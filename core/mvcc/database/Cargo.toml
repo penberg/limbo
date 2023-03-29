@@ -1,0 +1,8 @@
+[package]
+name = "mvcc-rs"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.70"
+rustyline = "11.0.0"
