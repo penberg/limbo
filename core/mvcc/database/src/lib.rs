@@ -578,5 +578,9 @@ mod tests {
 
         db.commit_tx(tx2);
         db.commit_tx(tx3); // TODO: this should fail
+
+        let tx4 = db.begin_tx();
+        let row = db.read(tx4, 1).unwrap();
+        assert_eq!(tx2_row, row);
     }
 }
