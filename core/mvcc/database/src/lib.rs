@@ -238,17 +238,19 @@ impl<Clock: LogicalClock> Database<Clock> {
         let inner = self.inner.lock().unwrap();
         let mut rows = inner.rows.borrow_mut();
         let mut txs = inner.txs.borrow_mut();
-        let row_versions = rows.get_mut(&id).unwrap();
-        match row_versions.last_mut() {
-            Some(v) => {
-                let tx = txs.get(&tx).unwrap();
-                if is_version_visible(&txs, tx, v) {
-                    v.end = Some(TxTimestampOrID::TxID(tx.tx_id));
-                } else {
-                    return false;
+        match rows.get_mut(&id) {
+            Some(row_versions) => match row_versions.last_mut() {
+                Some(v) => {
+                    let tx = txs.get(&tx).unwrap();
+                    if is_version_visible(&txs, tx, v) {
+                        v.end = Some(TxTimestampOrID::TxID(tx.tx_id));
+                    } else {
+                        return false;
+                    }
                 }
-            }
-            None => unreachable!("no versions for row {}", id),
+                None => unreachable!("no versions for row {}", id),
+            },
+            None => return false,
         }
         let tx = txs.get_mut(&tx).unwrap();
         tx.insert_to_write_set(id);
