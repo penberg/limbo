@@ -413,6 +413,66 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_insert_read() {
+        let clock = LocalClock::new();
+        let db = Database::new(clock);
+
+        let tx1 = db.begin_tx();
+        let tx1_row = Row {
+            id: 1,
+            data: "Hello".to_string(),
+        };
+        db.insert(tx1, tx1_row.clone());
+        let row = db.read(tx1, 1).unwrap();
+        assert_eq!(tx1_row, row);
+        db.commit_tx(tx1);
+
+        let tx2 = db.begin_tx();
+        let row = db.read(tx2, 1).unwrap();
+        assert_eq!(tx1_row, row);
+    }
+
+    #[test]
+    fn test_read_nonexistent() {
+        let clock = LocalClock::new();
+        let db = Database::new(clock);
+        let tx = db.begin_tx();
+        let row = db.read(tx, 1);
+        assert!(row.is_none());
+    }
+
+    #[test]
+    fn test_delete() {
+        let clock = LocalClock::new();
+        let db = Database::new(clock);
+
+        let tx1 = db.begin_tx();
+        let tx1_row = Row {
+            id: 1,
+            data: "Hello".to_string(),
+        };
+        db.insert(tx1, tx1_row.clone());
+        let row = db.read(tx1, 1).unwrap();
+        assert_eq!(tx1_row, row);
+        db.delete(tx1, 1);
+        let row = db.read(tx1, 1);
+        assert!(row.is_none());
+        db.commit_tx(tx1);
+
+        let tx2 = db.begin_tx();
+        let row = db.read(tx2, 1);
+        assert!(row.is_none());
+    }
+
+    #[test]
+    fn test_delete_nonexistent() {
+        let clock = LocalClock::new();
+        let db = Database::new(clock);
+        let tx = db.begin_tx();
+        assert_eq!(false, db.delete(tx, 1));
+    }
+
+    #[test]
     fn test_commit() {
         let clock = LocalClock::new();
         let db = Database::new(clock);
