@@ -122,7 +122,7 @@ pub trait LogicalClock {
 }
 
 /// A node-local clock backed by an atomic counter.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct LocalClock {
     ts_sequence: AtomicU64,
 }
@@ -138,12 +138,6 @@ impl LocalClock {
 impl LogicalClock for LocalClock {
     fn get_timestamp(&self) -> u64 {
         self.ts_sequence.fetch_add(1, Ordering::SeqCst)
-    }
-}
-
-impl Default for LocalClock {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -414,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_insert_read() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         let tx1 = db.begin_tx();
@@ -434,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_read_nonexistent() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
         let tx = db.begin_tx();
         let row = db.read(tx, 1);
@@ -443,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_delete() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         let tx1 = db.begin_tx();
@@ -466,7 +460,7 @@ mod tests {
 
     #[test]
     fn test_delete_nonexistent() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
         let tx = db.begin_tx();
         assert_eq!(false, db.delete(tx, 1));
@@ -474,7 +468,7 @@ mod tests {
 
     #[test]
     fn test_commit() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
         let tx1 = db.begin_tx();
         let tx1_row = Row {
@@ -501,7 +495,7 @@ mod tests {
 
     #[test]
     fn test_rollback() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
         let tx1 = db.begin_tx();
         let row1 = Row {
@@ -526,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_dirty_write() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         // T1 inserts a row with ID 1, but does not commit.
@@ -553,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_dirty_read() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         // T1 inserts a row with ID 1, but does not commit.
@@ -573,7 +567,7 @@ mod tests {
     #[ignore]
     #[test]
     fn test_dirty_read_deleted() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
@@ -597,7 +591,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_read() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
@@ -633,7 +627,7 @@ mod tests {
     #[ignore]
     #[test]
     fn test_lost_update() {
-        let clock = LocalClock::new();
+        let clock = LocalClock::default();
         let db = Database::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
