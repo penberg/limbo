@@ -570,6 +570,31 @@ mod tests {
         assert_eq!(row2, None);
     }
 
+    #[ignore]
+    #[test]
+    fn test_dirty_read_deleted() {
+        let clock = LocalClock::new();
+        let db = Database::new(clock);
+
+        // T1 inserts a row with ID 1 and commits.
+        let tx1 = db.begin_tx();
+        let tx1_row = Row {
+            id: 1,
+            data: "Hello".to_string(),
+        };
+        db.insert(tx1, tx1_row.clone());
+        db.commit_tx(tx1);
+
+        // T2 deletes row with ID 1, but does not commit.
+        let tx2 = db.begin_tx();
+        assert_eq!(true, db.delete(tx2, 1));
+
+        // T3 reads row with ID 1, but doesn't see the delete because T2 hasn't committed.
+        let tx3 = db.begin_tx();
+        let row = db.read(tx3, 1).unwrap();
+        assert_eq!(tx1_row, row);
+    }
+
     #[test]
     fn test_fuzzy_read() {
         let clock = LocalClock::new();
