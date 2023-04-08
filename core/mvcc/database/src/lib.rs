@@ -19,7 +19,12 @@
 //!   different value in the course of the transaction because another
 //!   transaction T_n has updated the value.
 //!
-//! TODO: phantom reads, lost updates, cursor lost updates, read skew, write skew.
+//! * A *lost update* occurs when transactions T_m and T_n both attempt to update
+//!   the same value, resulting in one of the updates being lost. The MVCC algorithm
+//!   prevents lost updates by detecting the write-write conflict and letting the
+//!   first-writer win by aborting the later transaction.
+//!
+//! TODO: phantom reads, cursor lost updates, read skew, write skew.
 //!
 //! ## TODO
 //!
@@ -536,5 +541,42 @@ mod tests {
         // T2 still reads the same version of the row as before.
         let row = db.read(tx2, 1).unwrap();
         assert_eq!(tx1_row, row);
+    }
+
+    #[ignore]
+    #[test]
+    fn test_lost_update() {
+        let clock = LocalClock::new();
+        let db = Database::new(clock);
+
+        // T1 inserts a row with ID 1 and commits.
+        let tx1 = db.begin_tx();
+        let tx1_row = Row {
+            id: 1,
+            data: "Hello".to_string(),
+        };
+        db.insert(tx1, tx1_row.clone());
+        let row = db.read(tx1.clone(), 1).unwrap();
+        assert_eq!(tx1_row, row);
+        db.commit_tx(tx1);
+
+        // T2 attempts to update row ID 1 within an active transaction.
+        let tx2 = db.begin_tx();
+        let tx2_row = Row {
+            id: 1,
+            data: "World".to_string(),
+        };
+        db.update(tx2, tx2_row.clone());
+
+        // T3 also attempts to update row ID 1 within an active transaction.
+        let tx3 = db.begin_tx();
+        let tx3_row = Row {
+            id: 1,
+            data: "Hello, world!".to_string(),
+        };
+        db.update(tx3, tx3_row.clone());
+
+        db.commit_tx(tx2);
+        db.commit_tx(tx3); // TODO: this should fail
     }
 }
