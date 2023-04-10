@@ -7,3 +7,10 @@ edition = "2021"
 anyhow = "1.0.70"
 rustyline = "11.0.0"
 thiserror = "1.0.40"
+
+[dev-dependencies]
+criterion = { version = "0.4", features = ["html_reports"] }
+
+[[bench]]
+name = "my_benchmark"
+harness = false
