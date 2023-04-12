@@ -31,5 +31,5 @@
 //! * Optimistic reads and writes
 //! * Garbage collection
 
-pub mod errors;
 pub mod database;
+pub mod errors;

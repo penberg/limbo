@@ -10,6 +10,7 @@ thiserror = "1.0.40"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
+shuttle = "0.6.0"
 
 [[bench]]
 name = "my_benchmark"
