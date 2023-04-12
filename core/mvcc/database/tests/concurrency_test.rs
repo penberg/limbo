@@ -4,7 +4,6 @@ use shuttle::sync::Arc;
 use shuttle::thread;
 use std::sync::atomic::Ordering;
 
-#[ignore]
 #[test]
 fn test_non_overlapping_concurrent_inserts() {
     // Two threads insert to the database concurrently using non-overlapping
@@ -24,7 +23,7 @@ fn test_non_overlapping_concurrent_inserts() {
                         id,
                         data: "Hello".to_string(),
                     };
-                    db.insert(id, row.clone()).unwrap();
+                    db.insert(tx, row.clone()).unwrap();
                     db.commit_tx(tx);
                     let tx = db.begin_tx();
                     let committed_row = db.read(tx, id).unwrap();
@@ -42,7 +41,7 @@ fn test_non_overlapping_concurrent_inserts() {
                         id,
                         data: "World".to_string(),
                     };
-                    db.insert(id, row.clone()).unwrap();
+                    db.insert(tx, row.clone()).unwrap();
                     db.commit_tx(tx);
                     let tx = db.begin_tx();
                     let committed_row = db.read(tx, id).unwrap();
