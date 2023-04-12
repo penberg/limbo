@@ -209,7 +209,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         match rows.get_mut(&id) {
             Some(row_versions) => match row_versions.last_mut() {
                 Some(v) => {
-                    let tx = txs.get(&tx_id).ok_or(DatabaseError::NoSuchTransactionID(tx))?;
+                    let tx = txs.get(&tx_id).ok_or(DatabaseError::NoSuchTransactionID(tx_id))?;
                     assert!(tx.state == TransactionState::Active);
                     if is_version_visible(&txs, tx, v) {
                         v.end = Some(TxTimestampOrID::TxID(tx.tx_id));
@@ -222,8 +222,8 @@ impl<Clock: LogicalClock> Database<Clock> {
             None => return Ok(false),
         }
         let tx = txs
-            .get_mut(&tx)
-            .ok_or(DatabaseError::NoSuchTransactionID(tx))?;
+            .get_mut(&tx_id)
+            .ok_or(DatabaseError::NoSuchTransactionID(tx_id))?;
         tx.insert_to_write_set(id);
         Ok(true)
     }
