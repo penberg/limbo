@@ -202,14 +202,14 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// Returns `true` if the row was successfully deleted, and `false` otherwise.
     ///
-    pub fn delete(&self, tx: TxID, id: u64) -> Result<bool> {
+    pub fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
         let inner = self.inner.lock().unwrap();
         let mut rows = inner.rows.borrow_mut();
         let mut txs = inner.txs.borrow_mut();
         match rows.get_mut(&id) {
             Some(row_versions) => match row_versions.last_mut() {
                 Some(v) => {
-                    let tx = txs.get(&tx).ok_or(DatabaseError::NoSuchTransactionID(tx))?;
+                    let tx = txs.get(&tx_id).ok_or(DatabaseError::NoSuchTransactionID(tx))?;
                     assert!(tx.state == TransactionState::Active);
                     if is_version_visible(&txs, tx, v) {
                         v.end = Some(TxTimestampOrID::TxID(tx.tx_id));
