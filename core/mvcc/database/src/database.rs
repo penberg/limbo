@@ -69,7 +69,7 @@ impl Transaction {
 }
 
 /// Transaction state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum TransactionState {
     Active,
     Preparing,
@@ -149,6 +149,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         let tx = txs
             .get_mut(&tx_id)
             .ok_or(DatabaseError::NoSuchTransactionID(tx_id))?;
+        assert!(tx.state == TransactionState::Active);
         let id = row.id;
         let row_version = RowVersion {
             begin: TxTimestampOrID::TxID(tx.tx_id),
@@ -209,6 +210,7 @@ impl<Clock: LogicalClock> Database<Clock> {
             Some(row_versions) => match row_versions.last_mut() {
                 Some(v) => {
                     let tx = txs.get(&tx).ok_or(DatabaseError::NoSuchTransactionID(tx))?;
+                    assert!(tx.state == TransactionState::Active);
                     if is_version_visible(&txs, tx, v) {
                         v.end = Some(TxTimestampOrID::TxID(tx.tx_id));
                     } else {
@@ -244,6 +246,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         let inner = self.inner.lock().unwrap();
         let txs = inner.txs.borrow_mut();
         let tx = txs.get(&tx_id).unwrap();
+        assert!(tx.state == TransactionState::Active);
         let rows = inner.rows.borrow();
         if let Some(row_versions) = rows.get(&id) {
             for rv in row_versions.iter().rev() {
@@ -285,6 +288,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         let end_ts = get_timestamp(&mut inner);
         let mut txs = inner.txs.borrow_mut();
         let mut tx = txs.get_mut(&tx_id).unwrap();
+        assert!(tx.state == TransactionState::Active);
         let mut rows = inner.rows.borrow_mut();
         tx.state = TransactionState::Preparing;
         for id in &tx.write_set {
@@ -318,6 +322,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         let inner = self.inner.lock().unwrap();
         let mut txs = inner.txs.borrow_mut();
         let mut tx = txs.get_mut(&tx_id).unwrap();
+        assert!(tx.state == TransactionState::Active);
         tx.state = TransactionState::Aborted;
         let mut rows = inner.rows.borrow_mut();
         for id in &tx.write_set {
