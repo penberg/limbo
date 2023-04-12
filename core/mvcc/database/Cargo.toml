@@ -10,6 +10,7 @@ thiserror = "1.0.40"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
+pprof = { version = "0.11.1", features = ["criterion", "flamegraph"] }
 shuttle = "0.6.0"
 
 [[bench]]

@@ -1,7 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use mvcc_rs::database::{Database, LocalClock, Row};
+use pprof::criterion::{Output, PProfProfiler};
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn bench(c: &mut Criterion) {
     let clock = LocalClock::default();
     let db = Database::new(clock);
     c.bench_function("begin_tx", |b| {
@@ -46,5 +47,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = bench
+}
 criterion_main!(benches);
