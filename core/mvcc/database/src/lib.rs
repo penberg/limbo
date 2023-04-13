@@ -15,7 +15,7 @@
 //!   transaction T_n but not yet committed. The MVCC algorithm prevents dirty
 //!   reads by validating that a row version is visible to transaction T_m.
 //!
-//! * A *fuzzy read* (non-repetable read) occurs when transaction T_m reads a
+//! * A *fuzzy read* (non-repeatable read) occurs when transaction T_m reads a
 //!   different value in the course of the transaction because another
 //!   transaction T_n has updated the value.
 //!
