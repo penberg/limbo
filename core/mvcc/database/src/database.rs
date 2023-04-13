@@ -218,29 +218,6 @@ impl<Clock: LogicalClock> Database<Clock> {
     }
 }
 
-/// A write-write conflict happens when transaction T_m attempts to update a
-/// row version that is currently being updated by an active transaction T_n. 
-fn is_write_write_conflict(
-    txs: &HashMap<TxID, Transaction>,
-    tx: &Transaction,
-    rv: &RowVersion,
-) -> bool {
-    match rv.end {
-        Some(TxTimestampOrID::TxID(rv_end)) => {
-            let te = txs.get(&rv_end).unwrap();
-            match te.state {
-                TransactionState::Active => tx.tx_id != te.tx_id,
-                TransactionState::Preparing => todo!(),
-                TransactionState::Committed => todo!(),
-                TransactionState::Aborted => todo!(),
-                TransactionState::Terminated => todo!(),
-            }
-        }
-        Some(TxTimestampOrID::Timestamp(_)) => false,
-        None => false,
-    }
-}
-
 #[derive(Debug)]
 pub struct DatabaseInner<Clock: LogicalClock> {
     rows: RefCell<HashMap<u64, Vec<RowVersion>>>,
@@ -376,6 +353,29 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
 
     fn get_timestamp(&mut self) -> u64 {
         self.clock.get_timestamp()
+    }
+}
+
+/// A write-write conflict happens when transaction T_m attempts to update a
+/// row version that is currently being updated by an active transaction T_n. 
+fn is_write_write_conflict(
+    txs: &HashMap<TxID, Transaction>,
+    tx: &Transaction,
+    rv: &RowVersion,
+) -> bool {
+    match rv.end {
+        Some(TxTimestampOrID::TxID(rv_end)) => {
+            let te = txs.get(&rv_end).unwrap();
+            match te.state {
+                TransactionState::Active => tx.tx_id != te.tx_id,
+                TransactionState::Preparing => todo!(),
+                TransactionState::Committed => todo!(),
+                TransactionState::Aborted => todo!(),
+                TransactionState::Terminated => todo!(),
+            }
+        }
+        Some(TxTimestampOrID::Timestamp(_)) => false,
+        None => false,
     }
 }
 
