@@ -10,6 +10,12 @@ Run tests:
 cargo test
 ```
 
+Test coverage report:
+
+```console
+cargo tarpaulin -o html
+```
+
 Run benchmarks:
 
 ```console
