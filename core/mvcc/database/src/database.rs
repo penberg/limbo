@@ -21,6 +21,8 @@ struct RowVersion {
     row: Row,
 }
 
+type TxID = u64;
+
 /// A transaction timestamp or ID.
 ///
 /// Versions either track a timestamp or a transaction ID, depending on the
@@ -30,7 +32,7 @@ struct RowVersion {
 #[derive(Clone, Debug, PartialEq)]
 enum TxTimestampOrID {
     Timestamp(u64),
-    TxID(u64),
+    TxID(TxID),
 }
 
 /// Transaction
@@ -84,8 +86,6 @@ enum TransactionState {
 pub struct Database<Clock: LogicalClock> {
     inner: Arc<Mutex<DatabaseInner<Clock>>>,
 }
-
-type TxID = u64;
 
 impl<Clock: LogicalClock> Database<Clock> {
     /// Creates a new database.
