@@ -218,6 +218,8 @@ impl<Clock: LogicalClock> Database<Clock> {
     }
 }
 
+/// A write-write conflict happens when transaction T_m attempts to update a
+/// row version that is currently being updated by an active transaction T_n. 
 fn is_write_write_conflict(
     txs: &HashMap<TxID, Transaction>,
     tx: &Transaction,
