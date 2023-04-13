@@ -24,10 +24,10 @@ fn test_non_overlapping_concurrent_inserts() {
                         data: "Hello".to_string(),
                     };
                     db.insert(tx, row.clone()).unwrap();
-                    db.commit_tx(tx);
+                    db.commit_tx(tx).unwrap();
                     let tx = db.begin_tx();
                     let committed_row = db.read(tx, id).unwrap();
-                    db.commit_tx(tx);
+                    db.commit_tx(tx).unwrap();
                     assert_eq!(committed_row, Some(row));
                 });
             }
@@ -42,10 +42,10 @@ fn test_non_overlapping_concurrent_inserts() {
                         data: "World".to_string(),
                     };
                     db.insert(tx, row.clone()).unwrap();
-                    db.commit_tx(tx);
+                    db.commit_tx(tx).unwrap();
                     let tx = db.begin_tx();
                     let committed_row = db.read(tx, id).unwrap();
-                    db.commit_tx(tx);
+                    db.commit_tx(tx).unwrap();
                     assert_eq!(committed_row, Some(row));
                 });
             }
