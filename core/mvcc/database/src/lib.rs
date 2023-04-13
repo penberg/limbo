@@ -31,5 +31,6 @@
 //! * Optimistic reads and writes
 //! * Garbage collection
 
+pub mod clock;
 pub mod database;
 pub mod errors;

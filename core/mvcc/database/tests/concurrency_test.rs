@@ -1,4 +1,5 @@
-use mvcc_rs::database::{Database, LocalClock, Row};
+use mvcc_rs::clock::LocalClock;
+use mvcc_rs::database::{Database, Row};
 use shuttle::sync::atomic::AtomicU64;
 use shuttle::sync::Arc;
 use shuttle::thread;

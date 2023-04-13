@@ -1,3 +1,4 @@
+use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -85,31 +86,6 @@ pub struct Database<Clock: LogicalClock> {
 }
 
 type TxID = u64;
-
-/// Logical clock.
-pub trait LogicalClock {
-    fn get_timestamp(&self) -> u64;
-}
-
-/// A node-local clock backed by an atomic counter.
-#[derive(Debug, Default)]
-pub struct LocalClock {
-    ts_sequence: AtomicU64,
-}
-
-impl LocalClock {
-    pub fn new() -> Self {
-        Self {
-            ts_sequence: AtomicU64::new(0),
-        }
-    }
-}
-
-impl LogicalClock for LocalClock {
-    fn get_timestamp(&self) -> u64 {
-        self.ts_sequence.fetch_add(1, Ordering::SeqCst)
-    }
-}
 
 #[derive(Debug)]
 pub struct DatabaseInner<Clock: LogicalClock> {
@@ -441,6 +417,7 @@ fn is_end_visible(txs: &HashMap<TxID, Transaction>, tx: &Transaction, rv: &RowVe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::LocalClock;
 
     #[test]
     fn test_insert_read() {
