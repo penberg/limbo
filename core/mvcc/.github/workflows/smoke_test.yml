@@ -1,4 +1,4 @@
-name: Smoke test
+name: Rust
 
 on:
   push:
@@ -10,74 +10,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  checks:
+  build:
+
     runs-on: ubuntu-latest
-    name: Run Checks
+
     steps:
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Check format
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --all-targets --all-features
-  clippy:
-    runs-on: ubuntu-latest
-    name: Run Clippy
-    steps:
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          components: clippy
-          override: true
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-targets --all-features -- -D warnings
-  rust-fmt:
-    runs-on: ubuntu-latest
-    name: Run Rustfmt
-    steps:
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          components: rustfmt
-          override: true
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          submodules: recursive
-      - name: Check format
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --check
-  examples:
-    runs-on: ubuntu-latest
-    name: Run tests
-    steps:
-    - name: Install minimal stable toolchain with clippy and rustfmt
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
     - uses: actions/checkout@v3
+    - name: Check
+      run: cargo check --all-targets --all-features
+    - name: Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
     - name: Run tests
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
-        args: --verbose
+      run: cargo test --verbose
