@@ -8,6 +8,19 @@ The aim of the project is to provide a building block for implementing database 
 * Main memory architecture, rows are accessed via an index
 * Optimistic multi-version concurrency control
 
+## Experimental Evaluation
+
+**Single-threaded micro-benchmarks**
+
+Operations                         | Throughput
+-----------------------------------|------------
+`begin_tx`, `read`, and `commit`   | 2.2M ops/second
+`begin_tx`, `update`, and `commit` | 2.2M ops/second
+`read`                             | 12.9M ops/second
+`update`                           | 6.2M ops/second
+
+(The `cargo bench` was run on a AMD Ryzen 9 3900XT 2.2 GHz CPU.)
+
 ## Development
 
 Run tests:
