@@ -503,7 +503,7 @@ mod tests {
         let clock = LocalClock::default();
         let db = Database::new(clock);
         let tx = db.begin_tx();
-        assert_eq!(false, db.delete(tx, 1).unwrap());
+        assert!(!db.delete(tx, 1).unwrap());
     }
 
     #[traced_test]
@@ -544,19 +544,19 @@ mod tests {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1.clone(), row1.clone()).unwrap();
-        let row2 = db.read(tx1.clone(), 1).unwrap().unwrap();
+        db.insert(tx1, row1.clone()).unwrap();
+        let row2 = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(row1, row2);
         let row3 = Row {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx1.clone(), row3.clone()).unwrap();
-        let row4 = db.read(tx1.clone(), 1).unwrap().unwrap();
+        db.update(tx1, row3.clone()).unwrap();
+        let row4 = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(row3, row4);
         db.rollback_tx(tx1);
         let tx2 = db.begin_tx();
-        let row5 = db.read(tx2.clone(), 1).unwrap();
+        let row5 = db.read(tx2, 1).unwrap();
         assert_eq!(row5, None);
     }
 
@@ -573,7 +573,7 @@ mod tests {
             data: "Hello".to_string(),
         };
         db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1.clone(), 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
 
         // T2 attempts to delete row with ID 1, but fails because T1 has not committed.
@@ -582,7 +582,7 @@ mod tests {
             id: 1,
             data: "World".to_string(),
         };
-        assert_eq!(false, db.update(tx2, tx2_row.clone()).unwrap());
+        assert!(!db.update(tx2, tx2_row).unwrap());
 
         let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
@@ -600,7 +600,7 @@ mod tests {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, row1.clone()).unwrap();
+        db.insert(tx1, row1).unwrap();
 
         // T2 attempts to read row with ID 1, but doesn't see one because T1 has not committed.
         let tx2 = db.begin_tx();
@@ -626,7 +626,7 @@ mod tests {
 
         // T2 deletes row with ID 1, but does not commit.
         let tx2 = db.begin_tx();
-        assert_eq!(true, db.delete(tx2, 1).unwrap());
+        assert!(db.delete(tx2, 1).unwrap());
 
         // T3 reads row with ID 1, but doesn't see the delete because T2 hasn't committed.
         let tx3 = db.begin_tx();
@@ -647,7 +647,7 @@ mod tests {
             data: "Hello".to_string(),
         };
         db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1.clone(), 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
         db.commit_tx(tx1).unwrap();
 
@@ -662,7 +662,7 @@ mod tests {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx3, tx3_row.clone()).unwrap();
+        db.update(tx3, tx3_row).unwrap();
         db.commit_tx(tx3).unwrap();
 
         // T2 still reads the same version of the row as before.
@@ -683,7 +683,7 @@ mod tests {
             data: "Hello".to_string(),
         };
         db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1.clone(), 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
         db.commit_tx(tx1).unwrap();
 
@@ -703,7 +703,7 @@ mod tests {
         };
         assert_eq!(
             Err(DatabaseError::WriteWriteConflict),
-            db.update(tx3, tx3_row.clone())
+            db.update(tx3, tx3_row)
         );
 
         db.commit_tx(tx2).unwrap();
