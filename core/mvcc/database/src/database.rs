@@ -310,8 +310,8 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         let tx_id = self.get_tx_id();
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
-        let mut txs = self.txs.borrow_mut();
         tracing::trace!("BEGIN    {tx}");
+        let mut txs = self.txs.borrow_mut();
         txs.insert(tx_id, tx);
         tx_id
     }
@@ -328,6 +328,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         }
         let mut rows = self.rows.borrow_mut();
         tx.state = TransactionState::Preparing;
+        tracing::trace!("PREPARE   {tx}");
         for id in &tx.write_set {
             if let Some(row_versions) = rows.get_mut(id) {
                 for row_version in row_versions.iter_mut() {
@@ -345,7 +346,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
             }
         }
         tx.state = TransactionState::Committed;
-        tracing::trace!("COMMIT   {tx}");
+        tracing::trace!("COMMIT    {tx}");
         Ok(())
     }
 
@@ -354,6 +355,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         let mut tx = txs.get_mut(&tx_id).unwrap();
         assert!(tx.state == TransactionState::Active);
         tx.state = TransactionState::Aborted;
+        tracing::trace!("ABORT     {tx}");
         let mut rows = self.rows.borrow_mut();
         for id in &tx.write_set {
             if let Some(row_versions) = rows.get_mut(id) {
@@ -363,8 +365,8 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
                 }
             }
         }
-        tracing::trace!("ROLLBACK {tx}");
         tx.state = TransactionState::Terminated;
+        tracing::trace!("TERMINATE {tx}");
     }
 
     fn get_tx_id(&mut self) -> u64 {
