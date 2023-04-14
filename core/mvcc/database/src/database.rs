@@ -71,6 +71,23 @@ impl Transaction {
     }
 }
 
+impl std::fmt::Display for Transaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self.read_set.try_borrow() {
+            Ok(read_set) => write!(
+                f,
+                "{{ id: {}, begin_ts: {}, write_set: {:?}, read_set: {:?} }}",
+                self.tx_id, self.begin_ts, self.write_set, read_set
+            ),
+            Err(_) => write!(
+                f,
+                "{{ id: {}, begin_ts: {}, write_set: {:?}, read_set: <borrowed> }}",
+                self.tx_id, self.begin_ts, self.write_set
+            ),
+        }
+    }
+}
+
 /// Transaction state.
 #[derive(Debug, Clone, PartialEq)]
 enum TransactionState {
@@ -294,6 +311,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
         let mut txs = self.txs.borrow_mut();
+        tracing::trace!("BEGIN    {tx}");
         txs.insert(tx_id, tx);
         tx_id
     }
@@ -327,6 +345,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
             }
         }
         tx.state = TransactionState::Committed;
+        tracing::trace!("COMMIT   {tx}");
         Ok(())
     }
 
@@ -344,6 +363,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
                 }
             }
         }
+        tracing::trace!("ROLLBACK {tx}");
         tx.state = TransactionState::Terminated;
     }
 
@@ -357,7 +377,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
 }
 
 /// A write-write conflict happens when transaction T_m attempts to update a
-/// row version that is currently being updated by an active transaction T_n. 
+/// row version that is currently being updated by an active transaction T_n.
 fn is_write_write_conflict(
     txs: &HashMap<TxID, Transaction>,
     tx: &Transaction,
@@ -420,7 +440,9 @@ fn is_end_visible(txs: &HashMap<TxID, Transaction>, tx: &Transaction, rv: &RowVe
 mod tests {
     use super::*;
     use crate::clock::LocalClock;
+    use tracing_test::traced_test;
 
+    #[traced_test]
     #[test]
     fn test_insert_read() {
         let clock = LocalClock::default();
@@ -441,6 +463,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_read_nonexistent() {
         let clock = LocalClock::default();
@@ -450,6 +473,7 @@ mod tests {
         assert!(row.unwrap().is_none());
     }
 
+    #[traced_test]
     #[test]
     fn test_delete() {
         let clock = LocalClock::default();
@@ -473,6 +497,7 @@ mod tests {
         assert!(row.is_none());
     }
 
+    #[traced_test]
     #[test]
     fn test_delete_nonexistent() {
         let clock = LocalClock::default();
@@ -481,6 +506,7 @@ mod tests {
         assert_eq!(false, db.delete(tx, 1).unwrap());
     }
 
+    #[traced_test]
     #[test]
     fn test_commit() {
         let clock = LocalClock::default();
@@ -508,6 +534,7 @@ mod tests {
         assert_eq!(tx1_updated_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_rollback() {
         let clock = LocalClock::default();
@@ -533,6 +560,7 @@ mod tests {
         assert_eq!(row5, None);
     }
 
+    #[traced_test]
     #[test]
     fn test_dirty_write() {
         let clock = LocalClock::default();
@@ -560,6 +588,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_dirty_read() {
         let clock = LocalClock::default();
@@ -580,6 +609,7 @@ mod tests {
     }
 
     #[ignore]
+    #[traced_test]
     #[test]
     fn test_dirty_read_deleted() {
         let clock = LocalClock::default();
@@ -604,6 +634,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_fuzzy_read() {
         let clock = LocalClock::default();
@@ -639,6 +670,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_lost_update() {
         let clock = LocalClock::default();

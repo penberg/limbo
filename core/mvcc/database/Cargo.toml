@@ -13,6 +13,8 @@ tracing = "0.1.37"
 criterion = { version = "0.4", features = ["html_reports"] }
 pprof = { version = "0.11.1", features = ["criterion", "flamegraph"] }
 shuttle = "0.6.0"
+tracing-subscriber = "0"
+tracing-test = "0"
 
 [[bench]]
 name = "my_benchmark"
