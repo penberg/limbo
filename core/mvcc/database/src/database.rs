@@ -71,6 +71,23 @@ impl Transaction {
     }
 }
 
+impl std::fmt::Display for Transaction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self.read_set.try_borrow() {
+            Ok(read_set) => write!(
+                f,
+                "{{ id: {}, begin_ts: {}, write_set: {:?}, read_set: {:?} }}",
+                self.tx_id, self.begin_ts, self.write_set, read_set
+            ),
+            Err(_) => write!(
+                f,
+                "{{ id: {}, begin_ts: {}, write_set: {:?}, read_set: <borrowed> }}",
+                self.tx_id, self.begin_ts, self.write_set
+            ),
+        }
+    }
+}
+
 /// Transaction state.
 #[derive(Debug, Clone, PartialEq)]
 enum TransactionState {
@@ -294,6 +311,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
         let mut txs = self.txs.borrow_mut();
+        tracing::trace!("BEGIN    {tx}");
         txs.insert(tx_id, tx);
         tx_id
     }
@@ -327,6 +345,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
             }
         }
         tx.state = TransactionState::Committed;
+        tracing::trace!("COMMIT   {tx}");
         Ok(())
     }
 
@@ -344,6 +363,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
                 }
             }
         }
+        tracing::trace!("ROLLBACK {tx}");
         tx.state = TransactionState::Terminated;
     }
 
@@ -357,7 +377,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
 }
 
 /// A write-write conflict happens when transaction T_m attempts to update a
-/// row version that is currently being updated by an active transaction T_n. 
+/// row version that is currently being updated by an active transaction T_n.
 fn is_write_write_conflict(
     txs: &HashMap<TxID, Transaction>,
     tx: &Transaction,
@@ -420,7 +440,9 @@ fn is_end_visible(txs: &HashMap<TxID, Transaction>, tx: &Transaction, rv: &RowVe
 mod tests {
     use super::*;
     use crate::clock::LocalClock;
+    use tracing_test::traced_test;
 
+    #[traced_test]
     #[test]
     fn test_insert_read() {
         let clock = LocalClock::default();
@@ -441,6 +463,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_read_nonexistent() {
         let clock = LocalClock::default();
@@ -450,6 +473,7 @@ mod tests {
         assert!(row.unwrap().is_none());
     }
 
+    #[traced_test]
     #[test]
     fn test_delete() {
         let clock = LocalClock::default();
@@ -473,14 +497,16 @@ mod tests {
         assert!(row.is_none());
     }
 
+    #[traced_test]
     #[test]
     fn test_delete_nonexistent() {
         let clock = LocalClock::default();
         let db = Database::new(clock);
         let tx = db.begin_tx();
-        assert_eq!(false, db.delete(tx, 1).unwrap());
+        assert!(!db.delete(tx, 1).unwrap());
     }
 
+    #[traced_test]
     #[test]
     fn test_commit() {
         let clock = LocalClock::default();
@@ -508,6 +534,7 @@ mod tests {
         assert_eq!(tx1_updated_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_rollback() {
         let clock = LocalClock::default();
@@ -517,22 +544,23 @@ mod tests {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1.clone(), row1.clone()).unwrap();
-        let row2 = db.read(tx1.clone(), 1).unwrap().unwrap();
+        db.insert(tx1, row1.clone()).unwrap();
+        let row2 = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(row1, row2);
         let row3 = Row {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx1.clone(), row3.clone()).unwrap();
-        let row4 = db.read(tx1.clone(), 1).unwrap().unwrap();
+        db.update(tx1, row3.clone()).unwrap();
+        let row4 = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(row3, row4);
         db.rollback_tx(tx1);
         let tx2 = db.begin_tx();
-        let row5 = db.read(tx2.clone(), 1).unwrap();
+        let row5 = db.read(tx2, 1).unwrap();
         assert_eq!(row5, None);
     }
 
+    #[traced_test]
     #[test]
     fn test_dirty_write() {
         let clock = LocalClock::default();
@@ -545,7 +573,7 @@ mod tests {
             data: "Hello".to_string(),
         };
         db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1.clone(), 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
 
         // T2 attempts to delete row with ID 1, but fails because T1 has not committed.
@@ -554,12 +582,13 @@ mod tests {
             id: 1,
             data: "World".to_string(),
         };
-        assert_eq!(false, db.update(tx2, tx2_row.clone()).unwrap());
+        assert!(!db.update(tx2, tx2_row).unwrap());
 
         let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_dirty_read() {
         let clock = LocalClock::default();
@@ -571,7 +600,7 @@ mod tests {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, row1.clone()).unwrap();
+        db.insert(tx1, row1).unwrap();
 
         // T2 attempts to read row with ID 1, but doesn't see one because T1 has not committed.
         let tx2 = db.begin_tx();
@@ -580,6 +609,7 @@ mod tests {
     }
 
     #[ignore]
+    #[traced_test]
     #[test]
     fn test_dirty_read_deleted() {
         let clock = LocalClock::default();
@@ -596,7 +626,7 @@ mod tests {
 
         // T2 deletes row with ID 1, but does not commit.
         let tx2 = db.begin_tx();
-        assert_eq!(true, db.delete(tx2, 1).unwrap());
+        assert!(db.delete(tx2, 1).unwrap());
 
         // T3 reads row with ID 1, but doesn't see the delete because T2 hasn't committed.
         let tx3 = db.begin_tx();
@@ -604,6 +634,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_fuzzy_read() {
         let clock = LocalClock::default();
@@ -616,7 +647,7 @@ mod tests {
             data: "Hello".to_string(),
         };
         db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1.clone(), 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
         db.commit_tx(tx1).unwrap();
 
@@ -631,7 +662,7 @@ mod tests {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx3, tx3_row.clone()).unwrap();
+        db.update(tx3, tx3_row).unwrap();
         db.commit_tx(tx3).unwrap();
 
         // T2 still reads the same version of the row as before.
@@ -639,6 +670,7 @@ mod tests {
         assert_eq!(tx1_row, row);
     }
 
+    #[traced_test]
     #[test]
     fn test_lost_update() {
         let clock = LocalClock::default();
@@ -651,7 +683,7 @@ mod tests {
             data: "Hello".to_string(),
         };
         db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1.clone(), 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).unwrap().unwrap();
         assert_eq!(tx1_row, row);
         db.commit_tx(tx1).unwrap();
 
@@ -671,7 +703,7 @@ mod tests {
         };
         assert_eq!(
             Err(DatabaseError::WriteWriteConflict),
-            db.update(tx3, tx3_row.clone())
+            db.update(tx3, tx3_row)
         );
 
         db.commit_tx(tx2).unwrap();

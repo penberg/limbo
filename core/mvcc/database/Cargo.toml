@@ -7,11 +7,14 @@ edition = "2021"
 anyhow = "1.0.70"
 rustyline = "11.0.0"
 thiserror = "1.0.40"
+tracing = "0.1.37"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
 pprof = { version = "0.11.1", features = ["criterion", "flamegraph"] }
 shuttle = "0.6.0"
+tracing-subscriber = "0"
+tracing-test = "0"
 
 [[bench]]
 name = "my_benchmark"
