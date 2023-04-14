@@ -1,6 +1,12 @@
 # MVCC for Rust
 
-This is a _work-in-progress_ Rust implementation of the Hekaton optimistic multiversion concurrency control algorithm.
+This is a _work-in-progress_ the Hekaton optimistic multiversion concurrency control library in Rust.
+The aim of the project is to provide a building block for implementing database management systems.
+
+## Features
+
+* Main memory architecture, rows are accessed via an index
+* Optimistic multi-version concurrency control
 
 ## Development
 
