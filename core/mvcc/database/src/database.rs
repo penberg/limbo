@@ -2,7 +2,6 @@ use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -101,11 +100,16 @@ enum TransactionState {
 
 /// A database with MVCC.
 #[derive(Debug)]
-pub struct Database<Clock: LogicalClock> {
-    inner: Arc<Mutex<DatabaseInner<Clock>>>,
+pub struct Database<
+    Clock: LogicalClock,
+    AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock>>,
+> {
+    inner: Arc<AsyncMutex>,
 }
 
-impl<Clock: LogicalClock> Database<Clock> {
+impl<Clock: LogicalClock, AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock>>>
+    Database<Clock, AsyncMutex>
+{
     /// Creates a new database.
     pub fn new(clock: Clock) -> Self {
         let inner = DatabaseInner {
@@ -115,7 +119,7 @@ impl<Clock: LogicalClock> Database<Clock> {
             clock,
         };
         Self {
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(AsyncMutex::new(inner)),
         }
     }
 
@@ -129,9 +133,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// * `tx_id` - the ID of the transaction in which to insert the new row.
     /// * `row` - the row object containing the values to be inserted.
     ///
-    pub fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
-        let inner = self.inner.lock();
-        inner.insert(tx_id, row)
+    pub async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
+        let inner = self.inner.lock().await;
+        inner.insert(tx_id, row).await
     }
 
     /// Updates a row in the database with new values.
@@ -152,11 +156,11 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Returns
     ///
     /// Returns `true` if the row was successfully updated, and `false` otherwise.
-    pub fn update(&self, tx_id: TxID, row: Row) -> Result<bool> {
-        if !self.delete(tx_id, row.id)? {
+    pub async fn update(&self, tx_id: TxID, row: Row) -> Result<bool> {
+        if !self.delete(tx_id, row.id).await? {
             return Ok(false);
         }
-        self.insert(tx_id, row)?;
+        self.insert(tx_id, row).await?;
         Ok(true)
     }
 
@@ -174,9 +178,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// Returns `true` if the row was successfully deleted, and `false` otherwise.
     ///
-    pub fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
-        let inner = self.inner.lock();
-        inner.delete(tx_id, id)
+    pub async fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
+        let inner = self.inner.lock().await;
+        inner.delete(tx_id, id).await
     }
 
     /// Retrieves a row from the table with the given `id`.
@@ -193,9 +197,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// Returns `Some(row)` with the row data if the row with the given `id` exists,
     /// and `None` otherwise.
-    pub fn read(&self, tx_id: TxID, id: u64) -> Result<Option<Row>> {
-        let inner = self.inner.lock();
-        inner.read(tx_id, id)
+    pub async fn read(&self, tx_id: TxID, id: u64) -> Result<Option<Row>> {
+        let inner = self.inner.lock().await;
+        inner.read(tx_id, id).await
     }
 
     /// Begins a new transaction in the database.
@@ -203,9 +207,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// This function starts a new transaction in the database and returns a `TxID` value
     /// that you can use to perform operations within the transaction. All changes made within the
     /// transaction are isolated from other transactions until you commit the transaction.
-    pub fn begin_tx(&self) -> TxID {
-        let mut inner = self.inner.lock();
-        inner.begin_tx()
+    pub async fn begin_tx(&self) -> TxID {
+        let mut inner = self.inner.lock().await;
+        inner.begin_tx().await
     }
 
     /// Commits a transaction with the specified transaction ID.
@@ -217,9 +221,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Arguments
     ///
     /// * `tx_id` - The ID of the transaction to commit.
-    pub fn commit_tx(&self, tx_id: TxID) -> Result<()> {
-        let mut inner = self.inner.lock();
-        inner.commit_tx(tx_id)
+    pub async fn commit_tx(&self, tx_id: TxID) -> Result<()> {
+        let mut inner = self.inner.lock().await;
+        inner.commit_tx(tx_id).await
     }
 
     /// Rolls back a transaction with the specified ID.
@@ -230,9 +234,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Arguments
     ///
     /// * `tx_id` - The ID of the transaction to abort.
-    pub fn rollback_tx(&self, tx_id: TxID) {
-        let inner = self.inner.lock();
-        inner.rollback_tx(tx_id);
+    pub async fn rollback_tx(&self, tx_id: TxID) {
+        let inner = self.inner.lock().await;
+        inner.rollback_tx(tx_id).await;
     }
 }
 
@@ -245,7 +249,7 @@ pub struct DatabaseInner<Clock: LogicalClock> {
 }
 
 impl<Clock: LogicalClock> DatabaseInner<Clock> {
-    fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
+    async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
         let mut txs = self.txs.borrow_mut();
         let tx = txs
             .get_mut(&tx_id)
@@ -263,9 +267,12 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         Ok(())
     }
 
-    fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
-        let mut rows = self.rows.borrow_mut();
+    #[allow(clippy::await_holding_refcell_ref)]
+    async fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
+        // NOTICE: They *are* dropped before an await point!!! But the await is conditional,
+        //         so I think clippy is just confused.
         let mut txs = self.txs.borrow_mut();
+        let mut rows = self.rows.borrow_mut();
         if let Some(row_versions) = rows.get_mut(&id) {
             for rv in row_versions.iter_mut().rev() {
                 let tx = txs
@@ -275,7 +282,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
                 if is_write_write_conflict(&txs, tx, rv) {
                     drop(txs);
                     drop(rows);
-                    self.rollback_tx(tx_id);
+                    self.rollback_tx(tx_id).await;
                     return Err(DatabaseError::WriteWriteConflict);
                 }
                 if is_version_visible(&txs, tx, rv) {
@@ -291,7 +298,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         Ok(false)
     }
 
-    fn read(&self, tx_id: TxID, id: u64) -> Result<Option<Row>> {
+    async fn read(&self, tx_id: TxID, id: u64) -> Result<Option<Row>> {
         let txs = self.txs.borrow_mut();
         let tx = txs.get(&tx_id).unwrap();
         assert!(tx.state == TransactionState::Active);
@@ -307,7 +314,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         Ok(None)
     }
 
-    fn begin_tx(&mut self) -> TxID {
+    async fn begin_tx(&mut self) -> TxID {
         let tx_id = self.get_tx_id();
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
@@ -317,7 +324,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         tx_id
     }
 
-    fn commit_tx(&mut self, tx_id: TxID) -> Result<()> {
+    async fn commit_tx(&mut self, tx_id: TxID) -> Result<()> {
         let end_ts = self.get_timestamp();
         let mut txs = self.txs.borrow_mut();
         let mut tx = txs.get_mut(&tx_id).unwrap();
@@ -351,7 +358,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         Ok(())
     }
 
-    fn rollback_tx(&self, tx_id: TxID) {
+    async fn rollback_tx(&self, tx_id: TxID) {
         let mut txs = self.txs.borrow_mut();
         let mut tx = txs.get_mut(&tx_id).unwrap();
         assert!(tx.state == TransactionState::Active);
@@ -446,274 +453,274 @@ mod tests {
     use tracing_test::traced_test;
 
     #[traced_test]
-    #[test]
-    fn test_insert_read() {
+    #[tokio::test]
+    async fn test_insert_read() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
-        db.commit_tx(tx1).unwrap();
+        db.commit_tx(tx1).await.unwrap();
 
-        let tx2 = db.begin_tx();
-        let row = db.read(tx2, 1).unwrap().unwrap();
+        let tx2 = db.begin_tx().await;
+        let row = db.read(tx2, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[test]
-    fn test_read_nonexistent() {
+    #[tokio::test]
+    async fn test_read_nonexistent() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
-        let tx = db.begin_tx();
-        let row = db.read(tx, 1);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let tx = db.begin_tx().await;
+        let row = db.read(tx, 1).await;
         assert!(row.unwrap().is_none());
     }
 
     #[traced_test]
-    #[test]
-    fn test_delete() {
+    #[tokio::test]
+    async fn test_delete() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
-        db.delete(tx1, 1).unwrap();
-        let row = db.read(tx1, 1).unwrap();
+        db.delete(tx1, 1).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap();
         assert!(row.is_none());
-        db.commit_tx(tx1).unwrap();
+        db.commit_tx(tx1).await.unwrap();
 
-        let tx2 = db.begin_tx();
-        let row = db.read(tx2, 1).unwrap();
+        let tx2 = db.begin_tx().await;
+        let row = db.read(tx2, 1).await.unwrap();
         assert!(row.is_none());
     }
 
     #[traced_test]
-    #[test]
-    fn test_delete_nonexistent() {
+    #[tokio::test]
+    async fn test_delete_nonexistent() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
-        let tx = db.begin_tx();
-        assert!(!db.delete(tx, 1).unwrap());
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let tx = db.begin_tx().await;
+        assert!(!db.delete(tx, 1).await.unwrap());
     }
 
     #[traced_test]
-    #[test]
-    fn test_commit() {
+    #[tokio::test]
+    async fn test_commit() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
-        let tx1 = db.begin_tx();
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
         let tx1_updated_row = Row {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx1, tx1_updated_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.update(tx1, tx1_updated_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_updated_row, row);
-        db.commit_tx(tx1).unwrap();
+        db.commit_tx(tx1).await.unwrap();
 
-        let tx2 = db.begin_tx();
-        let row = db.read(tx2, 1).unwrap().unwrap();
-        db.commit_tx(tx2).unwrap();
+        let tx2 = db.begin_tx().await;
+        let row = db.read(tx2, 1).await.unwrap().unwrap();
+        db.commit_tx(tx2).await.unwrap();
         assert_eq!(tx1_updated_row, row);
     }
 
     #[traced_test]
-    #[test]
-    fn test_rollback() {
+    #[tokio::test]
+    async fn test_rollback() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
-        let tx1 = db.begin_tx();
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let tx1 = db.begin_tx().await;
         let row1 = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, row1.clone()).unwrap();
-        let row2 = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, row1.clone()).await.unwrap();
+        let row2 = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(row1, row2);
         let row3 = Row {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx1, row3.clone()).unwrap();
-        let row4 = db.read(tx1, 1).unwrap().unwrap();
+        db.update(tx1, row3.clone()).await.unwrap();
+        let row4 = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(row3, row4);
-        db.rollback_tx(tx1);
-        let tx2 = db.begin_tx();
-        let row5 = db.read(tx2, 1).unwrap();
+        db.rollback_tx(tx1).await;
+        let tx2 = db.begin_tx().await;
+        let row5 = db.read(tx2, 1).await.unwrap();
         assert_eq!(row5, None);
     }
 
     #[traced_test]
-    #[test]
-    fn test_dirty_write() {
+    #[tokio::test]
+    async fn test_dirty_write() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1, but does not commit.
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
 
         // T2 attempts to delete row with ID 1, but fails because T1 has not committed.
-        let tx2 = db.begin_tx();
+        let tx2 = db.begin_tx().await;
         let tx2_row = Row {
             id: 1,
             data: "World".to_string(),
         };
-        assert!(!db.update(tx2, tx2_row).unwrap());
+        assert!(!db.update(tx2, tx2_row).await.unwrap());
 
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[test]
-    fn test_dirty_read() {
+    #[tokio::test]
+    async fn test_dirty_read() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1, but does not commit.
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let row1 = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, row1).unwrap();
+        db.insert(tx1, row1).await.unwrap();
 
         // T2 attempts to read row with ID 1, but doesn't see one because T1 has not committed.
-        let tx2 = db.begin_tx();
-        let row2 = db.read(tx2, 1).unwrap();
+        let tx2 = db.begin_tx().await;
+        let row2 = db.read(tx2, 1).await.unwrap();
         assert_eq!(row2, None);
     }
 
     #[ignore]
     #[traced_test]
-    #[test]
-    fn test_dirty_read_deleted() {
+    #[tokio::test]
+    async fn test_dirty_read_deleted() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        db.commit_tx(tx1).unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.commit_tx(tx1).await.unwrap();
 
         // T2 deletes row with ID 1, but does not commit.
-        let tx2 = db.begin_tx();
-        assert!(db.delete(tx2, 1).unwrap());
+        let tx2 = db.begin_tx().await;
+        assert!(db.delete(tx2, 1).await.unwrap());
 
         // T3 reads row with ID 1, but doesn't see the delete because T2 hasn't committed.
-        let tx3 = db.begin_tx();
-        let row = db.read(tx3, 1).unwrap().unwrap();
+        let tx3 = db.begin_tx().await;
+        let row = db.read(tx3, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[test]
-    fn test_fuzzy_read() {
+    #[tokio::test]
+    async fn test_fuzzy_read() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
-        db.commit_tx(tx1).unwrap();
+        db.commit_tx(tx1).await.unwrap();
 
         // T2 reads the row with ID 1 within an active transaction.
-        let tx2 = db.begin_tx();
-        let row = db.read(tx2, 1).unwrap().unwrap();
+        let tx2 = db.begin_tx().await;
+        let row = db.read(tx2, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
 
         // T3 updates the row and commits.
-        let tx3 = db.begin_tx();
+        let tx3 = db.begin_tx().await;
         let tx3_row = Row {
             id: 1,
             data: "World".to_string(),
         };
-        db.update(tx3, tx3_row).unwrap();
-        db.commit_tx(tx3).unwrap();
+        db.update(tx3, tx3_row).await.unwrap();
+        db.commit_tx(tx3).await.unwrap();
 
         // T2 still reads the same version of the row as before.
-        let row = db.read(tx2, 1).unwrap().unwrap();
+        let row = db.read(tx2, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[test]
-    fn test_lost_update() {
+    #[tokio::test]
+    async fn test_lost_update() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
-        let tx1 = db.begin_tx();
+        let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).unwrap();
-        let row = db.read(tx1, 1).unwrap().unwrap();
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap().unwrap();
         assert_eq!(tx1_row, row);
-        db.commit_tx(tx1).unwrap();
+        db.commit_tx(tx1).await.unwrap();
 
         // T2 attempts to update row ID 1 within an active transaction.
-        let tx2 = db.begin_tx();
+        let tx2 = db.begin_tx().await;
         let tx2_row = Row {
             id: 1,
             data: "World".to_string(),
         };
-        assert!(db.update(tx2, tx2_row.clone()).unwrap());
+        assert!(db.update(tx2, tx2_row.clone()).await.unwrap());
 
         // T3 also attempts to update row ID 1 within an active transaction.
-        let tx3 = db.begin_tx();
+        let tx3 = db.begin_tx().await;
         let tx3_row = Row {
             id: 1,
             data: "Hello, world!".to_string(),
         };
         assert_eq!(
             Err(DatabaseError::WriteWriteConflict),
-            db.update(tx3, tx3_row)
+            db.update(tx3, tx3_row).await
         );
 
-        db.commit_tx(tx2).unwrap();
-        assert_eq!(Err(DatabaseError::TxTerminated), db.commit_tx(tx3));
+        db.commit_tx(tx2).await.unwrap();
+        assert_eq!(Err(DatabaseError::TxTerminated), db.commit_tx(tx3).await);
 
-        let tx4 = db.begin_tx();
-        let row = db.read(tx4, 1).unwrap().unwrap();
+        let tx4 = db.begin_tx().await;
+        let row = db.read(tx4, 1).await.unwrap().unwrap();
         assert_eq!(tx2_row, row);
     }
 }

@@ -5,17 +5,26 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
-parking_lot = "0.12.1"
+async-trait = "0.1.68"
+futures = "0.3.28"
 thiserror = "1.0.40"
 tracing = "0.1.37"
+tokio = { version = "1.27.0", features = ["full"], optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["html_reports"] }
+criterion = { version = "0.4", features = ["html_reports", "async", "async_futures"] }
 pprof = { version = "0.11.1", features = ["criterion", "flamegraph"] }
 shuttle = "0.6.0"
+tokio = { version = "1.27.0", features = ["full"] }
 tracing-subscriber = "0"
 tracing-test = "0"
+mvcc-rs = { path = ".", features = ["tokio"] }
 
 [[bench]]
 name = "my_benchmark"
 harness = false
+
+[features]
+default = []
+full = ["tokio"]
+tokio = ["dep:tokio"]

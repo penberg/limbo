@@ -1,3 +1,4 @@
+use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use mvcc_rs::clock::LocalClock;
 use mvcc_rs::database::{Database, Row};
@@ -8,46 +9,46 @@ fn bench(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
     group.bench_function("begin_tx", |b| {
-        b.iter(|| {
-            db.begin_tx();
+        b.to_async(FuturesExecutor).iter(|| async {
+            db.begin_tx().await;
         })
     });
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
     group.bench_function("begin_tx + rollback_tx", |b| {
-        b.iter(|| {
-            let tx_id = db.begin_tx();
-            db.rollback_tx(tx_id)
+        b.to_async(FuturesExecutor).iter(|| async {
+            let tx_id = db.begin_tx().await;
+            db.rollback_tx(tx_id).await
         })
     });
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
     group.bench_function("begin_tx + commit_tx", |b| {
-        b.iter(|| {
-            let tx_id = db.begin_tx();
-            db.commit_tx(tx_id)
+        b.to_async(FuturesExecutor).iter(|| async {
+            let tx_id = db.begin_tx().await;
+            db.commit_tx(tx_id).await
         })
     });
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
     group.bench_function("begin_tx-read-commit_tx", |b| {
-        b.iter(|| {
-            let tx_id = db.begin_tx();
-            db.read(tx_id, 1).unwrap();
-            db.commit_tx(tx_id)
+        b.to_async(FuturesExecutor).iter(|| async {
+            let tx_id = db.begin_tx().await;
+            db.read(tx_id, 1).await.unwrap();
+            db.commit_tx(tx_id).await
         })
     });
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
     group.bench_function("begin_tx-update-commit_tx", |b| {
-        b.iter(|| {
-            let tx_id = db.begin_tx();
+        b.to_async(FuturesExecutor).iter(|| async {
+            let tx_id = db.begin_tx().await;
             db.update(
                 tx_id,
                 Row {
@@ -55,41 +56,42 @@ fn bench(c: &mut Criterion) {
                     data: "World".to_string(),
                 },
             )
+            .await
             .unwrap();
-            db.commit_tx(tx_id)
+            db.commit_tx(tx_id).await
         })
     });
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
-    let tx = db.begin_tx();
-    db.insert(
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let tx = futures::executor::block_on(db.begin_tx());
+    futures::executor::block_on(db.insert(
         tx,
         Row {
             id: 1,
             data: "Hello".to_string(),
         },
-    )
+    ))
     .unwrap();
     group.bench_function("read", |b| {
-        b.iter(|| {
-            db.read(tx, 1).unwrap();
+        b.to_async(FuturesExecutor).iter(|| async {
+            db.read(tx, 1).await.unwrap();
         })
     });
 
     let clock = LocalClock::default();
-    let db = Database::new(clock);
-    let tx = db.begin_tx();
-    db.insert(
+    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let tx = futures::executor::block_on(db.begin_tx());
+    futures::executor::block_on(db.insert(
         tx,
         Row {
             id: 1,
             data: "Hello".to_string(),
         },
-    )
+    ))
     .unwrap();
     group.bench_function("update", |b| {
-        b.iter(|| {
+        b.to_async(FuturesExecutor).iter(|| async {
             db.update(
                 tx,
                 Row {
@@ -97,6 +99,7 @@ fn bench(c: &mut Criterion) {
                     data: "World".to_string(),
                 },
             )
+            .await
             .unwrap();
         })
     });
