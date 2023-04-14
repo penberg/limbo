@@ -435,7 +435,7 @@ fn is_end_visible(txs: &HashMap<TxID, Transaction>, tx: &Transaction, rv: &RowVe
         Some(TxTimestampOrID::TxID(rv_end)) => {
             let te = txs.get(&rv_end).unwrap();
             match te.state {
-                TransactionState::Active => tx.tx_id == te.tx_id && rv.end.is_none(),
+                TransactionState::Active => tx.tx_id != te.tx_id,
                 TransactionState::Preparing => todo!(),
                 TransactionState::Committed => todo!(),
                 TransactionState::Aborted => todo!(),
@@ -722,5 +722,62 @@ mod tests {
         let tx4 = db.begin_tx().await;
         let row = db.read(tx4, 1).await.unwrap().unwrap();
         assert_eq!(tx2_row, row);
+    }
+
+    // Test for the visibility to check if a new transaction can see old committed values.
+    // This test checks for the typo present in the paper, explained in https://github.com/penberg/mvcc-rs/issues/15
+    #[traced_test]
+    #[tokio::test]
+    async fn test_committed_visibility() {
+        let clock = LocalClock::default();
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+
+        // let's add $10 to my account since I like money
+        let tx1 = db.begin_tx().await;
+        let tx1_row = Row {
+            id: 1,
+            data: "10".to_string(),
+        };
+        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.commit_tx(tx1).await.unwrap();
+
+        // but I like more money, so let me try adding $10 more
+        let tx2 = db.begin_tx().await;
+        let tx2_row = Row {
+            id: 1,
+            data: "20".to_string(),
+        };
+        assert!(db.update(tx2, tx2_row.clone()).await.unwrap());
+
+        // can I check how much money I have?
+        let tx3 = db.begin_tx().await;
+        let row = db.read(tx3, 1).await.unwrap().unwrap();
+        assert_eq!(tx1_row, row);
+    }
+
+    // Test to check if a older transaction can see (un)committed future rows
+    #[traced_test]
+    #[tokio::test]
+    async fn test_future_row() {
+        let clock = LocalClock::default();
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+
+        let tx1 = db.begin_tx().await;
+
+        let tx2 = db.begin_tx().await;
+        let tx2_row = Row {
+            id: 1,
+            data: "10".to_string(),
+        };
+        db.insert(tx2, tx2_row.clone()).await.unwrap();
+
+        // transaction in progress, so tx1 shouldn't be able to see the value yet
+        let row = db.read(tx1, 1).await.unwrap();
+        assert_eq!(row, None);
+
+        // lets commit the transaction and check if tx1 can see it now
+        db.commit_tx(tx2).await.unwrap();
+        let row = db.read(tx1, 1).await.unwrap();
+        assert_eq!(row, None);
     }
 }
