@@ -2,8 +2,9 @@ use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, DatabaseError>;
 
@@ -129,7 +130,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// * `row` - the row object containing the values to be inserted.
     ///
     pub fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         inner.insert(tx_id, row)
     }
 
@@ -174,7 +175,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// Returns `true` if the row was successfully deleted, and `false` otherwise.
     ///
     pub fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         inner.delete(tx_id, id)
     }
 
@@ -193,7 +194,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// Returns `Some(row)` with the row data if the row with the given `id` exists,
     /// and `None` otherwise.
     pub fn read(&self, tx_id: TxID, id: u64) -> Result<Option<Row>> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         inner.read(tx_id, id)
     }
 
@@ -203,7 +204,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// that you can use to perform operations within the transaction. All changes made within the
     /// transaction are isolated from other transactions until you commit the transaction.
     pub fn begin_tx(&self) -> TxID {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.begin_tx()
     }
 
@@ -217,7 +218,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// * `tx_id` - The ID of the transaction to commit.
     pub fn commit_tx(&self, tx_id: TxID) -> Result<()> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.commit_tx(tx_id)
     }
 
@@ -230,7 +231,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// * `tx_id` - The ID of the transaction to abort.
     pub fn rollback_tx(&self, tx_id: TxID) {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock();
         inner.rollback_tx(tx_id);
     }
 }
