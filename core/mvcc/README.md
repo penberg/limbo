@@ -52,4 +52,4 @@ cargo bench --bench my_benchmark -- --profile-time=5
 
 Larson et al. [High-Performance Concurrency Control Mechanisms for Main-Memory Databases](https://vldb.org/pvldb/vol5/p298_per-akelarson_vldb2012.pdf). VLDB '11
 
-Paper errata: The visibility check in Table 2 is wrong and causes uncommitted delete to become visible to transactions (fixed in commit 6ca377320bb59b52ecc0430b9e5e422e8d61658d).
+Paper errata: The visibility check in Table 2 is wrong and causes uncommitted delete to become visible to transactions (fixed in [commit 6ca3773]( https://github.com/penberg/mvcc-rs/commit/6ca377320bb59b52ecc0430b9e5e422e8d61658d)).
