@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use mvcc_rs::database::{Database, LocalClock, Row};
+use criterion::{criterion_group, criterion_main, Criterion};
+use mvcc_rs::clock::LocalClock;
+use mvcc_rs::database::{Database, Row};
 use pprof::criterion::{Output, PProfProfiler};
 
 fn bench(c: &mut Criterion) {
