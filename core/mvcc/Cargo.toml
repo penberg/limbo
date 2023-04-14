@@ -3,3 +3,8 @@ resolver = "2"
 members = [
   "database",
 ]
+
+[profile.release]
+codegen-units = 1
+panic = "abort"
+strip = true
