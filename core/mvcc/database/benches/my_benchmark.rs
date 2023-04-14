@@ -1,12 +1,15 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use mvcc_rs::clock::LocalClock;
 use mvcc_rs::database::{Database, Row};
 use pprof::criterion::{Output, PProfProfiler};
 
 fn bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mvcc-ops-throughput");
+    group.throughput(Throughput::Elements(1));
+
     let clock = LocalClock::default();
     let db = Database::new(clock);
-    c.bench_function("begin_tx", |b| {
+    group.bench_function("begin_tx", |b| {
         b.iter(|| {
             db.begin_tx();
         })
@@ -14,7 +17,7 @@ fn bench(c: &mut Criterion) {
 
     let clock = LocalClock::default();
     let db = Database::new(clock);
-    c.bench_function("begin_tx + rollback_tx", |b| {
+    group.bench_function("begin_tx + rollback_tx", |b| {
         b.iter(|| {
             let tx_id = db.begin_tx();
             db.rollback_tx(tx_id)
@@ -23,7 +26,7 @@ fn bench(c: &mut Criterion) {
 
     let clock = LocalClock::default();
     let db = Database::new(clock);
-    c.bench_function("begin_tx + commit_tx", |b| {
+    group.bench_function("begin_tx + commit_tx", |b| {
         b.iter(|| {
             let tx_id = db.begin_tx();
             db.commit_tx(tx_id)
@@ -41,7 +44,7 @@ fn bench(c: &mut Criterion) {
         },
     )
     .unwrap();
-    c.bench_function("read", |b| {
+    group.bench_function("read", |b| {
         b.iter(|| {
             db.read(tx, 1).unwrap();
         })
