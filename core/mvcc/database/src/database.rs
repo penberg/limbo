@@ -771,11 +771,11 @@ mod tests {
         };
         db.insert(tx2, tx2_row.clone()).await.unwrap();
 
-        // transaction in progress, so tx1 shouldn't be able to see the value yet
+        // transaction in progress, so tx1 shouldn't be able to see the value
         let row = db.read(tx1, 1).await.unwrap();
         assert_eq!(row, None);
 
-        // lets commit the transaction and check if tx1 can see it now
+        // lets commit the transaction and check if tx1 can see it
         db.commit_tx(tx2).await.unwrap();
         let row = db.read(tx1, 1).await.unwrap();
         assert_eq!(row, None);
