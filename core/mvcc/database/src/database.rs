@@ -748,6 +748,8 @@ mod tests {
             data: "20".to_string(),
         };
         assert!(db.update(tx2, tx2_row.clone()).await.unwrap());
+        let row = db.read(tx2, 1).await.unwrap().unwrap();
+        assert_eq!(row, tx2_row);
 
         // can I check how much money I have?
         let tx3 = db.begin_tx().await;
