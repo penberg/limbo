@@ -10,7 +10,7 @@ fn test_non_overlapping_concurrent_inserts() {
     // Two threads insert to the database concurrently using non-overlapping
     // row IDs.
     let clock = LocalClock::default();
-    let db = Arc::new(Database::new(clock));
+    let db = Arc::new(Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock));
     let ids = Arc::new(AtomicU64::new(0));
     shuttle::check_random(
         move || {

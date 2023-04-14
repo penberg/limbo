@@ -1,6 +1,5 @@
 use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
-use parking_lot::Mutex;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -101,11 +100,16 @@ enum TransactionState {
 
 /// A database with MVCC.
 #[derive(Debug)]
-pub struct Database<Clock: LogicalClock> {
-    inner: Arc<Mutex<DatabaseInner<Clock>>>,
+pub struct Database<
+    Clock: LogicalClock,
+    AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock>>,
+> {
+    inner: Arc<AsyncMutex>,
 }
 
-impl<Clock: LogicalClock> Database<Clock> {
+impl<Clock: LogicalClock, AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock>>>
+    Database<Clock, AsyncMutex>
+{
     /// Creates a new database.
     pub fn new(clock: Clock) -> Self {
         let inner = DatabaseInner {
@@ -115,7 +119,7 @@ impl<Clock: LogicalClock> Database<Clock> {
             clock,
         };
         Self {
-            inner: Arc::new(Mutex::new(inner)),
+            inner: Arc::new(AsyncMutex::new(inner)),
         }
     }
 
@@ -130,7 +134,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// * `row` - the row object containing the values to be inserted.
     ///
     pub async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
-        let inner = self.inner.lock();
+        let inner = self.inner.lock().await;
         inner.insert(tx_id, row).await
     }
 
@@ -175,7 +179,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// Returns `true` if the row was successfully deleted, and `false` otherwise.
     ///
     pub async fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
-        let inner = self.inner.lock();
+        let inner = self.inner.lock().await;
         inner.delete(tx_id, id).await
     }
 
@@ -194,7 +198,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// Returns `Some(row)` with the row data if the row with the given `id` exists,
     /// and `None` otherwise.
     pub async fn read(&self, tx_id: TxID, id: u64) -> Result<Option<Row>> {
-        let inner = self.inner.lock();
+        let inner = self.inner.lock().await;
         inner.read(tx_id, id).await
     }
 
@@ -204,7 +208,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// that you can use to perform operations within the transaction. All changes made within the
     /// transaction are isolated from other transactions until you commit the transaction.
     pub async fn begin_tx(&self) -> TxID {
-        let mut inner = self.inner.lock();
+        let mut inner = self.inner.lock().await;
         inner.begin_tx().await
     }
 
@@ -218,7 +222,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// * `tx_id` - The ID of the transaction to commit.
     pub async fn commit_tx(&self, tx_id: TxID) -> Result<()> {
-        let mut inner = self.inner.lock();
+        let mut inner = self.inner.lock().await;
         inner.commit_tx(tx_id).await
     }
 
@@ -231,7 +235,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// * `tx_id` - The ID of the transaction to abort.
     pub async fn rollback_tx(&self, tx_id: TxID) {
-        let inner = self.inner.lock();
+        let inner = self.inner.lock().await;
         inner.rollback_tx(tx_id).await;
     }
 }
@@ -263,9 +267,12 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         Ok(())
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn delete(&self, tx_id: TxID, id: u64) -> Result<bool> {
-        let mut rows = self.rows.borrow_mut();
+        // NOTICE: They *are* dropped before an await point!!! But the await is conditional,
+        //         so I think clippy is just confused.
         let mut txs = self.txs.borrow_mut();
+        let mut rows = self.rows.borrow_mut();
         if let Some(row_versions) = rows.get_mut(&id) {
             for rv in row_versions.iter_mut().rev() {
                 let tx = txs
@@ -449,7 +456,7 @@ mod tests {
     #[tokio::test]
     async fn test_insert_read() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         let tx1 = db.begin_tx().await;
         let tx1_row = Row {
@@ -470,7 +477,7 @@ mod tests {
     #[tokio::test]
     async fn test_read_nonexistent() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
         let tx = db.begin_tx().await;
         let row = db.read(tx, 1).await;
         assert!(row.unwrap().is_none());
@@ -480,7 +487,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         let tx1 = db.begin_tx().await;
         let tx1_row = Row {
@@ -504,7 +511,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_nonexistent() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
         let tx = db.begin_tx().await;
         assert!(!db.delete(tx, 1).await.unwrap());
     }
@@ -513,7 +520,7 @@ mod tests {
     #[tokio::test]
     async fn test_commit() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
         let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
@@ -541,7 +548,7 @@ mod tests {
     #[tokio::test]
     async fn test_rollback() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
         let tx1 = db.begin_tx().await;
         let row1 = Row {
             id: 1,
@@ -567,7 +574,7 @@ mod tests {
     #[tokio::test]
     async fn test_dirty_write() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1, but does not commit.
         let tx1 = db.begin_tx().await;
@@ -595,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn test_dirty_read() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1, but does not commit.
         let tx1 = db.begin_tx().await;
@@ -616,7 +623,7 @@ mod tests {
     #[tokio::test]
     async fn test_dirty_read_deleted() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
         let tx1 = db.begin_tx().await;
@@ -641,7 +648,7 @@ mod tests {
     #[tokio::test]
     async fn test_fuzzy_read() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
         let tx1 = db.begin_tx().await;
@@ -677,7 +684,7 @@ mod tests {
     #[tokio::test]
     async fn test_lost_update() {
         let clock = LocalClock::default();
-        let db = Database::new(clock);
+        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
 
         // T1 inserts a row with ID 1 and commits.
         let tx1 = db.begin_tx().await;
