@@ -18,36 +18,40 @@ fn test_non_overlapping_concurrent_inserts() {
                 let db = db.clone();
                 let ids = ids.clone();
                 thread::spawn(move || {
-                    let tx = db.begin_tx();
-                    let id = ids.fetch_add(1, Ordering::SeqCst);
-                    let row = Row {
-                        id,
-                        data: "Hello".to_string(),
-                    };
-                    db.insert(tx, row.clone()).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    let tx = db.begin_tx();
-                    let committed_row = db.read(tx, id).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    assert_eq!(committed_row, Some(row));
+                    shuttle::future::block_on(async move {
+                        let tx = db.begin_tx().await;
+                        let id = ids.fetch_add(1, Ordering::SeqCst);
+                        let row = Row {
+                            id,
+                            data: "Hello".to_string(),
+                        };
+                        db.insert(tx, row.clone()).await.unwrap();
+                        db.commit_tx(tx).await.unwrap();
+                        let tx = db.begin_tx().await;
+                        let committed_row = db.read(tx, id).await.unwrap();
+                        db.commit_tx(tx).await.unwrap();
+                        assert_eq!(committed_row, Some(row));
+                    })
                 });
             }
             {
                 let db = db.clone();
                 let ids = ids.clone();
                 thread::spawn(move || {
-                    let tx = db.begin_tx();
-                    let id = ids.fetch_add(1, Ordering::SeqCst);
-                    let row = Row {
-                        id,
-                        data: "World".to_string(),
-                    };
-                    db.insert(tx, row.clone()).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    let tx = db.begin_tx();
-                    let committed_row = db.read(tx, id).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    assert_eq!(committed_row, Some(row));
+                    shuttle::future::block_on(async move {
+                        let tx = db.begin_tx().await;
+                        let id = ids.fetch_add(1, Ordering::SeqCst);
+                        let row = Row {
+                            id,
+                            data: "World".to_string(),
+                        };
+                        db.insert(tx, row.clone()).await.unwrap();
+                        db.commit_tx(tx).await.unwrap();
+                        let tx = db.begin_tx().await;
+                        let committed_row = db.read(tx, id).await.unwrap();
+                        db.commit_tx(tx).await.unwrap();
+                        assert_eq!(committed_row, Some(row));
+                    });
                 });
             }
         },
