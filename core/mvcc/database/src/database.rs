@@ -1,20 +1,21 @@
 use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-type Result<T> = std::result::Result<T, DatabaseError>;
+pub type Result<T> = std::result::Result<T, DatabaseError>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Row {
     pub id: u64,
     pub data: String,
 }
 
 /// A row version.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct RowVersion {
     begin: TxTimestampOrID,
     end: Option<TxTimestampOrID>,
@@ -29,14 +30,14 @@ type TxID = u64;
 /// phase of the transaction. During the active phase, new versions track the
 /// transaction ID in the `begin` and `end` fields. After a transaction commits,
 /// versions switch to tracking timestamps.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum TxTimestampOrID {
     Timestamp(u64),
     TxID(TxID),
 }
 
 /// Transaction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
     /// The state of the transaction.
     state: TransactionState,
@@ -89,7 +90,7 @@ impl std::fmt::Display for Transaction {
 }
 
 /// Transaction state.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum TransactionState {
     Active,
     Preparing,
