@@ -10,6 +10,10 @@ futures = "0.3.28"
 thiserror = "1.0.40"
 tracing = "0.1.37"
 tokio = { version = "1.27.0", features = ["full"], optional = true }
+tokio-stream = { version = "0.1.12", optional = true, features = ["io-util"] }
+serde = { version = "1.0.160", features = ["derive"] }
+serde_json = "1.0.96"
+pin-project = "1.0.12"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports", "async", "async_futures"] }
@@ -27,4 +31,4 @@ harness = false
 [features]
 default = []
 full = ["tokio"]
-tokio = ["dep:tokio"]
+tokio = ["dep:tokio", "dep:tokio-stream"]

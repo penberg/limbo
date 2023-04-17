@@ -8,4 +8,6 @@ pub enum DatabaseError {
     WriteWriteConflict,
     #[error("transaction is terminated")]
     TxTerminated,
+    #[error("I/O error: {0}")]
+    Io(String),
 }
