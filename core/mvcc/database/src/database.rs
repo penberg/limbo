@@ -16,13 +16,28 @@ pub struct Row {
 
 /// A row version.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct RowVersion {
+pub struct RowVersion {
     begin: TxTimestampOrID,
     end: Option<TxTimestampOrID>,
     row: Row,
 }
 
-type TxID = u64;
+pub type TxID = u64;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Mutation {
+    tx_id: TxID,
+    row_versions: Vec<RowVersion>,
+}
+
+impl Mutation {
+    fn new(tx_id: TxID) -> Self {
+        Self {
+            tx_id,
+            row_versions: Vec::new(),
+        }
+    }
+}
 
 /// A transaction timestamp or ID.
 ///
@@ -103,21 +118,26 @@ enum TransactionState {
 #[derive(Debug)]
 pub struct Database<
     Clock: LogicalClock,
-    AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock>>,
+    Storage: crate::persistent_storage::Storage,
+    AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock, Storage>>,
 > {
     inner: Arc<AsyncMutex>,
 }
 
-impl<Clock: LogicalClock, AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock>>>
-    Database<Clock, AsyncMutex>
+impl<
+        Clock: LogicalClock,
+        Storage: crate::persistent_storage::Storage,
+        AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock, Storage>>,
+    > Database<Clock, Storage, AsyncMutex>
 {
     /// Creates a new database.
-    pub fn new(clock: Clock) -> Self {
+    pub fn new(clock: Clock, storage: Storage) -> Self {
         let inner = DatabaseInner {
             rows: RefCell::new(HashMap::new()),
             txs: RefCell::new(HashMap::new()),
             tx_ids: AtomicU64::new(0),
             clock,
+            storage,
         };
         Self {
             inner: Arc::new(AsyncMutex::new(inner)),
@@ -239,17 +259,32 @@ impl<Clock: LogicalClock, AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseIn
         let inner = self.inner.lock().await;
         inner.rollback_tx(tx_id).await;
     }
+
+    #[cfg(test)]
+    pub(crate) async fn scan_storage(&self) -> Result<Vec<Mutation>> {
+        use futures::StreamExt;
+        let inner = self.inner.lock().await;
+        Ok(inner
+            .storage
+            .scan()
+            .await?
+            .collect::<Vec<Mutation>>()
+            .await)
+    }
 }
 
 #[derive(Debug)]
-pub struct DatabaseInner<Clock: LogicalClock> {
+pub struct DatabaseInner<Clock: LogicalClock, Storage: crate::persistent_storage::Storage> {
     rows: RefCell<HashMap<u64, Vec<RowVersion>>>,
     txs: RefCell<HashMap<TxID, Transaction>>,
     tx_ids: AtomicU64,
     clock: Clock,
+    storage: Storage,
 }
 
-impl<Clock: LogicalClock> DatabaseInner<Clock> {
+impl<Clock: LogicalClock, Storage: crate::persistent_storage::Storage>
+    DatabaseInner<Clock, Storage>
+{
     async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
         let mut txs = self.txs.borrow_mut();
         let tx = txs
@@ -325,6 +360,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         tx_id
     }
 
+    #[allow(clippy::await_holding_refcell_ref)]
     async fn commit_tx(&mut self, tx_id: TxID) -> Result<()> {
         let end_ts = self.get_timestamp();
         let mut txs = self.txs.borrow_mut();
@@ -338,17 +374,20 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         let mut rows = self.rows.borrow_mut();
         tx.state = TransactionState::Preparing;
         tracing::trace!("PREPARE   {tx}");
+        let mut mutation: Mutation = Mutation::new(tx_id);
         for id in &tx.write_set {
             if let Some(row_versions) = rows.get_mut(id) {
                 for row_version in row_versions.iter_mut() {
                     if let TxTimestampOrID::TxID(id) = row_version.begin {
                         if id == tx_id {
                             row_version.begin = TxTimestampOrID::Timestamp(tx.begin_ts);
+                            mutation.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
                         }
                     }
                     if let Some(TxTimestampOrID::TxID(id)) = row_version.end {
                         if id == tx_id {
                             row_version.end = Some(TxTimestampOrID::Timestamp(end_ts));
+                            mutation.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
                         }
                     }
                 }
@@ -363,6 +402,11 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         // might have speculatively read a version that we want to remove.
         // But that's a problem for another day.
         txs.remove(&tx_id);
+        drop(rows);
+        drop(txs);
+        if !mutation.row_versions.is_empty() {
+            self.storage.store(mutation).await?;
+        }
         Ok(())
     }
 
@@ -460,11 +504,20 @@ mod tests {
     use crate::clock::LocalClock;
     use tracing_test::traced_test;
 
+    fn test_db() -> Database<
+        LocalClock,
+        crate::persistent_storage::Noop,
+        tokio::sync::Mutex<DatabaseInner<LocalClock, crate::persistent_storage::Noop>>,
+    > {
+        let clock = LocalClock::new();
+        let storage = crate::persistent_storage::Noop {};
+        Database::<_, _, tokio::sync::Mutex<_>>::new(clock, storage)
+    }
+
     #[traced_test]
     #[tokio::test]
     async fn test_insert_read() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         let tx1 = db.begin_tx().await;
         let tx1_row = Row {
@@ -484,8 +537,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_read_nonexistent() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
         let tx = db.begin_tx().await;
         let row = db.read(tx, 1).await;
         assert!(row.unwrap().is_none());
@@ -494,8 +546,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_delete() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         let tx1 = db.begin_tx().await;
         let tx1_row = Row {
@@ -518,8 +569,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_delete_nonexistent() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
         let tx = db.begin_tx().await;
         assert!(!db.delete(tx, 1).await.unwrap());
     }
@@ -527,8 +577,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_commit() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
         let tx1 = db.begin_tx().await;
         let tx1_row = Row {
             id: 1,
@@ -555,8 +604,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_rollback() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
         let tx1 = db.begin_tx().await;
         let row1 = Row {
             id: 1,
@@ -581,8 +629,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_dirty_write() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         // T1 inserts a row with ID 1, but does not commit.
         let tx1 = db.begin_tx().await;
@@ -609,8 +656,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_dirty_read() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         // T1 inserts a row with ID 1, but does not commit.
         let tx1 = db.begin_tx().await;
@@ -630,8 +676,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_dirty_read_deleted() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         // T1 inserts a row with ID 1 and commits.
         let tx1 = db.begin_tx().await;
@@ -655,8 +700,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_fuzzy_read() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         // T1 inserts a row with ID 1 and commits.
         let tx1 = db.begin_tx().await;
@@ -691,8 +735,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_lost_update() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         // T1 inserts a row with ID 1 and commits.
         let tx1 = db.begin_tx().await;
@@ -737,8 +780,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_committed_visibility() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         // let's add $10 to my account since I like money
         let tx1 = db.begin_tx().await;
@@ -769,8 +811,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn test_future_row() {
-        let clock = LocalClock::default();
-        let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+        let db = test_db();
 
         let tx1 = db.begin_tx().await;
 
@@ -789,5 +830,74 @@ mod tests {
         db.commit_tx(tx2).await.unwrap();
         let row = db.read(tx1, 1).await.unwrap();
         assert_eq!(row, None);
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_storage1() {
+        let clock = LocalClock::new();
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "mvcc-rs-storage-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let storage = crate::persistent_storage::JsonOnDisk { path };
+        let db: Database<_, _, tokio::sync::Mutex<_>> = Database::new(clock, storage);
+
+        let tx1 = db.begin_tx().await;
+        let tx2 = db.begin_tx().await;
+        let tx3 = db.begin_tx().await;
+
+        db.insert(
+            tx3,
+            Row {
+                id: 1,
+                data: "testme".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        db.commit_tx(tx1).await.unwrap();
+        db.rollback_tx(tx2).await;
+        db.commit_tx(tx3).await.unwrap();
+
+        let tx4 = db.begin_tx().await;
+        db.insert(
+            tx4,
+            Row {
+                id: 2,
+                data: "testme2".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        db.insert(
+            tx4,
+            Row {
+                id: 3,
+                data: "testme3".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let mutation = db
+            .scan_storage()
+            .await
+            .unwrap();
+        println!("{:?}", mutation);
+
+        db.commit_tx(tx4).await.unwrap();
+
+        let mutation = db
+            .scan_storage()
+            .await
+            .unwrap();
+        println!("{:?}", mutation);
+
     }
 }

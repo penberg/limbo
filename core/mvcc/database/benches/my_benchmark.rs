@@ -4,20 +4,30 @@ use mvcc_rs::clock::LocalClock;
 use mvcc_rs::database::{Database, Row};
 use pprof::criterion::{Output, PProfProfiler};
 
+fn bench_db() -> Database<
+    LocalClock,
+    mvcc_rs::persistent_storage::Noop,
+    tokio::sync::Mutex<
+        mvcc_rs::database::DatabaseInner<LocalClock, mvcc_rs::persistent_storage::Noop>,
+    >,
+> {
+    let clock = LocalClock::default();
+    let storage = mvcc_rs::persistent_storage::Noop {};
+    Database::<_, _, tokio::sync::Mutex<_>>::new(clock, storage)
+}
+
 fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("mvcc-ops-throughput");
     group.throughput(Throughput::Elements(1));
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     group.bench_function("begin_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
             db.begin_tx().await;
         })
     });
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     group.bench_function("begin_tx + rollback_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
             let tx_id = db.begin_tx().await;
@@ -25,8 +35,7 @@ fn bench(c: &mut Criterion) {
         })
     });
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     group.bench_function("begin_tx + commit_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
             let tx_id = db.begin_tx().await;
@@ -34,8 +43,7 @@ fn bench(c: &mut Criterion) {
         })
     });
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     group.bench_function("begin_tx-read-commit_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
             let tx_id = db.begin_tx().await;
@@ -44,8 +52,7 @@ fn bench(c: &mut Criterion) {
         })
     });
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     group.bench_function("begin_tx-update-commit_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
             let tx_id = db.begin_tx().await;
@@ -62,8 +69,7 @@ fn bench(c: &mut Criterion) {
         })
     });
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     let tx = futures::executor::block_on(db.begin_tx());
     futures::executor::block_on(db.insert(
         tx,
@@ -79,8 +85,7 @@ fn bench(c: &mut Criterion) {
         })
     });
 
-    let clock = LocalClock::default();
-    let db = Database::<LocalClock, tokio::sync::Mutex<_>>::new(clock);
+    let db = bench_db();
     let tx = futures::executor::block_on(db.begin_tx());
     futures::executor::block_on(db.insert(
         tx,
