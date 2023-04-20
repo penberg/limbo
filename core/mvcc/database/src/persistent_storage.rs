@@ -44,6 +44,7 @@ pub struct JsonOnDiskStream {
     inner: tokio_stream::wrappers::LinesStream<tokio::io::BufReader<tokio::fs::File>>,
 }
 
+#[cfg(feature = "tokio")]
 impl futures::stream::Stream for JsonOnDiskStream {
     type Item = Mutation;
 
