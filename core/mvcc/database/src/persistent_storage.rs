@@ -1,5 +1,4 @@
 use crate::database::{Result, Mutation};
-use crate::errors::DatabaseError;
 
 /// Persistent storage API for storing and retrieving transactions.
 /// TODO: final design in heavy progress!
@@ -65,6 +64,7 @@ impl Storage for JsonOnDisk {
     type Stream = JsonOnDiskStream;
 
     async fn store(&mut self, m: Mutation) -> Result<()> {
+        use crate::errors::DatabaseError;
         use tokio::io::AsyncWriteExt;
         let t = serde_json::to_vec(&m).map_err(|e| DatabaseError::Io(e.to_string()))?;
         let mut file = tokio::fs::OpenOptions::new()
