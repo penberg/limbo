@@ -1,4 +1,4 @@
-use crate::database::{Result, Mutation};
+use crate::database::{Mutation, Result};
 
 /// Persistent storage API for storing and retrieving transactions.
 /// TODO: final design in heavy progress!

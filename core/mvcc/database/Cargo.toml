@@ -14,6 +14,8 @@ tokio-stream = { version = "0.1.12", optional = true, features = ["io-util"] }
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
 pin-project = "1.0.12"
+tracing-subscriber = { version = "0", optional = true }
+base64 = "0.21.0"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports", "async", "async_futures"] }
@@ -24,6 +26,9 @@ tracing-subscriber = "0"
 tracing-test = "0"
 mvcc-rs = { path = ".", features = ["tokio"] }
 
+[lib]
+crate-type = ["rlib", "cdylib", "staticlib"]
+
 [[bench]]
 name = "my_benchmark"
 harness = false
@@ -31,4 +36,5 @@ harness = false
 [features]
 default = []
 full = ["tokio"]
+c_bindings = ["tokio", "dep:tracing-subscriber"]
 tokio = ["dep:tokio", "dep:tokio-stream"]
