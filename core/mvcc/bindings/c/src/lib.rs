@@ -62,11 +62,11 @@ pub unsafe extern "C" fn MVCCDatabaseClose(db: MVCCDatabaseRef) {
 pub unsafe extern "C" fn MVCCDatabaseInsert(
     db: MVCCDatabaseRef,
     id: u64,
-    value_ptr: *const u8,
+    value_ptr: *const std::ffi::c_void,
     value_len: usize,
 ) -> MVCCError {
     let db = db.get_ref();
-    let value = std::slice::from_raw_parts(value_ptr, value_len);
+    let value = std::slice::from_raw_parts(value_ptr as *const u8, value_len);
     let data = match std::str::from_utf8(value) {
         Ok(value) => value.to_string(),
         Err(_) => {
