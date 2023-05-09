@@ -26,9 +26,6 @@ tracing-subscriber = "0"
 tracing-test = "0"
 mvcc-rs = { path = ".", features = ["tokio"] }
 
-[lib]
-crate-type = ["rlib", "cdylib", "staticlib"]
-
 [[bench]]
 name = "my_benchmark"
 harness = false
