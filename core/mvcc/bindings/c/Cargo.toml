@@ -12,7 +12,7 @@ cbindgen = "0.24.0"
 
 [dependencies]
 base64 = "0.21.0"
-mvcc-rs = { path = "../../database", features = ["tokio"] }
+mvcc-rs = { path = "../../mvcc-rs", features = ["tokio"] }
 tokio = { version = "1.27.0", features = ["full"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0" }
