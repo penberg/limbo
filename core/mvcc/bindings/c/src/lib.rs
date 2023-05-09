@@ -1,8 +1,10 @@
 #![allow(non_camel_case_types)]
 
+mod errors;
 mod types;
 
 use types::{MVCCDatabaseRef, DbContext};
+use errors::*;
 use mvcc_rs::*;
 
 /// cbindgen:ignore
@@ -81,11 +83,11 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
     }) {
         Ok(_) => {
             tracing::debug!("MVCCDatabaseInsert: success");
-            0 // SQLITE_OK
+            MVCC_OK
         }
         Err(e) => {
             tracing::error!("MVCCDatabaseInsert: {e}");
-            778 // SQLITE_IOERR_WRITE
+            MVCC_IO_ERROR_WRITE
         }
     }
 }
