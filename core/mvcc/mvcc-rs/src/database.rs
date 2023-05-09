@@ -24,13 +24,14 @@ pub struct RowVersion {
 
 pub type TxID = u64;
 
+/// A log record contains all the versions inserted and deleted by a transaction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Mutation {
+pub struct LogRecord {
     tx_id: TxID,
     row_versions: Vec<RowVersion>,
 }
 
-impl Mutation {
+impl LogRecord {
     fn new(tx_id: TxID) -> Self {
         Self {
             tx_id,
@@ -271,10 +272,15 @@ impl<
     }
 
     #[cfg(test)]
-    pub(crate) async fn scan_storage(&self) -> Result<Vec<Mutation>> {
+    pub(crate) async fn scan_storage(&self) -> Result<Vec<LogRecord>> {
         use futures::StreamExt;
         let inner = self.inner.lock().await;
-        Ok(inner.storage.scan().await?.collect::<Vec<Mutation>>().await)
+        Ok(inner
+            .storage
+            .scan()
+            .await?
+            .collect::<Vec<LogRecord>>()
+            .await)
     }
 }
 
@@ -382,20 +388,20 @@ impl<Clock: LogicalClock, Storage: crate::persistent_storage::Storage>
         let mut rows = self.rows.borrow_mut();
         tx.state = TransactionState::Preparing;
         tracing::trace!("PREPARE   {tx}");
-        let mut mutation: Mutation = Mutation::new(tx_id);
+        let mut log_record: LogRecord = LogRecord::new(tx_id);
         for id in &tx.write_set {
             if let Some(row_versions) = rows.get_mut(id) {
                 for row_version in row_versions.iter_mut() {
                     if let TxTimestampOrID::TxID(id) = row_version.begin {
                         if id == tx_id {
                             row_version.begin = TxTimestampOrID::Timestamp(tx.begin_ts);
-                            mutation.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
+                            log_record.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
                         }
                     }
                     if let Some(TxTimestampOrID::TxID(id)) = row_version.end {
                         if id == tx_id {
                             row_version.end = Some(TxTimestampOrID::Timestamp(end_ts));
-                            mutation.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
+                            log_record.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
                         }
                     }
                 }
@@ -419,8 +425,8 @@ impl<Clock: LogicalClock, Storage: crate::persistent_storage::Storage>
         txs.remove(&tx_id);
         drop(rows);
         drop(txs);
-        if !mutation.row_versions.is_empty() {
-            self.storage.store(mutation).await?;
+        if !log_record.row_versions.is_empty() {
+            self.storage.log_tx(log_record).await?;
         }
         Ok(())
     }
@@ -949,12 +955,12 @@ mod tests {
         .await
         .unwrap();
 
-        let mutation = db.scan_storage().await.unwrap();
-        println!("{:?}", mutation);
+        let log_record = db.scan_storage().await.unwrap();
+        println!("{:?}", log_record);
 
         db.commit_tx(tx4).await.unwrap();
 
-        let mutation = db.scan_storage().await.unwrap();
-        println!("{:?}", mutation);
+        let log_record = db.scan_storage().await.unwrap();
+        println!("{:?}", log_record);
     }
 }

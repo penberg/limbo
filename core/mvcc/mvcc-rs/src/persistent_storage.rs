@@ -1,12 +1,13 @@
-use crate::database::{Mutation, Result};
+use crate::database::{LogRecord, Result};
 
 /// Persistent storage API for storing and retrieving transactions.
 /// TODO: final design in heavy progress!
 #[async_trait::async_trait]
 pub trait Storage {
-    type Stream: futures::stream::Stream<Item = Mutation>;
+    type Stream: futures::stream::Stream<Item = LogRecord>;
 
-    async fn store(&mut self, m: Mutation) -> Result<()>;
+    async fn log_tx(&mut self, m: LogRecord) -> Result<()>;
+
     async fn scan(&self) -> Result<Self::Stream>;
 }
 
@@ -14,9 +15,9 @@ pub struct Noop {}
 
 #[async_trait::async_trait]
 impl Storage for Noop {
-    type Stream = futures::stream::Empty<Mutation>;
+    type Stream = futures::stream::Empty<LogRecord>;
 
-    async fn store(&mut self, _m: Mutation) -> Result<()> {
+    async fn log_tx(&mut self, _m: LogRecord) -> Result<()> {
         Ok(())
     }
 
@@ -45,7 +46,7 @@ pub struct JsonOnDiskStream {
 
 #[cfg(feature = "tokio")]
 impl futures::stream::Stream for JsonOnDiskStream {
-    type Item = Mutation;
+    type Item = LogRecord;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
@@ -63,7 +64,7 @@ impl futures::stream::Stream for JsonOnDiskStream {
 impl Storage for JsonOnDisk {
     type Stream = JsonOnDiskStream;
 
-    async fn store(&mut self, m: Mutation) -> Result<()> {
+    async fn log_tx(&mut self, m: LogRecord) -> Result<()> {
         use crate::errors::DatabaseError;
         use tokio::io::AsyncWriteExt;
         let t = serde_json::to_vec(&m).map_err(|e| DatabaseError::Io(e.to_string()))?;
