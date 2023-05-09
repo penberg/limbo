@@ -20,7 +20,7 @@ MVCCDatabaseRef MVCCDatabaseOpen(const char *path);
 
 void MVCCDatabaseClose(MVCCDatabaseRef db);
 
-MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db, uint64_t id, const uint8_t *value_ptr, uintptr_t value_len);
+MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db, uint64_t id, const void *value_ptr, uintptr_t value_len);
 
 #ifdef __cplusplus
 } // extern "C"
