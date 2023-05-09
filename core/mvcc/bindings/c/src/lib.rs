@@ -52,6 +52,7 @@ pub unsafe extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCC
 pub unsafe extern "C" fn MVCCDatabaseClose(db: MVCCDatabaseRef) {
     tracing::debug!("MVCCDatabaseClose");
     if db.is_null() {
+        tracing::debug!("warning: `db` is null in MVCCDatabaseClose()");
         return;
     }
     let _ = unsafe { Box::from_raw(db.get_ref_mut()) };
