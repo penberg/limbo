@@ -23,7 +23,7 @@ type Db = database::Database<Clock, Storage, tokio::sync::Mutex<Inner>>;
 static INIT_RUST_LOG: std::sync::Once = std::sync::Once::new();
 
 #[no_mangle]
-pub extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCCDatabaseRef {
+pub unsafe extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCCDatabaseRef {
     INIT_RUST_LOG.call_once(|| {
         tracing_subscriber::fmt::init();
     });
