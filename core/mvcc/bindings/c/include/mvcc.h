@@ -1,6 +1,8 @@
 #ifndef MVCC_H
 #define MVCC_H
 
+#include <stdint.h>
+
 typedef enum {
   MVCC_OK = 0,
   MVCC_IO_ERROR_WRITE = 778,
