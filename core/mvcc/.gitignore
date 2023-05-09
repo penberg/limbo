@@ -1,2 +1,3 @@
-target/
 Cargo.lock
+bindings/c/include
+target/

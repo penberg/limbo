@@ -1,0 +1,6 @@
+language = "C"
+cpp_compat = true
+include_guard = "MVCC_H"
+line_length = 120
+no_includes = true
+style = "type"
