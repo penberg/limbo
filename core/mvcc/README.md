@@ -7,6 +7,7 @@ The aim of the project is to provide a building block for implementing database 
 
 * Main memory architecture, rows are accessed via an index
 * Optimistic multi-version concurrency control
+* Rust and C APIs
 
 ## Experimental Evaluation
 
