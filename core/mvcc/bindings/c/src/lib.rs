@@ -4,9 +4,9 @@
 mod errors;
 mod types;
 
-use types::{MVCCDatabaseRef, DbContext};
-use errors::*;
+use errors::MVCCError;
 use mvcc_rs::*;
+use types::{DbContext, MVCCDatabaseRef};
 
 /// cbindgen:ignore
 type Clock = clock::LocalClock;
@@ -63,7 +63,7 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
     id: u64,
     value_ptr: *const u8,
     value_len: usize,
-) -> i32 {
+) -> MVCCError {
     let db = db.get_ref();
     let value = std::slice::from_raw_parts(value_ptr, value_len);
     let data = match std::str::from_utf8(value) {
@@ -84,11 +84,11 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
     }) {
         Ok(_) => {
             tracing::debug!("MVCCDatabaseInsert: success");
-            MVCC_OK
+            MVCCError::MVCC_OK
         }
         Err(e) => {
             tracing::error!("MVCCDatabaseInsert: {e}");
-            MVCC_IO_ERROR_WRITE
+            MVCCError::MVCC_IO_ERROR_WRITE
         }
     }
 }
