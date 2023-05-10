@@ -11,7 +11,11 @@ typedef enum {
 
 typedef struct DbContext DbContext;
 
+typedef struct ScanCursorContext ScanCursorContext;
+
 typedef const DbContext *MVCCDatabaseRef;
+
+typedef ScanCursorContext *MVCCScanCursorRef;
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +30,14 @@ MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db, uint64_t id, const void *value_
 MVCCError MVCCDatabaseRead(MVCCDatabaseRef db, uint64_t id, char **value_ptr, int64_t *value_len);
 
 void MVCCFreeStr(void *ptr);
+
+MVCCScanCursorRef MVCCScanCursorOpen(MVCCDatabaseRef db);
+
+void MVCCScanCursorClose(MVCCScanCursorRef cursor);
+
+MVCCError MVCCScanCursorRead(MVCCScanCursorRef cursor, char **value_ptr, int64_t *value_len);
+
+int MVCCScanCursorNext(MVCCScanCursorRef cursor);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -45,3 +45,13 @@ pub struct DbContext {
     pub(crate) db: Db,
     pub(crate) runtime: tokio::runtime::Runtime,
 }
+
+pub struct ScanCursorContext {
+    pub cursor: crate::ScanCursor,
+    pub db: MVCCDatabaseRef,
+}
+
+#[repr(transparent)]
+pub struct MVCCScanCursorRef {
+    pub ptr: *mut ScanCursorContext,
+}
