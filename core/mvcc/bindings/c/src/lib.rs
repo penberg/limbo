@@ -93,3 +93,53 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
         }
     }
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn MVCCDatabaseRead(
+    db: MVCCDatabaseRef,
+    id: u64,
+    value_ptr: *mut *mut std::ffi::c_char,
+    value_len: *mut i64,
+) -> MVCCError {
+    let db = db.get_ref();
+    let (db, runtime) = (&db.db, &db.runtime);
+
+    match runtime.block_on(async move {
+        let tx = db.begin_tx().await;
+        let maybe_row = db.read(tx, id).await?;
+        match maybe_row {
+            Some(row) => {
+                tracing::debug!("Found row {row:?}");
+                let str_len = row.data.len() + 1;
+                let value = std::ffi::CString::new(row.data.as_bytes()).map_err(|e| {
+                    mvcc_rs::errors::DatabaseError::Io(format!(
+                        "Failed to transform read data into CString: {e}"
+                    ))
+                })?;
+                unsafe {
+                    *value_ptr = value.into_raw();
+                    *value_len = str_len as i64;
+                }
+            }
+            None => unsafe { *value_len = -1 },
+        };
+        Ok::<(), mvcc_rs::errors::DatabaseError>(())
+    }) {
+        Ok(_) => {
+            tracing::debug!("MVCCDatabaseRead: success");
+            MVCCError::MVCC_OK
+        }
+        Err(e) => {
+            tracing::error!("MVCCDatabaseRead: {e}");
+            MVCCError::MVCC_IO_ERROR_READ
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MVCCFreeStr(ptr: *mut std::ffi::c_void) {
+    if ptr.is_null() {
+        return;
+    }
+    let _ = std::ffi::CString::from_raw(ptr as *mut std::ffi::c_char);
+}
