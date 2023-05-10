@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Logical clock.
 pub trait LogicalClock {
     fn get_timestamp(&self) -> u64;
+    fn reset(&self, ts: u64);
 }
 
 /// A node-local clock backed by an atomic counter.
@@ -22,5 +23,9 @@ impl LocalClock {
 impl LogicalClock for LocalClock {
     fn get_timestamp(&self) -> u64 {
         self.ts_sequence.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn reset(&self, ts: u64) {
+        self.ts_sequence.store(ts, Ordering::SeqCst);
     }
 }
