@@ -5,6 +5,7 @@
 
 typedef enum {
   MVCC_OK = 0,
+  MVCC_IO_ERROR_READ = 266,
   MVCC_IO_ERROR_WRITE = 778,
 } MVCCError;
 
@@ -21,6 +22,10 @@ MVCCDatabaseRef MVCCDatabaseOpen(const char *path);
 void MVCCDatabaseClose(MVCCDatabaseRef db);
 
 MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db, uint64_t id, const void *value_ptr, uintptr_t value_len);
+
+MVCCError MVCCDatabaseRead(MVCCDatabaseRef db, uint64_t id, char **value_ptr, int64_t *value_len);
+
+void MVCCFreeStr(void *ptr);
 
 #ifdef __cplusplus
 } // extern "C"
