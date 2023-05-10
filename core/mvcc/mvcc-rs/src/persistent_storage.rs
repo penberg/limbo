@@ -6,9 +6,11 @@ use crate::database::{LogRecord, Result};
 pub trait Storage {
     type Stream: futures::stream::Stream<Item = LogRecord>;
 
+    /// Append a transaction in the transaction log.
     async fn log_tx(&mut self, m: LogRecord) -> Result<()>;
 
-    async fn scan(&self) -> Result<Self::Stream>;
+    /// Read the transaction log for replay.
+    async fn read_tx_log(&self) -> Result<Self::Stream>;
 }
 
 pub struct Noop {}
@@ -21,11 +23,12 @@ impl Storage for Noop {
         Ok(())
     }
 
-    async fn scan(&self) -> Result<Self::Stream> {
+    async fn read_tx_log(&self) -> Result<Self::Stream> {
         Ok(futures::stream::empty())
     }
 }
 
+#[derive(Debug)]
 pub struct JsonOnDisk {
     pub path: std::path::PathBuf,
 }
@@ -83,7 +86,7 @@ impl Storage for JsonOnDisk {
         Ok(())
     }
 
-    async fn scan(&self) -> Result<Self::Stream> {
+    async fn read_tx_log(&self) -> Result<Self::Stream> {
         use tokio::io::AsyncBufReadExt;
         let file = tokio::fs::OpenOptions::new()
             .read(true)
