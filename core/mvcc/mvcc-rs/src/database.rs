@@ -225,6 +225,11 @@ impl<
         inner.read(tx_id, id).await
     }
 
+    pub async fn scan_row_ids(&self) -> Result<Vec<u64>> {
+        let inner = self.inner.lock().await;
+        inner.scan_row_ids()
+    }
+
     /// Begins a new transaction in the database.
     ///
     /// This function starts a new transaction in the database and returns a `TxID` value
@@ -353,6 +358,11 @@ impl<Clock: LogicalClock, Storage: crate::persistent_storage::Storage>
             }
         }
         Ok(None)
+    }
+
+    fn scan_row_ids(&self) -> Result<Vec<u64>> {
+        let rows = self.rows.borrow();
+        Ok(rows.keys().cloned().collect())
     }
 
     async fn begin_tx(&mut self) -> TxID {
