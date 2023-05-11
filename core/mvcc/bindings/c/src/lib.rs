@@ -101,7 +101,7 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
 pub unsafe extern "C" fn MVCCDatabaseRead(
     db: MVCCDatabaseRef,
     id: u64,
-    value_ptr: *mut *mut std::ffi::c_char,
+    value_ptr: *mut *mut u8,
     value_len: *mut i64,
 ) -> MVCCError {
     let db = db.get_ref();
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn MVCCDatabaseRead(
                     ))
                 })?;
                 unsafe {
-                    *value_ptr = value.into_raw();
+                    *value_ptr = value.into_raw() as *mut u8;
                     *value_len = str_len as i64;
                 }
             }
@@ -186,7 +186,7 @@ pub unsafe extern "C" fn MVCCScanCursorClose(cursor: MVCCScanCursorRef) {
 #[no_mangle]
 pub unsafe extern "C" fn MVCCScanCursorRead(
     cursor: MVCCScanCursorRef,
-    value_ptr: *mut *mut std::ffi::c_char,
+    value_ptr: *mut *mut u8,
     value_len: *mut i64,
 ) -> MVCCError {
     tracing::debug!("MVCCScanCursorRead()");
@@ -211,7 +211,7 @@ pub unsafe extern "C" fn MVCCScanCursorRead(
                     ))
                 })?;
                 unsafe {
-                    *value_ptr = value.into_raw();
+                    *value_ptr = value.into_raw() as *mut u8;
                     *value_len = str_len as i64;
                 }
             }

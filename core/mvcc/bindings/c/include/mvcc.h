@@ -27,7 +27,7 @@ void MVCCDatabaseClose(MVCCDatabaseRef db);
 
 MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db, uint64_t id, const void *value_ptr, uintptr_t value_len);
 
-MVCCError MVCCDatabaseRead(MVCCDatabaseRef db, uint64_t id, char **value_ptr, int64_t *value_len);
+MVCCError MVCCDatabaseRead(MVCCDatabaseRef db, uint64_t id, uint8_t **value_ptr, int64_t *value_len);
 
 void MVCCFreeStr(void *ptr);
 
@@ -35,7 +35,7 @@ MVCCScanCursorRef MVCCScanCursorOpen(MVCCDatabaseRef db);
 
 void MVCCScanCursorClose(MVCCScanCursorRef cursor);
 
-MVCCError MVCCScanCursorRead(MVCCScanCursorRef cursor, char **value_ptr, int64_t *value_len);
+MVCCError MVCCScanCursorRead(MVCCScanCursorRef cursor, uint8_t **value_ptr, int64_t *value_len);
 
 int MVCCScanCursorNext(MVCCScanCursorRef cursor);
 
