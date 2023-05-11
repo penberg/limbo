@@ -44,6 +44,10 @@ impl<
         self.db.read(self.tx_id, id).await
     }
 
+    pub async fn close(self) -> Result<()> {
+        self.db.commit_tx(self.tx_id).await
+    }
+
     pub fn forward(&mut self) -> bool {
         self.index += 1;
         self.index < self.row_ids.len()

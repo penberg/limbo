@@ -177,7 +177,10 @@ pub unsafe extern "C" fn MVCCScanCursorClose(cursor: MVCCScanCursorRef) {
         tracing::debug!("warning: `cursor` is null in MVCCScanCursorClose()");
         return;
     }
-    let _ = unsafe { Box::from_raw(cursor.ptr) };
+    let cursor_ctx = unsafe { Box::from_raw(cursor.ptr) };
+    let db_context = cursor_ctx.db.clone();
+    let runtime = &db_context.get_ref().runtime;
+    runtime.block_on(async move { cursor_ctx.cursor.close().await.ok() });
 }
 
 #[no_mangle]

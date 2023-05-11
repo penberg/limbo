@@ -1,5 +1,6 @@
 use crate::Db;
 
+#[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct MVCCDatabaseRef {
     ptr: *const DbContext,
@@ -51,6 +52,7 @@ pub struct ScanCursorContext {
     pub db: MVCCDatabaseRef,
 }
 
+#[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct MVCCScanCursorRef {
     pub ptr: *mut ScanCursorContext,
