@@ -36,7 +36,14 @@ impl<
         })
     }
 
-    pub async fn current(&self) -> Result<Option<Row>> {
+    pub fn current_row_id(&self) -> Option<u64> {
+        if self.index >= self.row_ids.len() {
+            return None;
+        }
+        Some(self.row_ids[self.index])
+    }
+
+    pub async fn current_row(&self) -> Result<Option<Row>> {
         if self.index >= self.row_ids.len() {
             return Ok(None);
         }

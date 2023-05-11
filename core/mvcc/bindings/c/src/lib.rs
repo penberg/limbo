@@ -200,7 +200,7 @@ pub unsafe extern "C" fn MVCCScanCursorRead(
 
     // TODO: deduplicate with MVCCDatabaseRead()
     match runtime.block_on(async move {
-        let maybe_row = cursor.current().await?;
+        let maybe_row = cursor.current_row().await?;
         match maybe_row {
             Some(row) => {
                 tracing::debug!("Found row {row:?}");
@@ -242,4 +242,11 @@ pub unsafe extern "C" fn MVCCScanCursorNext(cursor: MVCCScanCursorRef) -> std::f
         tracing::debug!("Forwarded to end");
         0
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MVCCScanCursorPosition(cursor: MVCCScanCursorRef) -> u64 {
+    let cursor_ctx = unsafe { &mut *cursor.ptr };
+    let cursor = &mut cursor_ctx.cursor;
+    cursor.current_row_id().unwrap_or(0)
 }

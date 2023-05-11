@@ -39,6 +39,8 @@ MVCCError MVCCScanCursorRead(MVCCScanCursorRef cursor, uint8_t **value_ptr, int6
 
 int MVCCScanCursorNext(MVCCScanCursorRef cursor);
 
+uint64_t MVCCScanCursorPosition(MVCCScanCursorRef cursor);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif // __cplusplus
