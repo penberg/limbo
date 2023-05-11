@@ -134,7 +134,7 @@ impl<
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
         let inner = DatabaseInner {
-            rows: RefCell::new(HashMap::new()),
+            rows: RefCell::new(BTreeMap::new()),
             txs: RefCell::new(HashMap::new()),
             tx_timestamps: RefCell::new(BTreeMap::new()),
             tx_ids: AtomicU64::new(0),
@@ -284,7 +284,7 @@ impl<
 
 #[derive(Debug)]
 pub struct DatabaseInner<Clock: LogicalClock, Storage: crate::persistent_storage::Storage> {
-    rows: RefCell<HashMap<u64, Vec<RowVersion>>>,
+    rows: RefCell<BTreeMap<u64, Vec<RowVersion>>>,
     txs: RefCell<HashMap<TxID, Transaction>>,
     tx_timestamps: RefCell<BTreeMap<u64, usize>>,
     tx_ids: AtomicU64,
