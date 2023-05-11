@@ -37,6 +37,9 @@ impl<
     }
 
     pub async fn current(&self) -> Result<Option<Row>> {
+        if self.index >= self.row_ids.len() {
+            return Ok(None);
+        }
         let id = self.row_ids[self.index];
         self.db.read(self.tx_id, id).await
     }
