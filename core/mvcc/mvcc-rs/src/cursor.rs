@@ -59,4 +59,8 @@ impl<
         self.index += 1;
         self.index < self.row_ids.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.index >= self.row_ids.len()
+    }
 }

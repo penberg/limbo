@@ -156,6 +156,12 @@ pub unsafe extern "C" fn MVCCScanCursorOpen(db: MVCCDatabaseRef) -> MVCCScanCurs
     let (database, runtime) = (&database.db, &database.runtime);
     match runtime.block_on(async move { mvcc_rs::cursor::ScanCursor::new(database).await }) {
         Ok(cursor) => {
+            if cursor.is_empty() {
+                tracing::debug!("Cursor is empty");
+                return MVCCScanCursorRef {
+                    ptr: std::ptr::null_mut(),
+                };
+            }
             tracing::debug!("Cursor open: {cursor:?}");
             MVCCScanCursorRef {
                 ptr: Box::into_raw(Box::new(ScanCursorContext { cursor, db })),
