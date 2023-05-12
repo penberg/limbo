@@ -1,5 +1,5 @@
 use mvcc_rs::clock::LocalClock;
-use mvcc_rs::database::{Database, Row};
+use mvcc_rs::database::{Database, Row, RowID};
 use shuttle::sync::atomic::AtomicU64;
 use shuttle::sync::Arc;
 use shuttle::thread;
@@ -22,6 +22,10 @@ fn test_non_overlapping_concurrent_inserts() {
                     shuttle::future::block_on(async move {
                         let tx = db.begin_tx().await;
                         let id = ids.fetch_add(1, Ordering::SeqCst);
+                        let id = RowID {
+                            table_id: 1,
+                            row_id: id,
+                        };
                         let row = Row {
                             id,
                             data: "Hello".to_string(),
@@ -42,6 +46,10 @@ fn test_non_overlapping_concurrent_inserts() {
                     shuttle::future::block_on(async move {
                         let tx = db.begin_tx().await;
                         let id = ids.fetch_add(1, Ordering::SeqCst);
+                        let id = RowID {
+                            table_id: 1,
+                            row_id: id,
+                        };
                         let row = Row {
                             id,
                             data: "World".to_string(),

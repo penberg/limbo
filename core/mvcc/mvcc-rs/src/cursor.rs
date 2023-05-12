@@ -1,5 +1,5 @@
 use crate::clock::LogicalClock;
-use crate::database::{Database, DatabaseInner, Result, Row};
+use crate::database::{Database, DatabaseInner, Result, Row, RowID};
 use crate::persistent_storage::Storage;
 use crate::sync::AsyncMutex;
 
@@ -11,7 +11,7 @@ pub struct ScanCursor<
     Mutex: AsyncMutex<Inner = DatabaseInner<Clock, StorageImpl>>,
 > {
     pub db: &'a Database<Clock, StorageImpl, Mutex>,
-    pub row_ids: Vec<u64>,
+    pub row_ids: Vec<RowID>,
     pub index: usize,
     tx_id: u64,
 }
@@ -25,9 +25,10 @@ impl<
 {
     pub async fn new(
         db: &'a Database<Clock, StorageImpl, Mutex>,
+        table_id: u64,
     ) -> Result<ScanCursor<'a, Clock, StorageImpl, Mutex>> {
         let tx_id = db.begin_tx().await;
-        let row_ids = db.scan_row_ids().await?;
+        let row_ids = db.scan_row_ids_for_table(table_id).await?;
         Ok(Self {
             db,
             tx_id,
@@ -36,7 +37,7 @@ impl<
         })
     }
 
-    pub fn current_row_id(&self) -> Option<u64> {
+    pub fn current_row_id(&self) -> Option<RowID> {
         if self.index >= self.row_ids.len() {
             return None;
         }
