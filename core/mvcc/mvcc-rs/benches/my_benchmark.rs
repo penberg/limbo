@@ -7,13 +7,10 @@ use pprof::criterion::{Output, PProfProfiler};
 fn bench_db() -> Database<
     LocalClock,
     mvcc_rs::persistent_storage::Noop,
-    tokio::sync::Mutex<
-        mvcc_rs::database::DatabaseInner<LocalClock, mvcc_rs::persistent_storage::Noop>,
-    >,
 > {
     let clock = LocalClock::default();
     let storage = mvcc_rs::persistent_storage::Noop {};
-    Database::<_, _, tokio::sync::Mutex<_>>::new(clock, storage)
+    Database::new(clock, storage)
 }
 
 fn bench(c: &mut Criterion) {

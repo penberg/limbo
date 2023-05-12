@@ -15,13 +15,10 @@ type Clock = clock::LocalClock;
 type Storage = persistent_storage::JsonOnDisk;
 
 /// cbindgen:ignore
-type Inner = database::DatabaseInner<Clock, Storage>;
+type Db = database::Database<Clock, Storage>;
 
 /// cbindgen:ignore
-type Db = database::Database<Clock, Storage, tokio::sync::Mutex<Inner>>;
-
-/// cbindgen:ignore
-type ScanCursor = cursor::ScanCursor<'static, Clock, Storage, tokio::sync::Mutex<Inner>>;
+type ScanCursor = cursor::ScanCursor<'static, Clock, Storage>;
 
 static INIT_RUST_LOG: std::sync::Once = std::sync::Once::new();
 

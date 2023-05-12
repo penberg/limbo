@@ -11,7 +11,7 @@ fn test_non_overlapping_concurrent_inserts() {
     // row IDs.
     let clock = LocalClock::default();
     let storage = mvcc_rs::persistent_storage::Noop {};
-    let db = Arc::new(Database::<_, _, tokio::sync::Mutex<_>>::new(clock, storage));
+    let db = Arc::new(Database::new(clock, storage));
     let ids = Arc::new(AtomicU64::new(0));
     shuttle::check_random(
         move || {

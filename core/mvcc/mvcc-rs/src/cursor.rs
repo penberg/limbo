@@ -1,16 +1,14 @@
 use crate::clock::LogicalClock;
-use crate::database::{Database, DatabaseInner, Result, Row, RowID};
+use crate::database::{Database, Result, Row, RowID};
 use crate::persistent_storage::Storage;
-use crate::sync::AsyncMutex;
 
 #[derive(Debug)]
 pub struct ScanCursor<
     'a,
     Clock: LogicalClock,
     StorageImpl: Storage,
-    Mutex: AsyncMutex<Inner = DatabaseInner<Clock, StorageImpl>>,
 > {
-    pub db: &'a Database<Clock, StorageImpl, Mutex>,
+    pub db: &'a Database<Clock, StorageImpl>,
     pub row_ids: Vec<RowID>,
     pub index: usize,
     tx_id: u64,
@@ -20,13 +18,12 @@ impl<
         'a,
         Clock: LogicalClock,
         StorageImpl: Storage,
-        Mutex: AsyncMutex<Inner = DatabaseInner<Clock, StorageImpl>>,
-    > ScanCursor<'a, Clock, StorageImpl, Mutex>
+    > ScanCursor<'a, Clock, StorageImpl>
 {
     pub async fn new(
-        db: &'a Database<Clock, StorageImpl, Mutex>,
+        db: &'a Database<Clock, StorageImpl>,
         table_id: u64,
-    ) -> Result<ScanCursor<'a, Clock, StorageImpl, Mutex>> {
+    ) -> Result<ScanCursor<'a, Clock, StorageImpl>> {
         let tx_id = db.begin_tx().await;
         let row_ids = db.scan_row_ids_for_table(table_id).await?;
         Ok(Self {

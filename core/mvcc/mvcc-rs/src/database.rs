@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub type Result<T> = std::result::Result<T, DatabaseError>;
 
@@ -127,16 +128,14 @@ enum TransactionState {
 pub struct Database<
     Clock: LogicalClock,
     Storage: crate::persistent_storage::Storage,
-    AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock, Storage>>,
 > {
-    inner: Arc<AsyncMutex>,
+    inner: Arc<Mutex<DatabaseInner<Clock, Storage>>>,
 }
 
 impl<
         Clock: LogicalClock,
         Storage: crate::persistent_storage::Storage,
-        AsyncMutex: crate::sync::AsyncMutex<Inner = DatabaseInner<Clock, Storage>>,
-    > Database<Clock, Storage, AsyncMutex>
+    > Database<Clock, Storage>
 {
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
@@ -149,7 +148,7 @@ impl<
             storage,
         };
         Self {
-            inner: Arc::new(AsyncMutex::new(inner)),
+            inner: Arc::new(Mutex::new(inner)),
         }
     }
 
@@ -628,11 +627,10 @@ mod tests {
     fn test_db() -> Database<
         LocalClock,
         crate::persistent_storage::Noop,
-        tokio::sync::Mutex<DatabaseInner<LocalClock, crate::persistent_storage::Noop>>,
     > {
         let clock = LocalClock::new();
         let storage = crate::persistent_storage::Noop {};
-        Database::<_, _, tokio::sync::Mutex<_>>::new(clock, storage)
+        Database::new(clock, storage)
     }
 
     #[traced_test]
@@ -1289,7 +1287,7 @@ mod tests {
                 .as_nanos(),
         ));
         let storage = crate::persistent_storage::JsonOnDisk { path: path.clone() };
-        let db: Database<_, _, tokio::sync::Mutex<_>> = Database::new(clock, storage);
+        let db = Database::new(clock, storage);
 
         let tx1 = db.begin_tx().await;
         let tx2 = db.begin_tx().await;
@@ -1384,7 +1382,7 @@ mod tests {
 
         let clock = LocalClock::new();
         let storage = crate::persistent_storage::JsonOnDisk { path };
-        let db: Database<_, _, tokio::sync::Mutex<_>> = Database::new(clock, storage);
+        let db = Database::new(clock, storage);
         db.recover().await.unwrap();
         println!("{:#?}", db);
 
