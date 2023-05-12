@@ -64,7 +64,8 @@ pub unsafe extern "C" fn MVCCDatabaseClose(db: MVCCDatabaseRef) {
 #[no_mangle]
 pub unsafe extern "C" fn MVCCDatabaseInsert(
     db: MVCCDatabaseRef,
-    id: u64,
+    table_id: u64,
+    row_id: u64,
     value_ptr: *const std::ffi::c_void,
     value_len: usize,
 ) -> MVCCError {
@@ -79,6 +80,7 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
         }
     };
     let (db, runtime) = (&db.db, &db.runtime);
+    let id = database::RowID { table_id, row_id };
     let row = database::Row { id, data };
     tracing::debug!("MVCCDatabaseInsert: {row:?}");
     match runtime.block_on(async move {
@@ -100,7 +102,8 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
 #[no_mangle]
 pub unsafe extern "C" fn MVCCDatabaseRead(
     db: MVCCDatabaseRef,
-    id: u64,
+    table_id: u64,
+    row_id: u64,
     value_ptr: *mut *mut u8,
     value_len: *mut i64,
 ) -> MVCCError {
@@ -109,6 +112,7 @@ pub unsafe extern "C" fn MVCCDatabaseRead(
 
     match runtime.block_on(async move {
         let tx = db.begin_tx().await;
+        let id = database::RowID { table_id, row_id };
         let maybe_row = db.read(tx, id).await?;
         match maybe_row {
             Some(row) => {
@@ -148,13 +152,18 @@ pub unsafe extern "C" fn MVCCFreeStr(ptr: *mut std::ffi::c_void) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn MVCCScanCursorOpen(db: MVCCDatabaseRef) -> MVCCScanCursorRef {
+pub unsafe extern "C" fn MVCCScanCursorOpen(
+    db: MVCCDatabaseRef,
+    table_id: u64,
+) -> MVCCScanCursorRef {
     tracing::debug!("MVCCScanCursorOpen()");
     // Reference is transmuted to &'static in order to be able to pass the cursor back to C.
     // The contract with C is to never use a cursor after MVCCDatabaseClose() has been called.
     let database = unsafe { std::mem::transmute::<&DbContext, &'static DbContext>(db.get_ref()) };
     let (database, runtime) = (&database.db, &database.runtime);
-    match runtime.block_on(async move { mvcc_rs::cursor::ScanCursor::new(database).await }) {
+    match runtime
+        .block_on(async move { mvcc_rs::cursor::ScanCursor::new(database, table_id).await })
+    {
         Ok(cursor) => {
             if cursor.is_empty() {
                 tracing::debug!("Cursor is empty");
@@ -254,5 +263,8 @@ pub unsafe extern "C" fn MVCCScanCursorNext(cursor: MVCCScanCursorRef) -> std::f
 pub unsafe extern "C" fn MVCCScanCursorPosition(cursor: MVCCScanCursorRef) -> u64 {
     let cursor_ctx = unsafe { &mut *cursor.ptr };
     let cursor = &mut cursor_ctx.cursor;
-    cursor.current_row_id().unwrap_or(0)
+    cursor
+        .current_row_id()
+        .map(|row_id| row_id.row_id)
+        .unwrap_or(0)
 }

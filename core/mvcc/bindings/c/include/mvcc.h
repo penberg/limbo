@@ -25,13 +25,21 @@ MVCCDatabaseRef MVCCDatabaseOpen(const char *path);
 
 void MVCCDatabaseClose(MVCCDatabaseRef db);
 
-MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db, uint64_t id, const void *value_ptr, uintptr_t value_len);
+MVCCError MVCCDatabaseInsert(MVCCDatabaseRef db,
+                             uint64_t table_id,
+                             uint64_t row_id,
+                             const void *value_ptr,
+                             uintptr_t value_len);
 
-MVCCError MVCCDatabaseRead(MVCCDatabaseRef db, uint64_t id, uint8_t **value_ptr, int64_t *value_len);
+MVCCError MVCCDatabaseRead(MVCCDatabaseRef db,
+                           uint64_t table_id,
+                           uint64_t row_id,
+                           uint8_t **value_ptr,
+                           int64_t *value_len);
 
 void MVCCFreeStr(void *ptr);
 
-MVCCScanCursorRef MVCCScanCursorOpen(MVCCDatabaseRef db);
+MVCCScanCursorRef MVCCScanCursorOpen(MVCCDatabaseRef db, uint64_t table_id);
 
 void MVCCScanCursorClose(MVCCScanCursorRef cursor);
 
