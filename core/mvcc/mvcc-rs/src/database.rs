@@ -137,7 +137,7 @@ impl<Clock: LogicalClock> Database<Clock> {
             rows: RefCell::new(BTreeMap::new()),
             txs: RefCell::new(HashMap::new()),
             tx_timestamps: RefCell::new(BTreeMap::new()),
-            tx_ids: AtomicU64::new(0),
+            tx_ids: AtomicU64::new(1), // let's reserve transaction 0 for special purposes
             clock,
             storage,
         };

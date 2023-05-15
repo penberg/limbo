@@ -56,8 +56,41 @@ pub unsafe extern "C" fn MVCCDatabaseClose(db: MVCCDatabaseRef) {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn MVCCTransactionBegin(db: MVCCDatabaseRef) -> u64 {
+    let db = db.get_ref();
+    let (db, runtime) = (&db.db, &db.runtime);
+    let tx_id = runtime.block_on(async move { db.begin_tx().await });
+    tracing::debug!("MVCCTransactionBegin: {tx_id}");
+    tx_id
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MVCCTransactionCommit(db: MVCCDatabaseRef, tx_id: u64) -> MVCCError {
+    let db = db.get_ref();
+    let (db, runtime) = (&db.db, &db.runtime);
+    tracing::debug!("MVCCTransactionCommit: {tx_id}");
+    match runtime.block_on(async move { db.commit_tx(tx_id).await }) {
+        Ok(()) => MVCCError::MVCC_OK,
+        Err(e) => {
+            tracing::error!("MVCCTransactionCommit: {e}");
+            MVCCError::MVCC_IO_ERROR_WRITE
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn MVCCTransactionRollback(db: MVCCDatabaseRef, tx_id: u64) -> MVCCError {
+    let db = db.get_ref();
+    let (db, runtime) = (&db.db, &db.runtime);
+    tracing::debug!("MVCCTransactionRollback: {tx_id}");
+    runtime.block_on(async move { db.rollback_tx(tx_id).await });
+    MVCCError::MVCC_OK
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn MVCCDatabaseInsert(
     db: MVCCDatabaseRef,
+    tx_id: u64,
     table_id: u64,
     row_id: u64,
     value_ptr: *const std::ffi::c_void,
@@ -77,11 +110,7 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
     let id = database::RowID { table_id, row_id };
     let row = database::Row { id, data };
     tracing::debug!("MVCCDatabaseInsert: {row:?}");
-    match runtime.block_on(async move {
-        let tx = db.begin_tx().await;
-        db.insert(tx, row).await?;
-        db.commit_tx(tx).await
-    }) {
+    match runtime.block_on(async move { db.insert(tx_id, row).await }) {
         Ok(_) => {
             tracing::debug!("MVCCDatabaseInsert: success");
             MVCCError::MVCC_OK
@@ -96,6 +125,7 @@ pub unsafe extern "C" fn MVCCDatabaseInsert(
 #[no_mangle]
 pub unsafe extern "C" fn MVCCDatabaseRead(
     db: MVCCDatabaseRef,
+    tx_id: u64,
     table_id: u64,
     row_id: u64,
     value_ptr: *mut *mut u8,
@@ -105,9 +135,8 @@ pub unsafe extern "C" fn MVCCDatabaseRead(
     let (db, runtime) = (&db.db, &db.runtime);
 
     match runtime.block_on(async move {
-        let tx = db.begin_tx().await;
         let id = database::RowID { table_id, row_id };
-        let maybe_row = db.read(tx, id).await?;
+        let maybe_row = db.read(tx_id, id).await?;
         match maybe_row {
             Some(row) => {
                 tracing::debug!("Found row {row:?}");
@@ -148,6 +177,7 @@ pub unsafe extern "C" fn MVCCFreeStr(ptr: *mut std::ffi::c_void) {
 #[no_mangle]
 pub unsafe extern "C" fn MVCCScanCursorOpen(
     db: MVCCDatabaseRef,
+    tx_id: u64,
     table_id: u64,
 ) -> MVCCScanCursorRef {
     tracing::debug!("MVCCScanCursorOpen()");
@@ -156,7 +186,7 @@ pub unsafe extern "C" fn MVCCScanCursorOpen(
     let database = unsafe { std::mem::transmute::<&DbContext, &'static DbContext>(db.get_ref()) };
     let (database, runtime) = (&database.db, &database.runtime);
     match runtime
-        .block_on(async move { mvcc_rs::cursor::ScanCursor::new(database, table_id).await })
+        .block_on(async move { mvcc_rs::cursor::ScanCursor::new(database, tx_id, table_id).await })
     {
         Ok(cursor) => {
             if cursor.is_empty() {

@@ -10,8 +10,11 @@ pub struct ScanCursor<'a, Clock: LogicalClock> {
 }
 
 impl<'a, Clock: LogicalClock> ScanCursor<'a, Clock> {
-    pub async fn new(db: &'a Database<Clock>, table_id: u64) -> Result<ScanCursor<'a, Clock>> {
-        let tx_id = db.begin_tx().await;
+    pub async fn new(
+        db: &'a Database<Clock>,
+        tx_id: u64,
+        table_id: u64,
+    ) -> Result<ScanCursor<'a, Clock>> {
         let row_ids = db.scan_row_ids_for_table(table_id).await?;
         Ok(Self {
             db,
@@ -37,7 +40,7 @@ impl<'a, Clock: LogicalClock> ScanCursor<'a, Clock> {
     }
 
     pub async fn close(self) -> Result<()> {
-        self.db.commit_tx(self.tx_id).await
+        Ok(())
     }
 
     pub fn forward(&mut self) -> bool {
