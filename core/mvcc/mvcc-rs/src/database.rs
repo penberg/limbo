@@ -1,5 +1,6 @@
 use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
+use crate::persistent_storage::Storage;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -125,18 +126,11 @@ enum TransactionState {
 
 /// A database with MVCC.
 #[derive(Debug)]
-pub struct Database<
-    Clock: LogicalClock,
-    Storage: crate::persistent_storage::Storage,
-> {
-    inner: Arc<Mutex<DatabaseInner<Clock, Storage>>>,
+pub struct Database<Clock: LogicalClock> {
+    inner: Arc<Mutex<DatabaseInner<Clock>>>,
 }
 
-impl<
-        Clock: LogicalClock,
-        Storage: crate::persistent_storage::Storage,
-    > Database<Clock, Storage>
-{
+impl<Clock: LogicalClock> Database<Clock> {
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
         let inner = DatabaseInner {
@@ -294,7 +288,7 @@ impl<
 }
 
 #[derive(Debug)]
-pub struct DatabaseInner<Clock: LogicalClock, Storage: crate::persistent_storage::Storage> {
+pub struct DatabaseInner<Clock: LogicalClock> {
     rows: RefCell<BTreeMap<RowID, Vec<RowVersion>>>,
     txs: RefCell<HashMap<TxID, Transaction>>,
     tx_timestamps: RefCell<BTreeMap<u64, usize>>,
@@ -303,9 +297,7 @@ pub struct DatabaseInner<Clock: LogicalClock, Storage: crate::persistent_storage
     storage: Storage,
 }
 
-impl<Clock: LogicalClock, Storage: crate::persistent_storage::Storage>
-    DatabaseInner<Clock, Storage>
-{
+impl<Clock: LogicalClock> DatabaseInner<Clock> {
     async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
         let mut txs = self.txs.borrow_mut();
         let tx = txs
@@ -624,12 +616,9 @@ mod tests {
     use crate::clock::LocalClock;
     use tracing_test::traced_test;
 
-    fn test_db() -> Database<
-        LocalClock,
-        crate::persistent_storage::Noop,
-    > {
+    fn test_db() -> Database<LocalClock> {
         let clock = LocalClock::new();
-        let storage = crate::persistent_storage::Noop {};
+        let storage = crate::persistent_storage::Storage::new_noop();
         Database::new(clock, storage)
     }
 
@@ -1286,7 +1275,7 @@ mod tests {
                 .unwrap()
                 .as_nanos(),
         ));
-        let storage = crate::persistent_storage::JsonOnDisk { path: path.clone() };
+        let storage = crate::persistent_storage::Storage::new_json_on_disk(path.clone());
         let db = Database::new(clock, storage);
 
         let tx1 = db.begin_tx().await;
@@ -1381,7 +1370,7 @@ mod tests {
         db.commit_tx(tx4).await.unwrap();
 
         let clock = LocalClock::new();
-        let storage = crate::persistent_storage::JsonOnDisk { path };
+        let storage = crate::persistent_storage::Storage::new_json_on_disk(path);
         let db = Database::new(clock, storage);
         db.recover().await.unwrap();
         println!("{:#?}", db);
