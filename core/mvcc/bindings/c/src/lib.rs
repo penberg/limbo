@@ -12,13 +12,10 @@ use types::{DbContext, MVCCDatabaseRef, MVCCScanCursorRef, ScanCursorContext};
 type Clock = clock::LocalClock;
 
 /// cbindgen:ignore
-type Storage = persistent_storage::JsonOnDisk;
+type Db = database::Database<Clock>;
 
 /// cbindgen:ignore
-type Db = database::Database<Clock, Storage>;
-
-/// cbindgen:ignore
-type ScanCursor = cursor::ScanCursor<'static, Clock, Storage>;
+type ScanCursor = cursor::ScanCursor<'static, Clock>;
 
 static INIT_RUST_LOG: std::sync::Once = std::sync::Once::new();
 
@@ -40,7 +37,7 @@ pub unsafe extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCC
         }
     };
     tracing::debug!("mvccrs: opening persistent storage at {path}");
-    let storage = crate::persistent_storage::JsonOnDisk::new(path);
+    let storage = crate::persistent_storage::Storage::new_json_on_disk(path);
     let db = Db::new(clock, storage);
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let ctx = DbContext { db, runtime };

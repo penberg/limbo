@@ -1,53 +1,29 @@
 use crate::database::{LogRecord, Result};
-
-/// Persistent storage API for storing and retrieving transactions.
-/// TODO: final design in heavy progress!
-#[async_trait::async_trait]
-pub trait Storage {
-    type Stream: futures::stream::Stream<Item = LogRecord>;
-
-    /// Append a transaction in the transaction log.
-    async fn log_tx(&mut self, m: LogRecord) -> Result<()>;
-
-    /// Read the transaction log for replay.
-    async fn read_tx_log(&self) -> Result<Self::Stream>;
-}
-
-pub struct Noop {}
-
-#[async_trait::async_trait]
-impl Storage for Noop {
-    type Stream = futures::stream::Empty<LogRecord>;
-
-    async fn log_tx(&mut self, _m: LogRecord) -> Result<()> {
-        Ok(())
-    }
-
-    async fn read_tx_log(&self) -> Result<Self::Stream> {
-        Ok(futures::stream::empty())
-    }
-}
+use crate::errors::DatabaseError;
 
 #[derive(Debug)]
-pub struct JsonOnDisk {
-    pub path: std::path::PathBuf,
+pub enum Storage {
+    Noop,
+    JsonOnDisk(std::path::PathBuf),
 }
 
-impl JsonOnDisk {
-    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+impl Storage {
+    pub fn new_noop() -> Self {
+        Self::Noop
+    }
+
+    pub fn new_json_on_disk(path: impl Into<std::path::PathBuf>) -> Self {
         let path = path.into();
-        Self { path }
+        Self::JsonOnDisk(path)
     }
 }
 
-#[cfg(feature = "tokio")]
 #[pin_project::pin_project]
 pub struct JsonOnDiskStream {
     #[pin]
     inner: tokio_stream::wrappers::LinesStream<tokio::io::BufReader<tokio::fs::File>>,
 }
 
-#[cfg(feature = "tokio")]
 impl futures::stream::Stream for JsonOnDiskStream {
     type Item = LogRecord;
 
@@ -62,41 +38,44 @@ impl futures::stream::Stream for JsonOnDiskStream {
     }
 }
 
-#[cfg(feature = "tokio")]
-#[async_trait::async_trait]
-impl Storage for JsonOnDisk {
-    type Stream = JsonOnDiskStream;
-
-    async fn log_tx(&mut self, m: LogRecord) -> Result<()> {
-        use crate::errors::DatabaseError;
-        use tokio::io::AsyncWriteExt;
-        let t = serde_json::to_vec(&m).map_err(|e| DatabaseError::Io(e.to_string()))?;
-        let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .await
-            .map_err(|e| DatabaseError::Io(e.to_string()))?;
-        file.write_all(&t)
-            .await
-            .map_err(|e| DatabaseError::Io(e.to_string()))?;
-        file.write_all(b"\n")
-            .await
-            .map_err(|e| DatabaseError::Io(e.to_string()))?;
+impl Storage {
+    pub async fn log_tx(&mut self, m: LogRecord) -> Result<()> {
+        if let Self::JsonOnDisk(path) = self {
+            use tokio::io::AsyncWriteExt;
+            let t = serde_json::to_vec(&m).map_err(|e| DatabaseError::Io(e.to_string()))?;
+            let mut file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .await
+                .map_err(|e| DatabaseError::Io(e.to_string()))?;
+            file.write_all(&t)
+                .await
+                .map_err(|e| DatabaseError::Io(e.to_string()))?;
+            file.write_all(b"\n")
+                .await
+                .map_err(|e| DatabaseError::Io(e.to_string()))?;
+        }
         Ok(())
     }
 
-    async fn read_tx_log(&self) -> Result<Self::Stream> {
-        use tokio::io::AsyncBufReadExt;
-        let file = tokio::fs::OpenOptions::new()
-            .read(true)
-            .open(&self.path)
-            .await
-            .unwrap();
-        Ok(JsonOnDiskStream {
-            inner: tokio_stream::wrappers::LinesStream::new(
-                tokio::io::BufReader::new(file).lines(),
-            ),
-        })
+    pub async fn read_tx_log(&self) -> Result<JsonOnDiskStream> {
+        if let Self::JsonOnDisk(path) = self {
+            use tokio::io::AsyncBufReadExt;
+            let file = tokio::fs::OpenOptions::new()
+                .read(true)
+                .open(&path)
+                .await
+                .map_err(|e| DatabaseError::Io(e.to_string()))?;
+            Ok(JsonOnDiskStream {
+                inner: tokio_stream::wrappers::LinesStream::new(
+                    tokio::io::BufReader::new(file).lines(),
+                ),
+            })
+        } else {
+            Err(crate::errors::DatabaseError::Io(
+                "cannot read from Noop storage".to_string(),
+            ))
+        }
     }
 }
