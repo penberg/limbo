@@ -15,6 +15,9 @@ serde_json = "1.0.96"
 pin-project = "1.0.12"
 tracing-subscriber = { version = "0", optional = true }
 base64 = "0.21.0"
+aws-sdk-s3 = "0.27.0"
+aws-config = "0.55.2"
+tokio-util = "0.7.8"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports", "async", "async_futures"] }

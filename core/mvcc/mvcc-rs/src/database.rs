@@ -36,7 +36,7 @@ pub type TxID = u64;
 /// A log record contains all the versions inserted and deleted by a transaction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LogRecord {
-    tx_timestamp: TxID,
+    pub(crate) tx_timestamp: TxID,
     row_versions: Vec<RowVersion>,
 }
 
@@ -530,13 +530,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
     }
 
     pub async fn recover(&self) -> Result<()> {
-        use futures::StreamExt;
-        let tx_log = self
-            .storage
-            .read_tx_log()
-            .await?
-            .collect::<Vec<LogRecord>>()
-            .await;
+        let tx_log = self.storage.read_tx_log().await?;
         for record in tx_log {
             println!("RECOVERING {:?}", record);
             for version in record.row_versions {
