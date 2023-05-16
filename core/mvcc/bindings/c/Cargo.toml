@@ -16,3 +16,8 @@ mvcc-rs = { path = "../../mvcc-rs" }
 tokio = { version = "1.27.0", features = ["full", "parking_lot"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0" }
+
+[features]
+default = []
+json_on_disk_storage = []
+s3_storage = []

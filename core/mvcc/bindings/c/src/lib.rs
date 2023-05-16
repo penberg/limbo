@@ -5,6 +5,7 @@ mod errors;
 mod types;
 
 use errors::MVCCError;
+use mvcc_rs::persistent_storage::{s3, Storage};
 use mvcc_rs::*;
 use types::{DbContext, MVCCDatabaseRef, MVCCScanCursorRef, ScanCursorContext};
 
@@ -19,6 +20,21 @@ type ScanCursor = cursor::ScanCursor<'static, Clock>;
 
 static INIT_RUST_LOG: std::sync::Once = std::sync::Once::new();
 
+async fn storage_for(main_db_path: &str) -> database::Result<Storage> {
+    // TODO: let's accept an URL instead of main_db_path here, so we can
+    // pass custom S3 endpoints, options, etc.
+    if cfg!(feature = "json_on_disk_storage") {
+        tracing::info!("JSONonDisk storage stored in {main_db_path}-mvcc");
+        return Ok(Storage::new_json_on_disk(format!("{main_db_path}-mvcc")));
+    }
+    if cfg!(feature = "s3_storage") {
+        tracing::info!("S3 storage for {main_db_path}");
+        return Storage::new_s3(s3::Options::with_create_bucket_if_not_exists(true)).await;
+    }
+    tracing::info!("No persistent storage for {main_db_path}");
+    Ok(Storage::new_noop())
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCCDatabaseRef {
     INIT_RUST_LOG.call_once(|| {
@@ -28,18 +44,28 @@ pub unsafe extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCC
     tracing::debug!("MVCCDatabaseOpen");
 
     let clock = clock::LocalClock::new();
-    let path = unsafe { std::ffi::CStr::from_ptr(path) };
-    let path = match path.to_str() {
+    let main_db_path = unsafe { std::ffi::CStr::from_ptr(path) };
+    let main_db_path = match main_db_path.to_str() {
         Ok(path) => path,
         Err(_) => {
             tracing::error!("Invalid UTF-8 path");
             return MVCCDatabaseRef::null();
         }
     };
-    tracing::debug!("mvccrs: opening persistent storage at {path}");
-    let storage = crate::persistent_storage::Storage::new_json_on_disk(path);
-    let db = Db::new(clock, storage);
     let runtime = tokio::runtime::Runtime::new().unwrap();
+
+    tracing::debug!("mvccrs: opening persistent storage for {main_db_path}");
+    let storage = match runtime.block_on(storage_for(main_db_path)) {
+        Ok(storage) => storage,
+        Err(e) => {
+            tracing::error!("Failed to open persistent storage: {e}");
+            return MVCCDatabaseRef::null();
+        }
+    };
+    let db = Db::new(clock, storage);
+
+    runtime.block_on(db.recover()).ok();
+
     let ctx = DbContext { db, runtime };
     let ctx = Box::leak(Box::new(ctx));
     MVCCDatabaseRef::from(ctx)
