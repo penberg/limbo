@@ -532,7 +532,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
     pub async fn recover(&self) -> Result<()> {
         let tx_log = self.storage.read_tx_log().await?;
         for record in tx_log {
-            println!("RECOVERING {:?}", record);
+            tracing::debug!("RECOVERING {:?}", record);
             for version in record.row_versions {
                 let mut rows = self.rows.borrow_mut();
                 let row_versions = rows.entry(version.row.id).or_insert_with(Vec::new);

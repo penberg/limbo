@@ -64,6 +64,8 @@ pub unsafe extern "C" fn MVCCDatabaseOpen(path: *const std::ffi::c_char) -> MVCC
     };
     let db = Db::new(clock, storage);
 
+    runtime.block_on(db.recover()).ok();
+
     let ctx = DbContext { db, runtime };
     let ctx = Box::leak(Box::new(ctx));
     MVCCDatabaseRef::from(ctx)
