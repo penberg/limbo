@@ -10,12 +10,12 @@ pub struct ScanCursor<'a, Clock: LogicalClock> {
 }
 
 impl<'a, Clock: LogicalClock> ScanCursor<'a, Clock> {
-    pub async fn new(
+    pub fn new(
         db: &'a Database<Clock>,
         tx_id: u64,
         table_id: u64,
     ) -> Result<ScanCursor<'a, Clock>> {
-        let row_ids = db.scan_row_ids_for_table(table_id).await?;
+        let row_ids = db.scan_row_ids_for_table(table_id)?;
         Ok(Self {
             db,
             tx_id,
@@ -31,15 +31,15 @@ impl<'a, Clock: LogicalClock> ScanCursor<'a, Clock> {
         Some(self.row_ids[self.index])
     }
 
-    pub async fn current_row(&self) -> Result<Option<Row>> {
+    pub fn current_row(&self) -> Result<Option<Row>> {
         if self.index >= self.row_ids.len() {
             return Ok(None);
         }
         let id = self.row_ids[self.index];
-        self.db.read(self.tx_id, id).await
+        self.db.read(self.tx_id, id)
     }
 
-    pub async fn close(self) -> Result<()> {
+    pub fn close(self) -> Result<()> {
         Ok(())
     }
 

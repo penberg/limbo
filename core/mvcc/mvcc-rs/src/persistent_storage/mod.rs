@@ -20,51 +20,48 @@ impl Storage {
         Self::JsonOnDisk(path)
     }
 
-    pub async fn new_s3(options: s3::Options) -> Result<Self> {
-        Ok(Self::S3(s3::Replicator::new(options).await?))
+    pub fn new_s3(options: s3::Options) -> Result<Self> {
+        let replicator = futures::executor::block_on(s3::Replicator::new(options))?;
+        Ok(Self::S3(replicator))
     }
 }
 
 impl Storage {
-    pub async fn log_tx(&mut self, m: LogRecord) -> Result<()> {
+    pub fn log_tx(&mut self, m: LogRecord) -> Result<()> {
         match self {
             Self::JsonOnDisk(path) => {
-                use tokio::io::AsyncWriteExt;
+                use std::io::Write;
                 let t = serde_json::to_vec(&m).map_err(|e| DatabaseError::Io(e.to_string()))?;
-                let mut file = tokio::fs::OpenOptions::new()
+                let mut file = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&path)
-                    .await
+                    .open(path)
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
                 file.write_all(&t)
-                    .await
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
                 file.write_all(b"\n")
-                    .await
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
             }
             Self::S3(replicator) => {
-                replicator.replicate_tx(m).await?;
+                futures::executor::block_on(replicator.replicate_tx(m))?;
             }
             Self::Noop => (),
         }
         Ok(())
     }
 
-    pub async fn read_tx_log(&self) -> Result<Vec<LogRecord>> {
+    pub fn read_tx_log(&self) -> Result<Vec<LogRecord>> {
         match self {
             Self::JsonOnDisk(path) => {
-                use tokio::io::AsyncBufReadExt;
-                let file = tokio::fs::OpenOptions::new()
+                use std::io::BufRead;
+                let file = std::fs::OpenOptions::new()
                     .read(true)
-                    .open(&path)
-                    .await
+                    .open(path)
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
 
                 let mut records: Vec<LogRecord> = Vec::new();
-                let mut lines = tokio::io::BufReader::new(file).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
+                let mut lines = std::io::BufReader::new(file).lines();
+                while let Some(Ok(line)) = lines.next() {
                     records.push(
                         serde_json::from_str(&line)
                             .map_err(|e| DatabaseError::Io(e.to_string()))?,
@@ -72,7 +69,7 @@ impl Storage {
                 }
                 Ok(records)
             }
-            Self::S3(replicator) => replicator.read_tx_log().await,
+            Self::S3(replicator) => futures::executor::block_on(replicator.read_tx_log()),
             Self::Noop => Err(crate::errors::DatabaseError::Io(
                 "cannot read from Noop storage".to_string(),
             )),

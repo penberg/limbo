@@ -17,30 +17,30 @@ fn bench(c: &mut Criterion) {
     let db = bench_db();
     group.bench_function("begin_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
-            db.begin_tx().await;
+            db.begin_tx();
         })
     });
 
     let db = bench_db();
     group.bench_function("begin_tx + rollback_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
-            let tx_id = db.begin_tx().await;
-            db.rollback_tx(tx_id).await
+            let tx_id = db.begin_tx();
+            db.rollback_tx(tx_id)
         })
     });
 
     let db = bench_db();
     group.bench_function("begin_tx + commit_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
-            let tx_id = db.begin_tx().await;
-            db.commit_tx(tx_id).await
+            let tx_id = db.begin_tx();
+            db.commit_tx(tx_id)
         })
     });
 
     let db = bench_db();
     group.bench_function("begin_tx-read-commit_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
-            let tx_id = db.begin_tx().await;
+            let tx_id = db.begin_tx();
             db.read(
                 tx_id,
                 RowID {
@@ -48,16 +48,15 @@ fn bench(c: &mut Criterion) {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
-            db.commit_tx(tx_id).await
+            db.commit_tx(tx_id)
         })
     });
 
     let db = bench_db();
     group.bench_function("begin_tx-update-commit_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
-            let tx_id = db.begin_tx().await;
+            let tx_id = db.begin_tx();
             db.update(
                 tx_id,
                 Row {
@@ -68,15 +67,14 @@ fn bench(c: &mut Criterion) {
                     data: "World".to_string(),
                 },
             )
-            .await
             .unwrap();
-            db.commit_tx(tx_id).await
+            db.commit_tx(tx_id)
         })
     });
 
     let db = bench_db();
-    let tx = futures::executor::block_on(db.begin_tx());
-    futures::executor::block_on(db.insert(
+    let tx = db.begin_tx();
+    db.insert(
         tx,
         Row {
             id: RowID {
@@ -85,7 +83,7 @@ fn bench(c: &mut Criterion) {
             },
             data: "Hello".to_string(),
         },
-    ))
+    )
     .unwrap();
     group.bench_function("read", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
@@ -96,14 +94,13 @@ fn bench(c: &mut Criterion) {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         })
     });
 
     let db = bench_db();
-    let tx = futures::executor::block_on(db.begin_tx());
-    futures::executor::block_on(db.insert(
+    let tx = db.begin_tx();
+    db.insert(
         tx,
         Row {
             id: RowID {
@@ -112,7 +109,7 @@ fn bench(c: &mut Criterion) {
             },
             data: "Hello".to_string(),
         },
-    ))
+    )
     .unwrap();
     group.bench_function("update", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
@@ -126,7 +123,6 @@ fn bench(c: &mut Criterion) {
                     data: "World".to_string(),
                 },
             )
-            .await
             .unwrap();
         })
     });
