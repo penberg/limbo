@@ -5,19 +5,16 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.70"
-futures = "0.3.28"
 thiserror = "1.0.40"
 tracing = "0.1.37"
-tokio = { version = "1.27.0", features = ["full", "parking_lot"] }
-tokio-stream = { version = "0.1.12", features = ["io-util"] }
 serde = { version = "1.0.160", features = ["derive"] }
 serde_json = "1.0.96"
-pin-project = "1.0.12"
 tracing-subscriber = { version = "0", optional = true }
 base64 = "0.21.0"
 aws-sdk-s3 = "0.27.0"
 aws-config = "0.55.2"
-tokio-util = "0.7.8"
+parking_lot = "0.12.1"
+futures = "0.3.28"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports", "async", "async_futures"] }

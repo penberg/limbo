@@ -17,14 +17,14 @@ impl MVCCDatabaseRef {
         self.ptr.is_null()
     }
 
-    pub fn get_ref(&self) -> &DbContext {
-        unsafe { &*(self.ptr) }
+    pub fn get_ref(&self) -> &Db {
+        &unsafe { &*(self.ptr) }.db
     }
 
     #[allow(clippy::mut_from_ref)]
-    pub fn get_ref_mut(&self) -> &mut DbContext {
+    pub fn get_ref_mut(&self) -> &mut Db {
         let ptr_mut = self.ptr as *mut DbContext;
-        unsafe { &mut (*ptr_mut) }
+        &mut unsafe { &mut (*ptr_mut) }.db
     }
 }
 
@@ -44,16 +44,36 @@ impl From<&mut DbContext> for MVCCDatabaseRef {
 
 pub struct DbContext {
     pub(crate) db: Db,
-    pub(crate) runtime: tokio::runtime::Runtime,
 }
 
 pub struct ScanCursorContext {
-    pub cursor: crate::ScanCursor,
-    pub db: MVCCDatabaseRef,
+    pub(crate) cursor: crate::ScanCursor,
 }
 
 #[derive(Clone, Debug)]
 #[repr(transparent)]
 pub struct MVCCScanCursorRef {
     pub ptr: *mut ScanCursorContext,
+}
+
+impl MVCCScanCursorRef {
+    pub fn null() -> MVCCScanCursorRef {
+        MVCCScanCursorRef {
+            ptr: std::ptr::null_mut(),
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.ptr.is_null()
+    }
+
+    pub fn get_ref(&self) -> &crate::ScanCursor {
+        &unsafe { &*(self.ptr) }.cursor
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    pub fn get_ref_mut(&self) -> &mut crate::ScanCursor {
+        let ptr_mut = self.ptr as *mut ScanCursorContext;
+        &mut unsafe { &mut (*ptr_mut) }.cursor
+    }
 }

@@ -1,12 +1,12 @@
 use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
 use crate::persistent_storage::Storage;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 pub type Result<T> = std::result::Result<T, DatabaseError>;
 
@@ -156,9 +156,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// * `tx_id` - the ID of the transaction in which to insert the new row.
     /// * `row` - the row object containing the values to be inserted.
     ///
-    pub async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
-        let inner = self.inner.lock().await;
-        inner.insert(tx_id, row).await
+    pub fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
+        let inner = self.inner.lock();
+        inner.insert(tx_id, row)
     }
 
     /// Updates a row in the database with new values.
@@ -179,11 +179,11 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Returns
     ///
     /// Returns `true` if the row was successfully updated, and `false` otherwise.
-    pub async fn update(&self, tx_id: TxID, row: Row) -> Result<bool> {
-        if !self.delete(tx_id, row.id).await? {
+    pub fn update(&self, tx_id: TxID, row: Row) -> Result<bool> {
+        if !self.delete(tx_id, row.id)? {
             return Ok(false);
         }
-        self.insert(tx_id, row).await?;
+        self.insert(tx_id, row)?;
         Ok(true)
     }
 
@@ -201,9 +201,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// Returns `true` if the row was successfully deleted, and `false` otherwise.
     ///
-    pub async fn delete(&self, tx_id: TxID, id: RowID) -> Result<bool> {
-        let inner = self.inner.lock().await;
-        inner.delete(tx_id, id).await
+    pub fn delete(&self, tx_id: TxID, id: RowID) -> Result<bool> {
+        let inner = self.inner.lock();
+        inner.delete(tx_id, id)
     }
 
     /// Retrieves a row from the table with the given `id`.
@@ -220,18 +220,18 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// Returns `Some(row)` with the row data if the row with the given `id` exists,
     /// and `None` otherwise.
-    pub async fn read(&self, tx_id: TxID, id: RowID) -> Result<Option<Row>> {
-        let inner = self.inner.lock().await;
-        inner.read(tx_id, id).await
+    pub fn read(&self, tx_id: TxID, id: RowID) -> Result<Option<Row>> {
+        let inner = self.inner.lock();
+        inner.read(tx_id, id)
     }
 
-    pub async fn scan_row_ids(&self) -> Result<Vec<RowID>> {
-        let inner = self.inner.lock().await;
+    pub fn scan_row_ids(&self) -> Result<Vec<RowID>> {
+        let inner = self.inner.lock();
         inner.scan_row_ids()
     }
 
-    pub async fn scan_row_ids_for_table(&self, table_id: u64) -> Result<Vec<RowID>> {
-        let inner = self.inner.lock().await;
+    pub fn scan_row_ids_for_table(&self, table_id: u64) -> Result<Vec<RowID>> {
+        let inner = self.inner.lock();
         inner.scan_row_ids_for_table(table_id)
     }
 
@@ -240,9 +240,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// This function starts a new transaction in the database and returns a `TxID` value
     /// that you can use to perform operations within the transaction. All changes made within the
     /// transaction are isolated from other transactions until you commit the transaction.
-    pub async fn begin_tx(&self) -> TxID {
-        let mut inner = self.inner.lock().await;
-        inner.begin_tx().await
+    pub fn begin_tx(&self) -> TxID {
+        let mut inner = self.inner.lock();
+        inner.begin_tx()
     }
 
     /// Commits a transaction with the specified transaction ID.
@@ -254,9 +254,9 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Arguments
     ///
     /// * `tx_id` - The ID of the transaction to commit.
-    pub async fn commit_tx(&self, tx_id: TxID) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        inner.commit_tx(tx_id).await
+    pub fn commit_tx(&self, tx_id: TxID) -> Result<()> {
+        let mut inner = self.inner.lock();
+        inner.commit_tx(tx_id)
     }
 
     /// Rolls back a transaction with the specified ID.
@@ -267,23 +267,23 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Arguments
     ///
     /// * `tx_id` - The ID of the transaction to abort.
-    pub async fn rollback_tx(&self, tx_id: TxID) {
-        let inner = self.inner.lock().await;
-        inner.rollback_tx(tx_id).await;
+    pub fn rollback_tx(&self, tx_id: TxID) {
+        let inner = self.inner.lock();
+        inner.rollback_tx(tx_id);
     }
 
     /// Drops all unused row versions from the database.
     ///
     /// A version is considered unused if it is not visible to any active transaction
     /// and it is not the most recent version of the row.
-    pub async fn drop_unused_row_versions(&self) {
-        let inner = self.inner.lock().await;
+    pub fn drop_unused_row_versions(&self) {
+        let inner = self.inner.lock();
         inner.drop_unused_row_versions();
     }
 
-    pub async fn recover(&self) -> Result<()> {
-        let inner = self.inner.lock().await;
-        inner.recover().await
+    pub fn recover(&self) -> Result<()> {
+        let inner = self.inner.lock();
+        inner.recover()
     }
 }
 
@@ -298,7 +298,7 @@ pub struct DatabaseInner<Clock: LogicalClock> {
 }
 
 impl<Clock: LogicalClock> DatabaseInner<Clock> {
-    async fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
+    fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
         let mut txs = self.txs.borrow_mut();
         let tx = txs
             .get_mut(&tx_id)
@@ -317,7 +317,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
     }
 
     #[allow(clippy::await_holding_refcell_ref)]
-    async fn delete(&self, tx_id: TxID, id: RowID) -> Result<bool> {
+    fn delete(&self, tx_id: TxID, id: RowID) -> Result<bool> {
         // NOTICE: They *are* dropped before an await point!!! But the await is conditional,
         //         so I think clippy is just confused.
         let mut txs = self.txs.borrow_mut();
@@ -331,7 +331,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
                 if is_write_write_conflict(&txs, tx, rv) {
                     drop(txs);
                     drop(rows);
-                    self.rollback_tx(tx_id).await;
+                    self.rollback_tx(tx_id);
                     return Err(DatabaseError::WriteWriteConflict);
                 }
                 if is_version_visible(&txs, tx, rv) {
@@ -347,7 +347,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         Ok(false)
     }
 
-    async fn read(&self, tx_id: TxID, id: RowID) -> Result<Option<Row>> {
+    fn read(&self, tx_id: TxID, id: RowID) -> Result<Option<Row>> {
         let txs = self.txs.borrow_mut();
         let tx = txs.get(&tx_id).unwrap();
         assert!(tx.state == TransactionState::Active);
@@ -385,7 +385,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
             .collect())
     }
 
-    async fn begin_tx(&mut self) -> TxID {
+    fn begin_tx(&mut self) -> TxID {
         let tx_id = self.get_tx_id();
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
@@ -397,8 +397,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         tx_id
     }
 
-    #[allow(clippy::await_holding_refcell_ref)]
-    async fn commit_tx(&mut self, tx_id: TxID) -> Result<()> {
+    fn commit_tx(&mut self, tx_id: TxID) -> Result<()> {
         let end_ts = self.get_timestamp();
         let mut txs = self.txs.borrow_mut();
         let mut tx = txs.get_mut(&tx_id).unwrap();
@@ -449,12 +448,12 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         drop(rows);
         drop(txs);
         if !log_record.row_versions.is_empty() {
-            self.storage.log_tx(log_record).await?;
+            self.storage.log_tx(log_record)?;
         }
         Ok(())
     }
 
-    async fn rollback_tx(&self, tx_id: TxID) {
+    fn rollback_tx(&self, tx_id: TxID) {
         let mut txs = self.txs.borrow_mut();
         let mut tx = txs.get_mut(&tx_id).unwrap();
         assert!(tx.state == TransactionState::Active);
@@ -529,8 +528,8 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
         }
     }
 
-    pub async fn recover(&self) -> Result<()> {
-        let tx_log = self.storage.read_tx_log().await?;
+    pub fn recover(&self) -> Result<()> {
+        let tx_log = self.storage.read_tx_log()?;
         for record in tx_log {
             tracing::debug!("RECOVERING {:?}", record);
             for version in record.row_versions {
@@ -617,11 +616,11 @@ mod tests {
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_insert_read() {
+    #[test]
+    fn test_insert_read() {
         let db = test_db();
 
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -629,7 +628,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -638,13 +637,12 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
-        db.commit_tx(tx1).await.unwrap();
+        db.commit_tx(tx1).unwrap();
 
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let row = db
             .read(
                 tx2,
@@ -653,35 +651,32 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_read_nonexistent() {
+    #[test]
+    fn test_read_nonexistent() {
         let db = test_db();
-        let tx = db.begin_tx().await;
-        let row = db
-            .read(
-                tx,
-                RowID {
-                    table_id: 1,
-                    row_id: 1,
-                },
-            )
-            .await;
+        let tx = db.begin_tx();
+        let row = db.read(
+            tx,
+            RowID {
+                table_id: 1,
+                row_id: 1,
+            },
+        );
         assert!(row.unwrap().is_none());
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_delete() {
+    #[test]
+    fn test_delete() {
         let db = test_db();
 
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -689,7 +684,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -698,7 +693,6 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
@@ -709,7 +703,6 @@ mod tests {
                 row_id: 1,
             },
         )
-        .await
         .unwrap();
         let row = db
             .read(
@@ -719,12 +712,11 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         assert!(row.is_none());
-        db.commit_tx(tx1).await.unwrap();
+        db.commit_tx(tx1).unwrap();
 
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let row = db
             .read(
                 tx2,
@@ -733,16 +725,15 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         assert!(row.is_none());
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_delete_nonexistent() {
+    #[test]
+    fn test_delete_nonexistent() {
         let db = test_db();
-        let tx = db.begin_tx().await;
+        let tx = db.begin_tx();
         assert!(!db
             .delete(
                 tx,
@@ -751,15 +742,14 @@ mod tests {
                     row_id: 1
                 }
             )
-            .await
             .unwrap());
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_commit() {
+    #[test]
+    fn test_commit() {
         let db = test_db();
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -767,7 +757,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -776,7 +766,6 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
@@ -787,7 +776,7 @@ mod tests {
             },
             data: "World".to_string(),
         };
-        db.update(tx1, tx1_updated_row.clone()).await.unwrap();
+        db.update(tx1, tx1_updated_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -796,13 +785,12 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_updated_row, row);
-        db.commit_tx(tx1).await.unwrap();
+        db.commit_tx(tx1).unwrap();
 
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let row = db
             .read(
                 tx2,
@@ -811,19 +799,18 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
-        db.commit_tx(tx2).await.unwrap();
+        db.commit_tx(tx2).unwrap();
         assert_eq!(tx1_updated_row, row);
-        db.drop_unused_row_versions().await;
+        db.drop_unused_row_versions();
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_rollback() {
+    #[test]
+    fn test_rollback() {
         let db = test_db();
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let row1 = Row {
             id: RowID {
                 table_id: 1,
@@ -831,7 +818,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, row1.clone()).await.unwrap();
+        db.insert(tx1, row1.clone()).unwrap();
         let row2 = db
             .read(
                 tx1,
@@ -840,7 +827,6 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(row1, row2);
@@ -851,7 +837,7 @@ mod tests {
             },
             data: "World".to_string(),
         };
-        db.update(tx1, row3.clone()).await.unwrap();
+        db.update(tx1, row3.clone()).unwrap();
         let row4 = db
             .read(
                 tx1,
@@ -860,12 +846,11 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(row3, row4);
-        db.rollback_tx(tx1).await;
-        let tx2 = db.begin_tx().await;
+        db.rollback_tx(tx1);
+        let tx2 = db.begin_tx();
         let row5 = db
             .read(
                 tx2,
@@ -874,18 +859,17 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         assert_eq!(row5, None);
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_dirty_write() {
+    #[test]
+    fn test_dirty_write() {
         let db = test_db();
 
         // T1 inserts a row with ID 1, but does not commit.
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -893,7 +877,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -902,13 +886,12 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
 
         // T2 attempts to delete row with ID 1, but fails because T1 has not committed.
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let tx2_row = Row {
             id: RowID {
                 table_id: 1,
@@ -916,7 +899,7 @@ mod tests {
             },
             data: "World".to_string(),
         };
-        assert!(!db.update(tx2, tx2_row).await.unwrap());
+        assert!(!db.update(tx2, tx2_row).unwrap());
 
         let row = db
             .read(
@@ -926,19 +909,18 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_dirty_read() {
+    #[test]
+    fn test_dirty_read() {
         let db = test_db();
 
         // T1 inserts a row with ID 1, but does not commit.
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let row1 = Row {
             id: RowID {
                 table_id: 1,
@@ -946,10 +928,10 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, row1).await.unwrap();
+        db.insert(tx1, row1).unwrap();
 
         // T2 attempts to read row with ID 1, but doesn't see one because T1 has not committed.
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let row2 = db
             .read(
                 tx2,
@@ -958,19 +940,18 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         assert_eq!(row2, None);
     }
 
     #[ignore]
     #[traced_test]
-    #[tokio::test]
-    async fn test_dirty_read_deleted() {
+    #[test]
+    fn test_dirty_read_deleted() {
         let db = test_db();
 
         // T1 inserts a row with ID 1 and commits.
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -978,11 +959,11 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
-        db.commit_tx(tx1).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
+        db.commit_tx(tx1).unwrap();
 
         // T2 deletes row with ID 1, but does not commit.
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         assert!(db
             .delete(
                 tx2,
@@ -991,11 +972,10 @@ mod tests {
                     row_id: 1
                 }
             )
-            .await
             .unwrap());
 
         // T3 reads row with ID 1, but doesn't see the delete because T2 hasn't committed.
-        let tx3 = db.begin_tx().await;
+        let tx3 = db.begin_tx();
         let row = db
             .read(
                 tx3,
@@ -1004,19 +984,18 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_fuzzy_read() {
+    #[test]
+    fn test_fuzzy_read() {
         let db = test_db();
 
         // T1 inserts a row with ID 1 and commits.
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1024,7 +1003,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -1033,14 +1012,13 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
-        db.commit_tx(tx1).await.unwrap();
+        db.commit_tx(tx1).unwrap();
 
         // T2 reads the row with ID 1 within an active transaction.
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let row = db
             .read(
                 tx2,
@@ -1049,13 +1027,12 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
 
         // T3 updates the row and commits.
-        let tx3 = db.begin_tx().await;
+        let tx3 = db.begin_tx();
         let tx3_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1063,8 +1040,8 @@ mod tests {
             },
             data: "World".to_string(),
         };
-        db.update(tx3, tx3_row).await.unwrap();
-        db.commit_tx(tx3).await.unwrap();
+        db.update(tx3, tx3_row).unwrap();
+        db.commit_tx(tx3).unwrap();
 
         // T2 still reads the same version of the row as before.
         let row = db
@@ -1075,19 +1052,18 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_lost_update() {
+    #[test]
+    fn test_lost_update() {
         let db = test_db();
 
         // T1 inserts a row with ID 1 and commits.
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1095,7 +1071,7 @@ mod tests {
             },
             data: "Hello".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
         let row = db
             .read(
                 tx1,
@@ -1104,14 +1080,13 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
-        db.commit_tx(tx1).await.unwrap();
+        db.commit_tx(tx1).unwrap();
 
         // T2 attempts to update row ID 1 within an active transaction.
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let tx2_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1119,10 +1094,10 @@ mod tests {
             },
             data: "World".to_string(),
         };
-        assert!(db.update(tx2, tx2_row.clone()).await.unwrap());
+        assert!(db.update(tx2, tx2_row.clone()).unwrap());
 
         // T3 also attempts to update row ID 1 within an active transaction.
-        let tx3 = db.begin_tx().await;
+        let tx3 = db.begin_tx();
         let tx3_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1132,13 +1107,13 @@ mod tests {
         };
         assert_eq!(
             Err(DatabaseError::WriteWriteConflict),
-            db.update(tx3, tx3_row).await
+            db.update(tx3, tx3_row)
         );
 
-        db.commit_tx(tx2).await.unwrap();
-        assert_eq!(Err(DatabaseError::TxTerminated), db.commit_tx(tx3).await);
+        db.commit_tx(tx2).unwrap();
+        assert_eq!(Err(DatabaseError::TxTerminated), db.commit_tx(tx3));
 
-        let tx4 = db.begin_tx().await;
+        let tx4 = db.begin_tx();
         let row = db
             .read(
                 tx4,
@@ -1147,7 +1122,6 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx2_row, row);
@@ -1156,12 +1130,12 @@ mod tests {
     // Test for the visibility to check if a new transaction can see old committed values.
     // This test checks for the typo present in the paper, explained in https://github.com/penberg/mvcc-rs/issues/15
     #[traced_test]
-    #[tokio::test]
-    async fn test_committed_visibility() {
+    #[test]
+    fn test_committed_visibility() {
         let db = test_db();
 
         // let's add $10 to my account since I like money
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
         let tx1_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1169,11 +1143,11 @@ mod tests {
             },
             data: "10".to_string(),
         };
-        db.insert(tx1, tx1_row.clone()).await.unwrap();
-        db.commit_tx(tx1).await.unwrap();
+        db.insert(tx1, tx1_row.clone()).unwrap();
+        db.commit_tx(tx1).unwrap();
 
         // but I like more money, so let me try adding $10 more
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let tx2_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1181,7 +1155,7 @@ mod tests {
             },
             data: "20".to_string(),
         };
-        assert!(db.update(tx2, tx2_row.clone()).await.unwrap());
+        assert!(db.update(tx2, tx2_row.clone()).unwrap());
         let row = db
             .read(
                 tx2,
@@ -1190,13 +1164,12 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(row, tx2_row);
 
         // can I check how much money I have?
-        let tx3 = db.begin_tx().await;
+        let tx3 = db.begin_tx();
         let row = db
             .read(
                 tx3,
@@ -1205,7 +1178,6 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap()
             .unwrap();
         assert_eq!(tx1_row, row);
@@ -1213,13 +1185,13 @@ mod tests {
 
     // Test to check if a older transaction can see (un)committed future rows
     #[traced_test]
-    #[tokio::test]
-    async fn test_future_row() {
+    #[test]
+    fn test_future_row() {
         let db = test_db();
 
-        let tx1 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
 
-        let tx2 = db.begin_tx().await;
+        let tx2 = db.begin_tx();
         let tx2_row = Row {
             id: RowID {
                 table_id: 1,
@@ -1227,7 +1199,7 @@ mod tests {
             },
             data: "10".to_string(),
         };
-        db.insert(tx2, tx2_row.clone()).await.unwrap();
+        db.insert(tx2, tx2_row).unwrap();
 
         // transaction in progress, so tx1 shouldn't be able to see the value
         let row = db
@@ -1238,12 +1210,11 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         assert_eq!(row, None);
 
         // lets commit the transaction and check if tx1 can see it
-        db.commit_tx(tx2).await.unwrap();
+        db.commit_tx(tx2).unwrap();
         let row = db
             .read(
                 tx1,
@@ -1252,14 +1223,13 @@ mod tests {
                     row_id: 1,
                 },
             )
-            .await
             .unwrap();
         assert_eq!(row, None);
     }
 
     #[traced_test]
-    #[tokio::test]
-    async fn test_storage1() {
+    #[test]
+    fn test_storage1() {
         let clock = LocalClock::new();
         let mut path = std::env::temp_dir();
         path.push(format!(
@@ -1272,9 +1242,9 @@ mod tests {
         let storage = crate::persistent_storage::Storage::new_json_on_disk(path.clone());
         let db = Database::new(clock, storage);
 
-        let tx1 = db.begin_tx().await;
-        let tx2 = db.begin_tx().await;
-        let tx3 = db.begin_tx().await;
+        let tx1 = db.begin_tx();
+        let tx2 = db.begin_tx();
+        let tx3 = db.begin_tx();
 
         db.insert(
             tx3,
@@ -1286,14 +1256,13 @@ mod tests {
                 data: "testme".to_string(),
             },
         )
-        .await
         .unwrap();
 
-        db.commit_tx(tx1).await.unwrap();
-        db.rollback_tx(tx2).await;
-        db.commit_tx(tx3).await.unwrap();
+        db.commit_tx(tx1).unwrap();
+        db.rollback_tx(tx2);
+        db.commit_tx(tx3).unwrap();
 
-        let tx4 = db.begin_tx().await;
+        let tx4 = db.begin_tx();
         db.insert(
             tx4,
             Row {
@@ -1304,7 +1273,6 @@ mod tests {
                 data: "testme2".to_string(),
             },
         )
-        .await
         .unwrap();
         db.insert(
             tx4,
@@ -1316,7 +1284,6 @@ mod tests {
                 data: "testme3".to_string(),
             },
         )
-        .await
         .unwrap();
 
         assert_eq!(
@@ -1327,7 +1294,6 @@ mod tests {
                     row_id: 1
                 }
             )
-            .await
             .unwrap()
             .unwrap()
             .data,
@@ -1341,7 +1307,6 @@ mod tests {
                     row_id: 2
                 }
             )
-            .await
             .unwrap()
             .unwrap()
             .data,
@@ -1355,21 +1320,20 @@ mod tests {
                     row_id: 3
                 }
             )
-            .await
             .unwrap()
             .unwrap()
             .data,
             "testme3"
         );
-        db.commit_tx(tx4).await.unwrap();
+        db.commit_tx(tx4).unwrap();
 
         let clock = LocalClock::new();
         let storage = crate::persistent_storage::Storage::new_json_on_disk(path);
         let db = Database::new(clock, storage);
-        db.recover().await.unwrap();
+        db.recover().unwrap();
         println!("{:#?}", db);
 
-        let tx5 = db.begin_tx().await;
+        let tx5 = db.begin_tx();
         println!(
             "{:#?}",
             db.read(
@@ -1379,7 +1343,6 @@ mod tests {
                     row_id: 1
                 }
             )
-            .await
         );
         assert_eq!(
             db.read(
@@ -1389,7 +1352,6 @@ mod tests {
                     row_id: 1
                 }
             )
-            .await
             .unwrap()
             .unwrap()
             .data,
@@ -1403,7 +1365,6 @@ mod tests {
                     row_id: 2
                 }
             )
-            .await
             .unwrap()
             .unwrap()
             .data,
@@ -1417,7 +1378,6 @@ mod tests {
                     row_id: 3
                 }
             )
-            .await
             .unwrap()
             .unwrap()
             .data,
