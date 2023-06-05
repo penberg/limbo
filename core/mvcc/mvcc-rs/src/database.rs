@@ -408,7 +408,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
     fn commit_tx(&mut self, tx_id: TxID) -> Result<()> {
         let end_ts = self.get_timestamp();
         let mut txs = self.txs.borrow_mut();
-        let mut tx = txs.get_mut(&tx_id).unwrap();
+        let tx = txs.get_mut(&tx_id).unwrap();
         match tx.state {
             TransactionState::Terminated => return Err(DatabaseError::TxTerminated),
             _ => {
@@ -464,7 +464,7 @@ impl<Clock: LogicalClock> DatabaseInner<Clock> {
 
     fn rollback_tx(&self, tx_id: TxID) {
         let mut txs = self.txs.borrow_mut();
-        let mut tx = txs.get_mut(&tx_id).unwrap();
+        let tx = txs.get_mut(&tx_id).unwrap();
         assert!(tx.state == TransactionState::Active);
         tx.state = TransactionState::Aborted;
         tracing::trace!("ABORT     {tx}");
