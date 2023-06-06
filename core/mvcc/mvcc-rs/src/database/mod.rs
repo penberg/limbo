@@ -408,6 +408,14 @@ impl<Clock: LogicalClock> Database<Clock> {
         }
         tx.state = TransactionState::Committed;
         tracing::trace!("COMMIT    {tx}");
+        // We have now updated all the versions with a reference to the
+        // transaction ID to a timestamp and can, therefore, remove the
+        // transaction. Please note that when we move to lockless, the
+        // invariant doesn't necessarily hold anymore because another thread
+        // might have speculatively read a version that we want to remove.
+        // But that's a problem for another day.
+        // FIXME: it actually just become a problem for today!!!
+        // TODO: test that reproduces this failure, and then a fix
         self.txs.remove(&tx_id);
         if !log_record.row_versions.is_empty() {
             self.storage.log_tx(log_record)?;
