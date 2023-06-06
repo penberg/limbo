@@ -337,7 +337,6 @@ fn test_dirty_read() {
     assert_eq!(row2, None);
 }
 
-#[ignore]
 #[traced_test]
 #[test]
 fn test_dirty_read_deleted() {
