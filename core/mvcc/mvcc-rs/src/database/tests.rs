@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::clock::LocalClock;
 use tracing_test::traced_test;
