@@ -385,6 +385,80 @@ impl<Clock: LogicalClock> Database<Clock> {
         }
         tx.state = TransactionState::Preparing;
         tracing::trace!("PREPARE   {tx}");
+
+        /* TODO: The code we have here is sufficient for snapshot isolation.
+        ** In order to implement serializability, we need the following steps:
+        **
+        ** 1. Validate if all read versions are still visible by inspecting the read_set
+        ** 2. Validate if there are no phantoms by walking the scans from scan_set (which we don't even have yet)
+        **    - a phantom is a version that became visible in the middle of our transaction,
+        **      but wasn't taken into account during one of the scans from the scan_set
+        ** 3. Wait for commit dependencies, which we don't even track yet...
+        **    Excerpt from what's a commit dependency and how it's tracked in the original paper:
+        **    """
+                A transaction T1 has a commit dependency on another transaction
+                T2, if T1 is allowed to commit only if T2 commits. If T2 aborts,
+                T1 must also abort, so cascading aborts are possible. T1 acquires a
+                commit dependency either by speculatively reading or speculatively ignoring a version,
+                instead of waiting for T2 to commit.
+                We implement commit dependencies by a register-and-report
+                approach: T1 registers its dependency with T2 and T2 informs T1
+                when it has committed or aborted. Each transaction T contains a
+                counter, CommitDepCounter, that counts how many unresolved
+                commit dependencies it still has. A transaction cannot commit
+                until this counter is zero. In addition, T has a Boolean variable
+                AbortNow that other transactions can set to tell T to abort. Each
+                transaction T also has a set, CommitDepSet, that stores transaction IDs
+                of the transactions that depend on T.
+                To take a commit dependency on a transaction T2, T1 increments
+                its CommitDepCounter and adds its transaction ID to T2’s CommitDepSet.
+                When T2 has committed, it locates each transaction in
+                its CommitDepSet and decrements their CommitDepCounter. If
+                T2 aborted, it tells the dependent transactions to also abort by
+                setting their AbortNow flags. If a dependent transaction is not
+                found, this means that it has already aborted.
+                Note that a transaction with commit dependencies may not have to
+                wait at all - the dependencies may have been resolved before it is
+                ready to commit. Commit dependencies consolidate all waits into
+                a single wait and postpone the wait to just before commit.
+                Some transactions may have to wait before commit.
+                Waiting raises a concern of deadlocks.
+                However, deadlocks cannot occur because an older transaction never
+                waits on a younger transaction. In
+                a wait-for graph the direction of edges would always be from a
+                younger transaction (higher end timestamp) to an older transaction
+                (lower end timestamp) so cycles are impossible.
+            """
+        **  If you're wondering when a speculative read happens, here you go:
+        **  Case 1: speculative read of TB:
+            """
+                If transaction TB is in the Preparing state, it has acquired an end
+                timestamp TS which will be V’s begin timestamp if TB commits.
+                A safe approach in this situation would be to have transaction T
+                wait until transaction TB commits. However, we want to avoid all
+                blocking during normal processing so instead we continue with
+                the visibility test and, if the test returns true, allow T to
+                speculatively read V. Transaction T acquires a commit dependency on
+                TB, restricting the serialization order of the two transactions. That
+                is, T is allowed to commit only if TB commits.
+            """
+        **  Case 2: speculative ignore of TE:
+            """
+                If TE’s state is Preparing, it has an end timestamp TS that will become
+                the end timestamp of V if TE does commit. If TS is greater than the read
+                time RT, it is obvious that V will be visible if TE commits. If TE
+                aborts, V will still be visible, because any transaction that updates
+                V after TE has aborted will obtain an end timestamp greater than
+                TS. If TS is less than RT, we have a more complicated situation:
+                if TE commits, V will not be visible to T but if TE aborts, it will
+                be visible. We could handle this by forcing T to wait until TE
+                commits or aborts but we want to avoid all blocking during normal processing.
+                Instead we allow T to speculatively ignore V and
+                proceed with its processing. Transaction T acquires a commit
+                dependency (see Section 2.7) on TE, that is, T is allowed to commit
+                only if TE commits.
+            """
+        */
         let mut log_record: LogRecord = LogRecord::new(end_ts);
         for id in &tx.write_set {
             let id = id.value();
