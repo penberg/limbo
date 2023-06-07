@@ -776,3 +776,157 @@ fn test_storage1() {
         "testme3"
     );
 }
+
+/* States described in the Hekaton paper *for serializability*:
+
+Table 1: Case analysis of action to take when version V’s
+Begin field contains the ID of transaction TB
+------------------------------------------------------------------------------------------------------
+TB’s state   | TB’s end timestamp | Action to take when transaction T checks visibility of version V.
+------------------------------------------------------------------------------------------------------
+Active       | Not set            | V is visible only if TB=T and V’s end timestamp equals infinity.
+------------------------------------------------------------------------------------------------------
+Preparing    | TS                 | V’s begin timestamp will be TS ut V is not yet committed. Use TS
+                                  | as V’s begin time when testing visibility. If the test is true,
+                                  | allow T to speculatively read V. Committed TS V’s begin timestamp
+                                  | will be TS and V is committed. Use TS as V’s begin time to test
+                                  | visibility.
+------------------------------------------------------------------------------------------------------
+Committed    | TS                 | V’s begin timestamp will be TS and V is committed. Use TS as V’s
+                                  | begin time to test visibility.
+------------------------------------------------------------------------------------------------------
+Aborted      | Irrelevant         | Ignore V; it’s a garbage version.
+------------------------------------------------------------------------------------------------------
+Terminated   | Irrelevant         | Reread V’s Begin field. TB has terminated so it must have finalized
+or not found |                    | the timestamp.
+------------------------------------------------------------------------------------------------------
+
+Table 2: Case analysis of action to take when V's End field
+contains a transaction ID TE.
+------------------------------------------------------------------------------------------------------
+TE’s state   | TE’s end timestamp | Action to take when transaction T checks visibility of a version V
+             |                    | as of read time RT.
+------------------------------------------------------------------------------------------------------
+Active       | Not set            | V is visible only if TE is not T.
+------------------------------------------------------------------------------------------------------
+Preparing    | TS                 | V’s end timestamp will be TS provided that TE commits. If TS > RT,
+                                  | V is visible to T. If TS < RT, T speculatively ignores V.
+------------------------------------------------------------------------------------------------------
+Committed    | TS                 | V’s end timestamp will be TS and V is committed. Use TS as V’s end
+                                  | timestamp when testing visibility.
+------------------------------------------------------------------------------------------------------
+Aborted      | Irrelevant         | V is visible.
+------------------------------------------------------------------------------------------------------
+Terminated   | Irrelevant         | Reread V’s End field. TE has terminated so it must have finalized
+or not found |                    | the timestamp.
+*/
+
+fn new_tx(tx_id: TxID, begin_ts: u64, state: TransactionState) -> RwLock<Transaction> {
+    RwLock::new(Transaction {
+        state,
+        tx_id,
+        begin_ts,
+        write_set: SkipSet::new(),
+        read_set: SkipSet::new(),
+    })
+}
+
+#[traced_test]
+#[test]
+fn test_snapshot_isolation_tx_visible1() {
+    let txs: SkipMap<TxID, RwLock<Transaction>> = SkipMap::from_iter([
+        (1, new_tx(1, 1, TransactionState::Committed(2))),
+        (2, new_tx(2, 2, TransactionState::Committed(5))),
+        (3, new_tx(3, 3, TransactionState::Aborted)),
+        (5, new_tx(5, 5, TransactionState::Preparing)),
+        (6, new_tx(6, 6, TransactionState::Committed(10))),
+        (7, new_tx(7, 7, TransactionState::Active)),
+    ]);
+
+    let current_tx = new_tx(4, 4, TransactionState::Preparing);
+    let current_tx = current_tx.read().unwrap();
+
+    let rv_visible = |begin: TxTimestampOrID, end: Option<TxTimestampOrID>| {
+        let row_version = RowVersion {
+            begin,
+            end,
+            row: Row {
+                id: RowID {
+                    table_id: 1,
+                    row_id: 1,
+                },
+                data: "testme".to_string(),
+            },
+        };
+        tracing::debug!("Testing visibility of {row_version:?}");
+        is_version_visible(&txs, &current_tx, &row_version)
+    };
+
+    // begin visible:   transaction committed with ts < current_tx.begin_ts
+    // end visible:     inf
+    assert!(rv_visible(TxTimestampOrID::TxID(1), None));
+
+    // begin invisible: transaction committed with ts > current_tx.begin_ts
+    assert!(!rv_visible(TxTimestampOrID::TxID(2), None));
+
+    // begin invisible: transaction aborted
+    assert!(!rv_visible(TxTimestampOrID::TxID(3), None));
+
+    // begin visible:   timestamp < current_tx.begin_ts
+    // end invisible:   transaction committed with ts > current_tx.begin_ts
+    assert!(!rv_visible(
+        TxTimestampOrID::Timestamp(0),
+        Some(TxTimestampOrID::TxID(1))
+    ));
+
+    // begin visible:   timestamp < current_tx.begin_ts
+    // end visible:     transaction committed with ts < current_tx.begin_ts
+    assert!(rv_visible(
+        TxTimestampOrID::Timestamp(0),
+        Some(TxTimestampOrID::TxID(2))
+    ));
+
+    // begin visible:   timestamp < current_tx.begin_ts
+    // end invisible:   transaction aborted
+    assert!(!rv_visible(
+        TxTimestampOrID::Timestamp(0),
+        Some(TxTimestampOrID::TxID(3))
+    ));
+
+    // begin invisible: transaction preparing
+    assert!(!rv_visible(TxTimestampOrID::TxID(5), None));
+
+    // begin invisible: transaction committed with ts > current_tx.begin_ts
+    assert!(!rv_visible(TxTimestampOrID::TxID(6), None));
+
+    // begin invisible: transaction active
+    assert!(!rv_visible(TxTimestampOrID::TxID(7), None));
+
+    // begin invisible: transaction committed with ts > current_tx.begin_ts
+    assert!(!rv_visible(TxTimestampOrID::TxID(6), None));
+
+    // begin invisible:   transaction active
+    assert!(!rv_visible(TxTimestampOrID::TxID(7), None));
+
+    // begin visible:   timestamp < current_tx.begin_ts
+    // end invisible:     transaction preparing
+    assert!(!rv_visible(
+        TxTimestampOrID::Timestamp(0),
+        Some(TxTimestampOrID::TxID(5))
+    ));
+
+    // begin invisible: timestamp > current_tx.begin_ts
+    assert!(!rv_visible(
+        TxTimestampOrID::Timestamp(6),
+        Some(TxTimestampOrID::TxID(6))
+    ));
+
+    // begin visible:   timestamp < current_tx.begin_ts
+    // end visible:     some active transaction will eventually overwrite this version,
+    //                  but that hasn't happened
+    //                  (this is the https://avi.im/blag/2023/hekaton-paper-typo/ case, I believe!)
+    assert!(rv_visible(
+        TxTimestampOrID::Timestamp(0),
+        Some(TxTimestampOrID::TxID(7))
+    ));
+}

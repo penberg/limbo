@@ -147,7 +147,8 @@ impl std::fmt::Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         write!(
             f,
-            "{{ id: {}, begin_ts: {}, write_set: {:?}, read_set: {:?}",
+            "{{ state: {}, id: {}, begin_ts: {}, write_set: {:?}, read_set: {:?}",
+            self.state,
             self.tx_id,
             self.begin_ts,
             // FIXME: I'm sorry, we obviously shouldn't be cloning here.
@@ -168,10 +169,23 @@ impl std::fmt::Display for Transaction {
 enum TransactionState {
     Active,
     Preparing,
-    Committed,
+    Committed(u64),
     Aborted,
     Terminated,
 }
+
+impl std::fmt::Display for TransactionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            TransactionState::Active => write!(f, "Active"),
+            TransactionState::Preparing => write!(f, "Preparing"),
+            TransactionState::Committed(ts) => write!(f, "Committed({ts})"),
+            TransactionState::Aborted => write!(f, "Aborted"),
+            TransactionState::Terminated => write!(f, "Terminated"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Database<Clock: LogicalClock> {
     rows: SkipMap<RowID, RwLock<Vec<RowVersion>>>,
@@ -459,6 +473,10 @@ impl<Clock: LogicalClock> Database<Clock> {
                 only if TE commits.
             """
         */
+        tx.state = TransactionState::Committed(end_ts);
+        tracing::trace!("COMMIT    {tx}");
+        // Postprocessing: inserting row versions and logging the transaction to persistent storage.
+        // TODO: we should probably save to persistent storage first, and only then update the in-memory structures.
         let mut log_record: LogRecord = LogRecord::new(end_ts);
         for id in &tx.write_set {
             let id = id.value();
@@ -480,8 +498,6 @@ impl<Clock: LogicalClock> Database<Clock> {
                 }
             }
         }
-        tx.state = TransactionState::Committed;
-        tracing::trace!("COMMIT    {tx}");
         // We have now updated all the versions with a reference to the
         // transaction ID to a timestamp and can, therefore, remove the
         // transaction. Please note that when we move to lockless, the
@@ -595,7 +611,7 @@ impl<Clock: LogicalClock> Database<Clock> {
 
 /// A write-write conflict happens when transaction T_m attempts to update a
 /// row version that is currently being updated by an active transaction T_n.
-fn is_write_write_conflict(
+pub(crate) fn is_write_write_conflict(
     txs: &SkipMap<TxID, RwLock<Transaction>>,
     tx: &Transaction,
     rv: &RowVersion,
@@ -607,7 +623,7 @@ fn is_write_write_conflict(
             match te.state {
                 TransactionState::Active => tx.tx_id != te.tx_id,
                 TransactionState::Preparing => todo!(),
-                TransactionState::Committed => todo!(),
+                TransactionState::Committed(_end_ts) => todo!(),
                 TransactionState::Aborted => todo!(),
                 TransactionState::Terminated => todo!(),
             }
@@ -617,7 +633,7 @@ fn is_write_write_conflict(
     }
 }
 
-fn is_version_visible(
+pub(crate) fn is_version_visible(
     txs: &SkipMap<TxID, RwLock<Transaction>>,
     tx: &Transaction,
     rv: &RowVersion,
@@ -635,13 +651,22 @@ fn is_begin_visible(
         TxTimestampOrID::TxID(rv_begin) => {
             let tb = txs.get(&rv_begin).unwrap();
             let tb = tb.value().read().unwrap();
-            match tb.state {
+            let visible = match tb.state {
                 TransactionState::Active => tx.tx_id == tb.tx_id && rv.end.is_none(),
-                TransactionState::Preparing => todo!(),
-                TransactionState::Committed => todo!(),
-                TransactionState::Aborted => todo!(),
-                TransactionState::Terminated => todo!(),
-            }
+                TransactionState::Preparing => false, // NOTICE: makes sense for snapshot isolation, not so much for serializable!
+                TransactionState::Committed(committed_ts) => tx.begin_ts >= committed_ts,
+                TransactionState::Aborted => false,
+                TransactionState::Terminated => {
+                    tracing::debug!("TODO: should reread rv's end field - it should have updated the timestamp in the row version by now");
+                    false
+                }
+            };
+            tracing::trace!(
+                "is_begin_visible: tx={tx}, tb={tb} rv = {:?}-{:?} visible = {visible}",
+                rv.begin,
+                rv.end
+            );
+            visible
         }
     }
 }
@@ -656,13 +681,22 @@ fn is_end_visible(
         Some(TxTimestampOrID::TxID(rv_end)) => {
             let te = txs.get(&rv_end).unwrap();
             let te = te.value().read().unwrap();
-            match te.state {
+            let visible = match te.state {
                 TransactionState::Active => tx.tx_id != te.tx_id,
-                TransactionState::Preparing => todo!(),
-                TransactionState::Committed => todo!(),
-                TransactionState::Aborted => todo!(),
-                TransactionState::Terminated => todo!(),
-            }
+                TransactionState::Preparing => false, // NOTICE: makes sense for snapshot isolation, not so much for serializable!
+                TransactionState::Committed(committed_ts) => tx.begin_ts < committed_ts,
+                TransactionState::Aborted => false,
+                TransactionState::Terminated => {
+                    tracing::debug!("TODO: should reread rv's end field - it should have updated the timestamp in the row version by now");
+                    false
+                }
+            };
+            tracing::trace!(
+                "is_end_visible: tx={tx}, te={te} rv = {:?}-{:?}  visible = {visible}",
+                rv.begin,
+                rv.end
+            );
+            visible
         }
         None => true,
     }
