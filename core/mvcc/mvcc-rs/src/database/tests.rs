@@ -822,6 +822,7 @@ or not found |                    | the timestamp.
 */
 
 fn new_tx(tx_id: TxID, begin_ts: u64, state: TransactionState) -> RwLock<Transaction> {
+    let state = state.into();
     RwLock::new(Transaction {
         state,
         tx_id,
