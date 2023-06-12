@@ -2,14 +2,17 @@ use mvcc_rs::clock::LocalClock;
 use mvcc_rs::database::{Database, Row, RowID};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 static IDS: AtomicU64 = AtomicU64::new(1);
 
-#[tracing_test::traced_test]
+static START: Once = Once::new();
+
 #[test]
 fn test_non_overlapping_concurrent_inserts() {
-    tracing_subscriber::fmt::init();
+    START.call_once(|| {
+        tracing_subscriber::fmt::init();
+    });
     // Two threads insert to the database concurrently using non-overlapping
     // row IDs.
     let clock = LocalClock::default();
@@ -68,8 +71,9 @@ fn test_non_overlapping_concurrent_inserts() {
 
 #[test]
 fn test_overlapping_concurrent_inserts_read_your_writes() {
-    tracing_subscriber::fmt::init();
-    // Two threads insert to the database concurrently using overlapping row IDs.
+    START.call_once(|| {
+        tracing_subscriber::fmt::init();
+    }); // Two threads insert to the database concurrently using overlapping row IDs.
     let clock = LocalClock::default();
     let storage = mvcc_rs::persistent_storage::Storage::new_noop();
     let db = Arc::new(Database::new(clock, storage));
