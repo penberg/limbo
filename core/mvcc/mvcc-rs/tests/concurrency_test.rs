@@ -1,65 +1,127 @@
 use mvcc_rs::clock::LocalClock;
 use mvcc_rs::database::{Database, Row, RowID};
-use shuttle::sync::atomic::AtomicU64;
-use shuttle::sync::Arc;
-use shuttle::thread;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
+static IDS: AtomicU64 = AtomicU64::new(1);
+
+#[tracing_test::traced_test]
 #[test]
 fn test_non_overlapping_concurrent_inserts() {
+    tracing_subscriber::fmt::init();
     // Two threads insert to the database concurrently using non-overlapping
     // row IDs.
     let clock = LocalClock::default();
     let storage = mvcc_rs::persistent_storage::Storage::new_noop();
     let db = Arc::new(Database::new(clock, storage));
-    let ids = Arc::new(AtomicU64::new(0));
-    shuttle::check_random(
-        move || {
-            {
-                let db = db.clone();
-                let ids = ids.clone();
-                thread::spawn(move || {
-                    let tx = db.begin_tx();
-                    let id = ids.fetch_add(1, Ordering::SeqCst);
-                    let id = RowID {
-                        table_id: 1,
-                        row_id: id,
-                    };
-                    let row = Row {
-                        id,
-                        data: "Hello".to_string(),
-                    };
-                    db.insert(tx, row.clone()).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    let tx = db.begin_tx();
-                    let committed_row = db.read(tx, id).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    assert_eq!(committed_row, Some(row));
-                });
+    let iterations = 100000;
+
+    let th1 = {
+        let db = db.clone();
+        std::thread::spawn(move || {
+            for _ in 0..iterations {
+                let tx = db.begin_tx();
+                let id = IDS.fetch_add(1, Ordering::SeqCst);
+                let id = RowID {
+                    table_id: 1,
+                    row_id: id,
+                };
+                let row = Row {
+                    id,
+                    data: "Hello".to_string(),
+                };
+                db.insert(tx, row.clone()).unwrap();
+                db.commit_tx(tx).unwrap();
+                let tx = db.begin_tx();
+                let committed_row = db.read(tx, id).unwrap();
+                db.commit_tx(tx).unwrap();
+                assert_eq!(committed_row, Some(row));
             }
-            {
-                let db = db.clone();
-                let ids = ids.clone();
-                thread::spawn(move || {
-                    let tx = db.begin_tx();
-                    let id = ids.fetch_add(1, Ordering::SeqCst);
-                    let id = RowID {
-                        table_id: 1,
-                        row_id: id,
-                    };
-                    let row = Row {
-                        id,
-                        data: "World".to_string(),
-                    };
-                    db.insert(tx, row.clone()).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    let tx = db.begin_tx();
-                    let committed_row = db.read(tx, id).unwrap();
-                    db.commit_tx(tx).unwrap();
-                    assert_eq!(committed_row, Some(row));
-                });
+        })
+    };
+    let th2 = {
+        std::thread::spawn(move || {
+            for _ in 0..iterations {
+                let tx = db.begin_tx();
+                let id = IDS.fetch_add(1, Ordering::SeqCst);
+                let id = RowID {
+                    table_id: 1,
+                    row_id: id,
+                };
+                let row = Row {
+                    id,
+                    data: "World".to_string(),
+                };
+                db.insert(tx, row.clone()).unwrap();
+                db.commit_tx(tx).unwrap();
+                let tx = db.begin_tx();
+                let committed_row = db.read(tx, id).unwrap();
+                db.commit_tx(tx).unwrap();
+                assert_eq!(committed_row, Some(row));
             }
-        },
-        100,
-    );
+        })
+    };
+    th1.join().unwrap();
+    th2.join().unwrap();
+}
+
+#[test]
+fn test_overlapping_concurrent_inserts_read_your_writes() {
+    tracing_subscriber::fmt::init();
+    // Two threads insert to the database concurrently using overlapping row IDs.
+    let clock = LocalClock::default();
+    let storage = mvcc_rs::persistent_storage::Storage::new_noop();
+    let db = Arc::new(Database::new(clock, storage));
+    let iterations = 100000;
+
+    let th1 = {
+        let db = db.clone();
+        std::thread::spawn(move || {
+            for i in 0..iterations {
+                if i % 1000 == 0 {
+                    tracing::debug!("{i}");
+                }
+                let tx = db.begin_tx();
+                let id = i % 16;
+                let id = RowID {
+                    table_id: 1,
+                    row_id: id,
+                };
+                let row = Row {
+                    id,
+                    data: format!("Hello @{tx}"),
+                };
+                db.insert(tx, row.clone()).unwrap();
+                let committed_row = db.read(tx, id).unwrap();
+                db.commit_tx(tx).unwrap();
+                assert_eq!(committed_row, Some(row));
+            }
+        })
+    };
+    let th2 = {
+        std::thread::spawn(move || {
+            for i in 0..iterations {
+                if i % 1000 == 0 {
+                    tracing::debug!("{i}");
+                }
+                let tx = db.begin_tx();
+                let id = i % 16;
+                let id = RowID {
+                    table_id: 1,
+                    row_id: id,
+                };
+                let row = Row {
+                    id,
+                    data: format!("World @{tx}"),
+                };
+                db.insert(tx, row.clone()).unwrap();
+                let committed_row = db.read(tx, id).unwrap();
+                db.commit_tx(tx).unwrap();
+                assert_eq!(committed_row, Some(row));
+            }
+        })
+    };
+    th1.join().unwrap();
+    th2.join().unwrap();
 }

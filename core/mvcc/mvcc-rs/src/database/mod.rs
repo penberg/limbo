@@ -440,7 +440,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         let tx_id = self.get_tx_id();
         let begin_ts = self.get_timestamp();
         let tx = Transaction::new(tx_id, begin_ts);
-        tracing::trace!("BEGIN    {tx}");
+        tracing::trace!("BEGIN     {tx}");
         self.txs.insert(tx_id, RwLock::new(tx));
         tx_id
     }
@@ -565,6 +565,7 @@ impl<Clock: LogicalClock> Database<Clock> {
                 }
             }
         }
+        tracing::trace!("UPDATED   {tx}");
         // We have now updated all the versions with a reference to the
         // transaction ID to a timestamp and can, therefore, remove the
         // transaction. Please note that when we move to lockless, the
@@ -577,6 +578,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         if !log_record.row_versions.is_empty() {
             self.storage.log_tx(log_record)?;
         }
+        tracing::trace!("LOGGED    {tx}");
         Ok(())
     }
 

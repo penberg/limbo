@@ -16,13 +16,12 @@ aws-config = "0.55.2"
 parking_lot = "0.12.1"
 futures = "0.3.28"
 crossbeam-skiplist = "0.1.1"
+tracing-test = "0"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports", "async", "async_futures"] }
 pprof = { version = "0.11.1", features = ["criterion", "flamegraph"] }
-shuttle = "0.6.0"
 tracing-subscriber = "0"
-tracing-test = "0"
 mvcc-rs = { path = "." }
 
 [[bench]]
