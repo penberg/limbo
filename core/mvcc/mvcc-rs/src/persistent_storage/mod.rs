@@ -27,7 +27,7 @@ impl Storage {
 }
 
 impl Storage {
-    pub fn log_tx(&mut self, m: LogRecord) -> Result<()> {
+    pub fn log_tx(&self, m: LogRecord) -> Result<()> {
         match self {
             Self::JsonOnDisk(path) => {
                 use std::io::Write;
