@@ -86,6 +86,10 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
                 if i % 1000 == 0 {
                     tracing::debug!("{prefix}: {i}");
                 }
+                if i % 10000 == 0 {
+                    let dropped = db.drop_unused_row_versions();
+                    tracing::debug!("garbage collected {dropped} versions");
+                }
                 let tx = db.begin_tx();
                 let id = i % 16;
                 let id = RowID {
@@ -96,7 +100,7 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
                     id,
                     data: format!("{prefix} @{tx}"),
                 };
-                db.insert(tx, row.clone()).unwrap();
+                db.upsert(tx, row.clone()).unwrap();
                 let committed_row = db.read(tx, id).unwrap();
                 db.commit_tx(tx).unwrap();
                 assert_eq!(committed_row, Some(row));
