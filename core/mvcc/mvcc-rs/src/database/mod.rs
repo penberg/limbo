@@ -25,7 +25,7 @@ pub struct Row {
 }
 
 /// A row version.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RowVersion {
     begin: TxTimestampOrID,
     end: Option<TxTimestampOrID>,
@@ -274,6 +274,22 @@ impl<Clock: LogicalClock> Database<Clock> {
         }
     }
 
+    // Extracts the begin timestamp from a transaction
+    fn get_begin_timestamp(&self, ts_or_id: &TxTimestampOrID) -> u64 {
+        match ts_or_id {
+            TxTimestampOrID::Timestamp(ts) => *ts,
+            TxTimestampOrID::TxID(tx_id) => {
+                self.txs
+                    .get(tx_id)
+                    .unwrap()
+                    .value()
+                    .read()
+                    .unwrap()
+                    .begin_ts
+            }
+        }
+    }
+
     /// Inserts a new row version into the database, while making sure that
     /// the row version is inserted in the correct order.
     fn insert_version(&self, id: RowID, row_version: RowVersion) {
@@ -288,12 +304,17 @@ impl<Clock: LogicalClock> Database<Clock> {
         // NOTICE: this is an insert a'la insertion sort, with pessimistic linear complexity.
         // However, we expect the number of versions to be nearly sorted, so we deem it worthy
         // to search linearly for the insertion point instead of paying the price of using
-        // another data structure, e.g. a BTreeSet.
-        let position = versions.iter().rposition(|v| v >= &row_version);
-        match position {
-            Some(position) => versions.insert(position, row_version),
-            None => versions.push(row_version),
-        };
+        // another data structure, e.g. a BTreeSet. If it proves to be too quadratic empirically,
+        // we can either switch to a tree-like structure, or at least use partition_point()
+        // which performs a binary search for the insertion point.
+        let position = versions
+            .iter()
+            .rposition(|v| {
+                self.get_begin_timestamp(&v.begin) < self.get_begin_timestamp(&row_version.begin)
+            })
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        versions.insert(position, row_version);
     }
 
     /// Inserts a new row into the database.
