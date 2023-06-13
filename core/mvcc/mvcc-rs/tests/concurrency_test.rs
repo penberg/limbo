@@ -82,6 +82,7 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
     let work = |prefix: &'static str| {
         let db = db.clone();
         std::thread::spawn(move || {
+            let mut failed_upserts = 0;
             for i in 0..iterations {
                 if i % 1000 == 0 {
                     tracing::debug!("{prefix}: {i}");
@@ -100,11 +101,19 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
                     id,
                     data: format!("{prefix} @{tx}"),
                 };
-                db.upsert(tx, row.clone()).unwrap();
+                if let Err(e) = db.upsert(tx, row.clone()) {
+                    tracing::trace!("upsert failed: {e}");
+                    failed_upserts += 1;
+                    continue;
+                }
                 let committed_row = db.read(tx, id).unwrap();
                 db.commit_tx(tx).unwrap();
                 assert_eq!(committed_row, Some(row));
             }
+            tracing::info!(
+                "{prefix}'s failed upserts: {failed_upserts}/{iterations} {:.2}%",
+                (failed_upserts * 100) as f64 / iterations as f64
+            );
         })
     };
 
