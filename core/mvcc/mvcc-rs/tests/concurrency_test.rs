@@ -79,12 +79,12 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
     let db = Arc::new(Database::new(clock, storage));
     let iterations = 100000;
 
-    let th1 = {
+    let work = |prefix: &'static str| {
         let db = db.clone();
         std::thread::spawn(move || {
             for i in 0..iterations {
                 if i % 1000 == 0 {
-                    tracing::debug!("{i}");
+                    tracing::debug!("{prefix}: {i}");
                 }
                 let tx = db.begin_tx();
                 let id = i % 16;
@@ -94,7 +94,7 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
                 };
                 let row = Row {
                     id,
-                    data: format!("Hello @{tx}"),
+                    data: format!("{prefix} @{tx}"),
                 };
                 db.insert(tx, row.clone()).unwrap();
                 let committed_row = db.read(tx, id).unwrap();
@@ -103,29 +103,9 @@ fn test_overlapping_concurrent_inserts_read_your_writes() {
             }
         })
     };
-    let th2 = {
-        std::thread::spawn(move || {
-            for i in 0..iterations {
-                if i % 1000 == 0 {
-                    tracing::debug!("{i}");
-                }
-                let tx = db.begin_tx();
-                let id = i % 16;
-                let id = RowID {
-                    table_id: 1,
-                    row_id: id,
-                };
-                let row = Row {
-                    id,
-                    data: format!("World @{tx}"),
-                };
-                db.insert(tx, row.clone()).unwrap();
-                let committed_row = db.read(tx, id).unwrap();
-                db.commit_tx(tx).unwrap();
-                assert_eq!(committed_row, Some(row));
-            }
-        })
-    };
-    th1.join().unwrap();
-    th2.join().unwrap();
+
+    let threads = vec![work("A"), work("B"), work("C"), work("D")];
+    for th in threads {
+        th.join().unwrap();
+    }
 }
