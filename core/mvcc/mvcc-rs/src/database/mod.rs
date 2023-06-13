@@ -17,7 +17,7 @@ pub struct RowID {
     pub row_id: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 
 pub struct Row {
     pub id: RowID,
@@ -25,7 +25,7 @@ pub struct Row {
 }
 
 /// A row version.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct RowVersion {
     begin: TxTimestampOrID,
     end: Option<TxTimestampOrID>,
@@ -56,7 +56,7 @@ impl LogRecord {
 /// phase of the transaction. During the active phase, new versions track the
 /// transaction ID in the `begin` and `end` fields. After a transaction commits,
 /// versions switch to tracking timestamps.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 enum TxTimestampOrID {
     Timestamp(u64),
     TxID(TxID),
@@ -274,6 +274,28 @@ impl<Clock: LogicalClock> Database<Clock> {
         }
     }
 
+    /// Inserts a new row version into the database, while making sure that
+    /// the row version is inserted in the correct order.
+    fn insert_version(&self, id: RowID, row_version: RowVersion) {
+        let versions = self.rows.get_or_insert_with(id, || RwLock::new(Vec::new()));
+        let mut versions = versions.value().write().unwrap();
+        self.insert_version_raw(&mut versions, row_version)
+    }
+
+    /// Inserts a new row version into the internal data structure for versions,
+    /// while making sure that the row version is inserted in the correct order.
+    fn insert_version_raw(&self, versions: &mut Vec<RowVersion>, row_version: RowVersion) {
+        // NOTICE: this is an insert a'la insertion sort, with pessimistic linear complexity.
+        // However, we expect the number of versions to be nearly sorted, so we deem it worthy
+        // to search linearly for the insertion point instead of paying the price of using
+        // another data structure, e.g. a BTreeSet.
+        let position = versions.iter().rposition(|v| v >= &row_version);
+        match position {
+            Some(position) => versions.insert(position, row_version),
+            None => versions.push(row_version),
+        };
+    }
+
     /// Inserts a new row into the database.
     ///
     /// This function inserts a new `row` into the database within the context
@@ -299,9 +321,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         };
         tx.insert_to_write_set(id);
         drop(tx);
-        let versions = self.rows.get_or_insert_with(id, || RwLock::new(Vec::new()));
-        let mut versions = versions.value().write().unwrap();
-        versions.push(row_version);
+        self.insert_version(id, row_version);
         Ok(())
     }
 
@@ -560,13 +580,19 @@ impl<Clock: LogicalClock> Database<Clock> {
                     if let TxTimestampOrID::TxID(id) = row_version.begin {
                         if id == tx_id {
                             row_version.begin = TxTimestampOrID::Timestamp(tx_begin_ts);
-                            log_record.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
+                            self.insert_version_raw(
+                                &mut log_record.row_versions,
+                                row_version.clone(),
+                            ); // FIXME: optimize cloning out
                         }
                     }
                     if let Some(TxTimestampOrID::TxID(id)) = row_version.end {
                         if id == tx_id {
                             row_version.end = Some(TxTimestampOrID::Timestamp(end_ts));
-                            log_record.row_versions.push(row_version.clone()); // FIXME: optimize cloning out
+                            self.insert_version_raw(
+                                &mut log_record.row_versions,
+                                row_version.clone(),
+                            ); // FIXME: optimize cloning out
                         }
                     }
                 }
@@ -675,11 +701,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         for record in tx_log {
             tracing::debug!("RECOVERING {:?}", record);
             for version in record.row_versions {
-                let row_versions = self
-                    .rows
-                    .get_or_insert_with(version.row.id, || RwLock::new(Vec::new()));
-                let mut row_versions = row_versions.value().write().unwrap();
-                row_versions.push(version);
+                self.insert_version(version.row.id, version);
             }
             self.clock.reset(record.tx_timestamp);
         }
