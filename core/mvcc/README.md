@@ -1,7 +1,7 @@
-# MVCC for Rust
+# Tihku
 
-This is a _work-in-progress_ the Hekaton optimistic multiversion concurrency control library in Rust.
-The aim of the project is to provide a building block for implementing database management systems.
+Tihku is an _work-in-progress_, open-source implementation of the Hekaton multi-version concurrency control (MVCC) written in Rust.
+The project aims to provide a foundational building block for implementing database management systems.
 
 ## Features
 
