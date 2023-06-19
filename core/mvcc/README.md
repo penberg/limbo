@@ -3,6 +3,8 @@
 Tihku is an _work-in-progress_, open-source implementation of the Hekaton multi-version concurrency control (MVCC) written in Rust.
 The project aims to provide a foundational building block for implementing database management systems.
 
+One of the projects using Tihku is an experimental [libSQL branch with MVCC](https://github.com/penberg/libsql/tree/mvcc) that aims to implement `BEGIN CONCURRENT` with Tihku improve SQLite write concurrency.
+
 ## Features
 
 * Main memory architecture, rows are accessed via an index
