@@ -1,20 +1,24 @@
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
 use crate::clock::LogicalClock;
 use crate::database::{Database, Result, Row, RowID};
+use std::fmt::Debug;
 
 #[derive(Debug)]
-pub struct ScanCursor<'a, Clock: LogicalClock> {
-    pub db: &'a Database<Clock>,
+pub struct ScanCursor<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug> {
+    pub db: &'a Database<Clock, T>,
     pub row_ids: Vec<RowID>,
     pub index: usize,
     tx_id: u64,
 }
 
-impl<'a, Clock: LogicalClock> ScanCursor<'a, Clock> {
+impl<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug> ScanCursor<'a, Clock, T> {
     pub fn new(
-        db: &'a Database<Clock>,
+        db: &'a Database<Clock, T>,
         tx_id: u64,
         table_id: u64,
-    ) -> Result<ScanCursor<'a, Clock>> {
+    ) -> Result<ScanCursor<'a, Clock, T>> {
         let row_ids = db.scan_row_ids_for_table(table_id)?;
         Ok(Self {
             db,
@@ -31,7 +35,7 @@ impl<'a, Clock: LogicalClock> ScanCursor<'a, Clock> {
         Some(self.row_ids[self.index])
     }
 
-    pub fn current_row(&self) -> Result<Option<Row>> {
+    pub fn current_row(&self) -> Result<Option<Row<T>>> {
         if self.index >= self.row_ids.len() {
             return Ok(None);
         }

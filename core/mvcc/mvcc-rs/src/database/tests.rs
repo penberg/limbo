@@ -2,7 +2,7 @@ use super::*;
 use crate::clock::LocalClock;
 use tracing_test::traced_test;
 
-fn test_db() -> Database<LocalClock> {
+fn test_db() -> Database<LocalClock, String> {
     let clock = LocalClock::new();
     let storage = crate::persistent_storage::Storage::new_noop();
     Database::new(clock, storage)
@@ -721,7 +721,7 @@ fn test_storage1() {
 
     let clock = LocalClock::new();
     let storage = crate::persistent_storage::Storage::new_json_on_disk(path);
-    let db = Database::new(clock, storage);
+    let db: Database<LocalClock, String> = Database::new(clock, storage);
     db.recover().unwrap();
     println!("{:#?}", db);
 

@@ -1,3 +1,7 @@
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use std::fmt::Debug;
+
 use crate::database::{LogRecord, Result};
 use crate::errors::DatabaseError;
 
@@ -27,7 +31,7 @@ impl Storage {
 }
 
 impl Storage {
-    pub fn log_tx(&self, m: LogRecord) -> Result<()> {
+    pub fn log_tx<T: Serialize>(&self, m: LogRecord<T>) -> Result<()> {
         match self {
             Self::JsonOnDisk(path) => {
                 use std::io::Write;
@@ -50,7 +54,7 @@ impl Storage {
         Ok(())
     }
 
-    pub fn read_tx_log(&self) -> Result<Vec<LogRecord>> {
+    pub fn read_tx_log<T: DeserializeOwned + Debug>(&self) -> Result<Vec<LogRecord<T>>> {
         match self {
             Self::JsonOnDisk(path) => {
                 use std::io::BufRead;
@@ -59,7 +63,7 @@ impl Storage {
                     .open(path)
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
 
-                let mut records: Vec<LogRecord> = Vec::new();
+                let mut records: Vec<LogRecord<T>> = Vec::new();
                 let mut lines = std::io::BufReader::new(file).lines();
                 while let Some(Ok(line)) = lines.next() {
                     records.push(

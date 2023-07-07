@@ -13,10 +13,12 @@ use types::{DbContext, MVCCDatabaseRef, MVCCScanCursorRef, ScanCursorContext};
 type Clock = clock::LocalClock;
 
 /// cbindgen:ignore
-type Db = database::Database<Clock>;
+/// Note - We use String type in C bindings as Row type. Type is generic.
+type Db = database::Database<Clock, String>;
 
 /// cbindgen:ignore
-type ScanCursor = cursor::ScanCursor<'static, Clock>;
+/// Note - We use String type in C bindings as Row type. Type is generic.
+type ScanCursor = cursor::ScanCursor<'static, Clock, String>;
 
 static INIT_RUST_LOG: std::sync::Once = std::sync::Once::new();
 
