@@ -13,7 +13,7 @@ pub struct ScanCursor<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serializ
     tx_id: u64,
 }
 
-impl<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug> ScanCursor<'a, Clock, T> {
+impl<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug + 'static> ScanCursor<'a, Clock, T> {
     pub fn new(
         db: &'a Database<Clock, T>,
         tx_id: u64,

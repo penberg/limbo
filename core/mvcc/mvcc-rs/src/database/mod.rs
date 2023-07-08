@@ -267,10 +267,8 @@ pub struct Database<
     storage: Storage,
 }
 
-impl<
-        Clock: LogicalClock,
-        T: Sync + Send + Clone + Serialize + Debug + DeserializeOwned,
-    > Database<Clock, T>
+impl<Clock: LogicalClock, T: Sync + Send + Clone + Serialize + Debug + DeserializeOwned + 'static>
+    Database<Clock, T>
 {
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
@@ -680,8 +678,7 @@ impl<
                 let mut row_versions = row_versions.value().write().unwrap();
                 row_versions.retain(|rv| rv.begin != TxTimestampOrID::TxID(tx_id));
                 if row_versions.is_empty() {
-                    // !TODO! FIXME! This is a bug, because we can't remove the row here!
-                    // self.rows.remove(id);
+                    self.rows.remove(id);
                 }
             }
         }
@@ -757,8 +754,7 @@ impl<
             }
         }
         for id in to_remove {
-            // !TODO! FIXME! This is a bug, because we can't remove the row here!
-            // self.rows.remove(&id);
+            self.rows.remove(&id);
         }
         dropped
     }
