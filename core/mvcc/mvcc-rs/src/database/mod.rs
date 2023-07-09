@@ -515,7 +515,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         let end_ts = self.get_timestamp();
         // NOTICE: the first shadowed tx keeps the entry alive in the map
         // for the duration of this whole function, which is important for correctness!
-        let tx = self.txs.get(&tx_id).unwrap();
+        let tx = self.txs.get(&tx_id).ok_or(DatabaseError::TxTerminated)?;
         let tx = tx.value().write().unwrap();
         match tx.state.load() {
             TransactionState::Terminated => return Err(DatabaseError::TxTerminated),
