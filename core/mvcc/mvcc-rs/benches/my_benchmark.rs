@@ -4,7 +4,7 @@ use mvcc_rs::clock::LocalClock;
 use mvcc_rs::database::{Database, Row, RowID};
 use pprof::criterion::{Output, PProfProfiler};
 
-fn bench_db() -> Database<LocalClock> {
+fn bench_db() -> Database<LocalClock, String> {
     let clock = LocalClock::default();
     let storage = mvcc_rs::persistent_storage::Storage::new_noop();
     Database::new(clock, storage)
