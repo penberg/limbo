@@ -2,7 +2,9 @@ use crate::clock::LogicalClock;
 use crate::errors::DatabaseError;
 use crate::persistent_storage::Storage;
 use crossbeam_skiplist::{SkipMap, SkipSet};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
 
@@ -19,29 +21,29 @@ pub struct RowID {
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
 
-pub struct Row {
+pub struct Row<T> {
     pub id: RowID,
-    pub data: String,
+    pub data: T,
 }
 
 /// A row version.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct RowVersion {
+pub struct RowVersion<T> {
     begin: TxTimestampOrID,
     end: Option<TxTimestampOrID>,
-    row: Row,
+    row: Row<T>,
 }
 
 pub type TxID = u64;
 
 /// A log record contains all the versions inserted and deleted by a transaction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct LogRecord {
+pub struct LogRecord<T> {
     pub(crate) tx_timestamp: TxID,
-    row_versions: Vec<RowVersion>,
+    row_versions: Vec<RowVersion<T>>,
 }
 
-impl LogRecord {
+impl<T> LogRecord<T> {
     fn new(tx_timestamp: TxID) -> Self {
         Self {
             tx_timestamp,
@@ -254,15 +256,20 @@ impl AtomicTransactionState {
 }
 
 #[derive(Debug)]
-pub struct Database<Clock: LogicalClock> {
-    rows: SkipMap<RowID, RwLock<Vec<RowVersion>>>,
+pub struct Database<
+    Clock: LogicalClock,
+    T: Sync + Send + Clone + Serialize + Debug + DeserializeOwned,
+> {
+    rows: SkipMap<RowID, RwLock<Vec<RowVersion<T>>>>,
     txs: SkipMap<TxID, RwLock<Transaction>>,
     tx_ids: AtomicU64,
     clock: Clock,
     storage: Storage,
 }
 
-impl<Clock: LogicalClock> Database<Clock> {
+impl<Clock: LogicalClock, T: Sync + Send + Clone + Serialize + Debug + DeserializeOwned + 'static>
+    Database<Clock, T>
+{
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
         Self {
@@ -292,7 +299,7 @@ impl<Clock: LogicalClock> Database<Clock> {
 
     /// Inserts a new row version into the database, while making sure that
     /// the row version is inserted in the correct order.
-    fn insert_version(&self, id: RowID, row_version: RowVersion) {
+    fn insert_version(&self, id: RowID, row_version: RowVersion<T>) {
         let versions = self.rows.get_or_insert_with(id, || RwLock::new(Vec::new()));
         let mut versions = versions.value().write().unwrap();
         self.insert_version_raw(&mut versions, row_version)
@@ -300,7 +307,7 @@ impl<Clock: LogicalClock> Database<Clock> {
 
     /// Inserts a new row version into the internal data structure for versions,
     /// while making sure that the row version is inserted in the correct order.
-    fn insert_version_raw(&self, versions: &mut Vec<RowVersion>, row_version: RowVersion) {
+    fn insert_version_raw(&self, versions: &mut Vec<RowVersion<T>>, row_version: RowVersion<T>) {
         // NOTICE: this is an insert a'la insertion sort, with pessimistic linear complexity.
         // However, we expect the number of versions to be nearly sorted, so we deem it worthy
         // to search linearly for the insertion point instead of paying the price of using
@@ -333,7 +340,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// * `tx_id` - the ID of the transaction in which to insert the new row.
     /// * `row` - the row object containing the values to be inserted.
     ///
-    pub fn insert(&self, tx_id: TxID, row: Row) -> Result<()> {
+    pub fn insert(&self, tx_id: TxID, row: Row<T>) -> Result<()> {
         let tx = self
             .txs
             .get(&tx_id)
@@ -370,7 +377,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     /// # Returns
     ///
     /// Returns `true` if the row was successfully updated, and `false` otherwise.
-    pub fn update(&self, tx_id: TxID, row: Row) -> Result<bool> {
+    pub fn update(&self, tx_id: TxID, row: Row<T>) -> Result<bool> {
         if !self.delete(tx_id, row.id)? {
             return Ok(false);
         }
@@ -380,7 +387,7 @@ impl<Clock: LogicalClock> Database<Clock> {
 
     /// Inserts a row in the database with new values, previously deleting
     /// any old data if it existed. Bails on a delete error, e.g. write-write conflict.
-    pub fn upsert(&self, tx_id: TxID, row: Row) -> Result<()> {
+    pub fn upsert(&self, tx_id: TxID, row: Row<T>) -> Result<()> {
         self.delete(tx_id, row.id)?;
         self.insert(tx_id, row)
     }
@@ -449,7 +456,7 @@ impl<Clock: LogicalClock> Database<Clock> {
     ///
     /// Returns `Some(row)` with the row data if the row with the given `id` exists,
     /// and `None` otherwise.
-    pub fn read(&self, tx_id: TxID, id: RowID) -> Result<Option<Row>> {
+    pub fn read(&self, tx_id: TxID, id: RowID) -> Result<Option<Row<T>>> {
         let tx = self.txs.get(&tx_id).unwrap();
         let tx = tx.value().read().unwrap();
         assert_eq!(tx.state, TransactionState::Active);
@@ -606,7 +613,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         drop(tx);
         // Postprocessing: inserting row versions and logging the transaction to persistent storage.
         // TODO: we should probably save to persistent storage first, and only then update the in-memory structures.
-        let mut log_record: LogRecord = LogRecord::new(end_ts);
+        let mut log_record: LogRecord<T> = LogRecord::new(end_ts);
         for ref id in write_set {
             if let Some(row_versions) = self.rows.get(id) {
                 let mut row_versions = row_versions.value().write().unwrap();
@@ -665,6 +672,7 @@ impl<Clock: LogicalClock> Database<Clock> {
         tracing::trace!("ABORT     {tx}");
         let write_set: Vec<RowID> = tx.write_set.iter().map(|v| *v.value()).collect();
         drop(tx);
+        
         for ref id in write_set {
             if let Some(row_versions) = self.rows.get(id) {
                 let mut row_versions = row_versions.value().write().unwrap();
@@ -674,6 +682,7 @@ impl<Clock: LogicalClock> Database<Clock> {
                 }
             }
         }
+
         let tx = tx_unlocked.value().write().unwrap();
         tx.state.store(TransactionState::Terminated);
         tracing::trace!("TERMINATE {tx}");
@@ -765,10 +774,10 @@ impl<Clock: LogicalClock> Database<Clock> {
 
 /// A write-write conflict happens when transaction T_m attempts to update a
 /// row version that is currently being updated by an active transaction T_n.
-pub(crate) fn is_write_write_conflict(
+pub(crate) fn is_write_write_conflict<T>(
     txs: &SkipMap<TxID, RwLock<Transaction>>,
     tx: &Transaction,
-    rv: &RowVersion,
+    rv: &RowVersion<T>,
 ) -> bool {
     match rv.end {
         Some(TxTimestampOrID::TxID(rv_end)) => {
@@ -784,18 +793,18 @@ pub(crate) fn is_write_write_conflict(
     }
 }
 
-pub(crate) fn is_version_visible(
+pub(crate) fn is_version_visible<T>(
     txs: &SkipMap<TxID, RwLock<Transaction>>,
     tx: &Transaction,
-    rv: &RowVersion,
+    rv: &RowVersion<T>,
 ) -> bool {
     is_begin_visible(txs, tx, rv) && is_end_visible(txs, tx, rv)
 }
 
-fn is_begin_visible(
+fn is_begin_visible<T>(
     txs: &SkipMap<TxID, RwLock<Transaction>>,
     tx: &Transaction,
-    rv: &RowVersion,
+    rv: &RowVersion<T>,
 ) -> bool {
     match rv.begin {
         TxTimestampOrID::Timestamp(rv_begin_ts) => tx.begin_ts >= rv_begin_ts,
@@ -822,10 +831,10 @@ fn is_begin_visible(
     }
 }
 
-fn is_end_visible(
+fn is_end_visible<T>(
     txs: &SkipMap<TxID, RwLock<Transaction>>,
     tx: &Transaction,
-    rv: &RowVersion,
+    rv: &RowVersion<T>,
 ) -> bool {
     match rv.end {
         Some(TxTimestampOrID::Timestamp(rv_end_ts)) => tx.begin_ts < rv_end_ts,

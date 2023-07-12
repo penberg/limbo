@@ -1,6 +1,9 @@
 use crate::database::{LogRecord, Result};
 use crate::errors::DatabaseError;
 use aws_sdk_s3::Client;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use std::fmt::Debug;
 
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
@@ -66,7 +69,7 @@ impl Replicator {
         })
     }
 
-    pub async fn replicate_tx(&self, record: LogRecord) -> Result<()> {
+    pub async fn replicate_tx<T: Serialize>(&self, record: LogRecord<T>) -> Result<()> {
         let key = format!("{}-{:020}", self.prefix, record.tx_timestamp);
         tracing::trace!("Replicating {key}");
         let body = serde_json::to_vec(&record).map_err(|e| DatabaseError::Io(e.to_string()))?;
@@ -83,8 +86,8 @@ impl Replicator {
         Ok(())
     }
 
-    pub async fn read_tx_log(&self) -> Result<Vec<LogRecord>> {
-        let mut records: Vec<LogRecord> = Vec::new();
+    pub async fn read_tx_log<T: DeserializeOwned + Debug>(&self) -> Result<Vec<LogRecord<T>>> {
+        let mut records: Vec<LogRecord<T>> = Vec::new();
         // Read all objects from the bucket, one log record is stored in one object
         let mut next_token = None;
         loop {
@@ -120,7 +123,7 @@ impl Replicator {
                         .collect()
                         .await
                         .map_err(|e| DatabaseError::Io(e.to_string()))?;
-                    let record: LogRecord = serde_json::from_slice(&body.into_bytes())
+                    let record: LogRecord<T> = serde_json::from_slice(&body.into_bytes())
                         .map_err(|e| DatabaseError::Io(e.to_string()))?;
                     records.push(record);
                 }
