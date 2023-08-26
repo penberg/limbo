@@ -1,0 +1,16 @@
+[package]
+name = "lig-wasm"
+version = "0.0.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+path = "lib.rs"
+
+[dependencies]
+anyhow = "1.0.75"
+lig_core = { path = "../../core" }
+wasm-bindgen = "0.2"

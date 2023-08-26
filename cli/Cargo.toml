@@ -1,0 +1,22 @@
+# Copyright 2023 the Lig authors. All rights reserved. MIT license.
+
+[package]
+name = "lig"
+version = "0.0.0"
+authors.workspace = true
+default-run = "lig"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Lig interactive SQL shell"
+
+[[bin]]
+name = "lig"
+path = "main.rs"
+
+[dependencies]
+anyhow = "1.0.75"
+clap = { version = "4.4.0", features = ["derive"] }
+dirs = "5.0.1"
+lig_core = { path = "../core" }
+rustyline = "12.0.0"
