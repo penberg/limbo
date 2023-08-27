@@ -11,7 +11,7 @@ pub enum Insn {
     OpenReadAwait,
     RewindAsync,
     RewindAwait(RewindAwaitInsn),
-    Column,
+    Column(ColumnInsn),
     ResultRow,
     NextAsync,
     NextAwait,
@@ -29,6 +29,10 @@ pub struct OpenReadAsyncInsn {
 }
 pub struct RewindAwaitInsn {
     pub pc_if_empty: usize,
+}
+
+pub struct ColumnInsn {
+    pub column: usize,
 }
 
 pub struct GotoInsn {
@@ -104,7 +108,7 @@ impl Program {
                     // TODO: Check if empty
                     self.pc = rewind_await.pc_if_empty;
                 }
-                Insn::Column => {
+                Insn::Column(_) => {
                     self.pc += 1;
                 }
                 Insn::ResultRow => {
@@ -140,7 +144,9 @@ pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
 fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     match select.body.select {
         OneSelect::Select {
-            from: Some(from), ..
+            columns,
+            from: Some(from),
+            ..
         } => {
             let table_name = match from.select {
                 Some(select_table) => match *select_table {
@@ -162,8 +168,17 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync);
             let rewind_await_offset = program.emit_placeholder();
-            program.emit_insn(Insn::Column);
-            program.emit_insn(Insn::Column);
+            for col in columns {
+                match col {
+                    sqlite3_parser::ast::ResultColumn::Expr(_, _) => todo!(),
+                    sqlite3_parser::ast::ResultColumn::Star => {
+                        for i in 0..table.columns.len() {
+                            program.emit_insn(Insn::Column(ColumnInsn { column: i }));
+                        }
+                    }
+                    sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
+                }
+            }
             program.emit_insn(Insn::ResultRow);
             program.emit_insn(Insn::NextAsync);
             program.emit_insn(Insn::NextAwait);
@@ -221,7 +236,7 @@ fn print_insn(addr: usize, insn: &Insn) {
             0,
             "".to_string(),
         ),
-        Insn::Column => ("Column", 0, 0, 0, "", 0, "".to_string()),
+        Insn::Column(column) => ("Column", 0, column.column, 0, "", 0, "".to_string()),
         Insn::ResultRow => ("ResultRow", 0, 0, 0, "", 0, "".to_string()),
         Insn::NextAsync => ("NextAsync", 0, 0, 0, "", 0, "".to_string()),
         Insn::NextAwait => ("NextAwait", 0, 0, 0, "", 0, "".to_string()),

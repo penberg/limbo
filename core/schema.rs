@@ -45,8 +45,8 @@ impl Table {
 }
 
 pub struct Column {
-    name: String,
-    ty: Type,
+    pub name: String,
+    pub ty: Type,
 }
 
 pub enum Type {
