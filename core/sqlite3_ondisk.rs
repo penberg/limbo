@@ -23,9 +23,10 @@
 /// +-----------------+----------------+---------------------+----------------+
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
-
+use crate::buffer_pool::BufferPool;
 use crate::{DatabaseRef, IO};
 use anyhow::{anyhow, Result};
+use std::borrow::BorrowMut;
 use std::sync::Arc;
 
 /// The size of the database header in bytes.
@@ -130,12 +131,12 @@ pub struct BTreePage {
 pub fn read_btree_page(
     io: Arc<dyn IO>,
     database_ref: DatabaseRef,
-    page_size: usize,
+    buffer_pool: &mut BufferPool,
     page_idx: usize,
 ) -> Result<BTreePage> {
-    let mut page = Vec::new();
-    page.resize(page_size, 0);
-    io.get(database_ref, page_idx, &mut page)?;
+    let mut buf = buffer_pool.get();
+    let page = &mut buf.borrow_mut().data_mut();
+    io.get(database_ref, page_idx, page)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
@@ -163,7 +164,7 @@ pub fn read_btree_page(
     for _ in 0..header.num_cells {
         let cell_pointer = u16::from_be_bytes([page[pos], page[pos + 1]]);
         pos += 2;
-        let cell = read_btree_cell(&page, &header.page_type, cell_pointer as usize)?;
+        let cell = read_btree_cell(page, &header.page_type, cell_pointer as usize)?;
         match &cell {
             BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
                 let record = read_record(_payload)?;
