@@ -2,7 +2,7 @@ use crate::pager::Pager;
 use crate::schema::Schema;
 
 use anyhow::Result;
-use sqlite3_parser::ast::{OneSelect, Select, SelectBody, Stmt};
+use sqlite3_parser::ast::{OneSelect, Select, Stmt};
 use std::sync::Arc;
 
 pub enum Insn {
