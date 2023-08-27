@@ -7,28 +7,33 @@ mod vdbe;
 use anyhow::Result;
 use fallible_iterator::FallibleIterator;
 use pager::Pager;
+use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
 pub struct Database {
     pager: Arc<Pager>,
+    schema: Arc<Schema>,
 }
 
 impl Database {
     pub fn open(io: Arc<dyn IO>, path: &str) -> Result<Database> {
         let pager = Arc::new(Pager::open(io.clone(), path)?);
-        Ok(Database { pager })
+        let schema = Arc::new(Schema::new());
+        Ok(Database { pager, schema })
     }
 
     pub fn connect(&self) -> Connection {
         Connection {
             pager: self.pager.clone(),
+            schema: self.schema.clone(),
         }
     }
 }
 
 pub struct Connection {
     pager: Arc<Pager>,
+    schema: Arc<Schema>,
 }
 
 impl Connection {
@@ -39,12 +44,12 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Explain(stmt) => {
-                    let program = vdbe::translate(stmt)?;
+                    let program = vdbe::translate(&self.schema, stmt)?;
                     program.explain();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
-                    let mut program = vdbe::translate(stmt)?;
+                    let mut program = vdbe::translate(&self.schema, stmt)?;
                     program.step(self.pager.clone())?;
                 }
             }

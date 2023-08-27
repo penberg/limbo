@@ -2,12 +2,12 @@ use crate::pager::Pager;
 use crate::schema::Schema;
 
 use anyhow::Result;
-use sqlite3_parser::ast::{Select, Stmt};
+use sqlite3_parser::ast::{OneSelect, Select, SelectBody, Stmt};
 use std::sync::Arc;
 
 pub enum Insn {
     Init(InitInsn),
-    OpenReadAsync,
+    OpenReadAsync(OpenReadAsyncInsn),
     OpenReadAwait,
     RewindAsync,
     RewindAwait(RewindAwaitInsn),
@@ -24,6 +24,9 @@ pub struct InitInsn {
     pub target_pc: usize,
 }
 
+pub struct OpenReadAsyncInsn {
+    pub root_page: usize,
+}
 pub struct RewindAwaitInsn {
     pub pc_if_empty: usize,
 }
@@ -32,7 +35,6 @@ pub struct GotoInsn {
     pub target_pc: usize,
 }
 pub struct Program {
-    pub schema: Schema,
     pub insns: Vec<Insn>,
     pub pc: usize,
 }
@@ -66,7 +68,6 @@ impl ProgramBuilder {
 
     pub fn build(self) -> Program {
         Program {
-            schema: Schema::new(),
             insns: self.insns,
             pc: 0,
         }
@@ -90,7 +91,7 @@ impl Program {
                 Insn::Init(init) => {
                     self.pc = init.target_pc;
                 }
-                Insn::OpenReadAsync => {
+                Insn::OpenReadAsync(_) => {
                     self.pc += 1;
                 }
                 Insn::OpenReadAwait => {
@@ -129,44 +130,64 @@ impl Program {
     }
 }
 
-pub fn translate(stmt: Stmt) -> Result<Program> {
+pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
     match stmt {
-        Stmt::Select(select) => translate_select(select),
+        Stmt::Select(select) => translate_select(schema, select),
         _ => todo!(),
     }
 }
 
-fn translate_select(_select: Select) -> Result<Program> {
-    let mut program = ProgramBuilder::new();
-    let init_offset = program.emit_placeholder();
-    let open_read_offset = program.offset();
-    program.emit_insn(Insn::OpenReadAsync);
-    program.emit_insn(Insn::OpenReadAwait);
-    program.emit_insn(Insn::RewindAsync);
-    let rewind_await_offset = program.emit_placeholder();
-    program.emit_insn(Insn::Column);
-    program.emit_insn(Insn::Column);
-    program.emit_insn(Insn::ResultRow);
-    program.emit_insn(Insn::NextAsync);
-    program.emit_insn(Insn::NextAwait);
-    program.fixup_insn(
-        rewind_await_offset,
-        Insn::RewindAwait(RewindAwaitInsn {
-            pc_if_empty: program.offset(),
-        }),
-    );
-    program.emit_insn(Insn::Halt);
-    program.fixup_insn(
-        init_offset,
-        Insn::Init(InitInsn {
-            target_pc: program.offset(),
-        }),
-    );
-    program.emit_insn(Insn::Transaction);
-    program.emit_insn(Insn::Goto(GotoInsn {
-        target_pc: open_read_offset,
-    }));
-    Ok(program.build())
+fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
+    match select.body.select {
+        OneSelect::Select {
+            from: Some(from), ..
+        } => {
+            let table_name = match from.select {
+                Some(select_table) => match *select_table {
+                    sqlite3_parser::ast::SelectTable::Table(name, ..) => name.name,
+                    _ => todo!(),
+                },
+                None => todo!(),
+            };
+            let table_name = table_name.0;
+            let table = match schema.get_table(&table_name) {
+                Some(table) => table,
+                None => anyhow::bail!("Parse error: no such table: {}", table_name),
+            };
+            let root_page = table.root_page;
+            let mut program = ProgramBuilder::new();
+            let init_offset = program.emit_placeholder();
+            let open_read_offset = program.offset();
+            program.emit_insn(Insn::OpenReadAsync(OpenReadAsyncInsn { root_page }));
+            program.emit_insn(Insn::OpenReadAwait);
+            program.emit_insn(Insn::RewindAsync);
+            let rewind_await_offset = program.emit_placeholder();
+            program.emit_insn(Insn::Column);
+            program.emit_insn(Insn::Column);
+            program.emit_insn(Insn::ResultRow);
+            program.emit_insn(Insn::NextAsync);
+            program.emit_insn(Insn::NextAwait);
+            program.fixup_insn(
+                rewind_await_offset,
+                Insn::RewindAwait(RewindAwaitInsn {
+                    pc_if_empty: program.offset(),
+                }),
+            );
+            program.emit_insn(Insn::Halt);
+            program.fixup_insn(
+                init_offset,
+                Insn::Init(InitInsn {
+                    target_pc: program.offset(),
+                }),
+            );
+            program.emit_insn(Insn::Transaction);
+            program.emit_insn(Insn::Goto(GotoInsn {
+                target_pc: open_read_offset,
+            }));
+            Ok(program.build())
+        }
+        _ => todo!(),
+    }
 }
 
 fn print_insn(addr: usize, insn: &Insn) {
@@ -180,7 +201,15 @@ fn print_insn(addr: usize, insn: &Insn) {
             0,
             format!("Starts at {}", init.target_pc),
         ),
-        Insn::OpenReadAsync => ("OpenReadAsync", 0, 0, 0, "", 0, "".to_string()),
+        Insn::OpenReadAsync(open_read_async) => (
+            "OpenReadAsync",
+            0,
+            open_read_async.root_page,
+            0,
+            "",
+            0,
+            "".to_string(),
+        ),
         Insn::OpenReadAwait => ("OpenReadAwait", 0, 0, 0, "", 0, "".to_string()),
         Insn::RewindAsync => ("RewindAsync", 0, 0, 0, "", 0, "".to_string()),
         Insn::RewindAwait(rewind_await) => (

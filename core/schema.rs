@@ -15,12 +15,16 @@ impl Schema {
     pub fn add_table(&mut self, name: String, table: Table) {
         self.tables.insert(name, table);
     }
+
+    pub fn get_table(&self, name: &str) -> Option<&Table> {
+        self.tables.get(name)
+    }
 }
 
 pub struct Table {
-    root_page: i32,
-    name: String,
-    columns: Vec<Column>,
+    pub root_page: usize,
+    pub name: String,
+    pub columns: Vec<Column>,
 }
 
 impl Table {
