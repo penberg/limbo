@@ -8,7 +8,7 @@ A SQLite-compatible database library built with Rust.
 
 * Asynchronous I/O support (_wip_)
 * WebAssembly bindings (_wip_)
-* SQLite file format compatibility
+* SQLite file format compatibility (_read-only_)
 
 ## Getting Started
 
