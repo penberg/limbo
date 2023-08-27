@@ -1,4 +1,5 @@
 use crate::pager::Pager;
+use crate::schema::Schema;
 
 use anyhow::Result;
 use sqlite3_parser::ast::{Select, Stmt};
@@ -31,6 +32,7 @@ pub struct GotoInsn {
     pub target_pc: usize,
 }
 pub struct Program {
+    pub schema: Schema,
     pub insns: Vec<Insn>,
     pub pc: usize,
 }
@@ -64,6 +66,7 @@ impl ProgramBuilder {
 
     pub fn build(self) -> Program {
         Program {
+            schema: Schema::new(),
             insns: self.insns,
             pc: 0,
         }

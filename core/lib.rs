@@ -1,5 +1,6 @@
 mod buffer_pool;
 mod pager;
+mod schema;
 mod sqlite3_ondisk;
 mod vdbe;
 
