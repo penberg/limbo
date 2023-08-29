@@ -38,10 +38,6 @@ pub struct ColumnInsn {
 pub struct GotoInsn {
     pub target_pc: usize,
 }
-pub struct Program {
-    pub insns: Vec<Insn>,
-    pub pc: usize,
-}
 
 pub struct ProgramBuilder {
     pub insns: Vec<Insn>,
@@ -70,12 +66,25 @@ impl ProgramBuilder {
         self.insns.len()
     }
 
-    pub fn build(self) -> Program {
+    pub fn build(self, pager: Arc<Pager>) -> Program {
         Program {
+            pager,
             insns: self.insns,
             pc: 0,
         }
     }
+}
+
+pub enum StepResult {
+    Done,
+    IO,
+    Row,
+}
+
+pub struct Program {
+    pager: Arc<Pager>,
+    pub insns: Vec<Insn>,
+    pub pc: usize,
 }
 
 impl Program {
@@ -87,7 +96,15 @@ impl Program {
         }
     }
 
-    pub fn step(&mut self, _pager: Arc<Pager>) -> Result<()> {
+    pub fn column_count(&self) -> usize {
+        0
+    }
+
+    pub fn column(&self, _i: usize) -> Option<&str> {
+        None
+    }
+
+    pub fn step(&mut self) -> Result<StepResult> {
         loop {
             let insn = &self.insns[self.pc];
             print_insn(self.pc, insn);
@@ -95,7 +112,8 @@ impl Program {
                 Insn::Init(init) => {
                     self.pc = init.target_pc;
                 }
-                Insn::OpenReadAsync(_) => {
+                Insn::OpenReadAsync(open_read_async) => {
+                    self.pager.read_page(open_read_async.root_page)?;
                     self.pc += 1;
                 }
                 Insn::OpenReadAwait => {
@@ -113,6 +131,7 @@ impl Program {
                 }
                 Insn::ResultRow => {
                     self.pc += 1;
+                    return Ok(StepResult::Row);
                 }
                 Insn::NextAsync => {
                     self.pc += 1;
@@ -121,7 +140,7 @@ impl Program {
                     self.pc += 1;
                 }
                 Insn::Halt => {
-                    return Ok(());
+                    return Ok(StepResult::Done);
                 }
                 Insn::Transaction => {
                     self.pc += 1;
@@ -134,14 +153,14 @@ impl Program {
     }
 }
 
-pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
+pub fn translate(pager: Arc<Pager>, schema: &Schema, stmt: Stmt) -> Result<Program> {
     match stmt {
-        Stmt::Select(select) => translate_select(schema, select),
+        Stmt::Select(select) => translate_select(pager, schema, select),
         _ => todo!(),
     }
 }
 
-fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
+fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Result<Program> {
     match select.body.select {
         OneSelect::Select {
             columns,
@@ -199,7 +218,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             program.emit_insn(Insn::Goto(GotoInsn {
                 target_pc: open_read_offset,
             }));
-            Ok(program.build())
+            Ok(program.build(pager))
         }
         _ => todo!(),
     }

@@ -20,6 +20,11 @@ impl Database {
     pub fn open(io: Arc<dyn IO>, path: &str) -> Result<Database> {
         let pager = Arc::new(Pager::open(io.clone(), path)?);
         let schema = Arc::new(Schema::new());
+        let conn = Connection {
+            pager: pager.clone(),
+            schema: schema.clone(),
+        };
+        conn.query("SELECT * FROM sqlite_schema")?;
         Ok(Database { pager, schema })
     }
 
@@ -37,6 +42,38 @@ pub struct Connection {
 }
 
 impl Connection {
+    pub fn query(&self, sql: impl Into<String>) -> Result<()> {
+        let sql = sql.into();
+        let mut parser = Parser::new(sql.as_bytes());
+        let cmd = parser.next()?;
+        if let Some(cmd) = cmd {
+            match cmd {
+                Cmd::Stmt(stmt) => {
+                    let mut program = vdbe::translate(self.pager.clone(), &self.schema, stmt)?;
+                    loop {
+                        let result = program.step()?;
+                        match result {
+                            vdbe::StepResult::Row => {
+                                let mut row = Vec::new();
+                                for i in 0..program.column_count() {
+                                    row.push(program.column(i).unwrap().to_string());
+                                }
+                                println!("{:?}", row);
+                            }
+                            vdbe::StepResult::IO => todo!(),
+                            vdbe::StepResult::Done => break,
+                        }
+                    }
+                }
+                Cmd::Explain(stmt) => {
+                    todo!();
+                }
+                Cmd::ExplainQueryPlan(_stmt) => todo!(),
+            }
+        }
+        Ok(())
+    }
+
     pub fn execute(&self, sql: impl Into<String>) -> Result<()> {
         let sql = sql.into();
         let mut parser = Parser::new(sql.as_bytes());
@@ -44,13 +81,13 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Explain(stmt) => {
-                    let program = vdbe::translate(&self.schema, stmt)?;
+                    let program = vdbe::translate(self.pager.clone(), &self.schema, stmt)?;
                     program.explain();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
-                    let mut program = vdbe::translate(&self.schema, stmt)?;
-                    program.step(self.pager.clone())?;
+                    let mut program = vdbe::translate(self.pager.clone(), &self.schema, stmt)?;
+                    program.step()?;
                 }
             }
         }
