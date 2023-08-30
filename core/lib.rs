@@ -1,6 +1,6 @@
+mod btree;
 mod buffer_pool;
 mod pager;
-mod btree;
 mod schema;
 mod sqlite3_ondisk;
 mod vdbe;

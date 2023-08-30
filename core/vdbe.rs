@@ -1,15 +1,17 @@
+use crate::btree::Cursor;
 use crate::pager::Pager;
 use crate::schema::Schema;
 
 use anyhow::Result;
 use sqlite3_parser::ast::{OneSelect, Select, Stmt};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub enum Insn {
     Init(InitInsn),
     OpenReadAsync(OpenReadAsyncInsn),
     OpenReadAwait,
-    RewindAsync,
+    RewindAsync(RewindAsyncInsn),
     RewindAwait(RewindAwaitInsn),
     Column(ColumnInsn),
     ResultRow,
@@ -25,8 +27,14 @@ pub struct InitInsn {
 }
 
 pub struct OpenReadAsyncInsn {
+    pub cursor_id: usize,
     pub root_page: usize,
 }
+
+pub struct RewindAsyncInsn {
+    pub cursor_id: usize,
+}
+
 pub struct RewindAwaitInsn {
     pub pc_if_empty: usize,
 }
@@ -68,9 +76,10 @@ impl ProgramBuilder {
 
     pub fn build(self, pager: Arc<Pager>) -> Program {
         Program {
-            pager,
             insns: self.insns,
             pc: 0,
+            pager,
+            cursors: HashMap::new(),
         }
     }
 }
@@ -82,9 +91,10 @@ pub enum StepResult {
 }
 
 pub struct Program {
-    pager: Arc<Pager>,
     pub insns: Vec<Insn>,
     pub pc: usize,
+    pager: Arc<Pager>,
+    cursors: HashMap<usize, Cursor>,
 }
 
 impl Program {
@@ -112,14 +122,17 @@ impl Program {
                 Insn::Init(init) => {
                     self.pc = init.target_pc;
                 }
-                Insn::OpenReadAsync(open_read_async) => {
-                    self.pager.read_page(open_read_async.root_page)?;
+                Insn::OpenReadAsync(insn) => {
+                    let cursor = Cursor::new(self.pager.clone(), insn.root_page);
+                    self.cursors.insert(insn.cursor_id, cursor);
                     self.pc += 1;
                 }
                 Insn::OpenReadAwait => {
                     self.pc += 1;
                 }
-                Insn::RewindAsync => {
+                Insn::RewindAsync(insn) => {
+                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    cursor.rewind()?;
                     self.pc += 1;
                 }
                 Insn::RewindAwait(rewind_await) => {
@@ -183,9 +196,12 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
             let mut program = ProgramBuilder::new();
             let init_offset = program.emit_placeholder();
             let open_read_offset = program.offset();
-            program.emit_insn(Insn::OpenReadAsync(OpenReadAsyncInsn { root_page }));
+            program.emit_insn(Insn::OpenReadAsync(OpenReadAsyncInsn {
+                cursor_id: 0,
+                root_page,
+            }));
             program.emit_insn(Insn::OpenReadAwait);
-            program.emit_insn(Insn::RewindAsync);
+            program.emit_insn(Insn::RewindAsync(RewindAsyncInsn { cursor_id: 0 }));
             let rewind_await_offset = program.emit_placeholder();
             for col in columns {
                 match col {
@@ -237,7 +253,7 @@ fn print_insn(addr: usize, insn: &Insn) {
         ),
         Insn::OpenReadAsync(open_read_async) => (
             "OpenReadAsync",
-            0,
+            open_read_async.cursor_id,
             open_read_async.root_page,
             0,
             "",
@@ -245,7 +261,7 @@ fn print_insn(addr: usize, insn: &Insn) {
             "".to_string(),
         ),
         Insn::OpenReadAwait => ("OpenReadAwait", 0, 0, 0, "", 0, "".to_string()),
-        Insn::RewindAsync => ("RewindAsync", 0, 0, 0, "", 0, "".to_string()),
+        Insn::RewindAsync(insn) => ("RewindAsync", insn.cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::RewindAwait(rewind_await) => (
             "RewindAwait",
             0,
