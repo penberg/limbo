@@ -14,9 +14,9 @@ pub enum Insn {
     RewindAsync(RewindAsyncInsn),
     RewindAwait(RewindAwaitInsn),
     Column(ColumnInsn),
-    ResultRow,
-    NextAsync,
-    NextAwait,
+    ResultRow(ResultRowInsn),
+    NextAsync(NextAsyncInsn),
+    NextAwait(NextAwaitInsn),
     Halt,
     Transaction,
     Goto(GotoInsn),
@@ -36,11 +36,25 @@ pub struct RewindAsyncInsn {
 }
 
 pub struct RewindAwaitInsn {
+    pub cursor_id: usize,
     pub pc_if_empty: usize,
+}
+
+pub struct NextAsyncInsn {
+    pub cursor_id: usize,
+}
+
+pub struct NextAwaitInsn {
+    pub cursor_id: usize,
+    pub pc_if_next: usize,
 }
 
 pub struct ColumnInsn {
     pub column: usize,
+}
+
+pub struct ResultRowInsn {
+    pub cursor_id: usize,
 }
 
 pub struct GotoInsn {
@@ -135,22 +149,36 @@ impl Program {
                     cursor.rewind()?;
                     self.pc += 1;
                 }
-                Insn::RewindAwait(rewind_await) => {
-                    // TODO: Check if empty
-                    self.pc = rewind_await.pc_if_empty;
+                Insn::RewindAwait(insn) => {
+                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    if cursor.is_empty() {
+                        self.pc = insn.pc_if_empty;
+                    } else {
+                        self.pc += 1;
+                    }
                 }
                 Insn::Column(_) => {
                     self.pc += 1;
                 }
-                Insn::ResultRow => {
+                Insn::ResultRow(insn) => {
+                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let record = cursor.record()?;
+                    println!("record: {:?}", record);
                     self.pc += 1;
                     return Ok(StepResult::Row);
                 }
-                Insn::NextAsync => {
+                Insn::NextAsync(insn) => {
+                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    cursor.next()?;
                     self.pc += 1;
                 }
-                Insn::NextAwait => {
-                    self.pc += 1;
+                Insn::NextAwait(insn) => {
+                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    if cursor.has_record() {
+                        self.pc = insn.pc_if_next;
+                    } else {
+                        self.pc += 1;
+                    }
                 }
                 Insn::Halt => {
                     return Ok(StepResult::Done);
@@ -180,6 +208,7 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
             from: Some(from),
             ..
         } => {
+            let cursor_id = 0;
             let table_name = match from.select {
                 Some(select_table) => match *select_table {
                     sqlite3_parser::ast::SelectTable::Table(name, ..) => name.name,
@@ -201,7 +230,7 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
                 root_page,
             }));
             program.emit_insn(Insn::OpenReadAwait);
-            program.emit_insn(Insn::RewindAsync(RewindAsyncInsn { cursor_id: 0 }));
+            program.emit_insn(Insn::RewindAsync(RewindAsyncInsn { cursor_id }));
             let rewind_await_offset = program.emit_placeholder();
             for col in columns {
                 match col {
@@ -214,12 +243,16 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
                     sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
                 }
             }
-            program.emit_insn(Insn::ResultRow);
-            program.emit_insn(Insn::NextAsync);
-            program.emit_insn(Insn::NextAwait);
+            program.emit_insn(Insn::ResultRow(ResultRowInsn { cursor_id }));
+            program.emit_insn(Insn::NextAsync(NextAsyncInsn { cursor_id }));
+            program.emit_insn(Insn::NextAwait(NextAwaitInsn {
+                cursor_id,
+                pc_if_next: rewind_await_offset,
+            }));
             program.fixup_insn(
                 rewind_await_offset,
                 Insn::RewindAwait(RewindAwaitInsn {
+                    cursor_id,
                     pc_if_empty: program.offset(),
                 }),
             );
@@ -272,9 +305,17 @@ fn print_insn(addr: usize, insn: &Insn) {
             "".to_string(),
         ),
         Insn::Column(column) => ("  Column", 0, column.column, 0, "", 0, "".to_string()),
-        Insn::ResultRow => ("  ResultRow", 0, 0, 0, "", 0, "".to_string()),
-        Insn::NextAsync => ("NextAsync", 0, 0, 0, "", 0, "".to_string()),
-        Insn::NextAwait => ("NextAwait", 0, 0, 0, "", 0, "".to_string()),
+        Insn::ResultRow(insn) => ("  ResultRow", insn.cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::NextAsync(insn) => ("NextAsync", insn.cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::NextAwait(insn) => (
+            "NextAwait",
+            insn.cursor_id,
+            insn.pc_if_next,
+            0,
+            "",
+            0,
+            "".to_string(),
+        ),
         Insn::Halt => ("Halt", 0, 0, 0, "", 0, "".to_string()),
         Insn::Transaction => ("Transaction", 0, 0, 0, "", 0, "".to_string()),
         Insn::Goto(goto) => ("Goto", 0, goto.target_pc, 0, "", 0, "".to_string()),

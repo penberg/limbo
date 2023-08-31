@@ -165,12 +165,6 @@ pub fn read_btree_page(
         let cell_pointer = u16::from_be_bytes([page[pos], page[pos + 1]]);
         pos += 2;
         let cell = read_btree_cell(page, &header.page_type, cell_pointer as usize)?;
-        match &cell {
-            BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
-                let record = read_record(_payload)?;
-                println!("record: {:?}", record);
-            }
-        }
         cells.push(cell);
     }
     Ok(BTreePage { header, cells })
@@ -183,8 +177,8 @@ pub enum BTreeCell {
 
 #[derive(Debug)]
 pub struct TableLeafCell {
-    _rowid: u64,
-    _payload: Vec<u8>,
+    pub _rowid: u64,
+    pub _payload: Vec<u8>,
 }
 
 pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<BTreeCell> {
