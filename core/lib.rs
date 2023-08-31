@@ -59,7 +59,7 @@ impl Connection {
                                 for i in 0..program.column_count() {
                                     row.push(program.column(i).unwrap().to_string());
                                 }
-                                println!("{:?}", row);
+                                println!("Row = {:?}", row);
                             }
                             vdbe::StepResult::IO => todo!(),
                             vdbe::StepResult::Done => break,

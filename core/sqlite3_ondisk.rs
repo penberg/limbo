@@ -202,7 +202,7 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Null,
     Integer(i64),
@@ -213,7 +213,7 @@ pub enum Value {
 
 #[derive(Debug)]
 pub struct Record {
-    _values: Vec<Value>,
+    pub values: Vec<Value>,
 }
 
 #[derive(Debug)]
@@ -276,7 +276,7 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
         pos += usize;
         values.push(value);
     }
-    Ok(Record { _values: values })
+    Ok(Record { values })
 }
 
 pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(Value, usize)> {

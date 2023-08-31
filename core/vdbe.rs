@@ -1,6 +1,7 @@
 use crate::btree::Cursor;
 use crate::pager::Pager;
 use crate::schema::Schema;
+use crate::sqlite3_ondisk::Value;
 
 use anyhow::Result;
 use sqlite3_parser::ast::{OneSelect, Select, Stmt};
@@ -50,7 +51,9 @@ pub struct NextAwaitInsn {
 }
 
 pub struct ColumnInsn {
+    pub cursor_id: usize,
     pub column: usize,
+    pub dest: usize,
 }
 
 pub struct ResultRowInsn {
@@ -94,6 +97,7 @@ impl ProgramBuilder {
             pc: 0,
             pager,
             cursors: HashMap::new(),
+            registers: Vec::new(),
         }
     }
 }
@@ -109,6 +113,7 @@ pub struct Program {
     pub pc: usize,
     pager: Arc<Pager>,
     cursors: HashMap<usize, Cursor>,
+    registers: Vec<Option<Value>>,
 }
 
 impl Program {
@@ -121,11 +126,11 @@ impl Program {
     }
 
     pub fn column_count(&self) -> usize {
-        0
+        self.registers.len()
     }
 
-    pub fn column(&self, _i: usize) -> Option<&str> {
-        None
+    pub fn column(&self, i: usize) -> Option<String> {
+        Some(format!("{:?}", self.registers[i]))
     }
 
     pub fn step(&mut self) -> Result<StepResult> {
@@ -157,13 +162,19 @@ impl Program {
                         self.pc += 1;
                     }
                 }
-                Insn::Column(_) => {
+                Insn::Column(insn) => {
+                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    if let Some(ref record) = *cursor.record()? {
+                        self.registers.resize(insn.column + 1, None);
+                        self.registers[insn.dest] = Some(record.values[insn.column].clone());
+                    } else {
+                        todo!();
+                    }
                     self.pc += 1;
                 }
                 Insn::ResultRow(insn) => {
                     let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
-                    let record = cursor.record()?;
-                    println!("record: {:?}", record);
+                    let _ = cursor.record()?;
                     self.pc += 1;
                     return Ok(StepResult::Row);
                 }
@@ -237,7 +248,11 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
                     sqlite3_parser::ast::ResultColumn::Expr(_, _) => todo!(),
                     sqlite3_parser::ast::ResultColumn::Star => {
                         for i in 0..table.columns.len() {
-                            program.emit_insn(Insn::Column(ColumnInsn { column: i }));
+                            program.emit_insn(Insn::Column(ColumnInsn {
+                                cursor_id,
+                                column: i,
+                                dest: i,
+                            }));
                         }
                     }
                     sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
@@ -304,7 +319,15 @@ fn print_insn(addr: usize, insn: &Insn) {
             0,
             "".to_string(),
         ),
-        Insn::Column(column) => ("  Column", 0, column.column, 0, "", 0, "".to_string()),
+        Insn::Column(insn) => (
+            "  Column",
+            insn.cursor_id,
+            insn.column,
+            0,
+            "",
+            0,
+            "".to_string(),
+        ),
         Insn::ResultRow(insn) => ("  ResultRow", insn.cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::NextAsync(insn) => ("NextAsync", insn.cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::NextAwait(insn) => (
