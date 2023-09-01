@@ -21,6 +21,7 @@ pub enum Insn {
     Halt,
     Transaction,
     Goto(GotoInsn),
+    Integer(IntegerInsn),
 }
 
 pub struct InitInsn {
@@ -62,6 +63,11 @@ pub struct ResultRowInsn {
 
 pub struct GotoInsn {
     pub target_pc: usize,
+}
+
+pub struct IntegerInsn {
+    pub value: i64,
+    pub dest: usize,
 }
 
 pub struct ProgramBuilder {
@@ -200,6 +206,11 @@ impl Program {
                 Insn::Goto(goto) => {
                     self.pc = goto.target_pc;
                 }
+                Insn::Integer(insn) => {
+                    self.registers.resize(insn.dest + 1, None);
+                    self.registers[insn.dest] = Some(Value::Integer(insn.value));
+                    self.pc += 1;
+                }
             }
         }
     }
@@ -243,21 +254,7 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync(RewindAsyncInsn { cursor_id }));
             let rewind_await_offset = program.emit_placeholder();
-            for col in columns {
-                match col {
-                    sqlite3_parser::ast::ResultColumn::Expr(_, _) => todo!(),
-                    sqlite3_parser::ast::ResultColumn::Star => {
-                        for i in 0..table.columns.len() {
-                            program.emit_insn(Insn::Column(ColumnInsn {
-                                cursor_id,
-                                column: i,
-                                dest: i,
-                            }));
-                        }
-                    }
-                    sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
-                }
-            }
+            translate_columns(&mut program, Some(cursor_id), Some(table), columns);
             program.emit_insn(Insn::ResultRow(ResultRowInsn { cursor_id }));
             program.emit_insn(Insn::NextAsync(NextAsyncInsn { cursor_id }));
             program.emit_insn(Insn::NextAwait(NextAwaitInsn {
@@ -284,7 +281,119 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
             }));
             Ok(program.build(pager))
         }
+        OneSelect::Select {
+            columns,
+            from: None,
+            ..
+        } => {
+            let mut program = ProgramBuilder::new();
+            let init_offset = program.emit_placeholder();
+            let after_init_offset = program.offset();
+            translate_columns(&mut program, None, None, columns);
+            program.emit_insn(Insn::ResultRow(ResultRowInsn { cursor_id: 0 }));
+            program.emit_insn(Insn::Halt);
+            program.fixup_insn(
+                init_offset,
+                Insn::Init(InitInsn {
+                    target_pc: program.offset(),
+                }),
+            );
+            program.emit_insn(Insn::Goto(GotoInsn {
+                target_pc: after_init_offset,
+            }));
+            Ok(program.build(pager))
+        }
         _ => todo!(),
+    }
+}
+
+fn translate_columns(
+    program: &mut ProgramBuilder,
+    cursor_id: Option<usize>,
+    table: Option<&crate::schema::Table>,
+    columns: Vec<sqlite3_parser::ast::ResultColumn>,
+) {
+    let mut dest = 0;
+    for col in columns {
+        match col {
+            sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
+                sqlite3_parser::ast::Expr::Between {
+                    lhs,
+                    not,
+                    start,
+                    end,
+                } => todo!(),
+                sqlite3_parser::ast::Expr::Binary(_, _, _) => todo!(),
+                sqlite3_parser::ast::Expr::Case {
+                    base,
+                    when_then_pairs,
+                    else_expr,
+                } => todo!(),
+                sqlite3_parser::ast::Expr::Cast { expr, type_name } => todo!(),
+                sqlite3_parser::ast::Expr::Collate(_, _) => todo!(),
+                sqlite3_parser::ast::Expr::DoublyQualified(_, _, _) => todo!(),
+                sqlite3_parser::ast::Expr::Exists(_) => todo!(),
+                sqlite3_parser::ast::Expr::FunctionCall {
+                    name,
+                    distinctness,
+                    args,
+                    filter_over,
+                } => todo!(),
+                sqlite3_parser::ast::Expr::FunctionCallStar { name, filter_over } => todo!(),
+                sqlite3_parser::ast::Expr::Id(_) => todo!(),
+                sqlite3_parser::ast::Expr::InList { lhs, not, rhs } => todo!(),
+                sqlite3_parser::ast::Expr::InSelect { lhs, not, rhs } => todo!(),
+                sqlite3_parser::ast::Expr::InTable {
+                    lhs,
+                    not,
+                    rhs,
+                    args,
+                } => todo!(),
+                sqlite3_parser::ast::Expr::IsNull(_) => todo!(),
+                sqlite3_parser::ast::Expr::Like {
+                    lhs,
+                    not,
+                    op,
+                    rhs,
+                    escape,
+                } => todo!(),
+                sqlite3_parser::ast::Expr::Literal(lit) => match lit {
+                    sqlite3_parser::ast::Literal::Numeric(val) => {
+                        program.emit_insn(Insn::Integer(IntegerInsn {
+                            value: val.parse().unwrap(),
+                            dest,
+                        }));
+                        dest += 1;
+                    }
+                    sqlite3_parser::ast::Literal::String(_) => todo!(),
+                    sqlite3_parser::ast::Literal::Blob(_) => todo!(),
+                    sqlite3_parser::ast::Literal::Keyword(_) => todo!(),
+                    sqlite3_parser::ast::Literal::Null => todo!(),
+                    sqlite3_parser::ast::Literal::CurrentDate => todo!(),
+                    sqlite3_parser::ast::Literal::CurrentTime => todo!(),
+                    sqlite3_parser::ast::Literal::CurrentTimestamp => todo!(),
+                },
+                sqlite3_parser::ast::Expr::Name(_) => todo!(),
+                sqlite3_parser::ast::Expr::NotNull(_) => todo!(),
+                sqlite3_parser::ast::Expr::Parenthesized(_) => todo!(),
+                sqlite3_parser::ast::Expr::Qualified(_, _) => todo!(),
+                sqlite3_parser::ast::Expr::Raise(_, _) => todo!(),
+                sqlite3_parser::ast::Expr::Subquery(_) => todo!(),
+                sqlite3_parser::ast::Expr::Unary(_, _) => todo!(),
+                sqlite3_parser::ast::Expr::Variable(_) => todo!(),
+            },
+            sqlite3_parser::ast::ResultColumn::Star => {
+                for i in 0..table.unwrap().columns.len() {
+                    program.emit_insn(Insn::Column(ColumnInsn {
+                        column: i,
+                        dest,
+                        cursor_id: cursor_id.unwrap(),
+                    }));
+                    dest += 1;
+                }
+            }
+            sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
+        }
     }
 }
 
@@ -330,7 +439,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             "".to_string(),
         ),
         Insn::Column(insn) => (
-            "  Column",
+            "Column",
             insn.cursor_id,
             insn.column,
             0,
@@ -338,7 +447,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             0,
             "".to_string(),
         ),
-        Insn::ResultRow(insn) => ("  ResultRow", insn.cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::ResultRow(insn) => ("ResultRow", insn.cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::NextAsync(insn) => ("NextAsync", insn.cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::NextAwait(insn) => (
             "NextAwait",
@@ -352,6 +461,15 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
         Insn::Halt => ("Halt", 0, 0, 0, "", 0, "".to_string()),
         Insn::Transaction => ("Transaction", 0, 0, 0, "", 0, "".to_string()),
         Insn::Goto(goto) => ("Goto", 0, goto.target_pc, 0, "", 0, "".to_string()),
+        Insn::Integer(insn) => (
+            "Integer",
+            insn.dest,
+            insn.value as usize,
+            0,
+            "",
+            0,
+            "".to_string(),
+        ),
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
