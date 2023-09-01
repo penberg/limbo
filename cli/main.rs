@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
         rl.load_history(history_file.as_path())?;
     }
     loop {
-        let readline = rl.readline("⚡️ ");
+        let readline = rl.readline("\x1b[90m>\x1b[0m ");
         match readline {
             Ok(line) => {
                 if let Err(err) = conn.execute(&line) {
