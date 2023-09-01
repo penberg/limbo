@@ -136,7 +136,7 @@ impl Program {
     pub fn step(&mut self) -> Result<StepResult> {
         loop {
             let insn = &self.insns[self.pc];
-            print_insn(self.pc, insn);
+            trace_insn(self.pc, insn);
             match insn {
                 Insn::Init(init) => {
                     self.pc = init.target_pc;
@@ -288,7 +288,17 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
     }
 }
 
+fn trace_insn(addr: usize, insn: &Insn) {
+    let s = insn_to_str(addr, insn);
+    log::trace!("{}", s);
+}
+
 fn print_insn(addr: usize, insn: &Insn) {
+    let s = insn_to_str(addr, insn);
+    println!("{}", s);
+}
+
+fn insn_to_str(addr: usize, insn: &Insn) -> String {
     let (opcode, p1, p2, p3, p4, p5, comment) = match insn {
         Insn::Init(init) => (
             "Init",
@@ -343,8 +353,8 @@ fn print_insn(addr: usize, insn: &Insn) {
         Insn::Transaction => ("Transaction", 0, 0, 0, "", 0, "".to_string()),
         Insn::Goto(goto) => ("Goto", 0, goto.target_pc, 0, "", 0, "".to_string()),
     };
-    println!(
+    format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
         addr, opcode, p1, p2, p3, p4, p5, comment
-    );
+    )
 }

@@ -16,6 +16,7 @@ struct Opts {
 }
 
 fn main() -> anyhow::Result<()> {
+    env_logger::init();
     let opts = Opts::parse();
     let io = IO::new();
     let db = Database::open(Arc::new(io), opts.database.to_str().unwrap())?;
