@@ -16,7 +16,6 @@ struct Opts {
 }
 
 fn main() -> anyhow::Result<()> {
-    env_logger::init();
     let opts = Opts::parse();
     let io = IO::new();
     let db = Database::open(Arc::new(io), opts.database.to_str().unwrap())?;
@@ -27,6 +26,7 @@ fn main() -> anyhow::Result<()> {
     if history_file.exists() {
         rl.load_history(history_file.as_path())?;
     }
+    println!("Welcome to Lig SQL shell!");
     loop {
         let readline = rl.readline("\x1b[90m>\x1b[0m ");
         match readline {
@@ -63,7 +63,6 @@ struct IOInner {
 
 impl lig_core::IO for IO {
     fn open(&self, path: &str) -> Result<DatabaseRef> {
-        println!("Opening database file {}", path);
         let file = std::fs::File::open(path)?;
         let mut inner = self.inner.borrow_mut();
         let db_ref = inner.db_refs;
