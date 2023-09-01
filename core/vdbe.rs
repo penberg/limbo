@@ -142,11 +142,10 @@ pub struct ProgramState {
     pub pc: usize,
     cursors: HashMap<usize, Cursor>,
     registers: Vec<Option<Value>>,
-    pager: Arc<Pager>,
 }
 
 impl ProgramState {
-    pub fn new(pager: Arc<Pager>, max_registers: usize) -> Self {
+    pub fn new(max_registers: usize) -> Self {
         let cursors = HashMap::new();
         let mut registers = Vec::new();
         registers.resize(max_registers, None);
@@ -154,7 +153,6 @@ impl ProgramState {
             pc: 0,
             cursors,
             registers,
-            pager,
         }
     }
 
@@ -187,7 +185,7 @@ impl Program {
         }
     }
 
-    pub fn step(&self, state: &mut ProgramState) -> Result<StepResult> {
+    pub fn step(&self, state: &mut ProgramState, pager: Arc<Pager>) -> Result<StepResult> {
         loop {
             let insn = &self.insns[state.pc];
             trace_insn(state.pc, insn);
@@ -199,7 +197,7 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Cursor::new(state.pager.clone(), *root_page);
+                    let cursor = Cursor::new(pager.clone(), *root_page);
                     state.cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }

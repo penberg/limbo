@@ -12,6 +12,7 @@ use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
+use vdbe::Program;
 
 pub use types::Value;
 
@@ -46,6 +47,27 @@ pub struct Connection {
 }
 
 impl Connection {
+    pub fn prepare(&self, sql: impl Into<String>) -> Result<Statement> {
+        let sql = sql.into();
+        let mut parser = Parser::new(sql.as_bytes());
+        let cmd = parser.next()?;
+        if let Some(cmd) = cmd {
+            match cmd {
+                Cmd::Stmt(stmt) => {
+                    let program = Arc::new(vdbe::translate(&self.schema, stmt)?);
+                    Ok(Statement {
+                        program,
+                        pager: self.pager.clone(),
+                    })
+                }
+                Cmd::Explain(_stmt) => todo!(),
+                Cmd::ExplainQueryPlan(_stmt) => todo!(),
+            }
+        } else {
+            todo!()
+        }
+    }
+
     pub fn query(&self, sql: impl Into<String>) -> Result<Option<Rows>> {
         let sql = sql.into();
         let mut parser = Parser::new(sql.as_bytes());
@@ -53,10 +75,9 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = vdbe::translate(&self.schema, stmt)?;
-                    let mut state =
-                        vdbe::ProgramState::new(self.pager.clone(), program.max_registers);
-                    Ok(Some(Rows::new(state, program)))
+                    let program = Arc::new(vdbe::translate(&self.schema, stmt)?);
+                    let state = vdbe::ProgramState::new(program.max_registers);
+                    Ok(Some(Rows::new(state, program, self.pager.clone())))
                 }
                 Cmd::Explain(stmt) => {
                     let program = vdbe::translate(&self.schema, stmt)?;
@@ -83,9 +104,8 @@ impl Connection {
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
                     let program = vdbe::translate(&self.schema, stmt)?;
-                    let mut state =
-                        vdbe::ProgramState::new(self.pager.clone(), program.max_registers);
-                    program.step(&mut state)?;
+                    let mut state = vdbe::ProgramState::new(program.max_registers);
+                    program.step(&mut state, self.pager.clone())?;
                 }
             }
         }
@@ -93,22 +113,42 @@ impl Connection {
     }
 }
 
+pub struct Statement {
+    program: Arc<vdbe::Program>,
+    pager: Arc<Pager>,
+}
+
+impl Statement {
+    pub fn query(&self) -> Result<Rows> {
+        let state = vdbe::ProgramState::new(self.program.max_registers);
+        Ok(Rows::new(state, self.program.clone(), self.pager.clone()))
+    }
+
+    pub fn reset(&self) {
+    }
+}
+
 pub struct Rows {
     state: vdbe::ProgramState,
-    program: vdbe::Program,
+    program: Arc<vdbe::Program>,
+    pager: Arc<Pager>,
 }
 
 impl Rows {
-    pub fn new(state: vdbe::ProgramState, program: vdbe::Program) -> Self {
-        Self { state, program }
+    pub fn new(state: vdbe::ProgramState, program: Arc<vdbe::Program>, pager: Arc<Pager>) -> Self {
+        Self {
+            state,
+            program,
+            pager,
+        }
     }
 
-    pub fn next(&mut self) -> Result<Option<crate::types::Record>> {
+    pub fn next(&mut self) -> Result<Option<Row>> {
         loop {
-            let result = self.program.step(&mut self.state)?;
+            let result = self.program.step(&mut self.state, self.pager.clone())?;
             match result {
                 vdbe::StepResult::Row(row) => {
-                    return Ok(Some(row));
+                    return Ok(Some(Row { values: row.values }));
                 }
                 vdbe::StepResult::IO => todo!(),
                 vdbe::StepResult::Done => {
@@ -116,6 +156,17 @@ impl Rows {
                 }
             }
         }
+    }
+}
+
+pub struct Row {
+    pub values: Vec<Value>,
+}
+
+impl Row {
+    pub fn get<T: crate::types::FromValue>(&self, idx: usize) -> Result<T> {
+        let value = &self.values[idx];
+        T::from_value(value)
     }
 }
 
