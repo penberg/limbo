@@ -50,14 +50,15 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let mut program = vdbe::translate(self.pager.clone(), &self.schema, stmt)?;
+                    let mut program = vdbe::translate(&self.schema, stmt)?;
+                    let mut state = vdbe::ProgramState::new(self.pager.clone());
                     loop {
-                        let result = program.step()?;
+                        let result = program.step(&mut state)?;
                         match result {
                             vdbe::StepResult::Row => {
                                 let mut row = Vec::new();
-                                for i in 0..program.column_count() {
-                                    row.push(program.column(i).unwrap().to_string());
+                                for i in 0..state.column_count() {
+                                    row.push(state.column(i).unwrap().to_string());
                                 }
                                 log::trace!("Row = {:?}", row);
                             }
@@ -82,13 +83,14 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Explain(stmt) => {
-                    let program = vdbe::translate(self.pager.clone(), &self.schema, stmt)?;
+                    let program = vdbe::translate(&self.schema, stmt)?;
                     program.explain();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
-                    let mut program = vdbe::translate(self.pager.clone(), &self.schema, stmt)?;
-                    program.step()?;
+                    let program = vdbe::translate(&self.schema, stmt)?;
+                    let mut state = vdbe::ProgramState::new(self.pager.clone());
+                    program.step(&mut state)?;
                 }
             }
         }

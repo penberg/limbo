@@ -97,14 +97,8 @@ impl ProgramBuilder {
         self.insns.len()
     }
 
-    pub fn build(self, pager: Arc<Pager>) -> Program {
-        Program {
-            insns: self.insns,
-            pc: 0,
-            pager,
-            cursors: HashMap::new(),
-            registers: Vec::new(),
-        }
+    pub fn build(self) -> Program {
+        Program { insns: self.insns }
     }
 }
 
@@ -114,12 +108,35 @@ pub enum StepResult {
     Row,
 }
 
-pub struct Program {
-    pub insns: Vec<Insn>,
+/// The program state describes the environment in which the program executes.
+pub struct ProgramState {
     pub pc: usize,
-    pager: Arc<Pager>,
     cursors: HashMap<usize, Cursor>,
     registers: Vec<Option<Value>>,
+    pager: Arc<Pager>,
+}
+
+impl ProgramState {
+    pub fn new(pager: Arc<Pager>) -> Self {
+        Self {
+            pc: 0,
+            cursors: HashMap::new(),
+            registers: Vec::new(),
+            pager,
+        }
+    }
+
+    pub fn column_count(&self) -> usize {
+        self.registers.len()
+    }
+
+    pub fn column(&self, i: usize) -> Option<String> {
+        Some(format!("{:?}", self.registers[i]))
+    }
+}
+
+pub struct Program {
+    pub insns: Vec<Insn>,
 }
 
 impl Program {
@@ -131,99 +148,91 @@ impl Program {
         }
     }
 
-    pub fn column_count(&self) -> usize {
-        self.registers.len()
-    }
-
-    pub fn column(&self, i: usize) -> Option<String> {
-        Some(format!("{:?}", self.registers[i]))
-    }
-
-    pub fn step(&mut self) -> Result<StepResult> {
+    pub fn step(&self, state: &mut ProgramState) -> Result<StepResult> {
         loop {
-            let insn = &self.insns[self.pc];
-            trace_insn(self.pc, insn);
+            let insn = &self.insns[state.pc];
+            trace_insn(state.pc, insn);
             match insn {
                 Insn::Init(init) => {
-                    self.pc = init.target_pc;
+                    state.pc = init.target_pc;
                 }
                 Insn::OpenReadAsync(insn) => {
-                    let cursor = Cursor::new(self.pager.clone(), insn.root_page);
-                    self.cursors.insert(insn.cursor_id, cursor);
-                    self.pc += 1;
+                    let cursor = Cursor::new(state.pager.clone(), insn.root_page);
+                    state.cursors.insert(insn.cursor_id, cursor);
+                    state.pc += 1;
                 }
                 Insn::OpenReadAwait => {
-                    self.pc += 1;
+                    state.pc += 1;
                 }
                 Insn::RewindAsync(insn) => {
-                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
                     cursor.rewind()?;
-                    self.pc += 1;
+                    state.pc += 1;
                 }
                 Insn::RewindAwait(insn) => {
-                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
                     if cursor.is_empty() {
-                        self.pc = insn.pc_if_empty;
+                        state.pc = insn.pc_if_empty;
                     } else {
-                        self.pc += 1;
+                        state.pc += 1;
                     }
                 }
                 Insn::Column(insn) => {
-                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
-                        self.registers.resize(insn.column + 1, None);
-                        self.registers[insn.dest] = Some(record.values[insn.column].clone());
+                        state.registers.resize(insn.column + 1, None);
+                        state.registers[insn.dest] = Some(record.values[insn.column].clone());
                     } else {
                         todo!();
                     }
-                    self.pc += 1;
+                    state.pc += 1;
                 }
                 Insn::ResultRow(insn) => {
-                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
                     let _ = cursor.record()?;
-                    self.pc += 1;
+                    state.pc += 1;
                     return Ok(StepResult::Row);
                 }
                 Insn::NextAsync(insn) => {
-                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
                     cursor.next()?;
-                    self.pc += 1;
+                    state.pc += 1;
                 }
                 Insn::NextAwait(insn) => {
-                    let cursor = self.cursors.get_mut(&insn.cursor_id).unwrap();
+                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
                     if cursor.has_record() {
-                        self.pc = insn.pc_if_next;
+                        state.pc = insn.pc_if_next;
                     } else {
-                        self.pc += 1;
+                        state.pc += 1;
                     }
                 }
                 Insn::Halt => {
                     return Ok(StepResult::Done);
                 }
                 Insn::Transaction => {
-                    self.pc += 1;
+                    state.pc += 1;
                 }
                 Insn::Goto(goto) => {
-                    self.pc = goto.target_pc;
+                    state.pc = goto.target_pc;
                 }
                 Insn::Integer(insn) => {
-                    self.registers.resize(insn.dest + 1, None);
-                    self.registers[insn.dest] = Some(Value::Integer(insn.value));
-                    self.pc += 1;
+                    state.registers.resize(insn.dest + 1, None);
+                    state.registers[insn.dest] = Some(Value::Integer(insn.value));
+                    state.pc += 1;
                 }
             }
         }
     }
 }
 
-pub fn translate(pager: Arc<Pager>, schema: &Schema, stmt: Stmt) -> Result<Program> {
+pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
     match stmt {
-        Stmt::Select(select) => translate_select(pager, schema, select),
+        Stmt::Select(select) => translate_select(schema, select),
         _ => todo!(),
     }
 }
 
-fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Result<Program> {
+fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     match select.body.select {
         OneSelect::Select {
             columns,
@@ -279,7 +288,7 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
             program.emit_insn(Insn::Goto(GotoInsn {
                 target_pc: open_read_offset,
             }));
-            Ok(program.build(pager))
+            Ok(program.build())
         }
         OneSelect::Select {
             columns,
@@ -301,7 +310,7 @@ fn translate_select(pager: Arc<Pager>, schema: &Schema, select: Select) -> Resul
             program.emit_insn(Insn::Goto(GotoInsn {
                 target_pc: after_init_offset,
             }));
-            Ok(program.build(pager))
+            Ok(program.build())
         }
         _ => todo!(),
     }
