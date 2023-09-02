@@ -1,4 +1,10 @@
+use anyhow::Result;
 use core::fmt;
+use fallible_iterator::FallibleIterator;
+use sqlite3_parser::{
+    ast::{Cmd, CreateTableBody, Stmt},
+    lexer::sql::Parser,
+};
 use std::collections::HashMap;
 
 pub struct Schema {
@@ -28,6 +34,53 @@ pub struct Table {
 }
 
 impl Table {
+    pub fn from_sql(sql: &str, root_page: usize) -> Result<Table> {
+        let mut parser = Parser::new(sql.as_bytes());
+        let cmd = parser.next()?;
+        match cmd {
+            Some(cmd) => match cmd {
+                Cmd::Stmt(stmt) => match stmt {
+                    Stmt::CreateTable { tbl_name, body, .. } => {
+                        let mut cols = vec![];
+                        match body {
+                            CreateTableBody::ColumnsAndConstraints { columns, .. } => {
+                                for column in columns {
+                                    let name = column.col_name.0.to_string();
+                                    let ty = match column.col_type {
+                                        Some(data_type) => match data_type.name.as_str() {
+                                            "INT" => Type::Integer,
+                                            "REAL" => Type::Real,
+                                            "TEXT" => Type::Text,
+                                            "BLOB" => Type::Blob,
+                                            _ => unreachable!("Unknown type: {:?}", data_type.name),
+                                        },
+                                        None => Type::Null,
+                                    };
+                                    cols.push(Column { name, ty });
+                                }
+                            }
+                            CreateTableBody::AsSelect(_) => todo!(),
+                        };
+                        Ok(Table {
+                            root_page,
+                            name: tbl_name.name.to_string(),
+                            columns: cols,
+                        })
+                    }
+                    _ => {
+                        anyhow::bail!("Expected CREATE TABLE statement");
+                    }
+                },
+                _ => {
+                    anyhow::bail!("Expected CREATE TABLE statement");
+                }
+            },
+            None => {
+                anyhow::bail!("Expected CREATE TABLE statement");
+            }
+        }
+    }
+
     pub fn to_sql(&self) -> String {
         let mut sql = format!("CREATE TABLE {} (\n", self.name);
         for (i, column) in self.columns.iter().enumerate() {

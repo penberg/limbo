@@ -16,8 +16,7 @@ use fallible_iterator::FallibleIterator;
 use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
-use std::sync::Arc;
-use vdbe::Program;
+use std::{borrow::BorrowMut, sync::Arc};
 
 pub use types::Value;
 
@@ -29,12 +28,28 @@ pub struct Database {
 impl Database {
     pub fn open(io: Arc<dyn IO>, path: &str) -> Result<Database> {
         let pager = Arc::new(Pager::open(io.clone(), path)?);
-        let schema = Arc::new(Schema::new());
+        let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
-            schema: schema.clone(),
+            schema: bootstrap_schema.clone(),
         };
-        conn.query("SELECT * FROM sqlite_schema")?;
+        let mut schema = Schema::new();
+        let rows = conn.query("SELECT * FROM sqlite_schema")?;
+        if let Some(mut rows) = rows {
+            while let Some(row) = rows.next()? {
+                let ty = row.get::<String>(0)?;
+                if ty != "table" {
+                    continue;
+                }
+                let name: String = row.get::<String>(1)?;
+                let root_page: i64 = row.get::<i64>(3)?;
+                let sql: String = row.get::<String>(4)?;
+                let table = schema::Table::from_sql(&sql, root_page as usize)?;
+                assert_eq!(table.name, name);
+                schema.add_table(table.name.to_owned(), table);
+            }
+        }
+        let schema = Arc::new(schema);
         Ok(Database { pager, schema })
     }
 
@@ -129,8 +144,7 @@ impl Statement {
         Ok(Rows::new(state, self.program.clone(), self.pager.clone()))
     }
 
-    pub fn reset(&self) {
-    }
+    pub fn reset(&self) {}
 }
 
 pub struct Rows {
