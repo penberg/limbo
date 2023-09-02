@@ -5,7 +5,7 @@ use crate::types::{Record, Value};
 
 use anyhow::Result;
 use sqlite3_parser::ast::{OneSelect, Select, Stmt};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub type BranchOffset = usize;
@@ -140,13 +140,13 @@ pub enum StepResult {
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: usize,
-    cursors: HashMap<usize, Cursor>,
+    cursors: BTreeMap<usize, Cursor>,
     registers: Vec<Value>,
 }
 
 impl ProgramState {
     pub fn new(max_registers: usize) -> Self {
-        let cursors = HashMap::new();
+        let cursors = BTreeMap::new();
         let mut registers = Vec::with_capacity(max_registers);
         registers.resize(max_registers, Value::Null);
         Self {
