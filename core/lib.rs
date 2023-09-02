@@ -58,7 +58,11 @@ impl Connection {
                         vdbe::ProgramState::new(self.pager.clone(), program.max_registers);
                     Ok(Some(Rows::new(state, program)))
                 }
-                Cmd::Explain(_stmt) => Ok(None),
+                Cmd::Explain(stmt) => {
+                    let program = vdbe::translate(&self.schema, stmt)?;
+                    program.explain();
+                    Ok(None)
+                }
                 Cmd::ExplainQueryPlan(_stmt) => Ok(None),
             }
         } else {
