@@ -83,12 +83,22 @@ pub enum Insn {
 }
 
 pub struct ProgramBuilder {
-    pub insns: Vec<Insn>,
+    next_free_register: usize,
+    insns: Vec<Insn>,
 }
 
 impl ProgramBuilder {
     pub fn new() -> Self {
-        Self { insns: Vec::new() }
+        Self {
+            next_free_register: 0,
+            insns: Vec::new(),
+        }
+    }
+
+    pub fn alloc_register(&mut self) -> usize {
+        let reg = self.next_free_register;
+        self.next_free_register += 1;
+        reg
     }
 
     pub fn emit_placeholder(&mut self) -> usize {
@@ -110,7 +120,10 @@ impl ProgramBuilder {
     }
 
     pub fn build(self) -> Program {
-        Program { insns: self.insns }
+        Program {
+            max_registers: self.next_free_register,
+            insns: self.insns,
+        }
     }
 }
 
@@ -129,13 +142,22 @@ pub struct ProgramState {
 }
 
 impl ProgramState {
-    pub fn new(pager: Arc<Pager>) -> Self {
+    pub fn new(pager: Arc<Pager>, max_registers: usize) -> Self {
+        let cursors = HashMap::new();
+        let mut registers = Vec::new();
+        registers.resize(max_registers, None);
         Self {
             pc: 0,
-            cursors: HashMap::new(),
-            registers: Vec::new(),
+            cursors,
+            registers,
             pager,
         }
+    }
+
+    pub fn alloc_register(&mut self) -> usize {
+        let reg = self.registers.len();
+        self.registers.push(None);
+        reg
     }
 
     pub fn column_count(&self) -> usize {
@@ -148,6 +170,7 @@ impl ProgramState {
 }
 
 pub struct Program {
+    pub max_registers: usize,
     pub insns: Vec<Insn>,
 }
 
@@ -202,7 +225,6 @@ impl Program {
                 } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
-                        state.registers.resize(*column + 1, None);
                         state.registers[*dest] = Some(record.values[*column].clone());
                     } else {
                         todo!();
@@ -241,7 +263,6 @@ impl Program {
                     state.pc = *target_pc;
                 }
                 Insn::Integer { value, dest } => {
-                    state.registers.resize(*dest + 1, None);
                     state.registers[*dest] = Some(Value::Integer(*value));
                     state.pc += 1;
                 }
@@ -347,7 +368,6 @@ fn translate_columns(
     table: Option<&crate::schema::Table>,
     columns: Vec<sqlite3_parser::ast::ResultColumn>,
 ) {
-    let mut dest = 0;
     for col in columns {
         match col {
             sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
@@ -393,11 +413,11 @@ fn translate_columns(
                 } => todo!(),
                 sqlite3_parser::ast::Expr::Literal(lit) => match lit {
                     sqlite3_parser::ast::Literal::Numeric(val) => {
+                        let dest = program.alloc_register();
                         program.emit_insn(Insn::Integer {
                             value: val.parse().unwrap(),
                             dest,
                         });
-                        dest += 1;
                     }
                     sqlite3_parser::ast::Literal::String(_) => todo!(),
                     sqlite3_parser::ast::Literal::Blob(_) => todo!(),
@@ -418,12 +438,12 @@ fn translate_columns(
             },
             sqlite3_parser::ast::ResultColumn::Star => {
                 for i in 0..table.unwrap().columns.len() {
+                    let dest = program.alloc_register();
                     program.emit_insn(Insn::Column {
                         column: i,
                         dest,
                         cursor_id: cursor_id.unwrap(),
                     });
-                    dest += 1;
                 }
             }
             sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),

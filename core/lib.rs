@@ -50,8 +50,9 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let mut program = vdbe::translate(&self.schema, stmt)?;
-                    let mut state = vdbe::ProgramState::new(self.pager.clone());
+                    let program = vdbe::translate(&self.schema, stmt)?;
+                    let mut state =
+                        vdbe::ProgramState::new(self.pager.clone(), program.max_registers);
                     loop {
                         let result = program.step(&mut state)?;
                         match result {
@@ -67,7 +68,7 @@ impl Connection {
                         }
                     }
                 }
-                Cmd::Explain(stmt) => {
+                Cmd::Explain(_stmt) => {
                     todo!();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
@@ -89,7 +90,8 @@ impl Connection {
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
                     let program = vdbe::translate(&self.schema, stmt)?;
-                    let mut state = vdbe::ProgramState::new(self.pager.clone());
+                    let mut state =
+                        vdbe::ProgramState::new(self.pager.clone(), program.max_registers);
                     program.step(&mut state)?;
                 }
             }
