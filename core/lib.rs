@@ -3,6 +3,7 @@ mod buffer_pool;
 mod pager;
 mod schema;
 mod sqlite3_ondisk;
+mod types;
 mod vdbe;
 
 use anyhow::Result;
@@ -11,6 +12,8 @@ use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
+
+pub use types::Value;
 
 pub struct Database {
     pager: Arc<Pager>,
@@ -43,7 +46,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn query(&self, sql: impl Into<String>) -> Result<()> {
+    pub fn query(&self, sql: impl Into<String>) -> Result<Option<Rows>> {
         let sql = sql.into();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -53,28 +56,14 @@ impl Connection {
                     let program = vdbe::translate(&self.schema, stmt)?;
                     let mut state =
                         vdbe::ProgramState::new(self.pager.clone(), program.max_registers);
-                    loop {
-                        let result = program.step(&mut state)?;
-                        match result {
-                            vdbe::StepResult::Row => {
-                                let mut row = Vec::new();
-                                for i in 0..state.column_count() {
-                                    row.push(state.column(i).unwrap().to_string());
-                                }
-                                log::trace!("Row = {:?}", row);
-                            }
-                            vdbe::StepResult::IO => todo!(),
-                            vdbe::StepResult::Done => break,
-                        }
-                    }
+                    Ok(Some(Rows::new(state, program)))
                 }
-                Cmd::Explain(_stmt) => {
-                    todo!();
-                }
-                Cmd::ExplainQueryPlan(_stmt) => todo!(),
+                Cmd::Explain(_stmt) => Ok(None),
+                Cmd::ExplainQueryPlan(_stmt) => Ok(None),
             }
+        } else {
+            Ok(None)
         }
-        Ok(())
     }
 
     pub fn execute(&self, sql: impl Into<String>) -> Result<()> {
@@ -97,6 +86,32 @@ impl Connection {
             }
         }
         Ok(())
+    }
+}
+
+pub struct Rows {
+    state: vdbe::ProgramState,
+    program: vdbe::Program,
+}
+
+impl Rows {
+    pub fn new(state: vdbe::ProgramState, program: vdbe::Program) -> Self {
+        Self { state, program }
+    }
+
+    pub fn next(&mut self) -> Result<Option<crate::types::Record>> {
+        loop {
+            let result = self.program.step(&mut self.state)?;
+            match result {
+                vdbe::StepResult::Row(row) => {
+                    return Ok(Some(row));
+                }
+                vdbe::StepResult::IO => todo!(),
+                vdbe::StepResult::Done => {
+                    return Ok(None);
+                }
+            }
+        }
     }
 }
 

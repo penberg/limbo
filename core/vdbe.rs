@@ -1,7 +1,7 @@
 use crate::btree::Cursor;
 use crate::pager::Pager;
 use crate::schema::Schema;
-use crate::sqlite3_ondisk::Value;
+use crate::types::{Record, Value};
 
 use anyhow::Result;
 use sqlite3_parser::ast::{OneSelect, Select, Stmt};
@@ -49,8 +49,8 @@ pub enum Insn {
 
     // Emit a row of results.
     ResultRow {
-        // FIXME: This is incorrect, it should be reading from registers.
-        cursor_id: CursorID,
+        register_start: usize,
+        register_end: usize,
     },
 
     // Advance the cursor to the next row.
@@ -101,6 +101,10 @@ impl ProgramBuilder {
         reg
     }
 
+    pub fn next_free_register(&self) -> usize {
+        self.next_free_register
+    }
+
     pub fn emit_placeholder(&mut self) -> usize {
         let offset = self.insns.len();
         self.insns.push(Insn::Halt);
@@ -130,7 +134,7 @@ impl ProgramBuilder {
 pub enum StepResult {
     Done,
     IO,
-    Row,
+    Row(Record),
 }
 
 /// The program state describes the environment in which the program executes.
@@ -231,11 +235,16 @@ impl Program {
                     }
                     state.pc += 1;
                 }
-                Insn::ResultRow { cursor_id } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
-                    let _ = cursor.record()?;
+                Insn::ResultRow {
+                    register_start,
+                    register_end,
+                } => {
+                    let mut values = vec![];
+                    for i in *register_start..*register_end {
+                        values.push(state.registers[i].clone().unwrap());
+                    }
                     state.pc += 1;
-                    return Ok(StepResult::Row);
+                    return Ok(StepResult::Row(Record::new(values)));
                 }
                 Insn::NextAsync { cursor_id } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
@@ -309,8 +318,12 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync { cursor_id });
             let rewind_await_offset = program.emit_placeholder();
-            translate_columns(&mut program, Some(cursor_id), Some(table), columns);
-            program.emit_insn(Insn::ResultRow { cursor_id });
+            let (register_start, register_end) =
+                translate_columns(&mut program, Some(cursor_id), Some(table), columns);
+            program.emit_insn(Insn::ResultRow {
+                register_start,
+                register_end,
+            });
             program.emit_insn(Insn::NextAsync { cursor_id });
             program.emit_insn(Insn::NextAwait {
                 cursor_id,
@@ -344,8 +357,12 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             let mut program = ProgramBuilder::new();
             let init_offset = program.emit_placeholder();
             let after_init_offset = program.offset();
-            translate_columns(&mut program, None, None, columns);
-            program.emit_insn(Insn::ResultRow { cursor_id: 0 });
+            let (register_start, register_end) =
+                translate_columns(&mut program, None, None, columns);
+            program.emit_insn(Insn::ResultRow {
+                register_start,
+                register_end,
+            });
             program.emit_insn(Insn::Halt);
             program.fixup_insn(
                 init_offset,
@@ -367,7 +384,8 @@ fn translate_columns(
     cursor_id: Option<usize>,
     table: Option<&crate::schema::Table>,
     columns: Vec<sqlite3_parser::ast::ResultColumn>,
-) {
+) -> (usize, usize) {
+    let register_start = program.next_free_register();
     for col in columns {
         match col {
             sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
@@ -449,6 +467,8 @@ fn translate_columns(
             sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
         }
     }
+    let register_end = program.next_free_register();
+    (register_start, register_end)
 }
 
 fn trace_insn(addr: usize, insn: &Insn) {
@@ -503,7 +523,18 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             column,
             dest,
         } => ("Column", *cursor_id, *column, *dest, "", 0, "".to_string()),
-        Insn::ResultRow { cursor_id } => ("ResultRow", *cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::ResultRow {
+            register_start,
+            register_end,
+        } => (
+            "ResultRow",
+            *register_start,
+            *register_end,
+            0,
+            "",
+            0,
+            "".to_string(),
+        ),
         Insn::NextAsync { cursor_id } => ("NextAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::NextAwait {
             cursor_id,

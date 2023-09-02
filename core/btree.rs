@@ -1,5 +1,6 @@
 use crate::pager::Pager;
-use crate::sqlite3_ondisk::{BTreeCell, BTreePage, Record, TableLeafCell};
+use crate::sqlite3_ondisk::{BTreeCell, BTreePage, TableLeafCell};
+use crate::types::Record;
 
 use anyhow::Result;
 

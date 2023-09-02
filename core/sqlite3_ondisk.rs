@@ -24,6 +24,7 @@
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
+use crate::types::{Record, Value};
 use crate::{DatabaseRef, IO};
 use anyhow::{anyhow, Result};
 use std::borrow::BorrowMut;
@@ -200,20 +201,6 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             }))
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum Value {
-    Null,
-    Integer(i64),
-    Float(f64),
-    Text(String),
-    Blob(Vec<u8>),
-}
-
-#[derive(Debug)]
-pub struct Record {
-    pub values: Vec<Value>,
 }
 
 #[derive(Debug)]

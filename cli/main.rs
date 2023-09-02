@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use lig_core::{Database, DatabaseRef};
+use cli_table::{Cell, Table};
+use lig_core::{Database, DatabaseRef, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,10 +32,31 @@ fn main() -> anyhow::Result<()> {
         let readline = rl.readline("\x1b[90m>\x1b[0m ");
         match readline {
             Ok(line) => {
-                if let Err(err) = conn.execute(&line) {
-                    eprintln!("{}", err);
-                } else {
-                    rl.add_history_entry(line)?;
+                rl.add_history_entry(line.to_owned())?;
+                match conn.query(line) {
+                    Ok(Some(ref mut rows)) => {
+                        let mut table_rows: Vec<Vec<_>> = vec![];
+                        while let Some(row) = rows.next()? {
+                            table_rows.push(
+                                row.values
+                                    .iter()
+                                    .map(|value| match value {
+                                        Value::Null => "NULL".cell(),
+                                        Value::Integer(i) => i.to_string().cell(),
+                                        Value::Float(f) => f.to_string().cell(),
+                                        Value::Text(s) => s.cell(),
+                                        Value::Blob(b) => format!("{:?}", b).cell(),
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        let table = table_rows.table();
+                        cli_table::print_stdout(table).unwrap();
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        eprintln!("{}", err);
+                    }
                 }
             }
             Err(ReadlineError::Interrupted) => {
