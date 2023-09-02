@@ -238,7 +238,7 @@ impl Program {
                     register_start,
                     register_end,
                 } => {
-                    let mut values = vec![];
+                    let mut values = Vec::with_capacity(*register_end - *register_start);
                     for i in *register_start..*register_end {
                         values.push(state.registers[i].clone().unwrap());
                     }
