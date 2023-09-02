@@ -216,6 +216,7 @@ impl Program {
                     pc_if_empty,
                 } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
                     if cursor.is_empty() {
                         state.pc = *pc_if_empty;
                     } else {
@@ -256,6 +257,7 @@ impl Program {
                     pc_if_next,
                 } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
                     if cursor.has_record() {
                         state.pc = *pc_if_next;
                     } else {

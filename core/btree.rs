@@ -26,6 +26,10 @@ impl Cursor {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.page.borrow().is_none()
+    }
+
     pub fn rewind(&mut self) -> Result<()> {
         self.page
             .replace(Some(self.pager.read_page(self.root_page)?));
@@ -34,15 +38,16 @@ impl Cursor {
         Ok(())
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.page.borrow().is_none()
-    }
-
     pub fn next(&mut self) -> Result<Option<Record>> {
         let result = self.record.take();
         let next = self.get_next_record()?;
         self.record.replace(next);
         Ok(result)
+    }
+
+    pub fn wait_for_completion(&mut self) -> Result<()> {
+        // TODO: Wait for pager I/O to complete
+        Ok(())
     }
 
     pub fn record(&self) -> Result<Ref<Option<Record>>> {
