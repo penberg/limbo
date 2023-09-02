@@ -10,7 +10,7 @@ use std::sync::Arc;
 pub struct Cursor {
     pager: Arc<Pager>,
     root_page: usize,
-    page: RefCell<Option<BTreePage>>,
+    page: RefCell<Option<Arc<BTreePage>>>,
     record: RefCell<Option<Record>>,
     cell_idx: usize,
 }
