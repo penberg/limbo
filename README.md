@@ -31,6 +31,21 @@ You can then start the Lig shell with:
 cargo run hello.db
 ```
 
+## Developing
+
+Run benchmarks:
+
+```console
+cargo bench
+```
+
+Run benchmarks and generate flamegraphs:
+
+```console
+echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
+cargo bench --bench benchmark -- --profile-time=5
+```
+
 ## License
 
 This project is licensed under the [MIT license].
