@@ -472,8 +472,7 @@ fn translate_columns(
 }
 
 fn trace_insn(addr: usize, insn: &Insn) {
-    let s = insn_to_str(addr, insn);
-    log::trace!("{}", s);
+    log::trace!("{}", insn_to_str(addr, insn));
 }
 
 fn print_insn(addr: usize, insn: &Insn) {
