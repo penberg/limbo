@@ -6,6 +6,11 @@ mod sqlite3_ondisk;
 mod types;
 mod vdbe;
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 use anyhow::Result;
 use fallible_iterator::FallibleIterator;
 use pager::Pager;
