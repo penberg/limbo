@@ -189,9 +189,9 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
         PageType::IndexLeaf => todo!(),
         PageType::TableLeaf => {
             let mut pos = pos;
-            let (payload_size, nr) = read_varint(&page[pos..])?;
+            let (payload_size, nr) = read_varint(&page[pos..]);
             pos += nr;
-            let (rowid, nr) = read_varint(&page[pos..])?;
+            let (rowid, nr) = read_varint(&page[pos..]);
             pos += nr;
             let payload = &page[pos..pos + payload_size as usize];
             // FIXME: page overflows if the payload is too large
@@ -243,13 +243,13 @@ impl TryFrom<u64> for SerialType {
 
 pub fn read_record(payload: &[u8]) -> Result<Record> {
     let mut pos = 0;
-    let (header_size, nr) = read_varint(payload)?;
+    let (header_size, nr) = read_varint(payload);
     assert!((header_size as usize) >= nr);
     let mut header_size = (header_size as usize) - nr;
     pos += nr;
     let mut serial_types = Vec::new();
     while header_size > 0 {
-        let (serial_type, nr) = read_varint(&payload[pos..])?;
+        let (serial_type, nr) = read_varint(&payload[pos..]);
         let serial_type = SerialType::try_from(serial_type)?;
         serial_types.push(serial_type);
         assert!(pos + nr < payload.len());
@@ -310,7 +310,7 @@ pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(Value, usize)>
     }
 }
 
-pub fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
+fn read_varint(buf: &[u8]) -> (u64, usize) {
     let mut value = 0;
     let mut shift = 0;
     let mut i = 0;
@@ -323,5 +323,5 @@ pub fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
         shift += 7;
         i += 1;
     }
-    Ok((value, i + 1))
+    (value, i + 1)
 }
