@@ -75,6 +75,16 @@ fn bench(c: &mut Criterion) {
             stmt.reset();
         });
     });
+
+    let stmt = conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
+    group.bench_function("Execute prepared statement: 'SELECT * FROM users LIMIT 1'", |b| {
+        b.iter(|| {
+            let mut rows = stmt.query().unwrap();
+            let row = rows.next().unwrap().unwrap();
+            assert_eq!(row.get::<i64>(0).unwrap(), 1);
+            stmt.reset();
+        });
+    });
 }
 
 criterion_group! {
