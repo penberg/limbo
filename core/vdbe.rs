@@ -141,25 +141,19 @@ pub enum StepResult {
 pub struct ProgramState {
     pub pc: usize,
     cursors: HashMap<usize, Cursor>,
-    registers: Vec<Option<Value>>,
+    registers: Vec<Value>,
 }
 
 impl ProgramState {
     pub fn new(max_registers: usize) -> Self {
         let cursors = HashMap::new();
-        let mut registers = Vec::new();
-        registers.resize(max_registers, None);
+        let mut registers = Vec::with_capacity(max_registers);
+        registers.resize(max_registers, Value::Null);
         Self {
             pc: 0,
             cursors,
             registers,
         }
-    }
-
-    pub fn alloc_register(&mut self) -> usize {
-        let reg = self.registers.len();
-        self.registers.push(None);
-        reg
     }
 
     pub fn column_count(&self) -> usize {
@@ -228,7 +222,7 @@ impl Program {
                 } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
-                        state.registers[*dest] = Some(record.values[*column].clone());
+                        state.registers[*dest] = record.values[*column].clone();
                     } else {
                         todo!();
                     }
@@ -240,7 +234,7 @@ impl Program {
                 } => {
                     let mut values = Vec::with_capacity(*register_end - *register_start);
                     for i in *register_start..*register_end {
-                        values.push(state.registers[i].clone().unwrap());
+                        values.push(state.registers[i].clone());
                     }
                     state.pc += 1;
                     return Ok(StepResult::Row(Record::new(values)));
@@ -272,7 +266,7 @@ impl Program {
                     state.pc = *target_pc;
                 }
                 Insn::Integer { value, dest } => {
-                    state.registers[*dest] = Some(Value::Integer(*value));
+                    state.registers[*dest] = Value::Integer(*value);
                     state.pc += 1;
                 }
             }
