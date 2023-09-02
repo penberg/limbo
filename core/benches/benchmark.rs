@@ -60,7 +60,7 @@ fn bench_db() -> Database {
 }
 
 fn bench(c: &mut Criterion) {
-    let mut group = c.benchmark_group("libsql");
+    let mut group = c.benchmark_group("lig");
     group.throughput(Throughput::Elements(1));
 
     let db = bench_db();
