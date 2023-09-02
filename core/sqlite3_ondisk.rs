@@ -257,7 +257,7 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
         assert!(header_size >= nr);
         header_size -= nr;
     }
-    let mut values = Vec::new();
+    let mut values = Vec::with_capacity(serial_types.len());
     for serial_type in serial_types {
         let (value, usize) = read_value(&payload[pos..], serial_type)?;
         pos += usize;
