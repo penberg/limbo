@@ -8,66 +8,78 @@ use sqlite3_parser::ast::{OneSelect, Select, Stmt};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub type BranchOffset = usize;
+
+pub type CursorID = usize;
+
+pub type PageIdx = usize;
+
 pub enum Insn {
-    Init(InitInsn),
-    OpenReadAsync(OpenReadAsyncInsn),
+    // Initialize the program state and jump to the given PC.
+    Init {
+        target_pc: BranchOffset,
+    },
+
+    // Open a cursor for reading.
+    OpenReadAsync {
+        cursor_id: CursorID,
+        root_page: PageIdx,
+    },
+
+    // Await for the competion of open cursor.
     OpenReadAwait,
-    RewindAsync(RewindAsyncInsn),
-    RewindAwait(RewindAwaitInsn),
-    Column(ColumnInsn),
-    ResultRow(ResultRowInsn),
-    NextAsync(NextAsyncInsn),
-    NextAwait(NextAwaitInsn),
+
+    // Rewind the cursor to the beginning of the B-Tree.
+    RewindAsync {
+        cursor_id: CursorID,
+    },
+
+    // Await for the completion of cursor rewind.
+    RewindAwait {
+        cursor_id: CursorID,
+        pc_if_empty: BranchOffset,
+    },
+
+    // Read a column from the current row of the cursor.
+    Column {
+        cursor_id: CursorID,
+        column: usize,
+        dest: usize,
+    },
+
+    // Emit a row of results.
+    ResultRow {
+        // FIXME: This is incorrect, it should be reading from registers.
+        cursor_id: CursorID,
+    },
+
+    // Advance the cursor to the next row.
+    NextAsync {
+        cursor_id: CursorID,
+    },
+
+    // Await for the completion of cursor advance.
+    NextAwait {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
+    },
+
+    // Halt the program.
     Halt,
+
+    // Start a transaction.
     Transaction,
-    Goto(GotoInsn),
-    Integer(IntegerInsn),
-}
 
-pub struct InitInsn {
-    pub target_pc: usize,
-}
+    // Branch to the given PC.
+    Goto {
+        target_pc: BranchOffset,
+    },
 
-pub struct OpenReadAsyncInsn {
-    pub cursor_id: usize,
-    pub root_page: usize,
-}
-
-pub struct RewindAsyncInsn {
-    pub cursor_id: usize,
-}
-
-pub struct RewindAwaitInsn {
-    pub cursor_id: usize,
-    pub pc_if_empty: usize,
-}
-
-pub struct NextAsyncInsn {
-    pub cursor_id: usize,
-}
-
-pub struct NextAwaitInsn {
-    pub cursor_id: usize,
-    pub pc_if_next: usize,
-}
-
-pub struct ColumnInsn {
-    pub cursor_id: usize,
-    pub column: usize,
-    pub dest: usize,
-}
-
-pub struct ResultRowInsn {
-    pub cursor_id: usize,
-}
-
-pub struct GotoInsn {
-    pub target_pc: usize,
-}
-
-pub struct IntegerInsn {
-    pub value: i64,
-    pub dest: usize,
+    // Write an integer value into a register.
+    Integer {
+        value: i64,
+        dest: usize,
+    },
 }
 
 pub struct ProgramBuilder {
@@ -153,55 +165,68 @@ impl Program {
             let insn = &self.insns[state.pc];
             trace_insn(state.pc, insn);
             match insn {
-                Insn::Init(init) => {
-                    state.pc = init.target_pc;
+                Insn::Init { target_pc } => {
+                    state.pc = *target_pc;
                 }
-                Insn::OpenReadAsync(insn) => {
-                    let cursor = Cursor::new(state.pager.clone(), insn.root_page);
-                    state.cursors.insert(insn.cursor_id, cursor);
+                Insn::OpenReadAsync {
+                    cursor_id,
+                    root_page,
+                } => {
+                    let cursor = Cursor::new(state.pager.clone(), *root_page);
+                    state.cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
                 Insn::OpenReadAwait => {
                     state.pc += 1;
                 }
-                Insn::RewindAsync(insn) => {
-                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
+                Insn::RewindAsync { cursor_id } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     cursor.rewind()?;
                     state.pc += 1;
                 }
-                Insn::RewindAwait(insn) => {
-                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
+                Insn::RewindAwait {
+                    cursor_id,
+                    pc_if_empty,
+                } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     if cursor.is_empty() {
-                        state.pc = insn.pc_if_empty;
+                        state.pc = *pc_if_empty;
                     } else {
                         state.pc += 1;
                     }
                 }
-                Insn::Column(insn) => {
-                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
+                Insn::Column {
+                    cursor_id,
+                    column,
+                    dest,
+                } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
-                        state.registers.resize(insn.column + 1, None);
-                        state.registers[insn.dest] = Some(record.values[insn.column].clone());
+                        state.registers.resize(*column + 1, None);
+                        state.registers[*dest] = Some(record.values[*column].clone());
                     } else {
                         todo!();
                     }
                     state.pc += 1;
                 }
-                Insn::ResultRow(insn) => {
-                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
+                Insn::ResultRow { cursor_id } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     let _ = cursor.record()?;
                     state.pc += 1;
                     return Ok(StepResult::Row);
                 }
-                Insn::NextAsync(insn) => {
-                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
+                Insn::NextAsync { cursor_id } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     cursor.next()?;
                     state.pc += 1;
                 }
-                Insn::NextAwait(insn) => {
-                    let cursor = state.cursors.get_mut(&insn.cursor_id).unwrap();
+                Insn::NextAwait {
+                    cursor_id,
+                    pc_if_next,
+                } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
                     if cursor.has_record() {
-                        state.pc = insn.pc_if_next;
+                        state.pc = *pc_if_next;
                     } else {
                         state.pc += 1;
                     }
@@ -212,12 +237,12 @@ impl Program {
                 Insn::Transaction => {
                     state.pc += 1;
                 }
-                Insn::Goto(goto) => {
-                    state.pc = goto.target_pc;
+                Insn::Goto { target_pc } => {
+                    state.pc = *target_pc;
                 }
-                Insn::Integer(insn) => {
-                    state.registers.resize(insn.dest + 1, None);
-                    state.registers[insn.dest] = Some(Value::Integer(insn.value));
+                Insn::Integer { value, dest } => {
+                    state.registers.resize(*dest + 1, None);
+                    state.registers[*dest] = Some(Value::Integer(*value));
                     state.pc += 1;
                 }
             }
@@ -256,38 +281,38 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             let mut program = ProgramBuilder::new();
             let init_offset = program.emit_placeholder();
             let open_read_offset = program.offset();
-            program.emit_insn(Insn::OpenReadAsync(OpenReadAsyncInsn {
+            program.emit_insn(Insn::OpenReadAsync {
                 cursor_id: 0,
                 root_page,
-            }));
+            });
             program.emit_insn(Insn::OpenReadAwait);
-            program.emit_insn(Insn::RewindAsync(RewindAsyncInsn { cursor_id }));
+            program.emit_insn(Insn::RewindAsync { cursor_id });
             let rewind_await_offset = program.emit_placeholder();
             translate_columns(&mut program, Some(cursor_id), Some(table), columns);
-            program.emit_insn(Insn::ResultRow(ResultRowInsn { cursor_id }));
-            program.emit_insn(Insn::NextAsync(NextAsyncInsn { cursor_id }));
-            program.emit_insn(Insn::NextAwait(NextAwaitInsn {
+            program.emit_insn(Insn::ResultRow { cursor_id });
+            program.emit_insn(Insn::NextAsync { cursor_id });
+            program.emit_insn(Insn::NextAwait {
                 cursor_id,
                 pc_if_next: rewind_await_offset,
-            }));
+            });
             program.fixup_insn(
                 rewind_await_offset,
-                Insn::RewindAwait(RewindAwaitInsn {
+                Insn::RewindAwait {
                     cursor_id,
                     pc_if_empty: program.offset(),
-                }),
+                },
             );
             program.emit_insn(Insn::Halt);
             program.fixup_insn(
                 init_offset,
-                Insn::Init(InitInsn {
+                Insn::Init {
                     target_pc: program.offset(),
-                }),
+                },
             );
             program.emit_insn(Insn::Transaction);
-            program.emit_insn(Insn::Goto(GotoInsn {
+            program.emit_insn(Insn::Goto {
                 target_pc: open_read_offset,
-            }));
+            });
             Ok(program.build())
         }
         OneSelect::Select {
@@ -299,17 +324,17 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             let init_offset = program.emit_placeholder();
             let after_init_offset = program.offset();
             translate_columns(&mut program, None, None, columns);
-            program.emit_insn(Insn::ResultRow(ResultRowInsn { cursor_id: 0 }));
+            program.emit_insn(Insn::ResultRow { cursor_id: 0 });
             program.emit_insn(Insn::Halt);
             program.fixup_insn(
                 init_offset,
-                Insn::Init(InitInsn {
+                Insn::Init {
                     target_pc: program.offset(),
-                }),
+                },
             );
-            program.emit_insn(Insn::Goto(GotoInsn {
+            program.emit_insn(Insn::Goto {
                 target_pc: after_init_offset,
-            }));
+            });
             Ok(program.build())
         }
         _ => todo!(),
@@ -368,10 +393,10 @@ fn translate_columns(
                 } => todo!(),
                 sqlite3_parser::ast::Expr::Literal(lit) => match lit {
                     sqlite3_parser::ast::Literal::Numeric(val) => {
-                        program.emit_insn(Insn::Integer(IntegerInsn {
+                        program.emit_insn(Insn::Integer {
                             value: val.parse().unwrap(),
                             dest,
-                        }));
+                        });
                         dest += 1;
                     }
                     sqlite3_parser::ast::Literal::String(_) => todo!(),
@@ -393,11 +418,11 @@ fn translate_columns(
             },
             sqlite3_parser::ast::ResultColumn::Star => {
                 for i in 0..table.unwrap().columns.len() {
-                    program.emit_insn(Insn::Column(ColumnInsn {
+                    program.emit_insn(Insn::Column {
                         column: i,
                         dest,
                         cursor_id: cursor_id.unwrap(),
-                    }));
+                    });
                     dest += 1;
                 }
             }
@@ -418,50 +443,55 @@ fn print_insn(addr: usize, insn: &Insn) {
 
 fn insn_to_str(addr: usize, insn: &Insn) -> String {
     let (opcode, p1, p2, p3, p4, p5, comment) = match insn {
-        Insn::Init(init) => (
+        Insn::Init { target_pc } => (
             "Init",
             0,
-            init.target_pc,
+            *target_pc,
             0,
             "",
             0,
-            format!("Starts at {}", init.target_pc),
+            format!("Starts at {}", target_pc),
         ),
-        Insn::OpenReadAsync(open_read_async) => (
+        Insn::OpenReadAsync {
+            cursor_id,
+            root_page,
+        } => (
             "OpenReadAsync",
-            open_read_async.cursor_id,
-            open_read_async.root_page,
+            *cursor_id,
+            *root_page,
             0,
             "",
             0,
             "".to_string(),
         ),
         Insn::OpenReadAwait => ("OpenReadAwait", 0, 0, 0, "", 0, "".to_string()),
-        Insn::RewindAsync(insn) => ("RewindAsync", insn.cursor_id, 0, 0, "", 0, "".to_string()),
-        Insn::RewindAwait(rewind_await) => (
+        Insn::RewindAsync { cursor_id } => ("RewindAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::RewindAwait {
+            cursor_id,
+            pc_if_empty,
+        } => (
             "RewindAwait",
-            0,
-            rewind_await.pc_if_empty,
-            0,
-            "",
-            0,
-            "".to_string(),
-        ),
-        Insn::Column(insn) => (
-            "Column",
-            insn.cursor_id,
-            insn.column,
+            *cursor_id,
+            *pc_if_empty,
             0,
             "",
             0,
             "".to_string(),
         ),
-        Insn::ResultRow(insn) => ("ResultRow", insn.cursor_id, 0, 0, "", 0, "".to_string()),
-        Insn::NextAsync(insn) => ("NextAsync", insn.cursor_id, 0, 0, "", 0, "".to_string()),
-        Insn::NextAwait(insn) => (
+        Insn::Column {
+            cursor_id,
+            column,
+            dest,
+        } => ("Column", *cursor_id, *column, *dest, "", 0, "".to_string()),
+        Insn::ResultRow { cursor_id } => ("ResultRow", *cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::NextAsync { cursor_id } => ("NextAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::NextAwait {
+            cursor_id,
+            pc_if_next,
+        } => (
             "NextAwait",
-            insn.cursor_id,
-            insn.pc_if_next,
+            *cursor_id,
+            *pc_if_next,
             0,
             "",
             0,
@@ -469,16 +499,10 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
         ),
         Insn::Halt => ("Halt", 0, 0, 0, "", 0, "".to_string()),
         Insn::Transaction => ("Transaction", 0, 0, 0, "", 0, "".to_string()),
-        Insn::Goto(goto) => ("Goto", 0, goto.target_pc, 0, "", 0, "".to_string()),
-        Insn::Integer(insn) => (
-            "Integer",
-            insn.dest,
-            insn.value as usize,
-            0,
-            "",
-            0,
-            "".to_string(),
-        ),
+        Insn::Goto { target_pc } => ("Goto", 0, *target_pc, 0, "", 0, "".to_string()),
+        Insn::Integer { value, dest } => {
+            ("Integer", *dest, *value as usize, 0, "", 0, "".to_string())
+        }
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
