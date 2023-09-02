@@ -88,6 +88,36 @@ fn bench(c: &mut Criterion) {
             });
         },
     );
+
+    drop(group);
+
+    let mut group = c.benchmark_group("rusqlite");
+    group.throughput(Throughput::Elements(1));
+
+    let conn = rusqlite::Connection::open("../testing/hello.db").unwrap();
+
+    let mut stmt = conn.prepare("SELECT 1").unwrap();
+    group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
+        b.iter(|| {
+            let mut rows = stmt.query(()).unwrap();
+            let row = rows.next().unwrap().unwrap();
+            let val: i64 = row.get(0).unwrap();
+            assert_eq!(val, 1);
+        });
+    });
+
+    let mut stmt = conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
+    group.bench_function(
+        "Execute prepared statement: 'SELECT * FROM users LIMIT 1'",
+        |b| {
+            b.iter(|| {
+                let mut rows = stmt.query(()).unwrap();
+                let row = rows.next().unwrap().unwrap();
+                let id: i64 = row.get(0).unwrap();
+                assert_eq!(id, 1);
+            });
+        },
+    );
 }
 
 criterion_group! {
