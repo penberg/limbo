@@ -173,7 +173,14 @@ pub fn read_btree_page(
 
 #[derive(Debug)]
 pub enum BTreeCell {
+    TableInteriorCell(TableInteriorCell),
     TableLeafCell(TableLeafCell),
+}
+
+#[derive(Debug)]
+pub struct TableInteriorCell {
+    pub _left_child_page: u32,
+    pub _rowid: u64,
 }
 
 #[derive(Debug)]
@@ -185,7 +192,21 @@ pub struct TableLeafCell {
 pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<BTreeCell> {
     match page_type {
         PageType::IndexInterior => todo!(),
-        PageType::TableInterior => todo!(),
+        PageType::TableInterior => {
+            let mut pos = pos;
+            let left_child_page = u32::from_be_bytes([
+                page[pos],
+                page[pos + 1],
+                page[pos + 2],
+                page[pos + 3],
+            ]);
+            pos += 4;
+            let (rowid, _) = read_varint(&page[pos..]);
+            Ok(BTreeCell::TableInteriorCell(TableInteriorCell {
+                _left_child_page: left_child_page,
+                _rowid: rowid,
+            }))
+        }
         PageType::IndexLeaf => todo!(),
         PageType::TableLeaf => {
             let mut pos = pos;

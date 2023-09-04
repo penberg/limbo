@@ -65,6 +65,9 @@ impl Cursor {
                     let cell = &page.cells[self.cell_idx];
                     self.cell_idx += 1;
                     match &cell {
+                        BTreeCell::TableInteriorCell(_) => {
+                            todo!();
+                        }
                         BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
                             let record = crate::sqlite3_ondisk::read_record(_payload)?;
                             Ok(Some(record))
