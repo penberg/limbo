@@ -311,17 +311,14 @@ pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(Value, usize)>
 }
 
 fn read_varint(buf: &[u8]) -> (u64, usize) {
-    let mut value = 0;
-    let mut shift = 0;
-    let mut i = 0;
-    loop {
-        let byte = buf[i];
-        value |= ((byte & 0x7f) as u64) << shift;
-        if byte & 0x80 == 0 {
-            break;
+    let mut v: u64 = 0;
+    for i in 0..8 {
+        let c = buf[i];
+        v = (v << 7) + (c & 0x7f) as u64;
+        if (c & 0x80) == 0 {
+            return (v, i + 1);
         }
-        shift += 7;
-        i += 1;
     }
-    (value, i + 1)
+    v = (v << 8) + buf[8] as u64;
+    (v, 9)
 }
