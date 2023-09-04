@@ -47,13 +47,28 @@ impl Table {
                                 for column in columns {
                                     let name = column.col_name.0.to_string();
                                     let ty = match column.col_type {
-                                        Some(data_type) => match data_type.name.as_str() {
-                                            "INT" => Type::Integer,
-                                            "REAL" => Type::Real,
-                                            "TEXT" => Type::Text,
-                                            "BLOB" => Type::Blob,
-                                            _ => unreachable!("Unknown type: {:?}", data_type.name),
-                                        },
+                                        Some(data_type) => {
+                                            let type_name = data_type.name.as_str();
+                                            if type_name.contains("INT") {
+                                                Type::Integer
+                                            } else if type_name.contains("CHAR")
+                                                || type_name.contains("CLOB")
+                                                || type_name.contains("TEXT")
+                                            {
+                                                Type::Text
+                                            } else if type_name.contains("BLOB")
+                                                || type_name.is_empty()
+                                            {
+                                                Type::Blob
+                                            } else if type_name.contains("REAL")
+                                                || type_name.contains("FLOA")
+                                                || type_name.contains("DOUB")
+                                            {
+                                                Type::Real
+                                            } else {
+                                                Type::Numeric
+                                            }
+                                        }
                                         None => Type::Null,
                                     };
                                     cols.push(Column { name, ty });
@@ -104,9 +119,10 @@ pub struct Column {
 
 pub enum Type {
     Null,
+    Text,
+    Numeric,
     Integer,
     Real,
-    Text,
     Blob,
 }
 
@@ -114,9 +130,10 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             Type::Null => "NULL",
+            Type::Text => "TEXT",
+            Type::Numeric => "NUMERIC",
             Type::Integer => "INTEGER",
             Type::Real => "REAL",
-            Type::Text => "TEXT",
             Type::Blob => "BLOB",
         };
         write!(f, "{}", s)
