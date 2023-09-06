@@ -33,6 +33,18 @@ cargo run hello.db
 
 ## Developing
 
+Run tests:
+
+```console
+cargo test
+```
+
+Test coverage report:
+
+```
+cargo tarpaulin -o html
+```
+
 Run benchmarks:
 
 ```console
