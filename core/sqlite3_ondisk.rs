@@ -220,7 +220,7 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SerialType {
     Null,
     UInt8,
@@ -387,6 +387,30 @@ fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[rstest]
+    #[case(0, SerialType::Null)]
+    #[case(1, SerialType::UInt8)]
+    #[case(2, SerialType::BEInt16)]
+    #[case(3, SerialType::BEInt24)]
+    #[case(4, SerialType::BEInt32)]
+    #[case(5, SerialType::BEInt48)]
+    #[case(6, SerialType::BEInt64)]
+    #[case(7, SerialType::BEFloat64)]
+    #[case(8, SerialType::ConstInt0)]
+    #[case(9, SerialType::ConstInt1)]
+    #[case(14, SerialType::Blob(1))]
+    #[case(15, SerialType::String(1))]
+    fn test_read_serial_type(#[case] input: u64, #[case] expected: SerialType) {
+        let result = SerialType::try_from(input).unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_read_invalid_serial_type() {
+        let result = SerialType::try_from(10);
+        assert!(result.is_err());
+    }
 
     #[rstest]
     #[case(&[], SerialType::Null, Value::Null)]
