@@ -194,14 +194,10 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
         PageType::IndexInterior => todo!(),
         PageType::TableInterior => {
             let mut pos = pos;
-            let left_child_page = u32::from_be_bytes([
-                page[pos],
-                page[pos + 1],
-                page[pos + 2],
-                page[pos + 3],
-            ]);
+            let left_child_page =
+                u32::from_be_bytes([page[pos], page[pos + 1], page[pos + 2], page[pos + 3]]);
             pos += 4;
-            let (rowid, _) = read_varint(&page[pos..]);
+            let (rowid, _) = read_varint(&page[pos..])?;
             Ok(BTreeCell::TableInteriorCell(TableInteriorCell {
                 _left_child_page: left_child_page,
                 _rowid: rowid,
@@ -210,9 +206,9 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
         PageType::IndexLeaf => todo!(),
         PageType::TableLeaf => {
             let mut pos = pos;
-            let (payload_size, nr) = read_varint(&page[pos..]);
+            let (payload_size, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (rowid, nr) = read_varint(&page[pos..]);
+            let (rowid, nr) = read_varint(&page[pos..])?;
             pos += nr;
             let payload = &page[pos..pos + payload_size as usize];
             // FIXME: page overflows if the payload is too large
@@ -264,13 +260,13 @@ impl TryFrom<u64> for SerialType {
 
 pub fn read_record(payload: &[u8]) -> Result<Record> {
     let mut pos = 0;
-    let (header_size, nr) = read_varint(payload);
+    let (header_size, nr) = read_varint(payload)?;
     assert!((header_size as usize) >= nr);
     let mut header_size = (header_size as usize) - nr;
     pos += nr;
     let mut serial_types = Vec::new();
     while header_size > 0 {
-        let (serial_type, nr) = read_varint(&payload[pos..]);
+        let (serial_type, nr) = read_varint(&payload[pos..])?;
         let serial_type = SerialType::try_from(serial_type)?;
         serial_types.push(serial_type);
         assert!(pos + nr < payload.len());
@@ -290,56 +286,165 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
 pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(Value, usize)> {
     match serial_type {
         SerialType::Null => Ok((Value::Null, 0)),
-        SerialType::UInt8 => Ok((Value::Integer(buf[0] as i64), 1)),
-        SerialType::BEInt16 => Ok((
-            Value::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64),
-            2,
-        )),
-        SerialType::BEInt24 => Ok((
-            Value::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
-            3,
-        )),
-        SerialType::BEInt32 => Ok((
-            Value::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64),
-            4,
-        )),
-        SerialType::BEInt48 => Ok((
-            Value::Integer(i64::from_be_bytes([
-                0, 0, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5],
-            ])),
-            6,
-        )),
-        SerialType::BEInt64 => Ok((
-            Value::Integer(i64::from_be_bytes([
-                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-            ])),
-            8,
-        )),
-        SerialType::BEFloat64 => Ok((
-            Value::Float(f64::from_be_bytes([
-                buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-            ])),
-            8,
-        )),
+        SerialType::UInt8 => {
+            if buf.len() < 1 {
+                return Err(anyhow!("Invalid UInt8 value"));
+            }
+            Ok((Value::Integer(buf[0] as i64), 1))
+        }
+        SerialType::BEInt16 => {
+            if buf.len() < 2 {
+                return Err(anyhow!("Invalid BEInt16 value"));
+            }
+            Ok((
+                Value::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64),
+                2,
+            ))
+        }
+        SerialType::BEInt24 => {
+            if buf.len() < 3 {
+                return Err(anyhow!("Invalid BEInt24 value"));
+            }
+            Ok((
+                Value::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
+                3,
+            ))
+        }
+        SerialType::BEInt32 => {
+            if buf.len() < 4 {
+                return Err(anyhow!("Invalid BEInt32 value"));
+            }
+            Ok((
+                Value::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64),
+                4,
+            ))
+        }
+        SerialType::BEInt48 => {
+            if buf.len() < 6 {
+                return Err(anyhow!("Invalid BEInt48 value"));
+            }
+            Ok((
+                Value::Integer(i64::from_be_bytes([
+                    0, 0, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5],
+                ])),
+                6,
+            ))
+        }
+        SerialType::BEInt64 => {
+            if buf.len() < 8 {
+                return Err(anyhow!("Invalid BEInt64 value"));
+            }
+            Ok((
+                Value::Integer(i64::from_be_bytes([
+                    buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+                ])),
+                8,
+            ))
+        }
+        SerialType::BEFloat64 => {
+            if buf.len() < 8 {
+                return Err(anyhow!("Invalid BEFloat64 value"));
+            }
+            Ok((
+                Value::Float(f64::from_be_bytes([
+                    buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
+                ])),
+                8,
+            ))
+        }
         SerialType::ConstInt0 => Ok((Value::Integer(0), 0)),
         SerialType::ConstInt1 => Ok((Value::Integer(1), 0)),
-        SerialType::Blob(n) => Ok((Value::Blob(buf[0..n].to_vec()), n)),
+        SerialType::Blob(n) => {
+            if buf.len() < n {
+                return Err(anyhow!("Invalid Blob value"));
+            }
+            Ok((Value::Blob(buf[0..n].to_vec()), n))
+        }
         SerialType::String(n) => {
+            if buf.len() < n {
+                return Err(anyhow!("Invalid String value"));
+            }
             let value = String::from_utf8(buf[0..n].to_vec())?;
             Ok((Value::Text(value), n))
         }
     }
 }
 
-fn read_varint(buf: &[u8]) -> (u64, usize) {
+fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     let mut v: u64 = 0;
     for i in 0..8 {
-        let c = buf[i];
+        let c = buf.get(i).ok_or(anyhow!("Invalid varint"))?;
         v = (v << 7) + (c & 0x7f) as u64;
         if (c & 0x80) == 0 {
-            return (v, i + 1);
+            return Ok((v, i + 1));
         }
     }
     v = (v << 8) + buf[8] as u64;
-    (v, 9)
+    Ok((v, 9))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case(&[], SerialType::Null, Value::Null)]
+    #[case(&[255], SerialType::UInt8, Value::Integer(255))]
+    #[case(&[0x12, 0x34], SerialType::BEInt16, Value::Integer(0x1234))]
+    #[case(&[0x12, 0x34, 0x56], SerialType::BEInt24, Value::Integer(0x123456))]
+    #[case(&[0x12, 0x34, 0x56, 0x78], SerialType::BEInt32, Value::Integer(0x12345678))]
+    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC], SerialType::BEInt48, Value::Integer(0x123456789ABC))]
+    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xFF], SerialType::BEInt64, Value::Integer(0x123456789ABCDEFF))]
+    #[case(&[64, 9, 33, 251, 84, 68, 45, 24], SerialType::BEFloat64, Value::Float(3.141592653589793))]
+    #[case(&[], SerialType::ConstInt0, Value::Integer(0))]
+    #[case(&[], SerialType::ConstInt1, Value::Integer(1))]
+    #[case(&[1, 2, 3], SerialType::Blob(3), Value::Blob(vec![1, 2, 3]))]
+    #[case(&[65, 66, 67], SerialType::String(3), Value::Text("ABC".to_string()))]
+    fn test_read_value(
+        #[case] buf: &[u8],
+        #[case] serial_type: SerialType,
+        #[case] expected: Value,
+    ) {
+        let result = read_value(buf, serial_type).unwrap();
+        assert_eq!(result, (expected, buf.len()));
+    }
+
+    #[rstest]
+    #[case(&[], SerialType::UInt8)]
+    #[case(&[0x12], SerialType::BEInt16)]
+    #[case(&[0x12, 0x34], SerialType::BEInt24)]
+    #[case(&[0x12, 0x34, 0x56], SerialType::BEInt32)]
+    #[case(&[0x12, 0x34, 0x56, 0x78], SerialType::BEInt48)]
+    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE], SerialType::BEInt64)]
+    #[case(&[64, 9, 33, 251, 84, 68, 45], SerialType::BEFloat64)]
+    #[case(&[1, 2], SerialType::Blob(3))]
+    #[case(&[65, 66], SerialType::String(3))]
+    #[case(&[192], SerialType::String(1))] // invalid UTF-8 sequence
+    fn test_read_invalid_value(#[case] buf: &[u8], #[case] serial_type: SerialType) {
+        let result = read_value(buf, serial_type);
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    #[case(&[0x01], (1, 1))]
+    #[case(&[0x81, 0x01], (129, 2))]
+    #[case(&[0x81, 0x81, 0x01], (16513, 3))]
+    #[case(&[0x81, 0x81, 0x81, 0x01], (2113665, 4))]
+    #[case(&[0x81, 0x81, 0x81, 0x81, 0x01], (270549121, 5))]
+    #[case(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x01], (34630287489, 6))]
+    #[case(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01], (4432676798593, 7))]
+    #[case(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01], (567382630219905, 8))]
+    #[case(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01], (145249953336295681, 9))]
+    fn read_varint_test(#[case] input: &[u8], #[case] expected: (u64, usize)) {
+        let result = read_varint(&input).unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_read_invalid_varint() {
+        let buf = [0b11111110];
+        let result = read_varint(&buf);
+        assert!(result.is_err());
+    }
 }

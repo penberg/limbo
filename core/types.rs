@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
     Integer(i64),
