@@ -5,6 +5,7 @@ mod schema;
 mod sqlite3_ondisk;
 mod types;
 mod vdbe;
+mod io;
 
 use mimalloc::MiMalloc;
 
@@ -18,6 +19,7 @@ use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::{borrow::BorrowMut, sync::Arc};
 
+pub use io::sync_io::SyncIO;
 pub use types::Value;
 
 pub struct Database {
