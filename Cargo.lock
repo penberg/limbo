@@ -721,6 +721,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-uring"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "141a0f4546a50b2ed637c7a6df0d7dff45c9f41523254996764461c8ae0d9424"
+dependencies = [
+ "bitflags 1.3.2",
+ "libc",
+]
+
+[[package]]
 name = "is-terminal"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -816,6 +826,7 @@ dependencies = [
  "concurrent_lru",
  "criterion",
  "fallible-iterator 0.3.0",
+ "io-uring",
  "log",
  "mimalloc",
  "pprof",

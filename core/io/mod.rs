@@ -1,7 +1,14 @@
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use std::cell::RefCell;
 use std::io::{Read, Seek};
+use std::os::unix::io::AsRawFd;
 use std::{fs::File, sync::Arc};
+
+#[cfg(feature = "fs")]
+mod io_uring;
+
+#[cfg(target_os = "linux")]
+mod syscall;
 
 /// I/O access method
 enum IOMethod {
@@ -9,6 +16,9 @@ enum IOMethod {
 
     #[cfg(feature = "fs")]
     Sync,
+
+    #[cfg(target_os = "linux")]
+    IoUring,
 }
 
 /// I/O access interface.
@@ -16,7 +26,16 @@ pub struct IO {
     io_method: IOMethod,
 }
 
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "fs", target_os = "linux"))]
+impl Default for IO {
+    fn default() -> Self {
+        IO {
+            io_method: IOMethod::IoUring,
+        }
+    }
+}
+
+#[cfg(all(feature = "fs", target_os = "darwin"))]
 impl Default for IO {
     fn default() -> Self {
         IO {
@@ -39,7 +58,11 @@ impl IO {
         match self.io_method {
             #[cfg(feature = "fs")]
             IOMethod::Sync => {
-                let io = Arc::new(FileIO::open(path)?);
+                let io = Arc::new(syscall::SyscallIO::open(path)?);
+                Ok(PageSource { io })
+            }
+            IOMethod::IoUring => {
+                let io = Arc::new(io_uring::IoUring::open(path)?);
                 Ok(PageSource { io })
             }
             IOMethod::Memory => {
@@ -61,32 +84,4 @@ impl PageSource {
 
 trait PageIO {
     fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()>;
-}
-
-struct FileIO {
-    file: RefCell<File>,
-}
-
-impl PageIO for FileIO {
-    fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()> {
-        let page_size = buf.len();
-        assert!(page_idx > 0);
-        assert!(page_size >= 512);
-        assert!(page_size <= 65536);
-        assert!((page_size & (page_size - 1)) == 0);
-        let pos = (page_idx - 1) * page_size;
-        let mut file = self.file.borrow_mut();
-        file.seek(std::io::SeekFrom::Start(pos as u64))?;
-        file.read_exact(buf)?;
-        Ok(())
-    }
-}
-
-impl FileIO {
-    fn open(path: &str) -> Result<Self> {
-        let file = std::fs::File::open(path)?;
-        Ok(FileIO {
-            file: RefCell::new(file),
-        })
-    }
 }
