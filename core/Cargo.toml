@@ -13,6 +13,10 @@ description = "The Lig database library"
 name = "lig_core"
 path = "lib.rs"
 
+[features]
+default = ["fs"]
+fs = []
+
 [dependencies]
 anyhow = "1.0.75"
 concurrent_lru = "0.2.0"

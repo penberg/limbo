@@ -25,10 +25,9 @@
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
 use crate::types::{Record, Value};
-use crate::{DatabaseRef, IO};
+use crate::PageSource;
 use anyhow::{anyhow, Result};
 use std::borrow::BorrowMut;
-use std::sync::Arc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -60,9 +59,9 @@ pub struct DatabaseHeader {
     version_number: u32,
 }
 
-pub fn read_database_header(io: Arc<dyn IO>, database_ref: DatabaseRef) -> Result<DatabaseHeader> {
+pub fn read_database_header(database: &PageSource) -> Result<DatabaseHeader> {
     let mut buf = [0; 512];
-    io.get(database_ref, 1, &mut buf)?;
+    database.get(1, &mut buf)?;
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
@@ -130,14 +129,13 @@ pub struct BTreePage {
 }
 
 pub fn read_btree_page(
-    io: Arc<dyn IO>,
-    database_ref: DatabaseRef,
+    database: &PageSource,
     buffer_pool: &mut BufferPool,
     page_idx: usize,
 ) -> Result<BTreePage> {
     let mut buf = buffer_pool.get();
     let page = &mut buf.borrow_mut().data_mut();
-    io.get(database_ref, page_idx, page)?;
+    database.get(page_idx, page)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {

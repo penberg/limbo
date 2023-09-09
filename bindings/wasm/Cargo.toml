@@ -12,5 +12,5 @@ path = "lib.rs"
 
 [dependencies]
 anyhow = "1.0.75"
-lig_core = { path = "../../core" }
+lig_core = { path = "../../core", default-features = false }
 wasm-bindgen = "0.2"

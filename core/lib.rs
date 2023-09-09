@@ -1,11 +1,11 @@
 mod btree;
 mod buffer_pool;
+mod io;
 mod pager;
 mod schema;
 mod sqlite3_ondisk;
 mod types;
 mod vdbe;
-mod io;
 
 use mimalloc::MiMalloc;
 
@@ -17,9 +17,9 @@ use fallible_iterator::FallibleIterator;
 use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
-use std::{borrow::BorrowMut, sync::Arc};
+use std::sync::Arc;
 
-pub use io::sync_io::SyncIO;
+pub use io::{PageSource, IO};
 pub use types::Value;
 
 pub struct Database {
@@ -28,8 +28,8 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(io: Arc<dyn IO>, path: &str) -> Result<Database> {
-        let pager = Arc::new(Pager::open(io.clone(), path)?);
+    pub fn open(io: IO, path: &str) -> Result<Database> {
+        let pager = Arc::new(Pager::open(&io, path)?);
         let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
@@ -189,14 +189,4 @@ impl Row {
         let value = &self.values[idx];
         T::from_value(value)
     }
-}
-
-pub type DatabaseRef = usize;
-
-pub trait IO {
-    /// Open a database file.
-    fn open(&self, path: &str) -> Result<DatabaseRef>;
-
-    /// Get a page from the database file.
-    fn get(&self, database_ref: DatabaseRef, page_idx: usize, buf: &mut [u8]) -> Result<()>;
 }

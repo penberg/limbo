@@ -3,7 +3,6 @@ use lig_core::{Database, SyncIO};
 use pprof::criterion::{Output, PProfProfiler};
 use std::sync::Arc;
 
-
 fn bench_db() -> Database {
     let io = SyncIO::new();
     Database::open(Arc::new(io), "../testing/hello.db").unwrap()

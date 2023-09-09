@@ -1,9 +1,8 @@
 use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
-use lig_core::{Database, Value, SyncIO};
+use lig_core::{Database, Value, IO};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputMode {
@@ -30,8 +29,8 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    let io = SyncIO::new();
-    let db = Database::open(Arc::new(io), opts.database.to_str().unwrap())?;
+    let io = IO::default();
+    let db = Database::open(io, opts.database.to_str().unwrap())?;
     let conn = db.connect();
     let mut rl = DefaultEditor::new()?;
     let home = dirs::home_dir().unwrap();
@@ -102,4 +101,3 @@ fn main() -> anyhow::Result<()> {
     rl.save_history(history_file.as_path())?;
     Ok(())
 }
-
