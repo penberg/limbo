@@ -1,11 +1,10 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use lig_core::{Database, SyncIO};
+use lig_core::{Database, IO};
 use pprof::criterion::{Output, PProfProfiler};
-use std::sync::Arc;
 
 fn bench_db() -> Database {
-    let io = SyncIO::new();
-    Database::open(Arc::new(io), "../testing/hello.db").unwrap()
+    let io = IO::default();
+    Database::open(io, "../testing/hello.db").unwrap()
 }
 
 fn bench(c: &mut Criterion) {
