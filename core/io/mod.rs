@@ -4,10 +4,10 @@ use std::io::{Read, Seek};
 use std::os::unix::io::AsRawFd;
 use std::{fs::File, sync::Arc};
 
-#[cfg(feature = "fs")]
+#[cfg(all(feature = "fs", target_os = "linux"))]
 mod io_uring;
 
-#[cfg(target_os = "linux")]
+#[cfg(feature = "fs")]
 mod syscall;
 
 /// I/O access method
@@ -35,7 +35,7 @@ impl Default for IO {
     }
 }
 
-#[cfg(all(feature = "fs", target_os = "darwin"))]
+#[cfg(all(feature = "fs", target_os = "macos"))]
 impl Default for IO {
     fn default() -> Self {
         IO {
@@ -61,6 +61,7 @@ impl IO {
                 let io = Arc::new(syscall::SyscallIO::open(path)?);
                 Ok(PageSource { io })
             }
+            #[cfg(all(feature = "fs", target_os = "darwin"))]
             IOMethod::IoUring => {
                 let io = Arc::new(io_uring::IoUring::open(path)?);
                 Ok(PageSource { io })

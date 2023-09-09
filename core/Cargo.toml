@@ -17,11 +17,13 @@ path = "lib.rs"
 default = ["fs"]
 fs = []
 
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.6.1"
+
 [dependencies]
 anyhow = "1.0.75"
 concurrent_lru = "0.2.0"
 fallible-iterator = "0.3.0"
-io-uring = "0.6.1"
 log = "0.4.20"
 mimalloc = { version = "*", default-features = false }
 sqlite3-parser = "0.11.0"
