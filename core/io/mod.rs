@@ -61,7 +61,7 @@ impl IO {
                 let io = Arc::new(syscall::SyscallIO::open(path)?);
                 Ok(PageSource { io })
             }
-            #[cfg(all(feature = "fs", target_os = "darwin"))]
+            #[cfg(all(feature = "fs", target_os = "linux"))]
             IOMethod::IoUring => {
                 let io = Arc::new(io_uring::IoUring::open(path)?);
                 Ok(PageSource { io })
