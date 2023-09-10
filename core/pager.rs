@@ -13,7 +13,7 @@ pub struct Pager {
 }
 
 impl Pager {
-    pub fn open(io: &IO, path: &str) -> anyhow::Result<Self> {
+    pub fn open(io: &impl IO, path: &str) -> anyhow::Result<Self> {
         let database = io.open(path)?;
         let db_header = sqlite3_ondisk::read_database_header(&database)?;
         let page_size = db_header.page_size as usize;

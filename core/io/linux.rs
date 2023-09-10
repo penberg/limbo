@@ -1,16 +1,25 @@
+use crate::io::{PageSource, IO};
 use anyhow::Result;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
+use std::sync::Arc;
 
-pub(crate) struct Loop {
+pub(crate) struct LinuxIO {
     ring: Rc<RefCell<io_uring::IoUring>>,
 }
 
-impl Loop {
+impl IO for LinuxIO {
+    fn open(&self, path: &str) -> Result<PageSource> {
+        let file = self.open_file(path)?;
+        Ok(PageSource { io: Arc::new(file) })
+    }
+}
+
+impl LinuxIO {
     pub(crate) fn new() -> Result<Self> {
         let ring = io_uring::IoUring::new(8)?;
-        Ok(Loop {
+        Ok(LinuxIO {
             ring: Rc::new(RefCell::new(ring)),
         })
     }

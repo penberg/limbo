@@ -8,8 +8,16 @@ pub struct Database {
 #[wasm_bindgen]
 impl Database {
     pub fn open(path: &str) -> Database {
-        let io = lig_core::IO::new().unwrap();
-        let inner = lig_core::Database::open(io, path).unwrap();
+        let io = IO {};
+        let inner = lig_core::Database::open(&io, path).unwrap();
         Database { _inner: inner }
+    }
+}
+
+struct IO {}
+
+impl lig_core::IO for IO {
+    fn open(&self, _path: &str) -> anyhow::Result<lig_core::PageSource> {
+        todo!();
     }
 }

@@ -1,6 +1,6 @@
 use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
-use lig_core::{Database, Value, IO};
+use lig_core::{Database, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
 
@@ -29,8 +29,8 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    let io = IO::new()?;
-    let db = Database::open(io, opts.database.to_str().unwrap())?;
+    let io = lig_core::default_io()?;
+    let db = Database::open(&io, opts.database.to_str().unwrap())?;
     let conn = db.connect();
     let mut rl = DefaultEditor::new()?;
     let home = dirs::home_dir().unwrap();

@@ -1,12 +1,21 @@
+use crate::{PageSource, IO};
 use anyhow::{Ok, Result};
 use std::cell::RefCell;
 use std::io::{Read, Seek};
+use std::sync::Arc;
 
-pub(crate) struct Loop {}
+pub(crate) struct DarwinIO {}
 
-impl Loop {
+impl IO for DarwinIO {
+    fn open(&self, path: &str) -> Result<PageSource> {
+        let file = self.open_file(path)?;
+        Ok(PageSource { io: Arc::new(file) })
+    }
+}
+
+impl DarwinIO {
     pub(crate) fn new() -> Result<Self> {
-        Ok(Loop {})
+        Ok(DarwinIO {})
     }
 
     pub(crate) fn open_file(&self, path: &str) -> Result<File> {

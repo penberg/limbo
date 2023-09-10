@@ -20,6 +20,7 @@ use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
+pub use io::default_io;
 pub use io::{PageSource, IO};
 pub use types::Value;
 
@@ -29,8 +30,8 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(io: IO, path: &str) -> Result<Database> {
-        let pager = Arc::new(Pager::open(&io, path)?);
+    pub fn open(io: &impl IO, path: &str) -> Result<Database> {
+        let pager = Arc::new(Pager::open(io, path)?);
         let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
