@@ -4,6 +4,7 @@ mod io;
 mod pager;
 mod schema;
 mod sqlite3_ondisk;
+mod translate;
 mod types;
 mod vdbe;
 
@@ -76,7 +77,7 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = Arc::new(vdbe::translate(&self.schema, stmt)?);
+                    let program = Arc::new(translate::translate(&self.schema, stmt)?);
                     Ok(Statement {
                         program,
                         pager: self.pager.clone(),
@@ -97,12 +98,12 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = Arc::new(vdbe::translate(&self.schema, stmt)?);
+                    let program = Arc::new(translate::translate(&self.schema, stmt)?);
                     let state = vdbe::ProgramState::new(program.max_registers);
                     Ok(Some(Rows::new(state, program, self.pager.clone())))
                 }
                 Cmd::Explain(stmt) => {
-                    let program = vdbe::translate(&self.schema, stmt)?;
+                    let program = translate::translate(&self.schema, stmt)?;
                     program.explain();
                     Ok(None)
                 }
@@ -120,12 +121,12 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Explain(stmt) => {
-                    let program = vdbe::translate(&self.schema, stmt)?;
+                    let program = translate::translate(&self.schema, stmt)?;
                     program.explain();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
-                    let program = vdbe::translate(&self.schema, stmt)?;
+                    let program = translate::translate(&self.schema, stmt)?;
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
                 }
