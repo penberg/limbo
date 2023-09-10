@@ -12,12 +12,10 @@ A modern SQLite-compatible database library built with Rust.
 
 ## Getting Started
 
-Lig is currently read-only so you need a [SQLite database file](https://www.sqlite.org/fileformat.html) for testing.
-
-You can create a databse file with the `sqlite3` program:
+Lig is currently read-only. You can either use the `sqlite3` program to create a database:
 
 ```console
-$ sqlite3 hello.db
+$ sqlite3 database.db
 SQLite version 3.42.0 2023-05-16 12:36:15
 Enter ".help" for usage hints.
 sqlite> CREATE TABLE users (id INT PRIMARY KEY, username TEXT);
@@ -25,10 +23,19 @@ sqlite> INSERT INTO users VALUES (1, 'alice');
 sqlite> INSERT INTO users VALUES (2, 'bob');
 ```
 
+or use the testing script to generate one for you:
+
+```console
+./testing/gen-database.py
+```
+
 You can then start the Lig shell with:
 
-```bash
-cargo run hello.db
+```console
+$ cargo run database.db
+Welcome to Lig SQL shell!
+> SELECT * FROM users LIMIT 1;
+|1|Cody|Miller|mhurst@example.org|525.595.7319x21268|33667 Shaw Extension Suite 104|West Robert|VA|45161|`
 ```
 
 ## Developing
