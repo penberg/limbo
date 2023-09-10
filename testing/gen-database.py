@@ -8,7 +8,7 @@ cursor = conn.cursor()
 
 # Create the user table
 cursor.execute('''
-    CREATE TABLE IF NOT EXISTS user (
+    CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY,
         first_name TEXT,
         last_name TEXT,
@@ -33,7 +33,7 @@ for _ in range(10000):
     zipcode = fake.zipcode()
 
     cursor.execute('''
-        INSERT INTO user (first_name, last_name, email, phone_number, address, city, state, zipcode)
+        INSERT INTO users (first_name, last_name, email, phone_number, address, city, state, zipcode)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ''', (first_name, last_name, email, phone_number, address, city, state, zipcode))
 
