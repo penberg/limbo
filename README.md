@@ -2,7 +2,7 @@
 
 # Lig
 
-A SQLite-compatible database library built with Rust.
+A modern SQLite-compatible database library built with Rust.
 
 ## Features
 
