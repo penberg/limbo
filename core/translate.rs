@@ -113,46 +113,21 @@ fn translate_columns(
     for col in columns {
         match col {
             sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
-                sqlite3_parser::ast::Expr::Between {
-                    lhs,
-                    not,
-                    start,
-                    end,
-                } => todo!(),
+                sqlite3_parser::ast::Expr::Between { .. } => todo!(),
                 sqlite3_parser::ast::Expr::Binary(_, _, _) => todo!(),
-                sqlite3_parser::ast::Expr::Case {
-                    base,
-                    when_then_pairs,
-                    else_expr,
-                } => todo!(),
-                sqlite3_parser::ast::Expr::Cast { expr, type_name } => todo!(),
+                sqlite3_parser::ast::Expr::Case { .. } => todo!(),
+                sqlite3_parser::ast::Expr::Cast { .. } => todo!(),
                 sqlite3_parser::ast::Expr::Collate(_, _) => todo!(),
                 sqlite3_parser::ast::Expr::DoublyQualified(_, _, _) => todo!(),
                 sqlite3_parser::ast::Expr::Exists(_) => todo!(),
-                sqlite3_parser::ast::Expr::FunctionCall {
-                    name,
-                    distinctness,
-                    args,
-                    filter_over,
-                } => todo!(),
-                sqlite3_parser::ast::Expr::FunctionCallStar { name, filter_over } => todo!(),
+                sqlite3_parser::ast::Expr::FunctionCall { .. } => todo!(),
+                sqlite3_parser::ast::Expr::FunctionCallStar { .. } => todo!(),
                 sqlite3_parser::ast::Expr::Id(_) => todo!(),
-                sqlite3_parser::ast::Expr::InList { lhs, not, rhs } => todo!(),
-                sqlite3_parser::ast::Expr::InSelect { lhs, not, rhs } => todo!(),
-                sqlite3_parser::ast::Expr::InTable {
-                    lhs,
-                    not,
-                    rhs,
-                    args,
-                } => todo!(),
+                sqlite3_parser::ast::Expr::InList { .. } => todo!(),
+                sqlite3_parser::ast::Expr::InSelect { .. } => todo!(),
+                sqlite3_parser::ast::Expr::InTable { .. } => todo!(),
                 sqlite3_parser::ast::Expr::IsNull(_) => todo!(),
-                sqlite3_parser::ast::Expr::Like {
-                    lhs,
-                    not,
-                    op,
-                    rhs,
-                    escape,
-                } => todo!(),
+                sqlite3_parser::ast::Expr::Like { .. } => todo!(),
                 sqlite3_parser::ast::Expr::Literal(lit) => match lit {
                     sqlite3_parser::ast::Literal::Numeric(val) => {
                         let dest = program.alloc_register();

@@ -27,7 +27,7 @@ impl Pager {
     }
 
     pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Arc<BTreePage>> {
-        let handle = self.page_cache.get_or_try_init(page_idx, 1, |idx| {
+        let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
             let mut buffer_pool = self.buffer_pool.lock().unwrap();
             let page = sqlite3_ondisk::read_btree_page(&self.database, &mut buffer_pool, page_idx)
                 .unwrap();
