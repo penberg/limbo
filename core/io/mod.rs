@@ -1,8 +1,5 @@
 use anyhow::{Ok, Result};
-use std::cell::RefCell;
-use std::io::{Read, Seek};
-use std::os::unix::io::AsRawFd;
-use std::{fs::File, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(all(feature = "fs", target_os = "linux"))]
 mod io_uring;
@@ -12,6 +9,7 @@ mod syscall;
 
 /// I/O access method
 enum IOMethod {
+    #[cfg(not(feature = "fs"))]
     Memory,
 
     #[cfg(feature = "fs")]
@@ -66,6 +64,7 @@ impl IO {
                 let io = Arc::new(io_uring::IoUring::open(path)?);
                 Ok(PageSource { io })
             }
+            #[cfg(not(feature = "fs"))]
             IOMethod::Memory => {
                 todo!();
             }
