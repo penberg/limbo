@@ -84,6 +84,14 @@ pub enum Insn {
         cursor_id: CursorID,
         dest: usize,
     },
+
+    // Decrement the given register and jump to the given PC if the result is zero.
+    //
+    // Unlike in SQLite, if register is already zero, we don't decrement, but take the jump.
+    DecrJumpZero {
+        reg: usize,
+        target_pc: BranchOffset,
+    },
 }
 
 pub struct ProgramBuilder {
@@ -282,6 +290,17 @@ impl Program {
                     }
                     state.pc += 1;
                 }
+                Insn::DecrJumpZero { reg, target_pc } => match state.registers[*reg] {
+                    Value::Integer(n) => {
+                        if n > 0 {
+                            state.registers[*reg] = Value::Integer(n - 1);
+                            state.pc += 1;
+                        } else {
+                            state.pc = *target_pc;
+                        }
+                    }
+                    _ => unreachable!("DecrJumpZero on non-integer register"),
+                },
             }
         }
     }
@@ -370,6 +389,9 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             ("Integer", *dest, *value as usize, 0, "", 0, "".to_string())
         }
         Insn::RowId { cursor_id, dest } => ("RowId", *cursor_id, *dest, 0, "", 0, "".to_string()),
+        Insn::DecrJumpZero { reg, target_pc } => {
+            ("DecrJumpZero", *reg, *target_pc, 0, "", 0, "".to_string())
+        }
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
