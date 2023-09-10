@@ -29,7 +29,7 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    let io = IO::default();
+    let io = IO::new()?;
     let db = Database::open(io, opts.database.to_str().unwrap())?;
     let conn = db.connect();
     let mut rl = DefaultEditor::new()?;

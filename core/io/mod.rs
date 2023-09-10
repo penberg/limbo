@@ -13,10 +13,10 @@ enum IOMethod {
     Memory,
 
     #[cfg(feature = "fs")]
-    Sync,
+    Sync { io: syscall::Loop },
 
     #[cfg(target_os = "linux")]
-    IoUring,
+    IoUring { io: io_uring::Loop },
 }
 
 /// I/O access interface.
@@ -24,44 +24,44 @@ pub struct IO {
     io_method: IOMethod,
 }
 
-#[cfg(all(feature = "fs", target_os = "linux"))]
-impl Default for IO {
-    fn default() -> Self {
-        IO {
-            io_method: IOMethod::IoUring,
-        }
+impl IO {
+    #[cfg(all(feature = "fs", target_os = "linux"))]
+    pub fn new() -> Result<Self> {
+        Ok(IO {
+            io_method: IOMethod::IoUring {
+                io: io_uring::Loop::new()?,
+            },
+        })
     }
-}
 
-#[cfg(all(feature = "fs", target_os = "macos"))]
-impl Default for IO {
-    fn default() -> Self {
-        IO {
-            io_method: IOMethod::Sync,
-        }
+    #[cfg(all(feature = "fs", target_os = "macos"))]
+    pub fn new() -> Result<Self> {
+        Ok(IO {
+            io_method: IOMethod::Sync {
+                io: syscall::Loop::new()?,
+            },
+        })
     }
-}
 
-#[cfg(not(feature = "fs"))]
-impl Default for IO {
-    fn default() -> Self {
-        IO {
+    #[cfg(not(feature = "fs"))]
+    pub fn new() -> Result<Self> {
+        Ok(IO {
             io_method: IOMethod::Memory,
-        }
+        })
     }
 }
 
 impl IO {
     pub fn open(&self, path: &str) -> Result<PageSource> {
-        match self.io_method {
+        match &self.io_method {
             #[cfg(feature = "fs")]
-            IOMethod::Sync => {
-                let io = Arc::new(syscall::SyscallIO::open(path)?);
+            IOMethod::Sync { io } => {
+                let io = Arc::new(io.open_file(path)?);
                 Ok(PageSource { io })
             }
             #[cfg(all(feature = "fs", target_os = "linux"))]
-            IOMethod::IoUring => {
-                let io = Arc::new(io_uring::IoUring::open(path)?);
+            IOMethod::IoUring { io } => {
+                let io = Arc::new(io.open_file(path)?);
                 Ok(PageSource { io })
             }
             #[cfg(not(feature = "fs"))]

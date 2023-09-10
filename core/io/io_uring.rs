@@ -1,22 +1,42 @@
 use anyhow::Result;
 use std::cell::RefCell;
-use std::fs::File;
 use std::os::unix::io::AsRawFd;
+use std::rc::Rc;
 
-pub(crate) struct IoUring {
-    ring: RefCell<io_uring::IoUring>,
-    file: File,
+pub(crate) struct Loop {
+    ring: Rc<RefCell<io_uring::IoUring>>,
 }
 
-impl IoUring {
-    pub(crate) fn open(path: &str) -> Result<Self> {
-        let mut ring = RefCell::new(io_uring::IoUring::new(8)?);
+impl Loop {
+    pub(crate) fn new() -> Result<Self> {
+        let ring = io_uring::IoUring::new(8)?;
+        Ok(Loop {
+            ring: Rc::new(RefCell::new(ring)),
+        })
+    }
+
+    pub(crate) fn open_file(&self, path: &str) -> Result<File> {
         let file = std::fs::File::open(path)?;
-        Ok(IoUring { ring, file })
+        Ok(File {
+            ring: self.ring.clone(),
+            file,
+        })
+    }
+
+    pub(crate) fn run_once(&self) -> Result<()> {
+        let mut ring = self.ring.borrow_mut();
+        ring.submit_and_wait(1)?;
+        let cqe = ring.completion().next().expect("completion queue is empty");
+        Ok(())
     }
 }
 
-impl super::PageIO for IoUring {
+pub(crate) struct File {
+    ring: Rc<RefCell<io_uring::IoUring>>,
+    file: std::fs::File,
+}
+
+impl super::PageIO for File {
     fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()> {
         let page_size = buf.len();
         assert!(page_idx > 0);

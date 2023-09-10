@@ -1,22 +1,30 @@
 use anyhow::{Ok, Result};
 use std::cell::RefCell;
-use std::fs::File;
 use std::io::{Read, Seek};
 
-pub(crate) struct SyscallIO {
-    file: RefCell<File>,
-}
+pub(crate) struct Loop {}
 
-impl SyscallIO {
-    pub(crate) fn open(path: &str) -> Result<Self> {
+impl Loop {
+    pub(crate) fn new() -> Result<Self> {
+        Ok(Loop {})
+    }
+
+    pub(crate) fn open_file(&self, path: &str) -> Result<File> {
         let file = std::fs::File::open(path)?;
-        Ok(SyscallIO {
+        Ok(File {
             file: RefCell::new(file),
         })
     }
+
+    pub(crate) fn run_once(&self) -> Result<()> {
+        Ok(())
+    }
+}
+pub(crate) struct File {
+    file: RefCell<std::fs::File>,
 }
 
-impl super::PageIO for SyscallIO {
+impl super::PageIO for File {
     fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()> {
         let page_size = buf.len();
         assert!(page_idx > 0);
