@@ -2,10 +2,10 @@ use anyhow::{Ok, Result};
 use std::sync::Arc;
 
 #[cfg(all(feature = "fs", target_os = "linux"))]
-mod io_uring;
+mod linux;
 
 #[cfg(feature = "fs")]
-mod syscall;
+mod darwin;
 
 /// I/O access method
 enum IOMethod {
@@ -13,10 +13,10 @@ enum IOMethod {
     Memory,
 
     #[cfg(feature = "fs")]
-    Sync { io: syscall::Loop },
+    Sync { io: darwin::Loop },
 
     #[cfg(target_os = "linux")]
-    IoUring { io: io_uring::Loop },
+    IoUring { io: linux::Loop },
 }
 
 /// I/O access interface.
@@ -29,7 +29,7 @@ impl IO {
     pub fn new() -> Result<Self> {
         Ok(IO {
             io_method: IOMethod::IoUring {
-                io: io_uring::Loop::new()?,
+                io: linux::Loop::new()?,
             },
         })
     }
@@ -38,7 +38,7 @@ impl IO {
     pub fn new() -> Result<Self> {
         Ok(IO {
             io_method: IOMethod::Sync {
-                io: syscall::Loop::new()?,
+                io: darwin::Loop::new()?,
             },
         })
     }
