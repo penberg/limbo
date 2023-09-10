@@ -2,12 +2,12 @@ use crate::buffer_pool;
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk;
 use crate::sqlite3_ondisk::BTreePage;
-use crate::{PageSource, IO};
+use crate::{File, IO};
 use concurrent_lru::unsharded::LruCache;
 use std::sync::{Arc, Mutex};
 
 pub struct Pager {
-    database: PageSource,
+    database: File,
     page_cache: LruCache<usize, Arc<BTreePage>>,
     buffer_pool: Arc<Mutex<BufferPool>>,
 }

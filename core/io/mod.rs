@@ -8,7 +8,7 @@ mod linux;
 mod darwin;
 
 pub trait IO {
-    fn open(&self, path: &str) -> Result<PageSource>;
+    fn open(&self, path: &str) -> Result<File>;
 }
 
 #[cfg(target_os = "linux")]
@@ -21,11 +21,11 @@ pub fn default_io() -> Result<impl IO> {
     Ok(darwin::DarwinIO::new()?)
 }
 
-pub struct PageSource {
+pub struct File {
     io: Arc<dyn PageIO>,
 }
 
-impl PageSource {
+impl File {
     pub fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()> {
         self.io.get(page_idx, buf)
     }

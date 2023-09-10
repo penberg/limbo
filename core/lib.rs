@@ -21,7 +21,7 @@ use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
 pub use io::default_io;
-pub use io::{PageSource, IO};
+pub use io::{File, IO};
 pub use types::Value;
 
 pub struct Database {

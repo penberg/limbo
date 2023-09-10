@@ -17,7 +17,7 @@ impl Database {
 struct IO {}
 
 impl lig_core::IO for IO {
-    fn open(&self, _path: &str) -> anyhow::Result<lig_core::PageSource> {
+    fn open(&self, _path: &str) -> anyhow::Result<lig_core::File> {
         todo!();
     }
 }

@@ -1,4 +1,3 @@
-use crate::{PageSource, IO};
 use anyhow::{Ok, Result};
 use std::cell::RefCell;
 use std::io::{Read, Seek};
@@ -6,10 +5,10 @@ use std::sync::Arc;
 
 pub(crate) struct DarwinIO {}
 
-impl IO for DarwinIO {
-    fn open(&self, path: &str) -> Result<PageSource> {
+impl super::IO for DarwinIO {
+    fn open(&self, path: &str) -> Result<super::File> {
         let file = self.open_file(path)?;
-        Ok(PageSource { io: Arc::new(file) })
+        Ok(super::File { io: Arc::new(file) })
     }
 }
 
@@ -29,6 +28,7 @@ impl DarwinIO {
         Ok(())
     }
 }
+
 pub(crate) struct File {
     file: RefCell<std::fs::File>,
 }

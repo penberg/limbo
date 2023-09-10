@@ -1,4 +1,3 @@
-use crate::io::{PageSource, IO};
 use anyhow::Result;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
@@ -9,10 +8,10 @@ pub(crate) struct LinuxIO {
     ring: Rc<RefCell<io_uring::IoUring>>,
 }
 
-impl IO for LinuxIO {
-    fn open(&self, path: &str) -> Result<PageSource> {
+impl super::IO for LinuxIO {
+    fn open(&self, path: &str) -> Result<super::File> {
         let file = self.open_file(path)?;
-        Ok(PageSource { io: Arc::new(file) })
+        Ok(super::File { io: Arc::new(file) })
     }
 }
 
