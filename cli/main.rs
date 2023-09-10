@@ -23,7 +23,7 @@ impl std::fmt::Display for OutputMode {
 #[command(author, version, about, long_about = None)]
 struct Opts {
     database: PathBuf,
-    #[clap(short, long, default_value_t = OutputMode::Pretty)]
+    #[clap(short, long, default_value_t = OutputMode::Raw)]
     output_mode: OutputMode,
 }
 
