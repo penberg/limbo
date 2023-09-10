@@ -36,6 +36,7 @@ pub struct Cursor {
     pager: Arc<Pager>,
     root_page: usize,
     page: RefCell<Option<Arc<MemPage>>>,
+    rowid: RefCell<Option<u64>>,
     record: RefCell<Option<Record>>,
 }
 
@@ -45,6 +46,7 @@ impl Cursor {
             pager,
             root_page,
             page: RefCell::new(None),
+            rowid: RefCell::new(None),
             record: RefCell::new(None),
         }
     }
@@ -56,14 +58,16 @@ impl Cursor {
     pub fn rewind(&mut self) -> Result<()> {
         let mem_page = MemPage::new(None, self.root_page, 0);
         self.page.replace(Some(Arc::new(mem_page)));
-        let record = self.get_next_record()?;
-        self.record.replace(record);
+        let (rowid, next) = self.get_next_record()?;
+        self.rowid.replace(rowid);
+        self.record.replace(next);
         Ok(())
     }
 
     pub fn next(&mut self) -> Result<Option<Record>> {
         let result = self.record.take();
-        let next = self.get_next_record()?;
+        let (rowid, next) = self.get_next_record()?;
+        self.rowid.replace(rowid);
         self.record.replace(next);
         Ok(result)
     }
@@ -71,6 +75,10 @@ impl Cursor {
     pub fn wait_for_completion(&mut self) -> Result<()> {
         // TODO: Wait for pager I/O to complete
         Ok(())
+    }
+
+    pub fn rowid(&self) -> Result<Ref<Option<u64>>> {
+        Ok(self.rowid.borrow())
     }
 
     pub fn record(&self) -> Result<Ref<Option<Record>>> {
@@ -81,7 +89,7 @@ impl Cursor {
         self.record.borrow().is_some()
     }
 
-    fn get_next_record(&mut self) -> Result<Option<Record>> {
+    fn get_next_record(&mut self) -> Result<(Option<u64>, Option<Record>)> {
         loop {
             let mem_page = {
                 let mem_page = self.page.borrow();
@@ -96,7 +104,7 @@ impl Cursor {
                         self.page.replace(Some(parent.clone()));
                         continue;
                     }
-                    None => return Ok(None),
+                    None => return Ok((None, None)),
                 }
             }
             let cell = &page.cells[mem_page.cell_idx()];
@@ -114,7 +122,7 @@ impl Cursor {
                 BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
                     mem_page.advance();
                     let record = crate::sqlite3_ondisk::read_record(_payload)?;
-                    return Ok(Some(record));
+                    return Ok((Some(*_rowid), Some(record)));
                 }
             }
         }

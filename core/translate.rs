@@ -1,5 +1,5 @@
-use crate::vdbe::{Insn, Program, ProgramBuilder};
 use crate::schema::Schema;
+use crate::vdbe::{Insn, Program, ProgramBuilder};
 
 use anyhow::Result;
 use sqlite3_parser::ast::{OneSelect, Select, Stmt};
@@ -154,13 +154,20 @@ fn translate_columns(
                 sqlite3_parser::ast::Expr::Variable(_) => todo!(),
             },
             sqlite3_parser::ast::ResultColumn::Star => {
-                for i in 0..table.unwrap().columns.len() {
+                for (i, col) in table.unwrap().columns.iter().enumerate() {
                     let dest = program.alloc_register();
-                    program.emit_insn(Insn::Column {
-                        column: i,
-                        dest,
-                        cursor_id: cursor_id.unwrap(),
-                    });
+                    if col.primary_key {
+                        program.emit_insn(Insn::RowId {
+                            cursor_id: cursor_id.unwrap(),
+                            dest,
+                        });
+                    } else {
+                        program.emit_insn(Insn::Column {
+                            column: i,
+                            dest,
+                            cursor_id: cursor_id.unwrap(),
+                        });
+                    }
                 }
             }
             sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),

@@ -78,6 +78,12 @@ pub enum Insn {
         value: i64,
         dest: usize,
     },
+
+    // Read the rowid of the current row.
+    RowId {
+        cursor_id: CursorID,
+        dest: usize,
+    },
 }
 
 pub struct ProgramBuilder {
@@ -267,6 +273,15 @@ impl Program {
                     state.registers[*dest] = Value::Integer(*value);
                     state.pc += 1;
                 }
+                Insn::RowId { cursor_id, dest } => {
+                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    if let Some(ref rowid) = *cursor.rowid()? {
+                        state.registers[*dest] = Value::Integer(*rowid as i64);
+                    } else {
+                        todo!();
+                    }
+                    state.pc += 1;
+                }
             }
         }
     }
@@ -354,6 +369,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
         Insn::Integer { value, dest } => {
             ("Integer", *dest, *value as usize, 0, "", 0, "".to_string())
         }
+        Insn::RowId { cursor_id, dest } => ("RowId", *cursor_id, *dest, 0, "", 0, "".to_string()),
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

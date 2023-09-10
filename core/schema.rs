@@ -71,7 +71,17 @@ impl Table {
                                         }
                                         None => Type::Null,
                                     };
-                                    cols.push(Column { name, ty });
+                                    let primary_key = column.constraints.iter().any(|c| {
+                                        matches!(
+                                            c.constraint,
+                                            sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
+                                        )
+                                    });
+                                    cols.push(Column {
+                                        name,
+                                        ty,
+                                        primary_key,
+                                    });
                                 }
                             }
                             CreateTableBody::AsSelect(_) => todo!(),
@@ -116,6 +126,7 @@ impl Table {
 pub struct Column {
     pub name: String,
     pub ty: Type,
+    pub primary_key: bool,
 }
 
 pub enum Type {
@@ -149,22 +160,27 @@ pub fn sqlite_schema_table() -> Table {
             Column {
                 name: "type".to_string(),
                 ty: Type::Text,
+                primary_key: false,
             },
             Column {
                 name: "name".to_string(),
                 ty: Type::Text,
+                primary_key: false,
             },
             Column {
                 name: "tbl_name".to_string(),
                 ty: Type::Text,
+                primary_key: false,
             },
             Column {
                 name: "rootpage".to_string(),
                 ty: Type::Integer,
+                primary_key: false,
             },
             Column {
                 name: "sql".to_string(),
                 ty: Type::Text,
+                primary_key: false,
             },
         ],
     }
