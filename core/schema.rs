@@ -96,6 +96,7 @@ impl Table {
         }
     }
 
+    #[allow(dead_code)] // used in tests
     pub fn to_sql(&self) -> String {
         let mut sql = format!("CREATE TABLE {} (\n", self.name);
         for (i, column) in self.columns.iter().enumerate() {
