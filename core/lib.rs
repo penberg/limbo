@@ -4,6 +4,7 @@ mod io;
 mod pager;
 mod schema;
 mod sqlite3_ondisk;
+mod storage;
 mod translate;
 mod types;
 mod vdbe;
@@ -20,8 +21,8 @@ use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
-pub use io::default_io;
-pub use io::{File, IO};
+pub use io::IO;
+pub use storage::{Storage, StorageIO};
 pub use types::Value;
 
 pub struct Database {
@@ -30,8 +31,15 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(io: &impl IO, path: &str) -> Result<Database> {
-        let pager = Arc::new(Pager::open(io, path)?);
+    #[cfg(feature = "fs")]
+    pub fn open_file(io: IO, path: &str) -> Result<Database> {
+        let file = io.open_file(path)?;
+        let storage = storage::Storage::from_file(file);
+        Self::open(storage)
+    }
+
+    pub fn open(storage: Storage) -> Result<Database> {
+        let pager = Arc::new(Pager::open(storage)?);
         let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),

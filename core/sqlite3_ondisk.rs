@@ -25,7 +25,7 @@
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
 use crate::types::{Record, Value};
-use crate::File;
+use crate::Storage;
 use anyhow::{anyhow, Result};
 use std::borrow::BorrowMut;
 
@@ -59,9 +59,9 @@ pub struct DatabaseHeader {
     version_number: u32,
 }
 
-pub fn read_database_header(database: &File) -> Result<DatabaseHeader> {
+pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
     let mut buf = [0; 512];
-    database.get(1, &mut buf)?;
+    storage.get(1, &mut buf)?;
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
@@ -129,13 +129,13 @@ pub struct BTreePage {
 }
 
 pub fn read_btree_page(
-    database: &File,
+    storage: &Storage,
     buffer_pool: &mut BufferPool,
     page_idx: usize,
 ) -> Result<BTreePage> {
     let mut buf = buffer_pool.get();
     let page = &mut buf.borrow_mut().data_mut();
-    database.get(page_idx, page)?;
+    storage.get(page_idx, page)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {

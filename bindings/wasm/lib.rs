@@ -1,3 +1,5 @@
+use anyhow::Result;
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -7,17 +9,17 @@ pub struct Database {
 
 #[wasm_bindgen]
 impl Database {
-    pub fn open(path: &str) -> Database {
-        let io = IO {};
-        let inner = lig_core::Database::open(&io, path).unwrap();
+    pub fn open(_path: &str) -> Database {
+        let storage = lig_core::Storage::from_io(Arc::new(IO {}));
+        let inner = lig_core::Database::open(storage).unwrap();
         Database { _inner: inner }
     }
 }
 
-struct IO {}
+pub struct IO {}
 
-impl lig_core::IO for IO {
-    fn open(&self, _path: &str) -> anyhow::Result<lig_core::File> {
+impl lig_core::StorageIO for IO {
+    fn get(&self, _page_idx: usize, _buf: &mut [u8]) -> Result<()> {
         todo!();
     }
 }

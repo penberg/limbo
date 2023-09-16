@@ -29,8 +29,9 @@ struct Opts {
 
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
-    let io = lig_core::default_io()?;
-    let db = Database::open(&io, opts.database.to_str().unwrap())?;
+    let path = opts.database.to_str().unwrap();
+    let io = lig_core::IO::new()?;
+    let db = Database::open_file(io, path)?;
     let conn = db.connect();
     let mut rl = DefaultEditor::new()?;
     let home = dirs::home_dir().unwrap();

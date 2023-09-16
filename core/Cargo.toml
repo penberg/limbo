@@ -22,6 +22,7 @@ io-uring = "0.6.1"
 
 [dependencies]
 anyhow = "1.0.75"
+cfg_block = "0.1.1"
 concurrent_lru = "0.2.0"
 fallible-iterator = "0.3.0"
 log = "0.4.20"
