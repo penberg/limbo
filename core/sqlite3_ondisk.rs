@@ -60,8 +60,9 @@ pub struct DatabaseHeader {
 }
 
 pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
-    let mut buf = vec![0; 512];
+    let mut buf = crate::Buffer::allocate(512);
     storage.get(1, &mut buf)?;
+    let buf = buf.as_slice();
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
@@ -141,6 +142,7 @@ pub fn read_btree_page(
     } else {
         0
     };
+    let page = page.as_slice();
     let mut header = BTreePageHeader {
         page_type: page[pos].try_into()?,
         _first_freeblock_offset: u16::from_be_bytes([page[pos + 1], page[pos + 2]]),

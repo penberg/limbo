@@ -19,7 +19,7 @@ impl BufferPool {
         if let Some(buffer) = free_buffers.pop() {
             Buffer::new(self, buffer)
         } else {
-            let raw_buffer = vec![0; self.page_size];
+            let raw_buffer = IoBuffer::allocate(self.page_size);
             Buffer::new(self, raw_buffer)
         }
     }

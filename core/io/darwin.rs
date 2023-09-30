@@ -30,7 +30,7 @@ impl File {
     pub fn pread(&self, pos: usize, buf: &mut Buffer) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
-        file.read_exact(buf)?;
+        file.read_exact(buf.as_mut_slice())?;
         Ok(())
     }
 }
