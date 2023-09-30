@@ -19,7 +19,7 @@ impl Database {
 pub struct IO {}
 
 impl lig_core::StorageIO for IO {
-    fn get(&self, _page_idx: usize, _buf: &mut [u8]) -> Result<()> {
+    fn get(&self, _page_idx: usize, _buf: &mut lig_core::Buffer) -> Result<()> {
         todo!();
     }
 }

@@ -1,4 +1,4 @@
-use crate::io::File;
+use crate::io::{Buffer, File};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -17,13 +17,13 @@ impl Storage {
         }
     }
 
-    pub fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()> {
+    pub fn get(&self, page_idx: usize, buf: &mut Buffer) -> Result<()> {
         self.io.get(page_idx, buf)
     }
 }
 
 pub trait StorageIO {
-    fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()>;
+    fn get(&self, page_idx: usize, buf: &mut Buffer) -> Result<()>;
 }
 
 struct FileStorage {
@@ -31,7 +31,7 @@ struct FileStorage {
 }
 
 impl StorageIO for FileStorage {
-    fn get(&self, page_idx: usize, buf: &mut [u8]) -> Result<()> {
+    fn get(&self, page_idx: usize, buf: &mut Buffer) -> Result<()> {
         let page_size = buf.len();
         assert!(page_idx > 0);
         assert!(page_size >= 512);

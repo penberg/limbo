@@ -1,9 +1,8 @@
+use crate::io::Buffer as IoBuffer;
 use std::{mem::ManuallyDrop, sync::Mutex};
 
-pub type RawBuffer = Vec<u8>;
-
 pub struct BufferPool {
-    pub free_buffers: Mutex<Vec<RawBuffer>>,
+    pub free_buffers: Mutex<Vec<IoBuffer>>,
     page_size: usize,
 }
 
@@ -25,7 +24,7 @@ impl BufferPool {
         }
     }
 
-    pub fn put(&self, buffer: RawBuffer) {
+    pub fn put(&self, buffer: IoBuffer) {
         let mut free_buffers = self.free_buffers.lock().unwrap();
         free_buffers.push(buffer);
     }
@@ -33,7 +32,7 @@ impl BufferPool {
 
 pub struct Buffer<'a> {
     pool: &'a BufferPool,
-    data: ManuallyDrop<RawBuffer>,
+    data: ManuallyDrop<IoBuffer>,
 }
 
 impl Drop for Buffer<'_> {
@@ -44,14 +43,14 @@ impl Drop for Buffer<'_> {
 }
 
 impl<'a> Buffer<'a> {
-    pub fn new(pool: &'a BufferPool, data: RawBuffer) -> Self {
+    pub fn new(pool: &'a BufferPool, data: IoBuffer) -> Self {
         Self {
             pool,
             data: ManuallyDrop::new(data),
         }
     }
 
-    pub fn data_mut(&mut self) -> &mut [u8] {
+    pub fn data_mut(&mut self) -> &mut IoBuffer {
         &mut self.data
     }
 }

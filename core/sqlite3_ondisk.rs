@@ -60,7 +60,7 @@ pub struct DatabaseHeader {
 }
 
 pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
-    let mut buf = [0; 512];
+    let mut buf = vec![0; 512];
     storage.get(1, &mut buf)?;
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
@@ -134,7 +134,7 @@ pub fn read_btree_page(
     page_idx: usize,
 ) -> Result<BTreePage> {
     let mut buf = buffer_pool.get();
-    let page = &mut buf.borrow_mut().data_mut();
+    let page = buf.borrow_mut().data_mut();
     storage.get(page_idx, page)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE

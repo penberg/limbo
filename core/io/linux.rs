@@ -1,3 +1,4 @@
+use super::Buffer;
 use anyhow::Result;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
@@ -37,7 +38,7 @@ pub struct File {
 }
 
 impl File {
-    pub fn pread(&self, pos: usize, buf: &mut [u8]) -> Result<()> {
+    pub fn pread(&self, pos: usize, buf: &mut Buffer) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let read_e = io_uring::opcode::Read::new(fd, buf.as_mut_ptr(), buf.len() as u32 )
             .offset(pos as u64)
