@@ -1,16 +1,16 @@
-# Copyright 2023 the Lig authors. All rights reserved. MIT license.
+# Copyright 2023 the Limbo authors. All rights reserved. MIT license.
 
 [package]
-name = "lig_core"
+name = "limbo_core"
 version = "0.0.0"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The Lig database library"
+description = "The Limbo database library"
 
 [lib]
-name = "lig_core"
+name = "limbo_core"
 path = "lib.rs"
 
 [features]

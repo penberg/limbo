@@ -1,4 +1,4 @@
-# Copyright 2023 the Lig authors. All rights reserved. MIT license.
+# Copyright 2023 the Limbo authors. All rights reserved. MIT license.
 
 [workspace]
 resolver = "2"
@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-authors = ["the Lig authors"]
+authors = ["the Limbo authors"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/penberg/lig"
+repository = "https://github.com/penberg/limbo"

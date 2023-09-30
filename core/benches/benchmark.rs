@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use lig_core::{Database, IO};
+use limbo_core::{Database, IO};
 use pprof::criterion::{Output, PProfProfiler};
 
 fn bench_db() -> Database {
@@ -8,7 +8,7 @@ fn bench_db() -> Database {
 }
 
 fn bench(c: &mut Criterion) {
-    let mut group = c.benchmark_group("lig");
+    let mut group = c.benchmark_group("limbo");
     group.throughput(Throughput::Elements(1));
 
     let db = bench_db();

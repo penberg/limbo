@@ -1,6 +1,6 @@
-<img src="lig.png" width="200" align="right" />
+<img src="limbo.png" width="200" align="right" />
 
-# Lig
+# Limbo
 
 A modern SQLite-compatible database library built with Rust.
 
@@ -12,7 +12,7 @@ A modern SQLite-compatible database library built with Rust.
 
 ## Getting Started
 
-Lig is currently read-only. You can either use the `sqlite3` program to create a database:
+Limbo is currently read-only. You can either use the `sqlite3` program to create a database:
 
 ```console
 $ sqlite3 database.db
@@ -29,11 +29,11 @@ or use the testing script to generate one for you:
 ./testing/gen-database.py
 ```
 
-You can then start the Lig shell with:
+You can then start the Limbo shell with:
 
 ```console
 $ cargo run database.db
-Welcome to Lig SQL shell!
+Welcome to Limbo SQL shell!
 > SELECT * FROM users LIMIT 1;
 |1|Cody|Miller|mhurst@example.org|525.595.7319x21268|33667 Shaw Extension Suite 104|West Robert|VA|45161|`
 ```
@@ -72,7 +72,7 @@ This project is licensed under the [MIT license].
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in Lig by you, shall be licensed as MIT, without any additional
+for inclusion in Limbo by you, shall be licensed as MIT, without any additional
 terms or conditions.
 
-[MIT license]: https://github.com/penberg/lig/blob/main/LICENSE.md
+[MIT license]: https://github.com/penberg/limbo/blob/main/LICENSE.md

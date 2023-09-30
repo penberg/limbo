@@ -1,17 +1,17 @@
-# Copyright 2023 the Lig authors. All rights reserved. MIT license.
+# Copyright 2023 the Limbo authors. All rights reserved. MIT license.
 
 [package]
-name = "lig"
+name = "limbo"
 version = "0.0.0"
 authors.workspace = true
-default-run = "lig"
+default-run = "limbo"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The Lig interactive SQL shell"
+description = "The Limbo interactive SQL shell"
 
 [[bin]]
-name = "lig"
+name = "limbo"
 path = "main.rs"
 
 [dependencies]
@@ -19,5 +19,5 @@ anyhow = "1.0.75"
 clap = { version = "4.4.0", features = ["derive"] }
 cli-table = "0.4.7"
 dirs = "5.0.1"
-lig_core = { path = "../core" }
+limbo_core = { path = "../core" }
 rustyline = "12.0.0"

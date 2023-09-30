@@ -1,5 +1,5 @@
 [package]
-name = "lig-wasm"
+name = "limbo-wasm"
 version = "0.0.0"
 authors.workspace = true
 edition.workspace = true
@@ -12,5 +12,5 @@ path = "lib.rs"
 
 [dependencies]
 anyhow = "1.0.75"
-lig_core = { path = "../../core", default-features = false }
+limbo_core = { path = "../../core", default-features = false }
 wasm-bindgen = "0.2"

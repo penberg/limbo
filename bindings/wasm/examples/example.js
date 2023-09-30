@@ -1,3 +1,3 @@
-import lig from "../pkg/lig_wasm.js";
+import limbo from "../pkg/limbo_wasm.js";
 
-const db = lig.Database.open();
+const db = limbo.Database.open();

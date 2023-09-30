@@ -804,28 +804,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "lig"
+name = "limbo"
 version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
  "cli-table",
  "dirs",
- "lig_core",
+ "limbo_core",
  "rustyline",
 ]
 
 [[package]]
-name = "lig-wasm"
+name = "limbo-wasm"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "lig_core",
+ "limbo_core",
  "wasm-bindgen",
 ]
 
 [[package]]
-name = "lig_core"
+name = "limbo_core"
 version = "0.0.0"
 dependencies = [
  "anyhow",

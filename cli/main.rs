@@ -1,6 +1,6 @@
 use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
-use lig_core::{Database, Value};
+use limbo_core::{Database, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
 
@@ -30,16 +30,16 @@ struct Opts {
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     let path = opts.database.to_str().unwrap();
-    let io = lig_core::IO::new()?;
+    let io = limbo_core::IO::new()?;
     let db = Database::open_file(io, path)?;
     let conn = db.connect();
     let mut rl = DefaultEditor::new()?;
     let home = dirs::home_dir().unwrap();
-    let history_file = home.join(".lig_history");
+    let history_file = home.join(".limbo_history");
     if history_file.exists() {
         rl.load_history(history_file.as_path())?;
     }
-    println!("Welcome to Lig SQL shell!");
+    println!("Welcome to Limbo SQL shell!");
     loop {
         let readline = rl.readline("\x1b[90m>\x1b[0m ");
         match readline {
