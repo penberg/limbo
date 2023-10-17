@@ -104,7 +104,16 @@ impl Cursor {
                         self.page.replace(Some(parent.clone()));
                         continue;
                     }
-                    None => return Ok((None, None)),
+                    None => match page.header.right_most_pointer {
+                        Some(right_most_pointer) => {
+                            let mem_page = MemPage::new(None, right_most_pointer as usize, 0);
+                            self.page.replace(Some(Arc::new(mem_page)));
+                            continue;
+                        }
+                        None => {
+                            return Ok((None, None));
+                        }
+                    },
                 }
             }
             let cell = &page.cells[mem_page.cell_idx()];

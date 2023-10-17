@@ -97,7 +97,7 @@ pub struct BTreePageHeader {
     num_cells: u16,
     _cell_content_area: u16,
     _num_frag_free_bytes: u8,
-    right_most_pointer: Option<u32>,
+    pub(crate) right_most_pointer: Option<u32>,
 }
 
 #[repr(u8)]
