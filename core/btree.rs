@@ -99,15 +99,16 @@ impl Cursor {
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
             if mem_page.cell_idx() >= page.cells.len() {
-                match mem_page.parent {
-                    Some(ref parent) => {
-                        self.page.replace(Some(parent.clone()));
+                let parent = mem_page.parent.clone();
+                match page.header.right_most_pointer {
+                    Some(right_most_pointer) => {
+                        let mem_page = MemPage::new(parent.clone(), right_most_pointer as usize, 0);
+                        self.page.replace(Some(Arc::new(mem_page)));
                         continue;
                     }
-                    None => match page.header.right_most_pointer {
-                        Some(right_most_pointer) => {
-                            let mem_page = MemPage::new(None, right_most_pointer as usize, 0);
-                            self.page.replace(Some(Arc::new(mem_page)));
+                    None => match parent {
+                        Some(ref parent) => {
+                            self.page.replace(Some(parent.clone()));
                             continue;
                         }
                         None => {
