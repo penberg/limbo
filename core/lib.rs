@@ -9,10 +9,9 @@ mod translate;
 mod types;
 mod vdbe;
 
-use mimalloc::MiMalloc;
-
+#[cfg(not(target_family = "wasm"))]
 #[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use anyhow::Result;
 use fallible_iterator::FallibleIterator;

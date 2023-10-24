@@ -20,13 +20,15 @@ fs = []
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.6.1"
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+mimalloc = { version = "*", default-features = false }
+
 [dependencies]
 anyhow = "1.0.75"
 cfg_block = "0.1.1"
 concurrent_lru = "0.2.0"
 fallible-iterator = "0.3.0"
 log = "0.4.20"
-mimalloc = { version = "*", default-features = false }
 sqlite3-parser = "0.11.0"
 
 [dev-dependencies]
