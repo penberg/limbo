@@ -1,4 +1,4 @@
-use crate::io::{Buffer, File};
+use crate::io::{Buffer};
 use anyhow::Result;
 use std::sync::Arc;
 
@@ -11,7 +11,8 @@ impl Storage {
         Self { io }
     }
 
-    pub fn from_file(file: File) -> Self {
+    #[cfg(feature = "fs")]
+    pub fn from_file(file: crate::io::File) -> Self {
         Self {
             io: Arc::new(FileStorage::new(file)),
         }
@@ -26,10 +27,12 @@ pub trait StorageIO {
     fn get(&self, page_idx: usize, buf: &mut Buffer) -> Result<()>;
 }
 
+#[cfg(feature = "fs")]
 struct FileStorage {
-    file: File,
+    file: crate::io::File,
 }
 
+#[cfg(feature = "fs")]
 impl StorageIO for FileStorage {
     fn get(&self, page_idx: usize, buf: &mut Buffer) -> Result<()> {
         let page_size = buf.len();
@@ -43,8 +46,9 @@ impl StorageIO for FileStorage {
     }
 }
 
+#[cfg(feature = "fs")]
 impl FileStorage {
-    pub fn new(file: File) -> Self {
+    pub fn new(file: crate::io::File) -> Self {
         Self { file }
     }
 }

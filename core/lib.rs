@@ -20,7 +20,9 @@ use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
-pub use io::{Buffer, IO};
+pub use io::{Buffer};
+#[cfg(feature = "fs")]
+pub use io::IO;
 pub use storage::{Storage, StorageIO};
 pub use types::Value;
 
@@ -31,7 +33,7 @@ pub struct Database {
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: IO, path: &str) -> Result<Database> {
+    pub fn open_file(io: crate::io::IO, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let storage = storage::Storage::from_file(file);
         Self::open(storage)
