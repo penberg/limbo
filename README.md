@@ -65,6 +65,10 @@ echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 cargo bench --bench benchmark -- --profile-time=5
 ```
 
+## Publications
+
+* Pekka Enberg, Sasu Tarkoma, and Ashwin Rao. 2023. Towards Database and Serverless Runtime Co-Design. CoNEXT-SW ’23
+
 ## License
 
 This project is licensed under the [MIT license].
