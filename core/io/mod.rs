@@ -1,6 +1,10 @@
 use cfg_block::cfg_block;
 use std::pin::Pin;
 
+pub struct Completion<'a> {
+    pub buf: &'a mut Buffer,
+}
+
 pub struct Buffer {
     data: Pin<Vec<u8>>,
 }

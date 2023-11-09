@@ -1,4 +1,4 @@
-use super::Buffer;
+use super::Completion;
 use anyhow::{Ok, Result};
 use std::cell::RefCell;
 use std::io::{Read, Seek};
@@ -27,10 +27,10 @@ pub struct File {
 }
 
 impl File {
-    pub fn pread(&self, pos: usize, buf: &mut Buffer) -> Result<()> {
+    pub fn pread(&self, pos: usize, c: &mut Completion) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
-        file.read_exact(buf.as_mut_slice())?;
+        file.read_exact(c.buf.as_mut_slice())?;
         Ok(())
     }
 }

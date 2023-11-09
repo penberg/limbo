@@ -24,6 +24,7 @@
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
+use crate::io::{Buffer, Completion};
 use crate::types::{Record, Value};
 use crate::Storage;
 use anyhow::{anyhow, Result};
@@ -60,8 +61,11 @@ pub struct DatabaseHeader {
 }
 
 pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
-    let mut buf = crate::Buffer::allocate(512);
-    storage.get(1, &mut buf)?;
+    let mut buf = Buffer::allocate(512);
+    let mut c = Completion {
+        buf: buf.borrow_mut(),
+    };
+    storage.get(1, &mut c)?;
     let buf = buf.as_slice();
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
@@ -136,7 +140,8 @@ pub fn read_btree_page(
 ) -> Result<BTreePage> {
     let mut buf = buffer_pool.get();
     let page = buf.borrow_mut().data_mut();
-    storage.get(page_idx, page)?;
+    let mut c = Completion { buf: page };
+    storage.get(page_idx, &mut c)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {

@@ -20,9 +20,9 @@ use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
-pub use io::{Buffer};
 #[cfg(feature = "fs")]
 pub use io::IO;
+pub use io::{Buffer, Completion};
 pub use storage::{Storage, StorageIO};
 pub use types::Value;
 
