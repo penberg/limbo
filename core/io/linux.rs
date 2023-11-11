@@ -40,7 +40,7 @@ pub struct File {
 impl File {
     pub fn pread(&self, pos: usize, c: &mut Completion) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        let read_e = io_uring::opcode::Read::new(fd, c.buf.as_mut_ptr(), buf.len() as u32 )
+        let read_e = io_uring::opcode::Read::new(fd, c.buf.as_mut_ptr(), c.buf.len() as u32 )
             .offset(pos as u64)
             .build();
         let mut ring = self.ring.borrow_mut();
