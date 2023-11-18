@@ -98,6 +98,8 @@ impl Cursor {
             };
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
+            assert!(page.is_uptodate());
+            let page = &page.contents;
             if mem_page.cell_idx() >= page.cells.len() {
                 let parent = mem_page.parent.clone();
                 match page.header.right_most_pointer {
