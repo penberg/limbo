@@ -67,7 +67,7 @@ cargo bench --bench benchmark -- --profile-time=5
 
 ## Publications
 
-* Pekka Enberg, Sasu Tarkoma, and Ashwin Rao. 2023. Towards Database and Serverless Runtime Co-Design. CoNEXT-SW ’23
+* Pekka Enberg, Sasu Tarkoma, and Ashwin Rao (2023). Towards Database and Serverless Runtime Co-Design. In _CoNEXT-SW ’23_. [[PDF](https://penberg.org/papers/penberg-conext-sw-23.pdf)] [[Slides](https://penberg.org/papers/penberg-conext-sw-23-slides.pdf)]
 
 ## License
 
