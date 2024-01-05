@@ -1,12 +1,12 @@
-use crate::buffer_pool;
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::Storage;
+use crate::{buffer_pool, Buffer, Completion};
 use concurrent_lru::unsharded::LruCache;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 
 pub struct Page {
@@ -69,14 +69,14 @@ impl Page {
 pub struct Pager {
     storage: Storage,
     page_cache: LruCache<usize, Arc<Page>>,
-    buffer_pool: Arc<Mutex<BufferPool>>,
+    buffer_pool: Arc<BufferPool>,
 }
 
 impl Pager {
     pub fn open(storage: Storage) -> anyhow::Result<Self> {
         let db_header = sqlite3_ondisk::read_database_header(&storage)?;
         let page_size = db_header.page_size as usize;
-        let buffer_pool = Arc::new(Mutex::new(buffer_pool::BufferPool::new(page_size)));
+        let buffer_pool = Arc::new(buffer_pool::BufferPool::new(page_size));
         let page_cache = LruCache::new(10);
         Ok(Self {
             storage,
@@ -87,9 +87,14 @@ impl Pager {
 
     pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Arc<Page>> {
         let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
-            let mut buffer_pool = self.buffer_pool.lock().unwrap();
-            let page =
-                sqlite3_ondisk::read_btree_page(&self.storage, &mut buffer_pool, page_idx).unwrap();
+            let buffer_pool = self.buffer_pool.clone();
+            let drop_fn = Arc::new(move |buf| {
+                buffer_pool.put(buf);
+            });
+            let buf = self.buffer_pool.get();
+            let buf = Buffer::new(buf, drop_fn);
+            let mut c = Completion { buf };
+            let page = sqlite3_ondisk::read_btree_page(&self.storage, &mut c, page_idx).unwrap();
             let page = Page::new(page);
             page.set_uptodate();
             Ok::<Arc<Page>, anyhow::Error>(Arc::new(page))

@@ -1,19 +1,35 @@
 use cfg_block::cfg_block;
-use std::pin::Pin;
+use std::{mem::ManuallyDrop, pin::Pin, sync::Arc};
 
-pub struct Completion<'a> {
-    pub buf: &'a mut Buffer,
+pub struct Completion {
+    pub buf: Buffer,
 }
 
+pub type BufferData = Pin<Vec<u8>>;
+
+pub type BufferDropFn = Arc<dyn Fn(BufferData)>;
+
 pub struct Buffer {
-    data: Pin<Vec<u8>>,
+    data: ManuallyDrop<BufferData>,
+    drop: BufferDropFn,
+}
+
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        let data = unsafe { ManuallyDrop::take(&mut self.data) };
+        (self.drop)(data);
+    }
 }
 
 impl Buffer {
-    pub fn allocate(size: usize) -> Self {
-        Self {
-            data: Pin::new(vec![0; size]),
-        }
+    pub fn allocate(size: usize, drop: BufferDropFn) -> Self {
+        let data = ManuallyDrop::new(Pin::new(vec![0; size]));
+        Self { data, drop }
+    }
+
+    pub fn new(data: BufferData, drop: BufferDropFn) -> Self {
+        let data = ManuallyDrop::new(data);
+        Self { data, drop }
     }
 
     pub fn len(&self) -> usize {

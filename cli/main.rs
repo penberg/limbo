@@ -2,7 +2,7 @@ use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
 use limbo_core::{Database, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputMode {

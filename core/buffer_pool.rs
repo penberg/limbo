@@ -1,8 +1,8 @@
-use crate::io::Buffer as IoBuffer;
-use std::{mem::ManuallyDrop, sync::Mutex};
+use crate::io::BufferData;
+use std::{pin::Pin, sync::Mutex};
 
 pub struct BufferPool {
-    pub free_buffers: Mutex<Vec<IoBuffer>>,
+    pub free_buffers: Mutex<Vec<BufferData>>,
     page_size: usize,
 }
 
@@ -14,43 +14,17 @@ impl BufferPool {
         }
     }
 
-    pub fn get(&mut self) -> Buffer {
+    pub fn get(&self) -> BufferData {
         let mut free_buffers = self.free_buffers.lock().unwrap();
         if let Some(buffer) = free_buffers.pop() {
-            Buffer::new(self, buffer)
+            buffer
         } else {
-            let raw_buffer = IoBuffer::allocate(self.page_size);
-            Buffer::new(self, raw_buffer)
+            Pin::new(vec![0; self.page_size])
         }
     }
 
-    pub fn put(&self, buffer: IoBuffer) {
+    pub fn put(&self, buffer: BufferData) {
         let mut free_buffers = self.free_buffers.lock().unwrap();
         free_buffers.push(buffer);
-    }
-}
-
-pub struct Buffer<'a> {
-    pool: &'a BufferPool,
-    data: ManuallyDrop<IoBuffer>,
-}
-
-impl Drop for Buffer<'_> {
-    fn drop(&mut self) {
-        let data = unsafe { ManuallyDrop::take(&mut self.data) };
-        self.pool.put(data);
-    }
-}
-
-impl<'a> Buffer<'a> {
-    pub fn new(pool: &'a BufferPool, data: IoBuffer) -> Self {
-        Self {
-            pool,
-            data: ManuallyDrop::new(data),
-        }
-    }
-
-    pub fn data_mut(&mut self) -> &mut IoBuffer {
-        &mut self.data
     }
 }

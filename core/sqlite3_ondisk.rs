@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /// SQLite on-disk file format.
 ///
 /// SQLite stores data in a single database file, which is divided into fixed-size
@@ -23,12 +25,10 @@
 /// +-----------------+----------------+---------------------+----------------+
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
-use crate::buffer_pool::BufferPool;
 use crate::io::{Buffer, Completion};
 use crate::types::{Record, Value};
 use crate::Storage;
 use anyhow::{anyhow, Result};
-use std::borrow::BorrowMut;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -61,12 +61,11 @@ pub struct DatabaseHeader {
 }
 
 pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
-    let mut buf = Buffer::allocate(512);
-    let mut c = Completion {
-        buf: buf.borrow_mut(),
-    };
+    let drop_fn = Arc::new(|_buf| {});
+    let buf = Buffer::allocate(512, drop_fn);
+    let mut c = Completion { buf };
     storage.get(1, &mut c)?;
-    let buf = buf.as_slice();
+    let buf = c.buf.as_slice();
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
@@ -135,19 +134,16 @@ pub struct BTreePage {
 
 pub fn read_btree_page(
     storage: &Storage,
-    buffer_pool: &mut BufferPool,
+    c: &mut Completion,
     page_idx: usize,
 ) -> Result<BTreePage> {
-    let mut buf = buffer_pool.get();
-    let page = buf.borrow_mut().data_mut();
-    let mut c = Completion { buf: page };
-    storage.get(page_idx, &mut c)?;
+    storage.get(page_idx, c)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
         0
     };
-    let page = page.as_slice();
+    let page = c.buf.as_slice();
     let mut header = BTreePageHeader {
         page_type: page[pos].try_into()?,
         _first_freeblock_offset: u16::from_be_bytes([page[pos + 1], page[pos + 2]]),
