@@ -89,7 +89,7 @@ impl Pager {
         let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
             let page = Arc::new(Page::new());
             page.set_locked();
-            sqlite3_ondisk::read_btree_page(
+            sqlite3_ondisk::begin_read_btree_page(
                 &self.storage,
                 self.buffer_pool.clone(),
                 page.clone(),

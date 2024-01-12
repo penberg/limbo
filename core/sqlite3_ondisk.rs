@@ -134,7 +134,7 @@ pub struct BTreePage {
     pub cells: Vec<BTreeCell>,
 }
 
-pub fn read_btree_page(
+pub fn begin_read_btree_page(
     storage: &Storage,
     buffer_pool: Arc<BufferPool>,
     page: Arc<Page>,
@@ -146,15 +146,25 @@ pub fn read_btree_page(
         buffer_pool.put(buf);
     });
     let buf = Buffer::new(buf, drop_fn);
-    let complete = Box::new(move |_buf: &Buffer| {});
+    let complete = Box::new(move |buf: &Buffer| {
+        let page = page.clone();
+        if let Err(_) = finish_read_btree_page(page_idx, buf, page.clone()) {
+            page.set_error();
+        }
+    });
     let mut c = Completion::new(buf, complete);
     storage.get(page_idx, &mut c)?;
+    c.complete();
+    Ok(())
+}
+
+fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Arc<Page>) -> Result<()> {
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
         0
     };
-    let buf = c.buf.as_slice();
+    let buf = buf.as_slice();
     let mut header = BTreePageHeader {
         page_type: buf[pos].try_into()?,
         _first_freeblock_offset: u16::from_be_bytes([buf[pos + 1], buf[pos + 2]]),
