@@ -36,10 +36,10 @@ impl Database {
     pub fn open_file(io: crate::io::IO, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let storage = storage::Storage::from_file(file);
-        Self::open(storage)
+        Self::open(io, storage)
     }
 
-    pub fn open(storage: Storage) -> Result<Database> {
+    pub fn open(io: crate::io::IO, storage: Storage) -> Result<Database> {
         let pager = Arc::new(Pager::open(storage)?);
         let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
@@ -49,17 +49,27 @@ impl Database {
         let mut schema = Schema::new();
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
         if let Some(mut rows) = rows {
-            while let Some(row) = rows.next()? {
-                let ty = row.get::<String>(0)?;
-                if ty != "table" {
-                    continue;
+            loop {
+                match rows.next()? {
+                    RowResult::Row(row) => {
+                        let ty = row.get::<String>(0)?;
+                        if ty != "table" {
+                            continue;
+                        }
+                        let name: String = row.get::<String>(1)?;
+                        let root_page: i64 = row.get::<i64>(3)?;
+                        let sql: String = row.get::<String>(4)?;
+                        let table = schema::Table::from_sql(&sql, root_page as usize)?;
+                        assert_eq!(table.name, name);
+                        schema.add_table(table.name.to_owned(), table);
+                    }
+                    RowResult::IO => {
+                        // TODO: How do we ensure that the I/O we submitted to
+                        // read the schema is actually complete?
+                        io.run_once()?;
+                    }
+                    RowResult::Done => break,
                 }
-                let name: String = row.get::<String>(1)?;
-                let root_page: i64 = row.get::<i64>(3)?;
-                let sql: String = row.get::<String>(4)?;
-                let table = schema::Table::from_sql(&sql, root_page as usize)?;
-                assert_eq!(table.name, name);
-                schema.add_table(table.name.to_owned(), table);
             }
         }
         let schema = Arc::new(schema);
@@ -160,6 +170,12 @@ impl Statement {
     pub fn reset(&self) {}
 }
 
+pub enum RowResult {
+    Row(Row),
+    IO,
+    Done,
+}
+
 pub struct Rows {
     state: vdbe::ProgramState,
     program: Arc<vdbe::Program>,
@@ -175,16 +191,18 @@ impl Rows {
         }
     }
 
-    pub fn next(&mut self) -> Result<Option<Row>> {
+    pub fn next(&mut self) -> Result<RowResult> {
         loop {
             let result = self.program.step(&mut self.state, self.pager.clone())?;
             match result {
                 vdbe::StepResult::Row(row) => {
-                    return Ok(Some(Row { values: row.values }));
+                    return Ok(RowResult::Row(Row { values: row.values }));
                 }
-                vdbe::StepResult::IO => todo!(),
+                vdbe::StepResult::IO => {
+                    return Ok(RowResult::IO);
+                }
                 vdbe::StepResult::Done => {
-                    return Ok(None);
+                    return Ok(RowResult::Done);
                 }
             }
         }

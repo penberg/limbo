@@ -1,6 +1,6 @@
 use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
-use limbo_core::{Database, Value};
+use limbo_core::{Database, RowResult, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
 
@@ -70,36 +70,50 @@ fn main() -> anyhow::Result<()> {
 fn query(conn: &limbo_core::Connection, sql: &str, output_mode: &OutputMode) -> anyhow::Result<()> {
     match conn.query(sql) {
         Ok(Some(ref mut rows)) => match output_mode {
-            OutputMode::Raw => {
-                while let Some(row) = rows.next()? {
-                    print!("|");
-                    for val in row.values.iter() {
-                        match val {
-                            Value::Null => print!("NULL|"),
-                            Value::Integer(i) => print!("{}|", i),
-                            Value::Float(f) => print!("{}|", f),
-                            Value::Text(s) => print!("{}|", s),
-                            Value::Blob(b) => print!("{:?}|", b),
+            OutputMode::Raw => loop {
+                match rows.next()? {
+                    RowResult::Row(row) => {
+                        print!("|");
+                        for val in row.values.iter() {
+                            match val {
+                                Value::Null => print!("NULL|"),
+                                Value::Integer(i) => print!("{}|", i),
+                                Value::Float(f) => print!("{}|", f),
+                                Value::Text(s) => print!("{}|", s),
+                                Value::Blob(b) => print!("{:?}|", b),
+                            }
                         }
+                        println!();
                     }
-                    println!();
+                    RowResult::IO => {
+                        todo!();
+                    }
+                    RowResult::Done => break,
                 }
-            }
+            },
             OutputMode::Pretty => {
                 let mut table_rows: Vec<Vec<_>> = vec![];
-                while let Some(row) = rows.next()? {
-                    table_rows.push(
-                        row.values
-                            .iter()
-                            .map(|value| match value {
-                                Value::Null => "NULL".cell(),
-                                Value::Integer(i) => i.to_string().cell(),
-                                Value::Float(f) => f.to_string().cell(),
-                                Value::Text(s) => s.cell(),
-                                Value::Blob(b) => format!("{:?}", b).cell(),
-                            })
-                            .collect(),
-                    );
+                loop {
+                    match rows.next()? {
+                        RowResult::Row(row) => {
+                            table_rows.push(
+                                row.values
+                                    .iter()
+                                    .map(|value| match value {
+                                        Value::Null => "NULL".cell(),
+                                        Value::Integer(i) => i.to_string().cell(),
+                                        Value::Float(f) => f.to_string().cell(),
+                                        Value::Text(s) => s.cell(),
+                                        Value::Blob(b) => format!("{:?}", b).cell(),
+                                    })
+                                    .collect(),
+                            );
+                        }
+                        RowResult::IO => {
+                            todo!();
+                        }
+                        RowResult::Done => break,
+                    }
                 }
                 let table = table_rows.table();
                 cli_table::print_stdout(table).unwrap();

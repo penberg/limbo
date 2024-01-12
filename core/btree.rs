@@ -32,6 +32,11 @@ impl MemPage {
     }
 }
 
+pub enum CursorResult<T> {
+    Ok(T),
+    IO,
+}
+
 pub struct Cursor {
     pager: Arc<Pager>,
     root_page: usize,
@@ -55,21 +60,33 @@ impl Cursor {
         self.page.borrow().is_none()
     }
 
-    pub fn rewind(&mut self) -> Result<()> {
+    pub fn rewind(&mut self) -> Result<CursorResult<()>> {
         let mem_page = MemPage::new(None, self.root_page, 0);
         self.page.replace(Some(Arc::new(mem_page)));
-        let (rowid, next) = self.get_next_record()?;
-        self.rowid.replace(rowid);
-        self.record.replace(next);
-        Ok(())
+        match self.get_next_record()? {
+            CursorResult::Ok((rowid, next)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(next);
+                Ok(CursorResult::Ok(()))
+            }
+            CursorResult::IO => {
+                return Ok(CursorResult::IO);
+            }
+        }
     }
 
-    pub fn next(&mut self) -> Result<Option<Record>> {
+    pub fn next(&mut self) -> Result<CursorResult<Option<Record>>> {
         let result = self.record.take();
-        let (rowid, next) = self.get_next_record()?;
-        self.rowid.replace(rowid);
-        self.record.replace(next);
-        Ok(result)
+        match self.get_next_record()? {
+            CursorResult::Ok((rowid, next)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(next);
+                Ok(CursorResult::Ok(result))
+            }
+            CursorResult::IO => {
+                return Ok(CursorResult::IO);
+            }
+        }
     }
 
     pub fn wait_for_completion(&mut self) -> Result<()> {
@@ -89,7 +106,7 @@ impl Cursor {
         self.record.borrow().is_some()
     }
 
-    fn get_next_record(&mut self) -> Result<(Option<u64>, Option<Record>)> {
+    fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<Record>)>> {
         loop {
             let mem_page = {
                 let mem_page = self.page.borrow();
@@ -98,7 +115,9 @@ impl Cursor {
             };
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
-            assert!(page.is_uptodate());
+            if page.is_locked() {
+                return Ok(CursorResult::IO);
+            }
             let page = page.contents.read().unwrap();
             let page = page.as_ref().unwrap();
             if mem_page.cell_idx() >= page.cells.len() {
@@ -115,7 +134,7 @@ impl Cursor {
                             continue;
                         }
                         None => {
-                            return Ok((None, None));
+                            return Ok(CursorResult::Ok((None, None)));
                         }
                     },
                 }
@@ -135,7 +154,7 @@ impl Cursor {
                 BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
                     mem_page.advance();
                     let record = crate::sqlite3_ondisk::read_record(_payload)?;
-                    return Ok((Some(*_rowid), Some(record)));
+                    return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
             }
         }

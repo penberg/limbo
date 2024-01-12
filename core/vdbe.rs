@@ -1,4 +1,4 @@
-use crate::btree::Cursor;
+use crate::btree::{Cursor, CursorResult};
 use crate::pager::Pager;
 use crate::types::{Record, Value};
 
@@ -212,7 +212,12 @@ impl Program {
                 }
                 Insn::RewindAsync { cursor_id } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
-                    cursor.rewind()?;
+                    match cursor.rewind()? {
+                        CursorResult::Ok(()) => {}
+                        CursorResult::IO => {
+                            return Ok(StepResult::IO);
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::RewindAwait {
