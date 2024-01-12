@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 /// SQLite on-disk file format.
 ///
 /// SQLite stores data in a single database file, which is divided into fixed-size
@@ -25,10 +23,13 @@ use std::sync::Arc;
 /// +-----------------+----------------+---------------------+----------------+
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
+use crate::buffer_pool::BufferPool;
 use crate::io::{Buffer, Completion};
+use crate::pager::Page;
 use crate::types::{Record, Value};
 use crate::Storage;
 use anyhow::{anyhow, Result};
+use std::sync::Arc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -135,42 +136,55 @@ pub struct BTreePage {
 
 pub fn read_btree_page(
     storage: &Storage,
-    c: &mut Completion,
+    buffer_pool: Arc<BufferPool>,
+    page: Arc<Page>,
     page_idx: usize,
-) -> Result<BTreePage> {
-    storage.get(page_idx, c)?;
+) -> Result<()> {
+    let buf = buffer_pool.get();
+    let drop_fn = Arc::new(move |buf| {
+        let buffer_pool = buffer_pool.clone();
+        buffer_pool.put(buf);
+    });
+    let buf = Buffer::new(buf, drop_fn);
+    let complete = Box::new(move |_buf: &Buffer| {});
+    let mut c = Completion::new(buf, complete);
+    storage.get(page_idx, &mut c)?;
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
         0
     };
-    let page = c.buf.as_slice();
+    let buf = c.buf.as_slice();
     let mut header = BTreePageHeader {
-        page_type: page[pos].try_into()?,
-        _first_freeblock_offset: u16::from_be_bytes([page[pos + 1], page[pos + 2]]),
-        num_cells: u16::from_be_bytes([page[pos + 3], page[pos + 4]]),
-        _cell_content_area: u16::from_be_bytes([page[pos + 5], page[pos + 6]]),
-        _num_frag_free_bytes: page[pos + 7],
+        page_type: buf[pos].try_into()?,
+        _first_freeblock_offset: u16::from_be_bytes([buf[pos + 1], buf[pos + 2]]),
+        num_cells: u16::from_be_bytes([buf[pos + 3], buf[pos + 4]]),
+        _cell_content_area: u16::from_be_bytes([buf[pos + 5], buf[pos + 6]]),
+        _num_frag_free_bytes: buf[pos + 7],
         right_most_pointer: None,
     };
     pos += 8;
     if header.page_type == PageType::IndexInterior || header.page_type == PageType::TableInterior {
         header.right_most_pointer = Some(u32::from_be_bytes([
-            page[pos],
-            page[pos + 1],
-            page[pos + 2],
-            page[pos + 3],
+            buf[pos],
+            buf[pos + 1],
+            buf[pos + 2],
+            buf[pos + 3],
         ]));
         pos += 4;
     }
     let mut cells = Vec::new();
     for _ in 0..header.num_cells {
-        let cell_pointer = u16::from_be_bytes([page[pos], page[pos + 1]]);
+        let cell_pointer = u16::from_be_bytes([buf[pos], buf[pos + 1]]);
         pos += 2;
-        let cell = read_btree_cell(page, &header.page_type, cell_pointer as usize)?;
+        let cell = read_btree_cell(buf, &header.page_type, cell_pointer as usize)?;
         cells.push(cell);
     }
-    Ok(BTreePage { header, cells })
+    let inner = BTreePage { header, cells };
+    page.contents.write().unwrap().replace(inner);
+    page.set_uptodate();
+    page.clear_locked();
+    Ok(())
 }
 
 #[derive(Debug)]

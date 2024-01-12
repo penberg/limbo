@@ -2,8 +2,8 @@ use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::Storage;
-use crate::{buffer_pool, Buffer, Completion};
 use concurrent_lru::unsharded::LruCache;
+use std::sync::RwLock;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -11,7 +11,7 @@ use std::sync::{
 
 pub struct Page {
     flags: AtomicUsize,
-    pub contents: BTreePage,
+    pub contents: RwLock<Option<BTreePage>>,
 }
 
 /// Page is up-to-date.
@@ -22,10 +22,10 @@ const PAGE_LOCKED: usize = 0b010;
 const PAGE_ERROR: usize = 0b100;
 
 impl Page {
-    pub fn new(contents: BTreePage) -> Page {
+    pub fn new() -> Page {
         Page {
             flags: AtomicUsize::new(0),
-            contents,
+            contents: RwLock::new(None),
         }
     }
 
@@ -76,7 +76,7 @@ impl Pager {
     pub fn open(storage: Storage) -> anyhow::Result<Self> {
         let db_header = sqlite3_ondisk::read_database_header(&storage)?;
         let page_size = db_header.page_size as usize;
-        let buffer_pool = Arc::new(buffer_pool::BufferPool::new(page_size));
+        let buffer_pool = Arc::new(BufferPool::new(page_size));
         let page_cache = LruCache::new(10);
         Ok(Self {
             storage,
@@ -87,18 +87,16 @@ impl Pager {
 
     pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Arc<Page>> {
         let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
-            let buffer_pool = self.buffer_pool.clone();
-            let drop_fn = Arc::new(move |buf| {
-                buffer_pool.put(buf);
-            });
-            let buf = self.buffer_pool.get();
-            let buf = Buffer::new(buf, drop_fn);
-            let complete = Box::new(move |buf: &Buffer| {});
-            let mut c = Completion::new(buf, complete);
-            let page = sqlite3_ondisk::read_btree_page(&self.storage, &mut c, page_idx).unwrap();
-            let page = Page::new(page);
-            page.set_uptodate();
-            Ok::<Arc<Page>, anyhow::Error>(Arc::new(page))
+            let page = Arc::new(Page::new());
+            page.set_locked();
+            sqlite3_ondisk::read_btree_page(
+                &self.storage,
+                self.buffer_pool.clone(),
+                page.clone(),
+                page_idx,
+            )
+            .unwrap();
+            Ok::<Arc<Page>, anyhow::Error>(page)
         })?;
         Ok(handle.value().clone())
     }
