@@ -63,7 +63,8 @@ pub struct DatabaseHeader {
 pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
     let drop_fn = Arc::new(|_buf| {});
     let buf = Buffer::allocate(512, drop_fn);
-    let mut c = Completion { buf };
+    let complete = Box::new(move |_buf: &Buffer| {});
+    let mut c = Completion::new(buf, complete);
     storage.get(1, &mut c)?;
     let buf = c.buf.as_slice();
     let mut header = DatabaseHeader::default();

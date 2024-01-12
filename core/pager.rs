@@ -93,7 +93,8 @@ impl Pager {
             });
             let buf = self.buffer_pool.get();
             let buf = Buffer::new(buf, drop_fn);
-            let mut c = Completion { buf };
+            let complete = Box::new(move |buf: &Buffer| {});
+            let mut c = Completion::new(buf, complete);
             let page = sqlite3_ondisk::read_btree_page(&self.storage, &mut c, page_idx).unwrap();
             let page = Page::new(page);
             page.set_uptodate();

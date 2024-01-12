@@ -1,8 +1,21 @@
 use cfg_block::cfg_block;
 use std::{mem::ManuallyDrop, pin::Pin, sync::Arc};
 
+pub type Complete = dyn Fn(&Buffer) + Send + Sync;
+
 pub struct Completion {
     pub buf: Buffer,
+    pub complete: Box<Complete>,
+}
+
+impl Completion {
+    pub fn new(buf: Buffer, complete: Box<Complete>) -> Self {
+        Self { buf, complete }
+    }
+
+    pub fn complete(&self) {
+        (self.complete)(&self.buf);
+    }
 }
 
 pub type BufferData = Pin<Vec<u8>>;
