@@ -155,7 +155,6 @@ pub fn begin_read_btree_page(
     });
     let c = Arc::new(Completion::new(buf, complete));
     storage.get(page_idx, c.clone())?;
-    c.complete();
     Ok(())
 }
 

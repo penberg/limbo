@@ -33,6 +33,8 @@ impl File {
         let buf = c.buf();
         let mut buf = buf.as_mut_slice();
         file.read_exact(buf)?;
+        drop(buf);
+        c.complete();
         Ok(())
     }
 }

@@ -41,20 +41,27 @@ pub struct File {
 impl File {
     pub fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        let mut buf = c.buf_mut();
-        let len = buf.len();
-        let buf = buf.as_mut_ptr();
-        let read_e = io_uring::opcode::Read::new(fd, buf, len as u32 )
-            .offset(pos as u64)
-            .build();
+        let read_e = {
+            let mut buf = c.buf_mut();
+            let len = buf.len();
+            let buf = buf.as_mut_ptr();
+            let ptr = Arc::into_raw(c.clone());
+            io_uring::opcode::Read::new(fd, buf, len as u32 )
+                .offset(pos as u64)
+                .build()
+                .user_data(ptr as u64)
+        };
         let mut ring = self.ring.borrow_mut();
         unsafe {
             ring.submission()
                 .push(&read_e)
                 .expect("submission queue is full");
         }
+        // TODO: move this to run_once()
         ring.submit_and_wait(1)?;
         let cqe = ring.completion().next().expect("completion queue is empty");
+        let c = unsafe { Arc::from_raw(cqe.user_data() as *const Completion) };
+        c.complete();
         Ok(())
     }
 }
