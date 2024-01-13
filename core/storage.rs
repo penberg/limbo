@@ -18,13 +18,13 @@ impl Storage {
         }
     }
 
-    pub fn get(&self, page_idx: usize, c: &mut Completion) -> Result<()> {
+    pub fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()> {
         self.io.get(page_idx, c)
     }
 }
 
 pub trait StorageIO {
-    fn get(&self, page_idx: usize, c: &mut Completion) -> Result<()>;
+    fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()>;
 }
 
 #[cfg(feature = "fs")]
@@ -34,8 +34,8 @@ struct FileStorage {
 
 #[cfg(feature = "fs")]
 impl StorageIO for FileStorage {
-    fn get(&self, page_idx: usize, c: &mut Completion) -> Result<()> {
-        let page_size = c.buf.len();
+    fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()> {
+        let page_size = c.buf().len();
         assert!(page_idx > 0);
         assert!(page_size >= 512);
         assert!(page_size <= 65536);

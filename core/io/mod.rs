@@ -1,20 +1,35 @@
 use cfg_block::cfg_block;
-use std::{mem::ManuallyDrop, pin::Pin, sync::Arc};
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    mem::ManuallyDrop,
+    pin::Pin,
+    sync::Arc,
+};
 
 pub type Complete = dyn Fn(&Buffer) + Send + Sync;
 
 pub struct Completion {
-    pub buf: Buffer,
+    pub buf: RefCell<Buffer>,
     pub complete: Box<Complete>,
 }
 
 impl Completion {
     pub fn new(buf: Buffer, complete: Box<Complete>) -> Self {
+        let buf = RefCell::new(buf);
         Self { buf, complete }
     }
 
+    pub fn buf<'a>(&'a self) -> Ref<'a, Buffer> {
+        self.buf.borrow()
+    }
+
+    pub fn buf_mut<'a>(&'a self) -> RefMut<'a, Buffer> {
+        self.buf.borrow_mut()
+    }
+
     pub fn complete(&self) {
-        (self.complete)(&self.buf);
+        let buf = self.buf.borrow_mut();
+        (self.complete)(&buf);
     }
 }
 

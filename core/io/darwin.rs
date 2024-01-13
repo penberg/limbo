@@ -27,10 +27,12 @@ pub struct File {
 }
 
 impl File {
-    pub fn pread(&self, pos: usize, c: &mut Completion) -> Result<()> {
+    pub fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
-        file.read_exact(c.buf.as_mut_slice())?;
+        let buf = c.buf();
+        let mut buf = buf.as_mut_slice();
+        file.read_exact(buf)?;
         Ok(())
     }
 }

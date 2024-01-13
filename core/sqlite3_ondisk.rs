@@ -65,9 +65,10 @@ pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
     let drop_fn = Arc::new(|_buf| {});
     let buf = Buffer::allocate(512, drop_fn);
     let complete = Box::new(move |_buf: &Buffer| {});
-    let mut c = Completion::new(buf, complete);
-    storage.get(1, &mut c)?;
-    let buf = c.buf.as_slice();
+    let c = Arc::new(Completion::new(buf, complete));
+    storage.get(1, c.clone())?;
+    let buf = c.buf();
+    let buf = buf.as_slice();
     let mut header = DatabaseHeader::default();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
@@ -152,8 +153,8 @@ pub fn begin_read_btree_page(
             page.set_error();
         }
     });
-    let mut c = Completion::new(buf, complete);
-    storage.get(page_idx, &mut c)?;
+    let c = Arc::new(Completion::new(buf, complete));
+    storage.get(page_idx, c.clone())?;
     c.complete();
     Ok(())
 }

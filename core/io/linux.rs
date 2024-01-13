@@ -3,6 +3,7 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct IO {
     ring: Rc<RefCell<io_uring::IoUring>>,
@@ -38,9 +39,12 @@ pub struct File {
 }
 
 impl File {
-    pub fn pread(&self, pos: usize, c: &mut Completion) -> Result<()> {
+    pub fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        let read_e = io_uring::opcode::Read::new(fd, c.buf.as_mut_ptr(), c.buf.len() as u32 )
+        let mut buf = c.buf_mut();
+        let len = buf.len();
+        let buf = buf.as_mut_ptr();
+        let read_e = io_uring::opcode::Read::new(fd, buf, len as u32 )
             .offset(pos as u64)
             .build();
         let mut ring = self.ring.borrow_mut();
