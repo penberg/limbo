@@ -1,5 +1,6 @@
 use super::Completion;
 use anyhow::{Ok, Result};
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::io::{Read, Seek};
 
@@ -30,10 +31,11 @@ impl File {
     pub fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
-        let buf = c.buf();
-        let mut buf = buf.as_mut_slice();
-        file.read_exact(buf)?;
-        drop(buf);
+        {
+            let mut buf = c.buf_mut();
+            let buf = buf.as_mut_slice();
+            file.read_exact(buf)?;
+        }
         c.complete();
         Ok(())
     }
