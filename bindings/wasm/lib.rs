@@ -19,7 +19,7 @@ impl Database {
 pub struct IO {}
 
 impl limbo_core::StorageIO for IO {
-    fn get(&self, _page_idx: usize, _c: &mut limbo_core::Completion) -> Result<()> {
+    fn get(&self, _page_idx: usize, _c: Arc<limbo_core::Completion>) -> Result<()> {
         todo!();
     }
 }
