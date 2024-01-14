@@ -3,6 +3,7 @@ use anyhow::{Ok, Result};
 use std::sync::Arc;
 use std::cell::RefCell;
 use std::io::{Read, Seek};
+use log::trace;
 
 pub struct DarwinIO {}
 
@@ -14,6 +15,7 @@ impl DarwinIO {
 
 impl IO for DarwinIO {
     fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
+        trace!("open_file: {}", path);
         let file = std::fs::File::open(path)?;
         Ok(Box::new(DarwinFile {
             file: RefCell::new(file),

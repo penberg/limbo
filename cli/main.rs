@@ -29,6 +29,7 @@ struct Opts {
 }
 
 fn main() -> anyhow::Result<()> {
+    env_logger::init();
     let opts = Opts::parse();
     let path = opts.database.to_str().unwrap();
     let io = Arc::new(limbo_core::PlatformIO::new()?);

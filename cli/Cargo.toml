@@ -19,5 +19,6 @@ anyhow = "1.0.75"
 clap = { version = "4.4.0", features = ["derive"] }
 cli-table = "0.4.7"
 dirs = "5.0.1"
+env_logger = "0.10.1"
 limbo_core = { path = "../core" }
 rustyline = "12.0.0"

@@ -29,6 +29,7 @@ use crate::pager::Page;
 use crate::types::{Record, Value};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
+use log::trace;
 use std::sync::Arc;
 
 /// The size of the database header in bytes.
@@ -141,6 +142,7 @@ pub fn begin_read_btree_page(
     page: Arc<Page>,
     page_idx: usize,
 ) -> Result<()> {
+    trace!("begin_read_btree_page: {}", page_idx);
     let buf = buffer_pool.get();
     let drop_fn = Arc::new(move |buf| {
         let buffer_pool = buffer_pool.clone();
@@ -159,6 +161,7 @@ pub fn begin_read_btree_page(
 }
 
 fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Arc<Page>) -> Result<()> {
+    trace!("finish_read_btree_page: {}", page_idx);
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {

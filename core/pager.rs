@@ -3,6 +3,7 @@ use crate::sqlite3_ondisk;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::PageSource;
 use concurrent_lru::unsharded::LruCache;
+use log::trace;
 use std::sync::RwLock;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -86,6 +87,7 @@ impl Pager {
     }
 
     pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Arc<Page>> {
+        trace!("read_page: {}", page_idx);
         let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
             let page = Arc::new(Page::new());
             page.set_locked();
