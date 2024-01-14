@@ -10,15 +10,28 @@ pub struct Database {
 #[wasm_bindgen]
 impl Database {
     pub fn open(_path: &str) -> Database {
-        let storage = limbo_core::Storage::from_io(Arc::new(IO {}));
-        let inner = limbo_core::Database::open(storage).unwrap();
+        let io = Arc::new(IO {});
+        let page_source = limbo_core::PageSource::from_io(Arc::new(PageIO {}));
+        let inner = limbo_core::Database::open(io, page_source).unwrap();
         Database { _inner: inner }
     }
 }
 
 pub struct IO {}
 
-impl limbo_core::StorageIO for IO {
+impl limbo_core::IO for IO {
+    fn open_file(&self, _path: &str) -> Result<Box<dyn limbo_core::File>> {
+        todo!();
+    }
+
+    fn run_once(&self) -> Result<()> {
+        todo!();
+    }
+}
+
+pub struct PageIO {}
+
+impl limbo_core::PageIO for PageIO {
     fn get(&self, _page_idx: usize, _c: Arc<limbo_core::Completion>) -> Result<()> {
         todo!();
     }

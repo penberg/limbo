@@ -1,31 +1,33 @@
-use super::Completion;
+use super::{Completion, File, IO};
 use anyhow::Result;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use std::sync::Arc;
 
-pub struct IO {
+pub struct LinuxIO {
     ring: Rc<RefCell<io_uring::IoUring>>,
 }
 
-impl IO {
+impl LinuxIO {
     pub fn new() -> Result<Self> {
         let ring = io_uring::IoUring::new(8)?;
         Ok(Self {
             ring: Rc::new(RefCell::new(ring)),
         })
     }
+}
 
-    pub fn open_file(&self, path: &str) -> Result<File> {
+impl IO for LinuxIO {
+    fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
         let file = std::fs::File::open(path)?;
-        Ok(File {
+        Ok(Box::new(LinuxFile {
             ring: self.ring.clone(),
             file,
-        })
+        }))
     }
 
-    pub fn run_once(&self) -> Result<()> {
+    fn run_once(&self) -> Result<()> {
         let mut ring = self.ring.borrow_mut();
         ring.submit_and_wait(1)?;
         let cqe = ring.completion().next().expect("completion queue is empty");
@@ -33,13 +35,13 @@ impl IO {
     }
 }
 
-pub struct File {
+pub struct LinuxFile {
     ring: Rc<RefCell<io_uring::IoUring>>,
     file: std::fs::File,
 }
 
-impl File {
-    pub fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
+impl File for LinuxFile {
+    fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let read_e = {
             let mut buf = c.buf_mut();

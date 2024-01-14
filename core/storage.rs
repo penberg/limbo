@@ -1,18 +1,20 @@
 use crate::io::Completion;
+#[cfg(feature = "fs")]
+use crate::io::File;
 use anyhow::Result;
 use std::sync::Arc;
 
-pub struct Storage {
-    io: Arc<dyn StorageIO>,
+pub struct PageSource {
+    io: Arc<dyn PageIO>,
 }
 
-impl Storage {
-    pub fn from_io(io: Arc<dyn StorageIO>) -> Self {
+impl PageSource {
+    pub fn from_io(io: Arc<dyn PageIO>) -> Self {
         Self { io }
     }
 
     #[cfg(feature = "fs")]
-    pub fn from_file(file: crate::io::File) -> Self {
+    pub fn from_file(file: Box<dyn File>) -> Self {
         Self {
             io: Arc::new(FileStorage::new(file)),
         }
@@ -23,17 +25,17 @@ impl Storage {
     }
 }
 
-pub trait StorageIO {
+pub trait PageIO {
     fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()>;
 }
 
 #[cfg(feature = "fs")]
 struct FileStorage {
-    file: crate::io::File,
+    file: Box<dyn crate::io::File>,
 }
 
 #[cfg(feature = "fs")]
-impl StorageIO for FileStorage {
+impl PageIO for FileStorage {
     fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()> {
         let page_size = c.buf().len();
         assert!(page_idx > 0);
@@ -48,7 +50,7 @@ impl StorageIO for FileStorage {
 
 #[cfg(feature = "fs")]
 impl FileStorage {
-    pub fn new(file: crate::io::File) -> Self {
+    pub fn new(file: Box<dyn crate::io::File>) -> Self {
         Self { file }
     }
 }

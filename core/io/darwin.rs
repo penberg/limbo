@@ -1,34 +1,36 @@
-use super::Completion;
+use super::{Completion, File, IO};
 use anyhow::{Ok, Result};
 use std::sync::Arc;
 use std::cell::RefCell;
 use std::io::{Read, Seek};
 
-pub struct IO {}
+pub struct DarwinIO {}
 
-impl IO {
+impl DarwinIO {
     pub fn new() -> Result<Self> {
         Ok(Self {})
     }
+}
 
-    pub fn open_file(&self, path: &str) -> Result<File> {
+impl IO for DarwinIO {
+    fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
         let file = std::fs::File::open(path)?;
-        Ok(File {
+        Ok(Box::new(DarwinFile {
             file: RefCell::new(file),
-        })
+        }))
     }
 
-    pub(crate) fn run_once(&self) -> Result<()> {
+    fn run_once(&self) -> Result<()> {
         Ok(())
     }
 }
 
-pub struct File {
+pub struct DarwinFile {
     file: RefCell<std::fs::File>,
 }
 
-impl File {
-    pub fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
+impl File for DarwinFile {
+    fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         {

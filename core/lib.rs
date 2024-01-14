@@ -21,9 +21,9 @@ use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 
 #[cfg(feature = "fs")]
-pub use io::IO;
-pub use io::{Buffer, Completion};
-pub use storage::{Storage, StorageIO};
+pub use io::PlatformIO;
+pub use io::{Buffer, Completion, File, IO};
+pub use storage::{PageIO, PageSource};
 pub use types::Value;
 
 pub struct Database {
@@ -33,14 +33,14 @@ pub struct Database {
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: crate::io::IO, path: &str) -> Result<Database> {
+    pub fn open_file(io: Arc<impl crate::io::IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
-        let storage = storage::Storage::from_file(file);
+        let storage = storage::PageSource::from_file(file);
         Self::open(io, storage)
     }
 
-    pub fn open(io: crate::io::IO, storage: Storage) -> Result<Database> {
-        let pager = Arc::new(Pager::open(storage)?);
+    pub fn open(io: Arc<impl crate::io::IO>, page_source: PageSource) -> Result<Database> {
+        let pager = Arc::new(Pager::open(page_source)?);
         let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
