@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use std::sync::Arc;
+use log::trace;
 
 pub struct LinuxIO {
     ring: Rc<RefCell<io_uring::IoUring>>,
@@ -20,6 +21,7 @@ impl LinuxIO {
 
 impl IO for LinuxIO {
     fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
+        trace!("open_file(path = {})", path);
         let file = std::fs::File::open(path)?;
         Ok(Box::new(LinuxFile {
             ring: self.ring.clone(),
@@ -28,6 +30,7 @@ impl IO for LinuxIO {
     }
 
     fn run_once(&self) -> Result<()> {
+        trace!("run_once()");
         let mut ring = self.ring.borrow_mut();
         ring.submit_and_wait(1)?;
         let cqe = ring.completion().next().expect("completion queue is empty");
@@ -42,6 +45,7 @@ pub struct LinuxFile {
 
 impl File for LinuxFile {
     fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
+        trace!("pread(pos = {}, length = {})", pos, c.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let read_e = {
             let mut buf = c.buf_mut();
