@@ -34,6 +34,8 @@ impl IO for LinuxIO {
         let mut ring = self.ring.borrow_mut();
         ring.submit_and_wait(1)?;
         let cqe = ring.completion().next().expect("completion queue is empty");
+        let c = unsafe { Arc::from_raw(cqe.user_data() as *const Completion) };
+        c.complete();
         Ok(())
     }
 }
@@ -63,11 +65,6 @@ impl File for LinuxFile {
                 .push(&read_e)
                 .expect("submission queue is full");
         }
-        // TODO: move this to run_once()
-        ring.submit_and_wait(1)?;
-        let cqe = ring.completion().next().expect("completion queue is empty");
-        let c = unsafe { Arc::from_raw(cqe.user_data() as *const Completion) };
-        c.complete();
         Ok(())
     }
 }

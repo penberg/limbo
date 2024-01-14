@@ -29,8 +29,8 @@ use crate::pager::Page;
 use crate::types::{Record, Value};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
+use std::sync::{Arc, Mutex};
 use log::trace;
-use std::sync::Arc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -62,15 +62,23 @@ pub struct DatabaseHeader {
     version_number: u32,
 }
 
-pub fn read_database_header(page_source: &PageSource) -> Result<DatabaseHeader> {
+pub fn begin_read_database_header(page_source: &PageSource) -> Result<Arc<Mutex<DatabaseHeader>>> {
     let drop_fn = Arc::new(|_buf| {});
     let buf = Buffer::allocate(512, drop_fn);
-    let complete = Box::new(move |_buf: &Buffer| {});
+    let result = Arc::new(Mutex::new(DatabaseHeader::default()));
+    let header = result.clone();
+    let complete = Box::new(move |buf: &Buffer| {
+        let header = header.clone();
+        finish_read_database_header(buf, header).unwrap();
+    });
     let c = Arc::new(Completion::new(buf, complete));
     page_source.get(1, c.clone())?;
-    let buf = c.buf();
+    Ok(result)
+}
+
+fn finish_read_database_header(buf: &Buffer, header: Arc<Mutex<DatabaseHeader>>) -> Result<()> {
     let buf = buf.as_slice();
-    let mut header = DatabaseHeader::default();
+    let mut header = header.lock().unwrap();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
     header.write_version = buf[18];
@@ -94,7 +102,7 @@ pub fn read_database_header(page_source: &PageSource) -> Result<DatabaseHeader> 
     header.reserved.copy_from_slice(&buf[72..92]);
     header.version_valid_for = u32::from_be_bytes([buf[92], buf[93], buf[94], buf[95]]);
     header.version_number = u32::from_be_bytes([buf[96], buf[97], buf[98], buf[99]]);
-    Ok(header)
+    Ok(())
 }
 
 #[derive(Debug)]
