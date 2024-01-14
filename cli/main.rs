@@ -2,7 +2,7 @@ use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
 use limbo_core::{Database, RowResult, Value};
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputMode {
@@ -31,7 +31,7 @@ struct Opts {
 fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     let path = opts.database.to_str().unwrap();
-    let io = limbo_core::IO::new()?;
+    let io = Arc::new(limbo_core::PlatformIO::new()?);
     let db = Database::open_file(io, path)?;
     let conn = db.connect();
     if let Some(sql) = opts.sql {

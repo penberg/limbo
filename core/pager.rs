@@ -1,7 +1,7 @@
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk;
 use crate::sqlite3_ondisk::BTreePage;
-use crate::Storage;
+use crate::PageSource;
 use concurrent_lru::unsharded::LruCache;
 use std::sync::RwLock;
 use std::sync::{
@@ -67,19 +67,19 @@ impl Page {
 }
 
 pub struct Pager {
-    storage: Storage,
+    page_source: PageSource,
     page_cache: LruCache<usize, Arc<Page>>,
     buffer_pool: Arc<BufferPool>,
 }
 
 impl Pager {
-    pub fn open(storage: Storage) -> anyhow::Result<Self> {
-        let db_header = sqlite3_ondisk::read_database_header(&storage)?;
+    pub fn open(page_source: PageSource) -> anyhow::Result<Self> {
+        let db_header = sqlite3_ondisk::read_database_header(&page_source)?;
         let page_size = db_header.page_size as usize;
         let buffer_pool = Arc::new(BufferPool::new(page_size));
         let page_cache = LruCache::new(10);
         Ok(Self {
-            storage,
+            page_source,
             buffer_pool,
             page_cache,
         })
@@ -90,7 +90,7 @@ impl Pager {
             let page = Arc::new(Page::new());
             page.set_locked();
             sqlite3_ondisk::begin_read_btree_page(
-                &self.storage,
+                &self.page_source,
                 self.buffer_pool.clone(),
                 page.clone(),
                 page_idx,

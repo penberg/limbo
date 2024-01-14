@@ -27,7 +27,7 @@ use crate::buffer_pool::BufferPool;
 use crate::io::{Buffer, Completion};
 use crate::pager::Page;
 use crate::types::{Record, Value};
-use crate::Storage;
+use crate::PageSource;
 use anyhow::{anyhow, Result};
 use std::sync::Arc;
 
@@ -61,12 +61,12 @@ pub struct DatabaseHeader {
     version_number: u32,
 }
 
-pub fn read_database_header(storage: &Storage) -> Result<DatabaseHeader> {
+pub fn read_database_header(page_source: &PageSource) -> Result<DatabaseHeader> {
     let drop_fn = Arc::new(|_buf| {});
     let buf = Buffer::allocate(512, drop_fn);
     let complete = Box::new(move |_buf: &Buffer| {});
     let c = Arc::new(Completion::new(buf, complete));
-    storage.get(1, c.clone())?;
+    page_source.get(1, c.clone())?;
     let buf = c.buf();
     let buf = buf.as_slice();
     let mut header = DatabaseHeader::default();
@@ -136,7 +136,7 @@ pub struct BTreePage {
 }
 
 pub fn begin_read_btree_page(
-    storage: &Storage,
+    page_source: &PageSource,
     buffer_pool: Arc<BufferPool>,
     page: Arc<Page>,
     page_idx: usize,
@@ -154,7 +154,7 @@ pub fn begin_read_btree_page(
         }
     });
     let c = Arc::new(Completion::new(buf, complete));
-    storage.get(page_idx, c.clone())?;
+    page_source.get(page_idx, c.clone())?;
     Ok(())
 }
 
