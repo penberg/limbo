@@ -12,7 +12,7 @@ pub struct LinuxIO {
 
 impl LinuxIO {
     pub fn new() -> Result<Self> {
-        let ring = io_uring::IoUring::new(8)?;
+        let ring = io_uring::IoUring::new(128)?;
         Ok(Self {
             ring: Rc::new(RefCell::new(ring)),
         })
