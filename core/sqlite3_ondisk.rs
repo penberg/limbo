@@ -410,10 +410,16 @@ pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(Value, usize)>
 fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     let mut v: u64 = 0;
     for i in 0..8 {
-        let c = buf.get(i).ok_or(anyhow!("Invalid varint"))?;
-        v = (v << 7) + (c & 0x7f) as u64;
-        if (c & 0x80) == 0 {
-            return Ok((v, i + 1));
+        match buf.get(i) {
+            Some(c) => {
+                v = (v << 7) + (c & 0x7f) as u64;
+                if (c & 0x80) == 0 {
+                    return Ok((v, i + 1));
+                }
+            }
+            None => {
+                return Err(anyhow!("Invalid varint"));
+            }
         }
     }
     v = (v << 8) + buf[8] as u64;
