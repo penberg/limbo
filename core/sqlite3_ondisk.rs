@@ -194,7 +194,7 @@ fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Arc<Page>) -> Res
         ]));
         pos += 4;
     }
-    let mut cells = Vec::new();
+    let mut cells = Vec::with_capacity(header.num_cells as usize);
     for _ in 0..header.num_cells {
         let cell_pointer = u16::from_be_bytes([buf[pos], buf[pos + 1]]);
         pos += 2;
