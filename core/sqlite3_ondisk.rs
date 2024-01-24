@@ -301,7 +301,7 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
     assert!((header_size as usize) >= nr);
     let mut header_size = (header_size as usize) - nr;
     pos += nr;
-    let mut serial_types = Vec::new();
+    let mut serial_types = Vec::with_capacity(header_size);
     while header_size > 0 {
         let (serial_type, nr) = read_varint(&payload[pos..])?;
         let serial_type = SerialType::try_from(serial_type)?;
