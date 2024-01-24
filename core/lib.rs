@@ -33,14 +33,16 @@ pub struct Database {
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Arc<impl crate::io::IO>, path: &str) -> Result<Database> {
+    pub fn open_file(io: Arc<dyn crate::io::IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let storage = storage::PageSource::from_file(file);
         Self::open(io, storage)
     }
 
-    pub fn open(io: Arc<impl crate::io::IO>, page_source: PageSource) -> Result<Database> {
-        let pager = Arc::new(Pager::open(page_source)?);
+    pub fn open(io: Arc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
+        let db_header = Pager::begin_open(&page_source)?;
+        io.run_once()?;
+        let pager = Arc::new(Pager::finish_open(db_header, page_source)?);
         let bootstrap_schema = Arc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),

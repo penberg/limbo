@@ -215,6 +215,7 @@ impl Program {
                     match cursor.rewind()? {
                         CursorResult::Ok(()) => {}
                         CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
                             return Ok(StepResult::IO);
                         }
                     }
@@ -258,7 +259,13 @@ impl Program {
                 }
                 Insn::NextAsync { cursor_id } => {
                     let cursor = state.cursors.get_mut(cursor_id).unwrap();
-                    cursor.next()?;
+                    match cursor.next()? {
+                        CursorResult::Ok(_) => {}
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::NextAwait {

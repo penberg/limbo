@@ -33,10 +33,10 @@ fn main() -> anyhow::Result<()> {
     let opts = Opts::parse();
     let path = opts.database.to_str().unwrap();
     let io = Arc::new(limbo_core::PlatformIO::new()?);
-    let db = Database::open_file(io, path)?;
+    let db = Database::open_file(io.clone(), path)?;
     let conn = db.connect();
     if let Some(sql) = opts.sql {
-        query(&conn, &sql, &opts.output_mode)?;
+        query(io.clone(), &conn, &sql, &opts.output_mode)?;
         return Ok(());
     }
     let mut rl = DefaultEditor::new()?;
@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.to_owned())?;
-                query(&conn, &line, &opts.output_mode)?;
+                query(io.clone(), &conn, &line, &opts.output_mode)?;
             }
             Err(ReadlineError::Interrupted) => {
                 break;
@@ -68,7 +68,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn query(conn: &limbo_core::Connection, sql: &str, output_mode: &OutputMode) -> anyhow::Result<()> {
+fn query(io: Arc<dyn limbo_core::IO>, conn: &limbo_core::Connection, sql: &str, output_mode: &OutputMode) -> anyhow::Result<()> {
     match conn.query(sql) {
         Ok(Some(ref mut rows)) => match output_mode {
             OutputMode::Raw => loop {
@@ -87,7 +87,7 @@ fn query(conn: &limbo_core::Connection, sql: &str, output_mode: &OutputMode) -> 
                         println!();
                     }
                     RowResult::IO => {
-                        todo!();
+                        io.run_once()?;
                     }
                     RowResult::Done => break,
                 }
@@ -111,7 +111,7 @@ fn query(conn: &limbo_core::Connection, sql: &str, output_mode: &OutputMode) -> 
                             );
                         }
                         RowResult::IO => {
-                            todo!();
+                            io.run_once()?;
                         }
                         RowResult::Done => break,
                     }
