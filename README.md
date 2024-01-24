@@ -6,7 +6,7 @@ A modern SQLite-compatible database library built with Rust.
 
 ## Features
 
-* SQLite compatibility: SQL dialect (_wip_) and file format (_read-only_)
+* SQLite SQL dialect (_wip_) and file format (_read-only_) compatibility
 * Asynchronous I/O support with `io_uring` 
 * WebAssembly bindings (_wip_)
 
