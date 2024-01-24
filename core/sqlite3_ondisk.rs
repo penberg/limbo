@@ -312,7 +312,7 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
         header_size -= nr;
     }
     let mut values = Vec::with_capacity(serial_types.len());
-    for serial_type in serial_types {
+    for serial_type in &serial_types {
         let (value, usize) = read_value(&payload[pos..], serial_type)?;
         pos += usize;
         values.push(value);
@@ -320,8 +320,8 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
     Ok(Record { values })
 }
 
-pub fn read_value(buf: &[u8], serial_type: SerialType) -> Result<(Value, usize)> {
-    match serial_type {
+pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)> {
+    match *serial_type {
         SerialType::Null => Ok((Value::Null, 0)),
         SerialType::UInt8 => {
             if buf.len() < 1 {
