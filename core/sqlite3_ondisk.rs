@@ -401,7 +401,8 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
             if buf.len() < n {
                 return Err(anyhow!("Invalid String value"));
             }
-            Ok((Value::Text(buf[0..n].to_vec()), n))
+            let value = String::from_utf8(buf[0..n].to_vec())?;
+            Ok((Value::Text(value), n))
         }
     }
 }

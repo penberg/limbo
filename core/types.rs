@@ -5,7 +5,7 @@ pub enum Value {
     Null,
     Integer(i64),
     Float(f64),
-    Text(Vec<u8>),
+    Text(String),
     Blob(Vec<u8>),
 }
 
@@ -27,10 +27,7 @@ impl FromValue for i64 {
 impl FromValue for String {
     fn from_value(value: &Value) -> Result<Self> {
         match value {
-            Value::Text(s) => {
-                let s = std::str::from_utf8(s)?;
-                Ok(s.to_string())
-            },
+            Value::Text(s) => Ok(s.clone()),
             _ => anyhow::bail!("Expected text value"),
         }
     }
