@@ -32,10 +32,16 @@ impl IO for LinuxIO {
     fn run_once(&self) -> Result<()> {
         trace!("run_once()");
         let mut ring = self.ring.borrow_mut();
-        ring.submit_and_wait(1)?;
-        let cqe = ring.completion().next().expect("completion queue is empty");
-        let c = unsafe { Arc::from_raw(cqe.user_data() as *const Completion) };
-        c.complete();
+        ring.submit_and_wait(0)?;
+        loop {
+            match ring.completion().next() {
+                Some(cqe) => {
+                    let c = unsafe { Arc::from_raw(cqe.user_data() as *const Completion) };
+                    c.complete();
+                }
+                None => break,
+            }
+        }
         Ok(())
     }
 }
