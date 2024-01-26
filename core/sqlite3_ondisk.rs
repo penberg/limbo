@@ -473,7 +473,7 @@ mod tests {
         #[case] serial_type: SerialType,
         #[case] expected: Value,
     ) {
-        let result = read_value(buf, serial_type).unwrap();
+        let result = read_value(buf, &serial_type).unwrap();
         assert_eq!(result, (expected, buf.len()));
     }
 
@@ -489,7 +489,7 @@ mod tests {
     #[case(&[65, 66], SerialType::String(3))]
     #[case(&[192], SerialType::String(1))] // invalid UTF-8 sequence
     fn test_read_invalid_value(#[case] buf: &[u8], #[case] serial_type: SerialType) {
-        let result = read_value(buf, serial_type);
+        let result = read_value(buf, &serial_type);
         assert!(result.is_err());
     }
 
