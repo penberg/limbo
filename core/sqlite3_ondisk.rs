@@ -29,6 +29,7 @@ use crate::pager::Page;
 use crate::types::{Record, Value};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use log::trace;
 
@@ -403,7 +404,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
-            Ok((Value::Text(Arc::new(value)), n))
+            Ok((Value::Text(Rc::new(value)), n))
         }
     }
 }
@@ -468,7 +469,7 @@ mod tests {
     #[case(&[], SerialType::ConstInt0, Value::Integer(0))]
     #[case(&[], SerialType::ConstInt1, Value::Integer(1))]
     #[case(&[1, 2, 3], SerialType::Blob(3), Value::Blob(vec![1, 2, 3]))]
-    #[case(&[65, 66, 67], SerialType::String(3), Value::Text("ABC".to_string()))]
+    #[case(&[65, 66, 67], SerialType::String(3), Value::Text("ABC".to_string().into()))]
     fn test_read_value(
         #[case] buf: &[u8],
         #[case] serial_type: SerialType,

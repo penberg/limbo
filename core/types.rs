@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::rc::Rc;
 
 use anyhow::Result;
 
@@ -7,7 +7,7 @@ pub enum Value {
     Null,
     Integer(i64),
     Float(f64),
-    Text(Arc<String>),
+    Text(Rc<String>),
     Blob(Vec<u8>),
 }
 
