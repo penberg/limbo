@@ -75,13 +75,12 @@ impl Cursor {
         }
     }
 
-    pub fn next(&mut self) -> Result<CursorResult<Option<Record>>> {
-        let result = self.record.take();
+    pub fn next(&mut self) -> Result<CursorResult<()>> {
         match self.get_next_record()? {
             CursorResult::Ok((rowid, next)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(next);
-                Ok(CursorResult::Ok(result))
+                Ok(CursorResult::Ok(()))
             }
             CursorResult::IO => {
                 return Ok(CursorResult::IO);
