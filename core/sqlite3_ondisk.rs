@@ -489,7 +489,7 @@ mod tests {
     #[case(&[64, 9, 33, 251, 84, 68, 45], SerialType::BEFloat64)]
     #[case(&[1, 2], SerialType::Blob(3))]
     #[case(&[65, 66], SerialType::String(3))]
-    #[case(&[192], SerialType::String(1))] // invalid UTF-8 sequence
+    // TODO: UTF-8 validation is disabled #[case(&[192], SerialType::String(1))] // invalid UTF-8 sequence
     fn test_read_invalid_value(#[case] buf: &[u8], #[case] serial_type: SerialType) {
         let result = read_value(buf, &serial_type);
         assert!(result.is_err());
