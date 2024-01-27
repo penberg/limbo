@@ -403,7 +403,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
-            Ok((Value::Text(value), n))
+            Ok((Value::Text(Arc::new(value)), n))
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -5,7 +7,7 @@ pub enum Value {
     Null,
     Integer(i64),
     Float(f64),
-    Text(String),
+    Text(Arc<String>),
     Blob(Vec<u8>),
 }
 
@@ -27,7 +29,7 @@ impl FromValue for i64 {
 impl FromValue for String {
     fn from_value(value: &Value) -> Result<Self> {
         match value {
-            Value::Text(s) => Ok(s.clone()),
+            Value::Text(s) => Ok(s.to_string()),
             _ => anyhow::bail!("Expected text value"),
         }
     }
