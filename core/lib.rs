@@ -220,7 +220,7 @@ impl Rows {
         Self { stmt }
     }
 
-    pub fn next<'a>(&'a mut self) -> Result<RowResult<'a>> {
+    pub fn next(&mut self) -> Result<RowResult<'_>> {
         self.stmt.step()
     }
 }
