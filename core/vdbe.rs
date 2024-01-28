@@ -325,6 +325,9 @@ impl Program {
 }
 
 fn trace_insn(addr: usize, insn: &Insn) {
+    if !log::log_enabled!(log::Level::Trace) {
+        return;
+    }
     log::trace!("{}", insn_to_str(addr, insn));
 }
 
