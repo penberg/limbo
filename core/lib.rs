@@ -171,17 +171,17 @@ impl Statement {
         }
     }
 
-    pub fn step<'a>(&'a mut self) -> Result<RowResult<'a>> {
+    pub fn step(&mut self) -> Result<RowResult<'_>> {
         let result = self.program.step(&mut self.state, self.pager.clone())?;
         match result {
             vdbe::StepResult::Row(row) => {
-                return Ok(RowResult::Row(Row { values: row.values }));
+                Ok(RowResult::Row(Row { values: row.values }))
             }
             vdbe::StepResult::IO => {
-                return Ok(RowResult::IO);
+                Ok(RowResult::IO)
             }
             vdbe::StepResult::Done => {
-                return Ok(RowResult::Done);
+                Ok(RowResult::Done)
             }
         }
     }
