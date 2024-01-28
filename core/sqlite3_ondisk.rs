@@ -320,7 +320,7 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
         pos += usize;
         values.push(value);
     }
-    Ok(OwnedRecord { values })
+    Ok(OwnedRecord::new(values))
 }
 
 pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
