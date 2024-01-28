@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -14,8 +16,8 @@ pub enum OwnedValue {
     Null,
     Integer(i64),
     Float(f64),
-    Text(String),
-    Blob(Vec<u8>),
+    Text(Rc<String>),
+    Blob(Rc<Vec<u8>>),
 }
 
 pub fn to_value(value: &OwnedValue) -> Value<'_> {
