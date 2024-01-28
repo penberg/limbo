@@ -192,7 +192,11 @@ impl Program {
         }
     }
 
-    pub fn step<'a>(&self, state: &'a mut ProgramState, pager: Arc<Pager>) -> Result<StepResult<'a>> {
+    pub fn step<'a>(
+        &self,
+        state: &'a mut ProgramState,
+        pager: Arc<Pager>,
+    ) -> Result<StepResult<'a>> {
         loop {
             let insn = &self.insns[state.pc];
             trace_insn(state.pc, insn);

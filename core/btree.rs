@@ -152,7 +152,7 @@ impl Cursor {
                 }
                 BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
                     mem_page.advance();
-                    let record= crate::sqlite3_ondisk::read_record(_payload)?;
+                    let record = crate::sqlite3_ondisk::read_record(_payload)?;
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
             }

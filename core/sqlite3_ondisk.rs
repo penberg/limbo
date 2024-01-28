@@ -29,8 +29,8 @@ use crate::pager::Page;
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
-use std::sync::{Arc, Mutex};
 use log::trace;
+use std::sync::{Arc, Mutex};
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -320,7 +320,7 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
     Ok(OwnedRecord { values })
 }
 
-pub fn read_value(buf: & [u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
+pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
     match *serial_type {
         SerialType::Null => Ok((OwnedValue::Null, 0)),
         SerialType::UInt8 => {

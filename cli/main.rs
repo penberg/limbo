@@ -68,7 +68,12 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn query(io: Arc<dyn limbo_core::IO>, conn: &limbo_core::Connection, sql: &str, output_mode: &OutputMode) -> anyhow::Result<()> {
+fn query(
+    io: Arc<dyn limbo_core::IO>,
+    conn: &limbo_core::Connection,
+    sql: &str,
+    output_mode: &OutputMode,
+) -> anyhow::Result<()> {
     match conn.query(sql) {
         Ok(Some(ref mut rows)) => match output_mode {
             OutputMode::Raw => loop {
