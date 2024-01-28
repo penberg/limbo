@@ -26,10 +26,9 @@
 use crate::buffer_pool::BufferPool;
 use crate::io::{Buffer, Completion};
 use crate::pager::Page;
-use crate::types::{Record, Value};
+use crate::types::{OwnedRecord, OwnedValue};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use log::trace;
 
@@ -296,7 +295,7 @@ impl TryFrom<u64> for SerialType {
     }
 }
 
-pub fn read_record(payload: &[u8]) -> Result<Record> {
+pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
     let mut pos = 0;
     let (header_size, nr) = read_varint(payload)?;
     assert!((header_size as usize) >= nr);
@@ -318,24 +317,24 @@ pub fn read_record(payload: &[u8]) -> Result<Record> {
         pos += usize;
         values.push(value);
     }
-    Ok(Record { values })
+    Ok(OwnedRecord { values })
 }
 
-pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)> {
+pub fn read_value(buf: & [u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
     match *serial_type {
-        SerialType::Null => Ok((Value::Null, 0)),
+        SerialType::Null => Ok((OwnedValue::Null, 0)),
         SerialType::UInt8 => {
             if buf.len() < 1 {
                 return Err(anyhow!("Invalid UInt8 value"));
             }
-            Ok((Value::Integer(buf[0] as i64), 1))
+            Ok((OwnedValue::Integer(buf[0] as i64), 1))
         }
         SerialType::BEInt16 => {
             if buf.len() < 2 {
                 return Err(anyhow!("Invalid BEInt16 value"));
             }
             Ok((
-                Value::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64),
+                OwnedValue::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64),
                 2,
             ))
         }
@@ -344,7 +343,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
                 return Err(anyhow!("Invalid BEInt24 value"));
             }
             Ok((
-                Value::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
+                OwnedValue::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
                 3,
             ))
         }
@@ -353,7 +352,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
                 return Err(anyhow!("Invalid BEInt32 value"));
             }
             Ok((
-                Value::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64),
+                OwnedValue::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64),
                 4,
             ))
         }
@@ -362,7 +361,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
                 return Err(anyhow!("Invalid BEInt48 value"));
             }
             Ok((
-                Value::Integer(i64::from_be_bytes([
+                OwnedValue::Integer(i64::from_be_bytes([
                     0, 0, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5],
                 ])),
                 6,
@@ -373,7 +372,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
                 return Err(anyhow!("Invalid BEInt64 value"));
             }
             Ok((
-                Value::Integer(i64::from_be_bytes([
+                OwnedValue::Integer(i64::from_be_bytes([
                     buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
                 ])),
                 8,
@@ -384,19 +383,19 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
                 return Err(anyhow!("Invalid BEFloat64 value"));
             }
             Ok((
-                Value::Float(f64::from_be_bytes([
+                OwnedValue::Float(f64::from_be_bytes([
                     buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
                 ])),
                 8,
             ))
         }
-        SerialType::ConstInt0 => Ok((Value::Integer(0), 0)),
-        SerialType::ConstInt1 => Ok((Value::Integer(1), 0)),
+        SerialType::ConstInt0 => Ok((OwnedValue::Integer(0), 0)),
+        SerialType::ConstInt1 => Ok((OwnedValue::Integer(1), 0)),
         SerialType::Blob(n) => {
             if buf.len() < n {
                 return Err(anyhow!("Invalid Blob value"));
             }
-            Ok((Value::Blob(buf[0..n].to_vec()), n))
+            Ok((OwnedValue::Blob(buf[0..n].to_vec()), n))
         }
         SerialType::String(n) => {
             if buf.len() < n {
@@ -404,7 +403,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(Value, usize)
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
-            Ok((Value::Text(Rc::new(value)), n))
+            Ok((OwnedValue::Text(value), n))
         }
     }
 }
@@ -458,22 +457,22 @@ mod tests {
     }
 
     #[rstest]
-    #[case(&[], SerialType::Null, Value::Null)]
-    #[case(&[255], SerialType::UInt8, Value::Integer(255))]
-    #[case(&[0x12, 0x34], SerialType::BEInt16, Value::Integer(0x1234))]
-    #[case(&[0x12, 0x34, 0x56], SerialType::BEInt24, Value::Integer(0x123456))]
-    #[case(&[0x12, 0x34, 0x56, 0x78], SerialType::BEInt32, Value::Integer(0x12345678))]
-    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC], SerialType::BEInt48, Value::Integer(0x123456789ABC))]
-    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xFF], SerialType::BEInt64, Value::Integer(0x123456789ABCDEFF))]
-    #[case(&[64, 9, 33, 251, 84, 68, 45, 24], SerialType::BEFloat64, Value::Float(3.141592653589793))]
-    #[case(&[], SerialType::ConstInt0, Value::Integer(0))]
-    #[case(&[], SerialType::ConstInt1, Value::Integer(1))]
-    #[case(&[1, 2, 3], SerialType::Blob(3), Value::Blob(vec![1, 2, 3]))]
-    #[case(&[65, 66, 67], SerialType::String(3), Value::Text("ABC".to_string().into()))]
+    #[case(&[], SerialType::Null, OwnedValue::Null)]
+    #[case(&[255], SerialType::UInt8, OwnedValue::Integer(255))]
+    #[case(&[0x12, 0x34], SerialType::BEInt16, OwnedValue::Integer(0x1234))]
+    #[case(&[0x12, 0x34, 0x56], SerialType::BEInt24, OwnedValue::Integer(0x123456))]
+    #[case(&[0x12, 0x34, 0x56, 0x78], SerialType::BEInt32, OwnedValue::Integer(0x12345678))]
+    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC], SerialType::BEInt48, OwnedValue::Integer(0x123456789ABC))]
+    #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xFF], SerialType::BEInt64, OwnedValue::Integer(0x123456789ABCDEFF))]
+    #[case(&[64, 9, 33, 251, 84, 68, 45, 24], SerialType::BEFloat64, OwnedValue::Float(3.141592653589793))]
+    #[case(&[], SerialType::ConstInt0, OwnedValue::Integer(0))]
+    #[case(&[], SerialType::ConstInt1, OwnedValue::Integer(1))]
+    #[case(&[1, 2, 3], SerialType::Blob(3), OwnedValue::Blob(vec![1, 2, 3]))]
+    #[case(&[65, 66, 67], SerialType::String(3), OwnedValue::Text("ABC".to_string()))]
     fn test_read_value(
         #[case] buf: &[u8],
         #[case] serial_type: SerialType,
-        #[case] expected: Value,
+        #[case] expected: OwnedValue,
     ) {
         let result = read_value(buf, &serial_type).unwrap();
         assert_eq!(result, (expected, buf.len()));

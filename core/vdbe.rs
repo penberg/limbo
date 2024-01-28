@@ -1,8 +1,9 @@
 use crate::btree::{Cursor, CursorResult};
 use crate::pager::Pager;
-use crate::types::{Record, Value};
+use crate::types::{OwnedValue, Record};
 
 use anyhow::Result;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -143,24 +144,24 @@ impl ProgramBuilder {
     }
 }
 
-pub enum StepResult {
+pub enum StepResult<'a> {
     Done,
     IO,
-    Row(Record),
+    Row(Record<'a>),
 }
 
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: usize,
-    cursors: BTreeMap<usize, Cursor>,
-    registers: Vec<Value>,
+    cursors: RefCell<BTreeMap<usize, Cursor>>,
+    registers: Vec<OwnedValue>,
 }
 
 impl ProgramState {
     pub fn new(max_registers: usize) -> Self {
-        let cursors = BTreeMap::new();
+        let cursors = RefCell::new(BTreeMap::new());
         let mut registers = Vec::with_capacity(max_registers);
-        registers.resize(max_registers, Value::Null);
+        registers.resize(max_registers, OwnedValue::Null);
         Self {
             pc: 0,
             cursors,
@@ -191,10 +192,11 @@ impl Program {
         }
     }
 
-    pub fn step(&self, state: &mut ProgramState, pager: Arc<Pager>) -> Result<StepResult> {
+    pub fn step<'a>(&self, state: &'a mut ProgramState, pager: Arc<Pager>) -> Result<StepResult<'a>> {
         loop {
             let insn = &self.insns[state.pc];
             trace_insn(state.pc, insn);
+            let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
                     state.pc = *target_pc;
@@ -204,14 +206,14 @@ impl Program {
                     root_page,
                 } => {
                     let cursor = Cursor::new(pager.clone(), *root_page);
-                    state.cursors.insert(*cursor_id, cursor);
+                    cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
                 Insn::OpenReadAwait => {
                     state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
                     match cursor.rewind()? {
                         CursorResult::Ok(()) => {}
                         CursorResult::IO => {
@@ -225,7 +227,7 @@ impl Program {
                     cursor_id,
                     pc_if_empty,
                 } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
                         state.pc = *pc_if_empty;
@@ -238,7 +240,7 @@ impl Program {
                     column,
                     dest,
                 } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
                         state.registers[*dest] = record.values[*column].clone();
                     } else {
@@ -252,13 +254,13 @@ impl Program {
                 } => {
                     let mut values = Vec::with_capacity(*register_end - *register_start);
                     for i in *register_start..*register_end {
-                        values.push(state.registers[i].clone());
+                        values.push(crate::types::to_value(&state.registers[i]));
                     }
                     state.pc += 1;
                     return Ok(StepResult::Row(Record::new(values)));
                 }
                 Insn::NextAsync { cursor_id } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
                     match cursor.next()? {
                         CursorResult::Ok(_) => {}
                         CursorResult::IO => {
@@ -272,7 +274,7 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if cursor.has_record() {
                         state.pc = *pc_if_next;
@@ -290,22 +292,22 @@ impl Program {
                     state.pc = *target_pc;
                 }
                 Insn::Integer { value, dest } => {
-                    state.registers[*dest] = Value::Integer(*value);
+                    state.registers[*dest] = OwnedValue::Integer(*value);
                     state.pc += 1;
                 }
                 Insn::RowId { cursor_id, dest } => {
-                    let cursor = state.cursors.get_mut(cursor_id).unwrap();
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref rowid) = *cursor.rowid()? {
-                        state.registers[*dest] = Value::Integer(*rowid as i64);
+                        state.registers[*dest] = OwnedValue::Integer(*rowid as i64);
                     } else {
                         todo!();
                     }
                     state.pc += 1;
                 }
                 Insn::DecrJumpZero { reg, target_pc } => match state.registers[*reg] {
-                    Value::Integer(n) => {
+                    OwnedValue::Integer(n) => {
                         if n > 0 {
-                            state.registers[*reg] = Value::Integer(n - 1);
+                            state.registers[*reg] = OwnedValue::Integer(n - 1);
                             state.pc += 1;
                         } else {
                             state.pc = *target_pc;

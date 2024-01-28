@@ -1,6 +1,6 @@
 use crate::pager::Pager;
 use crate::sqlite3_ondisk::{BTreeCell, TableInteriorCell, TableLeafCell};
-use crate::types::Record;
+use crate::types::OwnedRecord;
 
 use anyhow::Result;
 
@@ -42,7 +42,7 @@ pub struct Cursor {
     root_page: usize,
     page: RefCell<Option<Arc<MemPage>>>,
     rowid: RefCell<Option<u64>>,
-    record: RefCell<Option<Record>>,
+    record: RefCell<Option<OwnedRecord>>,
 }
 
 impl Cursor {
@@ -97,7 +97,7 @@ impl Cursor {
         Ok(self.rowid.borrow())
     }
 
-    pub fn record(&self) -> Result<Ref<Option<Record>>> {
+    pub fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
         Ok(self.record.borrow())
     }
 
@@ -105,7 +105,7 @@ impl Cursor {
         self.record.borrow().is_some()
     }
 
-    fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<Record>)>> {
+    fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
             let mem_page = {
                 let mem_page = self.page.borrow();
@@ -152,7 +152,7 @@ impl Cursor {
                 }
                 BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
                     mem_page.advance();
-                    let record = crate::sqlite3_ondisk::read_record(_payload)?;
+                    let record= crate::sqlite3_ondisk::read_record(_payload)?;
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
             }

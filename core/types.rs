@@ -1,14 +1,31 @@
-use std::rc::Rc;
-
 use anyhow::Result;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value {
+pub enum Value<'a> {
     Null,
     Integer(i64),
     Float(f64),
-    Text(Rc<String>),
+    Text(&'a String),
+    Blob(&'a Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OwnedValue {
+    Null,
+    Integer(i64),
+    Float(f64),
+    Text(String),
     Blob(Vec<u8>),
+}
+
+pub fn to_value<'a>(value: &'a OwnedValue) -> Value<'a> {
+    match value {
+        OwnedValue::Null => Value::Null,
+        OwnedValue::Integer(i) => Value::Integer(*i),
+        OwnedValue::Float(f) => Value::Float(*f),
+        OwnedValue::Text(s) => Value::Text(s),
+        OwnedValue::Blob(b) => Value::Blob(b),
+    }
 }
 
 pub trait FromValue {
@@ -36,12 +53,22 @@ impl FromValue for String {
 }
 
 #[derive(Debug)]
-pub struct Record {
-    pub values: Vec<Value>,
+pub struct Record<'a> {
+    pub values: Vec<Value<'a>>,
 }
 
-impl Record {
-    pub fn new(values: Vec<Value>) -> Self {
+impl<'a> Record<'a> {
+    pub fn new(values: Vec<Value<'a>>) -> Self {
+        Self { values }
+    }
+}
+
+pub struct OwnedRecord {
+    pub values: Vec<OwnedValue>,
+}
+
+impl OwnedRecord {
+    pub fn new(values: Vec<OwnedValue>) -> Self {
         Self { values }
     }
 }

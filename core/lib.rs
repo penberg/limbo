@@ -100,10 +100,7 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Arc::new(translate::translate(&self.schema, stmt)?);
-                    Ok(Statement {
-                        program,
-                        pager: self.pager.clone(),
-                    })
+                    Ok(Statement::new(program, self.pager.clone()))
                 }
                 Cmd::Explain(_stmt) => todo!(),
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
@@ -121,8 +118,8 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Arc::new(translate::translate(&self.schema, stmt)?);
-                    let state = vdbe::ProgramState::new(program.max_registers);
-                    Ok(Some(Rows::new(state, program, self.pager.clone())))
+                    let stmt = Statement::new(program, self.pager.clone());
+                    Ok(Some(Rows { stmt }))
                 }
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(&self.schema, stmt)?;
@@ -160,40 +157,21 @@ impl Connection {
 
 pub struct Statement {
     program: Arc<vdbe::Program>,
+    state: vdbe::ProgramState,
     pager: Arc<Pager>,
 }
 
 impl Statement {
-    pub fn query(&self) -> Result<Rows> {
-        let state = vdbe::ProgramState::new(self.program.max_registers);
-        Ok(Rows::new(state, self.program.clone(), self.pager.clone()))
-    }
-
-    pub fn reset(&self) {}
-}
-
-pub enum RowResult {
-    Row(Row),
-    IO,
-    Done,
-}
-
-pub struct Rows {
-    state: vdbe::ProgramState,
-    program: Arc<vdbe::Program>,
-    pager: Arc<Pager>,
-}
-
-impl Rows {
-    pub fn new(state: vdbe::ProgramState, program: Arc<vdbe::Program>, pager: Arc<Pager>) -> Self {
+    pub fn new(program: Arc<vdbe::Program>, pager: Arc<Pager>) -> Self {
+        let state = vdbe::ProgramState::new(program.max_registers);
         Self {
-            state,
             program,
+            state,
             pager,
         }
     }
 
-    pub fn next(&mut self) -> Result<RowResult> {
+    pub fn step<'a>(&'a mut self) -> Result<RowResult<'a>> {
         loop {
             let result = self.program.step(&mut self.state, self.pager.clone())?;
             match result {
@@ -209,15 +187,42 @@ impl Rows {
             }
         }
     }
+
+    pub fn query(&mut self) -> Result<Rows> {
+        let stmt = Statement::new(self.program.clone(), self.pager.clone());
+        Ok(Rows::new(stmt))
+    }
+
+    pub fn reset(&self) {}
 }
 
-pub struct Row {
-    pub values: Vec<Value>,
+pub enum RowResult<'a> {
+    Row(Row<'a>),
+    IO,
+    Done,
 }
 
-impl Row {
+pub struct Row<'a> {
+    pub values: Vec<Value<'a>>,
+}
+
+impl<'a> Row<'a> {
     pub fn get<T: crate::types::FromValue>(&self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
+    }
+}
+
+pub struct Rows {
+    stmt: Statement,
+}
+
+impl Rows {
+    pub fn new(stmt: Statement) -> Self {
+        Self { stmt }
+    }
+
+    pub fn next<'a>(&'a mut self) -> Result<RowResult<'a>> {
+        self.stmt.step()
     }
 }
