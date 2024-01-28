@@ -17,7 +17,7 @@ pub trait IO {
     fn run_once(&self) -> Result<()>;
 }
 
-pub type Complete = dyn Fn(&Buffer) + Send + Sync;
+pub type Complete = dyn Fn(&Buffer);
 
 pub struct Completion {
     pub buf: RefCell<Buffer>,

@@ -30,7 +30,8 @@ use crate::types::{OwnedRecord, OwnedValue};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
 use log::trace;
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::sync::Arc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -62,10 +63,12 @@ pub struct DatabaseHeader {
     version_number: u32,
 }
 
-pub fn begin_read_database_header(page_source: &PageSource) -> Result<Arc<Mutex<DatabaseHeader>>> {
+pub fn begin_read_database_header(
+    page_source: &PageSource,
+) -> Result<Arc<RefCell<DatabaseHeader>>> {
     let drop_fn = Arc::new(|_buf| {});
     let buf = Buffer::allocate(512, drop_fn);
-    let result = Arc::new(Mutex::new(DatabaseHeader::default()));
+    let result = Arc::new(RefCell::new(DatabaseHeader::default()));
     let header = result.clone();
     let complete = Box::new(move |buf: &Buffer| {
         let header = header.clone();
@@ -76,9 +79,9 @@ pub fn begin_read_database_header(page_source: &PageSource) -> Result<Arc<Mutex<
     Ok(result)
 }
 
-fn finish_read_database_header(buf: &Buffer, header: Arc<Mutex<DatabaseHeader>>) -> Result<()> {
+fn finish_read_database_header(buf: &Buffer, header: Arc<RefCell<DatabaseHeader>>) -> Result<()> {
     let buf = buf.as_slice();
-    let mut header = header.lock().unwrap();
+    let mut header = header.borrow_mut();
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
     header.write_version = buf[18];

@@ -4,11 +4,12 @@ use crate::sqlite3_ondisk::{self, DatabaseHeader};
 use crate::PageSource;
 use concurrent_lru::unsharded::LruCache;
 use log::trace;
+use std::cell::RefCell;
+use std::sync::RwLock;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use std::sync::{Mutex, RwLock};
 
 pub struct Page {
     flags: AtomicUsize,
@@ -74,15 +75,15 @@ pub struct Pager {
 }
 
 impl Pager {
-    pub fn begin_open(page_source: &PageSource) -> anyhow::Result<Arc<Mutex<DatabaseHeader>>> {
+    pub fn begin_open(page_source: &PageSource) -> anyhow::Result<Arc<RefCell<DatabaseHeader>>> {
         sqlite3_ondisk::begin_read_database_header(page_source)
     }
 
     pub fn finish_open(
-        db_header: Arc<Mutex<DatabaseHeader>>,
+        db_header: Arc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
     ) -> anyhow::Result<Self> {
-        let db_header = db_header.lock().unwrap();
+        let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;
         let buffer_pool = Arc::new(BufferPool::new(page_size));
         let page_cache = LruCache::new(10);
