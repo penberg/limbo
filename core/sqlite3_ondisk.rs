@@ -327,7 +327,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
     match *serial_type {
         SerialType::Null => Ok((OwnedValue::Null, 0)),
         SerialType::UInt8 => {
-            if buf.len() < 1 {
+            if buf.is_empty() {
                 return Err(anyhow!("Invalid UInt8 value"));
             }
             Ok((OwnedValue::Integer(buf[0] as i64), 1))
@@ -508,7 +508,7 @@ mod tests {
     #[case(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01], (567382630219905, 8))]
     #[case(&[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01], (145249953336295681, 9))]
     fn read_varint_test(#[case] input: &[u8], #[case] expected: (u64, usize)) {
-        let result = read_varint(&input).unwrap();
+        let result = read_varint(input).unwrap();
         assert_eq!(result, expected);
     }
 

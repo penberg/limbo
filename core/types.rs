@@ -18,7 +18,7 @@ pub enum OwnedValue {
     Blob(Vec<u8>),
 }
 
-pub fn to_value<'a>(value: &'a OwnedValue) -> Value<'a> {
+pub fn to_value(value: &OwnedValue) -> Value<'_> {
     match value {
         OwnedValue::Null => Value::Null,
         OwnedValue::Integer(i) => Value::Integer(*i),

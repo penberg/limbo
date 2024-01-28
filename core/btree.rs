@@ -70,7 +70,7 @@ impl Cursor {
                 Ok(CursorResult::Ok(()))
             }
             CursorResult::IO => {
-                return Ok(CursorResult::IO);
+                Ok(CursorResult::IO)
             }
         }
     }
@@ -83,7 +83,7 @@ impl Cursor {
                 Ok(CursorResult::Ok(()))
             }
             CursorResult::IO => {
-                return Ok(CursorResult::IO);
+                Ok(CursorResult::IO)
             }
         }
     }

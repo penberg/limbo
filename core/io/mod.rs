@@ -30,11 +30,11 @@ impl Completion {
         Self { buf, complete }
     }
 
-    pub fn buf<'a>(&'a self) -> Ref<'a, Buffer> {
+    pub fn buf(&self) -> Ref<'_, Buffer> {
         self.buf.borrow()
     }
 
-    pub fn buf_mut<'a>(&'a self) -> RefMut<'a, Buffer> {
+    pub fn buf_mut(&self) -> RefMut<'_, Buffer> {
         self.buf.borrow_mut()
     }
 

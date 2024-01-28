@@ -115,7 +115,7 @@ impl Table {
             }
             sql.push_str("  ");
             sql.push_str(&column.name);
-            sql.push_str(" ");
+            sql.push(' ');
             sql.push_str(&column.ty.to_string());
         }
         sql.push_str(");\n");

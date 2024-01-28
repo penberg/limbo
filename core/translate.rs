@@ -48,10 +48,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync { cursor_id });
             let rewind_await_offset = program.emit_placeholder();
-            let limit_decr_insn = match limit_reg {
-                Some(_) => Some(program.emit_placeholder()),
-                None => None,
-            };
+            let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
             let (register_start, register_end) =
                 translate_columns(&mut program, Some(cursor_id), Some(table), columns);
             program.emit_insn(Insn::ResultRow {
