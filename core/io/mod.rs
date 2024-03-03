@@ -102,4 +102,9 @@ cfg_block! {
         mod darwin;
         pub use darwin::DarwinIO as PlatformIO;
     }
+
+    #[cfg(target_os = "windows")] {
+        mod windows;
+        pub use windows::WindowsIO as PlatformIO;
+    }
 }
