@@ -1,8 +1,14 @@
-<img src="limbo.png" width="200" align="right" />
+<div align="center">
+  <img src="limbo.png" alt="Limbo" width="150"/>
+  <h1>Limbo</h1>
+  <p>
+    <a href="https://github.com/penberg/limbo/actions">
+      <img src="https://github.com/penberg/limbo/actions/workflows/rust.yml/badge.svg" alt="Build badge">
+    </a>
+  </p>
+</div>
 
-# Limbo
-
-A modern SQLite-compatible database library built with Rust.
+Limbo is a modern SQLite-compatible database library, built with Rust.
 
 ## Features
 
