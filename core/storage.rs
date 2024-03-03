@@ -25,7 +25,7 @@ impl PageSource {
     }
 
     #[cfg(feature = "fs")]
-    pub fn from_file(file: Box<dyn File>) -> Self {
+    pub fn from_file(file: Rc<dyn File>) -> Self {
         Self {
             io: Rc::new(FileStorage::new(file)),
         }
@@ -57,7 +57,7 @@ pub trait PageIO {
 
 #[cfg(feature = "fs")]
 struct FileStorage {
-    file: Box<dyn crate::io::File>,
+    file: Rc<dyn crate::io::File>,
 }
 
 #[cfg(feature = "fs")]
@@ -90,7 +90,7 @@ impl PageIO for FileStorage {
 
 #[cfg(feature = "fs")]
 impl FileStorage {
-    pub fn new(file: Box<dyn crate::io::File>) -> Self {
+    pub fn new(file: Rc<dyn crate::io::File>) -> Self {
         Self { file }
     }
 }

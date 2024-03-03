@@ -14,10 +14,10 @@ impl DarwinIO {
 }
 
 impl IO for DarwinIO {
-    fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
+    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::open(path)?;
-        Ok(Box::new(DarwinFile {
+        Ok(Rc::new(DarwinFile {
             file: RefCell::new(file),
         }))
     }

@@ -14,7 +14,7 @@ pub trait File {
 }
 
 pub trait IO {
-    fn open_file(&self, path: &str) -> Result<Box<dyn File>>;
+    fn open_file(&self, path: &str) -> Result<Rc<dyn File>>;
 
     fn run_once(&self) -> Result<()>;
 }
