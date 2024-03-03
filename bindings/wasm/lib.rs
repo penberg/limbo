@@ -9,11 +9,16 @@ pub struct Database {
 
 #[wasm_bindgen]
 impl Database {
-    pub fn open(_path: &str) -> Database {
+    #[wasm_bindgen(constructor)]
+    pub fn new(_path: &str) -> Database {
         let io = Rc::new(IO {});
         let page_source = limbo_core::PageSource::from_io(Rc::new(PageIO {}));
         let inner = limbo_core::Database::open(io, page_source).unwrap();
         Database { _inner: inner }
+    }
+
+    #[wasm_bindgen]
+    pub fn exec(&self, _sql: &str) {
     }
 }
 
