@@ -31,9 +31,11 @@ fallible-iterator = "0.3.0"
 log = "0.4.20"
 sqlite3-parser = "0.11.0"
 
+[target.'cfg(not(target_family = "windows"))'.dev-dependencies]
+pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports", "async", "async_futures"] }
-pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
 rstest = "0.18.2"
 rusqlite = "0.29.0"
 
