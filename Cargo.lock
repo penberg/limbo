@@ -290,15 +290,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "concurrent_lru"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7feb5cb312f774e8a24540e27206db4e890f7d488563671d24a16389cf4c2e4e"
-dependencies = [
- "once_cell",
-]
-
-[[package]]
 name = "cpp_demangle"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -850,7 +841,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "cfg_block",
- "concurrent_lru",
  "criterion",
  "fallible-iterator 0.3.0",
  "io-uring",
@@ -859,6 +849,7 @@ dependencies = [
  "pprof",
  "rstest",
  "rusqlite",
+ "sieve-cache",
  "sqlite3-parser",
 ]
 
@@ -1430,6 +1421,12 @@ dependencies = [
  "ryu",
  "serde",
 ]
+
+[[package]]
+name = "sieve-cache"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51bf3a9dccf2c079bf1465d449a485c85b36443caf765f2f127bfec28b180f75"
 
 [[package]]
 name = "siphasher"

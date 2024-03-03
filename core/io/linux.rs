@@ -3,7 +3,6 @@ use anyhow::Result;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
-use std::sync::Arc;
 use log::trace;
 
 pub struct LinuxIO {
@@ -36,7 +35,7 @@ impl IO for LinuxIO {
         loop {
             match ring.completion().next() {
                 Some(cqe) => {
-                    let c = unsafe { Arc::from_raw(cqe.user_data() as *const Completion) };
+                    let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
                     c.complete();
                 }
                 None => break,
@@ -52,14 +51,14 @@ pub struct LinuxFile {
 }
 
 impl File for LinuxFile {
-    fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
+    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         trace!("pread(pos = {}, length = {})", pos, c.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let read_e = {
             let mut buf = c.buf_mut();
             let len = buf.len();
             let buf = buf.as_mut_ptr();
-            let ptr = Arc::into_raw(c.clone());
+            let ptr = Rc::into_raw(c.clone());
             io_uring::opcode::Read::new(fd, buf, len as u32 )
                 .offset(pos as u64)
                 .build()

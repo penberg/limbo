@@ -4,11 +4,11 @@ use std::{
     cell::{Ref, RefCell, RefMut},
     mem::ManuallyDrop,
     pin::Pin,
-    sync::Arc,
+    rc::Rc,
 };
 
 pub trait File {
-    fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()>;
+    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
 }
 
 pub trait IO {
@@ -46,7 +46,7 @@ impl Completion {
 
 pub type BufferData = Pin<Vec<u8>>;
 
-pub type BufferDropFn = Arc<dyn Fn(BufferData)>;
+pub type BufferDropFn = Rc<dyn Fn(BufferData)>;
 
 pub struct Buffer {
     data: ManuallyDrop<BufferData>,
