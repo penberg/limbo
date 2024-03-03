@@ -2,14 +2,12 @@ use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
 use crate::PageSource;
-use concurrent_lru::unsharded::LruCache;
 use log::trace;
+use sieve_cache::SieveCache;
 use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
 
 pub struct Page {
     flags: AtomicUsize,
@@ -70,23 +68,23 @@ impl Page {
 
 pub struct Pager {
     page_source: PageSource,
-    page_cache: LruCache<usize, Arc<Page>>,
-    buffer_pool: Arc<BufferPool>,
+    page_cache: RefCell<SieveCache<usize, Rc<Page>>>,
+    buffer_pool: Rc<BufferPool>,
 }
 
 impl Pager {
-    pub fn begin_open(page_source: &PageSource) -> anyhow::Result<Arc<RefCell<DatabaseHeader>>> {
+    pub fn begin_open(page_source: &PageSource) -> anyhow::Result<Rc<RefCell<DatabaseHeader>>> {
         sqlite3_ondisk::begin_read_database_header(page_source)
     }
 
     pub fn finish_open(
-        db_header: Arc<RefCell<DatabaseHeader>>,
+        db_header: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
     ) -> anyhow::Result<Self> {
         let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;
-        let buffer_pool = Arc::new(BufferPool::new(page_size));
-        let page_cache = LruCache::new(10);
+        let buffer_pool = Rc::new(BufferPool::new(page_size));
+        let page_cache = RefCell::new(SieveCache::new(10).unwrap());
         Ok(Self {
             page_source,
             buffer_pool,
@@ -94,20 +92,28 @@ impl Pager {
         })
     }
 
-    pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Arc<Page>> {
+    pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Rc<Page>> {
         trace!("read_page(page_idx = {})", page_idx);
+        let mut page_cache = self.page_cache.borrow_mut();
+        if let Some(page) = page_cache.get(&page_idx) {
+            return Ok(page.clone());
+        }
+        let page = Rc::new(Page::new());
+        page.set_locked();
+        sqlite3_ondisk::begin_read_btree_page(
+            &self.page_source,
+            self.buffer_pool.clone(),
+            page.clone(),
+            page_idx,
+        )
+        .unwrap();
+        page_cache.insert(page_idx, page.clone());
+        Ok(page)
+        /*
         let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
-            let page = Arc::new(Page::new());
-            page.set_locked();
-            sqlite3_ondisk::begin_read_btree_page(
-                &self.page_source,
-                self.buffer_pool.clone(),
-                page.clone(),
-                page_idx,
-            )
-            .unwrap();
-            Ok::<Arc<Page>, anyhow::Error>(page)
+            Ok::<Rc<Page>, anyhow::Error>(page)
         })?;
         Ok(handle.value().clone())
+        */
     }
 }

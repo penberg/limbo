@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::sync::Arc;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
@@ -10,8 +10,8 @@ pub struct Database {
 #[wasm_bindgen]
 impl Database {
     pub fn open(_path: &str) -> Database {
-        let io = Arc::new(IO {});
-        let page_source = limbo_core::PageSource::from_io(Arc::new(PageIO {}));
+        let io = Rc::new(IO {});
+        let page_source = limbo_core::PageSource::from_io(Rc::new(PageIO {}));
         let inner = limbo_core::Database::open(io, page_source).unwrap();
         Database { _inner: inner }
     }
@@ -32,7 +32,7 @@ impl limbo_core::IO for IO {
 pub struct PageIO {}
 
 impl limbo_core::PageIO for PageIO {
-    fn get(&self, _page_idx: usize, _c: Arc<limbo_core::Completion>) -> Result<()> {
+    fn get(&self, _page_idx: usize, _c: Rc<limbo_core::Completion>) -> Result<()> {
         todo!();
     }
 }

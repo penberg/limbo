@@ -18,7 +18,7 @@ use fallible_iterator::FallibleIterator;
 use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
-use std::sync::Arc;
+use std::rc::Rc;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -27,23 +27,23 @@ pub use storage::{PageIO, PageSource};
 pub use types::Value;
 
 pub struct Database {
-    pager: Arc<Pager>,
-    schema: Arc<Schema>,
+    pager: Rc<Pager>,
+    schema: Rc<Schema>,
 }
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Arc<dyn crate::io::IO>, path: &str) -> Result<Database> {
+    pub fn open_file(io: Rc<dyn crate::io::IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let storage = storage::PageSource::from_file(file);
         Self::open(io, storage)
     }
 
-    pub fn open(io: Arc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
+    pub fn open(io: Rc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
         let db_header = Pager::begin_open(&page_source)?;
         io.run_once()?;
-        let pager = Arc::new(Pager::finish_open(db_header, page_source)?);
-        let bootstrap_schema = Arc::new(Schema::new());
+        let pager = Rc::new(Pager::finish_open(db_header, page_source)?);
+        let bootstrap_schema = Rc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
             schema: bootstrap_schema.clone(),
@@ -74,7 +74,7 @@ impl Database {
                 }
             }
         }
-        let schema = Arc::new(schema);
+        let schema = Rc::new(schema);
         Ok(Database { pager, schema })
     }
 
@@ -87,8 +87,8 @@ impl Database {
 }
 
 pub struct Connection {
-    pager: Arc<Pager>,
-    schema: Arc<Schema>,
+    pager: Rc<Pager>,
+    schema: Rc<Schema>,
 }
 
 impl Connection {
@@ -99,7 +99,7 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = Arc::new(translate::translate(&self.schema, stmt)?);
+                    let program = Rc::new(translate::translate(&self.schema, stmt)?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
                 Cmd::Explain(_stmt) => todo!(),
@@ -117,7 +117,7 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = Arc::new(translate::translate(&self.schema, stmt)?);
+                    let program = Rc::new(translate::translate(&self.schema, stmt)?);
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
                 }
@@ -156,13 +156,13 @@ impl Connection {
 }
 
 pub struct Statement {
-    program: Arc<vdbe::Program>,
+    program: Rc<vdbe::Program>,
     state: vdbe::ProgramState,
-    pager: Arc<Pager>,
+    pager: Rc<Pager>,
 }
 
 impl Statement {
-    pub fn new(program: Arc<vdbe::Program>, pager: Arc<Pager>) -> Self {
+    pub fn new(program: Rc<vdbe::Program>, pager: Rc<Pager>) -> Self {
         let state = vdbe::ProgramState::new(program.max_registers);
         Self {
             program,
@@ -174,15 +174,9 @@ impl Statement {
     pub fn step(&mut self) -> Result<RowResult<'_>> {
         let result = self.program.step(&mut self.state, self.pager.clone())?;
         match result {
-            vdbe::StepResult::Row(row) => {
-                Ok(RowResult::Row(Row { values: row.values }))
-            }
-            vdbe::StepResult::IO => {
-                Ok(RowResult::IO)
-            }
-            vdbe::StepResult::Done => {
-                Ok(RowResult::Done)
-            }
+            vdbe::StepResult::Row(row) => Ok(RowResult::Row(Row { values: row.values })),
+            vdbe::StepResult::IO => Ok(RowResult::IO),
+            vdbe::StepResult::Done => Ok(RowResult::Done),
         }
     }
 

@@ -31,7 +31,7 @@ use crate::PageSource;
 use anyhow::{anyhow, Result};
 use log::trace;
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::rc::Rc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -63,23 +63,21 @@ pub struct DatabaseHeader {
     version_number: u32,
 }
 
-pub fn begin_read_database_header(
-    page_source: &PageSource,
-) -> Result<Arc<RefCell<DatabaseHeader>>> {
-    let drop_fn = Arc::new(|_buf| {});
+pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
+    let drop_fn = Rc::new(|_buf| {});
     let buf = Buffer::allocate(512, drop_fn);
-    let result = Arc::new(RefCell::new(DatabaseHeader::default()));
+    let result = Rc::new(RefCell::new(DatabaseHeader::default()));
     let header = result.clone();
     let complete = Box::new(move |buf: &Buffer| {
         let header = header.clone();
         finish_read_database_header(buf, header).unwrap();
     });
-    let c = Arc::new(Completion::new(buf, complete));
+    let c = Rc::new(Completion::new(buf, complete));
     page_source.get(1, c.clone())?;
     Ok(result)
 }
 
-fn finish_read_database_header(buf: &Buffer, header: Arc<RefCell<DatabaseHeader>>) -> Result<()> {
+fn finish_read_database_header(buf: &Buffer, header: Rc<RefCell<DatabaseHeader>>) -> Result<()> {
     let buf = buf.as_slice();
     let mut header = header.borrow_mut();
     header.magic.copy_from_slice(&buf[0..16]);
@@ -149,13 +147,13 @@ pub struct BTreePage {
 
 pub fn begin_read_btree_page(
     page_source: &PageSource,
-    buffer_pool: Arc<BufferPool>,
-    page: Arc<Page>,
+    buffer_pool: Rc<BufferPool>,
+    page: Rc<Page>,
     page_idx: usize,
 ) -> Result<()> {
     trace!("begin_read_btree_page(page_idx = {})", page_idx);
     let buf = buffer_pool.get();
-    let drop_fn = Arc::new(move |buf| {
+    let drop_fn = Rc::new(move |buf| {
         let buffer_pool = buffer_pool.clone();
         buffer_pool.put(buf);
     });
@@ -166,12 +164,12 @@ pub fn begin_read_btree_page(
             page.set_error();
         }
     });
-    let c = Arc::new(Completion::new(buf, complete));
+    let c = Rc::new(Completion::new(buf, complete));
     page_source.get(page_idx, c.clone())?;
     Ok(())
 }
 
-fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Arc<Page>) -> Result<()> {
+fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<Page>) -> Result<()> {
     trace!("finish_read_btree_page(page_idx = {})", page_idx);
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE

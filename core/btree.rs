@@ -5,16 +5,16 @@ use crate::types::OwnedRecord;
 use anyhow::Result;
 
 use std::cell::{Ref, RefCell};
-use std::sync::Arc;
+use std::rc::Rc;
 
 pub struct MemPage {
-    parent: Option<Arc<MemPage>>,
+    parent: Option<Rc<MemPage>>,
     page_idx: usize,
     cell_idx: RefCell<usize>,
 }
 
 impl MemPage {
-    pub fn new(parent: Option<Arc<MemPage>>, page_idx: usize, cell_idx: usize) -> Self {
+    pub fn new(parent: Option<Rc<MemPage>>, page_idx: usize, cell_idx: usize) -> Self {
         Self {
             parent,
             page_idx,
@@ -38,15 +38,15 @@ pub enum CursorResult<T> {
 }
 
 pub struct Cursor {
-    pager: Arc<Pager>,
+    pager: Rc<Pager>,
     root_page: usize,
-    page: RefCell<Option<Arc<MemPage>>>,
+    page: RefCell<Option<Rc<MemPage>>>,
     rowid: RefCell<Option<u64>>,
     record: RefCell<Option<OwnedRecord>>,
 }
 
 impl Cursor {
-    pub fn new(pager: Arc<Pager>, root_page: usize) -> Self {
+    pub fn new(pager: Rc<Pager>, root_page: usize) -> Self {
         Self {
             pager,
             root_page,
@@ -62,16 +62,14 @@ impl Cursor {
 
     pub fn rewind(&mut self) -> Result<CursorResult<()>> {
         let mem_page = MemPage::new(None, self.root_page, 0);
-        self.page.replace(Some(Arc::new(mem_page)));
+        self.page.replace(Some(Rc::new(mem_page)));
         match self.get_next_record()? {
             CursorResult::Ok((rowid, next)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(next);
                 Ok(CursorResult::Ok(()))
             }
-            CursorResult::IO => {
-                Ok(CursorResult::IO)
-            }
+            CursorResult::IO => Ok(CursorResult::IO),
         }
     }
 
@@ -82,9 +80,7 @@ impl Cursor {
                 self.record.replace(next);
                 Ok(CursorResult::Ok(()))
             }
-            CursorResult::IO => {
-                Ok(CursorResult::IO)
-            }
+            CursorResult::IO => Ok(CursorResult::IO),
         }
     }
 
@@ -124,7 +120,7 @@ impl Cursor {
                 match page.header.right_most_pointer {
                     Some(right_most_pointer) => {
                         let mem_page = MemPage::new(parent.clone(), right_most_pointer as usize, 0);
-                        self.page.replace(Some(Arc::new(mem_page)));
+                        self.page.replace(Some(Rc::new(mem_page)));
                         continue;
                     }
                     None => match parent {
@@ -147,7 +143,7 @@ impl Cursor {
                     mem_page.advance();
                     let mem_page =
                         MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
-                    self.page.replace(Some(Arc::new(mem_page)));
+                    self.page.replace(Some(Rc::new(mem_page)));
                     continue;
                 }
                 BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {

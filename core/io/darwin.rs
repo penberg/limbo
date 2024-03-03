@@ -1,6 +1,6 @@
 use super::{Completion, File, IO};
 use anyhow::{Ok, Result};
-use std::sync::Arc;
+use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{Read, Seek};
 use log::trace;
@@ -32,7 +32,7 @@ pub struct DarwinFile {
 }
 
 impl File for DarwinFile {
-    fn pread(&self, pos: usize, c: Arc<Completion>) -> Result<()> {
+    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         {

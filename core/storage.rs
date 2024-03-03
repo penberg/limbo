@@ -2,31 +2,31 @@ use crate::io::Completion;
 #[cfg(feature = "fs")]
 use crate::io::File;
 use anyhow::Result;
-use std::sync::Arc;
+use std::rc::Rc;
 
 pub struct PageSource {
-    io: Arc<dyn PageIO>,
+    io: Rc<dyn PageIO>,
 }
 
 impl PageSource {
-    pub fn from_io(io: Arc<dyn PageIO>) -> Self {
+    pub fn from_io(io: Rc<dyn PageIO>) -> Self {
         Self { io }
     }
 
     #[cfg(feature = "fs")]
     pub fn from_file(file: Box<dyn File>) -> Self {
         Self {
-            io: Arc::new(FileStorage::new(file)),
+            io: Rc::new(FileStorage::new(file)),
         }
     }
 
-    pub fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()> {
+    pub fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         self.io.get(page_idx, c)
     }
 }
 
 pub trait PageIO {
-    fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()>;
+    fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
 }
 
 #[cfg(feature = "fs")]
@@ -36,7 +36,7 @@ struct FileStorage {
 
 #[cfg(feature = "fs")]
 impl PageIO for FileStorage {
-    fn get(&self, page_idx: usize, c: Arc<Completion>) -> Result<()> {
+    fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         let page_size = c.buf().len();
         assert!(page_idx > 0);
         assert!(page_size >= 512);
