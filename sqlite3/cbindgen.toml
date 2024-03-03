@@ -1,0 +1,7 @@
+language = "C"
+cpp_compat = true
+include_guard = "LIMBO_SQLITE3_H"
+line_length = 120
+no_includes = true
+style = "type"
+sys_includes = ["stdint.h"]

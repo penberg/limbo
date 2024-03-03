@@ -5,6 +5,7 @@ resolver = "2"
 members = [
   "bindings/wasm",
   "cli",
+  "sqlite3",
   "core",
 ]
 
