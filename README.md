@@ -8,14 +8,17 @@
   </p>
 </div>
 
-Limbo is a modern SQLite-compatible database library, built with Rust.
+Limbo is a modern in-process OLTP database management system, compatible with SQLite.
 
 ## Features
 
-* SQLite SQL dialect support ([_wip_](docs/sqlite-compat.md))
-* SQLite file format support (_read-only_)
-* Asynchronous I/O support with `io_uring` 
-* WebAssembly bindings (_wip_)
+* In-process OLTP database engine library
+* Asynchronous I/O support with `io_uring`
+* SQLite compatibility
+  * SQL dialect support ([_wip_](docs/sqlite-compat.md))
+  * File format support (_read-only_)
+  * SQLite C API (_wip_)
+* JavaScript/WebAssembly bindings (_wip_)
 
 ## Getting Started
 
