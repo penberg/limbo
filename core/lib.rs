@@ -58,12 +58,10 @@ impl Database {
                         if ty != "table" {
                             continue;
                         }
-                        let name: String = row.get::<String>(1)?;
                         let root_page: i64 = row.get::<i64>(3)?;
                         let sql: String = row.get::<String>(4)?;
                         let table = schema::Table::from_sql(&sql, root_page as usize)?;
-                        assert_eq!(table.name, name);
-                        schema.add_table(table.name.to_owned(), table);
+                        schema.add_table(&table.name.to_owned(), table);
                     }
                     RowResult::IO => {
                         // TODO: How do we ensure that the I/O we submitted to

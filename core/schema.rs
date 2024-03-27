@@ -1,6 +1,7 @@
 use anyhow::Result;
 use core::fmt;
 use fallible_iterator::FallibleIterator;
+use log::trace;
 use sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, Stmt},
     lexer::sql::Parser,
@@ -18,12 +19,14 @@ impl Schema {
         Self { tables }
     }
 
-    pub fn add_table(&mut self, name: String, table: Table) {
+    pub fn add_table(&mut self, name: &str, table: Table) {
+        let name = normalize_ident(&name);
         self.tables.insert(name, table);
     }
 
     pub fn get_table(&self, name: &str) -> Option<&Table> {
-        self.tables.get(name)
+        let name = normalize_ident(name);
+        self.tables.get(&name)
     }
 }
 
@@ -75,6 +78,8 @@ impl Table {
 }
 
 fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize) -> Result<Table> {
+    let table_name = normalize_ident(&tbl_name.name.0);
+    trace!("Creating table {}", table_name);
     let mut cols = vec![];
     match body {
         CreateTableBody::ColumnsAndConstraints { columns, .. } => {
@@ -122,9 +127,17 @@ fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize
     };
     Ok(Table {
         root_page,
-        name: tbl_name.name.to_string(),
+        name: table_name,
         columns: cols,
     })
+}
+
+fn normalize_ident(ident: &str) -> String {
+    if ident.starts_with('"') && ident.ends_with('"') {
+        ident[1..ident.len() - 1].to_string().to_lowercase()
+    } else {
+        ident.to_lowercase()
+    }
 }
 
 pub struct Column {
