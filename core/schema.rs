@@ -2,7 +2,7 @@ use anyhow::Result;
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use sqlite3_parser::{
-    ast::{Cmd, CreateTableBody, Stmt},
+    ast::{Cmd, CreateTableBody, QualifiedName, Stmt},
     lexer::sql::Parser,
 };
 use std::collections::HashMap;
@@ -41,56 +41,7 @@ impl Table {
             Some(cmd) => match cmd {
                 Cmd::Stmt(stmt) => match stmt {
                     Stmt::CreateTable { tbl_name, body, .. } => {
-                        let mut cols = vec![];
-                        match body {
-                            CreateTableBody::ColumnsAndConstraints { columns, .. } => {
-                                for column in columns {
-                                    let name = column.col_name.0.to_string();
-                                    let ty = match column.col_type {
-                                        Some(data_type) => {
-                                            let type_name = data_type.name.as_str();
-                                            if type_name.contains("INT") {
-                                                Type::Integer
-                                            } else if type_name.contains("CHAR")
-                                                || type_name.contains("CLOB")
-                                                || type_name.contains("TEXT")
-                                            {
-                                                Type::Text
-                                            } else if type_name.contains("BLOB")
-                                                || type_name.is_empty()
-                                            {
-                                                Type::Blob
-                                            } else if type_name.contains("REAL")
-                                                || type_name.contains("FLOA")
-                                                || type_name.contains("DOUB")
-                                            {
-                                                Type::Real
-                                            } else {
-                                                Type::Numeric
-                                            }
-                                        }
-                                        None => Type::Null,
-                                    };
-                                    let primary_key = column.constraints.iter().any(|c| {
-                                        matches!(
-                                            c.constraint,
-                                            sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
-                                        )
-                                    });
-                                    cols.push(Column {
-                                        name,
-                                        ty,
-                                        primary_key,
-                                    });
-                                }
-                            }
-                            CreateTableBody::AsSelect(_) => todo!(),
-                        };
-                        Ok(Table {
-                            root_page,
-                            name: tbl_name.name.to_string(),
-                            columns: cols,
-                        })
+                        create_table(tbl_name, body, root_page)
                     }
                     _ => {
                         anyhow::bail!("Expected CREATE TABLE statement");
@@ -121,6 +72,59 @@ impl Table {
         sql.push_str(");\n");
         sql
     }
+}
+
+fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize) -> Result<Table> {
+    let mut cols = vec![];
+    match body {
+        CreateTableBody::ColumnsAndConstraints { columns, .. } => {
+            for column in columns {
+                let name = column.col_name.0.to_string();
+                let ty = match column.col_type {
+                    Some(data_type) => {
+                        let type_name = data_type.name.as_str();
+                        if type_name.contains("INT") {
+                            Type::Integer
+                        } else if type_name.contains("CHAR")
+                            || type_name.contains("CLOB")
+                            || type_name.contains("TEXT")
+                        {
+                            Type::Text
+                        } else if type_name.contains("BLOB")
+                            || type_name.is_empty()
+                        {
+                            Type::Blob
+                        } else if type_name.contains("REAL")
+                            || type_name.contains("FLOA")
+                            || type_name.contains("DOUB")
+                        {
+                            Type::Real
+                        } else {
+                            Type::Numeric
+                        }
+                    }
+                    None => Type::Null,
+                };
+                let primary_key = column.constraints.iter().any(|c| {
+                    matches!(
+                        c.constraint,
+                        sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
+                    )
+                });
+                cols.push(Column {
+                    name,
+                    ty,
+                    primary_key,
+                });
+            }
+        }
+        CreateTableBody::AsSelect(_) => todo!(),
+    };
+    Ok(Table {
+        root_page,
+        name: tbl_name.name.to_string(),
+        columns: cols,
+    })
 }
 
 pub struct Column {
