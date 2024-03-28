@@ -109,11 +109,5 @@ impl Pager {
         .unwrap();
         page_cache.insert(page_idx, page.clone());
         Ok(page)
-        /*
-        let handle = self.page_cache.get_or_try_init(page_idx, 1, |_idx| {
-            Ok::<Rc<Page>, anyhow::Error>(page)
-        })?;
-        Ok(handle.value().clone())
-        */
     }
 }
