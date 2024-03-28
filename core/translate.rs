@@ -36,7 +36,12 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             let start_offset = program.offset();
             let limit_reg = if let Some(limit) = select.limit {
                 assert!(limit.offset.is_none());
-                Some(translate_expr(&mut program, &limit.expr))
+                Some(translate_expr(
+                    &mut program,
+                    Some(cursor_id),
+                    Some(table),
+                    &limit.expr,
+                ))
             } else {
                 None
             };
@@ -128,7 +133,7 @@ fn translate_columns(
     for col in columns {
         match col {
             sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
-                let _ = translate_expr(program, &expr);
+                let _ = translate_expr(program, cursor_id, table, &expr);
             }
             sqlite3_parser::ast::ResultColumn::Star => {
                 for (i, col) in table.unwrap().columns.iter().enumerate() {
@@ -154,7 +159,12 @@ fn translate_columns(
     (register_start, register_end)
 }
 
-fn translate_expr(program: &mut ProgramBuilder, expr: &Expr) -> usize {
+fn translate_expr(
+    program: &mut ProgramBuilder,
+    cursor_id: Option<usize>,
+    table: Option<&crate::schema::Table>,
+    expr: &Expr,
+) -> usize {
     match expr {
         Expr::Between { .. } => todo!(),
         Expr::Binary(_, _, _) => todo!(),
@@ -165,7 +175,23 @@ fn translate_expr(program: &mut ProgramBuilder, expr: &Expr) -> usize {
         Expr::Exists(_) => todo!(),
         Expr::FunctionCall { .. } => todo!(),
         Expr::FunctionCallStar { .. } => todo!(),
-        Expr::Id(_) => todo!(),
+        Expr::Id(ident) => {
+            let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
+            let dest = program.alloc_register();
+            if col.primary_key {
+                program.emit_insn(Insn::RowId {
+                    cursor_id: cursor_id.unwrap(),
+                    dest,
+                });
+            } else {
+                program.emit_insn(Insn::Column {
+                    column: idx,
+                    dest,
+                    cursor_id: cursor_id.unwrap(),
+                });
+            }
+            dest
+        }
         Expr::InList { .. } => todo!(),
         Expr::InSelect { .. } => todo!(),
         Expr::InTable { .. } => todo!(),

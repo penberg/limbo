@@ -37,6 +37,16 @@ pub struct Table {
 }
 
 impl Table {
+    pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
+        let name = normalize_ident(name);
+        for (i, column) in self.columns.iter().enumerate() {
+            if column.name == name {
+                return Some((i, column));
+            }
+        }
+        None
+    }
+
     pub fn from_sql(sql: &str, root_page: usize) -> Result<Table> {
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
