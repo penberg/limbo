@@ -1,8 +1,7 @@
 use crate::schema::Schema;
 use crate::vdbe::{Insn, Program, ProgramBuilder};
-
 use anyhow::Result;
-use sqlite3_parser::ast::{Expr, OneSelect, Select, Stmt};
+use sqlite3_parser::ast::{Expr, Literal, OneSelect, Select, Stmt};
 
 pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
     match stmt {
@@ -157,23 +156,23 @@ fn translate_columns(
 
 fn translate_expr(program: &mut ProgramBuilder, expr: &Expr) -> usize {
     match expr {
-        sqlite3_parser::ast::Expr::Between { .. } => todo!(),
-        sqlite3_parser::ast::Expr::Binary(_, _, _) => todo!(),
-        sqlite3_parser::ast::Expr::Case { .. } => todo!(),
-        sqlite3_parser::ast::Expr::Cast { .. } => todo!(),
-        sqlite3_parser::ast::Expr::Collate(_, _) => todo!(),
-        sqlite3_parser::ast::Expr::DoublyQualified(_, _, _) => todo!(),
-        sqlite3_parser::ast::Expr::Exists(_) => todo!(),
-        sqlite3_parser::ast::Expr::FunctionCall { .. } => todo!(),
-        sqlite3_parser::ast::Expr::FunctionCallStar { .. } => todo!(),
-        sqlite3_parser::ast::Expr::Id(_) => todo!(),
-        sqlite3_parser::ast::Expr::InList { .. } => todo!(),
-        sqlite3_parser::ast::Expr::InSelect { .. } => todo!(),
-        sqlite3_parser::ast::Expr::InTable { .. } => todo!(),
-        sqlite3_parser::ast::Expr::IsNull(_) => todo!(),
-        sqlite3_parser::ast::Expr::Like { .. } => todo!(),
-        sqlite3_parser::ast::Expr::Literal(lit) => match lit {
-            sqlite3_parser::ast::Literal::Numeric(val) => {
+        Expr::Between { .. } => todo!(),
+        Expr::Binary(_, _, _) => todo!(),
+        Expr::Case { .. } => todo!(),
+        Expr::Cast { .. } => todo!(),
+        Expr::Collate(_, _) => todo!(),
+        Expr::DoublyQualified(_, _, _) => todo!(),
+        Expr::Exists(_) => todo!(),
+        Expr::FunctionCall { .. } => todo!(),
+        Expr::FunctionCallStar { .. } => todo!(),
+        Expr::Id(_) => todo!(),
+        Expr::InList { .. } => todo!(),
+        Expr::InSelect { .. } => todo!(),
+        Expr::InTable { .. } => todo!(),
+        Expr::IsNull(_) => todo!(),
+        Expr::Like { .. } => todo!(),
+        Expr::Literal(lit) => match lit {
+            Literal::Numeric(val) => {
                 let dest = program.alloc_register();
                 program.emit_insn(Insn::Integer {
                     value: val.parse().unwrap(),
@@ -181,21 +180,21 @@ fn translate_expr(program: &mut ProgramBuilder, expr: &Expr) -> usize {
                 });
                 dest
             }
-            sqlite3_parser::ast::Literal::String(_) => todo!(),
-            sqlite3_parser::ast::Literal::Blob(_) => todo!(),
-            sqlite3_parser::ast::Literal::Keyword(_) => todo!(),
-            sqlite3_parser::ast::Literal::Null => todo!(),
-            sqlite3_parser::ast::Literal::CurrentDate => todo!(),
-            sqlite3_parser::ast::Literal::CurrentTime => todo!(),
-            sqlite3_parser::ast::Literal::CurrentTimestamp => todo!(),
+            Literal::String(_) => todo!(),
+            Literal::Blob(_) => todo!(),
+            Literal::Keyword(_) => todo!(),
+            Literal::Null => todo!(),
+            Literal::CurrentDate => todo!(),
+            Literal::CurrentTime => todo!(),
+            Literal::CurrentTimestamp => todo!(),
         },
-        sqlite3_parser::ast::Expr::Name(_) => todo!(),
-        sqlite3_parser::ast::Expr::NotNull(_) => todo!(),
-        sqlite3_parser::ast::Expr::Parenthesized(_) => todo!(),
-        sqlite3_parser::ast::Expr::Qualified(_, _) => todo!(),
-        sqlite3_parser::ast::Expr::Raise(_, _) => todo!(),
-        sqlite3_parser::ast::Expr::Subquery(_) => todo!(),
-        sqlite3_parser::ast::Expr::Unary(_, _) => todo!(),
-        sqlite3_parser::ast::Expr::Variable(_) => todo!(),
+        Expr::Name(_) => todo!(),
+        Expr::NotNull(_) => todo!(),
+        Expr::Parenthesized(_) => todo!(),
+        Expr::Qualified(_, _) => todo!(),
+        Expr::Raise(_, _) => todo!(),
+        Expr::Subquery(_) => todo!(),
+        Expr::Unary(_, _) => todo!(),
+        Expr::Variable(_) => todo!(),
     }
 }
