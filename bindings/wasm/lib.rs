@@ -18,8 +18,7 @@ impl Database {
     }
 
     #[wasm_bindgen]
-    pub fn exec(&self, _sql: &str) {
-    }
+    pub fn exec(&self, _sql: &str) {}
 }
 
 pub struct IO {}

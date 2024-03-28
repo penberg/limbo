@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Ref, rc::Rc};
 
 use anyhow::Result;
 
@@ -73,4 +73,19 @@ impl OwnedRecord {
     pub fn new(values: Vec<OwnedValue>) -> Self {
         Self { values }
     }
+}
+
+pub enum CursorResult<T> {
+    Ok(T),
+    IO,
+}
+
+pub trait Cursor {
+    fn is_empty(&self) -> bool;
+    fn rewind(&mut self) -> Result<CursorResult<()>>;
+    fn next(&mut self) -> Result<CursorResult<()>>;
+    fn wait_for_completion(&mut self) -> Result<()>;
+    fn rowid(&self) -> Result<Ref<Option<u64>>>;
+    fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
+    fn has_record(&self) -> bool;
 }

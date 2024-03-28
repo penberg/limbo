@@ -1,6 +1,6 @@
 use crate::pager::Pager;
 use crate::sqlite3_ondisk::{BTreeCell, TableInteriorCell, TableLeafCell};
-use crate::types::OwnedRecord;
+use crate::types::{Cursor, CursorResult, OwnedRecord};
 
 use anyhow::Result;
 
@@ -32,12 +32,7 @@ impl MemPage {
     }
 }
 
-pub enum CursorResult<T> {
-    Ok(T),
-    IO,
-}
-
-pub struct Cursor {
+pub struct BTreeCursor {
     pager: Rc<Pager>,
     root_page: usize,
     page: RefCell<Option<Rc<MemPage>>>,
@@ -45,7 +40,7 @@ pub struct Cursor {
     record: RefCell<Option<OwnedRecord>>,
 }
 
-impl Cursor {
+impl BTreeCursor {
     pub fn new(pager: Rc<Pager>, root_page: usize) -> Self {
         Self {
             pager,
@@ -54,51 +49,6 @@ impl Cursor {
             rowid: RefCell::new(None),
             record: RefCell::new(None),
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.page.borrow().is_none()
-    }
-
-    pub fn rewind(&mut self) -> Result<CursorResult<()>> {
-        let mem_page = MemPage::new(None, self.root_page, 0);
-        self.page.replace(Some(Rc::new(mem_page)));
-        match self.get_next_record()? {
-            CursorResult::Ok((rowid, next)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(next);
-                Ok(CursorResult::Ok(()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    pub fn next(&mut self) -> Result<CursorResult<()>> {
-        match self.get_next_record()? {
-            CursorResult::Ok((rowid, next)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(next);
-                Ok(CursorResult::Ok(()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    pub fn wait_for_completion(&mut self) -> Result<()> {
-        // TODO: Wait for pager I/O to complete
-        Ok(())
-    }
-
-    pub fn rowid(&self) -> Result<Ref<Option<u64>>> {
-        Ok(self.rowid.borrow())
-    }
-
-    pub fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
-        Ok(self.record.borrow())
-    }
-
-    pub fn has_record(&self) -> bool {
-        self.record.borrow().is_some()
     }
 
     fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
@@ -153,5 +103,52 @@ impl Cursor {
                 }
             }
         }
+    }
+}
+
+impl Cursor for BTreeCursor {
+    fn is_empty(&self) -> bool {
+        self.page.borrow().is_none()
+    }
+
+    fn rewind(&mut self) -> Result<CursorResult<()>> {
+        let mem_page = MemPage::new(None, self.root_page, 0);
+        self.page.replace(Some(Rc::new(mem_page)));
+        match self.get_next_record()? {
+            CursorResult::Ok((rowid, next)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(next);
+                Ok(CursorResult::Ok(()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn next(&mut self) -> Result<CursorResult<()>> {
+        match self.get_next_record()? {
+            CursorResult::Ok((rowid, next)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(next);
+                Ok(CursorResult::Ok(()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn wait_for_completion(&mut self) -> Result<()> {
+        // TODO: Wait for pager I/O to complete
+        Ok(())
+    }
+
+    fn rowid(&self) -> Result<Ref<Option<u64>>> {
+        Ok(self.rowid.borrow())
+    }
+
+    fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
+        Ok(self.record.borrow())
+    }
+
+    fn has_record(&self) -> bool {
+        self.record.borrow().is_some()
     }
 }

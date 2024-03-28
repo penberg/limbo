@@ -1,6 +1,6 @@
-use crate::btree::{Cursor, CursorResult};
+use crate::btree::BTreeCursor;
 use crate::pager::Pager;
-use crate::types::{OwnedValue, Record};
+use crate::types::{Cursor, CursorResult, OwnedValue, Record};
 
 use anyhow::Result;
 use std::cell::RefCell;
@@ -153,7 +153,7 @@ pub enum StepResult<'a> {
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: usize,
-    cursors: RefCell<BTreeMap<usize, Cursor>>,
+    cursors: RefCell<BTreeMap<usize, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
 }
 
@@ -209,7 +209,7 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Cursor::new(pager.clone(), *root_page);
+                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }

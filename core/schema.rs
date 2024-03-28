@@ -95,9 +95,7 @@ fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize
                             || type_name.contains("TEXT")
                         {
                             Type::Text
-                        } else if type_name.contains("BLOB")
-                            || type_name.is_empty()
-                        {
+                        } else if type_name.contains("BLOB") || type_name.is_empty() {
                             Type::Blob
                         } else if type_name.contains("REAL")
                             || type_name.contains("FLOA")
