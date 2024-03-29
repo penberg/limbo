@@ -3,6 +3,7 @@ use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast::{Expr, Literal, OneSelect, Select, Stmt};
 
+/// Translate SQL statement into bytecode program.
 pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
     match stmt {
         Stmt::Select(select) => translate_select(schema, select),
@@ -11,6 +12,9 @@ pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
 }
 
 fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
+    let mut program = ProgramBuilder::new();
+    let init_offset = program.emit_placeholder();
+    let start_offset = program.offset();
     match select.body.select {
         OneSelect::Select {
             columns,
@@ -31,9 +35,6 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
             let root_page = table.root_page;
-            let mut program = ProgramBuilder::new();
-            let init_offset = program.emit_placeholder();
-            let start_offset = program.offset();
             let limit_reg = if let Some(limit) = select.limit {
                 assert!(limit.offset.is_none());
                 Some(translate_expr(
@@ -80,47 +81,33 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                     },
                 );
             }
-            program.emit_insn(Insn::Halt);
-            program.fixup_insn(
-                init_offset,
-                Insn::Init {
-                    target_pc: program.offset(),
-                },
-            );
-            program.emit_insn(Insn::Transaction);
-            program.emit_insn(Insn::Goto {
-                target_pc: start_offset,
-            });
-            Ok(program.build())
         }
         OneSelect::Select {
             columns,
             from: None,
             ..
         } => {
-            let mut program = ProgramBuilder::new();
-            let init_offset = program.emit_placeholder();
-            let after_init_offset = program.offset();
             let (register_start, register_end) =
                 translate_columns(&mut program, None, None, columns);
             program.emit_insn(Insn::ResultRow {
                 register_start,
                 register_end,
             });
-            program.emit_insn(Insn::Halt);
-            program.fixup_insn(
-                init_offset,
-                Insn::Init {
-                    target_pc: program.offset(),
-                },
-            );
-            program.emit_insn(Insn::Goto {
-                target_pc: after_init_offset,
-            });
-            Ok(program.build())
         }
         _ => todo!(),
     }
+    program.emit_insn(Insn::Halt);
+    program.fixup_insn(
+        init_offset,
+        Insn::Init {
+            target_pc: program.offset(),
+        },
+    );
+    program.emit_insn(Insn::Transaction);
+    program.emit_insn(Insn::Goto {
+        target_pc: start_offset,
+    });
+    Ok(program.build())
 }
 
 fn translate_columns(
