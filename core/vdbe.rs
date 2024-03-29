@@ -97,6 +97,7 @@ pub enum Insn {
 
 pub struct ProgramBuilder {
     next_free_register: usize,
+    next_free_cursor_id: usize,
     insns: Vec<Insn>,
 }
 
@@ -104,6 +105,7 @@ impl ProgramBuilder {
     pub fn new() -> Self {
         Self {
             next_free_register: 0,
+            next_free_cursor_id: 0,
             insns: Vec::new(),
         }
     }
@@ -116,6 +118,12 @@ impl ProgramBuilder {
 
     pub fn next_free_register(&self) -> usize {
         self.next_free_register
+    }
+
+    pub fn alloc_cursor_id(&mut self) -> usize {
+        let cursor = self.next_free_cursor_id;
+        self.next_free_cursor_id += 1;
+        cursor
     }
 
     pub fn emit_placeholder(&mut self) -> usize {

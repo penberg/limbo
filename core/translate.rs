@@ -21,7 +21,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             from: Some(from),
             ..
         } => {
-            let cursor_id = 0;
+            let cursor_id = program.alloc_cursor_id();
             let table_name = match from.select {
                 Some(select_table) => match *select_table {
                     sqlite3_parser::ast::SelectTable::Table(name, ..) => name.name,
@@ -47,7 +47,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 None
             };
             program.emit_insn(Insn::OpenReadAsync {
-                cursor_id: 0,
+                cursor_id,
                 root_page,
             });
             program.emit_insn(Insn::OpenReadAwait);
