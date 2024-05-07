@@ -19,6 +19,7 @@ use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::rc::Rc;
+use log::trace;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -92,6 +93,7 @@ pub struct Connection {
 impl Connection {
     pub fn prepare(&self, sql: impl Into<String>) -> Result<Statement> {
         let sql = sql.into();
+        trace!("Preparing: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
@@ -110,6 +112,7 @@ impl Connection {
 
     pub fn query(&self, sql: impl Into<String>) -> Result<Option<Rows>> {
         let sql = sql.into();
+        trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
