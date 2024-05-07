@@ -8,7 +8,7 @@
   </p>
 </div>
 
-Limbo is a modern in-process OLTP database management system, compatible with SQLite.
+Limbo is a work-in-progress, in-process OLTP database management system, compatible with SQLite.
 
 ## Features
 
@@ -77,6 +77,7 @@ cargo bench --bench benchmark -- --profile-time=5
 
 ## Publications
 
+* Pekka Enberg, Sasu Tarkoma, Jon Crowcroft Ashwin Rao (2024). Serverless Runtime / Database Co-Design With Asynchronous I/O. In _EdgeSys ‘24_. [[PDF]](https://penberg.org/papers/penberg-edgesys24.pdf)
 * Pekka Enberg, Sasu Tarkoma, and Ashwin Rao (2023). Towards Database and Serverless Runtime Co-Design. In _CoNEXT-SW ’23_. [[PDF](https://penberg.org/papers/penberg-conext-sw-23.pdf)] [[Slides](https://penberg.org/papers/penberg-conext-sw-23-slides.pdf)]
 
 ## License
