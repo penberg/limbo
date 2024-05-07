@@ -66,6 +66,9 @@ impl Page {
     }
 }
 
+/// The pager interface implements the persistence layer by providing access
+/// to pages of the database file, including caching, concurrency control, and
+/// transaction management.
 pub struct Pager {
     page_source: PageSource,
     page_cache: RefCell<SieveCache<usize, Rc<Page>>>,
