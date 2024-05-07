@@ -288,7 +288,7 @@ impl Program {
                 } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
-                    if cursor.has_record() {
+                    if !cursor.is_empty() {
                         state.pc = *pc_if_next;
                     } else {
                         state.pc += 1;

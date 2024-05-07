@@ -108,7 +108,7 @@ impl BTreeCursor {
 
 impl Cursor for BTreeCursor {
     fn is_empty(&self) -> bool {
-        self.page.borrow().is_none()
+        self.record.borrow().is_none()
     }
 
     fn rewind(&mut self) -> Result<CursorResult<()>> {
@@ -146,9 +146,5 @@ impl Cursor for BTreeCursor {
 
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
         Ok(self.record.borrow())
-    }
-
-    fn has_record(&self) -> bool {
-        self.record.borrow().is_some()
     }
 }

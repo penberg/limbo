@@ -87,5 +87,4 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Ref<Option<u64>>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
-    fn has_record(&self) -> bool;
 }
