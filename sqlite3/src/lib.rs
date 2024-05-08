@@ -1,6 +1,8 @@
 #![allow(non_camel_case_types)]
 
+use std::cell::RefCell;
 use std::ffi;
+use std::ffi::CString;
 use std::rc::Rc;
 
 pub const SQLITE_OK: ffi::c_int = 0;
@@ -22,13 +24,15 @@ impl sqlite3 {
     }
 }
 
-pub struct sqlite3_stmt {
+pub struct sqlite3_stmt<'a> {
     pub(crate) stmt: limbo_core::Statement,
+    pub(crate) row: RefCell<Option<limbo_core::Row<'a>>>,
 }
 
-impl sqlite3_stmt {
+impl<'a> sqlite3_stmt<'a> {
     pub fn new(stmt: limbo_core::Statement) -> Self {
-        Self { stmt }
+        let row = RefCell::new(None);
+        Self { stmt, row }
     }
 }
 
@@ -106,13 +110,16 @@ pub unsafe extern "C" fn sqlite3_finalize(stmt: *mut sqlite3_stmt) -> ffi::c_int
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_step(db: *mut sqlite3_stmt) -> std::ffi::c_int {
-    let stmt = &mut *db;
+pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_int {
+    let stmt = &mut *stmt;
     if let Ok(result) = stmt.stmt.step() {
         match result {
             limbo_core::RowResult::IO => SQLITE_BUSY,
             limbo_core::RowResult::Done => SQLITE_DONE,
-            limbo_core::RowResult::Row(_) => SQLITE_ROW,
+            limbo_core::RowResult::Row(row) => {
+                stmt.row.replace(Some(row));
+                SQLITE_ROW
+            }
         }
     } else {
         SQLITE_ERROR
@@ -121,8 +128,20 @@ pub unsafe extern "C" fn sqlite3_step(db: *mut sqlite3_stmt) -> std::ffi::c_int 
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_text(
-    db: *mut sqlite3_stmt,
+    stmt: *mut sqlite3_stmt,
     idx: std::ffi::c_int,
 ) -> *const std::ffi::c_uchar {
-    todo!();
+    let stmt = &mut *stmt;
+    let row = stmt.row.borrow();
+    let row = match row.as_ref() {
+        Some(row) => row,
+        None => return std::ptr::null(),
+    };
+    match row.values.get(idx as usize) {
+        Some(value) => match value {
+            limbo_core::Value::Text(text) => text.as_bytes().as_ptr(),
+            _ => std::ptr::null(),
+        },
+        None => std::ptr::null(),
+    }
 }
