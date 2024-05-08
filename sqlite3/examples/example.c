@@ -18,11 +18,16 @@ int main(int argc, char *argv[])
 	assert(rc == SQLITE_OK);
 
 	rc = sqlite3_step(stmt);
-	assert(rc == SQLITE_OK);
+	assert(rc == SQLITE_ROW);
 
 	const unsigned char *result = sqlite3_column_text(stmt, 0);
 
 	printf("result = %s\n", result);
+
+	rc = sqlite3_step(stmt);
+	assert(rc == SQLITE_DONE);
+
+	sqlite3_finalize(stmt);
 
 	sqlite3_close(db);
 
