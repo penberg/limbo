@@ -80,6 +80,12 @@ pub enum Insn {
         dest: usize,
     },
 
+    // Write a string value into a register.
+    String8 {
+        value: String,
+        dest: usize,
+    },
+
     // Read the rowid of the current row.
     RowId {
         cursor_id: CursorID,
@@ -307,6 +313,10 @@ impl Program {
                     state.registers[*dest] = OwnedValue::Integer(*value);
                     state.pc += 1;
                 }
+                Insn::String8 { value, dest } => {
+                    state.registers[*dest] = OwnedValue::Text(Rc::new(value.into()));
+                    state.pc += 1;
+                }
                 Insn::RowId { cursor_id, dest } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref rowid) = *cursor.rowid()? {
@@ -417,6 +427,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
         Insn::Integer { value, dest } => {
             ("Integer", *dest, *value as usize, 0, "", 0, "".to_string())
         }
+        Insn::String8 { value, dest } => ("String8", *dest, 0, 0, "", 0, "".to_string()),
         Insn::RowId { cursor_id, dest } => ("RowId", *cursor_id, *dest, 0, "", 0, "".to_string()),
         Insn::DecrJumpZero { reg, target_pc } => {
             ("DecrJumpZero", *reg, *target_pc, 0, "", 0, "".to_string())

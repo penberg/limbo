@@ -193,7 +193,14 @@ fn translate_expr(
                 });
                 dest
             }
-            Literal::String(_) => todo!(),
+            Literal::String(s) => {
+                let dest = program.alloc_register();
+                program.emit_insn(Insn::String8 {
+                    value: s.to_string(),
+                    dest,
+                });
+                dest
+            }
             Literal::Blob(_) => todo!(),
             Literal::Keyword(_) => todo!(),
             Literal::Null => todo!(),
