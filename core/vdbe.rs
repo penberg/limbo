@@ -435,7 +435,15 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
         Insn::Integer { value, dest } => {
             ("Integer", *dest, *value as usize, 0, "", 0, "".to_string())
         }
-        Insn::String8 { value, dest } => ("String8", *dest, 0, 0, "", 0, "".to_string()),
+        Insn::String8 { value, dest } => (
+            "String8",
+            *dest,
+            0,
+            0,
+            value.as_str(),
+            0,
+            format!("r[{}]= '{}'", dest, value),
+        ),
         Insn::RowId { cursor_id, dest } => ("RowId", *cursor_id, *dest, 0, "", 0, "".to_string()),
         Insn::DecrJumpZero { reg, target_pc } => {
             ("DecrJumpZero", *reg, *target_pc, 0, "", 0, "".to_string())

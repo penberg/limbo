@@ -196,7 +196,7 @@ fn translate_expr(
             Literal::String(s) => {
                 let dest = program.alloc_register();
                 program.emit_insn(Insn::String8 {
-                    value: s.to_string(),
+                    value: s[1..s.len() - 1].to_string(),
                     dest,
                 });
                 dest
