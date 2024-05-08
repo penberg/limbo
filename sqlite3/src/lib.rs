@@ -1,7 +1,7 @@
 #![allow(non_camel_case_types)]
 
-use std::rc::Rc;
 use std::ffi;
+use std::rc::Rc;
 
 pub const SQLITE_OK: ffi::c_int = 0;
 pub const SQLITE_ERROR: ffi::c_int = 1;
@@ -58,9 +58,7 @@ pub unsafe extern "C" fn sqlite3_open(
             *db_out = Box::leak(Box::new(sqlite3::new(db, conn)));
             SQLITE_OK
         }
-        Err(e) => {
-            SQLITE_NOTFOUND
-        },
+        Err(e) => SQLITE_NOTFOUND,
     }
 }
 

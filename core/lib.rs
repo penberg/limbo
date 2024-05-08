@@ -15,11 +15,11 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use anyhow::Result;
 use fallible_iterator::FallibleIterator;
+use log::trace;
 use pager::Pager;
 use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::rc::Rc;
-use log::trace;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
