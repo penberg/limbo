@@ -363,7 +363,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             0,
             "",
             0,
-            format!("Starts at {}", target_pc),
+            format!("Start at {}", target_pc),
         ),
         Insn::OpenReadAsync {
             cursor_id,
@@ -375,7 +375,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             0,
             "",
             0,
-            "".to_string(),
+            format!("root={}", root_page),
         ),
         Insn::OpenReadAwait => ("OpenReadAwait", 0, 0, 0, "", 0, "".to_string()),
         Insn::RewindAsync { cursor_id } => ("RewindAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
@@ -395,7 +395,15 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             cursor_id,
             column,
             dest,
-        } => ("Column", *cursor_id, *column, *dest, "", 0, "".to_string()),
+        } => (
+            "Column",
+            *cursor_id,
+            *column,
+            *dest,
+            "",
+            0,
+            format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
+        ),
         Insn::ResultRow {
             register_start,
             register_end,
@@ -406,7 +414,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             0,
             "",
             0,
-            "".to_string(),
+            format!("output=r[{}..{}]", register_start, register_end),
         ),
         Insn::NextAsync { cursor_id } => ("NextAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
         Insn::NextAwait {
