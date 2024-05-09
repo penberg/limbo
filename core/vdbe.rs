@@ -270,12 +270,9 @@ impl Program {
                     register_start,
                     register_end,
                 } => {
-                    let mut values = Vec::with_capacity(*register_end - *register_start);
-                    for i in *register_start..*register_end {
-                        values.push(crate::types::to_value(&state.registers[i]));
-                    }
+                    let record = make_record(&state.registers, register_end, register_start);
                     state.pc += 1;
-                    return Ok(StepResult::Row(Record::new(values)));
+                    return Ok(StepResult::Row(record));
                 }
                 Insn::NextAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
@@ -340,6 +337,14 @@ impl Program {
             }
         }
     }
+}
+
+fn make_record<'a>(registers: &'a [OwnedValue], register_end: &usize, register_start: &usize) -> Record<'a> {
+    let mut values = Vec::with_capacity(*register_end - *register_start);
+    for i in *register_start..*register_end {
+        values.push(crate::types::to_value(&registers[i]));
+    }
+    Record::new(values)
 }
 
 fn trace_insn(addr: usize, insn: &Insn) {
