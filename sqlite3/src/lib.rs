@@ -2,7 +2,6 @@
 
 use std::cell::RefCell;
 use std::ffi;
-use std::ffi::CString;
 use std::rc::Rc;
 
 pub const SQLITE_OK: ffi::c_int = 0;
@@ -62,7 +61,7 @@ pub unsafe extern "C" fn sqlite3_open(
             *db_out = Box::leak(Box::new(sqlite3::new(db, conn)));
             SQLITE_OK
         }
-        Err(e) => SQLITE_NOTFOUND,
+        Err(_e) => SQLITE_NOTFOUND,
     }
 }
 
@@ -79,9 +78,9 @@ pub unsafe extern "C" fn sqlite3_close(db: *mut sqlite3) -> ffi::c_int {
 pub unsafe extern "C" fn sqlite3_prepare_v2(
     db: *mut sqlite3,
     sql: *const ffi::c_char,
-    len: ffi::c_int,
+    _len: ffi::c_int,
     out_stmt: *mut *mut sqlite3_stmt,
-    tail: *mut *const ffi::c_char,
+    _tail: *mut *const ffi::c_char,
 ) -> ffi::c_int {
     if db.is_null() || sql.is_null() || out_stmt.is_null() {
         return SQLITE_MISUSE;

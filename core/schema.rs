@@ -20,7 +20,7 @@ impl Schema {
     }
 
     pub fn add_table(&mut self, name: &str, table: Table) {
-        let name = normalize_ident(&name);
+        let name = normalize_ident(name);
         self.tables.insert(name, table);
     }
 

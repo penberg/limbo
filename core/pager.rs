@@ -21,6 +21,12 @@ const PAGE_LOCKED: usize = 0b010;
 /// Page had an I/O error.
 const PAGE_ERROR: usize = 0b100;
 
+impl Default for Page {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Page {
     pub fn new() -> Page {
         Page {

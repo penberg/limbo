@@ -29,7 +29,7 @@ int sqlite3_open(const char *filename, sqlite3 **db_out);
 
 int sqlite3_close(sqlite3 *db);
 
-int sqlite3_prepare_v2(sqlite3 *db, const char *sql, int len, sqlite3_stmt **out_stmt, const char **tail);
+int sqlite3_prepare_v2(sqlite3 *db, const char *sql, int _len, sqlite3_stmt **out_stmt, const char **_tail);
 
 int sqlite3_finalize(sqlite3_stmt *stmt);
 
