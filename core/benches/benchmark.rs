@@ -1,22 +1,19 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use limbo_core::{Database, PlatformIO};
+use limbo_core::{Database, IO, PlatformIO};
 use pprof::criterion::{Output, PProfProfiler};
 use std::rc::Rc;
-
-fn bench_db() -> Database {
-    let io = Rc::new(PlatformIO::new().unwrap());
-    Database::open_file(io, "../testing/hello.db").unwrap()
-}
 
 fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("limbo");
     group.throughput(Throughput::Elements(1));
 
-    let db = bench_db();
+    let io = Rc::new(PlatformIO::new().unwrap());
+    let db = Database::open_file(io.clone(), "../testing/hello.db").unwrap();
     let conn = db.connect();
 
     let mut stmt = conn.prepare("SELECT 1").unwrap();
     group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
+        let io = io.clone();
         b.iter(|| {
             let mut rows = stmt.query().unwrap();
             match rows.next().unwrap() {
@@ -24,7 +21,7 @@ fn bench(c: &mut Criterion) {
                     assert_eq!(row.get::<i64>(0).unwrap(), 1);
                 }
                 limbo_core::RowResult::IO => {
-                    unreachable!();
+                    io.run_once().unwrap();
                 }
                 limbo_core::RowResult::Done => {
                     unreachable!();
@@ -38,6 +35,7 @@ fn bench(c: &mut Criterion) {
     group.bench_function(
         "Execute prepared statement: 'SELECT * FROM users LIMIT 1'",
         |b| {
+            let io = io.clone();
             b.iter(|| {
                 let mut rows = stmt.query().unwrap();
                 match rows.next().unwrap() {
@@ -45,7 +43,7 @@ fn bench(c: &mut Criterion) {
                         assert_eq!(row.get::<i64>(0).unwrap(), 1);
                     }
                     limbo_core::RowResult::IO => {
-                        unreachable!();
+                        io.run_once().unwrap();
                     }
                     limbo_core::RowResult::Done => {
                         unreachable!();
