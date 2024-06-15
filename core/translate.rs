@@ -1,12 +1,16 @@
+use std::borrow::Borrow;
+
 use crate::schema::Schema;
+use crate::sqlite3_ondisk::DatabaseHeader;
 use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{Expr, Literal, OneSelect, Select, Stmt};
+use sqlite3_parser::ast::{Expr, Literal, OneSelect, PragmaBody, QualifiedName, Select, Stmt};
 
 /// Translate SQL statement into bytecode program.
-pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
+pub fn translate(schema: &Schema, stmt: Stmt, database_header: &DatabaseHeader) -> Result<Program> {
     match stmt {
         Stmt::Select(select) => translate_select(schema, select),
+        Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header),
         _ => todo!(),
     }
 }
@@ -217,4 +221,59 @@ fn translate_expr(
         Expr::Unary(_, _) => todo!(),
         Expr::Variable(_) => todo!(),
     }
+}
+
+fn translate_pragma(
+    name: &QualifiedName,
+    body: Option<PragmaBody>,
+    database_header: &DatabaseHeader,
+) -> Result<Program> {
+    let mut program = ProgramBuilder::new();
+    let init_offset = program.emit_placeholder();
+    let start_offset = program.offset();
+    let (change_pragma, new_value) = match body {
+        None => {
+            let pragma_result = program.alloc_register();
+
+            program.emit_insn(Insn::Integer {
+                value: database_header.default_cache_size.into(),
+                dest: pragma_result,
+            });
+
+            let pragma_result_end = program.next_free_register();
+            program.emit_insn(Insn::ResultRow {
+                register_start: pragma_result,
+                register_end: pragma_result_end,
+            });
+            (false, 0)
+        }
+        Some(PragmaBody::Equals(value)) => {
+            let value_to_update = if let Expr::Literal(Literal::Numeric(numeric_value)) = value {
+                numeric_value.parse::<i64>().unwrap()
+            } else {
+                // If you put gibberish into a pragma update it turns it into 0 I think
+                0
+            };
+            println!("{:?}", value_to_update);
+            (true, value_to_update)
+        }
+        Some(PragmaBody::Call(_)) => {
+            todo!()
+        }
+    };
+    program.emit_insn(Insn::Halt);
+    program.fixup_insn(
+        init_offset,
+        Insn::Init {
+            target_pc: program.offset(),
+        },
+    );
+    program.emit_insn(Insn::Transaction);
+    program.emit_insn(Insn::Goto {
+        target_pc: start_offset,
+    });
+    if change_pragma {
+        return Ok(program.build_pragma_change(name.name.to_string(), new_value));
+    }
+    Ok(program.build())
 }

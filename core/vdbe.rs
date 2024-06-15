@@ -3,6 +3,7 @@ use crate::pager::Pager;
 use crate::types::{Cursor, CursorResult, OwnedValue, Record};
 
 use anyhow::Result;
+use core::fmt;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -154,6 +155,15 @@ impl ProgramBuilder {
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,
+            program_type: ProgramType::Default,
+        }
+    }
+
+    pub fn build_pragma_change(self, pragma_to_change: String, value: i64) -> Program {
+        Program {
+            max_registers: self.next_free_register,
+            insns: self.insns,
+            program_type: ProgramType::PragmaChange(pragma_to_change, value),
         }
     }
 }
@@ -192,9 +202,15 @@ impl ProgramState {
     }
 }
 
+pub enum ProgramType {
+    Default,
+    PragmaChange(String, i64),
+}
+
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
+    pub program_type: ProgramType,
 }
 
 impl Program {
@@ -363,15 +379,37 @@ fn print_insn(addr: usize, insn: &Insn) {
     println!("{}", s);
 }
 
+enum IntValue {
+    Int(i64),
+    Usize(usize),
+}
+
+impl fmt::Display for IntValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IntValue::Int(i) => f.pad(i.to_string().as_str()),
+            IntValue::Usize(i) => f.pad(i.to_string().as_str()),
+        }
+    }
+}
+
 fn insn_to_str(addr: usize, insn: &Insn) -> String {
-    let (opcode, p1, p2, p3, p4, p5, comment) = match insn {
+    let (opcode, p1, p2, p3, p4, p5, comment): (
+        &str,
+        IntValue,
+        IntValue,
+        IntValue,
+        &str,
+        IntValue,
+        String,
+    ) = match insn {
         Insn::Init { target_pc } => (
             "Init",
-            0,
-            *target_pc,
-            0,
+            IntValue::Usize(0),
+            IntValue::Usize(*target_pc),
+            IntValue::Usize(0),
             "",
-            0,
+            IntValue::Usize(0),
             format!("Start at {}", target_pc),
         ),
         Insn::OpenReadAsync {
@@ -379,25 +417,41 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             root_page,
         } => (
             "OpenReadAsync",
-            *cursor_id,
-            *root_page,
-            0,
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*root_page),
+            IntValue::Usize(0),
             "",
-            0,
+            IntValue::Usize(0),
             format!("root={}", root_page),
         ),
-        Insn::OpenReadAwait => ("OpenReadAwait", 0, 0, 0, "", 0, "".to_string()),
-        Insn::RewindAsync { cursor_id } => ("RewindAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::OpenReadAwait => (
+            "OpenReadAwait",
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::RewindAsync { cursor_id } => (
+            "RewindAsync",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
         Insn::RewindAwait {
             cursor_id,
             pc_if_empty,
         } => (
             "RewindAwait",
-            *cursor_id,
-            *pc_if_empty,
-            0,
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*pc_if_empty),
+            IntValue::Usize(0),
             "",
-            0,
+            IntValue::Usize(0),
             "".to_string(),
         ),
         Insn::Column {
@@ -406,11 +460,11 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             dest,
         } => (
             "Column",
-            *cursor_id,
-            *column,
-            *dest,
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*column),
+            IntValue::Usize(*dest),
             "",
-            0,
+            IntValue::Usize(0),
             format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
         ),
         Insn::ResultRow {
@@ -418,45 +472,97 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             register_end,
         } => (
             "ResultRow",
-            *register_start,
-            *register_end,
-            0,
+            IntValue::Usize(*register_start),
+            IntValue::Usize(*register_end),
+            IntValue::Usize(0),
             "",
-            0,
+            IntValue::Usize(0),
             format!("output=r[{}..{}]", register_start, register_end),
         ),
-        Insn::NextAsync { cursor_id } => ("NextAsync", *cursor_id, 0, 0, "", 0, "".to_string()),
+        Insn::NextAsync { cursor_id } => (
+            "NextAsync",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
         Insn::NextAwait {
             cursor_id,
             pc_if_next,
         } => (
             "NextAwait",
-            *cursor_id,
-            *pc_if_next,
-            0,
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*pc_if_next),
+            IntValue::Usize(0),
             "",
-            0,
+            IntValue::Usize(0),
             "".to_string(),
         ),
-        Insn::Halt => ("Halt", 0, 0, 0, "", 0, "".to_string()),
-        Insn::Transaction => ("Transaction", 0, 0, 0, "", 0, "".to_string()),
-        Insn::Goto { target_pc } => ("Goto", 0, *target_pc, 0, "", 0, "".to_string()),
-        Insn::Integer { value, dest } => {
-            ("Integer", *dest, *value as usize, 0, "", 0, "".to_string())
-        }
+        Insn::Halt => (
+            "Halt",
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::Transaction => (
+            "Transaction",
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::Goto { target_pc } => (
+            "Goto",
+            IntValue::Usize(0),
+            IntValue::Usize(*target_pc),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::Integer { value, dest } => (
+            "Integer",
+            IntValue::Usize(*dest),
+            IntValue::Int(*value),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
         Insn::String8 { value, dest } => (
             "String8",
-            *dest,
-            0,
-            0,
+            IntValue::Usize(*dest),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
             value.as_str(),
-            0,
+            IntValue::Usize(0),
             format!("r[{}]= '{}'", dest, value),
         ),
-        Insn::RowId { cursor_id, dest } => ("RowId", *cursor_id, *dest, 0, "", 0, "".to_string()),
-        Insn::DecrJumpZero { reg, target_pc } => {
-            ("DecrJumpZero", *reg, *target_pc, 0, "", 0, "".to_string())
-        }
+        Insn::RowId { cursor_id, dest } => (
+            "RowId",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*dest),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::DecrJumpZero { reg, target_pc } => (
+            "DecrJumpZero",
+            IntValue::Usize(*reg),
+            IntValue::Usize(*target_pc),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

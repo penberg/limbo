@@ -18,7 +18,7 @@
 /// +-----------------+----------------+---------------------+----------------+
 /// |                 |                |                     |                |
 /// |   Page header   |  Cell pointer  |     Unallocated     |  Cell content  |
-/// | (8 or 12 bytes) |     array      |        space        |      area      |      
+/// | (8 or 12 bytes) |     array      |        space        |      area      |
 /// |                 |                |                     |                |
 /// +-----------------+----------------+---------------------+----------------+
 ///
@@ -35,6 +35,7 @@ use std::rc::Rc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
+const DEFAULT_CACHE_SIZE: i32 = -2000;
 
 #[derive(Debug, Default)]
 pub struct DatabaseHeader {
@@ -52,7 +53,7 @@ pub struct DatabaseHeader {
     freelist_pages: u32,
     schema_cookie: u32,
     schema_format: u32,
-    default_cache_size: u32,
+    pub default_cache_size: i32,
     vacuum: u32,
     text_encoding: u32,
     user_version: u32,
@@ -94,7 +95,10 @@ fn finish_read_database_header(buf: &Buffer, header: Rc<RefCell<DatabaseHeader>>
     header.freelist_pages = u32::from_be_bytes([buf[36], buf[37], buf[38], buf[39]]);
     header.schema_cookie = u32::from_be_bytes([buf[40], buf[41], buf[42], buf[43]]);
     header.schema_format = u32::from_be_bytes([buf[44], buf[45], buf[46], buf[47]]);
-    header.default_cache_size = u32::from_be_bytes([buf[48], buf[49], buf[50], buf[51]]);
+    header.default_cache_size = i32::from_be_bytes([buf[48], buf[49], buf[50], buf[51]]);
+    if header.default_cache_size == 0 {
+        header.default_cache_size = DEFAULT_CACHE_SIZE;
+    }
     header.vacuum = u32::from_be_bytes([buf[52], buf[53], buf[54], buf[55]]);
     header.text_encoding = u32::from_be_bytes([buf[56], buf[57], buf[58], buf[59]]);
     header.user_version = u32::from_be_bytes([buf[60], buf[61], buf[62], buf[63]]);

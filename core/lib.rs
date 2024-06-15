@@ -18,8 +18,10 @@ use fallible_iterator::FallibleIterator;
 use log::trace;
 use pager::Pager;
 use schema::Schema;
+use sqlite3_ondisk::DatabaseHeader;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
+use vdbe::ProgramType;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -30,6 +32,7 @@ pub use types::Value;
 pub struct Database {
     pager: Rc<Pager>,
     schema: Rc<Schema>,
+    header: Rc<RefCell<DatabaseHeader>>,
 }
 
 impl Database {
@@ -43,11 +46,12 @@ impl Database {
     pub fn open(io: Rc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
         let db_header = Pager::begin_open(&page_source)?;
         io.run_once()?;
-        let pager = Rc::new(Pager::finish_open(db_header, page_source)?);
+        let pager = Rc::new(Pager::finish_open(db_header.clone(), page_source)?);
         let bootstrap_schema = Rc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
             schema: bootstrap_schema.clone(),
+            header: db_header.clone(),
         };
         let mut schema = Schema::new();
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
@@ -74,13 +78,19 @@ impl Database {
             }
         }
         let schema = Rc::new(schema);
-        Ok(Database { pager, schema })
+        let header = db_header;
+        Ok(Database {
+            pager,
+            schema,
+            header,
+        })
     }
 
     pub fn connect(&self) -> Connection {
         Connection {
             pager: self.pager.clone(),
             schema: self.schema.clone(),
+            header: self.header.clone(),
         }
     }
 }
@@ -88,6 +98,7 @@ impl Database {
 pub struct Connection {
     pager: Rc<Pager>,
     schema: Rc<Schema>,
+    header: Rc<RefCell<DatabaseHeader>>,
 }
 
 impl Connection {
@@ -99,7 +110,11 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = Rc::new(translate::translate(&self.schema, stmt)?);
+                    let program = Rc::new(translate::translate(
+                        &self.schema,
+                        stmt,
+                        &self.header.borrow(),
+                    )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
                 Cmd::Explain(_stmt) => todo!(),
@@ -107,6 +122,22 @@ impl Connection {
             }
         } else {
             todo!()
+        }
+    }
+
+    pub fn update_pragma(&self, name: &String, value: i64) {
+        match name.as_str() {
+            "cache_size" => {
+                // update in disk
+
+                // update in-memory header
+                self.header.borrow_mut().default_cache_size = value
+                    .try_into()
+                    .expect(&format!("invalid value, too big for a i32 {}", value));
+
+                // update cache size
+            }
+            _ => todo!(),
         }
     }
 
@@ -118,12 +149,19 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Stmt(stmt) => {
-                    let program = Rc::new(translate::translate(&self.schema, stmt)?);
+                    let program = Rc::new(translate::translate(
+                        &self.schema,
+                        stmt,
+                        &self.header.borrow(),
+                    )?);
+                    if let ProgramType::PragmaChange(name, value) = &program.program_type {
+                        self.update_pragma(name, *value);
+                    }
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
                 }
                 Cmd::Explain(stmt) => {
-                    let program = translate::translate(&self.schema, stmt)?;
+                    let program = translate::translate(&self.schema, stmt, &self.header.borrow())?;
                     program.explain();
                     Ok(None)
                 }
@@ -141,12 +179,12 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Explain(stmt) => {
-                    let program = translate::translate(&self.schema, stmt)?;
+                    let program = translate::translate(&self.schema, stmt, &self.header.borrow())?;
                     program.explain();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
-                    let program = translate::translate(&self.schema, stmt)?;
+                    let program = translate::translate(&self.schema, stmt, &self.header.borrow())?;
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
                 }
