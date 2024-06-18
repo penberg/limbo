@@ -141,6 +141,7 @@ impl Connection {
                 self.pager.write_database_header(&self.header.borrow());
 
                 // update cache size
+                self.pager.change_page_cache_size(value);
             }
             _ => todo!(),
         }
