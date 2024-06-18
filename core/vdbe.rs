@@ -339,7 +339,11 @@ impl Program {
     }
 }
 
-fn make_record<'a>(registers: &'a [OwnedValue], register_end: &usize, register_start: &usize) -> Record<'a> {
+fn make_record<'a>(
+    registers: &'a [OwnedValue],
+    register_end: &usize,
+    register_start: &usize,
+) -> Record<'a> {
     let mut values = Vec::with_capacity(*register_end - *register_start);
     for i in *register_start..*register_end {
         values.push(crate::types::to_value(&registers[i]));

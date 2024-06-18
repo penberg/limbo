@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use limbo_core::{Database, IO, PlatformIO};
+use limbo_core::{Database, PlatformIO, IO};
 use pprof::criterion::{Output, PProfProfiler};
 use std::rc::Rc;
 

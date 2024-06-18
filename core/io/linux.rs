@@ -1,9 +1,9 @@
-use super::{Completion, File, IO};
+use super::{Completion, File, WriteCompletion, IO};
 use anyhow::Result;
+use log::trace;
 use std::cell::RefCell;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
-use log::trace;
 
 pub struct LinuxIO {
     ring: Rc<RefCell<io_uring::IoUring>>,
@@ -21,7 +21,7 @@ impl LinuxIO {
 impl IO for LinuxIO {
     fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::open(path)?;
+        let file = std::fs::File::options().read(true).write(true).open(path)?;
         Ok(Box::new(LinuxFile {
             ring: self.ring.clone(),
             file,
@@ -59,7 +59,7 @@ impl File for LinuxFile {
             let len = buf.len();
             let buf = buf.as_mut_ptr();
             let ptr = Rc::into_raw(c.clone());
-            io_uring::opcode::Read::new(fd, buf, len as u32 )
+            io_uring::opcode::Read::new(fd, buf, len as u32)
                 .offset(pos as u64)
                 .build()
                 .user_data(ptr as u64)
@@ -69,6 +69,31 @@ impl File for LinuxFile {
             ring.submission()
                 .push(&read_e)
                 .expect("submission queue is full");
+        }
+        Ok(())
+    }
+
+    fn pwrite(
+        &self,
+        pos: usize,
+        buffer: Rc<RefCell<crate::Buffer>>,
+        c: Rc<WriteCompletion>,
+    ) -> Result<()> {
+        let fd = io_uring::types::Fd(self.file.as_raw_fd());
+        let write = {
+            let buf = buffer.borrow();
+            let ptr = Rc::into_raw(c.clone());
+            io_uring::opcode::Write::new(fd, buf.as_ptr(), buf.len() as u32)
+                .offset(pos as u64)
+                .build()
+                .user_data(ptr as u64)
+        };
+        let mut ring = self.ring.borrow_mut();
+        unsafe {
+            ring.submission()
+                .push(&write)
+                .expect("submission queue is full");
+            ring.submit()?;
         }
         Ok(())
     }

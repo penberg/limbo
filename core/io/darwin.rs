@@ -1,8 +1,8 @@
-use super::{Completion, File, IO};
+use super::{Completion, File, WriteCompletion, IO};
 use anyhow::{Ok, Result};
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use log::trace;
 
 pub struct DarwinIO {}
@@ -41,6 +41,20 @@ impl File for DarwinFile {
             file.read_exact(buf)?;
         }
         c.complete();
+        Ok(())
+    }
+
+    fn pwrite(
+        &self,
+        pos: usize,
+        buffer: Rc<RefCell<crate::Buffer>>,
+        c: Rc<WriteCompletion>,
+    ) -> Result<()> {
+        let mut file = self.file.borrow_mut();
+        file.seek(std::io::SeekFrom::Start(pos as u64))?;
+        let buf = buffer.borrow();
+        let buf = buf.as_slice();
+        file.write_all(buf)?;
         Ok(())
     }
 }
