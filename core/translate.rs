@@ -1,10 +1,10 @@
-use std::borrow::Borrow;
-
 use crate::schema::Schema;
 use crate::sqlite3_ondisk::DatabaseHeader;
 use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{Expr, Literal, OneSelect, PragmaBody, QualifiedName, Select, Stmt};
+use sqlite3_parser::ast::{
+    Expr, Literal, OneSelect, PragmaBody, QualifiedName, Select, Stmt, UnaryOperator,
+};
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(schema: &Schema, stmt: Stmt, database_header: &DatabaseHeader) -> Result<Program> {
@@ -248,11 +248,17 @@ fn translate_pragma(
             (false, 0)
         }
         Some(PragmaBody::Equals(value)) => {
-            let value_to_update = if let Expr::Literal(Literal::Numeric(numeric_value)) = value {
-                numeric_value.parse::<i64>().unwrap()
-            } else {
-                // If you put gibberish into a pragma update it turns it into 0 I think
-                0
+            let value_to_update = match value {
+                Expr::Literal(Literal::Numeric(numeric_value)) => {
+                    numeric_value.parse::<i64>().unwrap()
+                }
+                Expr::Unary(UnaryOperator::Negative, expr) => match *expr {
+                    Expr::Literal(Literal::Numeric(numeric_value)) => {
+                        -numeric_value.parse::<i64>().unwrap()
+                    }
+                    _ => 0,
+                },
+                _ => 0,
             };
             println!("{:?}", value_to_update);
             (true, value_to_update)

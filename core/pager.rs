@@ -76,9 +76,10 @@ impl Page {
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
 pub struct Pager {
-    page_source: PageSource,
+    pub page_source: PageSource,
     page_cache: RefCell<SieveCache<usize, Rc<Page>>>,
     buffer_pool: Rc<BufferPool>,
+    pub io: Rc<dyn crate::io::IO>,
 }
 
 impl Pager {
@@ -89,6 +90,7 @@ impl Pager {
     pub fn finish_open(
         db_header: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
+        io: Rc<dyn crate::io::IO>,
     ) -> anyhow::Result<Self> {
         let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;
@@ -98,6 +100,7 @@ impl Pager {
             page_source,
             buffer_pool,
             page_cache,
+            io,
         })
     }
 
@@ -118,5 +121,9 @@ impl Pager {
         .unwrap();
         page_cache.insert(page_idx, page.clone());
         Ok(page)
+    }
+
+    pub fn write_database_header(&self, header: &DatabaseHeader) {
+        sqlite3_ondisk::begin_write_database_header(header, self).expect("failed to write header");
     }
 }

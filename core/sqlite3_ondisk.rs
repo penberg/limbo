@@ -24,8 +24,8 @@
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
-use crate::io::{Buffer, Completion};
-use crate::pager::Page;
+use crate::io::{Buffer, Completion, WriteCompletion};
+use crate::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::PageSource;
 use anyhow::{anyhow, Result};
@@ -37,7 +37,7 @@ use std::rc::Rc;
 pub const DATABASE_HEADER_SIZE: usize = 100;
 const DEFAULT_CACHE_SIZE: i32 = -2000;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct DatabaseHeader {
     magic: [u8; 16],
     pub page_size: u16,
@@ -80,7 +80,7 @@ pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell
 
 fn finish_read_database_header(buf: &Buffer, header: Rc<RefCell<DatabaseHeader>>) -> Result<()> {
     let buf = buf.as_slice();
-    let mut header = header.borrow_mut();
+    let mut header = std::cell::RefCell::borrow_mut(&header);
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
     header.write_version = buf[18];
@@ -107,6 +107,76 @@ fn finish_read_database_header(buf: &Buffer, header: Rc<RefCell<DatabaseHeader>>
     header.reserved.copy_from_slice(&buf[72..92]);
     header.version_valid_for = u32::from_be_bytes([buf[92], buf[93], buf[94], buf[95]]);
     header.version_number = u32::from_be_bytes([buf[96], buf[97], buf[98], buf[99]]);
+    Ok(())
+}
+
+pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Result<()> {
+    let header = Rc::new(header.clone());
+    let page_source = Rc::new(pager.page_source.clone());
+
+    let drop_fn = Rc::new(|_buf| {});
+    let buffer_to_copy = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
+    let buffer_to_copy_in_cb = buffer_to_copy.clone();
+
+    let header_cb = header.clone();
+    let complete = Box::new(move |buffer: &Buffer| {
+        let header = header_cb.clone();
+        let buffer: Buffer = buffer.clone();
+        let buffer = Rc::new(RefCell::new(buffer));
+        {
+            let mut buf_mut = std::cell::RefCell::borrow_mut(&buffer);
+            let buf = buf_mut.as_mut_slice();
+            buf[0..16].copy_from_slice(&header.magic);
+            buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
+            buf[18] = header.write_version;
+            buf[19] = header.read_version;
+            buf[20] = header.unused_space;
+            buf[21] = header.max_embed_frac;
+            buf[22] = header.min_embed_frac;
+            buf[23] = header.min_leaf_frac;
+            buf[24..28].copy_from_slice(&header.change_counter.to_be_bytes());
+            buf[28..32].copy_from_slice(&header.database_size.to_be_bytes());
+            buf[32..36].copy_from_slice(&header.freelist_trunk_page.to_be_bytes());
+            buf[36..40].copy_from_slice(&header.freelist_pages.to_be_bytes());
+            buf[40..44].copy_from_slice(&header.schema_cookie.to_be_bytes());
+            buf[44..48].copy_from_slice(&header.schema_format.to_be_bytes());
+            buf[48..52].copy_from_slice(&header.default_cache_size.to_be_bytes());
+
+            buf[52..56].copy_from_slice(&header.vacuum.to_be_bytes());
+            buf[56..60].copy_from_slice(&header.text_encoding.to_be_bytes());
+            buf[60..64].copy_from_slice(&header.user_version.to_be_bytes());
+            buf[64..68].copy_from_slice(&header.incremental_vacuum.to_be_bytes());
+
+            buf[68..72].copy_from_slice(&header.application_id.to_be_bytes());
+            buf[72..92].copy_from_slice(&header.reserved);
+            buf[92..96].copy_from_slice(&header.version_valid_for.to_be_bytes());
+            buf[96..100].copy_from_slice(&header.version_number.to_be_bytes());
+            let mut buffer_to_copy = std::cell::RefCell::borrow_mut(&buffer_to_copy_in_cb);
+            let buffer_to_copy_slice = buffer_to_copy.as_mut_slice();
+
+            buffer_to_copy_slice.copy_from_slice(buf);
+        }
+    });
+
+    let drop_fn = Rc::new(|_buf| {});
+    let buf = Buffer::allocate(512, drop_fn);
+    let c = Rc::new(Completion::new(buf.clone(), complete));
+    page_source.get(1, c.clone())?;
+    // run get header block
+    pager.io.run_once()?;
+
+    let buffer_in_cb = buffer_to_copy.clone();
+    let write_complete = Box::new(move |bytes_written: usize| {
+        let buf = buffer_in_cb.clone();
+        let buf_len = std::cell::RefCell::borrow(&buf).len();
+        if bytes_written < buf_len {
+            log::error!("wrote({bytes_written}) less than expected({buf_len})");
+        }
+        // finish_read_database_header(buf, header).unwrap();
+    });
+    let c = Rc::new(WriteCompletion::new(write_complete));
+    page_source.write(0, buffer_to_copy.clone(), c).unwrap();
+
     Ok(())
 }
 

@@ -46,7 +46,11 @@ impl Database {
     pub fn open(io: Rc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
         let db_header = Pager::begin_open(&page_source)?;
         io.run_once()?;
-        let pager = Rc::new(Pager::finish_open(db_header.clone(), page_source)?);
+        let pager = Rc::new(Pager::finish_open(
+            db_header.clone(),
+            page_source,
+            io.clone(),
+        )?);
         let bootstrap_schema = Rc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
@@ -128,12 +132,13 @@ impl Connection {
     pub fn update_pragma(&self, name: &String, value: i64) {
         match name.as_str() {
             "cache_size" => {
-                // update in disk
-
                 // update in-memory header
                 self.header.borrow_mut().default_cache_size = value
                     .try_into()
                     .expect(&format!("invalid value, too big for a i32 {}", value));
+
+                // update in disk
+                self.pager.write_database_header(&self.header.borrow());
 
                 // update cache size
             }
