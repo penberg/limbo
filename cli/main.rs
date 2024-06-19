@@ -79,14 +79,16 @@ fn query(
             OutputMode::Raw => loop {
                 match rows.next()? {
                     RowResult::Row(row) => {
-                        print!("|");
-                        for val in row.values.iter() {
-                            match val {
-                                Value::Null => print!("NULL|"),
-                                Value::Integer(i) => print!("{}|", i),
-                                Value::Float(f) => print!("{}|", f),
-                                Value::Text(s) => print!("{}|", s),
-                                Value::Blob(b) => print!("{:?}|", b),
+                        for (i, value) in row.values.iter().enumerate() {
+                            if i > 0 {
+                                print!("|");
+                            }
+                            match value {
+                                Value::Null => print!("NULL"),
+                                Value::Integer(i) => print!("{}", i),
+                                Value::Float(f) => print!("{}", f),
+                                Value::Text(s) => print!("{}", s),
+                                Value::Blob(b) => print!("{:?}", b),
                             }
                         }
                         println!();
