@@ -24,7 +24,7 @@ use std::{cell::RefCell, rc::Rc};
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
-pub use io::{Buffer, Completion, File, IO};
+pub use io::{Buffer, Completion, File, WriteCompletion, IO};
 pub use storage::{PageIO, PageSource};
 pub use types::Value;
 
