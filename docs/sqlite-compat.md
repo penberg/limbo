@@ -1,6 +1,10 @@
 # SQLite Compatibility
 
-This document describes the SQLite compatibility status of Limbo.
+This document describes the SQLite compatibility status of Limbo:
+
+* [SQL statements](#sql-statements)
+* [SQL functions](#sql-functions)
+* [SQLite API](#sqlite-api)
 
 ## SQL statements
 
@@ -35,6 +39,11 @@ This document describes the SQLite compatibility status of Limbo.
 | ROLLBACK TRANSACTION         | No      |         |
 | SAVEPOINT                    | No      |         |
 | SELECT                       | Partial |         |
+| SELECT ... WHERE             | Yes     |         |
+| SELECT ... LIMIT             | Yes     |         |
+| SELECT ... ORDER BY          | No      |         |
+| SELECT ... GROUP BY          | No      |         |
+| SELECT ... JOIN              | No      |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |
@@ -132,3 +141,14 @@ This document describes the SQLite compatibility status of Limbo.
 | strftime()                   | No      |         |
 | timediff()                   | No      |         |
 
+
+## SQLite API
+
+| Interface                    | Status  | Comment |
+|------------------------------|---------|---------|
+| sqlite3_open                 | Partial |         |
+| sqlite3_close                | Yes     |         |
+| sqlite3_prepare              | Partial |         |
+| sqlite3_finalize             | Yes     |         |
+| sqlite3_step                 | Yes     |         |
+| sqlite3_column_text          | Yes     |         |
