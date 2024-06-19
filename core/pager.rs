@@ -150,14 +150,7 @@ impl Pager {
         sqlite3_ondisk::begin_write_database_header(header, self).expect("failed to write header");
     }
 
-    pub fn change_page_cache_size(&self, capacity: i64) {
-        // Sadly SieveCache is limited. Not resize available and no iterator.
-        let capacity = if capacity < 0 {
-            let kb = capacity.abs() * 1024;
-            kb / 512 // assume 512 page size for now
-        } else {
-            capacity
-        };
-        self.page_cache.borrow_mut().resize(capacity as usize);
+    pub fn change_page_cache_size(&self, capacity: usize) {
+        self.page_cache.borrow_mut().resize(capacity);
     }
 }
