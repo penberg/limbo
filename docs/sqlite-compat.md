@@ -31,7 +31,8 @@ This document describes the SQLite compatibility status of Limbo:
 | INDEXED BY                   | No      |         |
 | INSERT                       | No      |         |
 | ON CONFLICT clause           | No      |         |
-| PRAGMA                       | No      |         |
+| PRAGMA                       | Partial |         |
+| PRAGMA cache_size            | Yes     |         |
 | REINDEX                      | No      |         |
 | RELEASE SAVEPOINT            | No      |         |
 | REPLACE                      | No      |         |
