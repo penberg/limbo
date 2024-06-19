@@ -33,3 +33,7 @@ do_execsql_test select-2 {
 do_execsql_test select-limit {
   SELECT id FROM users LIMIT 1;
 } {1}
+
+do_execsql_test pragma-cache-size {
+  PRAGMA cache_size
+} {-2000}
