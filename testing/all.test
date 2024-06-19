@@ -29,3 +29,7 @@ do_execsql_test select-1 {
 do_execsql_test select-2 {
   SELECT 2
 } {2}
+
+do_execsql_test select-limit {
+  SELECT id FROM users LIMIT 1;
+} {1}
