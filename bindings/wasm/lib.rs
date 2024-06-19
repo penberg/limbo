@@ -39,4 +39,13 @@ impl limbo_core::PageIO for PageIO {
     fn get(&self, _page_idx: usize, _c: Rc<limbo_core::Completion>) -> Result<()> {
         todo!();
     }
+
+    fn write(
+        &self,
+        _page_idx: usize,
+        _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
+        _c: Rc<limbo_core::WriteCompletion>,
+    ) -> Result<()> {
+        todo!()
+    }
 }

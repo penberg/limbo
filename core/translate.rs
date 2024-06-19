@@ -1,16 +1,65 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::pager::Pager;
 use crate::schema::Schema;
+use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{Expr, Literal, OneSelect, Select, Stmt};
+use sqlite3_parser::ast::{
+    Expr, Literal, OneSelect, PragmaBody, QualifiedName, Select, Stmt, UnaryOperator,
+};
 
 /// Translate SQL statement into bytecode program.
-pub fn translate(schema: &Schema, stmt: Stmt) -> Result<Program> {
+pub fn translate(
+    schema: &Schema,
+    stmt: Stmt,
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    pager: Rc<Pager>,
+) -> Result<Program> {
     match stmt {
         Stmt::Select(select) => translate_select(schema, select),
+        Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
         _ => todo!(),
     }
 }
 
+pub fn update_pragma(
+    name: &String,
+    value: i64,
+    header: Rc<RefCell<DatabaseHeader>>,
+    pager: Rc<Pager>,
+) {
+    match name.as_str() {
+        "cache_size" => {
+            let mut cache_size_unformatted = value;
+            let mut cache_size = if cache_size_unformatted < 0 {
+                let kb = cache_size_unformatted.abs() * 1024;
+                kb / 512 // assume 512 page size for now
+            } else {
+                value
+            } as usize;
+            if cache_size < MIN_PAGE_CACHE_SIZE {
+                // update both in memory and stored disk value
+                cache_size = MIN_PAGE_CACHE_SIZE;
+                cache_size_unformatted = MIN_PAGE_CACHE_SIZE as i64;
+            }
+
+            // update in-memory header
+            header.borrow_mut().default_cache_size = cache_size_unformatted
+                .try_into()
+                .expect(&format!("invalid value, too big for a i32 {}", value));
+
+            // update in disk
+            let header_copy = header.borrow().clone();
+            pager.write_database_header(&header_copy);
+
+            // update cache size
+            pager.change_page_cache_size(cache_size);
+        }
+        _ => todo!(),
+    }
+}
 fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_offset = program.emit_placeholder();
@@ -217,4 +266,61 @@ fn translate_expr(
         Expr::Unary(_, _) => todo!(),
         Expr::Variable(_) => todo!(),
     }
+}
+
+fn translate_pragma(
+    name: &QualifiedName,
+    body: Option<PragmaBody>,
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    pager: Rc<Pager>,
+) -> Result<Program> {
+    let mut program = ProgramBuilder::new();
+    let init_offset = program.emit_placeholder();
+    let start_offset = program.offset();
+    match body {
+        None => {
+            let pragma_result = program.alloc_register();
+
+            program.emit_insn(Insn::Integer {
+                value: database_header.borrow().default_cache_size.into(),
+                dest: pragma_result,
+            });
+
+            let pragma_result_end = program.next_free_register();
+            program.emit_insn(Insn::ResultRow {
+                register_start: pragma_result,
+                register_end: pragma_result_end,
+            });
+        }
+        Some(PragmaBody::Equals(value)) => {
+            let value_to_update = match value {
+                Expr::Literal(Literal::Numeric(numeric_value)) => {
+                    numeric_value.parse::<i64>().unwrap()
+                }
+                Expr::Unary(UnaryOperator::Negative, expr) => match *expr {
+                    Expr::Literal(Literal::Numeric(numeric_value)) => {
+                        -numeric_value.parse::<i64>().unwrap()
+                    }
+                    _ => 0,
+                },
+                _ => 0,
+            };
+            update_pragma(&name.name.0, value_to_update, database_header, pager);
+        }
+        Some(PragmaBody::Call(_)) => {
+            todo!()
+        }
+    };
+    program.emit_insn(Insn::Halt);
+    program.fixup_insn(
+        init_offset,
+        Insn::Init {
+            target_pc: program.offset(),
+        },
+    );
+    program.emit_insn(Insn::Transaction);
+    program.emit_insn(Insn::Goto {
+        target_pc: start_offset,
+    });
+    Ok(program.build())
 }

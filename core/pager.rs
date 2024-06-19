@@ -5,6 +5,7 @@ use crate::PageSource;
 use log::trace;
 use sieve_cache::SieveCache;
 use std::cell::RefCell;
+use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
@@ -72,13 +73,36 @@ impl Page {
     }
 }
 
+pub struct PageCache<K: Eq + Hash + Clone, V> {
+    cache: SieveCache<K, V>,
+}
+
+impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
+    pub fn new(cache: SieveCache<K, V>) -> Self {
+        Self { cache }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        self.cache.insert(key, value);
+    }
+
+    pub fn get(&mut self, key: &K) -> Option<&V> {
+        self.cache.get(key)
+    }
+
+    pub fn resize(&mut self, capacity: usize) {
+        self.cache = SieveCache::new(capacity).unwrap();
+    }
+}
+
 /// The pager interface implements the persistence layer by providing access
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
 pub struct Pager {
-    page_source: PageSource,
-    page_cache: RefCell<SieveCache<usize, Rc<Page>>>,
+    pub page_source: PageSource,
+    page_cache: RefCell<PageCache<usize, Rc<Page>>>,
     buffer_pool: Rc<BufferPool>,
+    pub io: Rc<dyn crate::io::IO>,
 }
 
 impl Pager {
@@ -89,15 +113,17 @@ impl Pager {
     pub fn finish_open(
         db_header: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
+        io: Rc<dyn crate::io::IO>,
     ) -> anyhow::Result<Self> {
         let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;
         let buffer_pool = Rc::new(BufferPool::new(page_size));
-        let page_cache = RefCell::new(SieveCache::new(10).unwrap());
+        let page_cache = RefCell::new(PageCache::new(SieveCache::new(10).unwrap()));
         Ok(Self {
             page_source,
             buffer_pool,
             page_cache,
+            io,
         })
     }
 
@@ -118,5 +144,13 @@ impl Pager {
         .unwrap();
         page_cache.insert(page_idx, page.clone());
         Ok(page)
+    }
+
+    pub fn write_database_header(&self, header: &DatabaseHeader) {
+        sqlite3_ondisk::begin_write_database_header(header, self).expect("failed to write header");
+    }
+
+    pub fn change_page_cache_size(&self, capacity: usize) {
+        self.page_cache.borrow_mut().resize(capacity);
     }
 }
