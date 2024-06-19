@@ -2,7 +2,9 @@
 
 This document describes the SQLite compatibility status of Limbo.
 
-| Feature Name                 | Status  | Comment |
+## SQL statements
+
+| Statement                    | Status  | Comment |
 |------------------------------|---------|---------|
 | ALTER TABLE                  | No      |         |
 | ANALYZE                      | No      |         |
@@ -37,7 +39,13 @@ This document describes the SQLite compatibility status of Limbo.
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |
 | WITH clause                  | No      |         |
-| **Scalar functions**         | **No**  |         |
+
+## SQL functions
+
+### Scalar functions
+
+| Function                     | Status  | Comment |
+|------------------------------|---------|---------|
 | abs(X)                       | No      |         |
 | changes()                    | No      |         |
 | char(X1,X2,...,XN)           | No      |         |
@@ -95,7 +103,11 @@ This document describes the SQLite compatibility status of Limbo.
 | unlikely(X)                  | No      |         |
 | upper(X)                     | No      |         |
 | zeroblob(N)                  | No      |         |
-| **Aggregate functions**      | **No**  |         |
+
+### Aggregate functions
+
+| Function                     | Status  | Comment |
+|------------------------------|---------|---------|
 | avg(X)                       | No      |         |
 | count()                      | No      |         |
 | count(*)                     | No      |         |
@@ -106,7 +118,12 @@ This document describes the SQLite compatibility status of Limbo.
 | min(X)                       | No      |         |
 | sum(X)                       | No      |         |
 | total(X)                     | No      |         |
-| **Date and time functions**  | No      |         |
+
+
+### Date and time functions
+
+| Function                     | Status  | Comment |
+|------------------------------|---------|---------|
 | date()                       | No      |         |
 | time()                       | No      |         |
 | datetime()                   | No      |         |
