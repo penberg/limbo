@@ -18,10 +18,9 @@ use fallible_iterator::FallibleIterator;
 use log::trace;
 use pager::Pager;
 use schema::Schema;
-use sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use sqlite3_ondisk::DatabaseHeader;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::{cell::RefCell, rc::Rc};
-use vdbe::ProgramType;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -117,7 +116,8 @@ impl Connection {
                     let program = Rc::new(translate::translate(
                         &self.schema,
                         stmt,
-                        &self.header.borrow(),
+                        self.header.clone(),
+                        self.pager.clone(),
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -126,32 +126,6 @@ impl Connection {
             }
         } else {
             todo!()
-        }
-    }
-
-    pub fn update_pragma(&self, name: &String, value: i64) {
-        match name.as_str() {
-            "cache_size" => {
-                let cache_size_unformatted = value;
-                let cache_size = if cache_size_unformatted < 0 {
-                    let kb = cache_size_unformatted.abs() * 1024;
-                    kb / 512 // assume 512 page size for now
-                } else {
-                    value
-                } as usize;
-                let cache_size = cache_size.clamp(cache_size, MIN_PAGE_CACHE_SIZE);
-                // update in-memory header
-                self.header.borrow_mut().default_cache_size = cache_size_unformatted
-                    .try_into()
-                    .expect(&format!("invalid value, too big for a i32 {}", value));
-
-                // update in disk
-                self.pager.write_database_header(&self.header.borrow());
-
-                // update cache size
-                self.pager.change_page_cache_size(cache_size);
-            }
-            _ => todo!(),
         }
     }
 
@@ -166,16 +140,19 @@ impl Connection {
                     let program = Rc::new(translate::translate(
                         &self.schema,
                         stmt,
-                        &self.header.borrow(),
+                        self.header.clone(),
+                        self.pager.clone(),
                     )?);
-                    if let ProgramType::PragmaChange(name, value) = &program.program_type {
-                        self.update_pragma(name, *value);
-                    }
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
                 }
                 Cmd::Explain(stmt) => {
-                    let program = translate::translate(&self.schema, stmt, &self.header.borrow())?;
+                    let program = translate::translate(
+                        &self.schema,
+                        stmt,
+                        self.header.clone(),
+                        self.pager.clone(),
+                    )?;
                     program.explain();
                     Ok(None)
                 }
@@ -193,12 +170,22 @@ impl Connection {
         if let Some(cmd) = cmd {
             match cmd {
                 Cmd::Explain(stmt) => {
-                    let program = translate::translate(&self.schema, stmt, &self.header.borrow())?;
+                    let program = translate::translate(
+                        &self.schema,
+                        stmt,
+                        self.header.clone(),
+                        self.pager.clone(),
+                    )?;
                     program.explain();
                 }
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
-                    let program = translate::translate(&self.schema, stmt, &self.header.borrow())?;
+                    let program = translate::translate(
+                        &self.schema,
+                        stmt,
+                        self.header.clone(),
+                        self.pager.clone(),
+                    )?;
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
                 }

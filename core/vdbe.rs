@@ -155,15 +155,6 @@ impl ProgramBuilder {
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,
-            program_type: ProgramType::Default,
-        }
-    }
-
-    pub fn build_pragma_change(self, pragma_to_change: String, value: i64) -> Program {
-        Program {
-            max_registers: self.next_free_register,
-            insns: self.insns,
-            program_type: ProgramType::PragmaChange(pragma_to_change, value),
         }
     }
 }
@@ -202,15 +193,9 @@ impl ProgramState {
     }
 }
 
-pub enum ProgramType {
-    Default,
-    PragmaChange(String, i64),
-}
-
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
-    pub program_type: ProgramType,
 }
 
 impl Program {

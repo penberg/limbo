@@ -35,7 +35,11 @@ use std::rc::Rc;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
+// DEFAULT_CACHE_SIZE negative values mean that we store the amount of pages a XKiB of memory can hold.
+// We can calculate "real" cache size by diving by page size.
 const DEFAULT_CACHE_SIZE: i32 = -2000;
+// Minimun number of pages that cache can hold.
+pub const MIN_PAGE_CACHE_SIZE: usize = 10;
 
 #[derive(Debug, Default, Clone)]
 pub struct DatabaseHeader {
