@@ -3,7 +3,7 @@
 set sqlite_exec [expr {[info exists env(SQLITE_EXEC)] ? $env(SQLITE_EXEC) : "sqlite3"}]
 
 proc evaluate_sql {sqlite_exec sql} {
-    set command [list $sqlite_exec database.db $sql]
+    set command [list $sqlite_exec testing/hello.db $sql]
     set output [exec {*}$command]
     return $output
 }
