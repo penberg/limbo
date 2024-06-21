@@ -174,7 +174,7 @@ fn translate_columns(
             sqlite3_parser::ast::ResultColumn::Star => {
                 for (i, col) in table.unwrap().columns.iter().enumerate() {
                     let dest = program.alloc_register();
-                    if col.primary_key {
+                    if col.is_rowid_alias() {
                         program.emit_insn(Insn::RowId {
                             cursor_id: cursor_id.unwrap(),
                             dest,
