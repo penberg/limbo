@@ -98,7 +98,7 @@ fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize
                 let ty = match column.col_type {
                     Some(data_type) => {
                         let type_name = data_type.name.as_str();
-                        if type_name.contains("INT") {
+                        if type_name.contains("INTEGER") {
                             Type::Integer
                         } else if type_name.contains("CHAR")
                             || type_name.contains("CLOB")
