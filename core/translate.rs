@@ -167,32 +167,41 @@ fn translate_columns(
 ) -> (usize, usize) {
     let register_start = program.next_free_register();
     for col in columns {
-        match col {
-            sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
-                let _ = translate_expr(program, cursor_id, table, &expr);
-            }
-            sqlite3_parser::ast::ResultColumn::Star => {
-                for (i, col) in table.unwrap().columns.iter().enumerate() {
-                    let dest = program.alloc_register();
-                    if col.is_rowid_alias() {
-                        program.emit_insn(Insn::RowId {
-                            cursor_id: cursor_id.unwrap(),
-                            dest,
-                        });
-                    } else {
-                        program.emit_insn(Insn::Column {
-                            column: i,
-                            dest,
-                            cursor_id: cursor_id.unwrap(),
-                        });
-                    }
-                }
-            }
-            sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
-        }
+        translate_column(program, cursor_id, table, col);
     }
     let register_end = program.next_free_register();
     (register_start, register_end)
+}
+
+fn translate_column(
+    program: &mut ProgramBuilder,
+    cursor_id: Option<usize>,
+    table: Option<&crate::schema::Table>,
+    col: sqlite3_parser::ast::ResultColumn,
+) {
+    match col {
+        sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
+            let _ = translate_expr(program, cursor_id, table, &expr);
+        }
+        sqlite3_parser::ast::ResultColumn::Star => {
+            for (i, col) in table.unwrap().columns.iter().enumerate() {
+                let dest = program.alloc_register();
+                if col.is_rowid_alias() {
+                    program.emit_insn(Insn::RowId {
+                        cursor_id: cursor_id.unwrap(),
+                        dest,
+                    });
+                } else {
+                    program.emit_insn(Insn::Column {
+                        column: i,
+                        dest,
+                        cursor_id: cursor_id.unwrap(),
+                    });
+                }
+            }
+        }
+        sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
+    }
 }
 
 fn translate_expr(
