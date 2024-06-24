@@ -64,7 +64,13 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_offset = program.emit_placeholder();
     let start_offset = program.offset();
-    match select.body.select {
+    let limit_reg = if let Some(limit) = select.limit {
+        assert!(limit.offset.is_none());
+        Some(translate_expr(&mut program, None, None, &limit.expr))
+    } else {
+        None
+    };
+    let limit_decr_insn = match select.body.select {
         OneSelect::Select {
             columns,
             from: Some(from),
@@ -84,17 +90,6 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
             let root_page = table.root_page;
-            let limit_reg = if let Some(limit) = select.limit {
-                assert!(limit.offset.is_none());
-                Some(translate_expr(
-                    &mut program,
-                    Some(cursor_id),
-                    Some(table),
-                    &limit.expr,
-                ))
-            } else {
-                None
-            };
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
                 root_page,
@@ -121,15 +116,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                     pc_if_empty: program.offset(),
                 },
             );
-            if let Some(limit_decr_insn) = limit_decr_insn {
-                program.fixup_insn(
-                    limit_decr_insn,
-                    Insn::DecrJumpZero {
-                        reg: limit_reg.unwrap(),
-                        target_pc: program.offset(),
-                    },
-                );
-            }
+            limit_decr_insn
         }
         OneSelect::Select {
             columns,
@@ -142,8 +129,19 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 register_start,
                 register_end,
             });
+            let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
+            limit_decr_insn
         }
         _ => todo!(),
+    };
+    if let Some(limit_decr_insn) = limit_decr_insn {
+        program.fixup_insn(
+            limit_decr_insn,
+            Insn::DecrJumpZero {
+                reg: limit_reg.unwrap(),
+                target_pc: program.offset(),
+            },
+        );
     }
     program.emit_insn(Insn::Halt);
     program.fixup_insn(
