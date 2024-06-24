@@ -94,8 +94,6 @@ pub enum Insn {
     },
 
     // Decrement the given register and jump to the given PC if the result is zero.
-    //
-    // Unlike in SQLite, if register is already zero, we don't decrement, but take the jump.
     DecrJumpZero {
         reg: usize,
         target_pc: BranchOffset,
@@ -326,11 +324,12 @@ impl Program {
                 }
                 Insn::DecrJumpZero { reg, target_pc } => match state.registers[*reg] {
                     OwnedValue::Integer(n) => {
-                        if n > 0 {
-                            state.registers[*reg] = OwnedValue::Integer(n - 1);
-                            state.pc += 1;
-                        } else {
+                        let n = n - 1;
+                        if n == 0 {
                             state.pc = *target_pc;
+                        } else {
+                            state.registers[*reg] = OwnedValue::Integer(n);
+                            state.pc += 1;
                         }
                     }
                     _ => unreachable!("DecrJumpZero on non-integer register"),
