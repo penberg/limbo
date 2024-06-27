@@ -24,7 +24,7 @@ impl Database {
 pub struct IO {}
 
 impl limbo_core::IO for IO {
-    fn open_file(&self, _path: &str) -> Result<Box<dyn limbo_core::File>> {
+    fn open_file(&self, _path: &str) -> Result<Rc<dyn limbo_core::File>> {
         todo!();
     }
 

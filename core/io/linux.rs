@@ -19,10 +19,10 @@ impl LinuxIO {
 }
 
 impl IO for LinuxIO {
-    fn open_file(&self, path: &str) -> Result<Box<dyn File>> {
+    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options().read(true).write(true).open(path)?;
-        Ok(Box::new(LinuxFile {
+        Ok(Rc::new(LinuxFile {
             ring: self.ring.clone(),
             file,
         }))
