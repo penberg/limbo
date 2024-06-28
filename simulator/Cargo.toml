@@ -4,7 +4,6 @@
 name = "limbo_sim"
 version = "0.0.0"
 authors.workspace = true
-default-run = "limbo_sim"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
