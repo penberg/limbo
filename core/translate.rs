@@ -24,42 +24,7 @@ pub fn translate(
     }
 }
 
-pub fn update_pragma(
-    name: &String,
-    value: i64,
-    header: Rc<RefCell<DatabaseHeader>>,
-    pager: Rc<Pager>,
-) {
-    match name.as_str() {
-        "cache_size" => {
-            let mut cache_size_unformatted = value;
-            let mut cache_size = if cache_size_unformatted < 0 {
-                let kb = cache_size_unformatted.abs() * 1024;
-                kb / 512 // assume 512 page size for now
-            } else {
-                value
-            } as usize;
-            if cache_size < MIN_PAGE_CACHE_SIZE {
-                // update both in memory and stored disk value
-                cache_size = MIN_PAGE_CACHE_SIZE;
-                cache_size_unformatted = MIN_PAGE_CACHE_SIZE as i64;
-            }
-
-            // update in-memory header
-            header.borrow_mut().default_cache_size = cache_size_unformatted
-                .try_into()
-                .expect(&format!("invalid value, too big for a i32 {}", value));
-
-            // update in disk
-            let header_copy = header.borrow().clone();
-            pager.write_database_header(&header_copy);
-
-            // update cache size
-            pager.change_page_cache_size(cache_size);
-        }
-        _ => todo!(),
-    }
-}
+/// Generate code for a SELECT statement.
 fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_offset = program.emit_placeholder();
@@ -330,4 +295,36 @@ fn translate_pragma(
         target_pc: start_offset,
     });
     Ok(program.build())
+}
+
+fn update_pragma(name: &String, value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {
+    match name.as_str() {
+        "cache_size" => {
+            let mut cache_size_unformatted = value;
+            let mut cache_size = if cache_size_unformatted < 0 {
+                let kb = cache_size_unformatted.abs() * 1024;
+                kb / 512 // assume 512 page size for now
+            } else {
+                value
+            } as usize;
+            if cache_size < MIN_PAGE_CACHE_SIZE {
+                // update both in memory and stored disk value
+                cache_size = MIN_PAGE_CACHE_SIZE;
+                cache_size_unformatted = MIN_PAGE_CACHE_SIZE as i64;
+            }
+
+            // update in-memory header
+            header.borrow_mut().default_cache_size = cache_size_unformatted
+                .try_into()
+                .expect(&format!("invalid value, too big for a i32 {}", value));
+
+            // update in disk
+            let header_copy = header.borrow().clone();
+            pager.write_database_header(&header_copy);
+
+            // update cache size
+            pager.change_page_cache_size(cache_size);
+        }
+        _ => todo!(),
+    }
 }
