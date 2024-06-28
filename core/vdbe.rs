@@ -1,9 +1,10 @@
 use crate::btree::BTreeCursor;
 use crate::pager::Pager;
-use crate::types::{Cursor, CursorResult, OwnedValue, Record};
+use crate::types::{AggContext, Cursor, CursorResult, OwnedValue, Record};
 
 use anyhow::Result;
 use core::fmt;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -98,6 +99,26 @@ pub enum Insn {
         reg: usize,
         target_pc: BranchOffset,
     },
+
+    AggStep {
+        acc_reg: usize,
+        col: usize,
+        func: AggFunc,
+    },
+
+    AggFinal {
+        register: usize,
+        func: AggFunc,
+    },
+
+    Copy {
+        register_start: usize,
+        register_end: usize,
+    },
+}
+
+pub enum AggFunc {
+    Avg,
 }
 
 pub struct ProgramBuilder {
@@ -118,6 +139,12 @@ impl ProgramBuilder {
     pub fn alloc_register(&mut self) -> usize {
         let reg = self.next_free_register;
         self.next_free_register += 1;
+        reg
+    }
+
+    pub fn alloc_registers(&mut self, amount: usize) -> usize {
+        let reg = self.next_free_register;
+        self.next_free_register += amount;
         reg
     }
 
@@ -334,6 +361,46 @@ impl Program {
                     }
                     _ => unreachable!("DecrJumpZero on non-integer register"),
                 },
+                Insn::AggStep { acc_reg, col, func } => {
+                    if let OwnedValue::Null = &state.registers[*acc_reg] {
+                        state.registers[*acc_reg] =
+                            OwnedValue::Agg(Box::new(AggContext::Avg(0.0, 0)));
+                    }
+                    match func {
+                        AggFunc::Avg => {
+                            let col = state.registers[*col].clone();
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
+                            else {
+                                unreachable!();
+                            };
+                            let AggContext::Avg(acc, count) = agg.borrow_mut();
+                            match col {
+                                OwnedValue::Integer(i) => *acc += i as f64,
+                                OwnedValue::Float(f) => *acc += f,
+                                _ => unreachable!(),
+                            }
+                            *count += 1;
+                        }
+                    };
+                    state.pc += 1;
+                }
+                Insn::AggFinal { register, func } => {
+                    match func {
+                        AggFunc::Avg => {
+                            let OwnedValue::Agg(agg) = state.registers[*register].borrow_mut()
+                            else {
+                                unreachable!();
+                            };
+                            let AggContext::Avg(acc, count) = agg.borrow_mut();
+                            *acc /= *count as f64
+                        }
+                    };
+                    state.pc += 1;
+                }
+                Insn::Copy {
+                    register_start,
+                    register_end,
+                } => todo!(),
             }
         }
     }
@@ -547,6 +614,28 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             IntValue::Usize(0),
             "".to_string(),
         ),
+        Insn::AggStep { func, acc_reg, col } => (
+            "AggStep",
+            IntValue::Usize(0),
+            IntValue::Usize(*col),
+            IntValue::Usize(*acc_reg),
+            "avg",
+            IntValue::Usize(0),
+            format!("accum=r[{}] step({})", *acc_reg, *col),
+        ),
+        Insn::AggFinal { register, func } => (
+            "AggFinal",
+            IntValue::Usize(0),
+            IntValue::Usize(*register),
+            IntValue::Usize(0),
+            "avg",
+            IntValue::Usize(0),
+            format!("accum=r[{}]", *register),
+        ),
+        Insn::Copy {
+            register_start,
+            register_end,
+        } => todo!(),
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
