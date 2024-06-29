@@ -14,7 +14,7 @@ fn main() {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let io = Rc::new(SimulatorIO::new().unwrap());
     for _ in 0..100000 {
-        let db = match Database::open_file(io.clone(), "./testing/hello.db") {
+        let db = match Database::open_file(io.clone(), "./testing/testing.db") {
             Ok(db) => db,
             Err(_) => continue,
         };

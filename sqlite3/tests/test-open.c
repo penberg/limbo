@@ -25,6 +25,6 @@ void test_open_existing(void)
 {
 	sqlite3 *db;
 
-	CHECK_EQUAL(SQLITE_OK, sqlite3_open("../../testing/hello.db", &db));
+	CHECK_EQUAL(SQLITE_OK, sqlite3_open("../../testing/testing.db", &db));
 	CHECK_EQUAL(SQLITE_OK, sqlite3_close(db));
 }
