@@ -8,7 +8,7 @@ fn bench(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let io = Rc::new(PlatformIO::new().unwrap());
-    let db = Database::open_file(io.clone(), "../testing/database.db").unwrap();
+    let db = Database::open_file(io.clone(), "../testing/testing.db").unwrap();
     let conn = db.connect();
 
     let mut stmt = conn.prepare("SELECT 1").unwrap();
