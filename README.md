@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="limbo.png" alt="Limbo" width="150"/>
+  <img src="limbo.png" alt="Limbo"/>
   <h1>Limbo</h1>
   <p>
     <a href="https://github.com/penberg/limbo/actions">
