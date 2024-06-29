@@ -1,14 +1,22 @@
-<div align="center">
-  <img src="limbo.png" alt="Limbo"/>
-  <h1>Limbo</h1>
-  <p>
-    <a href="https://github.com/penberg/limbo/actions">
-      <img src="https://github.com/penberg/limbo/actions/workflows/rust.yml/badge.svg" alt="Build badge">
-    </a>
-  </p>
-</div>
+<p align="center">
+  <img src="limbo.png" alt="Limbo" width="1000"/>
+  <h1 align="center">Limbo</h1>
+</p>
 
-Limbo is a work-in-progress, in-process OLTP database management system, compatible with SQLite.
+<p align="center">
+  Limbo is a work-in-progress, in-process OLTP database management system, compatible with SQLite.
+</p>
+
+<p align="center">
+  <a href="https://github.com/penberg/limbo/actions">
+    <img src="https://github.com/penberg/limbo/actions/workflows/rust.yml/badge.svg" alt="Build badge">
+  </a>
+  <a href="https://github.com/penberg/limbo/blob/main/LICENSE.md">
+    <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" title="MIT License" />
+  </a>
+</p>
+
+---
 
 ## Features
 
