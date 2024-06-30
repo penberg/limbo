@@ -2,7 +2,6 @@
 
 import sqlite3
 from faker import Faker
-import random
 
 conn = sqlite3.connect('database.db')
 cursor = conn.cursor()
@@ -33,7 +32,7 @@ for _ in range(10000):
     city = fake.city()
     state = fake.state_abbr()
     zipcode = fake.zipcode()
-    age = random.randint(0, 100) % 99
+    age = fake.random_int(min=1, max=100)
 
     cursor.execute('''
         INSERT INTO users (first_name, last_name, email, phone_number, address, city, state, zipcode, age)
