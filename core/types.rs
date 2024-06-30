@@ -12,12 +12,18 @@ pub enum Value<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum AggContext {
+    Avg(f64, usize), // acc and count
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum OwnedValue {
     Null,
     Integer(i64),
     Float(f64),
     Text(Rc<String>),
     Blob(Rc<Vec<u8>>),
+    Agg(Box<AggContext>),
 }
 
 pub fn to_value(value: &OwnedValue) -> Value<'_> {
@@ -27,6 +33,10 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Float(f) => Value::Float(*f),
         OwnedValue::Text(s) => Value::Text(s),
         OwnedValue::Blob(b) => Value::Blob(b),
+        OwnedValue::Agg(a) => match a.as_ref() {
+            AggContext::Avg(acc, _count) => Value::Float(*acc), // we assume aggfinal was called
+            _ => todo!(),
+        },
     }
 }
 
