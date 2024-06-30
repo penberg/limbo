@@ -111,6 +111,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 exist_aggregation,
             );
             if exist_aggregation {
+                // Only one ResultRow will occurr with aggregations.
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
@@ -169,6 +170,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
         } => {
             let info_per_columns = analyze_columns(&columns, None);
             let exist_aggregation = info_per_columns.iter().any(|info| info.func.is_some());
+            assert!(!exist_aggregation);
             let (register_start, register_end) = translate_columns(
                 &mut program,
                 None,
@@ -306,6 +308,10 @@ fn analyze_columns(
     column_information_list
 }
 
+/*
+  Walk column expression trying to find aggregation functions. If it finds one it will save information
+  about it.
+*/
 fn analyze_column(
     column: &sqlite3_parser::ast::ResultColumn,
     column_info_out: &mut ColumnAggregationInfo,
