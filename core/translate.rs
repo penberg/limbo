@@ -21,13 +21,13 @@ enum AggregationFunc {
     Total,
 }
 
-struct ColumnAggregationInfo {
+struct ColumnInfo {
     func: Option<AggregationFunc>,
     args: Option<Vec<Expr>>,
     columns_to_allocate: usize, /* number of result columns this col will result on */
 }
 
-impl ColumnAggregationInfo {
+impl ColumnInfo {
     pub fn new() -> Self {
         Self {
             func: None,
@@ -216,7 +216,7 @@ fn translate_columns(
     cursor_id: Option<usize>,
     table: Option<&crate::schema::Table>,
     columns: &Vec<sqlite3_parser::ast::ResultColumn>,
-    info_per_columns: &Vec<ColumnAggregationInfo>,
+    info_per_columns: &Vec<ColumnInfo>,
     exist_aggregation: bool,
 ) -> (usize, usize) {
     let register_start = program.next_free_register();
@@ -250,7 +250,7 @@ fn translate_column(
     cursor_id: Option<usize>,
     table: Option<&crate::schema::Table>,
     col: &sqlite3_parser::ast::ResultColumn,
-    info: &ColumnAggregationInfo,
+    info: &ColumnInfo,
     exist_aggregation: bool, // notify this column there is aggregation going on in other columns (or this one)
     target_register: usize, // where to store the result, in case of star it will be the start of registers added
 ) {
@@ -291,12 +291,12 @@ fn translate_column(
 fn analyze_columns(
     columns: &Vec<sqlite3_parser::ast::ResultColumn>,
     table: Option<&crate::schema::Table>,
-) -> Vec<ColumnAggregationInfo> {
+) -> Vec<ColumnInfo> {
     let mut column_information_list = Vec::new();
     column_information_list.reserve(columns.len());
 
     for column in columns {
-        let mut info = ColumnAggregationInfo::new();
+        let mut info = ColumnInfo::new();
         info.columns_to_allocate = 1;
         if let sqlite3_parser::ast::ResultColumn::Star = column {
             info.columns_to_allocate = table.unwrap().columns.len();
@@ -312,10 +312,7 @@ fn analyze_columns(
   Walk column expression trying to find aggregation functions. If it finds one it will save information
   about it.
 */
-fn analyze_column(
-    column: &sqlite3_parser::ast::ResultColumn,
-    column_info_out: &mut ColumnAggregationInfo,
-) {
+fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &mut ColumnInfo) {
     match column {
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
             Expr::FunctionCall {
@@ -427,7 +424,7 @@ fn translate_aggregation(
     cursor_id: Option<usize>,
     table: Option<&crate::schema::Table>,
     expr: &Expr,
-    info: &ColumnAggregationInfo,
+    info: &ColumnInfo,
     target_register: usize,
 ) -> Result<usize> {
     let _ = expr;
