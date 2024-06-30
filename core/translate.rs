@@ -110,7 +110,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 &info_per_columns,
                 exist_aggregation,
             );
-            if exist_aggregation {
+            let limit_decr_insn = if exist_aggregation {
                 // Only one ResultRow will occurr with aggregations.
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
@@ -142,18 +142,20 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                     register_start,
                     register_end,
                 });
+                None
             } else {
                 program.emit_insn(Insn::ResultRow {
                     register_start,
                     register_end,
                 });
+                let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
                     pc_if_next: rewind_await_offset,
                 });
-            }
-            let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
+                limit_decr_insn
+            };
             program.fixup_insn(
                 rewind_await_offset,
                 Insn::RewindAwait {
