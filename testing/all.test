@@ -11,7 +11,8 @@ proc evaluate_sql {sqlite_exec sql} {
 proc run_test {sqlite_exec sql expected_output} {
     set actual_output [evaluate_sql $sqlite_exec $sql]
     if {$actual_output ne $expected_output} {
-        puts "Test passed: '$sql' returned '$actual_output'"
+        puts "Test FAILED: '$sql' returned '$actual_output'"
+        exit 1
     }
 }
 
