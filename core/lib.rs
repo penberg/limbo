@@ -3,6 +3,7 @@ mod buffer_pool;
 mod io;
 mod pager;
 mod schema;
+mod sorter;
 mod sqlite3_ondisk;
 mod storage;
 mod translate;
@@ -68,7 +69,7 @@ impl Database {
                         }
                         let root_page: i64 = row.get::<i64>(3)?;
                         let sql: String = row.get::<String>(4)?;
-                        let table = schema::Table::from_sql(&sql, root_page as usize)?;
+                        let table = schema::BTreeTable::from_sql(&sql, root_page as usize)?;
                         schema.add_table(&table.name.to_owned(), table);
                     }
                     RowResult::IO => {

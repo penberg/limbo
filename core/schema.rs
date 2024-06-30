@@ -3,40 +3,68 @@ use core::fmt;
 use fallible_iterator::FallibleIterator;
 use log::trace;
 use sqlite3_parser::{
-    ast::{Cmd, CreateTableBody, QualifiedName, Stmt},
+    ast::{Cmd, CreateTableBody, Expr, QualifiedName, ResultColumn, Stmt},
     lexer::sql::Parser,
 };
 use std::collections::HashMap;
 
 pub struct Schema {
-    pub tables: HashMap<String, Table>,
+    pub tables: HashMap<String, BTreeTable>,
 }
 
 impl Schema {
     pub fn new() -> Self {
-        let mut tables: HashMap<String, Table> = HashMap::new();
+        let mut tables: HashMap<String, BTreeTable> = HashMap::new();
         tables.insert("sqlite_schema".to_string(), sqlite_schema_table());
         Self { tables }
     }
 
-    pub fn add_table(&mut self, name: &str, table: Table) {
+    pub fn add_table(&mut self, name: &str, table: BTreeTable) {
         let name = normalize_ident(name);
         self.tables.insert(name, table);
     }
 
-    pub fn get_table(&self, name: &str) -> Option<&Table> {
+    pub fn get_table(&self, name: &str) -> Option<&BTreeTable> {
         let name = normalize_ident(name);
         self.tables.get(&name)
     }
 }
 
-pub struct Table {
+pub enum Table<'a> {
+    BTree(&'a BTreeTable),
+    Pseudo(&'a PseudoTable),
+}
+
+impl<'a> Table<'a> {
+    pub fn is_pseudo(&self) -> bool {
+        match self {
+            Table::Pseudo(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
+        match self {
+            Table::BTree(table) => table.get_column(name),
+            Table::Pseudo(table) => table.get_column(name),
+        }
+    }
+
+    pub fn columns(&self) -> &Vec<Column> {
+        match self {
+            Table::BTree(table) => &table.columns,
+            Table::Pseudo(table) => &table.columns,
+        }
+    }
+}
+
+pub struct BTreeTable {
     pub root_page: usize,
     pub name: String,
     pub columns: Vec<Column>,
 }
 
-impl Table {
+impl BTreeTable {
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         let name = normalize_ident(name);
         for (i, column) in self.columns.iter().enumerate() {
@@ -47,7 +75,7 @@ impl Table {
         None
     }
 
-    pub fn from_sql(sql: &str, root_page: usize) -> Result<Table> {
+    pub fn from_sql(sql: &str, root_page: usize) -> Result<BTreeTable> {
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         match cmd {
@@ -87,7 +115,38 @@ impl Table {
     }
 }
 
-fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize) -> Result<Table> {
+pub struct PseudoTable {
+    pub columns: Vec<Column>,
+}
+
+impl PseudoTable {
+    pub fn new() -> Self {
+        Self { columns: vec![] }
+    }
+
+    pub fn add_column(&mut self, name: &str, ty: Type, primary_key: bool) {
+        self.columns.push(Column {
+            name: name.to_string(),
+            ty,
+            primary_key,
+        });
+    }
+    pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
+        let name = normalize_ident(name);
+        for (i, column) in self.columns.iter().enumerate() {
+            if column.name == name {
+                return Some((i, column));
+            }
+        }
+        None
+    }
+}
+
+fn create_table(
+    tbl_name: QualifiedName,
+    body: CreateTableBody,
+    root_page: usize,
+) -> Result<BTreeTable> {
     let table_name = normalize_ident(&tbl_name.name.0);
     trace!("Creating table {}", table_name);
     let mut cols = vec![];
@@ -133,11 +192,31 @@ fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize
         }
         CreateTableBody::AsSelect(_) => todo!(),
     };
-    Ok(Table {
+    Ok(BTreeTable {
         root_page,
         name: table_name,
         columns: cols,
     })
+}
+
+pub fn build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
+    let mut table = PseudoTable::new();
+    for column in columns {
+        match column {
+            ResultColumn::Expr(expr, as_name) => match expr {
+                _ => {
+                    todo!("unsupported expression {:?}", expr);
+                }
+            },
+            ResultColumn::Star => {
+                todo!();
+            }
+            ResultColumn::TableStar(_) => {
+                todo!();
+            }
+        }
+    }
+    table
 }
 
 fn normalize_ident(ident: &str) -> String {
@@ -184,8 +263,8 @@ impl fmt::Display for Type {
     }
 }
 
-pub fn sqlite_schema_table() -> Table {
-    Table {
+pub fn sqlite_schema_table() -> BTreeTable {
+    BTreeTable {
         root_page: 1,
         name: "sqlite_schema".to_string(),
         columns: vec![

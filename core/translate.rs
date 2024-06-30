@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::pager::Pager;
-use crate::schema::Schema;
+use crate::schema::{self, PseudoTable, Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
@@ -35,7 +35,15 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     } else {
         None
     };
-    let limit_decr_insn = match select.body.select {
+    let sorter_cursor = match select.order_by {
+        Some(_) => {
+            let cursor_id = program.alloc_cursor_id();
+            program.emit_insn(Insn::SorterOpen { cursor_id });
+            Some(cursor_id)
+        }
+        None => None,
+    };
+    let (table, columns, limit_decr_insn) = match select.body.select {
         OneSelect::Select {
             columns,
             from: Some(from),
@@ -55,6 +63,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
             let root_page = table.root_page;
+            let table = Table::BTree(table);
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
                 root_page,
@@ -62,13 +71,48 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync { cursor_id });
             let rewind_await_offset = program.emit_placeholder();
-            let (register_start, register_end) =
-                translate_columns(&mut program, Some(cursor_id), Some(table), columns);
-            program.emit_insn(Insn::ResultRow {
-                register_start,
-                register_end,
-            });
             let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
+            match sorter_cursor {
+                Some(sorter_cursor_id) => {
+                    let start_reg = program.next_free_register();
+                    let order_by = select.order_by.unwrap();
+                    for column in order_by {
+                        let _ = translate_expr(
+                            &mut program,
+                            Some(cursor_id),
+                            Some(&table),
+                            &column.expr,
+                        );
+                    }
+                    let (_, end_reg) = translate_columns(
+                        &mut program,
+                        Some(cursor_id),
+                        Some(&table),
+                        columns.clone(),
+                    );
+                    let count = end_reg - start_reg;
+                    let record_reg = program.alloc_register();
+                    program.emit_insn(Insn::MakeRecord {
+                        start_reg,
+                        count,
+                        dest_reg: record_reg,
+                    });
+                    program.emit_insn(Insn::SorterInsert {
+                        cursor_id: sorter_cursor_id,
+                        record_reg,
+                    });
+                }
+                None => {
+                    let (start_reg, end_reg) = translate_columns(
+                        &mut program,
+                        Some(cursor_id),
+                        Some(&table),
+                        columns.clone(),
+                    );
+                    let count = end_reg - start_reg;
+                    program.emit_insn(Insn::ResultRow { start_reg, count });
+                }
+            }
             program.emit_insn(Insn::NextAsync { cursor_id });
             program.emit_insn(Insn::NextAwait {
                 cursor_id,
@@ -81,24 +125,56 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                     pc_if_empty: program.offset(),
                 },
             );
-            limit_decr_insn
+            (Some(table), columns, limit_decr_insn)
         }
         OneSelect::Select {
             columns,
             from: None,
             ..
         } => {
-            let (register_start, register_end) =
-                translate_columns(&mut program, None, None, columns);
-            program.emit_insn(Insn::ResultRow {
-                register_start,
-                register_end,
-            });
+            let (start_reg, end_reg) = translate_columns(&mut program, None, None, columns.clone());
+            let count = end_reg - start_reg;
+            program.emit_insn(Insn::ResultRow { start_reg, count });
             let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
-            limit_decr_insn
+            (None, columns, limit_decr_insn)
         }
         _ => todo!(),
     };
+    match sorter_cursor {
+        Some(sorter_cursor_id) => {
+            let pseudo_num_fields = columns.len();
+            let pseudo_table = schema::build_pseudo_table(&columns);
+            let pseudo_table = Some(Table::Pseudo(&pseudo_table));
+            let pseudo_cursor_id = program.alloc_cursor_id();
+            let pseudo_content_reg = program.alloc_register();
+            program.emit_insn(Insn::OpenPseudo {
+                cursor_id: pseudo_cursor_id,
+                content_reg: pseudo_content_reg,
+                num_fields: pseudo_num_fields,
+            });
+            program.emit_insn(Insn::SorterSort {
+                cursor_id: sorter_cursor_id,
+            });
+            let pc_if_next = program.offset();
+            program.emit_insn(Insn::SorterData {
+                cursor_id: sorter_cursor_id,
+                dest_reg: pseudo_content_reg,
+            });
+            let (start_reg, end_reg) = translate_columns(
+                &mut program,
+                Some(pseudo_cursor_id),
+                pseudo_table.as_ref(),
+                columns.clone(),
+            );
+            let count = end_reg - start_reg;
+            program.emit_insn(Insn::ResultRow { start_reg, count });
+            program.emit_insn(Insn::SorterNext {
+                cursor_id: sorter_cursor_id,
+                pc_if_next,
+            });
+        }
+        None => {}
+    }
     if let Some(limit_decr_insn) = limit_decr_insn {
         program.fixup_insn(
             limit_decr_insn,
@@ -147,9 +223,10 @@ fn translate_column(
             let _ = translate_expr(program, cursor_id, table, &expr);
         }
         sqlite3_parser::ast::ResultColumn::Star => {
-            for (i, col) in table.unwrap().columns.iter().enumerate() {
+            let table = table.unwrap();
+            for (i, col) in table.columns().iter().enumerate() {
                 let dest = program.alloc_register();
-                if col.is_rowid_alias() {
+                if !table.is_pseudo() && col.is_rowid_alias() {
                     program.emit_insn(Insn::RowId {
                         cursor_id: cursor_id.unwrap(),
                         dest,
@@ -184,9 +261,10 @@ fn translate_expr(
         Expr::FunctionCall { .. } => todo!(),
         Expr::FunctionCallStar { .. } => todo!(),
         Expr::Id(ident) => {
-            let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
+            let table = table.unwrap();
+            let (idx, col) = table.get_column(&ident.0).unwrap();
             let dest = program.alloc_register();
-            if col.primary_key {
+            if !table.is_pseudo() && col.is_rowid_alias() {
                 program.emit_insn(Insn::RowId {
                     cursor_id: cursor_id.unwrap(),
                     dest,
@@ -260,8 +338,8 @@ fn translate_pragma(
 
             let pragma_result_end = program.next_free_register();
             program.emit_insn(Insn::ResultRow {
-                register_start: pragma_result,
-                register_end: pragma_result_end,
+                start_reg: pragma_result,
+                count: pragma_result_end - pragma_result,
             });
         }
         Some(PragmaBody::Equals(value)) => {

@@ -1,6 +1,6 @@
 use crate::btree::BTreeCursor;
 use crate::pager::Pager;
-use crate::types::{Cursor, CursorResult, OwnedValue, Record};
+use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
 use anyhow::Result;
 use core::fmt;
@@ -29,6 +29,13 @@ pub enum Insn {
     // Await for the competion of open cursor.
     OpenReadAwait,
 
+    // Open a cursor for a pseudo-table that contains a single row.
+    OpenPseudo {
+        cursor_id: CursorID,
+        content_reg: usize,
+        num_fields: usize,
+    },
+
     // Rewind the cursor to the beginning of the B-Tree.
     RewindAsync {
         cursor_id: CursorID,
@@ -47,10 +54,17 @@ pub enum Insn {
         dest: usize,
     },
 
+    // Make a record and write it to destination register.
+    MakeRecord {
+        start_reg: usize, // P1
+        count: usize,     // P2
+        dest_reg: usize,  // P3
+    },
+
     // Emit a row of results.
     ResultRow {
-        register_start: usize,
-        register_end: usize,
+        start_reg: usize, // P1
+        count: usize,     // P2
     },
 
     // Advance the cursor to the next row.
@@ -97,6 +111,34 @@ pub enum Insn {
     DecrJumpZero {
         reg: usize,
         target_pc: BranchOffset,
+    },
+
+    // Open a sorter.
+    SorterOpen {
+        cursor_id: CursorID,
+    },
+
+    // Insert a row into the sorter.
+    SorterInsert {
+        cursor_id: CursorID,
+        record_reg: usize,
+    },
+
+    // Sort the rows in the sorter.
+    SorterSort {
+        cursor_id: CursorID,
+    },
+
+    // Retrieve the next row from the sorter.
+    SorterData {
+        cursor_id: CursorID, // P1
+        dest_reg: usize,     // P2
+    },
+
+    // Advance to the next row in the sorter.
+    SorterNext {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
     },
 }
 
@@ -229,6 +271,13 @@ impl Program {
                 Insn::OpenReadAwait => {
                     state.pc += 1;
                 }
+                Insn::OpenPseudo {
+                    cursor_id,
+                    content_reg,
+                    num_fields,
+                } => {
+                    todo!();
+                }
                 Insn::RewindAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     match cursor.rewind()? {
@@ -265,11 +314,18 @@ impl Program {
                     }
                     state.pc += 1;
                 }
-                Insn::ResultRow {
-                    register_start,
-                    register_end,
+                Insn::MakeRecord {
+                    start_reg,
+                    count,
+                    dest_reg,
                 } => {
-                    let record = make_record(&state.registers, register_end, register_start);
+                    let record =
+                        OwnedRecord::new(state.registers[*start_reg..*start_reg + *count].to_vec());
+                    state.registers[*dest_reg] = OwnedValue::Record(record);
+                    state.pc += 1;
+                }
+                Insn::ResultRow { start_reg, count } => {
+                    let record = make_record(&state.registers, *start_reg, *count);
                     state.pc += 1;
                     return Ok(StepResult::Row(record));
                 }
@@ -334,18 +390,66 @@ impl Program {
                     }
                     _ => unreachable!("DecrJumpZero on non-integer register"),
                 },
+                Insn::SorterOpen { cursor_id } => {
+                    let cursor = Box::new(crate::sorter::Sorter::new());
+                    cursors.insert(*cursor_id, cursor);
+                    state.pc += 1;
+                }
+                Insn::SorterData {
+                    cursor_id,
+                    dest_reg,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    if let Some(ref record) = *cursor.record()? {
+                        state.registers[*dest_reg] = OwnedValue::Record(record.clone());
+                    } else {
+                        todo!();
+                    }
+                    state.pc += 1;
+                }
+                Insn::SorterInsert {
+                    cursor_id,
+                    record_reg,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let record = match &state.registers[*record_reg] {
+                        OwnedValue::Record(record) => record,
+                        _ => unreachable!("SorterInsert on non-record register"),
+                    };
+                    cursor.insert(record)?;
+                    state.pc += 1;
+                }
+                Insn::SorterSort { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.rewind()?;
+                    state.pc += 1;
+                }
+                Insn::SorterNext {
+                    cursor_id,
+                    pc_if_next,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    match cursor.next()? {
+                        CursorResult::Ok(_) => {}
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
+                    if !cursor.is_empty() {
+                        state.pc = *pc_if_next;
+                    } else {
+                        state.pc += 1;
+                    }
+                }
             }
         }
     }
 }
 
-fn make_record<'a>(
-    registers: &'a [OwnedValue],
-    register_end: &usize,
-    register_start: &usize,
-) -> Record<'a> {
-    let mut values = Vec::with_capacity(*register_end - *register_start);
-    for i in *register_start..*register_end {
+fn make_record<'a>(registers: &'a [OwnedValue], start_reg: usize, count: usize) -> Record<'a> {
+    let mut values = Vec::with_capacity(count);
+    for i in start_reg..start_reg + count {
         values.push(crate::types::to_value(&registers[i]));
     }
     Record::new(values)
@@ -417,6 +521,19 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             IntValue::Usize(0),
             "".to_string(),
         ),
+        Insn::OpenPseudo {
+            cursor_id,
+            content_reg,
+            num_fields,
+        } => (
+            "OpenPseudo",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*content_reg),
+            IntValue::Usize(*num_fields),
+            "",
+            IntValue::Usize(0),
+            format!("{} columns in r[{}]", num_fields, content_reg),
+        ),
         Insn::RewindAsync { cursor_id } => (
             "RewindAsync",
             IntValue::Usize(*cursor_id),
@@ -451,17 +568,32 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             IntValue::Usize(0),
             format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
         ),
-        Insn::ResultRow {
-            register_start,
-            register_end,
+        Insn::MakeRecord {
+            start_reg,
+            count,
+            dest_reg,
         } => (
+            "MakeRecord",
+            IntValue::Usize(*start_reg),
+            IntValue::Usize(*count),
+            IntValue::Usize(*dest_reg),
+            "",
+            IntValue::Usize(0),
+            format!(
+                "r[{}]=mkrec(r[{}..{}])",
+                dest_reg,
+                start_reg,
+                start_reg + count
+            ),
+        ),
+        Insn::ResultRow { start_reg, count } => (
             "ResultRow",
-            IntValue::Usize(*register_start),
-            IntValue::Usize(*register_end),
+            IntValue::Usize(*start_reg),
+            IntValue::Usize(*start_reg + count),
             IntValue::Usize(0),
             "",
             IntValue::Usize(0),
-            format!("output=r[{}..{}]", register_start, register_end),
+            format!("output=r[{}..{}]", start_reg, start_reg + count),
         ),
         Insn::NextAsync { cursor_id } => (
             "NextAsync",
@@ -542,6 +674,60 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             "DecrJumpZero",
             IntValue::Usize(*reg),
             IntValue::Usize(*target_pc),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::SorterOpen { cursor_id } => (
+            "SorterOpen",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::SorterInsert {
+            cursor_id,
+            record_reg,
+        } => (
+            "SorterInsert",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*record_reg),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            format!("key=r[{}]", record_reg),
+        ),
+        Insn::SorterSort { cursor_id } => (
+            "SorterSort",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(0),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::SorterData {
+            cursor_id,
+            dest_reg,
+        } => (
+            "SorterData",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*dest_reg),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            format!("r[{}]= data", dest_reg),
+        ),
+        Insn::SorterNext {
+            cursor_id,
+            pc_if_next,
+        } => (
+            "SorterNext",
+            IntValue::Usize(*cursor_id),
+            IntValue::Usize(*pc_if_next),
             IntValue::Usize(0),
             "",
             IntValue::Usize(0),

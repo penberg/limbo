@@ -18,6 +18,7 @@ pub enum OwnedValue {
     Float(f64),
     Text(Rc<String>),
     Blob(Rc<Vec<u8>>),
+    Record(OwnedRecord),
 }
 
 pub fn to_value(value: &OwnedValue) -> Value<'_> {
@@ -27,6 +28,7 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Float(f) => Value::Float(*f),
         OwnedValue::Text(s) => Value::Text(s),
         OwnedValue::Blob(b) => Value::Blob(b),
+        OwnedValue::Record(r) => todo!(),
     }
 }
 
@@ -65,6 +67,7 @@ impl<'a> Record<'a> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct OwnedRecord {
     pub values: Vec<OwnedValue>,
 }
@@ -87,4 +90,5 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Ref<Option<u64>>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
+    fn insert(&mut self, record: &OwnedRecord) -> Result<()>;
 }
