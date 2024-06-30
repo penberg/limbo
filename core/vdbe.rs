@@ -4,7 +4,7 @@ use crate::types::{AggContext, Cursor, CursorResult, OwnedValue, Record};
 
 use anyhow::Result;
 use core::fmt;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -110,15 +110,19 @@ pub enum Insn {
         register: usize,
         func: AggFunc,
     },
-
-    Copy {
-        register_start: usize,
-        register_end: usize,
-    },
 }
 
 pub enum AggFunc {
     Avg,
+}
+
+impl AggFunc {
+    fn to_string(&self) -> &str {
+        match self {
+            AggFunc::Avg => "avg",
+            _ => "unknown",
+        }
+    }
 }
 
 pub struct ProgramBuilder {
@@ -397,10 +401,6 @@ impl Program {
                     };
                     state.pc += 1;
                 }
-                Insn::Copy {
-                    register_start,
-                    register_end,
-                } => todo!(),
             }
         }
     }
@@ -619,7 +619,7 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             IntValue::Usize(0),
             IntValue::Usize(*col),
             IntValue::Usize(*acc_reg),
-            "avg",
+            func.to_string(),
             IntValue::Usize(0),
             format!("accum=r[{}] step({})", *acc_reg, *col),
         ),
@@ -628,14 +628,10 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             IntValue::Usize(0),
             IntValue::Usize(*register),
             IntValue::Usize(0),
-            "avg",
+            func.to_string(),
             IntValue::Usize(0),
             format!("accum=r[{}]", *register),
         ),
-        Insn::Copy {
-            register_start,
-            register_end,
-        } => todo!(),
     };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

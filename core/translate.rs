@@ -228,7 +228,7 @@ fn translate_columns(
     let register_end = program.next_free_register();
 
     let mut target = register_start;
-    for (i, (col, info)) in columns.iter().zip(info_per_columns).enumerate() {
+    for (col, info) in columns.iter().zip(info_per_columns) {
         translate_column(
             program,
             cursor_id,
@@ -260,7 +260,8 @@ fn translate_column(
     match col {
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
             if info.is_aggregation_function() {
-                translate_aggregation(program, cursor_id, table, &expr, info, target_register);
+                let _ =
+                    translate_aggregation(program, cursor_id, table, &expr, info, target_register);
             } else {
                 let _ = translate_expr(program, cursor_id, table, &expr, target_register);
             }
@@ -313,9 +314,9 @@ fn analyze_column(
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
             Expr::FunctionCall {
                 name,
-                distinctness,
+                distinctness: _,
                 args,
-                filter_over,
+                filter_over: _,
             } => {
                 let func_type = match name.0.as_str() {
                     "avg" => Some(AggregationFunc::Avg),
@@ -423,6 +424,7 @@ fn translate_aggregation(
     info: &ColumnAggregationInfo,
     target_register: usize,
 ) -> Result<usize> {
+    let _ = expr;
     assert!(info.func.is_some());
     let func = info.func.as_ref().unwrap();
     let args = info.args.as_ref().unwrap();
