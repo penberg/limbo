@@ -369,10 +369,15 @@ impl Program {
                 },
                 Insn::AggStep { acc_reg, col, func } => {
                     if let OwnedValue::Null = &state.registers[*acc_reg] {
-                        state.registers[*acc_reg] = OwnedValue::Agg(Box::new(AggContext::Avg(
-                            OwnedValue::Float(0.0),
-                            OwnedValue::Integer(0),
-                        )));
+                        state.registers[*acc_reg] = match func {
+                            AggFunc::Avg => OwnedValue::Agg(Box::new(AggContext::Avg(
+                                OwnedValue::Float(0.0),
+                                OwnedValue::Integer(0),
+                            ))),
+                            AggFunc::Sum => {
+                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
+                            }
+                        };
                     }
                     match func {
                         AggFunc::Avg => {
@@ -393,11 +398,10 @@ impl Program {
                             else {
                                 unreachable!();
                             };
-                            let AggContext::Avg(acc, count) = agg.borrow_mut() else {
+                            let AggContext::Sum(acc) = agg.borrow_mut() else {
                                 unreachable!();
                             };
                             *acc += col;
-                            *count += 1;
                         }
                     };
                     state.pc += 1;
