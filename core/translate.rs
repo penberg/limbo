@@ -324,14 +324,16 @@ fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &
                 filter_over: _,
             } => {
                 let func_type = match name.0.as_str() {
-                    "avg" => Some(AggregationFunc::Avg),
-                    "count" => Some(AggregationFunc::Count),
-                    "group_concat" => Some(AggregationFunc::GroupConcat),
-                    "max" => Some(AggregationFunc::Max),
-                    "min" => Some(AggregationFunc::Min),
-                    "string_agg" => Some(AggregationFunc::StringAgg),
-                    "sum" => Some(AggregationFunc::Sum),
-                    "total" => Some(AggregationFunc::Total),
+                    s if s.eq_ignore_ascii_case("avg") => Some(AggregationFunc::Avg),
+                    s if s.eq_ignore_ascii_case("count") => Some(AggregationFunc::Count),
+                    s if s.eq_ignore_ascii_case("group_concat") => {
+                        Some(AggregationFunc::GroupConcat)
+                    }
+                    s if s.eq_ignore_ascii_case("max") => Some(AggregationFunc::Max),
+                    s if s.eq_ignore_ascii_case("min") => Some(AggregationFunc::Min),
+                    s if s.eq_ignore_ascii_case("string_agg") => Some(AggregationFunc::StringAgg),
+                    s if s.eq_ignore_ascii_case("sum") => Some(AggregationFunc::Sum),
+                    s if s.eq_ignore_ascii_case("total") => Some(AggregationFunc::Total),
                     _ => None,
                 };
                 if func_type.is_none() {
