@@ -127,7 +127,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                             AggregationFunc::Max => todo!(),
                             AggregationFunc::Min => todo!(),
                             AggregationFunc::StringAgg => todo!(),
-                            AggregationFunc::Sum => todo!(),
+                            AggregationFunc::Sum => AggFunc::Sum,
                             AggregationFunc::Total => todo!(),
                         };
                         program.emit_insn(Insn::AggFinal {
@@ -453,7 +453,20 @@ fn translate_aggregation(
         AggregationFunc::Max => todo!(),
         AggregationFunc::Min => todo!(),
         AggregationFunc::StringAgg => todo!(),
-        AggregationFunc::Sum => todo!(),
+        AggregationFunc::Sum => {
+            if args.len() != 1 {
+                anyhow::bail!("Parse error: sum bad number of arguments");
+            }
+            let expr = &args[0];
+            let expr_reg = program.alloc_register();
+            let _ = translate_expr(program, cursor_id, table, &expr, expr_reg);
+            program.emit_insn(Insn::AggStep {
+                acc_reg: target_register,
+                col: expr_reg,
+                func: crate::vdbe::AggFunc::Sum,
+            });
+            target_register
+        }
         AggregationFunc::Total => todo!(),
     };
     Ok(dest)
