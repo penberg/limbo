@@ -12,18 +12,111 @@ pub enum Value<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum AggContext {
-    Avg(f64, usize), // acc and count
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum OwnedValue {
     Null,
     Integer(i64),
     Float(f64),
     Text(Rc<String>),
     Blob(Rc<Vec<u8>>),
-    Agg(Box<AggContext>),
+    Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AggContext {
+    Avg(OwnedValue, OwnedValue), // acc and count
+    Sum(OwnedValue),
+}
+
+impl std::ops::Add<OwnedValue> for OwnedValue {
+    type Output = OwnedValue;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self, rhs) {
+            (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {
+                OwnedValue::Integer(int_left + int_right)
+            }
+            (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
+                OwnedValue::Float(int_left as f64 + float_right)
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
+                OwnedValue::Float(float_left + int_right as f64)
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
+                OwnedValue::Float(float_left + float_right)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl std::ops::Add<f64> for OwnedValue {
+    type Output = OwnedValue;
+
+    fn add(self, rhs: f64) -> Self::Output {
+        match self {
+            OwnedValue::Integer(int_left) => OwnedValue::Float(int_left as f64 + rhs),
+            OwnedValue::Float(float_left) => OwnedValue::Float(float_left + rhs),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl std::ops::Add<i64> for OwnedValue {
+    type Output = OwnedValue;
+
+    fn add(self, rhs: i64) -> Self::Output {
+        match self {
+            OwnedValue::Integer(int_left) => OwnedValue::Integer(int_left + rhs),
+            OwnedValue::Float(float_left) => OwnedValue::Float(float_left + rhs as f64),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl std::ops::AddAssign for OwnedValue {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = self.clone() + rhs;
+    }
+}
+
+impl std::ops::AddAssign<i64> for OwnedValue {
+    fn add_assign(&mut self, rhs: i64) {
+        *self = self.clone() + rhs;
+    }
+}
+
+impl std::ops::AddAssign<f64> for OwnedValue {
+    fn add_assign(&mut self, rhs: f64) {
+        *self = self.clone() + rhs;
+    }
+}
+
+impl std::ops::Div<OwnedValue> for OwnedValue {
+    type Output = OwnedValue;
+
+    fn div(self, rhs: OwnedValue) -> Self::Output {
+        match (self, rhs) {
+            (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {
+                OwnedValue::Integer(int_left / int_right)
+            }
+            (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
+                OwnedValue::Float(int_left as f64 / float_right)
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
+                OwnedValue::Float(float_left / int_right as f64)
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
+                OwnedValue::Float(float_left / float_right)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl std::ops::DivAssign<OwnedValue> for OwnedValue {
+    fn div_assign(&mut self, rhs: OwnedValue) {
+        *self = self.clone() / rhs;
+    }
 }
 
 pub fn to_value(value: &OwnedValue) -> Value<'_> {
@@ -34,7 +127,8 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Text(s) => Value::Text(s),
         OwnedValue::Blob(b) => Value::Blob(b),
         OwnedValue::Agg(a) => match a.as_ref() {
-            AggContext::Avg(acc, _count) => Value::Float(*acc), // we assume aggfinal was called
+            AggContext::Avg(acc, _count) => to_value(acc), // we assume aggfinal was called
+            AggContext::Sum(acc) => to_value(acc),
             _ => todo!(),
         },
     }
