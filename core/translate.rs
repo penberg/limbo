@@ -4,6 +4,7 @@ use std::rc::Rc;
 use crate::pager::Pager;
 use crate::schema::Schema;
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use crate::util::normalize_ident;
 use crate::vdbe::{AggFunc, Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast::{
@@ -323,7 +324,7 @@ fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &
                 args,
                 filter_over: _,
             } => {
-                let func_type = match name.0.as_str() {
+                let func_type = match normalize_ident(name.0.as_str()).as_str() {
                     "avg" => Some(AggregationFunc::Avg),
                     "count" => Some(AggregationFunc::Count),
                     "group_concat" => Some(AggregationFunc::GroupConcat),

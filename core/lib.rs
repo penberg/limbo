@@ -8,6 +8,7 @@ mod storage;
 mod translate;
 mod types;
 mod vdbe;
+mod util;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]
