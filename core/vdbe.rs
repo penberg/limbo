@@ -114,12 +114,14 @@ pub enum Insn {
 
 pub enum AggFunc {
     Avg,
+    Sum,
 }
 
 impl AggFunc {
     fn to_string(&self) -> &str {
         match self {
             AggFunc::Avg => "avg",
+            AggFunc::Sum => "sum",
             _ => "unknown",
         }
     }
@@ -367,8 +369,15 @@ impl Program {
                 },
                 Insn::AggStep { acc_reg, col, func } => {
                     if let OwnedValue::Null = &state.registers[*acc_reg] {
-                        state.registers[*acc_reg] =
-                            OwnedValue::Agg(Box::new(AggContext::Avg(0.0, 0)));
+                        state.registers[*acc_reg] = match func {
+                            AggFunc::Avg => OwnedValue::Agg(Box::new(AggContext::Avg(
+                                OwnedValue::Float(0.0),
+                                OwnedValue::Integer(0),
+                            ))),
+                            AggFunc::Sum => {
+                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
+                            }
+                        };
                     }
                     match func {
                         AggFunc::Avg => {
@@ -377,13 +386,22 @@ impl Program {
                             else {
                                 unreachable!();
                             };
-                            let AggContext::Avg(acc, count) = agg.borrow_mut();
-                            match col {
-                                OwnedValue::Integer(i) => *acc += i as f64,
-                                OwnedValue::Float(f) => *acc += f,
-                                _ => unreachable!(),
-                            }
+                            let AggContext::Avg(acc, count) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                            *acc += col;
                             *count += 1;
+                        }
+                        AggFunc::Sum => {
+                            let col = state.registers[*col].clone();
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
+                            else {
+                                unreachable!();
+                            };
+                            let AggContext::Sum(acc) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                            *acc += col;
                         }
                     };
                     state.pc += 1;
@@ -395,9 +413,12 @@ impl Program {
                             else {
                                 unreachable!();
                             };
-                            let AggContext::Avg(acc, count) = agg.borrow_mut();
-                            *acc /= *count as f64
+                            let AggContext::Avg(acc, count) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                            *acc /= count.clone();
                         }
+                        AggFunc::Sum => {}
                     };
                     state.pc += 1;
                 }
