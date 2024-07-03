@@ -2,12 +2,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::pager::Pager;
-use crate::schema::Schema;
+use crate::schema::{Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{AggFunc, Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast;
+
+struct Select<'a> {
+    columns: Vec<ast::ResultColumn>,
+    column_info: Vec<ColumnInfo>,
+    from: Option<&'a Table>,
+    limit: Option<ast::Limit>,
+}
 
 enum AggregationFunc {
     Avg,
@@ -48,14 +55,61 @@ pub fn translate(
     pager: Rc<Pager>,
 ) -> Result<Program> {
     match stmt {
-        ast::Stmt::Select(select) => translate_select(schema, select),
+        ast::Stmt::Select(select) => {
+            let select = build_select(schema, select)?;
+            translate_select(schema, select)
+        }
         ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
         _ => todo!(),
     }
 }
 
+fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
+    match select.body.select {
+        ast::OneSelect::Select {
+            columns,
+            from: Some(from),
+            ..
+        } => {
+            let table_name = match from.select {
+                Some(select_table) => match *select_table {
+                    ast::SelectTable::Table(name, ..) => name.name,
+                    _ => todo!(),
+                },
+                None => todo!(),
+            };
+            let table_name = table_name.0;
+            let table = match schema.get_table(&table_name) {
+                Some(table) => table,
+                None => anyhow::bail!("Parse error: no such table: {}", table_name),
+            };
+            let column_info = analyze_columns(&columns, Some(&table));
+            Ok(Select {
+                columns,
+                column_info,
+                from: Some(&table),
+                limit: select.limit.clone(),
+            })
+        }
+        ast::OneSelect::Select {
+            columns,
+            from: None,
+            ..
+        } => {
+            let column_info = analyze_columns(&columns, None);
+            Ok(Select {
+                columns,
+                column_info,
+                from: None,
+                limit: select.limit.clone(),
+            })
+        }
+        _ => todo!(),
+    }
+}
+
 /// Generate code for a SELECT statement.
-fn translate_select(schema: &Schema, select: ast::Select) -> Result<Program> {
+fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_offset = program.emit_placeholder();
     let start_offset = program.offset();
@@ -72,25 +126,9 @@ fn translate_select(schema: &Schema, select: ast::Select) -> Result<Program> {
     } else {
         None
     };
-    let limit_decr_insn = match select.body.select {
-        ast::OneSelect::Select {
-            columns,
-            from: Some(from),
-            ..
-        } => {
-            let cursor_id = program.alloc_cursor_id();
-            let table_name = match from.select {
-                Some(select_table) => match *select_table {
-                    sqlite3_parser::ast::SelectTable::Table(name, ..) => name.name,
-                    _ => todo!(),
-                },
-                None => todo!(),
-            };
-            let table_name = table_name.0;
-            let table = match schema.get_table(&table_name) {
-                Some(table) => table,
-                None => anyhow::bail!("Parse error: no such table: {}", table_name),
-            };
+    let cursor_id = program.alloc_cursor_id();
+    let limit_decr_insn = match select.from {
+        Some(table) => {
             let root_page = table.root_page;
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
@@ -99,14 +137,13 @@ fn translate_select(schema: &Schema, select: ast::Select) -> Result<Program> {
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync { cursor_id });
             let rewind_await_offset = program.emit_placeholder();
-            let info_per_columns = analyze_columns(&columns, Some(table));
-            let exist_aggregation = info_per_columns.iter().any(|info| info.func.is_some());
+            let exist_aggregation = select.column_info.iter().any(|info| info.func.is_some());
             let (register_start, register_end) = translate_columns(
                 &mut program,
                 Some(cursor_id),
                 Some(table),
-                &columns,
-                &info_per_columns,
+                &select.columns,
+                &select.column_info,
                 exist_aggregation,
             );
             let limit_decr_insn = if exist_aggregation {
@@ -117,7 +154,7 @@ fn translate_select(schema: &Schema, select: ast::Select) -> Result<Program> {
                     pc_if_next: rewind_await_offset,
                 });
                 let mut target = register_start;
-                for info in &info_per_columns {
+                for info in &select.column_info {
                     if info.is_aggregation_function() {
                         let func = match info.func.as_ref().unwrap() {
                             AggregationFunc::Avg => AggFunc::Avg,
@@ -164,30 +201,23 @@ fn translate_select(schema: &Schema, select: ast::Select) -> Result<Program> {
             );
             limit_decr_insn
         }
-        ast::OneSelect::Select {
-            columns,
-            from: None,
-            ..
-        } => {
-            let info_per_columns = analyze_columns(&columns, None);
-            let exist_aggregation = info_per_columns.iter().any(|info| info.func.is_some());
+        None => {
+            let exist_aggregation = select.column_info.iter().any(|info| info.func.is_some());
             assert!(!exist_aggregation);
             let (register_start, register_end) = translate_columns(
                 &mut program,
                 None,
                 None,
-                &columns,
-                &info_per_columns,
+                &select.columns,
+                &select.column_info,
                 exist_aggregation,
             );
             program.emit_insn(Insn::ResultRow {
                 register_start,
                 register_end,
             });
-
             limit_reg.map(|_| program.emit_placeholder())
         }
-        _ => todo!(),
     };
     if let Some(limit_decr_insn) = limit_decr_insn {
         program.fixup_insn(
