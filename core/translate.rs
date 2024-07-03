@@ -295,9 +295,7 @@ fn analyze_columns(
     columns: &Vec<sqlite3_parser::ast::ResultColumn>,
     table: Option<&crate::schema::Table>,
 ) -> Vec<ColumnInfo> {
-    let mut column_information_list = Vec::new();
-    column_information_list.reserve(columns.len());
-
+    let mut column_information_list = Vec::with_capacity(columns.len());
     for column in columns {
         let mut info = ColumnInfo::new();
         info.columns_to_allocate = 1;
