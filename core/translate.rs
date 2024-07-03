@@ -7,9 +7,7 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{AggFunc, Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{
-    Expr, Literal, OneSelect, PragmaBody, QualifiedName, Select, Stmt, UnaryOperator,
-};
+use sqlite3_parser::ast;
 
 enum AggregationFunc {
     Avg,
@@ -24,7 +22,7 @@ enum AggregationFunc {
 
 struct ColumnInfo {
     func: Option<AggregationFunc>,
-    args: Option<Vec<Expr>>,
+    args: Option<Vec<ast::Expr>>,
     columns_to_allocate: usize, /* number of result columns this col will result on */
 }
 
@@ -45,19 +43,19 @@ impl ColumnInfo {
 /// Translate SQL statement into bytecode program.
 pub fn translate(
     schema: &Schema,
-    stmt: Stmt,
+    stmt: ast::Stmt,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
 ) -> Result<Program> {
     match stmt {
-        Stmt::Select(select) => translate_select(schema, select),
-        Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
+        ast::Stmt::Select(select) => translate_select(schema, select),
+        ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
         _ => todo!(),
     }
 }
 
 /// Generate code for a SELECT statement.
-fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
+fn translate_select(schema: &Schema, select: ast::Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_offset = program.emit_placeholder();
     let start_offset = program.offset();
@@ -75,7 +73,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
         None
     };
     let limit_decr_insn = match select.body.select {
-        OneSelect::Select {
+        ast::OneSelect::Select {
             columns,
             from: Some(from),
             ..
@@ -166,7 +164,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             );
             limit_decr_insn
         }
-        OneSelect::Select {
+        ast::OneSelect::Select {
             columns,
             from: None,
             ..
@@ -186,7 +184,7 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 register_start,
                 register_end,
             });
-            
+
             limit_reg.map(|_| program.emit_placeholder())
         }
         _ => todo!(),
@@ -316,7 +314,7 @@ fn analyze_columns(
 fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &mut ColumnInfo) {
     match column {
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
-            Expr::FunctionCall {
+            ast::Expr::FunctionCall {
                 name,
                 distinctness: _,
                 args,
@@ -341,11 +339,11 @@ fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &
                     column_info_out.args = args.clone();
                 }
             }
-            Expr::FunctionCallStar { .. } => todo!(),
+            ast::Expr::FunctionCallStar { .. } => todo!(),
             _ => {}
         },
-        sqlite3_parser::ast::ResultColumn::Star => {}
-        sqlite3_parser::ast::ResultColumn::TableStar(_) => {}
+        ast::ResultColumn::Star => {}
+        ast::ResultColumn::TableStar(_) => {}
     }
 }
 
@@ -353,20 +351,20 @@ fn translate_expr(
     program: &mut ProgramBuilder,
     cursor_id: Option<usize>,
     table: Option<&crate::schema::Table>,
-    expr: &Expr,
+    expr: &ast::Expr,
     target_register: usize,
 ) -> usize {
     match expr {
-        Expr::Between { .. } => todo!(),
-        Expr::Binary(_, _, _) => todo!(),
-        Expr::Case { .. } => todo!(),
-        Expr::Cast { .. } => todo!(),
-        Expr::Collate(_, _) => todo!(),
-        Expr::DoublyQualified(_, _, _) => todo!(),
-        Expr::Exists(_) => todo!(),
-        Expr::FunctionCall { .. } => todo!(),
-        Expr::FunctionCallStar { .. } => todo!(),
-        Expr::Id(ident) => {
+        ast::Expr::Between { .. } => todo!(),
+        ast::Expr::Binary(_, _, _) => todo!(),
+        ast::Expr::Case { .. } => todo!(),
+        ast::Expr::Cast { .. } => todo!(),
+        ast::Expr::Collate(_, _) => todo!(),
+        ast::Expr::DoublyQualified(_, _, _) => todo!(),
+        ast::Expr::Exists(_) => todo!(),
+        ast::Expr::FunctionCall { .. } => todo!(),
+        ast::Expr::FunctionCallStar { .. } => todo!(),
+        ast::Expr::Id(ident) => {
             let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
             if col.primary_key {
                 program.emit_insn(Insn::RowId {
@@ -382,41 +380,41 @@ fn translate_expr(
             }
             target_register
         }
-        Expr::InList { .. } => todo!(),
-        Expr::InSelect { .. } => todo!(),
-        Expr::InTable { .. } => todo!(),
-        Expr::IsNull(_) => todo!(),
-        Expr::Like { .. } => todo!(),
-        Expr::Literal(lit) => match lit {
-            Literal::Numeric(val) => {
+        ast::Expr::InList { .. } => todo!(),
+        ast::Expr::InSelect { .. } => todo!(),
+        ast::Expr::InTable { .. } => todo!(),
+        ast::Expr::IsNull(_) => todo!(),
+        ast::Expr::Like { .. } => todo!(),
+        ast::Expr::Literal(lit) => match lit {
+            ast::Literal::Numeric(val) => {
                 program.emit_insn(Insn::Integer {
                     value: val.parse().unwrap(),
                     dest: target_register,
                 });
                 target_register
             }
-            Literal::String(s) => {
+            ast::Literal::String(s) => {
                 program.emit_insn(Insn::String8 {
                     value: s[1..s.len() - 1].to_string(),
                     dest: target_register,
                 });
                 target_register
             }
-            Literal::Blob(_) => todo!(),
-            Literal::Keyword(_) => todo!(),
-            Literal::Null => todo!(),
-            Literal::CurrentDate => todo!(),
-            Literal::CurrentTime => todo!(),
-            Literal::CurrentTimestamp => todo!(),
+            ast::Literal::Blob(_) => todo!(),
+            ast::Literal::Keyword(_) => todo!(),
+            ast::Literal::Null => todo!(),
+            ast::Literal::CurrentDate => todo!(),
+            ast::Literal::CurrentTime => todo!(),
+            ast::Literal::CurrentTimestamp => todo!(),
         },
-        Expr::Name(_) => todo!(),
-        Expr::NotNull(_) => todo!(),
-        Expr::Parenthesized(_) => todo!(),
-        Expr::Qualified(_, _) => todo!(),
-        Expr::Raise(_, _) => todo!(),
-        Expr::Subquery(_) => todo!(),
-        Expr::Unary(_, _) => todo!(),
-        Expr::Variable(_) => todo!(),
+        ast::Expr::Name(_) => todo!(),
+        ast::Expr::NotNull(_) => todo!(),
+        ast::Expr::Parenthesized(_) => todo!(),
+        ast::Expr::Qualified(_, _) => todo!(),
+        ast::Expr::Raise(_, _) => todo!(),
+        ast::Expr::Subquery(_) => todo!(),
+        ast::Expr::Unary(_, _) => todo!(),
+        ast::Expr::Variable(_) => todo!(),
     }
 }
 
@@ -424,7 +422,7 @@ fn translate_aggregation(
     program: &mut ProgramBuilder,
     cursor_id: Option<usize>,
     table: Option<&crate::schema::Table>,
-    expr: &Expr,
+    expr: &ast::Expr,
     info: &ColumnInfo,
     target_register: usize,
 ) -> Result<usize> {
@@ -472,8 +470,8 @@ fn translate_aggregation(
 }
 
 fn translate_pragma(
-    name: &QualifiedName,
-    body: Option<PragmaBody>,
+    name: &ast::QualifiedName,
+    body: Option<ast::PragmaBody>,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
 ) -> Result<Program> {
@@ -495,13 +493,13 @@ fn translate_pragma(
                 register_end: pragma_result_end,
             });
         }
-        Some(PragmaBody::Equals(value)) => {
+        Some(ast::PragmaBody::Equals(value)) => {
             let value_to_update = match value {
-                Expr::Literal(Literal::Numeric(numeric_value)) => {
+                ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
                     numeric_value.parse::<i64>().unwrap()
                 }
-                Expr::Unary(UnaryOperator::Negative, expr) => match *expr {
-                    Expr::Literal(Literal::Numeric(numeric_value)) => {
+                ast::Expr::Unary(ast::UnaryOperator::Negative, expr) => match *expr {
+                    ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
                         -numeric_value.parse::<i64>().unwrap()
                     }
                     _ => 0,
@@ -510,7 +508,7 @@ fn translate_pragma(
             };
             update_pragma(&name.name.0, value_to_update, database_header, pager);
         }
-        Some(PragmaBody::Call(_)) => {
+        Some(ast::PragmaBody::Call(_)) => {
             todo!()
         }
     };
