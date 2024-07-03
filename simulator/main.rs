@@ -20,7 +20,7 @@ fn main() {
         };
         io.inject_fault(rng.gen_bool(0.5));
         match io.run_once() {
-            Ok(_) => { }
+            Ok(_) => {}
             Err(_) => continue,
         }
         let conn = db.connect();

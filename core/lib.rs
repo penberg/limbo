@@ -7,8 +7,8 @@ mod sqlite3_ondisk;
 mod storage;
 mod translate;
 mod types;
-mod vdbe;
 mod util;
+mod vdbe;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]
