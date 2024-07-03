@@ -67,7 +67,7 @@ impl SimulatorIO {
     }
 }
 
-impl<'a> IO for SimulatorIO {
+impl IO for SimulatorIO {
     fn open_file(&self, path: &str) -> Result<Rc<dyn limbo_core::File>> {
         let inner = self.inner.open_file(path)?;
         let file = Rc::new(SimulatorFile {
