@@ -23,13 +23,21 @@ proc do_execsql_test {test_name sql_statements expected_outputs} {
     run_test $::sqlite_exec $combined_sql $combined_expected_output
 }
 
-do_execsql_test select-1 {
+do_execsql_test select-const-1 {
   SELECT 1
 } {1}
 
-do_execsql_test select-2 {
+do_execsql_test select-const-2 {
   SELECT 2
 } {2}
+
+do_execsql_test select-avg {
+  SELECT avg(age) FROM users;
+} {50.4649}
+
+do_execsql_test select-sum {
+  SELECT sum(age) FROM users;
+} {504649}
 
 do_execsql_test select-limit {
   SELECT id FROM users LIMIT 1;
