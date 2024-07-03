@@ -38,7 +38,7 @@ impl ColumnInfo {
     }
 
     pub fn is_aggregation_function(&self) -> bool {
-        return self.func.is_some();
+        self.func.is_some()
     }
 }
 
@@ -186,8 +186,8 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
                 register_start,
                 register_end,
             });
-            let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
-            limit_decr_insn
+            
+            limit_reg.map(|_| program.emit_placeholder())
         }
         _ => todo!(),
     };
@@ -266,9 +266,9 @@ fn translate_column(
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
             if info.is_aggregation_function() {
                 let _ =
-                    translate_aggregation(program, cursor_id, table, &expr, info, target_register);
+                    translate_aggregation(program, cursor_id, table, expr, info, target_register);
             } else {
-                let _ = translate_expr(program, cursor_id, table, &expr, target_register);
+                let _ = translate_expr(program, cursor_id, table, expr, target_register);
             }
         }
         sqlite3_parser::ast::ResultColumn::Star => {
@@ -441,7 +441,7 @@ fn translate_aggregation(
             }
             let expr = &args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, cursor_id, table, &expr, expr_reg);
+            let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -460,7 +460,7 @@ fn translate_aggregation(
             }
             let expr = &args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, cursor_id, table, &expr, expr_reg);
+            let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -549,7 +549,7 @@ fn update_pragma(name: &String, value: i64, header: Rc<RefCell<DatabaseHeader>>,
             // update in-memory header
             header.borrow_mut().default_cache_size = cache_size_unformatted
                 .try_into()
-                .expect(&format!("invalid value, too big for a i32 {}", value));
+                .unwrap_or_else(|_| panic!("invalid value, too big for a i32 {}", value));
 
             // update in disk
             let header_copy = header.borrow().clone();
