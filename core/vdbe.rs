@@ -122,7 +122,6 @@ impl AggFunc {
         match self {
             AggFunc::Avg => "avg",
             AggFunc::Sum => "sum",
-            _ => "unknown",
         }
     }
 }

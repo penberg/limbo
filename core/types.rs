@@ -129,7 +129,6 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Agg(a) => match a.as_ref() {
             AggContext::Avg(acc, _count) => to_value(acc), // we assume aggfinal was called
             AggContext::Sum(acc) => to_value(acc),
-            _ => todo!(),
         },
     }
 }
