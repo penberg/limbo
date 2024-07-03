@@ -8,6 +8,8 @@ use sqlite3_parser::{
 };
 use std::collections::HashMap;
 
+use crate::util::normalize_ident;
+
 pub struct Schema {
     pub tables: HashMap<String, Table>,
 }
@@ -138,14 +140,6 @@ fn create_table(tbl_name: QualifiedName, body: CreateTableBody, root_page: usize
         name: table_name,
         columns: cols,
     })
-}
-
-fn normalize_ident(ident: &str) -> String {
-    if ident.starts_with('"') && ident.ends_with('"') {
-        ident[1..ident.len() - 1].to_string().to_lowercase()
-    } else {
-        ident.to_lowercase()
-    }
 }
 
 pub struct Column {
