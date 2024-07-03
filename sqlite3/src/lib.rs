@@ -1,3 +1,4 @@
+#![allow(clippy::missing_safety_doc)]
 #![allow(non_camel_case_types)]
 
 use std::cell::RefCell;
