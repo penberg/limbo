@@ -145,7 +145,6 @@ fn translate_select(select: Select) -> Result<Program> {
             let (register_start, register_end) =
                 translate_columns(&mut program, Some(cursor_id), &select);
             let limit_decr_insn = if select.exist_aggregation {
-                // Only one ResultRow will occurr with aggregations.
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
@@ -176,7 +175,7 @@ fn translate_select(select: Select) -> Result<Program> {
                     register_start,
                     register_end,
                 });
-                None
+                limit_reg.map(|_| program.emit_placeholder())
             } else {
                 program.emit_insn(Insn::ResultRow {
                     register_start,
