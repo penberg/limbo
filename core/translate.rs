@@ -337,10 +337,10 @@ fn analyze_columns(
     column_information_list
 }
 
-/*
-  Walk column expression trying to find aggregation functions. If it finds one it will save information
-  about it.
-*/
+/// Analyze a column expression.
+/// 
+/// The function walks a column expression trying to find aggregation functions.
+/// If it finds one it will save information about it.
 fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &mut ColumnInfo) {
     match column {
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => match expr {
