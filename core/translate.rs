@@ -142,20 +142,10 @@ fn translate_select(select: Select) -> Result<Program> {
                 });
                 let mut target = register_start;
                 for info in &select.column_info {
-                    if info.is_aggregation_function() {
-                        let func = match info.func.as_ref().unwrap() {
-                            AggFunc::Avg => AggFunc::Avg,
-                            AggFunc::Count => todo!(),
-                            AggFunc::GroupConcat => todo!(),
-                            AggFunc::Max => todo!(),
-                            AggFunc::Min => todo!(),
-                            AggFunc::StringAgg => todo!(),
-                            AggFunc::Sum => AggFunc::Sum,
-                            AggFunc::Total => todo!(),
-                        };
+                    if let Some(func) = &info.func {
                         program.emit_insn(Insn::AggFinal {
                             register: target,
-                            func,
+                            func: func.clone(),
                         });
                     }
                     target += info.columns_to_allocate;
