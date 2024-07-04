@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::function::AggFunc;
 use crate::pager::Pager;
 use crate::schema::{Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
-use crate::vdbe::{AggFunc, Insn, Program, ProgramBuilder};
+use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast;
 
@@ -17,19 +18,8 @@ struct Select<'a> {
     exist_aggregation: bool,
 }
 
-enum AggregationFunc {
-    Avg,
-    Count,
-    GroupConcat,
-    Max,
-    Min,
-    StringAgg,
-    Sum,
-    Total,
-}
-
 struct ColumnInfo {
-    func: Option<AggregationFunc>,
+    func: Option<AggFunc>,
     args: Option<Vec<ast::Expr>>,
     columns_to_allocate: usize, /* number of result columns this col will result on */
 }
@@ -154,14 +144,14 @@ fn translate_select(select: Select) -> Result<Program> {
                 for info in &select.column_info {
                     if info.is_aggregation_function() {
                         let func = match info.func.as_ref().unwrap() {
-                            AggregationFunc::Avg => AggFunc::Avg,
-                            AggregationFunc::Count => todo!(),
-                            AggregationFunc::GroupConcat => todo!(),
-                            AggregationFunc::Max => todo!(),
-                            AggregationFunc::Min => todo!(),
-                            AggregationFunc::StringAgg => todo!(),
-                            AggregationFunc::Sum => AggFunc::Sum,
-                            AggregationFunc::Total => todo!(),
+                            AggFunc::Avg => AggFunc::Avg,
+                            AggFunc::Count => todo!(),
+                            AggFunc::GroupConcat => todo!(),
+                            AggFunc::Max => todo!(),
+                            AggFunc::Min => todo!(),
+                            AggFunc::StringAgg => todo!(),
+                            AggFunc::Sum => AggFunc::Sum,
+                            AggFunc::Total => todo!(),
                         };
                         program.emit_insn(Insn::AggFinal {
                             register: target,
@@ -338,14 +328,14 @@ fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &
                 filter_over: _,
             } => {
                 let func_type = match normalize_ident(name.0.as_str()).as_str() {
-                    "avg" => Some(AggregationFunc::Avg),
-                    "count" => Some(AggregationFunc::Count),
-                    "group_concat" => Some(AggregationFunc::GroupConcat),
-                    "max" => Some(AggregationFunc::Max),
-                    "min" => Some(AggregationFunc::Min),
-                    "string_agg" => Some(AggregationFunc::StringAgg),
-                    "sum" => Some(AggregationFunc::Sum),
-                    "total" => Some(AggregationFunc::Total),
+                    "avg" => Some(AggFunc::Avg),
+                    "count" => Some(AggFunc::Count),
+                    "group_concat" => Some(AggFunc::GroupConcat),
+                    "max" => Some(AggFunc::Max),
+                    "min" => Some(AggFunc::Min),
+                    "string_agg" => Some(AggFunc::StringAgg),
+                    "sum" => Some(AggFunc::Sum),
+                    "total" => Some(AggFunc::Total),
                     _ => None,
                 };
                 if func_type.is_none() {
@@ -448,7 +438,7 @@ fn translate_aggregation(
     let func = info.func.as_ref().unwrap();
     let args = info.args.as_ref().unwrap();
     let dest = match func {
-        AggregationFunc::Avg => {
+        AggFunc::Avg => {
             if args.len() != 1 {
                 anyhow::bail!("Parse error: avg bad number of arguments");
             }
@@ -458,16 +448,16 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
-                func: crate::vdbe::AggFunc::Avg,
+                func: AggFunc::Avg,
             });
             target_register
         }
-        AggregationFunc::Count => todo!(),
-        AggregationFunc::GroupConcat => todo!(),
-        AggregationFunc::Max => todo!(),
-        AggregationFunc::Min => todo!(),
-        AggregationFunc::StringAgg => todo!(),
-        AggregationFunc::Sum => {
+        AggFunc::Count => todo!(),
+        AggFunc::GroupConcat => todo!(),
+        AggFunc::Max => todo!(),
+        AggFunc::Min => todo!(),
+        AggFunc::StringAgg => todo!(),
+        AggFunc::Sum => {
             if args.len() != 1 {
                 anyhow::bail!("Parse error: sum bad number of arguments");
             }
@@ -477,11 +467,11 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
-                func: crate::vdbe::AggFunc::Sum,
+                func: AggFunc::Sum,
             });
             target_register
         }
-        AggregationFunc::Total => todo!(),
+        AggFunc::Total => todo!(),
     };
     Ok(dest)
 }

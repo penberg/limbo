@@ -1,4 +1,5 @@
 use crate::btree::BTreeCursor;
+use crate::function::AggFunc;
 use crate::pager::Pager;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedValue, Record};
 
@@ -110,20 +111,6 @@ pub enum Insn {
         register: usize,
         func: AggFunc,
     },
-}
-
-pub enum AggFunc {
-    Avg,
-    Sum,
-}
-
-impl AggFunc {
-    fn to_string(&self) -> &str {
-        match self {
-            AggFunc::Avg => "avg",
-            AggFunc::Sum => "sum",
-        }
-    }
 }
 
 pub struct ProgramBuilder {
@@ -376,6 +363,9 @@ impl Program {
                             AggFunc::Sum => {
                                 OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
                             }
+                            _ => {
+                                todo!();
+                            }
                         };
                     }
                     match func {
@@ -402,6 +392,9 @@ impl Program {
                             };
                             *acc += col;
                         }
+                        _ => {
+                            todo!();
+                        }
                     };
                     state.pc += 1;
                 }
@@ -418,6 +411,9 @@ impl Program {
                             *acc /= count.clone();
                         }
                         AggFunc::Sum => {}
+                        _ => {
+                            todo!();
+                        }
                     };
                     state.pc += 1;
                 }
