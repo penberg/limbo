@@ -83,6 +83,12 @@ pub enum Insn {
         dest: usize,
     },
 
+    // Write a float value into a register
+    Real {
+        value: f64,
+        dest: usize,
+    },
+
     // Write a string value into a register.
     String8 {
         value: String,
@@ -328,6 +334,10 @@ impl Program {
                     state.registers[*dest] = OwnedValue::Integer(*value);
                     state.pc += 1;
                 }
+                Insn::Real { value, dest } => {
+                    state.registers[*dest] = OwnedValue::Float(*value);
+                    state.pc += 1;
+                }
                 Insn::String8 { value, dest } => {
                     state.registers[*dest] = OwnedValue::Text(Rc::new(value.into()));
                     state.pc += 1;
@@ -449,6 +459,7 @@ fn print_insn(addr: usize, insn: &Insn) {
 enum IntValue {
     Int(i64),
     Usize(usize),
+    Float(f64),
 }
 
 impl fmt::Display for IntValue {
@@ -456,6 +467,7 @@ impl fmt::Display for IntValue {
         match self {
             IntValue::Int(i) => f.pad(i.to_string().as_str()),
             IntValue::Usize(i) => f.pad(i.to_string().as_str()),
+            IntValue::Float(float_val) => write!(f, "{}", float_val),
         }
     }
 }
@@ -598,6 +610,15 @@ fn insn_to_str(addr: usize, insn: &Insn) -> String {
             "Integer",
             IntValue::Usize(*dest),
             IntValue::Int(*value),
+            IntValue::Usize(0),
+            "",
+            IntValue::Usize(0),
+            "".to_string(),
+        ),
+        Insn::Real { value, dest } => (
+            "Real",
+            IntValue::Usize(*dest),
+            IntValue::Float(*value),
             IntValue::Usize(0),
             "",
             IntValue::Usize(0),

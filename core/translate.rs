@@ -384,10 +384,19 @@ fn translate_expr(
         ast::Expr::Like { .. } => todo!(),
         ast::Expr::Literal(lit) => match lit {
             ast::Literal::Numeric(val) => {
-                program.emit_insn(Insn::Integer {
-                    value: val.parse().unwrap(),
-                    dest: target_register,
-                });
+                let maybe_int = val.parse::<i64>();
+                if maybe_int.is_ok() {
+                    program.emit_insn(Insn::Integer {
+                        value: maybe_int.unwrap(),
+                        dest: target_register,
+                    });
+                } else {
+                    // must be a float
+                    program.emit_insn(Insn::Real {
+                        value: val.parse().unwrap(),
+                        dest: target_register,
+                    });
+                }
                 target_register
             }
             ast::Literal::String(s) => {
