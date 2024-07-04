@@ -14,6 +14,7 @@ struct Select<'a> {
     column_info: Vec<ColumnInfo>,
     from: Option<&'a Table>,
     limit: Option<ast::Limit>,
+    exist_aggregation: bool,
 }
 
 enum AggregationFunc {
@@ -57,7 +58,7 @@ pub fn translate(
     match stmt {
         ast::Stmt::Select(select) => {
             let select = build_select(schema, select)?;
-            translate_select(schema, select)
+            translate_select(select)
         }
         ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
         _ => todo!(),
@@ -84,11 +85,13 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
             let column_info = analyze_columns(&columns, Some(&table));
+            let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
             Ok(Select {
                 columns,
                 column_info,
                 from: Some(&table),
                 limit: select.limit.clone(),
+                exist_aggregation,
             })
         }
         ast::OneSelect::Select {
@@ -97,11 +100,13 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             ..
         } => {
             let column_info = analyze_columns(&columns, None);
+            let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
             Ok(Select {
                 columns,
                 column_info,
                 from: None,
                 limit: select.limit.clone(),
+                exist_aggregation,
             })
         }
         _ => todo!(),
@@ -109,11 +114,11 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
 }
 
 /// Generate code for a SELECT statement.
-fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
+fn translate_select(select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_offset = program.emit_placeholder();
     let start_offset = program.offset();
-    let limit_reg = if let Some(limit) = select.limit {
+    let limit_reg = if let Some(limit) = &select.limit {
         assert!(limit.offset.is_none());
         let target_register = program.alloc_register();
         Some(translate_expr(
@@ -137,16 +142,9 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             program.emit_insn(Insn::OpenReadAwait);
             program.emit_insn(Insn::RewindAsync { cursor_id });
             let rewind_await_offset = program.emit_placeholder();
-            let exist_aggregation = select.column_info.iter().any(|info| info.func.is_some());
-            let (register_start, register_end) = translate_columns(
-                &mut program,
-                Some(cursor_id),
-                Some(table),
-                &select.columns,
-                &select.column_info,
-                exist_aggregation,
-            );
-            let limit_decr_insn = if exist_aggregation {
+            let (register_start, register_end) =
+                translate_columns(&mut program, Some(cursor_id), &select);
+            let limit_decr_insn = if select.exist_aggregation {
                 // Only one ResultRow will occurr with aggregations.
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
@@ -202,16 +200,8 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
             limit_decr_insn
         }
         None => {
-            let exist_aggregation = select.column_info.iter().any(|info| info.func.is_some());
-            assert!(!exist_aggregation);
-            let (register_start, register_end) = translate_columns(
-                &mut program,
-                None,
-                None,
-                &select.columns,
-                &select.column_info,
-                exist_aggregation,
-            );
+            assert!(!select.exist_aggregation);
+            let (register_start, register_end) = translate_columns(&mut program, None, &select);
             program.emit_insn(Insn::ResultRow {
                 register_start,
                 register_end,
@@ -245,15 +235,13 @@ fn translate_select(schema: &Schema, select: Select) -> Result<Program> {
 fn translate_columns(
     program: &mut ProgramBuilder,
     cursor_id: Option<usize>,
-    table: Option<&crate::schema::Table>,
-    columns: &Vec<sqlite3_parser::ast::ResultColumn>,
-    info_per_columns: &Vec<ColumnInfo>,
-    exist_aggregation: bool,
+    select: &Select,
 ) -> (usize, usize) {
     let register_start = program.next_free_register();
 
     // allocate one register as output for each col
-    let registers: usize = info_per_columns
+    let registers: usize = select
+        .column_info
         .iter()
         .map(|col| col.columns_to_allocate)
         .sum();
@@ -261,14 +249,14 @@ fn translate_columns(
     let register_end = program.next_free_register();
 
     let mut target = register_start;
-    for (col, info) in columns.iter().zip(info_per_columns) {
+    for (col, info) in select.columns.iter().zip(select.column_info.iter()) {
         translate_column(
             program,
             cursor_id,
-            table,
+            select.from,
             col,
             info,
-            exist_aggregation,
+            select.exist_aggregation,
             target,
         );
         target += info.columns_to_allocate;
@@ -338,7 +326,7 @@ fn analyze_columns(
 }
 
 /// Analyze a column expression.
-/// 
+///
 /// The function walks a column expression trying to find aggregation functions.
 /// If it finds one it will save information about it.
 fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &mut ColumnInfo) {
