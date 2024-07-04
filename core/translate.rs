@@ -229,15 +229,7 @@ fn translate_columns(
 
     let mut target = register_start;
     for (col, info) in select.columns.iter().zip(select.column_info.iter()) {
-        translate_column(
-            program,
-            cursor_id,
-            select.from,
-            col,
-            info,
-            select.exist_aggregation,
-            target,
-        );
+        translate_column(program, cursor_id, select.from, col, info, target);
         target += info.columns_to_allocate;
     }
     (register_start, register_end)
@@ -249,14 +241,8 @@ fn translate_column(
     table: Option<&crate::schema::Table>,
     col: &sqlite3_parser::ast::ResultColumn,
     info: &ColumnInfo,
-    exist_aggregation: bool, // notify this column there is aggregation going on in other columns (or this one)
     target_register: usize, // where to store the result, in case of star it will be the start of registers added
 ) {
-    if exist_aggregation && !info.is_aggregation_function() {
-        // FIXME: let's do nothing
-        return;
-    }
-
     match col {
         sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
             if info.is_aggregation_function() {
