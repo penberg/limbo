@@ -50,8 +50,8 @@ pub enum Insn {
 
     // Emit a row of results.
     ResultRow {
-        register_start: usize,
-        register_end: usize,
+        start_reg: usize, // P1
+        count: usize,     // P2
     },
 
     // Advance the cursor to the next row.
@@ -289,11 +289,8 @@ impl Program {
                     }
                     state.pc += 1;
                 }
-                Insn::ResultRow {
-                    register_start,
-                    register_end,
-                } => {
-                    let record = make_record(&state.registers, register_end, register_start);
+                Insn::ResultRow { start_reg, count } => {
+                    let record = make_record(&state.registers, start_reg, count);
                     state.pc += 1;
                     return Ok(StepResult::Row(record));
                 }
@@ -431,13 +428,9 @@ impl Program {
     }
 }
 
-fn make_record<'a>(
-    registers: &'a [OwnedValue],
-    register_end: &usize,
-    register_start: &usize,
-) -> Record<'a> {
-    let mut values = Vec::with_capacity(*register_end - *register_start);
-    for i in *register_start..*register_end {
+fn make_record<'a>(registers: &'a [OwnedValue], start_reg: &usize, count: &usize) -> Record<'a> {
+    let mut values = Vec::with_capacity(*count);
+    for i in *start_reg..*start_reg + count {
         values.push(crate::types::to_value(&registers[i]));
     }
     Record::new(values)
@@ -522,17 +515,14 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
                 0,
                 format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
             ),
-            Insn::ResultRow {
-                register_start,
-                register_end,
-            } => (
+            Insn::ResultRow { start_reg, count } => (
                 "ResultRow",
-                *register_start as i32,
-                *register_end as i32,
+                *start_reg as i32,
+                *count as i32,
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("output=r[{}..{}]", register_start, register_end),
+                format!("output=r[{}..{}]", start_reg, start_reg + count),
             ),
             Insn::NextAsync { cursor_id } => (
                 "NextAsync",

@@ -152,14 +152,14 @@ fn translate_select(select: Select) -> Result<Program> {
                 }
                 // only one result row
                 program.emit_insn(Insn::ResultRow {
-                    register_start,
-                    register_end,
+                    start_reg: register_start,
+                    count: register_end - register_start,
                 });
                 limit_reg.map(|_| program.emit_placeholder())
             } else {
                 program.emit_insn(Insn::ResultRow {
-                    register_start,
-                    register_end,
+                    start_reg: register_start,
+                    count: register_end - register_start,
                 });
                 let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
                 program.emit_insn(Insn::NextAsync { cursor_id });
@@ -182,8 +182,8 @@ fn translate_select(select: Select) -> Result<Program> {
             assert!(!select.exist_aggregation);
             let (register_start, register_end) = translate_columns(&mut program, None, &select);
             program.emit_insn(Insn::ResultRow {
-                register_start,
-                register_end,
+                start_reg: register_start,
+                count: register_end - register_start,
             });
             limit_reg.map(|_| program.emit_placeholder())
         }
@@ -481,8 +481,8 @@ fn translate_pragma(
 
             let pragma_result_end = program.next_free_register();
             program.emit_insn(Insn::ResultRow {
-                register_start: pragma_result,
-                register_end: pragma_result_end,
+                start_reg: pragma_result,
+                count: pragma_result_end - pragma_result,
             });
         }
         Some(ast::PragmaBody::Equals(value)) => {
