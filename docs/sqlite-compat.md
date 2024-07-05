@@ -118,7 +118,7 @@ This document describes the SQLite compatibility status of Limbo:
 
 | Function                     | Status  | Comment |
 |------------------------------|---------|---------|
-| avg(X)                       | No      |         |
+| avg(X)                       | Yes     |         |
 | count()                      | No      |         |
 | count(*)                     | No      |         |
 | group_concat(X)              | No      |         |
@@ -126,7 +126,7 @@ This document describes the SQLite compatibility status of Limbo:
 | string_agg(X,Y)              | No      |         |
 | max(X)                       | No      |         |
 | min(X)                       | No      |         |
-| sum(X)                       | No      |         |
+| sum(X)                       | Yes     |         |
 | total(X)                     | No      |         |
 
 
