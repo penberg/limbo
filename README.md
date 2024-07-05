@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="limbo.png" alt="Limbo" width="1000"/>
+  <img src="limbo.png" alt="Limbo" width="200"/>
   <h1 align="center">Limbo</h1>
 </p>
 
