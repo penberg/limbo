@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::{cell::Ref, rc::Rc};
 
 use anyhow::Result;
@@ -11,6 +12,18 @@ pub enum Value<'a> {
     Blob(&'a Vec<u8>),
 }
 
+impl<'a> Display for Value<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Null => write!(f, "NULL"),
+            Value::Integer(i) => write!(f, "{}", i),
+            Value::Float(fl) => write!(f, "{}", fl),
+            Value::Text(s) => write!(f, "{}", s),
+            Value::Blob(b) => write!(f, "{:?}", b),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum OwnedValue {
     Null,
@@ -19,6 +32,22 @@ pub enum OwnedValue {
     Text(Rc<String>),
     Blob(Rc<Vec<u8>>),
     Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
+}
+
+impl Display for OwnedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OwnedValue::Null => write!(f, "NULL"),
+            OwnedValue::Integer(i) => write!(f, "{}", i),
+            OwnedValue::Float(fl) => write!(f, "{}", fl),
+            OwnedValue::Text(s) => write!(f, "{}", s),
+            OwnedValue::Blob(b) => write!(f, "{:?}", b),
+            OwnedValue::Agg(a) => match a.as_ref() {
+                AggContext::Avg(acc, _count) => write!(f, "{}", acc),
+                AggContext::Sum(acc) => write!(f, "{}", acc),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

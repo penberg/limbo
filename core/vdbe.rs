@@ -4,7 +4,6 @@ use crate::pager::Pager;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedValue, Record};
 
 use anyhow::Result;
-use core::fmt;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -190,8 +189,8 @@ pub enum StepResult<'a> {
 
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
-    pub pc: usize,
-    cursors: RefCell<BTreeMap<usize, Box<dyn Cursor>>>,
+    pub pc: BranchOffset,
+    cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
 }
 
@@ -226,7 +225,7 @@ impl Program {
         println!("addr  opcode         p1    p2    p3    p4             p5  comment");
         println!("----  -------------  ----  ----  ----  -------------  --  -------");
         for (addr, insn) in self.insns.iter().enumerate() {
-            print_insn(addr, insn);
+            print_insn(addr.try_into().unwrap(), insn);
         }
     }
 
@@ -236,7 +235,7 @@ impl Program {
         pager: Rc<Pager>,
     ) -> Result<StepResult<'a>> {
         loop {
-            let insn = &self.insns[state.pc];
+            let insn = &self.insns[state.pc as usize];
             trace_insn(state.pc, insn);
             let mut cursors = state.cursors.borrow_mut();
             match insn {
@@ -247,7 +246,7 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
+                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page as usize));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
@@ -444,232 +443,209 @@ fn make_record<'a>(
     Record::new(values)
 }
 
-fn trace_insn(addr: usize, insn: &Insn) {
+fn trace_insn(addr: BranchOffset, insn: &Insn) {
     if !log::log_enabled!(log::Level::Trace) {
         return;
     }
     log::trace!("{}", insn_to_str(addr, insn));
 }
 
-fn print_insn(addr: usize, insn: &Insn) {
+fn print_insn(addr: BranchOffset, insn: &Insn) {
     let s = insn_to_str(addr, insn);
     println!("{}", s);
 }
 
-enum IntValue {
-    Int(i64),
-    Usize(usize),
-    Float(f64),
-}
-
-impl fmt::Display for IntValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            IntValue::Int(i) => f.pad(i.to_string().as_str()),
-            IntValue::Usize(i) => f.pad(i.to_string().as_str()),
-            IntValue::Float(float_val) => write!(f, "{}", float_val),
-        }
-    }
-}
-
-fn insn_to_str(addr: usize, insn: &Insn) -> String {
-    let (opcode, p1, p2, p3, p4, p5, comment): (
-        &str,
-        IntValue,
-        IntValue,
-        IntValue,
-        &str,
-        IntValue,
-        String,
-    ) = match insn {
-        Insn::Init { target_pc } => (
-            "Init",
-            IntValue::Usize(0),
-            IntValue::Usize(*target_pc),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            format!("Start at {}", target_pc),
-        ),
-        Insn::OpenReadAsync {
-            cursor_id,
-            root_page,
-        } => (
-            "OpenReadAsync",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(*root_page),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            format!("root={}", root_page),
-        ),
-        Insn::OpenReadAwait => (
-            "OpenReadAwait",
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::RewindAsync { cursor_id } => (
-            "RewindAsync",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::RewindAwait {
-            cursor_id,
-            pc_if_empty,
-        } => (
-            "RewindAwait",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(*pc_if_empty),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::Column {
-            cursor_id,
-            column,
-            dest,
-        } => (
-            "Column",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(*column),
-            IntValue::Usize(*dest),
-            "",
-            IntValue::Usize(0),
-            format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
-        ),
-        Insn::ResultRow {
-            register_start,
-            register_end,
-        } => (
-            "ResultRow",
-            IntValue::Usize(*register_start),
-            IntValue::Usize(*register_end),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            format!("output=r[{}..{}]", register_start, register_end),
-        ),
-        Insn::NextAsync { cursor_id } => (
-            "NextAsync",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::NextAwait {
-            cursor_id,
-            pc_if_next,
-        } => (
-            "NextAwait",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(*pc_if_next),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::Halt => (
-            "Halt",
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::Transaction => (
-            "Transaction",
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::Goto { target_pc } => (
-            "Goto",
-            IntValue::Usize(0),
-            IntValue::Usize(*target_pc),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::Integer { value, dest } => (
-            "Integer",
-            IntValue::Usize(*dest),
-            IntValue::Int(*value),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::Real { value, dest } => (
-            "Real",
-            IntValue::Usize(*dest),
-            IntValue::Float(*value),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::String8 { value, dest } => (
-            "String8",
-            IntValue::Usize(*dest),
-            IntValue::Usize(0),
-            IntValue::Usize(0),
-            value.as_str(),
-            IntValue::Usize(0),
-            format!("r[{}]= '{}'", dest, value),
-        ),
-        Insn::RowId { cursor_id, dest } => (
-            "RowId",
-            IntValue::Usize(*cursor_id),
-            IntValue::Usize(*dest),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::DecrJumpZero { reg, target_pc } => (
-            "DecrJumpZero",
-            IntValue::Usize(*reg),
-            IntValue::Usize(*target_pc),
-            IntValue::Usize(0),
-            "",
-            IntValue::Usize(0),
-            "".to_string(),
-        ),
-        Insn::AggStep { func, acc_reg, col } => (
-            "AggStep",
-            IntValue::Usize(0),
-            IntValue::Usize(*col),
-            IntValue::Usize(*acc_reg),
-            func.to_string(),
-            IntValue::Usize(0),
-            format!("accum=r[{}] step({})", *acc_reg, *col),
-        ),
-        Insn::AggFinal { register, func } => (
-            "AggFinal",
-            IntValue::Usize(0),
-            IntValue::Usize(*register),
-            IntValue::Usize(0),
-            func.to_string(),
-            IntValue::Usize(0),
-            format!("accum=r[{}]", *register),
-        ),
-    };
+fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
+    let (opcode, p1, p2, p3, p4, p5, comment): (&str, i32, i32, i32, OwnedValue, u16, String) =
+        match insn {
+            Insn::Init { target_pc } => (
+                "Init",
+                0,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("Start at {}", target_pc),
+            ),
+            Insn::OpenReadAsync {
+                cursor_id,
+                root_page,
+            } => (
+                "OpenReadAsync",
+                *cursor_id as i32,
+                *root_page as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("root={}", root_page),
+            ),
+            Insn::OpenReadAwait => (
+                "OpenReadAwait",
+                0,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::RewindAsync { cursor_id } => (
+                "RewindAsync",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::RewindAwait {
+                cursor_id,
+                pc_if_empty,
+            } => (
+                "RewindAwait",
+                *cursor_id as i32,
+                *pc_if_empty as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Column {
+                cursor_id,
+                column,
+                dest,
+            } => (
+                "Column",
+                *cursor_id as i32,
+                *column as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
+            ),
+            Insn::ResultRow {
+                register_start,
+                register_end,
+            } => (
+                "ResultRow",
+                *register_start as i32,
+                *register_end as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("output=r[{}..{}]", register_start, register_end),
+            ),
+            Insn::NextAsync { cursor_id } => (
+                "NextAsync",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::NextAwait {
+                cursor_id,
+                pc_if_next,
+            } => (
+                "NextAwait",
+                *cursor_id as i32,
+                *pc_if_next as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Halt => (
+                "Halt",
+                0,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Transaction => (
+                "Transaction",
+                0,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Goto { target_pc } => (
+                "Goto",
+                0,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Integer { value, dest } => (
+                "Integer",
+                *dest as i32,
+                *value as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Real { value, dest } => (
+                "Real",
+                *dest as i32,
+                *value as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::String8 { value, dest } => (
+                "String8",
+                *dest as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new(value.clone())),
+                0,
+                format!("r[{}]= '{}'", dest, value),
+            ),
+            Insn::RowId { cursor_id, dest } => (
+                "RowId",
+                *cursor_id as i32,
+                *dest as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::DecrJumpZero { reg, target_pc } => (
+                "DecrJumpZero",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::AggStep { func, acc_reg, col } => (
+                "AggStep",
+                0,
+                *col as i32,
+                *acc_reg as i32,
+                OwnedValue::Text(Rc::new(func.to_string().into())),
+                0,
+                format!("accum=r[{}] step({})", *acc_reg, *col),
+            ),
+            Insn::AggFinal { register, func } => (
+                "AggFinal",
+                0,
+                *register as i32,
+                0,
+                OwnedValue::Text(Rc::new(func.to_string().into())),
+                0,
+                format!("accum=r[{}]", *register),
+            ),
+        };
     format!(
         "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
         addr, opcode, p1, p2, p3, p4, p5, comment
