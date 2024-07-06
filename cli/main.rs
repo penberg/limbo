@@ -84,20 +84,10 @@ fn handle_dot_command(
     }
 
     match args[0] {
-        ".schema" => match args.get(1) {
-            Some(table_name) => match display_schema(io, conn, Some(table_name)) {
-                Ok(found) => {
-                    if !found {
-                        println!("Error: Table '{}' not found.", table_name);
-                    }
-                }
-                Err(e) => println!("Error: {}", e),
-            },
-            None => {
-                println!("Error: .schema command requires a table name.");
-                println!("Usage: .schema <table_name>");
-            }
-        },
+        ".schema" => {
+            let table_name = args.get(1).map(|s| *s);
+            display_schema(io, conn, table_name)?;
+        }
         _ => {
             println!("Unknown command: {}", args[0]);
             println!("Available commands:");
@@ -112,16 +102,21 @@ fn display_schema(
     io: Rc<dyn limbo_core::IO>,
     conn: &limbo_core::Connection,
     table: Option<&str>,
-) -> anyhow::Result<bool> {
-    if let Some(table_name) = table {
-        let sql = format!(
+) -> anyhow::Result<()> {
+    let sql = match table {
+        Some(table_name) => format!(
             "SELECT sql FROM sqlite_schema WHERE type='table' AND name = '{}' AND name NOT LIKE 'sqlite_%'",
             table_name
-        );
+        ),
+        None => String::from(
+            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        ),
+    };
 
-        let mut found = false;
-        match conn.query(&sql) {
-            Ok(Some(ref mut rows)) => loop {
+    match conn.query(&sql) {
+        Ok(Some(ref mut rows)) => {
+            let mut found = false;
+            loop {
                 match rows.next()? {
                     RowResult::Row(row) => {
                         if let Some(Value::Text(schema)) = row.values.get(0) {
@@ -134,24 +129,30 @@ fn display_schema(
                     }
                     RowResult::Done => break,
                 }
-            },
-            Ok(None) => {
-                println!("Error: Table '{}' not found.", table_name);
             }
-            Err(err) => {
-                if err.to_string().contains("no such table: sqlite_schema") {
-                    return Err(anyhow::anyhow!("Unable to access database schema. The database may be using an older SQLite version or may not be properly initialized."));
+            if !found {
+                if let Some(table_name) = table {
+                    println!("Error: Table '{}' not found.", table_name);
                 } else {
-                    return Err(anyhow::anyhow!("Error querying schema: {}", err));
+                    println!("No tables or indexes found in the database.");
                 }
             }
         }
-
-        Ok(found)
-    } else {
-        Ok(false) // This case should not occur due to the check in handle_dot_command
+        Ok(None) => {
+            println!("No results returned from the query.");
+        }
+        Err(err) => {
+            if err.to_string().contains("no such table: sqlite_schema") {
+                return Err(anyhow::anyhow!("Unable to access database schema. The database may be using an older SQLite version or may not be properly initialized."));
+            } else {
+                return Err(anyhow::anyhow!("Error querying schema: {}", err));
+            }
+        }
     }
+
+    Ok(())
 }
+
 fn query(
     io: Rc<dyn limbo_core::IO>,
     conn: &limbo_core::Connection,
