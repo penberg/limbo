@@ -1,6 +1,9 @@
+mod opcodes_dictionary;
+
 use clap::{Parser, ValueEnum};
 use cli_table::{Cell, Table};
 use limbo_core::{Database, RowResult, Value};
+use opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::{path::PathBuf, rc::Rc};
 
@@ -87,6 +90,19 @@ fn handle_dot_command(
         ".schema" => {
             let table_name = args.get(1).map(|s| *s);
             display_schema(io, conn, table_name)?;
+        }
+        ".opcodes" => {
+            if args.len() > 1 {
+                for op in &OPCODE_DESCRIPTIONS {
+                    if op.name.eq_ignore_ascii_case(args.get(1).unwrap()) {
+                        println!("{}", op);
+                    }
+                }
+            } else {
+                for op in &OPCODE_DESCRIPTIONS {
+                    println!("{}\n", op);
+                }
+            }
         }
         _ => {
             println!("Unknown command: {}", args[0]);
