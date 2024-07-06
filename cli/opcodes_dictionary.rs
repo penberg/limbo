@@ -1,3 +1,6 @@
+// This source code is derived from SQLite project, which is in public domain:
+//
+/// https://www.sqlite.org/copyright.html
 use std::fmt::Display;
 
 pub struct OpCodeDescription {
@@ -11,6 +14,7 @@ impl Display for OpCodeDescription {
     }
 }
 
+// https://www.sqlite.org/opcode.html
 pub const OPCODE_DESCRIPTIONS: [OpCodeDescription; 189] = [
     OpCodeDescription { name: "Abortable", description: "Verify that an Abort can happen. Assert if an Abort at this point might cause database corruption. This opcode only appears in debugging builds. An Abort is safe if either there have been no writes, or if there is an active statement journal." },
     OpCodeDescription { name: "Add", description: "Add the value in register P1 to the value in register P2 and store the result in register P3. If either input is NULL, the result is NULL." },
