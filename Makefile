@@ -6,6 +6,7 @@ limbo:
 .PHONY: limbo
 
 limbo-wasm:
+	rustup target add wasm32-wasi
 	cargo build --package limbo-wasm --target wasm32-wasi
 .PHONY: limbo-wasm
 
