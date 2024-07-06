@@ -122,8 +122,16 @@ fn translate_select(select: Select) -> Result<Program> {
         None
     };
     let cursor_id = program.alloc_cursor_id();
-    let limit_decr_insn = match select.from {
-        Some(table) => {
+    let parsed_limit = select.limit.as_ref().and_then(|limit| {
+        if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &limit.expr {
+            num.parse::<i64>().ok()
+        } else {
+            None
+        }
+    });
+    let limit_insn = match (parsed_limit, select.from) {
+        (Some(0), _) => Some(program.emit_placeholder()),
+        (_, Some(table)) => {
             let root_page = table.root_page;
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
@@ -134,7 +142,7 @@ fn translate_select(select: Select) -> Result<Program> {
             let rewind_await_offset = program.emit_placeholder();
             let (register_start, register_end) =
                 translate_columns(&mut program, Some(cursor_id), &select);
-            let limit_decr_insn = if select.exist_aggregation {
+            let limit_insn = if select.exist_aggregation {
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
@@ -161,13 +169,13 @@ fn translate_select(select: Select) -> Result<Program> {
                     start_reg: register_start,
                     count: register_end - register_start,
                 });
-                let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
+                let limit_insn = limit_reg.map(|_| program.emit_placeholder());
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
                     pc_if_next: rewind_await_offset,
                 });
-                limit_decr_insn
+                limit_insn
             };
             program.fixup_insn(
                 rewind_await_offset,
@@ -176,9 +184,9 @@ fn translate_select(select: Select) -> Result<Program> {
                     pc_if_empty: program.offset(),
                 },
             );
-            limit_decr_insn
+            limit_insn
         }
-        None => {
+        (_, None) => {
             assert!(!select.exist_aggregation);
             let (register_start, register_end) = translate_columns(&mut program, None, &select);
             program.emit_insn(Insn::ResultRow {
@@ -188,16 +196,20 @@ fn translate_select(select: Select) -> Result<Program> {
             limit_reg.map(|_| program.emit_placeholder())
         }
     };
-    if let Some(limit_decr_insn) = limit_decr_insn {
-        program.fixup_insn(
-            limit_decr_insn,
-            Insn::DecrJumpZero {
-                reg: limit_reg.unwrap(),
-                target_pc: program.offset(),
-            },
-        );
-    }
     program.emit_insn(Insn::Halt);
+    let halt_offset = program.offset() - 1;
+    if let Some(limit_insn) = limit_insn {
+        let insn = match parsed_limit {
+            Some(0) => Insn::Goto {
+                target_pc: halt_offset,
+            },
+            _ => Insn::DecrJumpZero {
+                reg: limit_reg.unwrap(),
+                target_pc: halt_offset,
+            },
+        };
+        program.fixup_insn(limit_insn, insn);
+    }
     program.fixup_insn(
         init_offset,
         Insn::Init {
