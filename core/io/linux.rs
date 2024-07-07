@@ -93,7 +93,6 @@ impl File for LinuxFile {
             ring.submission()
                 .push(&write)
                 .expect("submission queue is full");
-            ring.submit()?;
         }
         Ok(())
     }
