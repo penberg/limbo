@@ -3,7 +3,7 @@ use anyhow::Result;
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use log::trace;
-use sqlite3_parser::ast::TableOptions;
+use sqlite3_parser::ast::{Expr, Literal, TableOptions};
 use sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, ResultColumn, Stmt},
     lexer::sql::Parser,
@@ -160,9 +160,31 @@ fn create_table(
     match body {
         CreateTableBody::ColumnsAndConstraints {
             columns,
-            constraints: _,
+            constraints,
             options,
         } => {
+            if let Some(constraints) = constraints {
+                for c in constraints {
+                    match c.constraint {
+                        sqlite3_parser::ast::TableConstraint::PrimaryKey { columns, .. } => {
+                            for column in columns {
+                                primary_key_column_names.push(match column.expr {
+                                    Expr::Id(id) => normalize_ident(&id.0),
+                                    Expr::Literal(Literal::String(value)) => {
+                                        value.trim_matches('\'').to_owned()
+                                    }
+                                    _ => {
+                                        return Err(anyhow::anyhow!(
+                                            "Unsupported primary key expression"
+                                        ))
+                                    }
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             for column in columns {
                 let name = column.col_name.0.to_string();
                 let ty = match column.col_type {
@@ -188,12 +210,17 @@ fn create_table(
                     }
                     None => Type::Null,
                 };
-                let primary_key = column.constraints.iter().any(|c| {
+                let mut primary_key = column.constraints.iter().any(|c| {
                     matches!(
                         c.constraint,
                         sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
                     )
                 });
+                if primary_key {
+                    primary_key_column_names.push(name.clone());
+                } else if primary_key_column_names.contains(&name) {
+                    primary_key = true;
+                }
                 cols.push(Column {
                     name,
                     ty,
