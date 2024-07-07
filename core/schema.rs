@@ -78,7 +78,7 @@ pub struct BTreeTable {
 impl BTreeTable {
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
         let composite_primary_key = self.columns.iter().filter(|col| col.primary_key).count() > 1;
-        col.primary_key && col.ty == Type::Integer && !composite_primary_key
+        col.primary_key && col.ty == Type::Integer && !composite_primary_key && self.has_rowid
     }
 
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
