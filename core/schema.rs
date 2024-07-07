@@ -437,6 +437,113 @@ mod tests {
     }
 
     #[test]
+    pub fn test_primary_key_inline_single() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT, c REAL);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(column.primary_key, "column 'a' should be a primary key");
+        let column = table.get_column("b").unwrap().1;
+        assert!(!column.primary_key, "column 'b' shouldn't be a primary key");
+        let column = table.get_column("c").unwrap().1;
+        assert!(!column.primary_key, "column 'c' shouldn't be a primary key");
+        assert_eq!(
+            vec!["a"],
+            table.primary_key_column_names,
+            "primary key column names should be ['a']"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_primary_key_inline_multiple() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT PRIMARY KEY, c REAL);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(column.primary_key, "column 'a' should be a primary key");
+        let column = table.get_column("b").unwrap().1;
+        assert!(column.primary_key, "column 'b' shouldn be a primary key");
+        let column = table.get_column("c").unwrap().1;
+        assert!(!column.primary_key, "column 'c' shouldn't be a primary key");
+        assert_eq!(
+            vec!["a", "b"],
+            table.primary_key_column_names,
+            "primary key column names should be ['a', 'b']"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_primary_key_separate_single() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, c REAL, PRIMARY KEY(a));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(column.primary_key, "column 'a' should be a primary key");
+        let column = table.get_column("b").unwrap().1;
+        assert!(!column.primary_key, "column 'b' shouldn't be a primary key");
+        let column = table.get_column("c").unwrap().1;
+        assert!(!column.primary_key, "column 'c' shouldn't be a primary key");
+        assert_eq!(
+            vec!["a"],
+            table.primary_key_column_names,
+            "primary key column names should be ['a']"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_primary_key_separate_multiple() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, c REAL, PRIMARY KEY(a, b));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(column.primary_key, "column 'a' should be a primary key");
+        let column = table.get_column("b").unwrap().1;
+        assert!(column.primary_key, "column 'b' shouldn be a primary key");
+        let column = table.get_column("c").unwrap().1;
+        assert!(!column.primary_key, "column 'c' shouldn't be a primary key");
+        assert_eq!(
+            vec!["a", "b"],
+            table.primary_key_column_names,
+            "primary key column names should be ['a', 'b']"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_primary_key_separate_single_quoted() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, c REAL, PRIMARY KEY('a'));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(column.primary_key, "column 'a' should be a primary key");
+        let column = table.get_column("b").unwrap().1;
+        assert!(!column.primary_key, "column 'b' shouldn't be a primary key");
+        let column = table.get_column("c").unwrap().1;
+        assert!(!column.primary_key, "column 'c' shouldn't be a primary key");
+        assert_eq!(
+            vec!["a"],
+            table.primary_key_column_names,
+            "primary key column names should be ['a']"
+        );
+        Ok(())
+    }
+    #[test]
+    pub fn test_primary_key_separate_single_doubly_quoted() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, c REAL, PRIMARY KEY("a"));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(column.primary_key, "column 'a' should be a primary key");
+        let column = table.get_column("b").unwrap().1;
+        assert!(!column.primary_key, "column 'b' shouldn't be a primary key");
+        let column = table.get_column("c").unwrap().1;
+        assert!(!column.primary_key, "column 'c' shouldn't be a primary key");
+        assert_eq!(
+            vec!["a"],
+            table.primary_key_column_names,
+            "primary key column names should be ['a']"
+        );
+        Ok(())
+    }
+
+    #[test]
     pub fn test_sqlite_schema() {
         let expected = r#"CREATE TABLE sqlite_schema (
   type TEXT,
