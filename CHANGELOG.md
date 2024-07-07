@@ -8,4 +8,6 @@
 
 - The `avg()` and `sum()` aggregate functions.
 
+- `PRAGMA cache_size` support.
+
 - Basic `SELECT` statement support.
