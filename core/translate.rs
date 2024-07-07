@@ -266,14 +266,8 @@ fn translate_column(
         }
         sqlite3_parser::ast::ResultColumn::Star => {
             let table = table.unwrap();
-            let composite_primary_key = table
-                .columns
-                .iter()
-                .filter(|col| col.primary_key)
-                .count()
-                > 1;
             for (i, col) in table.columns.iter().enumerate() {
-                if col.primary_key && col.ty == Type::Integer && !composite_primary_key { // rowid alias
+                if table.column_is_rowid_alias(col) {
                     program.emit_insn(Insn::RowId {
                         cursor_id: cursor_id.unwrap(),
                         dest: target_register + i,
