@@ -375,7 +375,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // We don't support separate definition of primary keys yet
     pub fn test_column_is_rowid_alias_single_integer_separate_primary_key_definition() -> Result<()>
     {
         let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, PRIMARY KEY(a));"#;
