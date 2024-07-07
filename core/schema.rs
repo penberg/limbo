@@ -1,15 +1,15 @@
+use crate::util::normalize_ident;
 use anyhow::Result;
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use log::trace;
+use sqlite3_parser::ast::TableOptions;
 use sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, ResultColumn, Stmt},
     lexer::sql::Parser,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
-
-use crate::util::normalize_ident;
 
 pub struct Schema {
     pub tables: HashMap<String, Rc<BTreeTable>>,
@@ -72,12 +72,13 @@ pub struct BTreeTable {
     pub root_page: usize,
     pub name: String,
     pub columns: Vec<Column>,
+    pub has_rowid: bool,
 }
 
 impl BTreeTable {
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
         let composite_primary_key = self.columns.iter().filter(|col| col.primary_key).count() > 1;
-        col.primary_key && col.ty == Type::Integer && !composite_primary_key
+        col.primary_key && col.ty == Type::Integer && !composite_primary_key && self.has_rowid
     }
 
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
@@ -152,9 +153,14 @@ fn create_table(
 ) -> Result<BTreeTable> {
     let table_name = normalize_ident(&tbl_name.name.0);
     trace!("Creating table {}", table_name);
+    let mut has_rowid = true;
     let mut cols = vec![];
     match body {
-        CreateTableBody::ColumnsAndConstraints { columns, .. } => {
+        CreateTableBody::ColumnsAndConstraints {
+            columns,
+            constraints: _,
+            options,
+        } => {
             for column in columns {
                 let name = column.col_name.0.to_string();
                 let ty = match column.col_type {
@@ -192,12 +198,16 @@ fn create_table(
                     primary_key,
                 });
             }
+            if options.contains(TableOptions::WITHOUT_ROWID) {
+                has_rowid = false;
+            }
         }
         CreateTableBody::AsSelect(_) => todo!(),
     };
     Ok(BTreeTable {
         root_page,
         name: table_name,
+        has_rowid,
         columns: cols,
     })
 }
@@ -256,6 +266,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
     BTreeTable {
         root_page: 1,
         name: "sqlite_schema".to_string(),
+        has_rowid: true,
         columns: vec![
             Column {
                 name: "type".to_string(),
@@ -289,6 +300,109 @@ pub fn sqlite_schema_table() -> BTreeTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    pub fn test_has_rowid_true() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        assert!(table.has_rowid, "has_rowid should be set to true");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_has_rowid_false() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID;"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        assert!(!table.has_rowid, "has_rowid should be set to false");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_column_is_rowid_alias_single_text() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a TEXT PRIMARY KEY, b TEXT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            !table.column_is_rowid_alias(column),
+            "column 'a´ has type different than INTEGER so can't be a rowid alias"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_column_is_rowid_alias_single_integer() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            table.column_is_rowid_alias(column),
+            "column 'a´ should be a rowid alias"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore] // We don't support separate definition of primary keys yet
+    pub fn test_column_is_rowid_alias_single_integer_separate_primary_key_definition() -> Result<()>
+    {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, PRIMARY KEY(a));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            table.column_is_rowid_alias(column),
+            "column 'a´ should be a rowid alias"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_column_is_rowid_alias_single_integer_separate_primary_key_definition_without_rowid(
+    ) -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, PRIMARY KEY(a)) WITHOUT ROWID;"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            !table.column_is_rowid_alias(column),
+            "column 'a´ shouldn't be a rowid alias because table has no rowid"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_column_is_rowid_alias_single_integer_without_rowid() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID;"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            !table.column_is_rowid_alias(column),
+            "column 'a´ shouldn't be a rowid alias because table has no rowid"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_column_is_rowid_alias_inline_composite_primary_key() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT PRIMARY KEY);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            !table.column_is_rowid_alias(column),
+            "column 'a´ shouldn't be a rowid alias because table has composite primary key"
+        );
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_column_is_rowid_alias_separate_composite_primary_key_definition() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, PRIMARY KEY(a, b));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert!(
+            !table.column_is_rowid_alias(column),
+            "column 'a´ shouldn't be a rowid alias because table has composite primary key"
+        );
+        Ok(())
+    }
 
     #[test]
     pub fn test_sqlite_schema() {
