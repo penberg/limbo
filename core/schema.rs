@@ -148,12 +148,6 @@ pub struct Column {
     pub primary_key: bool,
 }
 
-impl Column {
-    pub fn is_rowid_alias(&self) -> bool {
-        self.primary_key && self.ty == Type::Integer
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type {
     Null,
