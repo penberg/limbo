@@ -65,12 +65,12 @@ impl Database {
             loop {
                 match rows.next()? {
                     RowResult::Row(row) => {
-                        let ty = row.get::<String>(0)?;
+                        let ty = row.get::<&str>(0)?;
                         if ty != "table" {
                             continue;
                         }
                         let root_page: i64 = row.get::<i64>(3)?;
-                        let sql: String = row.get::<String>(4)?;
+                        let sql: &str = row.get::<&str>(4)?;
                         let table = schema::BTreeTable::from_sql(&sql, root_page as usize)?;
                         schema.add_table(Rc::new(table));
                     }
@@ -242,7 +242,7 @@ pub struct Row<'a> {
 }
 
 impl<'a> Row<'a> {
-    pub fn get<T: crate::types::FromValue>(&self, idx: usize) -> Result<T> {
+    pub fn get<T: crate::types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
     }

@@ -165,14 +165,14 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
     }
 }
 
-pub trait FromValue {
-    fn from_value(value: &Value) -> Result<Self>
+pub trait FromValue<'a> {
+    fn from_value(value: &Value<'a>) -> Result<Self>
     where
-        Self: Sized;
+        Self: Sized + 'a;
 }
 
-impl FromValue for i64 {
-    fn from_value(value: &Value) -> Result<Self> {
+impl<'a> FromValue<'a> for i64 {
+    fn from_value(value: &Value<'a>) -> Result<Self> {
         match value {
             Value::Integer(i) => Ok(*i),
             _ => anyhow::bail!("Expected integer value"),
@@ -180,10 +180,19 @@ impl FromValue for i64 {
     }
 }
 
-impl FromValue for String {
-    fn from_value(value: &Value) -> Result<Self> {
+impl<'a> FromValue<'a> for String {
+    fn from_value(value: &Value<'a>) -> Result<Self> {
         match value {
             Value::Text(s) => Ok(s.to_string()),
+            _ => anyhow::bail!("Expected text value"),
+        }
+    }
+}
+
+impl<'a> FromValue<'a> for &'a str {
+    fn from_value(value: &Value<'a>) -> Result<&'a str> {
+        match value {
+            Value::Text(s) => Ok(&s),
             _ => anyhow::bail!("Expected text value"),
         }
     }
