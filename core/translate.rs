@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::function::AggFunc;
 use crate::pager::Pager;
-use crate::schema::{Schema, Table};
+use crate::schema::{Schema, Table, Type};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{Insn, Program, ProgramBuilder};
@@ -265,8 +265,15 @@ fn translate_column(
             }
         }
         sqlite3_parser::ast::ResultColumn::Star => {
-            for (i, col) in table.unwrap().columns.iter().enumerate() {
-                if col.is_rowid_alias() {
+            let table = table.unwrap();
+            let composite_primary_key = table
+                .columns
+                .iter()
+                .filter(|col| col.primary_key)
+                .count()
+                > 1;
+            for (i, col) in table.columns.iter().enumerate() {
+                if col.primary_key && col.ty == Type::Integer && !composite_primary_key { // rowid alias
                     program.emit_insn(Insn::RowId {
                         cursor_id: cursor_id.unwrap(),
                         dest: target_register + i,
