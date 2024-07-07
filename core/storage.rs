@@ -4,8 +4,15 @@ use crate::{
     io::{Completion, WriteCompletion},
     Buffer,
 };
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use std::{cell::RefCell, rc::Rc};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum StorageError {
+    #[error("file is not a database")]
+    NotADB,
+}
 
 pub struct PageSource {
     io: Rc<dyn PageIO>,
@@ -63,12 +70,10 @@ struct FileStorage {
 #[cfg(feature = "fs")]
 impl PageIO for FileStorage {
     fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
-        let page_size = c.buf().len();
+        let size = c.buf().len();
         assert!(page_idx > 0);
-        assert!(page_size >= 512);
-        assert!(page_size <= 65536);
-        assert!((page_size & (page_size - 1)) == 0);
-        let pos = (page_idx - 1) * page_size;
+        ensure!(size >= 1 << 9 && size <= 1 << 16 && size & (size - 1) == 0, StorageError::NotADB);
+        let pos = (page_idx - 1) * size;
         self.file.pread(pos, c)?;
         Ok(())
     }

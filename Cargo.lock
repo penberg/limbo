@@ -962,6 +962,7 @@ dependencies = [
  "rusqlite",
  "sieve-cache",
  "sqlite3-parser",
+ "thiserror",
 ]
 
 [[package]]

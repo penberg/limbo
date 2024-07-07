@@ -31,6 +31,7 @@ log = "0.4.20"
 ordered-multimap = "0.7.1"
 sieve-cache = "0.1.4"
 sqlite3-parser = "0.11.0"
+thiserror = "1.0.61"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
