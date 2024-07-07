@@ -21,8 +21,8 @@ impl Schema {
         Self { tables }
     }
 
-    pub fn add_table(&mut self, name: &str, table: Table) {
-        let name = normalize_ident(name);
+    pub fn add_table(&mut self, table: Table) {
+        let name = normalize_ident(&table.name);
         self.tables.insert(name, table);
     }
 
