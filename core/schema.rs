@@ -302,6 +302,22 @@ mod tests {
     use super::*;
 
     #[test]
+    pub fn test_has_rowid_true() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        assert!(table.has_rowid, "has_rowid should be set to true");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_has_rowid_false() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID;"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        assert!(!table.has_rowid, "has_rowid should be set to false");
+        Ok(())
+    }
+
+    #[test]
     pub fn test_sqlite_schema() {
         let expected = r#"CREATE TABLE sqlite_schema (
   type TEXT,
