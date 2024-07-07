@@ -140,8 +140,7 @@ impl Pager {
             self.buffer_pool.clone(),
             page.clone(),
             page_idx,
-        )
-        .unwrap();
+        )?;
         page_cache.insert(page_idx, page.clone());
         Ok(page)
     }
