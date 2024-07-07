@@ -71,6 +71,7 @@ impl Table {
 pub struct BTreeTable {
     pub root_page: usize,
     pub name: String,
+    pub primary_key_column_names: Vec<String>,
     pub columns: Vec<Column>,
     pub has_rowid: bool,
 }
@@ -154,6 +155,7 @@ fn create_table(
     let table_name = normalize_ident(&tbl_name.name.0);
     trace!("Creating table {}", table_name);
     let mut has_rowid = true;
+    let mut primary_key_column_names = vec![];
     let mut cols = vec![];
     match body {
         CreateTableBody::ColumnsAndConstraints {
@@ -208,6 +210,7 @@ fn create_table(
         root_page,
         name: table_name,
         has_rowid,
+        primary_key_column_names,
         columns: cols,
     })
 }
@@ -267,6 +270,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
         root_page: 1,
         name: "sqlite_schema".to_string(),
         has_rowid: true,
+        primary_key_column_names: vec![],
         columns: vec![
             Column {
                 name: "type".to_string(),
