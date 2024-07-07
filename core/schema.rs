@@ -113,7 +113,7 @@ impl BTreeTable {
         }
     }
 
-    #[allow(dead_code)] // used in tests
+    #[cfg(test)]
     pub fn to_sql(&self) -> String {
         let mut sql = format!("CREATE TABLE {} (\n", self.name);
         for (i, column) in self.columns.iter().enumerate() {
