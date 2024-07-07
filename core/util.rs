@@ -3,5 +3,6 @@ pub fn normalize_ident(ident: &str) -> String {
         &ident[1..ident.len() - 1]
     } else {
         ident
-    }).to_lowercase()
+    })
+    .to_lowercase()
 }

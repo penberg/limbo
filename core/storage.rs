@@ -72,7 +72,10 @@ impl PageIO for FileStorage {
     fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         let size = c.buf().len();
         assert!(page_idx > 0);
-        ensure!(size >= 1 << 9 && size <= 1 << 16 && size & (size - 1) == 0, StorageError::NotADB);
+        ensure!(
+            size >= 1 << 9 && size <= 1 << 16 && size & (size - 1) == 0,
+            StorageError::NotADB
+        );
         let pos = (page_idx - 1) * size;
         self.file.pread(pos, c)?;
         Ok(())

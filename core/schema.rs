@@ -72,6 +72,7 @@ pub struct BTreeTable {
     pub root_page: usize,
     pub name: String,
     pub columns: Vec<Column>,
+    pub has_rowid: bool,
 }
 
 impl BTreeTable {
@@ -198,6 +199,7 @@ fn create_table(
     Ok(BTreeTable {
         root_page,
         name: table_name,
+        has_rowid: true,
         columns: cols,
     })
 }
@@ -256,6 +258,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
     BTreeTable {
         root_page: 1,
         name: "sqlite_schema".to_string(),
+        has_rowid: true,
         columns: vec![
             Column {
                 name: "type".to_string(),
