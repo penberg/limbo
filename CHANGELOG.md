@@ -10,4 +10,6 @@
 
 - `PRAGMA cache_size` support.
 
+- `SELECT ... LIMIT` support.
+
 - Basic `SELECT` statement support.
