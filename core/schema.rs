@@ -94,22 +94,10 @@ impl BTreeTable {
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         match cmd {
-            Some(cmd) => match cmd {
-                Cmd::Stmt(stmt) => match stmt {
-                    Stmt::CreateTable { tbl_name, body, .. } => {
-                        create_table(tbl_name, body, root_page)
-                    }
-                    _ => {
-                        anyhow::bail!("Expected CREATE TABLE statement");
-                    }
-                },
-                _ => {
-                    anyhow::bail!("Expected CREATE TABLE statement");
-                }
-            },
-            None => {
-                anyhow::bail!("Expected CREATE TABLE statement");
+            Some(Cmd::Stmt(Stmt::CreateTable { tbl_name, body, .. })) => {
+                create_table(tbl_name, body, root_page)
             }
+            _ => anyhow::bail!("Expected CREATE TABLE statement"),
         }
     }
 
