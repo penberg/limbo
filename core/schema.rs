@@ -1,15 +1,15 @@
+use crate::util::normalize_ident;
 use anyhow::Result;
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use log::trace;
+use sqlite3_parser::ast::TableOptions;
 use sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, ResultColumn, Stmt},
     lexer::sql::Parser,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
-
-use crate::util::normalize_ident;
 
 pub struct Schema {
     pub tables: HashMap<String, Rc<BTreeTable>>,
@@ -153,9 +153,14 @@ fn create_table(
 ) -> Result<BTreeTable> {
     let table_name = normalize_ident(&tbl_name.name.0);
     trace!("Creating table {}", table_name);
+    let mut has_rowid = true;
     let mut cols = vec![];
     match body {
-        CreateTableBody::ColumnsAndConstraints { columns, .. } => {
+        CreateTableBody::ColumnsAndConstraints {
+            columns,
+            constraints: _,
+            options,
+        } => {
             for column in columns {
                 let name = column.col_name.0.to_string();
                 let ty = match column.col_type {
@@ -193,13 +198,16 @@ fn create_table(
                     primary_key,
                 });
             }
+            if options.contains(TableOptions::WITHOUT_ROWID) {
+                has_rowid = false;
+            }
         }
         CreateTableBody::AsSelect(_) => todo!(),
     };
     Ok(BTreeTable {
         root_page,
         name: table_name,
-        has_rowid: true,
+        has_rowid,
         columns: cols,
     })
 }
