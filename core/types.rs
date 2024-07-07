@@ -32,6 +32,7 @@ pub enum OwnedValue {
     Text(Rc<String>),
     Blob(Rc<Vec<u8>>),
     Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
+    Record(OwnedRecord),
 }
 
 impl Display for OwnedValue {
@@ -46,6 +47,7 @@ impl Display for OwnedValue {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
                 AggContext::Sum(acc) => write!(f, "{}", acc),
             },
+            OwnedValue::Record(r) => write!(f, "{:?}", r),
         }
     }
 }
@@ -159,6 +161,7 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
             AggContext::Avg(acc, _count) => to_value(acc), // we assume aggfinal was called
             AggContext::Sum(acc) => to_value(acc),
         },
+        OwnedValue::Record(_) => todo!(),
     }
 }
 
@@ -197,6 +200,7 @@ impl<'a> Record<'a> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct OwnedRecord {
     pub values: Vec<OwnedValue>,
 }
@@ -219,4 +223,5 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Ref<Option<u64>>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
+    fn insert(&mut self, record: &OwnedRecord) -> Result<()>;
 }

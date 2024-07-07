@@ -3,17 +3,17 @@ use std::rc::Rc;
 
 use crate::function::AggFunc;
 use crate::pager::Pager;
-use crate::schema::{Schema, Table, Type};
+use crate::schema::{Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast;
 
-struct Select<'a> {
+struct Select {
     columns: Vec<ast::ResultColumn>,
     column_info: Vec<ColumnInfo>,
-    from: Option<&'a Table>,
+    from: Option<Table>,
     limit: Option<ast::Limit>,
     exist_aggregation: bool,
 }
@@ -74,12 +74,13 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 Some(table) => table,
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
+            let table = Table::BTree(table);
             let column_info = analyze_columns(&columns, Some(&table));
             let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
             Ok(Select {
                 columns,
                 column_info,
-                from: Some(&table),
+                from: Some(table),
                 limit: select.limit.clone(),
                 exist_aggregation,
             })
@@ -129,10 +130,13 @@ fn translate_select(select: Select) -> Result<Program> {
             None
         }
     });
-    let limit_insn = match (parsed_limit, select.from) {
+    let limit_insn = match (parsed_limit, &select.from) {
         (Some(0), _) => Some(program.emit_placeholder()),
         (_, Some(table)) => {
-            let root_page = table.root_page;
+            let root_page = match table {
+                Table::BTree(table) => table.root_page,
+                Table::Pseudo(_) => todo!(),
+            };
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
                 root_page,
@@ -241,7 +245,7 @@ fn translate_columns(
 
     let mut target = register_start;
     for (col, info) in select.columns.iter().zip(select.column_info.iter()) {
-        translate_column(program, cursor_id, select.from, col, info, target);
+        translate_column(program, cursor_id, select.from.as_ref(), col, info, target);
         target += info.columns_to_allocate;
     }
     (register_start, register_end)
@@ -266,7 +270,7 @@ fn translate_column(
         }
         sqlite3_parser::ast::ResultColumn::Star => {
             let table = table.unwrap();
-            for (i, col) in table.columns.iter().enumerate() {
+            for (i, col) in table.columns().iter().enumerate() {
                 if table.column_is_rowid_alias(col) {
                     program.emit_insn(Insn::RowId {
                         cursor_id: cursor_id.unwrap(),
@@ -294,7 +298,7 @@ fn analyze_columns(
         let mut info = ColumnInfo::new();
         info.columns_to_allocate = 1;
         if let sqlite3_parser::ast::ResultColumn::Star = column {
-            info.columns_to_allocate = table.unwrap().columns.len();
+            info.columns_to_allocate = table.unwrap().columns().len();
         } else {
             analyze_column(column, &mut info);
         }

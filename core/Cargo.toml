@@ -28,6 +28,7 @@ anyhow = "1.0.75"
 cfg_block = "0.1.1"
 fallible-iterator = "0.3.0"
 log = "0.4.20"
+ordered-multimap = "0.7.1"
 sieve-cache = "0.1.4"
 sqlite3-parser = "0.11.0"
 

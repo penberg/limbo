@@ -1,7 +1,7 @@
 use crate::btree::BTreeCursor;
 use crate::function::AggFunc;
 use crate::pager::Pager;
-use crate::types::{AggContext, Cursor, CursorResult, OwnedValue, Record};
+use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
 use anyhow::Result;
 use std::borrow::BorrowMut;
@@ -30,6 +30,13 @@ pub enum Insn {
     // Await for the competion of open cursor.
     OpenReadAwait,
 
+    // Open a cursor for a pseudo-table that contains a single row.
+    OpenPseudo {
+        cursor_id: CursorID,
+        content_reg: usize,
+        num_fields: usize,
+    },
+
     // Rewind the cursor to the beginning of the B-Tree.
     RewindAsync {
         cursor_id: CursorID,
@@ -46,6 +53,13 @@ pub enum Insn {
         cursor_id: CursorID,
         column: usize,
         dest: usize,
+    },
+
+    // Make a record and write it to destination register.
+    MakeRecord {
+        start_reg: usize, // P1
+        count: usize,     // P2
+        dest_reg: usize,  // P3
     },
 
     // Emit a row of results.
@@ -115,6 +129,34 @@ pub enum Insn {
     AggFinal {
         register: usize,
         func: AggFunc,
+    },
+
+    // Open a sorter.
+    SorterOpen {
+        cursor_id: CursorID,
+    },
+
+    // Insert a row into the sorter.
+    SorterInsert {
+        cursor_id: CursorID,
+        record_reg: usize,
+    },
+
+    // Sort the rows in the sorter.
+    SorterSort {
+        cursor_id: CursorID,
+    },
+
+    // Retrieve the next row from the sorter.
+    SorterData {
+        cursor_id: CursorID, // P1
+        dest_reg: usize,     // P2
+    },
+
+    // Advance to the next row in the sorter.
+    SorterNext {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
     },
 }
 
@@ -253,6 +295,16 @@ impl Program {
                 Insn::OpenReadAwait => {
                     state.pc += 1;
                 }
+                Insn::OpenPseudo {
+                    cursor_id,
+                    content_reg,
+                    num_fields,
+                } => {
+                    let _ = cursor_id;
+                    let _ = content_reg;
+                    let _ = num_fields;
+                    todo!();
+                }
                 Insn::RewindAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     match cursor.rewind()? {
@@ -287,6 +339,15 @@ impl Program {
                     } else {
                         todo!();
                     }
+                    state.pc += 1;
+                }
+                Insn::MakeRecord {
+                    start_reg,
+                    count,
+                    dest_reg,
+                } => {
+                    let record = make_owned_record(&state.registers, start_reg, count);
+                    state.registers[*dest_reg] = OwnedValue::Record(record);
                     state.pc += 1;
                 }
                 Insn::ResultRow { start_reg, count } => {
@@ -423,6 +484,58 @@ impl Program {
                     };
                     state.pc += 1;
                 }
+                Insn::SorterOpen { cursor_id } => {
+                    let cursor = Box::new(crate::sorter::Sorter::new());
+                    cursors.insert(*cursor_id, cursor);
+                    state.pc += 1;
+                }
+                Insn::SorterData {
+                    cursor_id,
+                    dest_reg,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    if let Some(ref record) = *cursor.record()? {
+                        state.registers[*dest_reg] = OwnedValue::Record(record.clone());
+                    } else {
+                        todo!();
+                    }
+                    state.pc += 1;
+                }
+                Insn::SorterInsert {
+                    cursor_id,
+                    record_reg,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let record = match &state.registers[*record_reg] {
+                        OwnedValue::Record(record) => record,
+                        _ => unreachable!("SorterInsert on non-record register"),
+                    };
+                    cursor.insert(record)?;
+                    state.pc += 1;
+                }
+                Insn::SorterSort { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.rewind()?;
+                    state.pc += 1;
+                }
+                Insn::SorterNext {
+                    cursor_id,
+                    pc_if_next,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    match cursor.next()? {
+                        CursorResult::Ok(_) => {}
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
+                    if !cursor.is_empty() {
+                        state.pc = *pc_if_next;
+                    } else {
+                        state.pc += 1;
+                    }
+                }
             }
         }
     }
@@ -434,6 +547,14 @@ fn make_record<'a>(registers: &'a [OwnedValue], start_reg: &usize, count: &usize
         values.push(crate::types::to_value(&registers[i]));
     }
     Record::new(values)
+}
+
+fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize) -> OwnedRecord {
+    let mut values = Vec::with_capacity(*count);
+    for i in *start_reg..*start_reg + count {
+        values.push(registers[i].clone());
+    }
+    OwnedRecord::new(values)
 }
 
 fn trace_insn(addr: BranchOffset, insn: &Insn) {
@@ -481,6 +602,19 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
                 0,
                 "".to_string(),
             ),
+            Insn::OpenPseudo {
+                cursor_id,
+                content_reg,
+                num_fields,
+            } => (
+                "OpenPseudo",
+                *cursor_id as i32,
+                *content_reg as i32,
+                *num_fields as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("{} columns in r[{}]", num_fields, content_reg),
+            ),
             Insn::RewindAsync { cursor_id } => (
                 "RewindAsync",
                 *cursor_id as i32,
@@ -514,6 +648,19 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
+            ),
+            Insn::MakeRecord {
+                start_reg,
+                count,
+                dest_reg,
+            } => (
+                "MakeRecord",
+                *start_reg as i32,
+                *count as i32,
+                *dest_reg as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}..{}] -> r[{}]", start_reg, start_reg + count, dest_reg),
             ),
             Insn::ResultRow { start_reg, count } => (
                 "ResultRow",
@@ -634,6 +781,60 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
                 OwnedValue::Text(Rc::new(func.to_string().into())),
                 0,
                 format!("accum=r[{}]", *register),
+            ),
+            Insn::SorterOpen { cursor_id } => (
+                "SorterOpen",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("cursor={}", cursor_id),
+            ),
+            Insn::SorterData {
+                cursor_id,
+                dest_reg,
+            } => (
+                "SorterData",
+                *cursor_id as i32,
+                *dest_reg as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=data", dest_reg),
+            ),
+            Insn::SorterInsert {
+                cursor_id,
+                record_reg,
+            } => (
+                "SorterInsert",
+                *cursor_id as i32,
+                *record_reg as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("key=r[{}]", record_reg),
+            ),
+            Insn::SorterSort { cursor_id } => (
+                "SorterSort",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::SorterNext {
+                cursor_id,
+                pc_if_next,
+            } => (
+                "SorterNext",
+                *cursor_id as i32,
+                *pc_if_next as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
             ),
         };
     format!(
