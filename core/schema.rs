@@ -40,12 +40,7 @@ pub struct Table {
 
 impl Table {
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
-        let composite_primary_key = self
-        .columns
-        .iter()
-        .filter(|col| col.primary_key)
-        .count()
-        > 1;
+        let composite_primary_key = self.columns.iter().filter(|col| col.primary_key).count() > 1;
         col.primary_key && col.ty == Type::Integer && !composite_primary_key
     }
 
