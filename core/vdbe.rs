@@ -369,6 +369,9 @@ impl Program {
                             AggFunc::Sum => {
                                 OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
                             }
+                            AggFunc::Count => {
+                                OwnedValue::Agg(Box::new(AggContext::Count(OwnedValue::Integer(0))))
+                            }
                             _ => {
                                 todo!();
                             }
@@ -398,6 +401,16 @@ impl Program {
                             };
                             *acc += col;
                         }
+                        AggFunc::Count => {
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
+                            else {
+                                unreachable!();
+                            };
+                            let AggContext::Count(count) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                            *count += 1;
+                        }
                         _ => {
                             todo!();
                         }
@@ -417,6 +430,7 @@ impl Program {
                             *acc /= count.clone();
                         }
                         AggFunc::Sum => {}
+                        AggFunc::Count => {}
                         _ => {
                             todo!();
                         }

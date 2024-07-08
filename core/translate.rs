@@ -437,7 +437,23 @@ fn translate_aggregation(
             });
             target_register
         }
-        AggFunc::Count => todo!(),
+        AggFunc::Count => {
+            let expr_reg = if args.is_empty() {
+                program.alloc_register()
+            } else {
+                let expr = &args[0];
+                let expr_reg = program.alloc_register();
+                let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
+                expr_reg
+            };
+            program.emit_insn(Insn::AggStep {
+                acc_reg: target_register,
+                col: expr_reg,
+                func: AggFunc::Count,
+            });
+            target_register
+        }
+        
         AggFunc::GroupConcat => todo!(),
         AggFunc::Max => todo!(),
         AggFunc::Min => todo!(),

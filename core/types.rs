@@ -45,6 +45,7 @@ impl Display for OwnedValue {
             OwnedValue::Agg(a) => match a.as_ref() {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
                 AggContext::Sum(acc) => write!(f, "{}", acc),
+                AggContext::Count(count) => write!(f, "{}", count),
             },
         }
     }
@@ -54,6 +55,7 @@ impl Display for OwnedValue {
 pub enum AggContext {
     Avg(OwnedValue, OwnedValue), // acc and count
     Sum(OwnedValue),
+    Count(OwnedValue),
 }
 
 impl std::ops::Add<OwnedValue> for OwnedValue {
@@ -158,6 +160,7 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Agg(a) => match a.as_ref() {
             AggContext::Avg(acc, _count) => to_value(acc), // we assume aggfinal was called
             AggContext::Sum(acc) => to_value(acc),
+            AggContext::Count(count) => to_value(count),
         },
     }
 }
