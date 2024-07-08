@@ -433,6 +433,20 @@ impl Program {
                             AggFunc::Count => {
                                 OwnedValue::Agg(Box::new(AggContext::Count(OwnedValue::Integer(0))))
                             }
+                            AggFunc::Max => {
+                                let col = state.registers[*col].clone();
+                                match col {
+                                    OwnedValue::Integer(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Max(OwnedValue::Integer(i64::MIN))))
+                                    }
+                                    OwnedValue::Float(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Max(OwnedValue::Float(f64::NEG_INFINITY))))
+                                    }
+                                    _ => {
+                                        unreachable!();
+                                    }
+                                }
+                            }
                             _ => {
                                 todo!();
                             }
@@ -472,6 +486,31 @@ impl Program {
                             };
                             *count += 1;
                         }
+                        AggFunc::Max => {
+                            let col = state.registers[*col].clone();
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut() else {
+                                unreachable!();
+                            };
+                            let AggContext::Max(acc) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                        
+                            match (acc, col) {
+                                (OwnedValue::Integer(ref mut current_max), OwnedValue::Integer(value)) => {
+                                    if value > *current_max {
+                                        *current_max = value;
+                                    }
+                                }
+                                (OwnedValue::Float(ref mut current_max), OwnedValue::Float(value)) => {
+                                    if value > *current_max {
+                                        *current_max = value;
+                                    }
+                                }
+                                _ => {
+                                    eprintln!("Unexpected types in max aggregation");
+                                }
+                            }
+                        }
                         _ => {
                             todo!();
                         }
@@ -492,6 +531,7 @@ impl Program {
                         }
                         AggFunc::Sum => {}
                         AggFunc::Count => {}
+                        AggFunc::Max => {} 
                         _ => {
                             todo!();
                         }

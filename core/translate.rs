@@ -471,9 +471,21 @@ fn translate_aggregation(
             });
             target_register
         }
-
         AggFunc::GroupConcat => todo!(),
-        AggFunc::Max => todo!(),
+        AggFunc::Max => {
+            if args.len() != 1 {
+                anyhow::bail!("Parse error: max bad number of arguments");
+            }
+            let expr = &args[0];
+            let expr_reg = program.alloc_register();
+            let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
+            program.emit_insn(Insn::AggStep {
+                acc_reg: target_register,
+                col: expr_reg,
+                func: AggFunc::Max,
+            });
+            target_register
+        }
         AggFunc::Min => todo!(),
         AggFunc::StringAgg => todo!(),
         AggFunc::Sum => {
