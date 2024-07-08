@@ -267,7 +267,7 @@ impl Program {
         println!("addr  opcode         p1    p2    p3    p4             p5  comment");
         println!("----  -------------  ----  ----  ----  -------------  --  -------");
         for (addr, insn) in self.insns.iter().enumerate() {
-            print_insn(addr.try_into().unwrap(), insn);
+            print_insn(addr, insn);
         }
     }
 
@@ -277,7 +277,7 @@ impl Program {
         pager: Rc<Pager>,
     ) -> Result<StepResult<'a>> {
         loop {
-            let insn = &self.insns[state.pc as usize];
+            let insn = &self.insns[state.pc];
             trace_insn(state.pc, insn);
             let mut cursors = state.cursors.borrow_mut();
             match insn {
@@ -288,7 +288,7 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page as usize));
+                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
@@ -557,16 +557,16 @@ impl Program {
 
 fn make_record<'a>(registers: &'a [OwnedValue], start_reg: &usize, count: &usize) -> Record<'a> {
     let mut values = Vec::with_capacity(*count);
-    for i in *start_reg..*start_reg + count {
-        values.push(crate::types::to_value(&registers[i]));
+    for r in registers.iter().skip(*start_reg).take(*count) {
+        values.push(crate::types::to_value(r))
     }
     Record::new(values)
 }
 
 fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize) -> OwnedRecord {
     let mut values = Vec::with_capacity(*count);
-    for i in *start_reg..*start_reg + count {
-        values.push(registers[i].clone());
+    for r in registers.iter().skip(*start_reg).take(*count) {
+        values.push(r.clone())
     }
     OwnedRecord::new(values)
 }

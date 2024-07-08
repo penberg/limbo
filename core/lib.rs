@@ -71,7 +71,7 @@ impl Database {
                         }
                         let root_page: i64 = row.get::<i64>(3)?;
                         let sql: &str = row.get::<&str>(4)?;
-                        let table = schema::BTreeTable::from_sql(&sql, root_page as usize)?;
+                        let table = schema::BTreeTable::from_sql(sql, root_page as usize)?;
                         schema.add_table(Rc::new(table));
                     }
                     RowResult::IO => {

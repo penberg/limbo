@@ -88,7 +88,7 @@ fn handle_dot_command(
 
     match args[0] {
         ".schema" => {
-            let table_name = args.get(1).map(|s| *s);
+            let table_name = args.get(1).copied();
             display_schema(io, conn, table_name)?;
         }
         ".opcodes" => {
@@ -129,13 +129,13 @@ fn display_schema(
         ),
     };
 
-    match conn.query(&sql) {
+    match conn.query(sql) {
         Ok(Some(ref mut rows)) => {
             let mut found = false;
             loop {
                 match rows.next()? {
                     RowResult::Row(row) => {
-                        if let Some(Value::Text(schema)) = row.values.get(0) {
+                        if let Some(Value::Text(schema)) = row.values.first() {
                             println!("{};", schema);
                             found = true;
                         }

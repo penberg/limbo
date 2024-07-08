@@ -73,7 +73,7 @@ impl PageIO for FileStorage {
         let size = c.buf().len();
         assert!(page_idx > 0);
         ensure!(
-            size >= 1 << 9 && size <= 1 << 16 && size & (size - 1) == 0,
+            (1 << 9..=1 << 16).contains(&size) && size & (size - 1) == 0,
             StorageError::NotADB
         );
         let pos = (page_idx - 1) * size;

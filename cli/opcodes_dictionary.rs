@@ -10,7 +10,7 @@ pub struct OpCodeDescription {
 
 impl Display for OpCodeDescription {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        return write!(f, "{}\n-------\n{}", self.name, self.description);
+        write!(f, "{}\n-------\n{}", self.name, self.description)
     }
 }
 

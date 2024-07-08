@@ -32,14 +32,9 @@ impl IO for LinuxIO {
         trace!("run_once()");
         let mut ring = self.ring.borrow_mut();
         ring.submit_and_wait(1)?;
-        loop {
-            match ring.completion().next() {
-                Some(cqe) => {
-                    let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
-                    c.complete();
-                }
-                None => break,
-            }
+        while let Some(cqe) = ring.completion().next() {
+            let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
+            c.complete();
         }
         Ok(())
     }
