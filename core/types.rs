@@ -32,6 +32,7 @@ pub enum OwnedValue {
     Text(Rc<String>),
     Blob(Rc<Vec<u8>>),
     Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
+    Record(OwnedRecord),
 }
 
 impl Display for OwnedValue {
@@ -47,6 +48,7 @@ impl Display for OwnedValue {
                 AggContext::Sum(acc) => write!(f, "{}", acc),
                 AggContext::Count(count) => write!(f, "{}", count),
             },
+            OwnedValue::Record(r) => write!(f, "{:?}", r),
         }
     }
 }
@@ -162,17 +164,18 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
             AggContext::Sum(acc) => to_value(acc),
             AggContext::Count(count) => to_value(count),
         },
+        OwnedValue::Record(_) => todo!(),
     }
 }
 
-pub trait FromValue {
-    fn from_value(value: &Value) -> Result<Self>
+pub trait FromValue<'a> {
+    fn from_value(value: &Value<'a>) -> Result<Self>
     where
-        Self: Sized;
+        Self: Sized + 'a;
 }
 
-impl FromValue for i64 {
-    fn from_value(value: &Value) -> Result<Self> {
+impl<'a> FromValue<'a> for i64 {
+    fn from_value(value: &Value<'a>) -> Result<Self> {
         match value {
             Value::Integer(i) => Ok(*i),
             _ => anyhow::bail!("Expected integer value"),
@@ -180,10 +183,19 @@ impl FromValue for i64 {
     }
 }
 
-impl FromValue for String {
-    fn from_value(value: &Value) -> Result<Self> {
+impl<'a> FromValue<'a> for String {
+    fn from_value(value: &Value<'a>) -> Result<Self> {
         match value {
             Value::Text(s) => Ok(s.to_string()),
+            _ => anyhow::bail!("Expected text value"),
+        }
+    }
+}
+
+impl<'a> FromValue<'a> for &'a str {
+    fn from_value(value: &Value<'a>) -> Result<&'a str> {
+        match value {
+            Value::Text(s) => Ok(&s),
             _ => anyhow::bail!("Expected text value"),
         }
     }
@@ -200,6 +212,7 @@ impl<'a> Record<'a> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct OwnedRecord {
     pub values: Vec<OwnedValue>,
 }
@@ -222,4 +235,5 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Ref<Option<u64>>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
+    fn insert(&mut self, record: &OwnedRecord) -> Result<()>;
 }

@@ -10,10 +10,10 @@ use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast;
 
-struct Select<'a> {
+struct Select {
     columns: Vec<ast::ResultColumn>,
     column_info: Vec<ColumnInfo>,
-    from: Option<&'a Table>,
+    from: Option<Table>,
     limit: Option<ast::Limit>,
     exist_aggregation: bool,
 }
@@ -74,12 +74,13 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 Some(table) => table,
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
+            let table = Table::BTree(table);
             let column_info = analyze_columns(&columns, Some(&table));
             let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
             Ok(Select {
                 columns,
                 column_info,
-                from: Some(&table),
+                from: Some(table),
                 limit: select.limit.clone(),
                 exist_aggregation,
             })
@@ -122,9 +123,20 @@ fn translate_select(select: Select) -> Result<Program> {
         None
     };
     let cursor_id = program.alloc_cursor_id();
-    let limit_decr_insn = match select.from {
-        Some(table) => {
-            let root_page = table.root_page;
+    let parsed_limit = select.limit.as_ref().and_then(|limit| {
+        if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &limit.expr {
+            num.parse::<i64>().ok()
+        } else {
+            None
+        }
+    });
+    let limit_insn = match (parsed_limit, &select.from) {
+        (Some(0), _) => Some(program.emit_placeholder()),
+        (_, Some(table)) => {
+            let root_page = match table {
+                Table::BTree(table) => table.root_page,
+                Table::Pseudo(_) => todo!(),
+            };
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
                 root_page,
@@ -134,7 +146,7 @@ fn translate_select(select: Select) -> Result<Program> {
             let rewind_await_offset = program.emit_placeholder();
             let (register_start, register_end) =
                 translate_columns(&mut program, Some(cursor_id), &select);
-            let limit_decr_insn = if select.exist_aggregation {
+            let limit_insn = if select.exist_aggregation {
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
@@ -161,13 +173,13 @@ fn translate_select(select: Select) -> Result<Program> {
                     start_reg: register_start,
                     count: register_end - register_start,
                 });
-                let limit_decr_insn = limit_reg.map(|_| program.emit_placeholder());
+                let limit_insn = limit_reg.map(|_| program.emit_placeholder());
                 program.emit_insn(Insn::NextAsync { cursor_id });
                 program.emit_insn(Insn::NextAwait {
                     cursor_id,
                     pc_if_next: rewind_await_offset,
                 });
-                limit_decr_insn
+                limit_insn
             };
             program.fixup_insn(
                 rewind_await_offset,
@@ -176,9 +188,9 @@ fn translate_select(select: Select) -> Result<Program> {
                     pc_if_empty: program.offset(),
                 },
             );
-            limit_decr_insn
+            limit_insn
         }
-        None => {
+        (_, None) => {
             assert!(!select.exist_aggregation);
             let (register_start, register_end) = translate_columns(&mut program, None, &select);
             program.emit_insn(Insn::ResultRow {
@@ -188,16 +200,20 @@ fn translate_select(select: Select) -> Result<Program> {
             limit_reg.map(|_| program.emit_placeholder())
         }
     };
-    if let Some(limit_decr_insn) = limit_decr_insn {
-        program.fixup_insn(
-            limit_decr_insn,
-            Insn::DecrJumpZero {
-                reg: limit_reg.unwrap(),
-                target_pc: program.offset(),
-            },
-        );
-    }
     program.emit_insn(Insn::Halt);
+    let halt_offset = program.offset() - 1;
+    if let Some(limit_insn) = limit_insn {
+        let insn = match parsed_limit {
+            Some(0) => Insn::Goto {
+                target_pc: halt_offset,
+            },
+            _ => Insn::DecrJumpZero {
+                reg: limit_reg.unwrap(),
+                target_pc: halt_offset,
+            },
+        };
+        program.fixup_insn(limit_insn, insn);
+    }
     program.fixup_insn(
         init_offset,
         Insn::Init {
@@ -229,7 +245,7 @@ fn translate_columns(
 
     let mut target = register_start;
     for (col, info) in select.columns.iter().zip(select.column_info.iter()) {
-        translate_column(program, cursor_id, select.from, col, info, target);
+        translate_column(program, cursor_id, select.from.as_ref(), col, info, target);
         target += info.columns_to_allocate;
     }
     (register_start, register_end)
@@ -253,8 +269,9 @@ fn translate_column(
             }
         }
         sqlite3_parser::ast::ResultColumn::Star => {
-            for (i, col) in table.unwrap().columns.iter().enumerate() {
-                if col.is_rowid_alias() {
+            let table = table.unwrap();
+            for (i, col) in table.columns().iter().enumerate() {
+                if table.column_is_rowid_alias(col) {
                     program.emit_insn(Insn::RowId {
                         cursor_id: cursor_id.unwrap(),
                         dest: target_register + i,
@@ -281,7 +298,7 @@ fn analyze_columns(
         let mut info = ColumnInfo::new();
         info.columns_to_allocate = 1;
         if let sqlite3_parser::ast::ResultColumn::Star = column {
-            info.columns_to_allocate = table.unwrap().columns.len();
+            info.columns_to_allocate = table.unwrap().columns().len();
         } else {
             analyze_column(column, &mut info);
         }

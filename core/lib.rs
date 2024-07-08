@@ -4,6 +4,7 @@ mod function;
 mod io;
 mod pager;
 mod schema;
+mod sorter;
 mod sqlite3_ondisk;
 mod storage;
 mod translate;
@@ -64,14 +65,14 @@ impl Database {
             loop {
                 match rows.next()? {
                     RowResult::Row(row) => {
-                        let ty = row.get::<String>(0)?;
+                        let ty = row.get::<&str>(0)?;
                         if ty != "table" {
                             continue;
                         }
                         let root_page: i64 = row.get::<i64>(3)?;
-                        let sql: String = row.get::<String>(4)?;
-                        let table = schema::Table::from_sql(&sql, root_page as usize)?;
-                        schema.add_table(&table.name.to_owned(), table);
+                        let sql: &str = row.get::<&str>(4)?;
+                        let table = schema::BTreeTable::from_sql(&sql, root_page as usize)?;
+                        schema.add_table(Rc::new(table));
                     }
                     RowResult::IO => {
                         // TODO: How do we ensure that the I/O we submitted to
@@ -241,7 +242,7 @@ pub struct Row<'a> {
 }
 
 impl<'a> Row<'a> {
-    pub fn get<T: crate::types::FromValue>(&self, idx: usize) -> Result<T> {
+    pub fn get<T: crate::types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
     }

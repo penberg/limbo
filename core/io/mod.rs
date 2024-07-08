@@ -64,18 +64,10 @@ pub type BufferData = Pin<Vec<u8>>;
 
 pub type BufferDropFn = Rc<dyn Fn(BufferData)>;
 
+#[derive(Clone)]
 pub struct Buffer {
     data: ManuallyDrop<BufferData>,
     drop: BufferDropFn,
-}
-
-impl Clone for Buffer {
-    fn clone(&self) -> Self {
-        Self {
-            data: self.data.clone(),
-            drop: self.drop.clone(),
-        }
-    }
 }
 
 impl Drop for Buffer {

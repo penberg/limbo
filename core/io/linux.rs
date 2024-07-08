@@ -31,7 +31,7 @@ impl IO for LinuxIO {
     fn run_once(&self) -> Result<()> {
         trace!("run_once()");
         let mut ring = self.ring.borrow_mut();
-        ring.submit_and_wait(0)?;
+        ring.submit_and_wait(1)?;
         loop {
             match ring.completion().next() {
                 Some(cqe) => {
@@ -93,7 +93,6 @@ impl File for LinuxFile {
             ring.submission()
                 .push(&write)
                 .expect("submission queue is full");
-            ring.submit()?;
         }
         Ok(())
     }

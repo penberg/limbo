@@ -147,4 +147,8 @@ impl Cursor for BTreeCursor {
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
         Ok(self.record.borrow())
     }
+
+    fn insert(&mut self, _record: &OwnedRecord) -> Result<()> {
+        unimplemented!()
+    }
 }
