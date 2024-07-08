@@ -108,6 +108,9 @@ fn handle_dot_command(
             println!("Unknown command: {}", args[0]);
             println!("Available commands:");
             println!("  .schema <table_name> - Display the schema for a specific table");
+            println!(
+                "  .opcodes             - Display all the opcodes defined by the virtual machine"
+            );
         }
     }
 
