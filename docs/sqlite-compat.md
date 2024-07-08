@@ -119,12 +119,12 @@ This document describes the SQLite compatibility status of Limbo:
 | Function                     | Status  | Comment |
 |------------------------------|---------|---------|
 | avg(X)                       | Yes     |         |
-| count()                      | No      |         |
-| count(*)                     | No      |         |
+| count()                      | Yes     |         |
+| count(*)                     | Yes     |         |
 | group_concat(X)              | No      |         |
 | group_concat(X,Y)            | No      |         |
 | string_agg(X,Y)              | No      |         |
-| max(X)                       | No      |         |
+| max(X)                       | Yes     |         |
 | min(X)                       | No      |         |
 | sum(X)                       | Yes     |         |
 | total(X)                     | No      |         |
