@@ -51,6 +51,10 @@ do_execsql_test select-max {
   SELECT max(age) FROM users;
 } {100}
 
+do_execsql_test select-min {
+  SELECT min(age) FROM users;
+} {1}
+
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
 } {}
