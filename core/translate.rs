@@ -486,7 +486,20 @@ fn translate_aggregation(
             });
             target_register
         }
-        AggFunc::Min => todo!(),
+        AggFunc::Min => {
+            if args.len() != 1 {
+                anyhow::bail!("Parse error: min bad number of arguments");
+            }
+            let expr = &args[0];
+            let expr_reg = program.alloc_register();
+            let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
+            program.emit_insn(Insn::AggStep {
+                acc_reg: target_register,
+                col: expr_reg,
+                func: AggFunc::Min,
+            });
+            target_register
+        }
         AggFunc::StringAgg => todo!(),
         AggFunc::Sum => {
             if args.len() != 1 {

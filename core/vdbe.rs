@@ -447,6 +447,20 @@ impl Program {
                                     }
                                 }
                             }
+                            AggFunc::Min => {
+                                let col = state.registers[*col].clone();
+                                match col {
+                                    OwnedValue::Integer(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Min(OwnedValue::Integer(i64::MAX))))
+                                    }
+                                    OwnedValue::Float(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Min(OwnedValue::Float(f64::INFINITY))))
+                                    }
+                                    _ => {
+                                        unreachable!();
+                                    }
+                                }
+                            }
                             _ => {
                                 todo!();
                             }
@@ -511,6 +525,31 @@ impl Program {
                                 }
                             }
                         }
+                        AggFunc::Min => {
+                            let col = state.registers[*col].clone();
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut() else {
+                                unreachable!();
+                            };
+                            let AggContext::Min(acc) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                        
+                            match (acc, col) {
+                                (OwnedValue::Integer(ref mut current_min), OwnedValue::Integer(value)) => {
+                                    if value < *current_min {
+                                        *current_min = value;
+                                    }
+                                }
+                                (OwnedValue::Float(ref mut current_min), OwnedValue::Float(value)) => {
+                                    if value < *current_min {
+                                        *current_min = value;
+                                    }
+                                }
+                                _ => {
+                                    eprintln!("Unexpected types in min aggregation");
+                                }
+                            }
+                        }
                         _ => {
                             todo!();
                         }
@@ -531,7 +570,8 @@ impl Program {
                         }
                         AggFunc::Sum => {}
                         AggFunc::Count => {}
-                        AggFunc::Max => {} 
+                        AggFunc::Max => {}
+                        AggFunc::Min => {} 
                         _ => {
                             todo!();
                         }
