@@ -195,7 +195,7 @@ impl<'a> FromValue<'a> for String {
 impl<'a> FromValue<'a> for &'a str {
     fn from_value(value: &Value<'a>) -> Result<&'a str> {
         match value {
-            Value::Text(s) => Ok(&s),
+            Value::Text(s) => Ok(s),
             _ => anyhow::bail!("Expected text value"),
         }
     }

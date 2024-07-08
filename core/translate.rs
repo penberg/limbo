@@ -336,7 +336,7 @@ fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &
                 } else {
                     column_info_out.func = func_type;
                     // TODO(pere): use lifetimes for args? Arenas would be lovely here :(
-                    column_info_out.args = args.clone();
+                    column_info_out.args.clone_from(args);
                 }
             }
             ast::Expr::FunctionCallStar { .. } => todo!(),
@@ -388,9 +388,9 @@ fn translate_expr(
         ast::Expr::Literal(lit) => match lit {
             ast::Literal::Numeric(val) => {
                 let maybe_int = val.parse::<i64>();
-                if maybe_int.is_ok() {
+                if let Ok(int_value) = maybe_int {
                     program.emit_insn(Insn::Integer {
-                        value: maybe_int.unwrap(),
+                        value: int_value,
                         dest: target_register,
                     });
                 } else {
@@ -439,7 +439,7 @@ fn translate_aggregation(
     assert!(info.func.is_some());
     let func = info.func.as_ref().unwrap();
     let empty_args = &Vec::<ast::Expr>::new();
-    let args = info.args.as_ref().unwrap_or_else(|| empty_args);
+    let args = info.args.as_ref().unwrap_or(empty_args);
     let dest = match func {
         AggFunc::Avg => {
             if args.len() != 1 {
@@ -471,7 +471,7 @@ fn translate_aggregation(
             });
             target_register
         }
-        
+
         AggFunc::GroupConcat => todo!(),
         AggFunc::Max => todo!(),
         AggFunc::Min => todo!(),
@@ -552,8 +552,8 @@ fn translate_pragma(
     Ok(program.build())
 }
 
-fn update_pragma(name: &String, value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {
-    match name.as_str() {
+fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {
+    match name {
         "cache_size" => {
             let mut cache_size_unformatted = value;
             let mut cache_size = if cache_size_unformatted < 0 {

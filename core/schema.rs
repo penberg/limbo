@@ -40,10 +40,7 @@ pub enum Table {
 
 impl Table {
     pub fn is_pseudo(&self) -> bool {
-        match self {
-            Table::Pseudo(_) => true,
-            _ => false,
-        }
+        matches!(self, Table::Pseudo(_))
     }
 
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
@@ -167,23 +164,22 @@ fn create_table(
         } => {
             if let Some(constraints) = constraints {
                 for c in constraints {
-                    match c.constraint {
-                        sqlite3_parser::ast::TableConstraint::PrimaryKey { columns, .. } => {
-                            for column in columns {
-                                primary_key_column_names.push(match column.expr {
-                                    Expr::Id(id) => normalize_ident(&id.0),
-                                    Expr::Literal(Literal::String(value)) => {
-                                        value.trim_matches('\'').to_owned()
-                                    }
-                                    _ => {
-                                        return Err(anyhow::anyhow!(
-                                            "Unsupported primary key expression"
-                                        ))
-                                    }
-                                });
-                            }
+                    if let sqlite3_parser::ast::TableConstraint::PrimaryKey { columns, .. } =
+                        c.constraint
+                    {
+                        for column in columns {
+                            primary_key_column_names.push(match column.expr {
+                                Expr::Id(id) => normalize_ident(&id.0),
+                                Expr::Literal(Literal::String(value)) => {
+                                    value.trim_matches('\'').to_owned()
+                                }
+                                _ => {
+                                    return Err(anyhow::anyhow!(
+                                        "Unsupported primary key expression"
+                                    ))
+                                }
+                            });
                         }
-                        _ => {}
                     }
                 }
             }
@@ -248,11 +244,9 @@ pub fn build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
     let table = PseudoTable::new();
     for column in columns {
         match column {
-            ResultColumn::Expr(expr, _as_name) => match expr {
-                _ => {
-                    todo!("unsupported expression {:?}", expr);
-                }
-            },
+            ResultColumn::Expr(expr, _as_name) => {
+                todo!("unsupported expression {:?}", expr);
+            }
             ResultColumn::Star => {
                 todo!();
             }

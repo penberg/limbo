@@ -138,10 +138,7 @@ pub unsafe extern "C" fn sqlite3_column_text(
         None => return std::ptr::null(),
     };
     match row.values.get(idx as usize) {
-        Some(value) => match value {
-            limbo_core::Value::Text(text) => text.as_bytes().as_ptr(),
-            _ => std::ptr::null(),
-        },
-        None => std::ptr::null(),
+        Some(limbo_core::Value::Text(text)) => text.as_bytes().as_ptr(),
+        _ => std::ptr::null(),
     }
 }

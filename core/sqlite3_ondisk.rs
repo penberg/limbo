@@ -238,7 +238,7 @@ pub fn begin_read_btree_page(
     let buf = Buffer::new(buf, drop_fn);
     let complete = Box::new(move |buf: &Buffer| {
         let page = page.clone();
-        if let Err(_) = finish_read_btree_page(page_idx, buf, page.clone()) {
+        if finish_read_btree_page(page_idx, buf, page.clone()).is_err() {
             page.set_error();
         }
     });
