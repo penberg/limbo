@@ -43,6 +43,10 @@ do_execsql_test select-limit {
   SELECT id FROM users LIMIT 1;
 } {1}
 
+do_execsql_test select-count {
+  SELECT count(id) FROM users;
+} {10000}
+
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
 } {}
