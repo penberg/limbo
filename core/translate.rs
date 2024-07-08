@@ -438,7 +438,8 @@ fn translate_aggregation(
     let _ = expr;
     assert!(info.func.is_some());
     let func = info.func.as_ref().unwrap();
-    let args = info.args.as_ref().unwrap();
+    let empty_args = &Vec::<ast::Expr>::new();
+    let args = info.args.as_ref().unwrap_or_else(|| empty_args);
     let dest = match func {
         AggFunc::Avg => {
             if args.len() != 1 {
