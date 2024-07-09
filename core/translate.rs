@@ -14,7 +14,7 @@ struct Select {
     columns: Vec<ast::ResultColumn>,
     column_info: Vec<ColumnInfo>,
     from: Option<Table>,
-    joins: Option<Vec<Join>>,
+    src_tables: Vec<SrcTable>,
     limit: Option<ast::Limit>,
     exist_aggregation: bool,
 }
@@ -38,9 +38,9 @@ struct SelectContext {
     loops: Vec<LoopInfo>,
 }
 
-struct Join {
+struct SrcTable {
     table: Table,
-    info: ast::JoinedSelectTable, // FIXME: preferably this should be a reference with lifetime == Select ast expr
+    join_info: Option<ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
 }
 
 struct ColumnInfo {
@@ -99,10 +99,14 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 Some(table) => table,
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
-            let joins = match from.joins {
-                Some(joins) => {
-                    let mut res = Vec::new();
-                    for join in joins {
+            let mut joins = Vec::new();
+            joins.push(SrcTable {
+                table: Table::BTree(table.clone()),
+                join_info: None,
+            });
+            match from.joins {
+                Some(selected_joins) => {
+                    for join in selected_joins {
                         let table_name = match &join.table {
                             ast::SelectTable::Table(name, ..) => name.name.clone(),
                             _ => todo!(),
@@ -112,24 +116,23 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                             Some(table) => table,
                             None => anyhow::bail!("Parse error: no such table: {}", table_name),
                         };
-                        res.push(Join {
+                        joins.push(SrcTable {
                             table: Table::BTree(table),
-                            info: join.clone(),
+                            join_info: Some(join.clone()),
                         });
                     }
-                    Some(res)
                 }
-                None => None,
+                None => {}
             };
 
             let table = Table::BTree(table);
-            let column_info = analyze_columns(&columns, Some(&table), &joins);
+            let column_info = analyze_columns(&columns, &joins);
             let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
             Ok(Select {
                 columns,
                 column_info,
                 from: Some(table),
-                joins: joins,
+                src_tables: joins,
                 limit: select.limit.clone(),
                 exist_aggregation,
             })
@@ -139,13 +142,13 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             from: None,
             ..
         } => {
-            let column_info = analyze_columns(&columns, None, &None);
+            let column_info = analyze_columns(&columns, &Vec::new());
             let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
             Ok(Select {
                 columns,
                 column_info,
                 from: None,
-                joins: None,
+                src_tables: Vec::new(),
                 limit: select.limit.clone(),
                 exist_aggregation,
             })
@@ -260,24 +263,15 @@ fn translate_select(select: Select) -> Result<Program> {
 fn translate_tables_begin(program: &mut ProgramBuilder, select: &Select) -> SelectContext {
     let mut context = SelectContext { loops: Vec::new() };
 
-    translate_table_open_cursor(program, &mut context, select.from.as_ref().unwrap());
-
-    if select.joins.is_some() {
-        for join in select.joins.as_ref().unwrap() {
-            let table = &join.table;
-            translate_table_open_cursor(program, &mut context, table);
-        }
+    for join in &select.src_tables {
+        let table = &join.table;
+        translate_table_open_cursor(program, &mut context, table);
     }
 
     let mut loop_index = 0;
-    translate_table_open_loop(program, &mut context, loop_index);
-
-    loop_index += 1;
-    if select.joins.is_some() {
-        for _ in select.joins.as_ref().unwrap() {
-            translate_table_open_loop(program, &mut context, loop_index);
-            loop_index += 1;
-        }
+    for _ in &select.src_tables {
+        translate_table_open_loop(program, &mut context, loop_index);
+        loop_index += 1;
     }
     context
 }
@@ -382,20 +376,11 @@ fn translate_column(
             }
         }
         sqlite3_parser::ast::ResultColumn::Star => {
-            let table = select.from.as_ref().unwrap();
-            translate_table_star(table, program, context, target_register);
-            let root_table_columns = table.columns().len();
-
-            if select.joins.is_some() {
-                for join in select.joins.as_ref().unwrap() {
-                    let table = &join.table;
-                    translate_table_star(
-                        table,
-                        program,
-                        context,
-                        target_register + root_table_columns,
-                    );
-                }
+            let mut target_register = target_register;
+            for join in &select.src_tables {
+                let table = &join.table;
+                translate_table_star(table, program, context, target_register);
+                target_register += table.columns().len();
             }
         }
         sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
@@ -433,21 +418,18 @@ fn translate_table_star(
 
 fn analyze_columns(
     columns: &Vec<sqlite3_parser::ast::ResultColumn>,
-    table: Option<&crate::schema::Table>,
-    joins: &Option<Vec<Join>>,
+    joins: &Vec<SrcTable>,
 ) -> Vec<ColumnInfo> {
     let mut column_information_list = Vec::with_capacity(columns.len());
     for column in columns {
         let mut info = ColumnInfo::new();
-        info.columns_to_allocate = 1;
         if let sqlite3_parser::ast::ResultColumn::Star = column {
-            info.columns_to_allocate = table.unwrap().columns().len();
-            if joins.is_some() {
-                for join in joins.as_ref().unwrap() {
-                    info.columns_to_allocate += join.table.columns().len();
-                }
+            info.columns_to_allocate = 0;
+            for join in joins {
+                info.columns_to_allocate += join.table.columns().len();
             }
         } else {
+            info.columns_to_allocate = 1;
             analyze_column(column, &mut info);
         }
         column_information_list.push(info);
@@ -588,42 +570,22 @@ fn resolve_ident_table<'a>(
     select: &'a Select,
     context: &SelectContext,
 ) -> Result<(usize, &'a Column, usize)> {
-    let table = select.from.as_ref().unwrap();
-
-    let res = table
-        .columns()
-        .iter()
-        .enumerate()
-        .find(|(_, col)| col.name == *ident);
-    if res.is_some() {
-        let (idx, col) = res.unwrap();
-        let cursor_id = context
-            .loops
+    for join in &select.src_tables {
+        let res = join
+            .table
+            .columns()
             .iter()
-            .find(|l| l.table == *table)
-            .unwrap()
-            .open_cursor;
-        return Ok((idx, col, cursor_id));
-    }
-
-    if select.joins.is_some() {
-        for join in select.joins.as_ref().unwrap().iter() {
-            let res = join
-                .table
-                .columns()
+            .enumerate()
+            .find(|(_, col)| col.name == *ident);
+        if res.is_some() {
+            let (idx, col) = res.unwrap();
+            let cursor_id = context
+                .loops
                 .iter()
-                .enumerate()
-                .find(|(_, col)| col.name == *ident);
-            if res.is_some() {
-                let (idx, col) = res.unwrap();
-                let cursor_id = context
-                    .loops
-                    .iter()
-                    .find(|l| l.table == join.table)
-                    .unwrap()
-                    .open_cursor;
-                return Ok((idx, col, cursor_id));
-            }
+                .find(|l| l.table == join.table)
+                .unwrap()
+                .open_cursor;
+            return Ok((idx, col, cursor_id));
         }
     }
     anyhow::bail!("Parse error: column with name {} not found", ident.as_str());
