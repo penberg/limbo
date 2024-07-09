@@ -76,17 +76,6 @@ impl PartialEq for Table {
     }
 }
 
-impl Eq for Table {}
-
-impl std::hash::Hash for Table {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Table::BTree(table) => std::ptr::hash(table.as_ref(), state),
-            Table::Pseudo(table) => std::ptr::hash(table.as_ref(), state),
-        }
-    }
-}
-
 pub struct BTreeTable {
     pub root_page: usize,
     pub name: String,
