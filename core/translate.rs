@@ -619,7 +619,7 @@ fn resolve_ident_table<'a>(
                 let cursor_id = context
                     .loops
                     .iter()
-                    .find(|l| l.table == *table)
+                    .find(|l| l.table == join.table)
                     .unwrap()
                     .open_cursor;
                 return Ok((idx, col, cursor_id));
