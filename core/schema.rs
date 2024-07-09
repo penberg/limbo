@@ -33,6 +33,7 @@ impl Schema {
     }
 }
 
+#[derive(Clone)]
 pub enum Table {
     BTree(Rc<BTreeTable>),
     Pseudo(Rc<PseudoTable>),
@@ -61,6 +62,16 @@ impl Table {
         match self {
             Table::BTree(table) => &table.columns,
             Table::Pseudo(table) => &table.columns,
+        }
+    }
+}
+
+impl PartialEq for Table {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Table::BTree(a), Table::BTree(b)) => Rc::ptr_eq(a, b),
+            (Table::Pseudo(a), Table::Pseudo(b)) => Rc::ptr_eq(a, b),
+            _ => false,
         }
     }
 }

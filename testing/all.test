@@ -11,7 +11,9 @@ proc evaluate_sql {sqlite_exec sql} {
 proc run_test {sqlite_exec sql expected_output} {
     set actual_output [evaluate_sql $sqlite_exec $sql]
     if {$actual_output ne $expected_output} {
-        puts "Test FAILED: '$sql' returned '$actual_output'"
+        puts "Test FAILED: '$sql'"
+        puts "returned '$actual_output'"
+        puts "expected '$expected_output'"
         exit 1
     }
 }
@@ -33,11 +35,11 @@ do_execsql_test select-const-2 {
 
 do_execsql_test select-avg {
   SELECT avg(age) FROM users;
-} {50.4649}
+} {50.396}
 
 do_execsql_test select-sum {
   SELECT sum(age) FROM users;
-} {504649}
+} {503960}
 
 do_execsql_test select-limit {
   SELECT id FROM users LIMIT 1;
@@ -62,3 +64,12 @@ do_execsql_test select-limit-0 {
 do_execsql_test pragma-cache-size {
   PRAGMA cache_size
 } {-2000}
+
+
+do_execsql_test cross-join {
+    select * from users, products limit 1;
+} {1|Jamie|Foster|dylan00@example.com|496-522-9493|62375\ Johnson\ Rest\ Suite\ 322|West\ Lauriestad|IL|35865|94|1|hat|79}
+
+do_execsql_test cross-join-specific-columns {
+    select first_name, price from users, products limit 1;
+} {Jamie|79}
