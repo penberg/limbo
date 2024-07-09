@@ -143,6 +143,47 @@ This document describes the SQLite compatibility status of Limbo:
 | strftime()                   | No      |         |
 | timediff()                   | No      |         |
 
+### JSON functions
+
+| Function                           | Status  | Comment |
+|------------------------------------|---------|---------|
+| json(json)                         |         |         |
+| jsonb(json)                        |         |         |
+| json_array(value1,value2,...)      |         |         |
+| jsonb_array(value1,value2,...)     |         |         |
+| json_array_length(json)            |         |         |
+| json_array_length(json,path)       |         |         |
+| json_error_position(json)          |         |         |
+| json_extract(json,path,...)        |         |         |
+| jsonb_extract(json,path,...)       |         |         |
+| json -> path                       |         |         |
+| json ->> path                      |         |         |
+| json_insert(json,path,value,...)   |         |         |
+| jsonb_insert(json,path,value,...)  |         |         |
+| json_object(label1,value1,...)     |         |         |
+| jsonb_object(label1,value1,...)    |         |         |
+| json_patch(json1,json2)            |         |         |
+| jsonb_patch(json1,json2)           |         |         |
+| json_pretty(json)                  |         |         |
+| json_remove(json,path,...)         |         |         |
+| jsonb_remove(json,path,...)        |         |         |
+| json_replace(json,path,value,...)  |         |         |
+| jsonb_replace(json,path,value,...) |         |         |
+| json_set(json,path,value,...)      |         |         |
+| jsonb_set(json,path,value,...)     |         |         |
+| json_type(json)                    |         |         |
+| json_type(json,path)               |         |         |
+| json_valid(json)                   |         |         |
+| json_valid(json,flags)             |         |         |
+| json_quote(value)                  |         |         |
+| json_group_array(value)            |         |         |
+| jsonb_group_array(value)           |         |         |
+| json_group_object(label,value)     |         |         |
+| jsonb_group_object(name,value)     |         |         |
+| json_each(json)                    |         |         |
+| json_each(json,path)               |         |         |
+| json_tree(json)                    |         |         |
+| json_tree(json,path)               |         |         |
 
 ## SQLite API
 
