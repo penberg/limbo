@@ -4,12 +4,16 @@
 
 ### Added
 
-- A `.opcodes <opcode>` dot command in the CLI that describes what a VDBE opcode does.
+- Partial `SELECT` statement support, including `LIMIT`.
 
-- The `avg()`, `count()`, `max()`, and `sum()` aggregate functions.
+- Partial `PRAGMA` statement support, including `cache_size`.
 
-- `PRAGMA cache_size` support.
+- Partial aggregate function support, including `avg()`, `count()`, `max()`, `min()`, and `sum()`.
 
-- `SELECT ... LIMIT` support.
+- `EXPLAIN` statement support.
 
-- Basic `SELECT` statement support.
+- Linux io_uring support using direct I/O.
+
+- Initial pass on command line shell with following commands:
+    - `.schema` command that describes the database schema.
+    - `.opcodes <opcode>` that describes what a VDBE opcode does.

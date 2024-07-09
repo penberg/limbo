@@ -5,6 +5,7 @@ This document describes the SQLite compatibility status of Limbo:
 * [SQL statements](#sql-statements)
 * [SQL functions](#sql-functions)
 * [SQLite API](#sqlite-api)
+* [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
 
 ## SQL statements
 
@@ -27,7 +28,7 @@ This document describes the SQLite compatibility status of Limbo:
 | DROP TRIGGER                 | No      |         |
 | DROP VIEW                    | No      |         |
 | END TRANSACTION              | No      |         |
-| EXPLAIN                      | No      |         |
+| EXPLAIN                      | Yes     |         |
 | INDEXED BY                   | No      |         |
 | INSERT                       | No      |         |
 | ON CONFLICT clause           | No      |         |
@@ -125,7 +126,7 @@ This document describes the SQLite compatibility status of Limbo:
 | group_concat(X,Y)            | No      |         |
 | string_agg(X,Y)              | No      |         |
 | max(X)                       | Yes     |         |
-| min(X)                       | No      |         |
+| min(X)                       | Yes     |         |
 | sum(X)                       | Yes     |         |
 | total(X)                     | No      |         |
 
