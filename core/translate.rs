@@ -663,7 +663,7 @@ fn translate_aggregation(
             } else {
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
+                let _ = translate_expr(program, select, context, expr, expr_reg);
                 expr_reg
             };
             program.emit_insn(Insn::AggStep {
@@ -680,7 +680,7 @@ fn translate_aggregation(
             }
             let expr = &args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
+            let _ = translate_expr(program, select, context, expr, expr_reg);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -694,7 +694,7 @@ fn translate_aggregation(
             }
             let expr = &args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, cursor_id, table, expr, expr_reg);
+            let _ = translate_expr(program, select, context, expr, expr_reg);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
