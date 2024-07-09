@@ -14,7 +14,7 @@ struct Select {
     columns: Vec<ast::ResultColumn>,
     column_info: Vec<ColumnInfo>,
     from: Option<Table>,
-    src_tables: Vec<SrcTable>,
+    src_tables: Vec<SrcTable>, // Tables we use to get data from. This includes "from" and "joins"
     limit: Option<ast::Limit>,
     exist_aggregation: bool,
 }
