@@ -266,8 +266,13 @@ impl Program {
     pub fn explain(&self) {
         println!("addr  opcode         p1    p2    p3    p4             p5  comment");
         println!("----  -------------  ----  ----  ----  -------------  --  -------");
+        let mut indent_count: usize = 0;
+        let indent = "  ";
+        let mut prev_insn: Option<&Insn> = None;
         for (addr, insn) in self.insns.iter().enumerate() {
-            print_insn(addr, insn);
+            indent_count = get_indent_count(indent_count, insn, prev_insn);
+            print_insn(addr, insn, indent.repeat(indent_count));
+            prev_insn = Some(insn);
         }
     }
 
@@ -655,15 +660,15 @@ fn trace_insn(addr: BranchOffset, insn: &Insn) {
     if !log::log_enabled!(log::Level::Trace) {
         return;
     }
-    log::trace!("{}", insn_to_str(addr, insn));
+    log::trace!("{}", insn_to_str(addr, insn, String::new()));
 }
 
-fn print_insn(addr: BranchOffset, insn: &Insn) {
-    let s = insn_to_str(addr, insn);
+fn print_insn(addr: BranchOffset, insn: &Insn, indent: String) {
+    let s = insn_to_str(addr, insn, indent);
     println!("{}", s);
 }
 
-fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
+fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
     let (opcode, p1, p2, p3, p4, p5, comment): (&str, i32, i32, i32, OwnedValue, u16, String) =
         match insn {
             Insn::Init { target_pc } => (
@@ -932,7 +937,25 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn) -> String {
             ),
         };
     format!(
-        "{:<4}  {:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
-        addr, opcode, p1, p2, p3, p4, p5, comment
+        "{:<4} {}{:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
+        addr, indent, opcode, p1, p2, p3, p4, p5, comment
     )
+}
+
+fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&Insn>) -> usize {
+    let indent_count = if let Some(insn) = prev_insn {
+        match insn {
+            Insn::RewindAwait { cursor_id: _, pc_if_empty: _, } => indent_count + 1,
+            Insn::SorterSort { cursor_id: _ } => indent_count + 1,
+            _ => indent_count
+        }
+    } else { indent_count };
+
+    let indent_count = match curr_insn {
+            Insn::NextAsync { cursor_id: _ } => indent_count - 1,
+            Insn::SorterNext { cursor_id: _, pc_if_next: _, } => indent_count - 1,
+            _ => indent_count
+        };
+    
+    indent_count
 }
