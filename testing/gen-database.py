@@ -22,6 +22,17 @@ cursor.execute('''
     )
 ''')
 
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        price REAL
+    )
+''')
+
+product_list = ["hat", "cap", "shirt", "sweater", "sweatshirt",
+    "shorts", "jeans", "sneakers", "boots", "coat", "accessories"]
+
 fake = Faker()
 for _ in range(10000):
     first_name = fake.first_name()
@@ -38,6 +49,13 @@ for _ in range(10000):
         INSERT INTO users (first_name, last_name, email, phone_number, address, city, state, zipcode, age)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (first_name, last_name, email, phone_number, address, city, state, zipcode, age))
+
+for product in product_list:
+    price = fake.random_int(min=1, max=100)
+    cursor.execute('''
+        INSERT INTO products (name, price)
+        VALUES (?, ?)
+    ''', (product, price))
 
 
 
