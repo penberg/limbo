@@ -954,6 +954,7 @@ dependencies = [
  "criterion",
  "fallible-iterator 0.3.0",
  "io-uring",
+ "libc",
  "log",
  "mimalloc",
  "ordered-multimap",

@@ -2,6 +2,7 @@ use super::{Completion, File, WriteCompletion, IO};
 use anyhow::Result;
 use log::trace;
 use std::cell::RefCell;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 
@@ -21,7 +22,11 @@ impl LinuxIO {
 impl IO for LinuxIO {
     fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::options().read(true).write(true).open(path)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(path)?;
         Ok(Rc::new(LinuxFile {
             ring: self.ring.clone(),
             file,
