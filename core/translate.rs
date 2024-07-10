@@ -13,7 +13,6 @@ use sqlite3_parser::ast::{self, Expr};
 struct Select {
     columns: Vec<ast::ResultColumn>,
     column_info: Vec<ColumnInfo>,
-    from: Option<Table>,
     src_tables: Vec<SrcTable>, // Tables we use to get data from. This includes "from" and "joins"
     limit: Option<ast::Limit>,
     exist_aggregation: bool,
@@ -128,7 +127,6 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             Ok(Select {
                 columns,
                 column_info,
-                from: Some(table),
                 src_tables: joins,
                 limit: select.limit.clone(),
                 exist_aggregation,
@@ -145,7 +143,6 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             Ok(Select {
                 columns,
                 column_info,
-                from: None,
                 src_tables: Vec::new(),
                 limit: select.limit.clone(),
                 exist_aggregation,
@@ -180,55 +177,55 @@ fn translate_select(mut select: Select) -> Result<Program> {
             None
         }
     });
-    let from = select.from.as_ref();
-    let limit_insn = match (parsed_limit, from) {
-        (Some(0), _) => Some(program.emit_placeholder()),
-        (_, Some(_)) => {
-            translate_tables_begin(&mut program, &mut select);
+    let limit_insn = match parsed_limit {
+        Some(0) => Some(program.emit_placeholder()),
+        _ => {
+            if !select.src_tables.is_empty() {
+                translate_tables_begin(&mut program, &mut select);
 
-            let (register_start, register_end) =
-                translate_columns(&mut program, &select)?;
+                let (register_start, register_end) =
+                    translate_columns(&mut program, &select)?;
 
-            let mut limit_insn: Option<usize> = None;
-            if !select.exist_aggregation {
-                program.emit_insn(Insn::ResultRow {
-                    start_reg: register_start,
-                    count: register_end - register_start,
-                });
-                limit_insn = limit_reg.map(|_| program.emit_placeholder());
-            }
-
-            translate_tables_end(&mut program, &select);
-
-            if select.exist_aggregation {
-                let mut target = register_start;
-                for info in &select.column_info {
-                    if let Some(func) = &info.func {
-                        program.emit_insn(Insn::AggFinal {
-                            register: target,
-                            func: func.clone(),
-                        });
-                    }
-                    target += info.columns_to_allocate;
+                let mut limit_insn: Option<usize> = None;
+                if !select.exist_aggregation {
+                    program.emit_insn(Insn::ResultRow {
+                        start_reg: register_start,
+                        count: register_end - register_start,
+                    });
+                    limit_insn = limit_reg.map(|_| program.emit_placeholder());
                 }
-                // only one result row
+
+                translate_tables_end(&mut program, &select);
+
+                if select.exist_aggregation {
+                    let mut target = register_start;
+                    for info in &select.column_info {
+                        if let Some(func) = &info.func {
+                            program.emit_insn(Insn::AggFinal {
+                                register: target,
+                                func: func.clone(),
+                            });
+                        }
+                        target += info.columns_to_allocate;
+                    }
+                    // only one result row
+                    program.emit_insn(Insn::ResultRow {
+                        start_reg: register_start,
+                        count: register_end - register_start,
+                    });
+                    limit_insn = limit_reg.map(|_| program.emit_placeholder());
+                }
+                limit_insn
+            } else{
+                assert!(!select.exist_aggregation);
+                let (register_start, register_end) =
+                    translate_columns(&mut program, &select)?;
                 program.emit_insn(Insn::ResultRow {
                     start_reg: register_start,
                     count: register_end - register_start,
                 });
-                limit_insn = limit_reg.map(|_| program.emit_placeholder());
+                limit_reg.map(|_| program.emit_placeholder())
             }
-            limit_insn
-        }
-        (_, None) => {
-            assert!(!select.exist_aggregation);
-            let (register_start, register_end) =
-                translate_columns(&mut program, &select)?;
-            program.emit_insn(Insn::ResultRow {
-                start_reg: register_start,
-                count: register_end - register_start,
-            });
-            limit_reg.map(|_| program.emit_placeholder())
         }
     };
     program.emit_insn(Insn::Halt);
