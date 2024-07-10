@@ -190,7 +190,7 @@ fn query(
                             match value {
                                 Value::Null => print!("NULL"),
                                 Value::Integer(i) => print!("{}", i),
-                                Value::Float(f) => print!("{}", f),
+                                Value::Float(f) => print!("{:?}", f),
                                 Value::Text(s) => print!("{}", s),
                                 Value::Blob(b) => print!("{:?}", b),
                             }
