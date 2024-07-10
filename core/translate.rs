@@ -362,12 +362,12 @@ fn translate_column(
     program: &mut ProgramBuilder,
     select: &Select,
     context: &SelectContext,
-    col: &sqlite3_parser::ast::ResultColumn,
+    col: &ast::ResultColumn,
     info: &ColumnInfo,
     target_register: usize, // where to store the result, in case of star it will be the start of registers added
 ) -> Result<()> {
     match col {
-        sqlite3_parser::ast::ResultColumn::Expr(expr, _) => {
+        ast::ResultColumn::Expr(expr, _) => {
             if info.is_aggregation_function() {
                 let _ =
                     translate_aggregation(program, select, context, expr, info, target_register)?;
@@ -375,7 +375,7 @@ fn translate_column(
                 let _ = translate_expr(program, select, context, expr, target_register)?;
             }
         }
-        sqlite3_parser::ast::ResultColumn::Star => {
+        ast::ResultColumn::Star => {
             let mut target_register = target_register;
             for join in &select.src_tables {
                 let table = &join.table;
@@ -383,7 +383,7 @@ fn translate_column(
                 target_register += table.columns().len();
             }
         }
-        sqlite3_parser::ast::ResultColumn::TableStar(_) => todo!(),
+        ast::ResultColumn::TableStar(_) => todo!(),
     }
     Ok(())
 }
@@ -417,13 +417,13 @@ fn translate_table_star(
 }
 
 fn analyze_columns(
-    columns: &Vec<sqlite3_parser::ast::ResultColumn>,
+    columns: &Vec<ast::ResultColumn>,
     joins: &Vec<SrcTable>,
 ) -> Vec<ColumnInfo> {
     let mut column_information_list = Vec::with_capacity(columns.len());
     for column in columns {
         let mut info = ColumnInfo::new();
-        if let sqlite3_parser::ast::ResultColumn::Star = column {
+        if let ast::ResultColumn::Star = column {
             info.columns_to_allocate = 0;
             for join in joins {
                 info.columns_to_allocate += join.table.columns().len();
@@ -441,9 +441,9 @@ fn analyze_columns(
 ///
 /// This function will walk all columns and find information about:
 /// * Aggregation functions.
-fn analyze_column(column: &sqlite3_parser::ast::ResultColumn, column_info_out: &mut ColumnInfo) {
+fn analyze_column(column: &ast::ResultColumn, column_info_out: &mut ColumnInfo) {
     match column {
-        sqlite3_parser::ast::ResultColumn::Expr(expr, _) => analyze_expr(expr, column_info_out),
+        ast::ResultColumn::Expr(expr, _) => analyze_expr(expr, column_info_out),
         ast::ResultColumn::Star => {}
         ast::ResultColumn::TableStar(_) => {}
     }
