@@ -102,6 +102,11 @@ pub enum Insn {
         dest: usize,
     },
 
+    // If register holds an integer, transform it to a float
+    RealAffinity {
+        register: usize,
+    },
+
     // Write a string value into a register.
     String8 {
         value: String,
@@ -400,6 +405,13 @@ impl Program {
                     state.registers[*dest] = OwnedValue::Float(*value);
                     state.pc += 1;
                 }
+                Insn::RealAffinity { register } => {
+                    if let OwnedValue::Integer(i) = &state.registers[*register] {
+                        state.registers[*register] = OwnedValue::Float(*i as f64);
+                    } else {
+                    };
+                    state.pc += 1;
+                }
                 Insn::String8 { value, dest } => {
                     state.registers[*dest] = OwnedValue::Text(Rc::new(value.into()));
                     state.pc += 1;
@@ -433,7 +445,7 @@ impl Program {
                                 OwnedValue::Integer(0),
                             ))),
                             AggFunc::Sum => {
-                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
+                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Integer(0))))
                             }
                             AggFunc::Count => {
                                 OwnedValue::Agg(Box::new(AggContext::Count(OwnedValue::Integer(0))))
@@ -441,12 +453,12 @@ impl Program {
                             AggFunc::Max => {
                                 let col = state.registers[*col].clone();
                                 match col {
-                                    OwnedValue::Integer(_) => {
-                                        OwnedValue::Agg(Box::new(AggContext::Max(OwnedValue::Integer(i64::MIN))))
-                                    }
-                                    OwnedValue::Float(_) => {
-                                        OwnedValue::Agg(Box::new(AggContext::Max(OwnedValue::Float(f64::NEG_INFINITY))))
-                                    }
+                                    OwnedValue::Integer(_) => OwnedValue::Agg(Box::new(
+                                        AggContext::Max(OwnedValue::Integer(i64::MIN)),
+                                    )),
+                                    OwnedValue::Float(_) => OwnedValue::Agg(Box::new(
+                                        AggContext::Max(OwnedValue::Float(f64::NEG_INFINITY)),
+                                    )),
                                     _ => {
                                         unreachable!();
                                     }
@@ -455,12 +467,12 @@ impl Program {
                             AggFunc::Min => {
                                 let col = state.registers[*col].clone();
                                 match col {
-                                    OwnedValue::Integer(_) => {
-                                        OwnedValue::Agg(Box::new(AggContext::Min(OwnedValue::Integer(i64::MAX))))
-                                    }
-                                    OwnedValue::Float(_) => {
-                                        OwnedValue::Agg(Box::new(AggContext::Min(OwnedValue::Float(f64::INFINITY))))
-                                    }
+                                    OwnedValue::Integer(_) => OwnedValue::Agg(Box::new(
+                                        AggContext::Min(OwnedValue::Integer(i64::MAX)),
+                                    )),
+                                    OwnedValue::Float(_) => OwnedValue::Agg(Box::new(
+                                        AggContext::Min(OwnedValue::Float(f64::INFINITY)),
+                                    )),
                                     _ => {
                                         unreachable!();
                                     }
@@ -507,20 +519,27 @@ impl Program {
                         }
                         AggFunc::Max => {
                             let col = state.registers[*col].clone();
-                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut() else {
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
+                            else {
                                 unreachable!();
                             };
                             let AggContext::Max(acc) = agg.borrow_mut() else {
                                 unreachable!();
                             };
-                        
+
                             match (acc, col) {
-                                (OwnedValue::Integer(ref mut current_max), OwnedValue::Integer(value)) => {
+                                (
+                                    OwnedValue::Integer(ref mut current_max),
+                                    OwnedValue::Integer(value),
+                                ) => {
                                     if value > *current_max {
                                         *current_max = value;
                                     }
                                 }
-                                (OwnedValue::Float(ref mut current_max), OwnedValue::Float(value)) => {
+                                (
+                                    OwnedValue::Float(ref mut current_max),
+                                    OwnedValue::Float(value),
+                                ) => {
                                     if value > *current_max {
                                         *current_max = value;
                                     }
@@ -532,20 +551,27 @@ impl Program {
                         }
                         AggFunc::Min => {
                             let col = state.registers[*col].clone();
-                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut() else {
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
+                            else {
                                 unreachable!();
                             };
                             let AggContext::Min(acc) = agg.borrow_mut() else {
                                 unreachable!();
                             };
-                        
+
                             match (acc, col) {
-                                (OwnedValue::Integer(ref mut current_min), OwnedValue::Integer(value)) => {
+                                (
+                                    OwnedValue::Integer(ref mut current_min),
+                                    OwnedValue::Integer(value),
+                                ) => {
                                     if value < *current_min {
                                         *current_min = value;
                                     }
                                 }
-                                (OwnedValue::Float(ref mut current_min), OwnedValue::Float(value)) => {
+                                (
+                                    OwnedValue::Float(ref mut current_min),
+                                    OwnedValue::Float(value),
+                                ) => {
                                     if value < *current_min {
                                         *current_min = value;
                                     }
@@ -576,7 +602,7 @@ impl Program {
                         AggFunc::Sum => {}
                         AggFunc::Count => {}
                         AggFunc::Max => {}
-                        AggFunc::Min => {} 
+                        AggFunc::Min => {}
                         _ => {
                             todo!();
                         }
@@ -836,6 +862,15 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 0,
                 "".to_string(),
             ),
+            Insn::RealAffinity { register } => (
+                "RealAffinity",
+                *register as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
             Insn::String8 { value, dest } => (
                 "String8",
                 *dest as i32,
@@ -945,17 +980,25 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
 fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&Insn>) -> usize {
     let indent_count = if let Some(insn) = prev_insn {
         match insn {
-            Insn::RewindAwait { cursor_id: _, pc_if_empty: _, } => indent_count + 1,
+            Insn::RewindAwait {
+                cursor_id: _,
+                pc_if_empty: _,
+            } => indent_count + 1,
             Insn::SorterSort { cursor_id: _ } => indent_count + 1,
-            _ => indent_count
+            _ => indent_count,
         }
-    } else { indent_count };
+    } else {
+        indent_count
+    };
 
     let indent_count = match curr_insn {
-            Insn::NextAsync { cursor_id: _ } => indent_count - 1,
-            Insn::SorterNext { cursor_id: _, pc_if_next: _, } => indent_count - 1,
-            _ => indent_count
-        };
-    
+        Insn::NextAsync { cursor_id: _ } => indent_count - 1,
+        Insn::SorterNext {
+            cursor_id: _,
+            pc_if_next: _,
+        } => indent_count - 1,
+        _ => indent_count,
+    };
+
     indent_count
 }

@@ -68,8 +68,12 @@ do_execsql_test pragma-cache-size {
 
 do_execsql_test cross-join {
     select * from users, products limit 1;
-} {1|Jamie|Foster|dylan00@example.com|496-522-9493|62375\ Johnson\ Rest\ Suite\ 322|West\ Lauriestad|IL|35865|94|1|hat|79}
+} {1|Jamie|Foster|dylan00@example.com|496-522-9493|62375\ Johnson\ Rest\ Suite\ 322|West\ Lauriestad|IL|35865|94|1|hat|79.0}
 
 do_execsql_test cross-join-specific-columns {
     select first_name, price from users, products limit 1;
-} {Jamie|79}
+} {Jamie|79.0}
+
+do_execsql_test realify {
+    select price from products limit 1;
+} {79.0}

@@ -401,17 +401,19 @@ fn translate_table_star(
         .unwrap()
         .open_cursor;
     for (i, col) in table.columns().iter().enumerate() {
+        let col_target_register = target_register + i;
         if table.column_is_rowid_alias(col) {
             program.emit_insn(Insn::RowId {
                 cursor_id: table_cursor,
-                dest: target_register + i,
+                dest: col_target_register,
             });
         } else {
             program.emit_insn(Insn::Column {
                 column: i,
-                dest: target_register + i,
+                dest: col_target_register,
                 cursor_id: table_cursor,
             });
+            maybe_apply_affinity(col, col_target_register, program);
         }
     }
 }
@@ -516,6 +518,7 @@ fn translate_expr(
                     cursor_id,
                 });
             }
+            maybe_apply_affinity(col, target_register, program);
             Ok(target_register)
         }
         ast::Expr::InList { .. } => todo!(),
@@ -770,5 +773,14 @@ fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pa
             pager.change_page_cache_size(cache_size);
         }
         _ => todo!(),
+    }
+}
+
+fn maybe_apply_affinity(col: &Column, target_register: usize, program: &mut ProgramBuilder) {
+    match col.ty {
+        crate::schema::Type::Real => program.emit_insn(Insn::RealAffinity {
+            register: target_register,
+        }),
+        _ => {}
     }
 }
