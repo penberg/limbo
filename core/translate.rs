@@ -177,59 +177,66 @@ fn translate_select(mut select: Select) -> Result<Program> {
             None
         }
     });
-    let limit_insn = match parsed_limit {
+    let limit_goto = match parsed_limit {
         Some(0) => Some(program.emit_placeholder()),
-        _ => {
-            if !select.src_tables.is_empty() {
-                translate_tables_begin(&mut program, &mut select);
+        _ => None,
+    };
+    let limit_insn = if !select.src_tables.is_empty() {
+        translate_tables_begin(&mut program, &mut select);
 
-                let (register_start, register_end) =
-                    translate_columns(&mut program, &select)?;
+        let (register_start, register_end) =
+            translate_columns(&mut program, &select)?;
 
-                let mut limit_insn: Option<usize> = None;
-                if !select.exist_aggregation {
-                    program.emit_insn(Insn::ResultRow {
-                        start_reg: register_start,
-                        count: register_end - register_start,
-                    });
-                    limit_insn = limit_reg.map(|_| program.emit_placeholder());
-                }
-
-                translate_tables_end(&mut program, &select);
-
-                if select.exist_aggregation {
-                    let mut target = register_start;
-                    for info in &select.column_info {
-                        if let Some(func) = &info.func {
-                            program.emit_insn(Insn::AggFinal {
-                                register: target,
-                                func: func.clone(),
-                            });
-                        }
-                        target += info.columns_to_allocate;
-                    }
-                    // only one result row
-                    program.emit_insn(Insn::ResultRow {
-                        start_reg: register_start,
-                        count: register_end - register_start,
-                    });
-                    limit_insn = limit_reg.map(|_| program.emit_placeholder());
-                }
-                limit_insn
-            } else{
-                assert!(!select.exist_aggregation);
-                let (register_start, register_end) =
-                    translate_columns(&mut program, &select)?;
-                program.emit_insn(Insn::ResultRow {
-                    start_reg: register_start,
-                    count: register_end - register_start,
-                });
-                limit_reg.map(|_| program.emit_placeholder())
-            }
+        let mut limit_insn: Option<usize> = None;
+        if !select.exist_aggregation {
+            program.emit_insn(Insn::ResultRow {
+                start_reg: register_start,
+                count: register_end - register_start,
+            });
+            limit_insn = limit_reg.map(|_| program.emit_placeholder());
         }
+
+        translate_tables_end(&mut program, &select);
+
+        if select.exist_aggregation {
+            let mut target = register_start;
+            for info in &select.column_info {
+                if let Some(func) = &info.func {
+                    program.emit_insn(Insn::AggFinal {
+                        register: target,
+                        func: func.clone(),
+                    });
+                }
+                target += info.columns_to_allocate;
+            }
+            // only one result row
+            program.emit_insn(Insn::ResultRow {
+                start_reg: register_start,
+                count: register_end - register_start,
+            });
+            limit_insn = limit_reg.map(|_| program.emit_placeholder());
+        }
+        limit_insn
+    } else{
+        assert!(!select.exist_aggregation);
+        let (register_start, register_end) =
+            translate_columns(&mut program, &select)?;
+        program.emit_insn(Insn::ResultRow {
+            start_reg: register_start,
+            count: register_end - register_start,
+        });
+        limit_reg.map(|_| program.emit_placeholder())
     };
     program.emit_insn(Insn::Halt);
     let halt_offset = program.offset() - 1;
+    if let Some(limit_goto) = limit_goto {
+        program.fixup_insn(
+            limit_goto,
+            Insn::Goto {
+                target_pc: halt_offset,
+            },
+        );
+    }
     if let Some(limit_insn) = limit_insn {
         let insn = match parsed_limit {
             Some(0) => Insn::Goto {
