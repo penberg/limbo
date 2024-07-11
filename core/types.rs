@@ -81,7 +81,9 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
             (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
                 OwnedValue::Float(float_left + float_right)
             }
-            _ => unreachable!(),
+            (lhs, OwnedValue::Null) => lhs,
+            (OwnedValue::Null, rhs) => rhs,
+            _ => OwnedValue::Float(0.0),
         }
     }
 }

@@ -653,7 +653,20 @@ fn translate_aggregation(
             });
             target_register
         }
-        AggFunc::Total => todo!(),
+        AggFunc::Total => {
+            if args.len() != 1 {
+                anyhow::bail!("Parse error: total bad number of arguments");
+            }
+            let expr = &args[0];
+            let expr_reg = program.alloc_register();
+            let _ = translate_expr(program, select, expr, expr_reg)?;
+            program.emit_insn(Insn::AggStep {
+                acc_reg: target_register,
+                col: expr_reg,
+                func: AggFunc::Total,
+            });
+            target_register
+        }
     };
     Ok(dest)
 }

@@ -41,6 +41,10 @@ do_execsql_test select-sum {
   SELECT sum(age) FROM users;
 } {503960}
 
+do_execsql_test select-total {
+  SELECT sum(age) FROM users;
+} {503960}
+
 do_execsql_test select-limit {
   SELECT id FROM users LIMIT 1;
 } {1}
