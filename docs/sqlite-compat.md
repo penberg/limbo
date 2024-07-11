@@ -128,7 +128,7 @@ This document describes the SQLite compatibility status of Limbo:
 | max(X)                       | Yes     |         |
 | min(X)                       | Yes     |         |
 | sum(X)                       | Yes     |         |
-| total(X)                     | No      |         |
+| total(X)                     | Yes     |         |
 
 
 ### Date and time functions

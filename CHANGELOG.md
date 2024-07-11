@@ -8,7 +8,7 @@
 
 - Partial `PRAGMA` statement support, including `cache_size`.
 
-- Partial aggregate function support, including `avg()`, `count()`, `max()`, `min()`, and `sum()`.
+- Partial aggregate function support, including `avg()`, `count()`, `max()`, `min()`, `sum()`, and `total()`.
 
 - `EXPLAIN` statement support.
 
