@@ -269,8 +269,8 @@ pub struct Program {
 
 impl Program {
     pub fn explain(&self) {
-        println!("addr  opcode         p1    p2    p3    p4             p5  comment");
-        println!("----  -------------  ----  ----  ----  -------------  --  -------");
+        println!("addr  opcode             p1    p2    p3    p4             p5  comment");
+        println!("----  -----------------  ----  ----  ----  -------------  --  -------");
         let mut indent_count: usize = 0;
         let indent = "  ";
         let mut prev_insn: Option<&Insn> = None;
@@ -972,8 +972,8 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
             ),
         };
     format!(
-        "{:<4} {}{:<13}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
-        addr, indent, opcode, p1, p2, p3, p4, p5, comment
+        "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
+        addr, &(indent + opcode), p1, p2, p3, p4.to_string(), p5, comment
     )
 }
 
