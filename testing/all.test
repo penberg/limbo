@@ -81,3 +81,48 @@ do_execsql_test cross-join-specific-columns {
 do_execsql_test realify {
     select price from products limit 1;
 } {79.0}
+
+do_execsql_test where-clause-eq {
+    select last_name from users where id = 2000;
+} {Rodriguez}
+
+do_execsql_test where-clause-eq-string {
+    select count(1) from users where last_name = 'Rodriguez';
+} {61}
+
+do_execsql_test where-clause-ne {
+    select count(1) from users where id != 2000;
+} {9999}
+
+do_execsql_test where-clause-gt {
+    select count(1) from users where id > 2000;
+} {8000}
+
+do_execsql_test where-clause-gte {
+    select count(1) from users where id >= 2000;
+} {8001}
+
+do_execsql_test where-clause-lt {
+    select count(1) from users where id < 2000;
+} {1999}
+
+do_execsql_test where-clause-lte {
+    select count(1) from users where id <= 2000;
+} {2000}
+
+do_execsql_test where-clause-unary-true {
+    select count(1) from users where 1;
+} {10000}
+
+# not correct? should be 0?
+do_execsql_test where-clause-unary-false {
+    select count(1) from users where 0;
+} {NULL}
+
+do_execsql_test where-clause-no-table-unary-true {
+    select 1 where 1;
+} {1}
+
+do_execsql_test where-clause-no-table-unary-false {
+    select 1 where 0;
+} {}

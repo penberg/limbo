@@ -16,6 +16,7 @@ struct Select {
     src_tables: Vec<SrcTable>, // Tables we use to get data from. This includes "from" and "joins"
     limit: Option<ast::Limit>,
     exist_aggregation: bool,
+    where_clause: Option<ast::Expr>,
     /// Ordered list of opened read table loops
     /// Used for generating a loop that looks like this:
     /// cursor 0 = open table 0
@@ -81,6 +82,7 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
         ast::OneSelect::Select {
             columns,
             from: Some(from),
+            where_clause,
             ..
         } => {
             let table_name = match from.select {
@@ -130,12 +132,14 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 src_tables: joins,
                 limit: select.limit.clone(),
                 exist_aggregation,
+                where_clause,
                 loops: Vec::new(),
             })
         }
         ast::OneSelect::Select {
             columns,
             from: None,
+            where_clause,
             ..
         } => {
             let column_info = analyze_columns(&columns, &Vec::new());
@@ -145,6 +149,7 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 column_info,
                 src_tables: Vec::new(),
                 limit: select.limit.clone(),
+                where_clause,
                 exist_aggregation,
                 loops: Vec::new(),
             })
@@ -184,6 +189,8 @@ fn translate_select(mut select: Select) -> Result<Program> {
     let limit_insn = if !select.src_tables.is_empty() {
         translate_tables_begin(&mut program, &mut select);
 
+        let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
+
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
 
         let mut limit_insn: Option<usize> = None;
@@ -195,7 +202,17 @@ fn translate_select(mut select: Select) -> Result<Program> {
             limit_insn = limit_reg.map(|_| program.emit_placeholder());
         }
 
-        translate_tables_end(&mut program, &select);
+        let next_offset = translate_tables_end(&mut program, &select);
+
+        if let Some((where_clause_offset, where_reg)) = where_maybe {
+            program.fixup_insn(
+                where_clause_offset,
+                Insn::IfNot {
+                    reg: where_reg,
+                    target_pc: next_offset, // jump to 'next row' instruction if where not matched
+                },
+            );
+        }
 
         if select.exist_aggregation {
             let mut target = register_start;
@@ -218,7 +235,17 @@ fn translate_select(mut select: Select) -> Result<Program> {
         limit_insn
     } else {
         assert!(!select.exist_aggregation);
+        let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
+        if let Some((where_clause_offset, where_reg)) = where_maybe {
+            program.fixup_insn(
+                where_clause_offset,
+                Insn::IfNot {
+                    reg: where_reg,
+                    target_pc: program.offset() + 1, // jump directly over the result row if no source tables and where not matched
+                },
+            );
+        }
         program.emit_insn(Insn::ResultRow {
             start_reg: register_start,
             count: register_end - register_start,
@@ -260,6 +287,19 @@ fn translate_select(mut select: Select) -> Result<Program> {
     Ok(program.build())
 }
 
+fn insert_where_clause_instructions(
+    select: &Select,
+    program: &mut ProgramBuilder,
+) -> Result<Option<(usize, usize)>> {
+    if let Some(w) = &select.where_clause {
+        let where_reg = program.alloc_register();
+        let _ = translate_expr(program, &select, w, where_reg)?;
+        Ok(Some((program.emit_placeholder(), where_reg))) // We emit a placeholder because we determine the jump target later (after we know where the 'cursor next' instruction is)
+    } else {
+        Ok(None)
+    }
+}
+
 fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) {
     for join in &select.src_tables {
         let table = &join.table;
@@ -272,11 +312,15 @@ fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) {
     }
 }
 
-fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
+fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) -> usize {
     // iterate in reverse order as we open cursors in order
+    let mut next_offset = std::usize::MAX;
     for table_loop in select.loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
         program.emit_insn(Insn::NextAsync { cursor_id });
+        if next_offset == std::usize::MAX {
+            next_offset = program.offset() - 1;
+        }
         program.emit_insn(Insn::NextAwait {
             cursor_id,
             pc_if_next: table_loop.rewind_offset,
@@ -289,6 +333,8 @@ fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
             },
         );
     }
+
+    next_offset
 }
 
 fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> LoopInfo {
@@ -468,7 +514,57 @@ fn translate_expr(
 ) -> Result<usize> {
     match expr {
         ast::Expr::Between { .. } => todo!(),
-        ast::Expr::Binary(_, _, _) => todo!(),
+        ast::Expr::Binary(e1, op, e2) => {
+            let e1_reg = program.alloc_register();
+            let e2_reg = program.alloc_register();
+            let _ = translate_expr(program, select, e1, e1_reg)?;
+            let _ = translate_expr(program, select, e2, e2_reg)?;
+            program.emit_insn(match op {
+                ast::Operator::NotEquals => Insn::Ne {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: program.offset() + 3, // jump to "emit True" instruction
+                },
+                ast::Operator::Equals => Insn::Eq {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: program.offset() + 3,
+                },
+                ast::Operator::Less => Insn::Lt {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: program.offset() + 3,
+                },
+                ast::Operator::LessEquals => Insn::Le {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: program.offset() + 3,
+                },
+                ast::Operator::Greater => Insn::Gt {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: program.offset() + 3,
+                },
+                ast::Operator::GreaterEquals => Insn::Ge {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: program.offset() + 3,
+                },
+                _ => todo!(),
+            });
+            program.emit_insn(Insn::Integer {
+                value: 0, // emit False
+                dest: target_register,
+            });
+            program.emit_insn(Insn::Goto {
+                target_pc: program.offset() + 2,
+            });
+            program.emit_insn(Insn::Integer {
+                value: 1, // emit True
+                dest: target_register,
+            });
+            Ok(target_register)
+        }
         ast::Expr::Case { .. } => todo!(),
         ast::Expr::Cast { .. } => todo!(),
         ast::Expr::Collate(_, _) => todo!(),
