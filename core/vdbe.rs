@@ -594,23 +594,38 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::AggFinal { register, func } => {
-                    match func {
-                        AggFunc::Avg => {
-                            let OwnedValue::Agg(agg) = state.registers[*register].borrow_mut()
-                            else {
-                                unreachable!();
+                    match state.registers[*register].borrow_mut() {
+                        OwnedValue::Agg(agg) => {
+                            match func {
+                                AggFunc::Avg => {
+                                    let AggContext::Avg(acc, count) = agg.borrow_mut() else {
+                                        unreachable!();
+                                    };
+                                    *acc /= count.clone();
+                                }
+                                AggFunc::Sum | AggFunc::Total => {}
+                                AggFunc::Count => {}
+                                AggFunc::Max => {}
+                                AggFunc::Min => {}
+                                _ => {
+                                    todo!();
+                                }
                             };
-                            let AggContext::Avg(acc, count) = agg.borrow_mut() else {
-                                unreachable!();
-                            };
-                            *acc /= count.clone();
                         }
-                        AggFunc::Sum | AggFunc::Total => {}
-                        AggFunc::Count => {}
-                        AggFunc::Max => {}
-                        AggFunc::Min => {}
+                        OwnedValue::Null => {
+                            // when the set is empty
+                            match func {
+                                AggFunc::Total => {
+                                    state.registers[*register] = OwnedValue::Float(0.0);
+                                }
+                                AggFunc::Count => {
+                                    state.registers[*register] = OwnedValue::Integer(0);
+                                }
+                                _ => {}
+                            }
+                        }
                         _ => {
-                            todo!();
+                            unreachable!();
                         }
                     };
                     state.pc += 1;
