@@ -88,6 +88,10 @@ cargo bench --bench benchmark -- --profile-time=5
 * Pekka Enberg, Sasu Tarkoma, Jon Crowcroft Ashwin Rao (2024). Serverless Runtime / Database Co-Design With Asynchronous I/O. In _EdgeSys ‘24_. [[PDF]](https://penberg.org/papers/penberg-edgesys24.pdf)
 * Pekka Enberg, Sasu Tarkoma, and Ashwin Rao (2023). Towards Database and Serverless Runtime Co-Design. In _CoNEXT-SW ’23_. [[PDF](https://penberg.org/papers/penberg-conext-sw-23.pdf)] [[Slides](https://penberg.org/papers/penberg-conext-sw-23-slides.pdf)]
 
+## Contributing
+
+We'd love to have you contribute to Limbo! Check out the [contribution guide] to get started.
+
 ## License
 
 This project is licensed under the [MIT license].
@@ -98,4 +102,5 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in Limbo by you, shall be licensed as MIT, without any additional
 terms or conditions.
 
+[contribution guide]: https://github.com/penberg/limbo/blob/main/CONTRIBUTING.md
 [MIT license]: https://github.com/penberg/limbo/blob/main/LICENSE.md
