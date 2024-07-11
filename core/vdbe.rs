@@ -445,7 +445,13 @@ impl Program {
                                 OwnedValue::Integer(0),
                             ))),
                             AggFunc::Sum => {
-                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Integer(0))))
+                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Null)))
+                            }
+                            AggFunc::Total => {
+                                // The result of total() is always a floating point value.
+                                // No overflow error is ever raised if any prior input was a floating point value.
+                                // Total() never throws an integer overflow.
+                                OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
                             }
                             AggFunc::Count => {
                                 OwnedValue::Agg(Box::new(AggContext::Count(OwnedValue::Integer(0))))
@@ -496,7 +502,7 @@ impl Program {
                             *acc += col;
                             *count += 1;
                         }
-                        AggFunc::Sum => {
+                        AggFunc::Sum | AggFunc::Total => {
                             let col = state.registers[*col].clone();
                             let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
                             else {
@@ -599,7 +605,7 @@ impl Program {
                             };
                             *acc /= count.clone();
                         }
-                        AggFunc::Sum => {}
+                        AggFunc::Sum | AggFunc::Total => {}
                         AggFunc::Count => {}
                         AggFunc::Max => {}
                         AggFunc::Min => {}
@@ -973,7 +979,14 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
-        addr, &(indent + opcode), p1, p2, p3, p4.to_string(), p5, comment
+        addr,
+        &(indent + opcode),
+        p1,
+        p2,
+        p3,
+        p4.to_string(),
+        p5,
+        comment
     )
 }
 
