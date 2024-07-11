@@ -184,8 +184,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
     let limit_insn = if !select.src_tables.is_empty() {
         translate_tables_begin(&mut program, &mut select);
 
-        let (register_start, register_end) =
-            translate_columns(&mut program, &select)?;
+        let (register_start, register_end) = translate_columns(&mut program, &select)?;
 
         let mut limit_insn: Option<usize> = None;
         if !select.exist_aggregation {
@@ -217,10 +216,9 @@ fn translate_select(mut select: Select) -> Result<Program> {
             limit_insn = limit_reg.map(|_| program.emit_placeholder());
         }
         limit_insn
-    } else{
+    } else {
         assert!(!select.exist_aggregation);
-        let (register_start, register_end) =
-            translate_columns(&mut program, &select)?;
+        let (register_start, register_end) = translate_columns(&mut program, &select)?;
         program.emit_insn(Insn::ResultRow {
             start_reg: register_start,
             count: register_end - register_start,
@@ -274,10 +272,7 @@ fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) {
     }
 }
 
-fn translate_tables_end(
-    program: &mut ProgramBuilder,
-    select: &Select,
-) {
+fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
     // iterate in reverse order as we open cursors in order
     for table_loop in select.loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
@@ -296,10 +291,7 @@ fn translate_tables_end(
     }
 }
 
-fn translate_table_open_cursor(
-    program: &mut ProgramBuilder,
-    table: &Table,
-) -> LoopInfo {
+fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> LoopInfo {
     let cursor_id = program.alloc_cursor_id();
     let root_page = match table {
         Table::BTree(btree) => btree.root_page,
@@ -317,10 +309,7 @@ fn translate_table_open_cursor(
     }
 }
 
-fn translate_table_open_loop(
-    program: &mut ProgramBuilder,
-    loop_info: &mut LoopInfo,
-) {
+fn translate_table_open_loop(program: &mut ProgramBuilder, loop_info: &mut LoopInfo) {
     program.emit_insn(Insn::RewindAsync {
         cursor_id: loop_info.open_cursor,
     });
@@ -328,10 +317,7 @@ fn translate_table_open_loop(
     loop_info.rewind_offset = rewind_await_offset;
 }
 
-fn translate_columns(
-    program: &mut ProgramBuilder,
-    select: &Select,
-) -> Result<(usize, usize)> {
+fn translate_columns(program: &mut ProgramBuilder, select: &Select) -> Result<(usize, usize)> {
     let register_start = program.next_free_register();
 
     // allocate one register as output for each col
@@ -361,8 +347,7 @@ fn translate_column(
     match col {
         ast::ResultColumn::Expr(expr, _) => {
             if info.is_aggregation_function() {
-                let _ =
-                    translate_aggregation(program, select, expr, info, target_register)?;
+                let _ = translate_aggregation(program, select, expr, info, target_register)?;
             } else {
                 let _ = translate_expr(program, select, expr, target_register)?;
             }
@@ -410,10 +395,7 @@ fn translate_table_star(
     }
 }
 
-fn analyze_columns(
-    columns: &Vec<ast::ResultColumn>,
-    joins: &Vec<SrcTable>,
-) -> Vec<ColumnInfo> {
+fn analyze_columns(columns: &Vec<ast::ResultColumn>, joins: &Vec<SrcTable>) -> Vec<ColumnInfo> {
     let mut column_information_list = Vec::with_capacity(columns.len());
     for column in columns {
         let mut info = ColumnInfo::new();
