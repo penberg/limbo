@@ -13,7 +13,7 @@
 ///
 /// The first page is special because it contains a 100 byte header at the beginning.
 ///
-/// Each page constists of a page header and N cells, which contain the records.
+/// Each page consists of a page header and N cells, which contain the records.
 ///
 /// +-----------------+----------------+---------------------+----------------+
 /// |                 |                |                     |                |
@@ -38,7 +38,7 @@ pub const DATABASE_HEADER_SIZE: usize = 100;
 // DEFAULT_CACHE_SIZE negative values mean that we store the amount of pages a XKiB of memory can hold.
 // We can calculate "real" cache size by diving by page size.
 const DEFAULT_CACHE_SIZE: i32 = -2000;
-// Minimun number of pages that cache can hold.
+// Minimum number of pages that cache can hold.
 pub const MIN_PAGE_CACHE_SIZE: usize = 10;
 
 #[derive(Debug, Default, Clone)]
