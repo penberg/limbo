@@ -86,6 +86,18 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
             (OwnedValue::Text(string_left), OwnedValue::Text(string_right)) => {
                 OwnedValue::Text(Rc::new(string_left.to_string() + &string_right.to_string()))
             }
+            (OwnedValue::Text(string_left), OwnedValue::Integer(int_right)) => {
+                OwnedValue::Text(Rc::new(string_left.to_string() + &int_right.to_string()))
+            }
+            (OwnedValue::Integer(int_left), OwnedValue::Text(string_right)) => {
+                OwnedValue::Text(Rc::new(int_left.to_string() + &string_right.to_string()))
+            }
+            (OwnedValue::Text(string_left), OwnedValue::Float(float_right)) => {
+                OwnedValue::Text(Rc::new(string_left.to_string() + &float_right.to_string()))
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Text(string_right)) => {
+                OwnedValue::Text(Rc::new(float_left.to_string() + &string_right.to_string()))
+            }
             (lhs, OwnedValue::Null) => lhs,
             (OwnedValue::Null, rhs) => rhs,
             _ => OwnedValue::Float(0.0),

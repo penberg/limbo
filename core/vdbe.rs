@@ -724,12 +724,10 @@ impl Program {
                                     }
                                 }
                             }
-                            AggFunc::GroupConcat => OwnedValue::Agg(Box::new(
+                            AggFunc::GroupConcat |
+                            AggFunc::StringAgg => OwnedValue::Agg(Box::new(
                                 AggContext::GroupConcat(OwnedValue::Text(Rc::new("".to_string()))),
                             )),
-                            _ => {
-                                todo!();
-                            }
                         };
                     }
                     match func {
@@ -830,7 +828,8 @@ impl Program {
                                 }
                             }
                         }
-                        AggFunc::GroupConcat => {
+                        AggFunc::GroupConcat |
+                        AggFunc::StringAgg => {
                             let col = state.registers[*col].clone();
                             let delimiter = state.registers[*delimiter].clone();
                             let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
@@ -840,19 +839,11 @@ impl Program {
                             let AggContext::GroupConcat(acc) = agg.borrow_mut() else {
                                 unreachable!();
                             };
-                            // let AggContext::GroupConcat(acc, _col, delimiter) =
-                            //     state.registers.borrow_mut()
-                            // else {
-                            //     unreachable!();
-                            // };
                             if acc.to_string().len() == 0 {
                                 *acc = col;
                             } else {
                                 *acc += delimiter + col;
                             }
-                        }
-                        _ => {
-                            todo!();
                         }
                     };
                     state.pc += 1;
@@ -871,10 +862,7 @@ impl Program {
                                 AggFunc::Count => {}
                                 AggFunc::Max => {}
                                 AggFunc::Min => {}
-                                AggFunc::GroupConcat => {}
-                                _ => {
-                                    todo!();
-                                }
+                                AggFunc::GroupConcat | AggFunc::StringAgg => {}
                             };
                         }
                         OwnedValue::Null => {
