@@ -712,29 +712,33 @@ fn translate_aggregation(
                 anyhow::bail!("Parse error: group_concat bad number of arguments");
             }
 
-            let expr = &args[0];
             let expr_reg = program.alloc_register();
             let delimiter_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg);
-            let delimiter: ast::Expr;
+            
+            let expr = &args[0];
+            let delimiter_expr: ast::Expr;
+
             if args.len() == 2 {
                 match &args[1] {
                     ast::Expr::Id(ident) => {
                         if ident.0.starts_with("\"") {
-                            delimiter = ast::Expr::Literal(Literal::String(ident.0.to_string()));
+                            delimiter_expr = ast::Expr::Literal(Literal::String(ident.0.to_string()));
                         } else {
-                            delimiter = args[1].clone();
+                            delimiter_expr = args[1].clone();
                         }
                     },
                     ast::Expr::Literal(Literal::String(s)) => {
-                        delimiter = ast::Expr::Literal(Literal::String(s.to_string()));
+                        delimiter_expr = ast::Expr::Literal(Literal::String(s.to_string()));
                     },
                     _ => anyhow::bail!("Incorrect delimiter parameter"),
                 };
             } else {
-                delimiter = ast::Expr::Literal(Literal::String(String::from("\",\"")));
+                delimiter_expr = ast::Expr::Literal(Literal::String(String::from("\",\"")));
             }
-            let _ = translate_expr(program, select, &delimiter, delimiter_reg);
+
+            let _ = translate_expr(program, select, expr, expr_reg);
+            let _ = translate_expr(program, select, &delimiter_expr, delimiter_reg);
+
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -776,29 +780,32 @@ fn translate_aggregation(
         }
         AggFunc::StringAgg => {
             if args.len() != 2 {
-                anyhow::bail!("Parse error: StringAgg bad number of arguments");
+                anyhow::bail!("Parse error: string_agg bad number of arguments");
             }
 
-            let expr = &args[0];
+            
             let expr_reg = program.alloc_register();
             let delimiter_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg);
-            let delimiter: ast::Expr;
+            
+            let expr = &args[0];
+            let delimiter_expr: ast::Expr;
+
             match &args[1] {
                 ast::Expr::Id(ident) => {
                     if ident.0.starts_with("\"") {
-                        delimiter = ast::Expr::Literal(Literal::String(ident.0.to_string()));
+                        delimiter_expr = ast::Expr::Literal(Literal::String(ident.0.to_string()));
                     } else {
-                        delimiter = args[1].clone();
+                        delimiter_expr = args[1].clone();
                     }
                 },
                 ast::Expr::Literal(Literal::String(s)) => {
-                    delimiter = ast::Expr::Literal(Literal::String(s.to_string()));
+                    delimiter_expr = ast::Expr::Literal(Literal::String(s.to_string()));
                 },
                 _ => anyhow::bail!("Incorrect delimiter parameter"),
             };
-            let _ = translate_expr(program, select, &delimiter, delimiter_reg);
-            let _ = translate_expr(program, select, &delimiter, delimiter_reg);
+
+            let _ = translate_expr(program, select, expr, expr_reg);
+            let _ = translate_expr(program, select, &delimiter_expr, delimiter_reg);
             
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,

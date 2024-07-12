@@ -842,7 +842,8 @@ impl Program {
                             if acc.to_string().len() == 0 {
                                 *acc = col;
                             } else {
-                                *acc += delimiter + col;
+                                *acc += delimiter;
+                                *acc += col;
                             }
                         }
                     };
