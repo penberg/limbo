@@ -117,7 +117,7 @@ do_execsql_test where-clause-unary-true {
 # not correct? should be 0?
 do_execsql_test where-clause-unary-false {
     select count(1) from users where 0;
-} {NULL}
+} {0}
 
 do_execsql_test where-clause-no-table-unary-true {
     select 1 where 1;
