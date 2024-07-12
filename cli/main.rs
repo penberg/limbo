@@ -75,6 +75,38 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn display_help_message() {
+    let help_message = r#"
+Limbo SQL Shell Help
+==============
+
+Welcome to the Limbo SQL Shell! You can execute any standard SQL command here.
+In addition to standard SQL commands, the following special commands are available:
+
+Special Commands:
+-----------------
+.schema <table_name>       Show the schema of the specified table.
+.opcodes                   Display all the opcodes defined by the virtual machine
+.help                      Display this help message.
+
+Usage Examples:
+---------------
+1. To view the schema of a table named 'employees':
+   .schema employees
+
+2. To list all available SQL opcodes:
+   .opcodes
+
+Note:
+-----
+- All SQL commands must end with a semicolon (;).
+- Special commands do not require a semicolon.
+
+"#;
+
+    println!("{}", help_message);
+}
+
 fn handle_dot_command(
     io: Rc<dyn limbo_core::IO>,
     conn: &limbo_core::Connection,
@@ -103,6 +135,9 @@ fn handle_dot_command(
                     println!("{}\n", op);
                 }
             }
+        }
+        ".help" => {
+            display_help_message();
         }
         _ => {
             println!("Unknown command: {}", args[0]);
