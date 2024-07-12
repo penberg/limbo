@@ -4,7 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-faker = "*"
+faker = "26.0.0"
 
 [dev-packages]
 
