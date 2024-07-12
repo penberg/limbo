@@ -41,7 +41,7 @@ This document describes the SQLite compatibility status of Limbo:
 | ROLLBACK TRANSACTION         | No      |         |
 | SAVEPOINT                    | No      |         |
 | SELECT                       | Partial |         |
-| SELECT ... WHERE             | No      |         |
+| SELECT ... WHERE             | Partial |         |
 | SELECT ... LIMIT             | Yes     |         |
 | SELECT ... ORDER BY          | No      |         |
 | SELECT ... GROUP BY          | No      |         |

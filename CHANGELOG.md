@@ -4,7 +4,7 @@
 
 ### Added
 
-- Partial `SELECT` statement support, including `LIMIT`.
+- Partial `SELECT` statement support, including `WHERE`, `LIMIT`, and `CROSS JOIN`.
 
 - Partial `PRAGMA` statement support, including `cache_size`.
 
