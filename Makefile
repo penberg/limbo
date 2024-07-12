@@ -2,6 +2,9 @@ MINIMUM_RUST_VERSION := 1.73.0
 CURRENT_RUST_VERSION := $(shell rustc -V | sed -E 's/rustc ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
 RUSTUP := $(shell command -v rustup 2> /dev/null)
 
+# Executable used to execute the compatibility tests.
+SQLITE_EXEC ?= ./target/debug/limbo
+
 all: check-rust-version check-wasm-target limbo limbo-wasm
 .PHONY: all
 
@@ -39,5 +42,5 @@ limbo-wasm:
 .PHONY: limbo-wasm
 
 test: limbo
-	SQLITE_EXEC=./target/debug/limbo ./testing/all.test
+	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
 .PHONY: test

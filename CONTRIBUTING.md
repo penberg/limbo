@@ -45,9 +45,20 @@ If the bytecode is the same, but query results are different, then the bug is so
 ## Compatibility tests
 
 The `testing/test.all` is a starting point for adding functional tests using a similar syntax to SQLite.
-When you run `make` the test cases are run with `cargo run`, which uses the latest build of the Limbo shell.
-If you run `testing/test.all` directly, it will run the tests with `sqlite3`.
 The purpose of these tests is to verify behavior matches with SQLite and Limbo.
+
+To run the test suite with Limbo, simply run:
+
+```
+make test
+```
+
+To run the test suite with SQLite, type:
+
+```
+SQLITE_EXEC=sqlite3 make test
+```
+
 When working on a new feature, please consider adding a test case for it.
 
 ## Deterministic simulation tests
