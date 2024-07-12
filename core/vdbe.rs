@@ -20,7 +20,47 @@ pub enum Insn {
     Init {
         target_pc: BranchOffset,
     },
-
+    // Compare two registers and jump to the given PC if they are equal.
+    Eq {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+    },
+    // Compare two registers and jump to the given PC if they are not equal.
+    Ne {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+    },
+    // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
+    Lt {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+    },
+    // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
+    Le {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+    },
+    // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
+    Gt {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+    },
+    // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
+    Ge {
+        lhs: usize,
+        rhs: usize,
+        target_pc: BranchOffset,
+    },
+    // Jump to the given PC if the register is zero.
+    IfNot {
+        reg: usize,
+        target_pc: BranchOffset,
+    },
     // Open a cursor for reading.
     OpenReadAsync {
         cursor_id: CursorID,
@@ -293,6 +333,200 @@ impl Program {
             match insn {
                 Insn::Init { target_pc } => {
                     state.pc = *target_pc;
+                }
+                Insn::Eq {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let target_pc = *target_pc;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            if lhs == rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            if lhs == rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => {
+                            if lhs == rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Insn::Ne {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let target_pc = *target_pc;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            if lhs != rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            if lhs != rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => {
+                            if lhs != rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Insn::Lt {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let target_pc = *target_pc;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            if lhs < rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            if lhs < rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Insn::Le {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let target_pc = *target_pc;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            if lhs <= rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            if lhs <= rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Insn::Gt {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let target_pc = *target_pc;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            if lhs > rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            if lhs > rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Insn::Ge {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let target_pc = *target_pc;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            if lhs >= rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            if lhs >= rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                }
+                Insn::IfNot { reg, target_pc } => {
+                    let reg = *reg;
+                    let target_pc = *target_pc;
+                    match &state.registers[reg] {
+                        OwnedValue::Integer(0) => {
+                            state.pc = target_pc;
+                        }
+                        _ => {
+                            state.pc += 1;
+                        }
+                    }
                 }
                 Insn::OpenReadAsync {
                     cursor_id,
@@ -726,6 +960,93 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("Start at {}", target_pc),
+            ),
+            Insn::Eq {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Eq",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] == r[{}] -> {}", lhs, rhs, target_pc),
+            ),
+            Insn::Ne {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Ne",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] != r[{}] -> {}", lhs, rhs, target_pc),
+            ),
+            Insn::Lt {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Lt",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] < r[{}] -> {}", lhs, rhs, target_pc),
+            ),
+            Insn::Le {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Le",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] <= r[{}] -> {}", lhs, rhs, target_pc),
+            ),
+            Insn::Gt {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Gt",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] > r[{}] -> {}", lhs, rhs, target_pc),
+            ),
+            Insn::Ge {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Ge",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] >= r[{}] -> {}", lhs, rhs, target_pc),
+            ),
+            Insn::IfNot { reg, target_pc } => (
+                "IfNot",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] -> {}", reg, target_pc),
             ),
             Insn::OpenReadAsync {
                 cursor_id,
