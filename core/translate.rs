@@ -6,7 +6,7 @@ use crate::pager::Pager;
 use crate::schema::{Column, Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
-use crate::vdbe::{Insn, Program, ProgramBuilder};
+use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast::{self, Expr};
 
@@ -31,7 +31,8 @@ struct Select {
 
 struct LoopInfo {
     table: Table,
-    rewind_offset: usize,
+    rewind_offset: BranchOffset,
+    rewind_label: BranchOffset,
     open_cursor: usize,
 }
 
@@ -58,6 +59,12 @@ impl ColumnInfo {
     pub fn is_aggregation_function(&self) -> bool {
         self.func.is_some()
     }
+}
+
+struct LimitInfo {
+    limit_reg: usize,
+    num: i64,
+    goto_label: BranchOffset,
 }
 
 /// Translate SQL statement into bytecode program.
@@ -161,58 +168,58 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
 /// Generate code for a SELECT statement.
 fn translate_select(mut select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
-    let init_offset = program.emit_placeholder();
+    let init_label = program.allocate_label();
+    program.add_label(init_label, program.offset());
+    program.emit_insn(Insn::Init {
+        target_pc: init_label,
+    });
     let start_offset = program.offset();
-    let limit_reg = if let Some(limit) = &select.limit {
+
+    let limit_info = if let Some(limit) = &select.limit {
         assert!(limit.offset.is_none());
         let target_register = program.alloc_register();
-        Some(translate_expr(
-            &mut program,
-            &select,
-            &limit.expr,
-            target_register,
-        )?)
+        let limit_reg = translate_expr(&mut program, &select, &limit.expr, target_register)?;
+        let num = if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &limit.expr {
+            num.parse::<i64>()?
+        } else {
+            todo!();
+        };
+        let goto_label = program.allocate_label();
+        if num == 0 {
+            program.add_label(goto_label, program.offset());
+            program.emit_insn(Insn::Goto {
+                target_pc: goto_label,
+            });
+        }
+        Some(LimitInfo {
+            limit_reg,
+            num,
+            goto_label,
+        })
     } else {
         None
     };
-    let parsed_limit = select.limit.as_ref().and_then(|limit| {
-        if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &limit.expr {
-            num.parse::<i64>().ok()
-        } else {
-            None
-        }
-    });
-    let limit_goto = match parsed_limit {
-        Some(0) => Some(program.emit_placeholder()),
-        _ => None,
-    };
-    let limit_insn = if !select.src_tables.is_empty() {
+
+    if !select.src_tables.is_empty() {
         translate_tables_begin(&mut program, &mut select);
 
         let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
 
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
 
-        let mut limit_insn: Option<usize> = None;
         if !select.exist_aggregation {
             program.emit_insn(Insn::ResultRow {
                 start_reg: register_start,
                 count: register_end - register_start,
             });
-            limit_insn = limit_reg.map(|_| program.emit_placeholder());
+            emit_limit_insn(&limit_info, &mut program);
         }
 
-        let next_offset = translate_tables_end(&mut program, &select);
-
-        if let Some((where_clause_offset, where_reg)) = where_maybe {
-            program.fixup_insn(
-                where_clause_offset,
-                Insn::IfNot {
-                    reg: where_reg,
-                    target_pc: next_offset, // jump to 'next row' instruction if where not matched
-                },
-            );
+        if let Some((where_clause_label, where_reg)) = where_maybe {
+            program.resolve_label(where_clause_label, program.offset());
         }
+
+        translate_tables_end(&mut program, &select);
 
         if select.exist_aggregation {
             let mut target = register_start;
@@ -230,56 +237,27 @@ fn translate_select(mut select: Select) -> Result<Program> {
                 start_reg: register_start,
                 count: register_end - register_start,
             });
-            limit_insn = limit_reg.map(|_| program.emit_placeholder());
+            emit_limit_insn(&limit_info, &mut program);
         }
-        limit_insn
     } else {
         assert!(!select.exist_aggregation);
         let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
-        if let Some((where_clause_offset, where_reg)) = where_maybe {
-            program.fixup_insn(
-                where_clause_offset,
-                Insn::IfNot {
-                    reg: where_reg,
-                    target_pc: program.offset() + 1, // jump directly over the result row if no source tables and where not matched
-                },
-            );
+        if let Some((where_clause_label, where_reg)) = where_maybe {
+            program.resolve_label(where_clause_label, program.offset() + 1);
         }
         program.emit_insn(Insn::ResultRow {
             start_reg: register_start,
             count: register_end - register_start,
         });
-        limit_reg.map(|_| program.emit_placeholder())
+        emit_limit_insn(&limit_info, &mut program);
     };
     program.emit_insn(Insn::Halt);
     let halt_offset = program.offset() - 1;
-    if let Some(limit_goto) = limit_goto {
-        program.fixup_insn(
-            limit_goto,
-            Insn::Goto {
-                target_pc: halt_offset,
-            },
-        );
+    if limit_info.is_some() && limit_info.as_ref().unwrap().goto_label < 0 {
+        program.resolve_label(limit_info.as_ref().unwrap().goto_label, halt_offset);
     }
-    if let Some(limit_insn) = limit_insn {
-        let insn = match parsed_limit {
-            Some(0) => Insn::Goto {
-                target_pc: halt_offset,
-            },
-            _ => Insn::DecrJumpZero {
-                reg: limit_reg.unwrap(),
-                target_pc: halt_offset,
-            },
-        };
-        program.fixup_insn(limit_insn, insn);
-    }
-    program.fixup_insn(
-        init_offset,
-        Insn::Init {
-            target_pc: program.offset(),
-        },
-    );
+    program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
@@ -287,14 +265,34 @@ fn translate_select(mut select: Select) -> Result<Program> {
     Ok(program.build())
 }
 
+fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder) {
+    if limit_info.is_none() {
+        return;
+    }
+    let limit_info = limit_info.as_ref().unwrap();
+    if limit_info.num > 0 {
+        program.add_label(limit_info.goto_label, program.offset());
+        program.emit_insn(Insn::DecrJumpZero {
+            reg: limit_info.limit_reg,
+            target_pc: limit_info.goto_label,
+        });
+    }
+}
+
 fn insert_where_clause_instructions(
     select: &Select,
     program: &mut ProgramBuilder,
-) -> Result<Option<(usize, usize)>> {
+) -> Result<Option<(BranchOffset, usize)>> {
     if let Some(w) = &select.where_clause {
         let where_reg = program.alloc_register();
         let _ = translate_expr(program, &select, w, where_reg)?;
-        Ok(Some((program.emit_placeholder(), where_reg))) // We emit a placeholder because we determine the jump target later (after we know where the 'cursor next' instruction is)
+        let label = program.allocate_label();
+        program.add_label(label, program.offset());
+        program.emit_insn(Insn::IfNot {
+            reg: where_reg,
+            target_pc: label, // jump to 'next row' instruction if where not matched
+        });
+        Ok(Some((label, where_reg))) // We emit a placeholder because we determine the jump target later (after we know where the 'cursor next' instruction is)
     } else {
         Ok(None)
     }
@@ -312,29 +310,17 @@ fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) {
     }
 }
 
-fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) -> usize {
+fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
     // iterate in reverse order as we open cursors in order
-    let mut next_offset = std::usize::MAX;
     for table_loop in select.loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
         program.emit_insn(Insn::NextAsync { cursor_id });
-        if next_offset == std::usize::MAX {
-            next_offset = program.offset() - 1;
-        }
         program.emit_insn(Insn::NextAwait {
             cursor_id,
-            pc_if_next: table_loop.rewind_offset,
+            pc_if_next: table_loop.rewind_offset as BranchOffset,
         });
-        program.fixup_insn(
-            table_loop.rewind_offset,
-            Insn::RewindAwait {
-                cursor_id: table_loop.open_cursor,
-                pc_if_empty: program.offset(),
-            },
-        );
+        program.resolve_label(table_loop.rewind_label, program.offset());
     }
-
-    next_offset
 }
 
 fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> LoopInfo {
@@ -352,6 +338,7 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> L
         table: table.clone(),
         open_cursor: cursor_id,
         rewind_offset: 0,
+        rewind_label: 0,
     }
 }
 
@@ -359,8 +346,14 @@ fn translate_table_open_loop(program: &mut ProgramBuilder, loop_info: &mut LoopI
     program.emit_insn(Insn::RewindAsync {
         cursor_id: loop_info.open_cursor,
     });
-    let rewind_await_offset = program.emit_placeholder();
-    loop_info.rewind_offset = rewind_await_offset;
+    let rewind_await_label = program.allocate_label();
+    program.emit_insn(Insn::RewindAwait {
+        cursor_id: loop_info.open_cursor,
+        pc_if_empty: rewind_await_label,
+    });
+    program.add_label(rewind_await_label, program.offset() - 1);
+    loop_info.rewind_label = rewind_await_label;
+    loop_info.rewind_offset = program.offset() - 1;
 }
 
 fn translate_columns(program: &mut ProgramBuilder, select: &Select) -> Result<(usize, usize)> {
@@ -774,7 +767,11 @@ fn translate_pragma(
     pager: Rc<Pager>,
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
-    let init_offset = program.emit_placeholder();
+    let init_label = program.allocate_label();
+    program.add_label(init_label, program.offset());
+    program.emit_insn(Insn::Init {
+        target_pc: init_label,
+    });
     let start_offset = program.offset();
     match body {
         None => {
@@ -811,12 +808,7 @@ fn translate_pragma(
         }
     };
     program.emit_insn(Insn::Halt);
-    program.fixup_insn(
-        init_offset,
-        Insn::Init {
-            target_pc: program.offset(),
-        },
-    );
+    program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,

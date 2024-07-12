@@ -6,15 +6,16 @@ use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Re
 use anyhow::Result;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-pub type BranchOffset = usize;
+pub type BranchOffset = i64;
 
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
 
+#[derive(Debug)]
 pub enum Insn {
     // Initialize the program state and jump to the given PC.
     Init {
@@ -205,18 +206,25 @@ pub enum Insn {
     },
 }
 
+// Index of insn in list of insns
+type InsnReference = usize;
+
 pub struct ProgramBuilder {
     next_free_register: usize,
+    next_free_label: BranchOffset,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
+    unresolved_labels: HashMap<BranchOffset, Vec<InsnReference>>,
 }
 
 impl ProgramBuilder {
     pub fn new() -> Self {
         Self {
             next_free_register: 0,
+            next_free_label: 0,
             next_free_cursor_id: 0,
             insns: Vec::new(),
+            unresolved_labels: HashMap::new(),
         }
     }
 
@@ -252,12 +260,124 @@ impl ProgramBuilder {
         self.insns.push(insn);
     }
 
-    pub fn fixup_insn(&mut self, offset: usize, insn: Insn) {
-        self.insns[offset] = insn;
+    pub fn offset(&self) -> BranchOffset {
+        self.insns.len() as BranchOffset
     }
 
-    pub fn offset(&self) -> usize {
-        self.insns.len()
+    pub fn allocate_label(&mut self) -> BranchOffset {
+        self.next_free_label -= 1;
+        self.unresolved_labels
+            .insert(self.next_free_label, Vec::new());
+        self.next_free_label
+    }
+
+    pub fn add_label(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
+        assert!(insn_reference >= 0);
+        assert!(label < 0);
+        let insn_reference = insn_reference as InsnReference;
+        let label_references = self.unresolved_labels.get_mut(&label);
+        if let Some(label_references) = label_references {
+            label_references.push(insn_reference);
+        } else {
+            self.unresolved_labels.insert(label, vec![insn_reference]);
+        }
+    }
+
+    pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
+        assert!(label < 0);
+        assert!(to_offset >= 0);
+        let label_references = self.unresolved_labels.get_mut(&label);
+        if label_references.is_none() {
+            unreachable!("Forbidden resolve of an unexistent label!");
+        }
+        let label_references = label_references.unwrap();
+
+        for insn_reference in label_references {
+            let insn = &mut self.insns[*insn_reference];
+            match insn {
+                Insn::Init { target_pc } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Eq {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Ne {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Lt {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Le {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Gt {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Ge {
+                    lhs,
+                    rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::IfNot { reg, target_pc } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::RewindAwait {
+                    cursor_id,
+                    pc_if_empty,
+                } => {
+                    assert!(*pc_if_empty < 0);
+                    *pc_if_empty = to_offset;
+                }
+                Insn::Goto { target_pc } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::DecrJumpZero { reg, target_pc } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::SorterNext {
+                    cursor_id,
+                    pc_if_next,
+                } => {
+                    assert!(*pc_if_next < 0);
+                    *pc_if_next = to_offset;
+                }
+                _ => {
+                    todo!("missing resolve_label for {:?}", insn);
+                }
+            }
+        }
     }
 
     pub fn build(self) -> Program {
@@ -316,7 +436,7 @@ impl Program {
         let mut prev_insn: Option<&Insn> = None;
         for (addr, insn) in self.insns.iter().enumerate() {
             indent_count = get_indent_count(indent_count, insn, prev_insn);
-            print_insn(addr, insn, indent.repeat(indent_count));
+            print_insn(addr as BranchOffset, insn, indent.repeat(indent_count));
             prev_insn = Some(insn);
         }
     }
@@ -327,7 +447,7 @@ impl Program {
         pager: Rc<Pager>,
     ) -> Result<StepResult<'a>> {
         loop {
-            let insn = &self.insns[state.pc];
+            let insn = &self.insns[state.pc as usize];
             trace_insn(state.pc, insn);
             let mut cursors = state.cursors.borrow_mut();
             match insn {
