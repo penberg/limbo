@@ -168,6 +168,7 @@ pub enum Insn {
     AggStep {
         acc_reg: usize,
         col: usize,
+        delimiter: usize,
         func: AggFunc,
     },
 
@@ -671,7 +672,12 @@ impl Program {
                     }
                     _ => unreachable!("DecrJumpZero on non-integer register"),
                 },
-                Insn::AggStep { acc_reg, col, func } => {
+                Insn::AggStep {
+                    acc_reg,
+                    col,
+                    delimiter,
+                    func,
+                } => {
                     if let OwnedValue::Null = &state.registers[*acc_reg] {
                         state.registers[*acc_reg] = match func {
                             AggFunc::Avg => OwnedValue::Agg(Box::new(AggContext::Avg(
@@ -718,6 +724,9 @@ impl Program {
                                     }
                                 }
                             }
+                            AggFunc::GroupConcat => OwnedValue::Agg(Box::new(
+                                AggContext::GroupConcat(OwnedValue::Text(Rc::new("".to_string()))),
+                            )),
                             _ => {
                                 todo!();
                             }
@@ -821,6 +830,27 @@ impl Program {
                                 }
                             }
                         }
+                        AggFunc::GroupConcat => {
+                            let col = state.registers[*col].clone();
+                            let delimiter = state.registers[*delimiter].clone();
+                            let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
+                            else {
+                                unreachable!();
+                            };
+                            let AggContext::GroupConcat(acc) = agg.borrow_mut() else {
+                                unreachable!();
+                            };
+                            // let AggContext::GroupConcat(acc, _col, delimiter) =
+                            //     state.registers.borrow_mut()
+                            // else {
+                            //     unreachable!();
+                            // };
+                            if acc.to_string().len() == 0 {
+                                *acc = col;
+                            } else {
+                                *acc += delimiter + col;
+                            }
+                        }
                         _ => {
                             todo!();
                         }
@@ -841,6 +871,7 @@ impl Program {
                                 AggFunc::Count => {}
                                 AggFunc::Max => {}
                                 AggFunc::Min => {}
+                                AggFunc::GroupConcat => {}
                                 _ => {
                                     todo!();
                                 }
@@ -1240,7 +1271,12 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 0,
                 "".to_string(),
             ),
-            Insn::AggStep { func, acc_reg, col } => (
+            Insn::AggStep {
+                func,
+                acc_reg,
+                delimiter: _,
+                col,
+            } => (
                 "AggStep",
                 0,
                 *col as i32,

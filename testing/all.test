@@ -61,6 +61,14 @@ do_execsql_test select-min {
   SELECT min(age) FROM users;
 } {1}
 
+do_execsql_test select-group-concat {
+  SELECT group_concat(name) FROM products;
+} {hat,cap,shirt,sweater,sweatshirt,shorts,jeans,sneakers,boots,coat,accessories}
+
+do_execsql_test select-group-concat-with-delimiter {
+  SELECT group_concat(name, ';') FROM products;
+} {hat;cap;shirt;sweater;sweatshirt;shorts;jeans;sneakers;boots;coat;accessories}
+
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
 } {}

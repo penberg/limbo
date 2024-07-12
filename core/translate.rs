@@ -8,7 +8,7 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{self, Expr};
+use sqlite3_parser::ast::{self, Expr, Literal};
 
 struct Select {
     columns: Vec<ast::ResultColumn>,
@@ -685,6 +685,7 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
+                delimiter: 0,
                 func: AggFunc::Avg,
             });
             target_register
@@ -701,11 +702,42 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
+                delimiter: 0,
                 func: AggFunc::Count,
             });
             target_register
         }
-        AggFunc::GroupConcat => todo!(),
+        AggFunc::GroupConcat => {
+            if args.len() != 1 && args.len() != 2 {
+                anyhow::bail!("Parse error: group_concat bad number of arguments");
+            }
+
+            let expr = &args[0];
+            let expr_reg = program.alloc_register();
+            let delimiter_reg = program.alloc_register();
+            let _ = translate_expr(program, select, expr, expr_reg);
+            if args.len() == 2 {
+                let delimiter = match &args[1] {
+                    ast::Expr::Id(ident) => &ident.0,
+                    ast::Expr::Literal(Literal::String(s)) => &s,
+                    _ => anyhow::bail!("Incorrect delimiter parameter"),
+                };
+                let delimiter = ast::Expr::Literal(Literal::String(delimiter.to_string()));
+                let _ = translate_expr(program, select, &delimiter, delimiter_reg);
+            } else {
+                let delimiter = ast::Expr::Literal(Literal::String(String::from("\",\"")));
+                let _ = translate_expr(program, select, &delimiter, delimiter_reg);
+            }
+
+            program.emit_insn(Insn::AggStep {
+                acc_reg: target_register,
+                col: expr_reg,
+                delimiter: delimiter_reg,
+                func: AggFunc::GroupConcat,
+            });
+
+            target_register
+        }
         AggFunc::Max => {
             if args.len() != 1 {
                 anyhow::bail!("Parse error: max bad number of arguments");
@@ -716,6 +748,7 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
+                delimiter: 0,
                 func: AggFunc::Max,
             });
             target_register
@@ -730,6 +763,7 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
+                delimiter: 0,
                 func: AggFunc::Min,
             });
             target_register
@@ -745,6 +779,7 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
+                delimiter: 0,
                 func: AggFunc::Sum,
             });
             target_register
@@ -759,6 +794,7 @@ fn translate_aggregation(
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
+                delimiter: 0,
                 func: AggFunc::Total,
             });
             target_register

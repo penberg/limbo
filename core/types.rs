@@ -49,6 +49,7 @@ impl Display for OwnedValue {
                 AggContext::Count(count) => write!(f, "{}", count),
                 AggContext::Max(max) => write!(f, "{}", max),
                 AggContext::Min(min) => write!(f, "{}", min),
+                AggContext::GroupConcat(s) => write!(f, "{}", s),
             },
             OwnedValue::Record(r) => write!(f, "{:?}", r),
         }
@@ -62,6 +63,7 @@ pub enum AggContext {
     Count(OwnedValue),
     Max(OwnedValue),
     Min(OwnedValue),
+    GroupConcat(OwnedValue),
 }
 
 impl std::ops::Add<OwnedValue> for OwnedValue {
@@ -80,6 +82,9 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
             }
             (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
                 OwnedValue::Float(float_left + float_right)
+            }
+            (OwnedValue::Text(string_left), OwnedValue::Text(string_right)) => {
+                OwnedValue::Text(Rc::new(string_left.to_string() + &string_right.to_string()))
             }
             (lhs, OwnedValue::Null) => lhs,
             (OwnedValue::Null, rhs) => rhs,
@@ -171,6 +176,7 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
             AggContext::Count(count) => to_value(count),
             AggContext::Max(max) => to_value(max),
             AggContext::Min(min) => to_value(min),
+            AggContext::GroupConcat(s) => to_value(s),
         },
         OwnedValue::Record(_) => todo!(),
     }
