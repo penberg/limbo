@@ -44,7 +44,7 @@ sqlite> INSERT INTO users VALUES (2, 'bob');
 or use the testing script to generate one for you:
 
 ```console
-./testing/gen-database.py
+pipenv run ./testing/gen-database.py
 ```
 
 You can then start the Limbo shell with:
