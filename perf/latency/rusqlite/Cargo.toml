@@ -1,0 +1,9 @@
+[package]
+name = "rusqlite-multitenancy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.4.2", features = ["derive"] }
+hdrhistogram = "7.5.2"
+rusqlite = "0.29.0"
