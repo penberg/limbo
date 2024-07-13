@@ -128,4 +128,9 @@ cfg_block! {
         mod windows;
         pub use windows::WindowsIO as PlatformIO;
     }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))] {
+        mod generic;
+        pub use generic::GenericIO as PlatformIO;
+    }
 }
