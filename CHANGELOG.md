@@ -12,7 +12,7 @@
 
 - `EXPLAIN` statement support.
 
-- Linux io_uring support using direct I/O.
+- Asynchronous I/O support with Linux io_uring using direct I/O and Darwin kqueue.
 
 - Initial pass on command line shell with following commands:
     - `.schema` command that describes the database schema.
