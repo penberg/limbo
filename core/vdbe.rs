@@ -295,12 +295,12 @@ impl ProgramBuilder {
             "Forbidden resolve of an unexistent label!"
         );
 
-        let label_references = &self.unresolved_labels[self.label_to_index(label)];
+        let label_references = &mut self.unresolved_labels[label_index];
         assert!(
             label_references.len() > 0,
             "Trying to resolve an empty created label, all labels must be resolved for now."
         );
-        for insn_reference in label_references {
+        for insn_reference in label_references.iter() {
             let insn = &mut self.insns[*insn_reference];
             match insn {
                 Insn::Init { target_pc } => {
@@ -386,6 +386,7 @@ impl ProgramBuilder {
                 }
             }
         }
+        label_references.clear();
     }
 
     pub fn build(self) -> Program {
