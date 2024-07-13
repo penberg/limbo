@@ -20,6 +20,10 @@ fs = []
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.6.1"
 
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+polling = "3.7.2"
+rustix = "0.38.34"
+
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 mimalloc = { version = "*", default-features = false }
 
