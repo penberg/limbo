@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::function::AggFunc;
+use crate::function::{AggFunc, Func, SingleRowFunc};
 use crate::pager::Pager;
 use crate::schema::{Column, Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
@@ -42,7 +42,7 @@ struct SrcTable {
 }
 
 struct ColumnInfo {
-    func: Option<AggFunc>,
+    func: Option<Func>,
     args: Option<Vec<ast::Expr>>,
     columns_to_allocate: usize, /* number of result columns this col will result on */
 }
@@ -57,7 +57,10 @@ impl ColumnInfo {
     }
 
     pub fn is_aggregation_function(&self) -> bool {
-        self.func.is_some()
+        match self.func {
+            Some(Func::Agg(_)) => true,
+            _ => false,
+        }
     }
 }
 
@@ -132,7 +135,9 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
 
             let table = Table::BTree(table);
             let column_info = analyze_columns(&columns, &joins);
-            let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
+            let exist_aggregation = column_info
+                .iter()
+                .any(|info| info.is_aggregation_function());
             Ok(Select {
                 columns,
                 column_info,
@@ -150,7 +155,9 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             ..
         } => {
             let column_info = analyze_columns(&columns, &Vec::new());
-            let exist_aggregation = column_info.iter().any(|info| info.func.is_some());
+            let exist_aggregation = column_info
+                .iter()
+                .any(|info| info.is_aggregation_function());
             Ok(Select {
                 columns,
                 column_info,
@@ -169,10 +176,12 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
 fn translate_select(mut select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
-    program.add_label(init_label, program.offset());
-    program.emit_insn(Insn::Init {
-        target_pc: init_label,
-    });
+    program.emit_insn_with_label_dependency(
+        Insn::Init {
+            target_pc: init_label,
+        },
+        init_label,
+    );
     let start_offset = program.offset();
 
     let limit_info = if let Some(limit) = &select.limit {
@@ -186,10 +195,12 @@ fn translate_select(mut select: Select) -> Result<Program> {
         };
         let goto_label = program.allocate_label();
         if num == 0 {
-            program.add_label(goto_label, program.offset());
-            program.emit_insn(Insn::Goto {
-                target_pc: goto_label,
-            });
+            program.emit_insn_with_label_dependency(
+                Insn::Goto {
+                    target_pc: goto_label,
+                },
+                goto_label,
+            );
         }
         Some(LimitInfo {
             limit_reg,
@@ -224,7 +235,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
         if select.exist_aggregation {
             let mut target = register_start;
             for info in &select.column_info {
-                if let Some(func) = &info.func {
+                if let Some(Func::Agg(func)) = &info.func {
                     program.emit_insn(Insn::AggFinal {
                         register: target,
                         func: func.clone(),
@@ -271,11 +282,13 @@ fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder)
     }
     let limit_info = limit_info.as_ref().unwrap();
     if limit_info.num > 0 {
-        program.add_label(limit_info.goto_label, program.offset());
-        program.emit_insn(Insn::DecrJumpZero {
-            reg: limit_info.limit_reg,
-            target_pc: limit_info.goto_label,
-        });
+        program.emit_insn_with_label_dependency(
+            Insn::DecrJumpZero {
+                reg: limit_info.limit_reg,
+                target_pc: limit_info.goto_label,
+            },
+            limit_info.goto_label,
+        );
     }
 }
 
@@ -287,11 +300,13 @@ fn insert_where_clause_instructions(
         let where_reg = program.alloc_register();
         let _ = translate_expr(program, &select, w, where_reg)?;
         let label = program.allocate_label();
-        program.add_label(label, program.offset());
-        program.emit_insn(Insn::IfNot {
-            reg: where_reg,
-            target_pc: label, // jump to 'next row' instruction if where not matched
-        });
+        program.emit_insn_with_label_dependency(
+            Insn::IfNot {
+                reg: where_reg,
+                target_pc: label, // jump to 'next row' instruction if where not matched
+            },
+            label,
+        );
         Ok(Some((label, where_reg))) // We emit a placeholder because we determine the jump target later (after we know where the 'cursor next' instruction is)
     } else {
         Ok(None)
@@ -347,11 +362,13 @@ fn translate_table_open_loop(program: &mut ProgramBuilder, loop_info: &mut LoopI
         cursor_id: loop_info.open_cursor,
     });
     let rewind_await_label = program.allocate_label();
-    program.emit_insn(Insn::RewindAwait {
-        cursor_id: loop_info.open_cursor,
-        pc_if_empty: rewind_await_label,
-    });
-    program.add_label(rewind_await_label, program.offset() - 1);
+    program.emit_insn_with_label_dependency(
+        Insn::RewindAwait {
+            cursor_id: loop_info.open_cursor,
+            pc_if_empty: rewind_await_label,
+        },
+        rewind_await_label,
+    );
     loop_info.rewind_label = rewind_await_label;
     loop_info.rewind_offset = program.offset() - 1;
 }
@@ -472,16 +489,9 @@ fn analyze_expr(expr: &Expr, column_info_out: &mut ColumnInfo) {
             args,
             filter_over: _,
         } => {
-            let func_type = match normalize_ident(name.0.as_str()).as_str() {
-                "avg" => Some(AggFunc::Avg),
-                "count" => Some(AggFunc::Count),
-                "group_concat" => Some(AggFunc::GroupConcat),
-                "max" => Some(AggFunc::Max),
-                "min" => Some(AggFunc::Min),
-                "string_agg" => Some(AggFunc::StringAgg),
-                "sum" => Some(AggFunc::Sum),
-                "total" => Some(AggFunc::Total),
-                _ => None,
+            let func_type = match normalize_ident(name.0.as_str()).as_str().parse() {
+                Ok(func) => Some(func),
+                Err(_) => None,
             };
             if func_type.is_none() {
                 let args = args.as_ref().unwrap();
@@ -563,7 +573,60 @@ fn translate_expr(
         ast::Expr::Collate(_, _) => todo!(),
         ast::Expr::DoublyQualified(_, _, _) => todo!(),
         ast::Expr::Exists(_) => todo!(),
-        ast::Expr::FunctionCall { .. } => todo!(),
+        ast::Expr::FunctionCall {
+            name,
+            distinctness: _,
+            args,
+            filter_over: _,
+        } => {
+            let func_type: Option<Func> = match normalize_ident(name.0.as_str()).as_str().parse() {
+                Ok(func) => Some(func),
+                Err(_) => None,
+            };
+            match func_type {
+                Some(Func::Agg(_)) => {
+                    anyhow::bail!("Parse error: aggregation function in non-aggregation context")
+                }
+                Some(Func::SingleRow(srf)) => {
+                    match srf {
+                        SingleRowFunc::Coalesce => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 2 {
+                                    anyhow::bail!(
+                                        "Parse error: coalesce function with less than 2 arguments"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: coalesce function with no arguments");
+                            };
+
+                            // coalesce function is implemented as a series of not null checks
+                            // whenever a not null check succeeds, we jump to the end of the series
+                            let label_coalesce_end = program.allocate_label();
+                            for (index, arg) in args.iter().enumerate() {
+                                let reg = translate_expr(program, select, arg, target_register)?;
+                                if index < args.len() - 1 {
+                                    program.emit_insn_with_label_dependency(
+                                        Insn::NotNull {
+                                            reg,
+                                            target_pc: label_coalesce_end,
+                                        },
+                                        label_coalesce_end,
+                                    );
+                                }
+                            }
+                            program.preassign_label_to_next_insn(label_coalesce_end);
+
+                            Ok(target_register)
+                        }
+                    }
+                }
+                None => {
+                    anyhow::bail!("Parse error: unknown function {}", name.0);
+                }
+            }
+        }
         ast::Expr::FunctionCallStar { .. } => todo!(),
         ast::Expr::Id(ident) => {
             // let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
@@ -614,7 +677,12 @@ fn translate_expr(
             }
             ast::Literal::Blob(_) => todo!(),
             ast::Literal::Keyword(_) => todo!(),
-            ast::Literal::Null => todo!(),
+            ast::Literal::Null => {
+                program.emit_insn(Insn::Null {
+                    dest: target_register,
+                });
+                Ok(target_register)
+            }
             ast::Literal::CurrentDate => todo!(),
             ast::Literal::CurrentTime => todo!(),
             ast::Literal::CurrentTimestamp => todo!(),
@@ -668,185 +736,190 @@ fn translate_aggregation(
     let empty_args = &Vec::<ast::Expr>::new();
     let args = info.args.as_ref().unwrap_or(empty_args);
     let dest = match func {
-        AggFunc::Avg => {
-            if args.len() != 1 {
-                anyhow::bail!("Parse error: avg bad number of arguments");
+        Func::SingleRow(_) => anyhow::bail!("Parse error: single row function in aggregation"),
+        Func::Agg(agg_func) => match agg_func {
+            AggFunc::Avg => {
+                if args.len() != 1 {
+                    anyhow::bail!("Parse error: avg bad number of arguments");
+                }
+                let expr = &args[0];
+                let expr_reg = program.alloc_register();
+                let _ = translate_expr(program, select, expr, expr_reg)?;
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: 0,
+                    func: AggFunc::Avg,
+                });
+                target_register
             }
-            let expr = &args[0];
-            let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg)?;
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: 0,
-                func: AggFunc::Avg,
-            });
-            target_register
-        }
-        AggFunc::Count => {
-            let expr_reg = if args.is_empty() {
-                program.alloc_register()
-            } else {
+            AggFunc::Count => {
+                let expr_reg = if args.is_empty() {
+                    program.alloc_register()
+                } else {
+                    let expr = &args[0];
+                    let expr_reg = program.alloc_register();
+                    let _ = translate_expr(program, select, expr, expr_reg);
+                    expr_reg
+                };
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: 0,
+                    func: AggFunc::Count,
+                });
+                target_register
+            }
+            AggFunc::GroupConcat => {
+                if args.len() != 1 && args.len() != 2 {
+                    anyhow::bail!("Parse error: group_concat bad number of arguments");
+                }
+
+                let expr_reg = program.alloc_register();
+                let delimiter_reg = program.alloc_register();
+
+                let expr = &args[0];
+                let delimiter_expr: ast::Expr;
+
+                if args.len() == 2 {
+                    match &args[1] {
+                        ast::Expr::Id(ident) => {
+                            if ident.0.starts_with("\"") {
+                                delimiter_expr =
+                                    ast::Expr::Literal(Literal::String(ident.0.to_string()));
+                            } else {
+                                delimiter_expr = args[1].clone();
+                            }
+                        }
+                        ast::Expr::Literal(Literal::String(s)) => {
+                            delimiter_expr = ast::Expr::Literal(Literal::String(s.to_string()));
+                        }
+                        _ => anyhow::bail!("Incorrect delimiter parameter"),
+                    };
+                } else {
+                    delimiter_expr = ast::Expr::Literal(Literal::String(String::from("\",\"")));
+                }
+
+                if let Err(error) = translate_expr(program, select, expr, expr_reg) {
+                    anyhow::bail!(error);
+                }
+                if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg)
+                {
+                    anyhow::bail!(error);
+                }
+
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: delimiter_reg,
+                    func: AggFunc::GroupConcat,
+                });
+
+                target_register
+            }
+            AggFunc::Max => {
+                if args.len() != 1 {
+                    anyhow::bail!("Parse error: max bad number of arguments");
+                }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
                 let _ = translate_expr(program, select, expr, expr_reg);
-                expr_reg
-            };
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: 0,
-                func: AggFunc::Count,
-            });
-            target_register
-        }
-        AggFunc::GroupConcat => {
-            if args.len() != 1 && args.len() != 2 {
-                anyhow::bail!("Parse error: group_concat bad number of arguments");
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: 0,
+                    func: AggFunc::Max,
+                });
+                target_register
             }
+            AggFunc::Min => {
+                if args.len() != 1 {
+                    anyhow::bail!("Parse error: min bad number of arguments");
+                }
+                let expr = &args[0];
+                let expr_reg = program.alloc_register();
+                let _ = translate_expr(program, select, expr, expr_reg);
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: 0,
+                    func: AggFunc::Min,
+                });
+                target_register
+            }
+            AggFunc::StringAgg => {
+                if args.len() != 2 {
+                    anyhow::bail!("Parse error: string_agg bad number of arguments");
+                }
 
-            let expr_reg = program.alloc_register();
-            let delimiter_reg = program.alloc_register();
-            
-            let expr = &args[0];
-            let delimiter_expr: ast::Expr;
-            
-            if args.len() == 2 {
+                let expr_reg = program.alloc_register();
+                let delimiter_reg = program.alloc_register();
+
+                let expr = &args[0];
+                let delimiter_expr: ast::Expr;
+
                 match &args[1] {
                     ast::Expr::Id(ident) => {
                         if ident.0.starts_with("\"") {
-                            delimiter_expr = ast::Expr::Literal(Literal::String(ident.0.to_string()));
+                            anyhow::bail!("Parse error: no such column: \",\" - should this be a string literal in single-quotes?");
                         } else {
                             delimiter_expr = args[1].clone();
                         }
-                    },
+                    }
                     ast::Expr::Literal(Literal::String(s)) => {
                         delimiter_expr = ast::Expr::Literal(Literal::String(s.to_string()));
-                    },
+                    }
                     _ => anyhow::bail!("Incorrect delimiter parameter"),
                 };
-            } else {
-                delimiter_expr = ast::Expr::Literal(Literal::String(String::from("\",\"")));
-            }
 
-            if let Err(error) = translate_expr(program, select, expr, expr_reg) {
-                anyhow::bail!(error);
-            }
-            if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg) {
-                anyhow::bail!(error);
-            }
+                if let Err(error) = translate_expr(program, select, expr, expr_reg) {
+                    anyhow::bail!(error);
+                }
+                if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg)
+                {
+                    anyhow::bail!(error);
+                }
 
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: delimiter_reg,
-                func: AggFunc::GroupConcat,
-            });
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: delimiter_reg,
+                    func: AggFunc::StringAgg,
+                });
 
-            target_register
-        }
-        AggFunc::Max => {
-            if args.len() != 1 {
-                anyhow::bail!("Parse error: max bad number of arguments");
+                target_register
             }
-            let expr = &args[0];
-            let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg);
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: 0,
-                func: AggFunc::Max,
-            });
-            target_register
-        }
-        AggFunc::Min => {
-            if args.len() != 1 {
-                anyhow::bail!("Parse error: min bad number of arguments");
+            AggFunc::Sum => {
+                if args.len() != 1 {
+                    anyhow::bail!("Parse error: sum bad number of arguments");
+                }
+                let expr = &args[0];
+                let expr_reg = program.alloc_register();
+                let _ = translate_expr(program, select, expr, expr_reg)?;
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: 0,
+                    func: AggFunc::Sum,
+                });
+                target_register
             }
-            let expr = &args[0];
-            let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg);
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: 0,
-                func: AggFunc::Min,
-            });
-            target_register
-        }
-        AggFunc::StringAgg => {
-            if args.len() != 2 {
-                anyhow::bail!("Parse error: string_agg bad number of arguments");
+            AggFunc::Total => {
+                if args.len() != 1 {
+                    anyhow::bail!("Parse error: total bad number of arguments");
+                }
+                let expr = &args[0];
+                let expr_reg = program.alloc_register();
+                let _ = translate_expr(program, select, expr, expr_reg)?;
+                program.emit_insn(Insn::AggStep {
+                    acc_reg: target_register,
+                    col: expr_reg,
+                    delimiter: 0,
+                    func: AggFunc::Total,
+                });
+                target_register
             }
-
-            
-            let expr_reg = program.alloc_register();
-            let delimiter_reg = program.alloc_register();
-            
-            let expr = &args[0];
-            let delimiter_expr: ast::Expr;
-
-            match &args[1] {
-                ast::Expr::Id(ident) => {
-                    if ident.0.starts_with("\"") {
-                        anyhow::bail!("Parse error: no such column: \",\" - should this be a string literal in single-quotes?");
-                    } else {
-                        delimiter_expr = args[1].clone();
-                    }
-                },
-                ast::Expr::Literal(Literal::String(s)) => {
-                    delimiter_expr = ast::Expr::Literal(Literal::String(s.to_string()));
-                },
-                _ => anyhow::bail!("Incorrect delimiter parameter"),
-            };
-
-            if let Err(error) = translate_expr(program, select, expr, expr_reg) {
-                anyhow::bail!(error);
-            }
-            if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg) {
-                anyhow::bail!(error);
-            }
-            
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: delimiter_reg,
-                func: AggFunc::StringAgg,
-            });
-
-            target_register
         },
-        AggFunc::Sum => {
-            if args.len() != 1 {
-                anyhow::bail!("Parse error: sum bad number of arguments");
-            }
-            let expr = &args[0];
-            let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg)?;
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: 0,
-                func: AggFunc::Sum,
-            });
-            target_register
-        }
-        AggFunc::Total => {
-            if args.len() != 1 {
-                anyhow::bail!("Parse error: total bad number of arguments");
-            }
-            let expr = &args[0];
-            let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, select, expr, expr_reg)?;
-            program.emit_insn(Insn::AggStep {
-                acc_reg: target_register,
-                col: expr_reg,
-                delimiter: 0,
-                func: AggFunc::Total,
-            });
-            target_register
-        }
     };
     Ok(dest)
 }
@@ -859,10 +932,12 @@ fn translate_pragma(
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
-    program.add_label(init_label, program.offset());
-    program.emit_insn(Insn::Init {
-        target_pc: init_label,
-    });
+    program.emit_insn_with_label_dependency(
+        Insn::Init {
+            target_pc: init_label,
+        },
+        init_label,
+    );
     let start_offset = program.offset();
     match body {
         None => {

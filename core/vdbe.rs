@@ -6,7 +6,7 @@ use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Re
 use anyhow::Result;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 pub type BranchOffset = i64;
@@ -19,6 +19,15 @@ pub type PageIdx = usize;
 pub enum Insn {
     // Initialize the program state and jump to the given PC.
     Init {
+        target_pc: BranchOffset,
+    },
+    // Set NULL in the given register.
+    Null {
+        dest: usize,
+    },
+    // If the given register is not NULL, jump to the given PC.
+    NotNull {
+        reg: usize,
         target_pc: BranchOffset,
     },
     // Compare two registers and jump to the given PC if they are equal.
@@ -218,6 +227,7 @@ pub struct ProgramBuilder {
     // Each lable has a list of InsnRefereces that must
     // be resolved. Lists are indexed by: label.abs() - 1
     unresolved_labels: Vec<Vec<InsnReference>>,
+    next_insn_label: Option<BranchOffset>,
 }
 
 impl ProgramBuilder {
@@ -228,6 +238,7 @@ impl ProgramBuilder {
             next_free_cursor_id: 0,
             insns: Vec::new(),
             unresolved_labels: Vec::new(),
+            next_insn_label: None,
         }
     }
 
@@ -253,14 +264,17 @@ impl ProgramBuilder {
         cursor
     }
 
-    pub fn emit_placeholder(&mut self) -> usize {
-        let offset = self.insns.len();
-        self.insns.push(Insn::Halt);
-        offset
-    }
-
     pub fn emit_insn(&mut self, insn: Insn) {
         self.insns.push(insn);
+        if let Some(label) = self.next_insn_label {
+            self.next_insn_label = None;
+            self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
+        }
+    }
+
+    pub fn emit_insn_with_label_dependency(&mut self, insn: Insn, label: BranchOffset) {
+        self.insns.push(insn);
+        self.add_label_dependency(label, (self.insns.len() - 1) as BranchOffset);
     }
 
     pub fn offset(&self) -> BranchOffset {
@@ -273,11 +287,18 @@ impl ProgramBuilder {
         self.next_free_label
     }
 
+    // Effectively a GOTO <next insn> without the need to emit an explicit GOTO instruction.
+    // Useful when you know you need to jump to "the next part", but the exact offset is unknowable
+    // at the time of emitting the instruction.
+    pub fn preassign_label_to_next_insn(&mut self, label: BranchOffset) {
+        self.next_insn_label = Some(label);
+    }
+
     fn label_to_index(&self, label: BranchOffset) -> usize {
         (label.abs() - 1) as usize
     }
 
-    pub fn add_label(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
+    fn add_label_dependency(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
         assert!(insn_reference >= 0);
         assert!(label < 0);
         let label_index = self.label_to_index(label);
@@ -382,6 +403,10 @@ impl ProgramBuilder {
                     assert!(*pc_if_next < 0);
                     *pc_if_next = to_offset;
                 }
+                Insn::NotNull { reg, target_pc } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }
@@ -463,6 +488,22 @@ impl Program {
             match insn {
                 Insn::Init { target_pc } => {
                     state.pc = *target_pc;
+                }
+                Insn::Null { dest } => {
+                    state.registers[*dest] = OwnedValue::Null;
+                    state.pc += 1;
+                }
+                Insn::NotNull { reg, target_pc } => {
+                    let reg = *reg;
+                    let target_pc = *target_pc;
+                    match &state.registers[reg] {
+                        OwnedValue::Null => {
+                            state.pc += 1;
+                        }
+                        _ => {
+                            state.pc = target_pc;
+                        }
+                    }
                 }
                 Insn::Eq {
                     lhs,
@@ -853,8 +894,7 @@ impl Program {
                                     }
                                 }
                             }
-                            AggFunc::GroupConcat |
-                            AggFunc::StringAgg => OwnedValue::Agg(Box::new(
+                            AggFunc::GroupConcat | AggFunc::StringAgg => OwnedValue::Agg(Box::new(
                                 AggContext::GroupConcat(OwnedValue::Text(Rc::new("".to_string()))),
                             )),
                         };
@@ -957,8 +997,7 @@ impl Program {
                                 }
                             }
                         }
-                        AggFunc::GroupConcat |
-                        AggFunc::StringAgg => {
+                        AggFunc::GroupConcat | AggFunc::StringAgg => {
                             let col = state.registers[*col].clone();
                             let delimiter = state.registers[*delimiter].clone();
                             let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
@@ -1109,6 +1148,24 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("Start at {}", target_pc),
+            ),
+            Insn::Null { dest } => (
+                "Null",
+                *dest as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=NULL", dest),
+            ),
+            Insn::NotNull { reg, target_pc } => (
+                "NotNull",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] -> {}", reg, target_pc),
             ),
             Insn::Eq {
                 lhs,
