@@ -73,6 +73,14 @@ do_execsql_test select-group-concat-with-column-delimiter {
   SELECT group_concat(name, id) FROM products;
 } {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
 
+do_execsql_test select-string-agg-with-delimiter {
+  SELECT string_agg(name, ',') FROM products;
+} {hat,cap,shirt,sweater,sweatshirt,shorts,jeans,sneakers,boots,coat,accessories}
+
+do_execsql_test select-string-agg-with-column-delimiter {
+  SELECT string_agg(name, id) FROM products;
+} {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
+
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
 } {}
