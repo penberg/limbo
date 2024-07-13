@@ -33,7 +33,7 @@ impl Schema {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Table {
     BTree(Rc<BTreeTable>),
     Pseudo(Rc<PseudoTable>),
@@ -96,6 +96,7 @@ impl PartialEq for Table {
     }
 }
 
+#[derive(Debug)]
 pub struct BTreeTable {
     pub root_page: usize,
     pub name: String,
@@ -150,6 +151,7 @@ impl BTreeTable {
     }
 }
 
+#[derive(Debug)]
 pub struct PseudoTable {
     pub columns: Vec<Column>,
 }
@@ -295,6 +297,7 @@ pub fn _build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
     table
 }
 
+#[derive(Debug)]
 pub struct Column {
     pub name: String,
     pub ty: Type,
