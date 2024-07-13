@@ -214,7 +214,9 @@ pub struct ProgramBuilder {
     next_free_label: BranchOffset,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
-    unresolved_labels: HashMap<BranchOffset, Vec<InsnReference>>,
+    // Each lable has a list of InsnRefereces that must
+    // be resolved. Lists are indexed by: label.abs() - 1
+    unresolved_labels: Vec<Vec<InsnReference>>,
 }
 
 impl ProgramBuilder {
@@ -224,7 +226,7 @@ impl ProgramBuilder {
             next_free_label: 0,
             next_free_cursor_id: 0,
             insns: Vec::new(),
-            unresolved_labels: HashMap::new(),
+            unresolved_labels: Vec::new(),
         }
     }
 
@@ -266,32 +268,38 @@ impl ProgramBuilder {
 
     pub fn allocate_label(&mut self) -> BranchOffset {
         self.next_free_label -= 1;
-        self.unresolved_labels
-            .insert(self.next_free_label, Vec::new());
+        self.unresolved_labels.push(Vec::new());
         self.next_free_label
+    }
+
+    fn label_to_index(&self, label: BranchOffset) -> usize {
+        (label.abs() - 1) as usize
     }
 
     pub fn add_label(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
         assert!(insn_reference >= 0);
         assert!(label < 0);
+        let label_index = self.label_to_index(label);
+        assert!(label_index < self.unresolved_labels.len());
         let insn_reference = insn_reference as InsnReference;
-        let label_references = self.unresolved_labels.get_mut(&label);
-        if let Some(label_references) = label_references {
-            label_references.push(insn_reference);
-        } else {
-            self.unresolved_labels.insert(label, vec![insn_reference]);
-        }
+        let label_references = &mut self.unresolved_labels[label_index];
+        label_references.push(insn_reference);
     }
 
     pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
         assert!(label < 0);
         assert!(to_offset >= 0);
-        let label_references = self.unresolved_labels.get_mut(&label);
-        if label_references.is_none() {
-            unreachable!("Forbidden resolve of an unexistent label!");
-        }
-        let label_references = label_references.unwrap();
+        let label_index = self.label_to_index(label);
+        assert!(
+            label_index < self.unresolved_labels.len(),
+            "Forbidden resolve of an unexistent label!"
+        );
 
+        let label_references = &self.unresolved_labels[self.label_to_index(label)];
+        assert!(
+            label_references.len() > 0,
+            "Trying to resolve an empty created label, all labels must be resolved for now."
+        );
         for insn_reference in label_references {
             let insn = &mut self.insns[*insn_reference];
             match insn {
