@@ -226,7 +226,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
             emit_limit_insn(&limit_info, &mut program);
         }
 
-        if let Some((where_clause_label, where_reg)) = where_maybe {
+        if let Some(where_clause_label) = where_maybe {
             program.resolve_label(where_clause_label, program.offset());
         }
 
@@ -254,7 +254,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
         assert!(!select.exist_aggregation);
         let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
-        if let Some((where_clause_label, where_reg)) = where_maybe {
+        if let Some(where_clause_label) = where_maybe {
             program.resolve_label(where_clause_label, program.offset() + 1);
         }
         program.emit_insn(Insn::ResultRow {
@@ -295,19 +295,11 @@ fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder)
 fn insert_where_clause_instructions(
     select: &Select,
     program: &mut ProgramBuilder,
-) -> Result<Option<(BranchOffset, usize)>> {
+) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
-        let where_reg = program.alloc_register();
-        let _ = translate_expr(program, &select, w, where_reg)?;
         let label = program.allocate_label();
-        program.emit_insn_with_label_dependency(
-            Insn::IfNot {
-                reg: where_reg,
-                target_pc: label, // jump to 'next row' instruction if where not matched
-            },
-            label,
-        );
-        Ok(Some((label, where_reg))) // We emit a placeholder because we determine the jump target later (after we know where the 'cursor next' instruction is)
+        translate_condition_expr(program, &select, w, label)?;
+        Ok(Some(label))
     } else {
         Ok(None)
     }
@@ -506,6 +498,84 @@ fn analyze_expr(expr: &Expr, column_info_out: &mut ColumnInfo) {
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
         _ => {}
+    }
+}
+
+fn translate_condition_expr(
+    program: &mut ProgramBuilder,
+    select: &Select,
+    expr: &ast::Expr,
+    jump_target: BranchOffset,
+) -> Result<()> {
+    match expr {
+        ast::Expr::Between { .. } => todo!(),
+        ast::Expr::Binary(e1, op, e2) => {
+            let e1_reg = program.alloc_register();
+            let e2_reg = program.alloc_register();
+            let _ = translate_expr(program, select, e1, e1_reg)?;
+            let _ = translate_expr(program, select, e2, e2_reg)?;
+            if jump_target < 0 {
+                program.add_label_dependency(jump_target, program.offset());
+            }
+            program.emit_insn(match op {
+                ast::Operator::NotEquals => Insn::Eq {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: jump_target,
+                },
+                ast::Operator::Equals => Insn::Ne {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: jump_target,
+                },
+                ast::Operator::Less => Insn::Ge {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: jump_target,
+                },
+                ast::Operator::LessEquals => Insn::Gt {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: jump_target,
+                },
+                ast::Operator::Greater => Insn::Le {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: jump_target,
+                },
+                ast::Operator::GreaterEquals => Insn::Lt {
+                    lhs: e1_reg,
+                    rhs: e2_reg,
+                    target_pc: jump_target,
+                },
+                _ => todo!(),
+            });
+            Ok(())
+        }
+        ast::Expr::Literal(lit) => match lit {
+            ast::Literal::Numeric(val) => {
+                let maybe_int = val.parse::<i64>();
+                if let Ok(int_value) = maybe_int {
+                    let reg = program.alloc_register();
+                    program.emit_insn(Insn::Integer {
+                        value: int_value,
+                        dest: reg,
+                    });
+                    if jump_target < 0 {
+                        program.add_label_dependency(jump_target, program.offset());
+                    }
+                    program.emit_insn(Insn::IfNot {
+                        reg,
+                        target_pc: jump_target,
+                    });
+                    Ok(())
+                } else {
+                    anyhow::bail!("Parse error: unsupported literal type in condition");
+                }
+            }
+            _ => todo!(),
+        },
+        _ => todo!(),
     }
 }
 
