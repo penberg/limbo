@@ -717,7 +717,7 @@ fn translate_aggregation(
             
             let expr = &args[0];
             let delimiter_expr: ast::Expr;
-
+            
             if args.len() == 2 {
                 match &args[1] {
                     ast::Expr::Id(ident) => {
@@ -736,8 +736,12 @@ fn translate_aggregation(
                 delimiter_expr = ast::Expr::Literal(Literal::String(String::from("\",\"")));
             }
 
-            let _ = translate_expr(program, select, expr, expr_reg);
-            let _ = translate_expr(program, select, &delimiter_expr, delimiter_reg);
+            if let Err(error) = translate_expr(program, select, expr, expr_reg) {
+                anyhow::bail!(error);
+            }
+            if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg) {
+                anyhow::bail!(error);
+            }
 
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
@@ -793,7 +797,7 @@ fn translate_aggregation(
             match &args[1] {
                 ast::Expr::Id(ident) => {
                     if ident.0.starts_with("\"") {
-                        delimiter_expr = ast::Expr::Literal(Literal::String(ident.0.to_string()));
+                        anyhow::bail!("Parse error: no such column: \",\" - should this be a string literal in single-quotes?");
                     } else {
                         delimiter_expr = args[1].clone();
                     }
@@ -804,8 +808,12 @@ fn translate_aggregation(
                 _ => anyhow::bail!("Incorrect delimiter parameter"),
             };
 
-            let _ = translate_expr(program, select, expr, expr_reg);
-            let _ = translate_expr(program, select, &delimiter_expr, delimiter_reg);
+            if let Err(error) = translate_expr(program, select, expr, expr_reg) {
+                anyhow::bail!(error);
+            }
+            if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg) {
+                anyhow::bail!(error);
+            }
             
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
