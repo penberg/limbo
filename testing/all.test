@@ -146,3 +146,31 @@ do_execsql_test where-clause-no-table-unary-true {
 do_execsql_test where-clause-no-table-unary-false {
     select 1 where 0;
 } {}
+
+do_execsql_test coalesce {
+    select coalesce(NULL, 1);
+} {1}
+
+do_execsql_test coalesce-2 {
+    select coalesce(NULL, NULL, 1);
+} {1}
+
+do_execsql_test coalesce-null {
+    select coalesce(NULL, NULL, NULL);
+} {NULL}
+
+do_execsql_test coalesce-first {
+    select coalesce(1, 2, 3);
+} {1}
+
+do_execsql_test coalesce-from-table {
+    select coalesce(NULL, 1) from users limit 1;
+} {1}
+
+do_execsql_test coalesce-from-table-column {
+    select coalesce(NULL, age) from users where age = 94 limit 1;
+} {94}
+
+do_execsql_test coalesce-from-table-multiple-columns {
+    select coalesce(NULL, age), coalesce(NULL, id) from users where age = 94 limit 1;
+} {94|1}
