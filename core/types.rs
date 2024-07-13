@@ -40,7 +40,7 @@ impl Display for OwnedValue {
         match self {
             OwnedValue::Null => write!(f, "NULL"),
             OwnedValue::Integer(i) => write!(f, "{}", i),
-            OwnedValue::Float(fl) => write!(f, "{}", fl),
+            OwnedValue::Float(fl) => write!(f, "{:?}", fl),
             OwnedValue::Text(s) => write!(f, "{}", s),
             OwnedValue::Blob(b) => write!(f, "{:?}", b),
             OwnedValue::Agg(a) => match a.as_ref() {
@@ -93,7 +93,8 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
                 OwnedValue::Text(Rc::new(int_left.to_string() + &string_right.to_string()))
             }
             (OwnedValue::Text(string_left), OwnedValue::Float(float_right)) => {
-                OwnedValue::Text(Rc::new(string_left.to_string() + &float_right.to_string()))
+                let text_right = OwnedValue::Float(float_right).to_string();
+                OwnedValue::Text(Rc::new(string_left.to_string() + &text_right))
             }
             (OwnedValue::Float(float_left), OwnedValue::Text(string_right)) => {
                 OwnedValue::Text(Rc::new(float_left.to_string() + &string_right.to_string()))
