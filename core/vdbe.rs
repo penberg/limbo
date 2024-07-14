@@ -1214,7 +1214,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] == r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]==r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Ne {
                 lhs,
@@ -1227,7 +1227,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] != r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]!=r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Lt {
                 lhs,
@@ -1240,7 +1240,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] < r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]<r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Le {
                 lhs,
@@ -1253,7 +1253,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] <= r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]<=r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Gt {
                 lhs,
@@ -1266,7 +1266,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] > r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]>r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Ge {
                 lhs,
@@ -1279,7 +1279,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] >= r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::IfNot { reg, target_pc } => (
                 "IfNot",
@@ -1386,7 +1386,11 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("output=r[{}..{}]", start_reg, start_reg + count - 1),
+                if *count == 1 {
+                    format!("output=r[{}]", start_reg)
+                } else {
+                    format!("output=r[{}..{}]", start_reg, start_reg + count - 1)
+                },
             ),
             Insn::NextAsync { cursor_id } => (
                 "NextAsync",
@@ -1465,12 +1469,12 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
             ),
             Insn::String8 { value, dest } => (
                 "String8",
-                *dest as i32,
                 0,
+                *dest as i32,
                 0,
                 OwnedValue::Text(Rc::new(value.clone())),
                 0,
-                format!("r[{}]= '{}'", dest, value),
+                format!("r[{}]='{}'", dest, value),
             ),
             Insn::RowId { cursor_id, dest } => (
                 "RowId",
@@ -1506,7 +1510,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *acc_reg as i32,
                 OwnedValue::Text(Rc::new(func.to_string().into())),
                 0,
-                format!("accum=r[{}] step({})", *acc_reg, *col),
+                format!("accum=r[{}] step(r[{}])", *acc_reg, *col),
             ),
             Insn::AggFinal { register, func } => (
                 "AggFinal",
