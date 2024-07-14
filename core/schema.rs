@@ -51,6 +51,26 @@ impl Table {
         }
     }
 
+    pub fn get_name(&self) -> &str {
+        match self {
+            Table::BTree(table) => &table.name,
+            Table::Pseudo(table) => &table.columns[0].name,
+        }
+    }
+
+    pub fn column_index_to_name(&self, index: usize) -> Option<&str> {
+        match self {
+            Table::BTree(table) => match table.columns.get(index) {
+                Some(column) => Some(&column.name),
+                None => None,
+            },
+            Table::Pseudo(table) => match table.columns.get(index) {
+                Some(column) => Some(&column.name),
+                None => None,
+            },
+        }
+    }
+
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         match self {
             Table::BTree(table) => table.get_column(name),
