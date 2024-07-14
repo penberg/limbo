@@ -1,6 +1,7 @@
 use crate::btree::BTreeCursor;
 use crate::function::AggFunc;
 use crate::pager::Pager;
+use crate::schema::Table;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
 use anyhow::Result;
@@ -224,21 +225,24 @@ pub struct ProgramBuilder {
     next_free_label: BranchOffset,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
-    // Each lable has a list of InsnRefereces that must
+    // Each label has a list of InsnReferences that must
     // be resolved. Lists are indexed by: label.abs() - 1
     unresolved_labels: Vec<Vec<InsnReference>>,
     next_insn_label: Option<BranchOffset>,
+    // Cursors that are referenced by the program. Indexed by CursorID.
+    cursor_ref: Vec<Table>,
 }
 
 impl ProgramBuilder {
     pub fn new() -> Self {
         Self {
-            next_free_register: 0,
+            next_free_register: 1,
             next_free_label: 0,
             next_free_cursor_id: 0,
             insns: Vec::new(),
             unresolved_labels: Vec::new(),
             next_insn_label: None,
+            cursor_ref: Vec::new(),
         }
     }
 
@@ -258,9 +262,14 @@ impl ProgramBuilder {
         self.next_free_register
     }
 
-    pub fn alloc_cursor_id(&mut self) -> usize {
+    pub fn alloc_cursor_id(&mut self, table: Table) -> usize {
         let cursor = self.next_free_cursor_id;
         self.next_free_cursor_id += 1;
+        if self.cursor_ref.iter().find(|t| **t == table).is_some() {
+            todo!("duplicate table is unhandled. see how resolve_ident_table() calls resolve_cursor_id")
+        }
+        self.cursor_ref.push(table);
+        assert!(self.cursor_ref.len() == self.next_free_cursor_id);
         cursor
     }
 
@@ -415,10 +424,16 @@ impl ProgramBuilder {
         label_references.clear();
     }
 
+    // translate table to cursor id
+    pub fn resolve_cursor_id(&self, table: &Table) -> CursorID {
+        self.cursor_ref.iter().position(|t| t == table).unwrap()
+    }
+
     pub fn build(self) -> Program {
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,
+            cursor_ref: self.cursor_ref,
         }
     }
 }
@@ -460,6 +475,7 @@ impl ProgramState {
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
+    pub cursor_ref: Vec<Table>,
 }
 
 impl Program {
@@ -471,7 +487,12 @@ impl Program {
         let mut prev_insn: Option<&Insn> = None;
         for (addr, insn) in self.insns.iter().enumerate() {
             indent_count = get_indent_count(indent_count, insn, prev_insn);
-            print_insn(addr as BranchOffset, insn, indent.repeat(indent_count));
+            print_insn(
+                &self,
+                addr as InsnReference,
+                insn,
+                indent.repeat(indent_count),
+            );
             prev_insn = Some(insn);
         }
     }
@@ -483,10 +504,11 @@ impl Program {
     ) -> Result<StepResult<'a>> {
         loop {
             let insn = &self.insns[state.pc as usize];
-            trace_insn(state.pc, insn);
+            trace_insn(self, state.pc as InsnReference, insn);
             let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
+                    assert!(*target_pc >= 0);
                     state.pc = *target_pc;
                 }
                 Insn::Null { dest } => {
@@ -494,6 +516,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::NotNull { reg, target_pc } => {
+                    assert!(*target_pc >= 0);
                     let reg = *reg;
                     let target_pc = *target_pc;
                     match &state.registers[reg] {
@@ -510,6 +533,7 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
+                    assert!(*target_pc >= 0);
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
@@ -545,6 +569,7 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
+                    assert!(*target_pc >= 0);
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
@@ -580,6 +605,7 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
+                    assert!(*target_pc >= 0);
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
@@ -608,6 +634,7 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
+                    assert!(*target_pc >= 0);
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
@@ -636,6 +663,7 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
+                    assert!(*target_pc >= 0);
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
@@ -664,6 +692,7 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
+                    assert!(*target_pc >= 0);
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
@@ -688,6 +717,7 @@ impl Program {
                     }
                 }
                 Insn::IfNot { reg, target_pc } => {
+                    assert!(*target_pc >= 0);
                     let reg = *reg;
                     let target_pc = *target_pc;
                     match &state.registers[reg] {
@@ -785,6 +815,7 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
+                    assert!(*pc_if_next >= 0);
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
@@ -800,6 +831,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Goto { target_pc } => {
+                    assert!(*target_pc >= 0);
                     state.pc = *target_pc;
                 }
                 Insn::Integer { value, dest } => {
@@ -830,18 +862,21 @@ impl Program {
                     }
                     state.pc += 1;
                 }
-                Insn::DecrJumpZero { reg, target_pc } => match state.registers[*reg] {
-                    OwnedValue::Integer(n) => {
-                        let n = n - 1;
-                        if n == 0 {
-                            state.pc = *target_pc;
-                        } else {
-                            state.registers[*reg] = OwnedValue::Integer(n);
-                            state.pc += 1;
+                Insn::DecrJumpZero { reg, target_pc } => {
+                    assert!(*target_pc >= 0);
+                    match state.registers[*reg] {
+                        OwnedValue::Integer(n) => {
+                            let n = n - 1;
+                            if n == 0 {
+                                state.pc = *target_pc;
+                            } else {
+                                state.registers[*reg] = OwnedValue::Integer(n);
+                                state.pc += 1;
+                            }
                         }
+                        _ => unreachable!("DecrJumpZero on non-integer register"),
                     }
-                    _ => unreachable!("DecrJumpZero on non-integer register"),
-                },
+                }
                 Insn::AggStep {
                     acc_reg,
                     col,
@@ -1090,6 +1125,7 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
+                    assert!(*pc_if_next >= 0);
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     match cursor.next()? {
                         CursorResult::Ok(_) => {}
@@ -1125,19 +1161,19 @@ fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize)
     OwnedRecord::new(values)
 }
 
-fn trace_insn(addr: BranchOffset, insn: &Insn) {
+fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
     if !log::log_enabled!(log::Level::Trace) {
         return;
     }
-    log::trace!("{}", insn_to_str(addr, insn, String::new()));
+    log::trace!("{}", insn_to_str(program, addr, insn, String::new()));
 }
 
-fn print_insn(addr: BranchOffset, insn: &Insn, indent: String) {
-    let s = insn_to_str(addr, insn, indent);
+fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: String) {
+    let s = insn_to_str(program, addr, insn, indent);
     println!("{}", s);
 }
 
-fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
+fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: String) -> String {
     let (opcode, p1, p2, p3, p4, p5, comment): (&str, i32, i32, i32, OwnedValue, u16, String) =
         match insn {
             Insn::Init { target_pc } => (
@@ -1313,15 +1349,23 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 cursor_id,
                 column,
                 dest,
-            } => (
-                "Column",
-                *cursor_id as i32,
-                *column as i32,
-                *dest as i32,
-                OwnedValue::Text(Rc::new("".to_string())),
-                0,
-                format!("r[{}]= cursor {} column {}", dest, cursor_id, column),
-            ),
+            } => {
+                let table = &program.cursor_ref[*cursor_id];
+                (
+                    "Column",
+                    *cursor_id as i32,
+                    *column as i32,
+                    *dest as i32,
+                    OwnedValue::Text(Rc::new("".to_string())),
+                    0,
+                    format!(
+                        "r[{}]={}.{}",
+                        dest,
+                        table.get_name(),
+                        table.column_index_to_name(*column).unwrap()
+                    ),
+                )
+            }
             Insn::MakeRecord {
                 start_reg,
                 count,
@@ -1342,7 +1386,7 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("output=r[{}..{}]", start_reg, start_reg + count),
+                format!("output=r[{}..{}]", start_reg, start_reg + count - 1),
             ),
             Insn::NextAsync { cursor_id } => (
                 "NextAsync",
@@ -1394,12 +1438,12 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
             ),
             Insn::Integer { value, dest } => (
                 "Integer",
-                *dest as i32,
                 *value as i32,
+                *dest as i32,
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                "".to_string(),
+                format!("r[{}]={}", dest, value),
             ),
             Insn::Real { value, dest } => (
                 "Real",
@@ -1435,7 +1479,11 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                "".to_string(),
+                format!(
+                    "r[{}]={}.rowid",
+                    dest,
+                    &program.cursor_ref[*cursor_id].get_name()
+                ),
             ),
             Insn::DecrJumpZero { reg, target_pc } => (
                 "DecrJumpZero",
@@ -1444,7 +1492,7 @@ fn insn_to_str(addr: BranchOffset, insn: &Insn, indent: String) -> String {
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                "".to_string(),
+                format!("if (--r[{}]==0) goto {}", reg, target_pc),
             ),
             Insn::AggStep {
                 func,

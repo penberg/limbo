@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::function::{AggFunc, Func, SingleRowFunc};
@@ -30,7 +31,6 @@ struct Select {
 }
 
 struct LoopInfo {
-    table: Table,
     rewind_offset: BranchOffset,
     rewind_label: BranchOffset,
     open_cursor: usize,
@@ -331,7 +331,7 @@ fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
 }
 
 fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> LoopInfo {
-    let cursor_id = program.alloc_cursor_id();
+    let cursor_id = program.alloc_cursor_id(table.clone());
     let root_page = match table {
         Table::BTree(btree) => btree.root_page,
         Table::Pseudo(_) => todo!(),
@@ -342,7 +342,6 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> L
     });
     program.emit_insn(Insn::OpenReadAwait);
     LoopInfo {
-        table: table.clone(),
         open_cursor: cursor_id,
         rewind_offset: 0,
         rewind_label: 0,
@@ -404,7 +403,7 @@ fn translate_column(
             let mut target_register = target_register;
             for join in &select.src_tables {
                 let table = &join.table;
-                translate_table_star(table, program, &select, target_register);
+                translate_table_star(table, program, target_register);
                 target_register += table.columns().len();
             }
         }
@@ -413,18 +412,8 @@ fn translate_column(
     Ok(())
 }
 
-fn translate_table_star(
-    table: &Table,
-    program: &mut ProgramBuilder,
-    select: &Select,
-    target_register: usize,
-) {
-    let table_cursor = select
-        .loops
-        .iter()
-        .find(|v| v.table == *table)
-        .unwrap()
-        .open_cursor;
+fn translate_table_star(table: &Table, program: &mut ProgramBuilder, target_register: usize) {
+    let table_cursor = program.resolve_cursor_id(table);
     for (i, col) in table.columns().iter().enumerate() {
         let col_target_register = target_register + i;
         if table.column_is_rowid_alias(col) {
@@ -700,7 +689,7 @@ fn translate_expr(
         ast::Expr::FunctionCallStar { .. } => todo!(),
         ast::Expr::Id(ident) => {
             // let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
-            let (idx, col, cursor_id) = resolve_ident_table(&ident.0, select)?;
+            let (idx, col, cursor_id) = resolve_ident_table(program, &ident.0, select)?;
             if col.primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
@@ -769,6 +758,7 @@ fn translate_expr(
 }
 
 fn resolve_ident_table<'a>(
+    program: &ProgramBuilder,
     ident: &String,
     select: &'a Select,
 ) -> Result<(usize, &'a Column, usize)> {
@@ -781,12 +771,7 @@ fn resolve_ident_table<'a>(
             .find(|(_, col)| col.name == *ident);
         if res.is_some() {
             let (idx, col) = res.unwrap();
-            let cursor_id = select
-                .loops
-                .iter()
-                .find(|l| l.table == join.table)
-                .unwrap()
-                .open_cursor;
+            let cursor_id = program.resolve_cursor_id(&join.table);
             return Ok((idx, col, cursor_id));
         }
     }
