@@ -177,6 +177,12 @@ impl PseudoTable {
     }
 }
 
+impl Default for PseudoTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn create_table(
     tbl_name: QualifiedName,
     body: CreateTableBody,
@@ -271,7 +277,7 @@ fn create_table(
     })
 }
 
-pub fn build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
+pub fn _build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
     let table = PseudoTable::new();
     for column in columns {
         match column {

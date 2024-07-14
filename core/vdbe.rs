@@ -268,7 +268,7 @@ impl ProgramBuilder {
     pub fn alloc_cursor_id(&mut self, table: Table) -> usize {
         let cursor = self.next_free_cursor_id;
         self.next_free_cursor_id += 1;
-        if self.cursor_ref.iter().find(|t| **t == table).is_some() {
+        if self.cursor_ref.iter().any(|t| *t == table) {
             todo!("duplicate table is unhandled. see how resolve_ident_table() calls resolve_cursor_id")
         }
         self.cursor_ref.push(table);
@@ -343,7 +343,7 @@ impl ProgramBuilder {
 
         let label_references = &mut self.unresolved_labels[label_index];
         assert!(
-            label_references.len() > 0,
+            !label_references.is_empty(),
             "Trying to resolve an empty created label, all labels must be resolved for now."
         );
         for insn_reference in label_references.iter() {
@@ -354,59 +354,62 @@ impl ProgramBuilder {
                     *target_pc = to_offset;
                 }
                 Insn::Eq {
-                    lhs,
-                    rhs,
+                    lhs: _lhs,
+                    rhs: _rhs,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::Ne {
-                    lhs,
-                    rhs,
+                    lhs: _lhs,
+                    rhs: _rhs,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::Lt {
-                    lhs,
-                    rhs,
+                    lhs: _lhs,
+                    rhs: _rhs,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::Le {
-                    lhs,
-                    rhs,
+                    lhs: _lhs,
+                    rhs: _rhs,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::Gt {
-                    lhs,
-                    rhs,
+                    lhs: _lhs,
+                    rhs: _rhs,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::Ge {
-                    lhs,
-                    rhs,
+                    lhs: _lhs,
+                    rhs: _rhs,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
-                Insn::IfNot { reg, target_pc } => {
+                Insn::IfNot {
+                    reg: _reg,
+                    target_pc,
+                } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::RewindAwait {
-                    cursor_id,
+                    cursor_id: _cursor_id,
                     pc_if_empty,
                 } => {
                     assert!(*pc_if_empty < 0);
@@ -416,18 +419,24 @@ impl ProgramBuilder {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
-                Insn::DecrJumpZero { reg, target_pc } => {
+                Insn::DecrJumpZero {
+                    reg: _reg,
+                    target_pc,
+                } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
                 Insn::SorterNext {
-                    cursor_id,
+                    cursor_id: _cursor_id,
                     pc_if_next,
                 } => {
                     assert!(*pc_if_next < 0);
                     *pc_if_next = to_offset;
                 }
-                Insn::NotNull { reg, target_pc } => {
+                Insn::NotNull {
+                    reg: _reg,
+                    target_pc,
+                } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
@@ -507,7 +516,7 @@ impl Program {
         for (addr, insn) in self.insns.iter().enumerate() {
             indent_count = get_indent_count(indent_count, insn, prev_insn);
             print_insn(
-                &self,
+                self,
                 addr as InsnReference,
                 insn,
                 indent.repeat(indent_count),
@@ -864,7 +873,6 @@ impl Program {
                 Insn::RealAffinity { register } => {
                     if let OwnedValue::Integer(i) = &state.registers[*register] {
                         state.registers[*register] = OwnedValue::Float(*i as f64);
-                    } else {
                     };
                     state.pc += 1;
                 }
@@ -1061,7 +1069,7 @@ impl Program {
                             let AggContext::GroupConcat(acc) = agg.borrow_mut() else {
                                 unreachable!();
                             };
-                            if acc.to_string().len() == 0 {
+                            if acc.to_string().is_empty() {
                                 *acc = col;
                             } else {
                                 *acc += delimiter;
@@ -1622,14 +1630,12 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
         indent_count
     };
 
-    let indent_count = match curr_insn {
+    match curr_insn {
         Insn::NextAsync { cursor_id: _ } => indent_count - 1,
         Insn::SorterNext {
             cursor_id: _,
             pc_if_next: _,
         } => indent_count - 1,
         _ => indent_count,
-    };
-
-    indent_count
+    }
 }

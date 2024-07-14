@@ -63,7 +63,7 @@ impl Database {
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
         if let Some(mut rows) = rows {
             loop {
-                match rows.next()? {
+                match rows.next_row()? {
                     RowResult::Row(row) => {
                         let ty = row.get::<&str>(0)?;
                         if ty != "table" {
@@ -257,7 +257,7 @@ impl Rows {
         Self { stmt }
     }
 
-    pub fn next(&mut self) -> Result<RowResult<'_>> {
+    pub fn next_row(&mut self) -> Result<RowResult<'_>> {
         self.stmt.step()
     }
 }

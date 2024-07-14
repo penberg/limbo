@@ -26,7 +26,7 @@ fn main() {
         let conn = db.connect();
         let mut stmt = conn.prepare("SELECT 1").unwrap();
         let mut rows = stmt.query().unwrap();
-        match rows.next().unwrap() {
+        match rows.next_row().unwrap() {
             limbo_core::RowResult::Row(row) => {
                 assert_eq!(row.get::<i64>(0).unwrap(), 1);
             }
