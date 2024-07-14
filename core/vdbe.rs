@@ -225,6 +225,8 @@ pub struct ProgramBuilder {
     next_free_label: BranchOffset,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
+    // for temporarily storing instructions that will be put after Transaction opcode
+    constant_insns: Vec<Insn>,
     // Each label has a list of InsnReferences that must
     // be resolved. Lists are indexed by: label.abs() - 1
     unresolved_labels: Vec<Vec<InsnReference>>,
@@ -243,6 +245,7 @@ impl ProgramBuilder {
             unresolved_labels: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),
+            constant_insns: Vec::new(),
         }
     }
 
@@ -279,6 +282,18 @@ impl ProgramBuilder {
             self.next_insn_label = None;
             self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
         }
+    }
+
+    // Emit an instruction that will be put at the end of the program (after Transaction statement).
+    // This is useful for instructions that otherwise will be unnecessarily repeated in a loop.
+    // Example: In `SELECT * from users where name='John'`, it is unnecessary to set r[1]='John' as we SCAN users table.
+    // We could simply set it once before the SCAN started.
+    pub fn mark_last_insn_constant(&mut self) {
+        self.constant_insns.push(self.insns.pop().unwrap());
+    }
+
+    pub fn emit_constant_insns(&mut self) {
+        self.insns.extend(self.constant_insns.drain(..));
     }
 
     pub fn emit_insn_with_label_dependency(&mut self, insn: Insn, label: BranchOffset) {
@@ -430,6 +445,10 @@ impl ProgramBuilder {
     }
 
     pub fn build(self) -> Program {
+        assert!(
+            self.constant_insns.is_empty(),
+            "constant_insns is not empty when build() is called, did you forget to call emit_constant_insns()?"
+        );
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,
@@ -1214,7 +1233,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] == r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]==r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Ne {
                 lhs,
@@ -1227,7 +1246,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] != r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]!=r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Lt {
                 lhs,
@@ -1240,7 +1259,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] < r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]<r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Le {
                 lhs,
@@ -1253,7 +1272,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] <= r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]<=r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Gt {
                 lhs,
@@ -1266,7 +1285,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] > r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]>r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::Ge {
                 lhs,
@@ -1279,7 +1298,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *target_pc as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] >= r[{}] -> {}", lhs, rhs, target_pc),
+                format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
             ),
             Insn::IfNot { reg, target_pc } => (
                 "IfNot",
@@ -1386,7 +1405,11 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("output=r[{}..{}]", start_reg, start_reg + count - 1),
+                if *count == 1 {
+                    format!("output=r[{}]", start_reg)
+                } else {
+                    format!("output=r[{}..{}]", start_reg, start_reg + count - 1)
+                },
             ),
             Insn::NextAsync { cursor_id } => (
                 "NextAsync",
@@ -1465,12 +1488,12 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
             ),
             Insn::String8 { value, dest } => (
                 "String8",
-                *dest as i32,
                 0,
+                *dest as i32,
                 0,
                 OwnedValue::Text(Rc::new(value.clone())),
                 0,
-                format!("r[{}]= '{}'", dest, value),
+                format!("r[{}]='{}'", dest, value),
             ),
             Insn::RowId { cursor_id, dest } => (
                 "RowId",
@@ -1506,7 +1529,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *acc_reg as i32,
                 OwnedValue::Text(Rc::new(func.to_string().into())),
                 0,
-                format!("accum=r[{}] step({})", *acc_reg, *col),
+                format!("accum=r[{}] step(r[{}])", *acc_reg, *col),
             ),
             Insn::AggFinal { register, func } => (
                 "AggFinal",
