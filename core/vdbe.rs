@@ -26,6 +26,12 @@ pub enum Insn {
     Null {
         dest: usize,
     },
+    // Add two registers and store the result in a third register.
+    Add {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
     // If the given register is not NULL, jump to the given PC.
     NotNull {
         reg: usize,
@@ -232,7 +238,7 @@ pub struct ProgramBuilder {
     unresolved_labels: Vec<Vec<InsnReference>>,
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
-    cursor_ref: Vec<Table>,
+    cursor_ref: Vec<(String, Table)>,
 }
 
 impl ProgramBuilder {
@@ -265,13 +271,10 @@ impl ProgramBuilder {
         self.next_free_register
     }
 
-    pub fn alloc_cursor_id(&mut self, table: Table) -> usize {
+    pub fn alloc_cursor_id(&mut self, table_identifier: String, table: Table) -> usize {
         let cursor = self.next_free_cursor_id;
         self.next_free_cursor_id += 1;
-        if self.cursor_ref.iter().any(|t| *t == table) {
-            todo!("duplicate table is unhandled. see how resolve_ident_table() calls resolve_cursor_id")
-        }
-        self.cursor_ref.push(table);
+        self.cursor_ref.push((table_identifier, table));
         assert!(self.cursor_ref.len() == self.next_free_cursor_id);
         cursor
     }
@@ -293,7 +296,7 @@ impl ProgramBuilder {
     }
 
     pub fn emit_constant_insns(&mut self) {
-        self.insns.extend(self.constant_insns.drain(..));
+        self.insns.append(&mut self.constant_insns);
     }
 
     pub fn emit_insn_with_label_dependency(&mut self, insn: Insn, label: BranchOffset) {
@@ -449,8 +452,11 @@ impl ProgramBuilder {
     }
 
     // translate table to cursor id
-    pub fn resolve_cursor_id(&self, table: &Table) -> CursorID {
-        self.cursor_ref.iter().position(|t| t == table).unwrap()
+    pub fn resolve_cursor_id(&self, table_identifier: &str) -> CursorID {
+        self.cursor_ref
+            .iter()
+            .position(|(t_ident, _)| *t_ident == table_identifier)
+            .unwrap()
     }
 
     pub fn build(self) -> Program {
@@ -503,7 +509,7 @@ impl ProgramState {
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
-    pub cursor_ref: Vec<Table>,
+    pub cursor_ref: Vec<(String, Table)>,
 }
 
 impl Program {
@@ -538,6 +544,23 @@ impl Program {
                 Insn::Init { target_pc } => {
                     assert!(*target_pc >= 0);
                     state.pc = *target_pc;
+                }
+                Insn::Add { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            state.registers[dest] = OwnedValue::Integer(lhs + rhs);
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            state.registers[dest] = OwnedValue::Float(lhs + rhs);
+                        }
+                        _ => {
+                            todo!();
+                        }
+                    }
+                    state.pc += 1;
                 }
                 Insn::Null { dest } => {
                     state.registers[*dest] = OwnedValue::Null;
@@ -1212,6 +1235,15 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 format!("Start at {}", target_pc),
             ),
+            Insn::Add { lhs, rhs, dest } => (
+                "Add",
+                *lhs as i32,
+                *rhs as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}]+r[{}]", dest, lhs, rhs),
+            ),
             Insn::Null { dest } => (
                 "Null",
                 *dest as i32,
@@ -1377,7 +1409,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 column,
                 dest,
             } => {
-                let table = &program.cursor_ref[*cursor_id];
+                let (_, table) = &program.cursor_ref[*cursor_id];
                 (
                     "Column",
                     *cursor_id as i32,
@@ -1513,7 +1545,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 format!(
                     "r[{}]={}.rowid",
                     dest,
-                    &program.cursor_ref[*cursor_id].get_name()
+                    &program.cursor_ref[*cursor_id].1.get_name()
                 ),
             ),
             Insn::DecrJumpZero { reg, target_pc } => (

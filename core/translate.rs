@@ -37,7 +37,8 @@ struct LoopInfo {
 
 struct SrcTable {
     table: Table,
-    _join_info: Option<ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
+    alias: Option<String>,
+    join_info: Option<ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
 }
 
 struct ColumnInfo {
@@ -91,14 +92,21 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             where_clause,
             ..
         } => {
-            let table_name = match from.select {
+            let (table_name, maybe_alias) = match from.select {
                 Some(select_table) => match *select_table {
-                    ast::SelectTable::Table(name, ..) => name.name,
+                    ast::SelectTable::Table(name, alias, ..) => (
+                        name.name,
+                        alias.map(|als| match als {
+                            ast::As::As(alias) => alias,     // users as u
+                            ast::As::Elided(alias) => alias, // users u
+                        }),
+                    ),
                     _ => todo!(),
                 },
                 None => todo!(),
             };
             let table_name = table_name.0;
+            let maybe_alias = maybe_alias.map(|als| als.0);
             let table = match schema.get_table(&table_name) {
                 Some(table) => table,
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
@@ -106,22 +114,31 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             let mut joins = Vec::new();
             joins.push(SrcTable {
                 table: Table::BTree(table.clone()),
-                _join_info: None,
+                alias: maybe_alias,
+                join_info: None,
             });
             if let Some(selected_joins) = from.joins {
                 for join in selected_joins {
-                    let table_name = match &join.table {
-                        ast::SelectTable::Table(name, ..) => name.name.clone(),
+                    let (table_name, maybe_alias) = match &join.table {
+                        ast::SelectTable::Table(name, alias, ..) => (
+                            name.name.clone(),
+                            alias.clone().map(|als| match als {
+                                ast::As::As(alias) => alias,     // users as u
+                                ast::As::Elided(alias) => alias, // users u
+                            }),
+                        ),
                         _ => todo!(),
                     };
                     let table_name = &table_name.0;
+                    let maybe_alias = maybe_alias.map(|als| als.0);
                     let table = match schema.get_table(table_name) {
                         Some(table) => table,
                         None => anyhow::bail!("Parse error: no such table: {}", table_name),
                     };
                     joins.push(SrcTable {
                         table: Table::BTree(table),
-                        _join_info: Some(join.clone()),
+                        alias: maybe_alias,
+                        join_info: Some(join.clone()),
                     });
                 }
             }
@@ -205,9 +222,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
     };
 
     if !select.src_tables.is_empty() {
-        translate_tables_begin(&mut program, &mut select);
-
-        let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
+        let condition_label_maybe = translate_tables_begin(&mut program, &mut select)?;
 
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
 
@@ -219,8 +234,8 @@ fn translate_select(mut select: Select) -> Result<Program> {
             emit_limit_insn(&limit_info, &mut program);
         }
 
-        if let Some(where_clause_label) = where_maybe {
-            program.resolve_label(where_clause_label, program.offset());
+        if let Some(condition_label) = condition_label_maybe {
+            program.resolve_label(condition_label, program.offset());
         }
 
         translate_tables_end(&mut program, &select);
@@ -245,7 +260,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
         }
     } else {
         assert!(!select.exist_aggregation);
-        let where_maybe = insert_where_clause_instructions(&select, &mut program)?;
+        let where_maybe = translate_where(&select, &mut program)?;
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
         if let Some(where_clause_label) = where_maybe {
             program.resolve_label(where_clause_label, program.offset() + 1);
@@ -288,10 +303,7 @@ fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder)
     }
 }
 
-fn insert_where_clause_instructions(
-    select: &Select,
-    program: &mut ProgramBuilder,
-) -> Result<Option<BranchOffset>> {
+fn translate_where(select: &Select, program: &mut ProgramBuilder) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
         let label = program.allocate_label();
         translate_condition_expr(program, select, w, label)?;
@@ -301,16 +313,76 @@ fn insert_where_clause_instructions(
     }
 }
 
-fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) {
+fn translate_conditions(
+    program: &mut ProgramBuilder,
+    select: &Select,
+) -> Result<Option<BranchOffset>> {
+    // FIXME: clone()
+    // TODO: only supports INNER JOIN on a single condition atm, e.g. SELECT * FROM a JOIN b ON a.id = b.id, no AND/OR
+    let join_constraints = select
+        .src_tables
+        .iter()
+        .map(|v| v.join_info.clone())
+        .filter_map(|v| v.map(|v| v.constraint))
+        .flatten()
+        .collect::<Vec<_>>();
+    // TODO: only supports one JOIN; -> add support for multiple JOINs, e.g. SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id
+    if join_constraints.len() > 1 {
+        anyhow::bail!("Parse error: multiple JOINs not supported");
+    }
+
+    let maybe_join = join_constraints.first();
+
+    match (&select.where_clause, maybe_join) {
+        (Some(where_clause), Some(join)) => {
+            match join {
+                ast::JoinConstraint::On(expr) => {
+                    // Combine where clause and join condition
+                    let label = program.allocate_label();
+                    translate_condition_expr(program, select, where_clause, label)?;
+                    translate_condition_expr(program, select, expr, label)?;
+                    Ok(Some(label))
+                }
+                ast::JoinConstraint::Using(_) => {
+                    todo!();
+                }
+            }
+        }
+        (None, None) => {
+            Ok(None)
+        }
+        (Some(where_clause), None) => {
+            let label = program.allocate_label();
+            translate_condition_expr(program, select, where_clause, label)?;
+            Ok(Some(label))
+        }
+        (None, Some(join)) => match join {
+            ast::JoinConstraint::On(expr) => {
+                let label = program.allocate_label();
+                translate_condition_expr(program, select, expr, label)?;
+                Ok(Some(label))
+            }
+            ast::JoinConstraint::Using(_) => {
+                todo!();
+            }
+        },
+    }
+}
+
+fn translate_tables_begin(
+    program: &mut ProgramBuilder,
+    select: &mut Select,
+) -> Result<Option<BranchOffset>> {
     for join in &select.src_tables {
-        let table = &join.table;
-        let loop_info = translate_table_open_cursor(program, table);
+        let loop_info = translate_table_open_cursor(program, join);
         select.loops.push(loop_info);
     }
 
     for loop_info in &mut select.loops {
         translate_table_open_loop(program, loop_info);
     }
+
+    translate_conditions(program, select)
 }
 
 fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
@@ -326,9 +398,13 @@ fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
     }
 }
 
-fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &Table) -> LoopInfo {
-    let cursor_id = program.alloc_cursor_id(table.clone());
-    let root_page = match table {
+fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -> LoopInfo {
+    let table_identifier = match &table.alias {
+        Some(alias) => alias.clone(),
+        None => table.table.get_name().to_string(),
+    };
+    let cursor_id = program.alloc_cursor_id(table_identifier, table.table.clone());
+    let root_page = match &table.table {
         Table::BTree(btree) => btree.root_page,
         Table::Pseudo(_) => todo!(),
     };
@@ -398,9 +474,8 @@ fn translate_column(
         ast::ResultColumn::Star => {
             let mut target_register = target_register;
             for join in &select.src_tables {
-                let table = &join.table;
-                translate_table_star(table, program, target_register);
-                target_register += table.columns().len();
+                translate_table_star(join, program, target_register);
+                target_register += &join.table.columns().len();
             }
         }
         ast::ResultColumn::TableStar(_) => todo!(),
@@ -408,8 +483,13 @@ fn translate_column(
     Ok(())
 }
 
-fn translate_table_star(table: &Table, program: &mut ProgramBuilder, target_register: usize) {
-    let table_cursor = program.resolve_cursor_id(table);
+fn translate_table_star(table: &SrcTable, program: &mut ProgramBuilder, target_register: usize) {
+    let table_identifier = match &table.alias {
+        Some(alias) => alias.clone(),
+        None => table.table.get_name().to_string(),
+    };
+    let table_cursor = program.resolve_cursor_id(&table_identifier);
+    let table = &table.table;
     for (i, col) in table.columns().iter().enumerate() {
         let col_target_register = target_register + i;
         if table.column_is_rowid_alias(col) {
@@ -541,7 +621,7 @@ fn translate_condition_expr(
                     rhs: e2_reg,
                     target_pc: jump_target,
                 },
-                _ => todo!(),
+                other => todo!("{:?}", other),
             });
             Ok(())
         }
@@ -572,6 +652,24 @@ fn translate_condition_expr(
     }
 }
 
+fn wrap_eval_jump_expr(
+    program: &mut ProgramBuilder,
+    insn: Insn,
+    target_register: usize,
+    if_true_label: BranchOffset,
+) {
+    program.emit_insn(Insn::Integer {
+        value: 1, // emit True by default
+        dest: target_register,
+    });
+    program.emit_insn_with_label_dependency(insn, if_true_label);
+    program.emit_insn(Insn::Integer {
+        value: 0, // emit False if we reach this point (no jump)
+        dest: target_register,
+    });
+    program.preassign_label_to_next_insn(if_true_label);
+}
+
 fn translate_expr(
     program: &mut ProgramBuilder,
     select: &Select,
@@ -585,50 +683,95 @@ fn translate_expr(
             let e2_reg = program.alloc_register();
             let _ = translate_expr(program, select, e1, e1_reg)?;
             let _ = translate_expr(program, select, e2, e2_reg)?;
-            program.emit_insn(match op {
-                ast::Operator::NotEquals => Insn::Ne {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: program.offset() + 3, // jump to "emit True" instruction
-                },
-                ast::Operator::Equals => Insn::Eq {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: program.offset() + 3,
-                },
-                ast::Operator::Less => Insn::Lt {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: program.offset() + 3,
-                },
-                ast::Operator::LessEquals => Insn::Le {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: program.offset() + 3,
-                },
-                ast::Operator::Greater => Insn::Gt {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: program.offset() + 3,
-                },
-                ast::Operator::GreaterEquals => Insn::Ge {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: program.offset() + 3,
-                },
-                _ => todo!(),
-            });
-            program.emit_insn(Insn::Integer {
-                value: 0, // emit False
-                dest: target_register,
-            });
-            program.emit_insn(Insn::Goto {
-                target_pc: program.offset() + 2,
-            });
-            program.emit_insn(Insn::Integer {
-                value: 1, // emit True
-                dest: target_register,
-            });
+
+            match op {
+                ast::Operator::NotEquals => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Ne {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
+                ast::Operator::Equals => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Eq {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
+                ast::Operator::Less => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Lt {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
+                ast::Operator::LessEquals => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Le {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
+                ast::Operator::Greater => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Gt {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
+                ast::Operator::GreaterEquals => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Ge {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
+                ast::Operator::Add => {
+                    program.emit_insn(Insn::Add {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
+                other_unimplemented => todo!("{:?}", other_unimplemented),
+            }
             Ok(target_register)
         }
         ast::Expr::Case { .. } => todo!(),
@@ -753,7 +896,23 @@ fn translate_expr(
         ast::Expr::Name(_) => todo!(),
         ast::Expr::NotNull(_) => todo!(),
         ast::Expr::Parenthesized(_) => todo!(),
-        ast::Expr::Qualified(_, _) => todo!(),
+        ast::Expr::Qualified(tbl, ident) => {
+            let (idx, col, cursor_id) = resolve_ident_qualified(program, &tbl.0, &ident.0, select)?;
+            if col.primary_key {
+                program.emit_insn(Insn::RowId {
+                    cursor_id,
+                    dest: target_register,
+                });
+            } else {
+                program.emit_insn(Insn::Column {
+                    column: idx,
+                    dest: target_register,
+                    cursor_id,
+                });
+            }
+            maybe_apply_affinity(col, target_register, program);
+            Ok(target_register)
+        }
         ast::Expr::Raise(_, _) => todo!(),
         ast::Expr::Subquery(_) => todo!(),
         ast::Expr::Unary(_, _) => todo!(),
@@ -761,25 +920,77 @@ fn translate_expr(
     }
 }
 
+fn resolve_ident_qualified<'a>(
+    program: &ProgramBuilder,
+    table_name: &String,
+    ident: &String,
+    select: &'a Select,
+) -> Result<(usize, &'a Column, usize)> {
+    for join in &select.src_tables {
+        match join.table {
+            Table::BTree(ref table) => {
+                let table_identifier = match &join.alias {
+                    Some(alias) => alias.clone(),
+                    None => table.name.to_string(),
+                };
+                if table_identifier == *table_name {
+                    let res = table
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .find(|(_, col)| col.name == *ident);
+                    if res.is_some() {
+                        let (idx, col) = res.unwrap();
+                        let cursor_id = program.resolve_cursor_id(&table_identifier);
+                        return Ok((idx, col, cursor_id));
+                    }
+                }
+            }
+            Table::Pseudo(_) => todo!(),
+        }
+    }
+    anyhow::bail!(
+        "Parse error: column with qualified name {}.{} not found",
+        table_name,
+        ident
+    );
+}
+
 fn resolve_ident_table<'a>(
     program: &ProgramBuilder,
     ident: &String,
     select: &'a Select,
 ) -> Result<(usize, &'a Column, usize)> {
+    let mut found = Vec::new();
     for join in &select.src_tables {
-        let res = join
-            .table
-            .columns()
-            .iter()
-            .enumerate()
-            .find(|(_, col)| col.name == *ident);
-        if res.is_some() {
-            let (idx, col) = res.unwrap();
-            let cursor_id = program.resolve_cursor_id(&join.table);
-            return Ok((idx, col, cursor_id));
+        match join.table {
+            Table::BTree(ref table) => {
+                let table_identifier = match &join.alias {
+                    Some(alias) => alias.clone(),
+                    None => table.name.to_string(),
+                };
+                let res = table
+                    .columns
+                    .iter()
+                    .enumerate()
+                    .find(|(_, col)| col.name == *ident);
+                if res.is_some() {
+                    let (idx, col) = res.unwrap();
+                    let cursor_id = program.resolve_cursor_id(&table_identifier);
+                    found.push((idx, col, cursor_id));
+                }
+            }
+            Table::Pseudo(_) => todo!(),
         }
     }
-    anyhow::bail!("Parse error: column with name {} not found", ident.as_str());
+    if found.len() == 1 {
+        return Ok(found[0]);
+    }
+    if found.is_empty() {
+        anyhow::bail!("Parse error: column with name {} not found", ident.as_str());
+    }
+
+    anyhow::bail!("Parse error: ambiguous column name {}", ident.as_str());
 }
 
 fn translate_aggregation(
