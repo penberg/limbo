@@ -171,7 +171,7 @@ fn display_schema(
         Ok(Some(ref mut rows)) => {
             let mut found = false;
             loop {
-                match rows.next()? {
+                match rows.next_row()? {
                     RowResult::Row(row) => {
                         if let Some(Value::Text(schema)) = row.values.first() {
                             println!("{};", schema);
@@ -216,7 +216,7 @@ fn query(
     match conn.query(sql) {
         Ok(Some(ref mut rows)) => match output_mode {
             OutputMode::Raw => loop {
-                match rows.next()? {
+                match rows.next_row()? {
                     RowResult::Row(row) => {
                         for (i, value) in row.values.iter().enumerate() {
                             if i > 0 {
@@ -241,7 +241,7 @@ fn query(
             OutputMode::Pretty => {
                 let mut table_rows: Vec<Vec<_>> = vec![];
                 loop {
-                    match rows.next()? {
+                    match rows.next_row()? {
                         RowResult::Row(row) => {
                             table_rows.push(
                                 row.values

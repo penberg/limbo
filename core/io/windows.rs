@@ -1,9 +1,9 @@
 use super::{Completion, File, WriteCompletion, IO};
 use anyhow::{Ok, Result};
-use std::rc::Rc;
+use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
-use log::trace;
+use std::rc::Rc;
 
 pub struct WindowsIO {}
 
@@ -48,7 +48,7 @@ impl File for WindowsFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<WriteCompletion>,
+        _c: Rc<WriteCompletion>,
     ) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;

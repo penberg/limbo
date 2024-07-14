@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::function::{AggFunc, Func, SingleRowFunc};
@@ -38,7 +37,7 @@ struct LoopInfo {
 
 struct SrcTable {
     table: Table,
-    join_info: Option<ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
+    _join_info: Option<ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
 }
 
 struct ColumnInfo {
@@ -57,10 +56,7 @@ impl ColumnInfo {
     }
 
     pub fn is_aggregation_function(&self) -> bool {
-        match self.func {
-            Some(Func::Agg(_)) => true,
-            _ => false,
-        }
+        matches!(self.func, Some(Func::Agg(_)))
     }
 }
 
@@ -110,30 +106,27 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             let mut joins = Vec::new();
             joins.push(SrcTable {
                 table: Table::BTree(table.clone()),
-                join_info: None,
+                _join_info: None,
             });
-            match from.joins {
-                Some(selected_joins) => {
-                    for join in selected_joins {
-                        let table_name = match &join.table {
-                            ast::SelectTable::Table(name, ..) => name.name.clone(),
-                            _ => todo!(),
-                        };
-                        let table_name = &table_name.0;
-                        let table = match schema.get_table(table_name) {
-                            Some(table) => table,
-                            None => anyhow::bail!("Parse error: no such table: {}", table_name),
-                        };
-                        joins.push(SrcTable {
-                            table: Table::BTree(table),
-                            join_info: Some(join.clone()),
-                        });
-                    }
+            if let Some(selected_joins) = from.joins {
+                for join in selected_joins {
+                    let table_name = match &join.table {
+                        ast::SelectTable::Table(name, ..) => name.name.clone(),
+                        _ => todo!(),
+                    };
+                    let table_name = &table_name.0;
+                    let table = match schema.get_table(table_name) {
+                        Some(table) => table,
+                        None => anyhow::bail!("Parse error: no such table: {}", table_name),
+                    };
+                    joins.push(SrcTable {
+                        table: Table::BTree(table),
+                        _join_info: Some(join.clone()),
+                    });
                 }
-                None => {}
-            };
+            }
 
-            let table = Table::BTree(table);
+            let _table = Table::BTree(table);
             let column_info = analyze_columns(&columns, &joins);
             let exist_aggregation = column_info
                 .iter()
@@ -265,8 +258,10 @@ fn translate_select(mut select: Select) -> Result<Program> {
     };
     program.emit_insn(Insn::Halt);
     let halt_offset = program.offset() - 1;
-    if limit_info.is_some() && limit_info.as_ref().unwrap().goto_label < 0 {
-        program.resolve_label(limit_info.as_ref().unwrap().goto_label, halt_offset);
+    if let Some(limit_info) = limit_info {
+        if limit_info.goto_label < 0 {
+            program.resolve_label(limit_info.goto_label, halt_offset);
+        }
     }
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
@@ -298,7 +293,7 @@ fn insert_where_clause_instructions(
 ) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
         let label = program.allocate_label();
-        translate_condition_expr(program, &select, w, label)?;
+        translate_condition_expr(program, select, w, label)?;
         Ok(Some(label))
     } else {
         Ok(None)
@@ -476,8 +471,8 @@ fn analyze_expr(expr: &Expr, column_info_out: &mut ColumnInfo) {
             };
             if func_type.is_none() {
                 let args = args.as_ref().unwrap();
-                if args.len() > 0 {
-                    analyze_expr(&args.get(0).unwrap(), column_info_out);
+                if !args.is_empty() {
+                    analyze_expr(args.first().unwrap(), column_info_out);
                 }
             } else {
                 column_info_out.func = func_type;
@@ -839,7 +834,7 @@ fn translate_aggregation(
                 if args.len() == 2 {
                     match &args[1] {
                         ast::Expr::Id(ident) => {
-                            if ident.0.starts_with("\"") {
+                            if ident.0.starts_with('"') {
                                 delimiter_expr =
                                     ast::Expr::Literal(Literal::String(ident.0.to_string()));
                             } else {
@@ -915,7 +910,7 @@ fn translate_aggregation(
 
                 match &args[1] {
                     ast::Expr::Id(ident) => {
-                        if ident.0.starts_with("\"") {
+                        if ident.0.starts_with('"') {
                             anyhow::bail!("Parse error: no such column: \",\" - should this be a string literal in single-quotes?");
                         } else {
                             delimiter_expr = args[1].clone();
@@ -1070,10 +1065,9 @@ fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pa
 }
 
 fn maybe_apply_affinity(col: &Column, target_register: usize, program: &mut ProgramBuilder) {
-    match col.ty {
-        crate::schema::Type::Real => program.emit_insn(Insn::RealAffinity {
+    if col.ty == crate::schema::Type::Real {
+        program.emit_insn(Insn::RealAffinity {
             register: target_register,
-        }),
-        _ => {}
+        })
     }
 }

@@ -60,27 +60,27 @@ int sqlite3_exec(sqlite3 *db, const char *sql, int (*_callback)(void), void *_co
 
 int sqlite3_reset(sqlite3_stmt *stmt);
 
-int sqlite3_changes(sqlite3 *db);
+int sqlite3_changes(sqlite3 *_db);
 
-int sqlite3_stmt_readonly(sqlite3_stmt *stmt);
+int sqlite3_stmt_readonly(sqlite3_stmt *_stmt);
 
-int sqlite3_stmt_busy(sqlite3_stmt *stmt);
+int sqlite3_stmt_busy(sqlite3_stmt *_stmt);
 
 int sqlite3_serialize(sqlite3 *_db, const char *_schema, void **_out, int *_out_bytes, unsigned int _flags);
 
 int sqlite3_deserialize(sqlite3 *_db, const char *_schema, const void *_in_, int _in_bytes, unsigned int _flags);
 
-int sqlite3_get_autocommit(sqlite3 *db);
+int sqlite3_get_autocommit(sqlite3 *_db);
 
-int sqlite3_total_changes(sqlite3 *db);
+int sqlite3_total_changes(sqlite3 *_db);
 
-int64_t sqlite3_last_insert_rowid(sqlite3 *db);
+int64_t sqlite3_last_insert_rowid(sqlite3 *_db);
 
-void sqlite3_interrupt(sqlite3 *db);
+void sqlite3_interrupt(sqlite3 *_db);
 
 int sqlite3_db_config(sqlite3 *_db, int _op);
 
-sqlite3 *sqlite3_db_handle(sqlite3_stmt *stmt);
+sqlite3 *sqlite3_db_handle(sqlite3_stmt *_stmt);
 
 void sqlite3_sleep(int _ms);
 
@@ -90,7 +90,7 @@ void *sqlite3_malloc64(int _n);
 
 void sqlite3_free(void *_ptr);
 
-int sqlite3_errcode(sqlite3 *db);
+int sqlite3_errcode(sqlite3 *_db);
 
 const char *sqlite3_errstr(int _err);
 
@@ -110,35 +110,35 @@ char *sqlite3_expanded_sql(sqlite3_stmt *_stmt);
 
 int sqlite3_data_count(sqlite3_stmt *stmt);
 
-int sqlite3_bind_parameter_count(sqlite3_stmt *stmt);
+int sqlite3_bind_parameter_count(sqlite3_stmt *_stmt);
 
 const char *sqlite3_bind_parameter_name(sqlite3_stmt *_stmt, int _idx);
 
-int sqlite3_bind_null(sqlite3_stmt *stmt, int idx);
+int sqlite3_bind_null(sqlite3_stmt *_stmt, int _idx);
 
-int sqlite3_bind_int64(sqlite3_stmt *stmt, int idx, int64_t val);
+int sqlite3_bind_int64(sqlite3_stmt *_stmt, int _idx, int64_t _val);
 
-int sqlite3_bind_double(sqlite3_stmt *stmt, int idx, double val);
+int sqlite3_bind_double(sqlite3_stmt *_stmt, int _idx, double _val);
 
-int sqlite3_bind_text(sqlite3_stmt *stmt, int idx, const char *text, int len, void *_destroy);
+int sqlite3_bind_text(sqlite3_stmt *_stmt, int _idx, const char *_text, int _len, void *_destroy);
 
-int sqlite3_bind_blob(sqlite3_stmt *stmt, int idx, const void *blob, int len, void *_destroy);
+int sqlite3_bind_blob(sqlite3_stmt *_stmt, int _idx, const void *_blob, int _len, void *_destroy);
 
-int sqlite3_column_type(sqlite3_stmt *stmt, int idx);
+int sqlite3_column_type(sqlite3_stmt *_stmt, int _idx);
 
-int sqlite3_column_count(sqlite3_stmt *stmt);
+int sqlite3_column_count(sqlite3_stmt *_stmt);
 
-const char *sqlite3_column_decltype(sqlite3_stmt *stmt, int idx);
+const char *sqlite3_column_decltype(sqlite3_stmt *_stmt, int _idx);
 
-const char *sqlite3_column_name(sqlite3_stmt *stmt, int idx);
+const char *sqlite3_column_name(sqlite3_stmt *_stmt, int _idx);
 
-int64_t sqlite3_column_int64(sqlite3_stmt *stmt, int idx);
+int64_t sqlite3_column_int64(sqlite3_stmt *_stmt, int _idx);
 
-double sqlite3_column_double(sqlite3_stmt *stmt, int idx);
+double sqlite3_column_double(sqlite3_stmt *_stmt, int _idx);
 
-const void *sqlite3_column_blob(sqlite3_stmt *stmt, int idx);
+const void *sqlite3_column_blob(sqlite3_stmt *_stmt, int _idx);
 
-int sqlite3_column_bytes(sqlite3_stmt *stmt, int idx);
+int sqlite3_column_bytes(sqlite3_stmt *_stmt, int _idx);
 
 int sqlite3_value_type(void *value);
 
@@ -218,7 +218,7 @@ int sqlite3_create_window_function(sqlite3 *_db,
                                    void (*_x_inverse)(void),
                                    void (*_destroy)(void));
 
-const char *sqlite3_errmsg(sqlite3 *db);
+const char *sqlite3_errmsg(sqlite3 *_db);
 
 int sqlite3_extended_errcode(sqlite3 *_db);
 
