@@ -225,6 +225,8 @@ pub struct ProgramBuilder {
     next_free_label: BranchOffset,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
+    // for temporarily storing instructions that will be put after Transaction opcode
+    run_once_insns: Vec<Insn>,
     // Each label has a list of InsnReferences that must
     // be resolved. Lists are indexed by: label.abs() - 1
     unresolved_labels: Vec<Vec<InsnReference>>,
@@ -243,6 +245,7 @@ impl ProgramBuilder {
             unresolved_labels: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),
+            run_once_insns: Vec::new(),
         }
     }
 
@@ -279,6 +282,18 @@ impl ProgramBuilder {
             self.next_insn_label = None;
             self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
         }
+    }
+
+    // Emit an instruction that will be put at the end of the program (after Transaction statement).
+    // This is useful for instructions that otherwise will be unnecessarily repeated in a loop.
+    // Example: In `SELECT * from users where name='John'`, it is unnecessary to set r[1]='John' as we SCAN users table.
+    // We could simply set it once before the SCAN started.
+    pub fn move_last_insn_out_of_loop(&mut self) {
+        self.run_once_insns.push(self.insns.pop().unwrap());
+    }
+
+    pub fn emit_run_once_insns(&mut self) {
+        self.insns.extend(self.run_once_insns.drain(..));
     }
 
     pub fn emit_insn_with_label_dependency(&mut self, insn: Insn, label: BranchOffset) {
@@ -430,6 +445,10 @@ impl ProgramBuilder {
     }
 
     pub fn build(self) -> Program {
+        assert!(
+            self.run_once_insns.is_empty(),
+            "run_once_insns is not empty when build() is called, did you forget to call emit_run_once_insns()?"
+        );
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,

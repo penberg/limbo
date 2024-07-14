@@ -269,6 +269,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
     }
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
+    program.emit_run_once_insns();
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
@@ -501,7 +502,15 @@ fn translate_condition_expr(
             let e1_reg = program.alloc_register();
             let e2_reg = program.alloc_register();
             let _ = translate_expr(program, select, e1, e1_reg)?;
+            match e1.as_ref() {
+                ast::Expr::Literal(_) => program.move_last_insn_out_of_loop(),
+                _ => {}
+            }
             let _ = translate_expr(program, select, e2, e2_reg)?;
+            match e2.as_ref() {
+                ast::Expr::Literal(_) => program.move_last_insn_out_of_loop(),
+                _ => {}
+            }
             if jump_target < 0 {
                 program.add_label_dependency(jump_target, program.offset());
             }
@@ -1030,6 +1039,7 @@ fn translate_pragma(
     program.emit_insn(Insn::Halt);
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
+    program.emit_run_once_insns();
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
