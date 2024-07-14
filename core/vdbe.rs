@@ -298,7 +298,7 @@ impl ProgramBuilder {
         (label.abs() - 1) as usize
     }
 
-    fn add_label_dependency(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
+    pub fn add_label_dependency(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
         assert!(insn_reference >= 0);
         assert!(label < 0);
         let label_index = self.label_to_index(label);
