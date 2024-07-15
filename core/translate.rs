@@ -571,6 +571,25 @@ fn translate_condition_expr(
     jump_target: BranchOffset,
 ) -> Result<()> {
     match expr {
+        ast::Expr::Binary(e1, op, e2) => match op {
+            ast::Operator::And => {
+                let _ = translate_condition_expr(program, select, e1, jump_target)?;
+                let _ = translate_condition_expr(program, select, e2, jump_target)?;
+                Ok(())
+            }
+            _ => translate_condition_expr_leaf(program, select, expr, jump_target),
+        },
+        _ => translate_condition_expr_leaf(program, select, expr, jump_target),
+    }
+}
+
+fn translate_condition_expr_leaf(
+    program: &mut ProgramBuilder,
+    select: &Select,
+    expr: &ast::Expr,
+    jump_target: BranchOffset,
+) -> Result<()> {
+    match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
             let e1_reg = program.alloc_register();
