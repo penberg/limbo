@@ -32,6 +32,14 @@ pub struct WindowsFile {
 }
 
 impl File for WindowsFile {
+    fn lock_file(&self, exclusive: bool) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn unlock_file(&self) -> Result<()> {
+        unimplemented!()
+    }
+
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;

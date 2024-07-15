@@ -99,6 +99,20 @@ impl SimulatorFile {
 }
 
 impl limbo_core::File for SimulatorFile {
+    fn lock_file(&self, exclusive: bool) -> Result<()> {
+        if *self.fault.borrow() {
+            return Err(anyhow::anyhow!("Injected fault"));
+        }
+        self.inner.lock_file(exclusive)
+    }
+
+    fn unlock_file(&self) -> Result<()> {
+        if *self.fault.borrow() {
+            return Err(anyhow::anyhow!("Injected fault"));
+        }
+        self.inner.unlock_file()
+    }
+
     fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         if *self.fault.borrow() {
             return Err(anyhow::anyhow!("Injected fault"));

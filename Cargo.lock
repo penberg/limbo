@@ -1011,6 +1011,7 @@ dependencies = [
  "rustix",
  "sieve-cache",
  "sqlite3-parser",
+ "tempfile",
  "thiserror",
 ]
 
