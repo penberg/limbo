@@ -83,6 +83,12 @@ echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
 cargo bench --bench benchmark -- --profile-time=5
 ```
 
+## FAQ
+
+### How is Limbo different from libSQL?
+
+Limbo is a research project to build a SQLite compatible in-process database in Rust with native async support. The libSQL project, on the other hand, is an open source, open contribution fork of SQLite, with focus on production features such as replication, backups, encryption, and so on. There is no hard dependency between the two projects. Of course, if Limbo becomes widely successful, we might consider merging with libSQL, but that something that will be decided in the future.
+
 ## Publications
 
 * Pekka Enberg, Sasu Tarkoma, Jon Crowcroft Ashwin Rao (2024). Serverless Runtime / Database Co-Design With Asynchronous I/O. In _EdgeSys ‘24_. [[PDF]](https://penberg.org/papers/penberg-edgesys24.pdf)
