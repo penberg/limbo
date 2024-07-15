@@ -603,12 +603,29 @@ impl Program {
                                 state.pc += 1;
                             }
                         }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            if (*lhs as f64) == *rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            if *lhs == (*rhs as f64) {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
                         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => {
                             if lhs == rhs {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
                             }
+                        }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
                             todo!();
@@ -639,12 +656,29 @@ impl Program {
                                 state.pc += 1;
                             }
                         }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            if (*lhs as f64) != *rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            if *lhs != (*rhs as f64) {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
                         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => {
                             if lhs != rhs {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
                             }
+                        }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
                             todo!();
@@ -675,6 +709,23 @@ impl Program {
                                 state.pc += 1;
                             }
                         }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            if (*lhs as f64) < *rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            if *lhs < (*rhs as f64) {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
+                        }
                         _ => {
                             todo!();
                         }
@@ -703,6 +754,23 @@ impl Program {
                             } else {
                                 state.pc += 1;
                             }
+                        }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            if (*lhs as f64) <= *rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            if *lhs <= (*rhs as f64) {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
                             todo!();
@@ -733,6 +801,23 @@ impl Program {
                                 state.pc += 1;
                             }
                         }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            if (*lhs as f64) > *rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            if *lhs > (*rhs as f64) {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
+                        }
                         _ => {
                             todo!();
                         }
@@ -761,6 +846,23 @@ impl Program {
                             } else {
                                 state.pc += 1;
                             }
+                        }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            if (*lhs as f64) >= *rhs {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            if *lhs >= (*rhs as f64) {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
                             todo!();
