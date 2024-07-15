@@ -32,9 +32,24 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: wasm-pack build --target nodejs bindings/wasm
 
-  test-compat:
+  test-limbo:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
     - name: Test
       run: make test
+
+  test-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install
+      run: |
+        set -euo pipefail
+        mkdir download && cd download
+        # apt contains an old version of sqlite3 that does not support e.g. string_agg(), so we download 3.46.0 manually
+        wget https://www.sqlite.org/2024/sqlite-tools-linux-x64-3460000.zip
+        unzip sqlite-tools-linux-x64-3460000.zip
+
+    - name: Test
+      run: SQLITE_EXEC="$(pwd)/download/sqlite3" make test
