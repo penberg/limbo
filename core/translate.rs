@@ -348,9 +348,7 @@ fn translate_conditions(
                 }
             }
         }
-        (None, None) => {
-            Ok(None)
-        }
+        (None, None) => Ok(None),
         (Some(where_clause), None) => {
             let label = program.allocate_label();
             translate_condition_expr(program, select, where_clause, label)?;

@@ -223,7 +223,7 @@ fn query(
                                 print!("|");
                             }
                             match value {
-                                Value::Null => print!("NULL"),
+                                Value::Null => print!(""),
                                 Value::Integer(i) => print!("{}", i),
                                 Value::Float(f) => print!("{:?}", f),
                                 Value::Text(s) => print!("{}", s),
@@ -247,7 +247,7 @@ fn query(
                                 row.values
                                     .iter()
                                     .map(|value| match value {
-                                        Value::Null => "NULL".cell(),
+                                        Value::Null => "".cell(),
                                         Value::Integer(i) => i.to_string().cell(),
                                         Value::Float(f) => f.to_string().cell(),
                                         Value::Text(s) => s.cell(),
