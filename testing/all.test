@@ -3,6 +3,7 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+source $testdir/agg-functions.test
 source $testdir/coalesce.test
 source $testdir/join.test
 source $testdir/where.test
@@ -14,54 +15,6 @@ do_execsql_test select-const-1 {
 do_execsql_test select-const-2 {
   SELECT 2
 } {2}
-
-do_execsql_test select-avg {
-  SELECT avg(age) FROM users;
-} {50.396}
-
-do_execsql_test select-sum {
-  SELECT sum(age) FROM users;
-} {503960}
-
-do_execsql_test select-total {
-  SELECT sum(age) FROM users;
-} {503960}
-
-do_execsql_test select-limit {
-  SELECT id FROM users LIMIT 1;
-} {1}
-
-do_execsql_test select-count {
-  SELECT count(id) FROM users;
-} {10000}
-
-do_execsql_test select-max {
-  SELECT max(age) FROM users;
-} {100}
-
-do_execsql_test select-min {
-  SELECT min(age) FROM users;
-} {1}
-
-do_execsql_test select-group-concat {
-  SELECT group_concat(name) FROM products;
-} {hat,cap,shirt,sweater,sweatshirt,shorts,jeans,sneakers,boots,coat,accessories}
-
-do_execsql_test select-group-concat-with-delimiter {
-  SELECT group_concat(name, ';') FROM products;
-} {hat;cap;shirt;sweater;sweatshirt;shorts;jeans;sneakers;boots;coat;accessories}
-
-do_execsql_test select-group-concat-with-column-delimiter {
-  SELECT group_concat(name, id) FROM products;
-} {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
-
-do_execsql_test select-string-agg-with-delimiter {
-  SELECT string_agg(name, ',') FROM products;
-} {hat,cap,shirt,sweater,sweatshirt,shorts,jeans,sneakers,boots,coat,accessories}
-
-do_execsql_test select-string-agg-with-column-delimiter {
-  SELECT string_agg(name, id) FROM products;
-} {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
 
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
