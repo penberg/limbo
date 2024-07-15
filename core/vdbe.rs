@@ -345,10 +345,6 @@ impl ProgramBuilder {
         );
 
         let label_references = &mut self.unresolved_labels[label_index];
-        assert!(
-            !label_references.is_empty(),
-            "Trying to resolve an empty created label, all labels must be resolved for now."
-        );
         for insn_reference in label_references.iter() {
             let insn = &mut self.insns[*insn_reference];
             match insn {
