@@ -1,0 +1,98 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test where-clause-eq {
+    select last_name from users where id = 2000;
+} {Rodriguez}
+
+do_execsql_test where-clause-eq-string {
+    select count(1) from users where last_name = 'Rodriguez';
+} {61}
+
+do_execsql_test where-clause-ne {
+    select count(1) from users where id != 2000;
+} {9999}
+
+do_execsql_test where-clause-gt {
+    select count(1) from users where id > 2000;
+} {8000}
+
+do_execsql_test where-clause-gte {
+    select count(1) from users where id >= 2000;
+} {8001}
+
+do_execsql_test where-clause-lt {
+    select count(1) from users where id < 2000;
+} {1999}
+
+do_execsql_test where-clause-lte {
+    select count(1) from users where id <= 2000;
+} {2000}
+
+do_execsql_test where-clause-unary-true {
+    select count(1) from users where 1;
+} {10000}
+
+# not correct? should be 0?
+do_execsql_test where-clause-unary-false {
+    select count(1) from users where 0;
+} {0}
+
+do_execsql_test where-clause-no-table-unary-true {
+    select 1 where 1;
+} {1}
+
+do_execsql_test where-clause-no-table-unary-false {
+    select 1 where 0;
+} {}
+
+do_execsql_test select-where-and {
+    select first_name, age from users where first_name = 'Jamie' and age > 80 
+} {Jamie|94
+Jamie|88
+Jamie|99
+Jamie|92
+Jamie|87
+Jamie|88
+}
+
+do_execsql_test select-where-or {
+    select first_name, age from users where first_name = 'Jamie' and age > 80 
+} {Jamie|94
+Jamie|88
+Jamie|99
+Jamie|92
+Jamie|87
+Jamie|88
+}
+
+do_execsql_test select-where-and-or {
+    select first_name, age from users where first_name = 'Jamie' or age = 1 and age = 2
+} {Jamie|94
+Jamie|88
+Jamie|31
+Jamie|26
+Jamie|71
+Jamie|50
+Jamie|28
+Jamie|46
+Jamie|17
+Jamie|64
+Jamie|76
+Jamie|99
+Jamie|92
+Jamie|47
+Jamie|27
+Jamie|54
+Jamie|47
+Jamie|15
+Jamie|12
+Jamie|71
+Jamie|87
+Jamie|34
+Jamie|88
+Jamie|41
+Jamie|73
+}
