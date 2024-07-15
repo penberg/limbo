@@ -22,10 +22,10 @@
 
 * In-process OLTP database engine library
 * Asynchronous I/O support with `io_uring`
-* SQLite compatibility
-  * SQL dialect support ([_wip_](docs/sqlite-compat.md))
+* SQLite compatibility ([status](COMPAT.md))
+  * SQL dialect support
   * File format support (_read-only_)
-  * SQLite C API (_wip_)
+  * SQLite C API
 * JavaScript/WebAssembly bindings (_wip_)
 
 ## Getting Started

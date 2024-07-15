@@ -4,13 +4,13 @@
 
 ### Added
 
-- Partial `SELECT` statement support, including `WHERE`, `LIMIT`, and `CROSS JOIN`.
+- Partial `SELECT` statement support, including `WHERE`, `LIMIT`, `CROSS JOIN`, and `INNER JOIN`.
 
-- Partial `PRAGMA` statement support, including `cache_size`.
-
-- Partial aggregate function support, including `avg()`, `count()`, `max()`, `min()`, `sum()`, and `total()`.
+- Aggregate function support.
 
 - `EXPLAIN` statement support.
+
+- Partial `PRAGMA` statement support, including `cache_size`.
 
 - Asynchronous I/O support with Linux io_uring using direct I/O and Darwin kqueue.
 

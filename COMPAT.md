@@ -45,7 +45,10 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... LIMIT             | Yes     |         |
 | SELECT ... ORDER BY          | No      |         |
 | SELECT ... GROUP BY          | No      |         |
-| SELECT ... JOIN              | No      |         |
+| SELECT ... JOIN              | Yes     |         |
+| SELECT ... CROSS JOIN        | Yes     |         |
+| SELECT ... INNER JOIN        | Yes     |         |
+| SELECT ... OUTER JOIN        | No      |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |
@@ -60,7 +63,7 @@ This document describes the SQLite compatibility status of Limbo:
 | abs(X)                       | No      |         |
 | changes()                    | No      |         |
 | char(X1,X2,...,XN)           | No      |         |
-| coalesce(X,Y,...)            | No      |         |
+| coalesce(X,Y,...)            | Yes     |         |
 | concat(X,...)                | No      |         |
 | concat_ws(SEP,X,...)         | No      |         |
 | format(FORMAT,...)           | No      |         |
@@ -122,9 +125,9 @@ This document describes the SQLite compatibility status of Limbo:
 | avg(X)                       | Yes     |         |
 | count()                      | Yes     |         |
 | count(*)                     | Yes     |         |
-| group_concat(X)              | No      |         |
-| group_concat(X,Y)            | No      |         |
-| string_agg(X,Y)              | No      |         |
+| group_concat(X)              | Yes     |         |
+| group_concat(X,Y)            | Yes     |         |
+| string_agg(X,Y)              | Yes     |         |
 | max(X)                       | Yes     |         |
 | min(X)                       | Yes     |         |
 | sum(X)                       | Yes     |         |
