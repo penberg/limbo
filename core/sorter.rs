@@ -75,4 +75,12 @@ impl Cursor for Sorter {
         self.insert(key, record.clone());
         Ok(())
     }
+
+    fn set_null_flag(&mut self, _flag: bool) {
+        todo!();
+    }
+
+    fn get_null_flag(&self) -> bool {
+        todo!();
+    }
 }

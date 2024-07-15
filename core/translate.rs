@@ -8,7 +8,10 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{self, Expr, Literal, UnaryOperator};
+use sqlite3_parser::ast::{self, Expr, JoinOperator, Literal, UnaryOperator};
+
+const HARDCODED_CURSOR_LEFT_TABLE: usize = 0;
+const HARDCODED_CURSOR_RIGHT_TABLE: usize = 1;
 
 struct Select<'a> {
     columns: &'a Vec<ast::ResultColumn>,
@@ -222,7 +225,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
     };
 
     if !select.src_tables.is_empty() {
-        let condition_label_maybe = translate_tables_begin(&mut program, &mut select)?;
+        let constraint = translate_tables_begin(&mut program, &mut select)?;
 
         let (register_start, register_end) = translate_columns(&mut program, &select)?;
 
@@ -234,11 +237,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
             emit_limit_insn(&limit_info, &mut program);
         }
 
-        if let Some(condition_label) = condition_label_maybe {
-            program.resolve_label(condition_label, program.offset());
-        }
-
-        translate_tables_end(&mut program, &select);
+        translate_tables_end(&mut program, &select, constraint);
 
         if select.exist_aggregation {
             let mut target = register_start;
@@ -284,6 +283,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
+    program.resolve_deferred_labels();
     Ok(program.build())
 }
 
@@ -313,86 +313,384 @@ fn translate_where(select: &Select, program: &mut ProgramBuilder) -> Result<Opti
     }
 }
 
-fn translate_conditions(
+fn introspect_expression_for_cursors(
+    program: &ProgramBuilder,
+    select: &Select,
+    where_expr: &ast::Expr,
+) -> Result<Vec<usize>> {
+    let mut cursors = vec![];
+    match where_expr {
+        ast::Expr::Binary(e1, _, e2) => {
+            cursors.extend(introspect_expression_for_cursors(program, select, e1)?);
+            cursors.extend(introspect_expression_for_cursors(program, select, e2)?);
+        }
+        ast::Expr::Id(ident) => {
+            let (_, _, cursor_id) = resolve_ident_table(program, &ident.0, select)?;
+            cursors.push(cursor_id);
+        }
+        ast::Expr::Qualified(tbl, ident) => {
+            let (_, _, cursor_id) = resolve_ident_qualified(program, &tbl.0, &ident.0, select)?;
+            cursors.push(cursor_id);
+        }
+        ast::Expr::Literal(_) => {}
+        ast::Expr::Like {
+            lhs,
+            not,
+            op,
+            rhs,
+            escape,
+        } => {
+            cursors.extend(introspect_expression_for_cursors(program, select, lhs)?);
+            cursors.extend(introspect_expression_for_cursors(program, select, rhs)?);
+        }
+        other => {
+            anyhow::bail!("Parse error: unsupported expression: {:?}", other);
+        }
+    }
+
+    Ok(cursors)
+}
+
+fn get_no_match_target_cursor(
+    program: &ProgramBuilder,
+    select: &Select,
+    expr: &ast::Expr,
+) -> usize {
+    // This is the hackiest part of the code. We are finding the cursor that should be advanced to the next row
+    // when the condition is not met. This is done by introspecting the expression and finding the innermost cursor that is
+    // used in the expression. This is a very naive approach and will not work in all cases.
+    // Thankfully though it might be possible to just refine the logic contained here to make it work in all cases. Maybe.
+    let cursors = introspect_expression_for_cursors(program, select, expr).unwrap_or_default();
+    if cursors.is_empty() {
+        HARDCODED_CURSOR_LEFT_TABLE
+    } else {
+        *cursors.iter().max().unwrap()
+    }
+}
+
+fn evaluate_conditions(
     program: &mut ProgramBuilder,
     select: &Select,
-) -> Result<Option<BranchOffset>> {
-    // FIXME: clone()
-    // TODO: only supports INNER JOIN on a single condition atm, e.g. SELECT * FROM a JOIN b ON a.id = b.id, no AND/OR
+) -> Result<Option<QueryConstraint>> {
     let join_constraints = select
         .src_tables
         .iter()
         .map(|v| v.join_info.clone())
-        .filter_map(|v| v.map(|v| v.constraint.clone()))
-        .flatten()
+        .filter_map(|v| v.map(|v| (v.constraint.clone(), v.operator)))
         .collect::<Vec<_>>();
     // TODO: only supports one JOIN; -> add support for multiple JOINs, e.g. SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id
     if join_constraints.len() > 1 {
         anyhow::bail!("Parse error: multiple JOINs not supported");
     }
 
-    let maybe_join = join_constraints.first();
+    let join_maybe = join_constraints.first();
 
-    match (&select.where_clause, maybe_join) {
-        (Some(where_clause), Some(join)) => {
-            match join {
-                ast::JoinConstraint::On(expr) => {
-                    // Combine where clause and join condition
-                    let label = program.allocate_label();
-                    translate_condition_expr(program, select, where_clause, label, false)?;
-                    translate_condition_expr(program, select, expr, label, false)?;
-                    Ok(Some(label))
+    let parsed_where_maybe = select.where_clause.as_ref().map(|where_clause| Where {
+        constraint_expr: where_clause.clone(),
+        no_match_jump_label: program.allocate_label(),
+        no_match_target_cursor: get_no_match_target_cursor(program, select, &where_clause),
+    });
+
+    let parsed_join_maybe = join_maybe
+        .map(|(constraint, _)| {
+            if let Some(ast::JoinConstraint::On(expr)) = constraint {
+                Some(Join {
+                    constraint_expr: expr.clone(),
+                    no_match_jump_label: program.allocate_label(),
+                    no_match_target_cursor: get_no_match_target_cursor(program, select, expr),
+                })
+            } else {
+                None
+            }
+        })
+        .flatten();
+
+    let constraint_maybe = match (parsed_where_maybe, parsed_join_maybe) {
+        (None, None) => None,
+        (Some(where_clause), None) => Some(QueryConstraint::Inner(Inner {
+            where_clause: Some(where_clause),
+            join_clause: None,
+        })),
+        (where_clause, Some(join_clause)) => {
+            let (_, op) = join_maybe.unwrap();
+            match op {
+                JoinOperator::TypedJoin { natural, join_type } => {
+                    if *natural {
+                        todo!("Natural join not supported");
+                    }
+                    // default to inner join when no join type is specified
+                    let join_type = join_type.unwrap_or(ast::JoinType::Inner);
+                    match join_type {
+                        ast::JoinType::Inner | ast::JoinType::Cross => {
+                            // cross join with a condition is an inner join
+                            Some(QueryConstraint::Inner(Inner {
+                                where_clause,
+                                join_clause: Some(join_clause),
+                            }))
+                        }
+                        ast::JoinType::LeftOuter | ast::JoinType::Left => {
+                            let left_join_match_flag = program.alloc_register();
+                            let left_join_match_flag_hit_marker = program.allocate_label();
+                            let left_join_found_match_next_row_label = program.allocate_label();
+
+                            Some(QueryConstraint::Left(Left {
+                                where_clause,
+                                join_clause: Some(join_clause),
+                                found_match_next_row_label: left_join_found_match_next_row_label,
+                                match_flag: left_join_match_flag,
+                                match_flag_hit_marker: left_join_match_flag_hit_marker,
+                                left_cursor: HARDCODED_CURSOR_LEFT_TABLE, // FIXME: hardcoded
+                                right_cursor: HARDCODED_CURSOR_RIGHT_TABLE, // FIXME: hardcoded
+                            }))
+                        }
+                        ast::JoinType::RightOuter | ast::JoinType::Right => {
+                            todo!();
+                        }
+                        ast::JoinType::FullOuter | ast::JoinType::Full => {
+                            todo!();
+                        }
+                    }
                 }
-                ast::JoinConstraint::Using(_) => {
+                JoinOperator::Comma => {
                     todo!();
                 }
             }
         }
-        (None, None) => Ok(None),
-        (Some(where_clause), None) => {
-            let label = program.allocate_label();
-            translate_condition_expr(program, select, where_clause, label, false)?;
-            Ok(Some(label))
+    };
+
+    Ok(constraint_maybe)
+}
+
+fn translate_conditions(
+    program: &mut ProgramBuilder,
+    select: &Select,
+    conditions: Option<QueryConstraint>,
+) -> Result<Option<QueryConstraint>> {
+    match conditions.as_ref() {
+        Some(QueryConstraint::Left(Left {
+            where_clause,
+            join_clause,
+            match_flag,
+            match_flag_hit_marker,
+            ..
+        })) => {
+            if let Some(where_clause) = where_clause {
+                translate_condition_expr(
+                    program,
+                    select,
+                    &where_clause.constraint_expr,
+                    where_clause.no_match_jump_label,
+                    false,
+                )?;
+            }
+            if let Some(join_clause) = join_clause {
+                translate_condition_expr(
+                    program,
+                    select,
+                    &join_clause.constraint_expr,
+                    join_clause.no_match_jump_label,
+                    false,
+                )?;
+            }
+            // Set match flag to 1 if we hit the marker (i.e. jump didn't happen to no_match_label as a result of the condition)
+            program.emit_insn(Insn::Integer {
+                value: 1,
+                dest: *match_flag,
+            });
+            program.defer_label_resolution(*match_flag_hit_marker, (program.offset() - 1) as usize);
         }
-        (None, Some(join)) => match join {
-            ast::JoinConstraint::On(expr) => {
-                let label = program.allocate_label();
-                translate_condition_expr(program, select, expr, label, false)?;
-                Ok(Some(label))
+        Some(QueryConstraint::Inner(inner_join)) => {
+            if let Some(where_clause) = &inner_join.where_clause {
+                translate_condition_expr(
+                    program,
+                    select,
+                    &where_clause.constraint_expr,
+                    where_clause.no_match_jump_label,
+                    false,
+                )?;
             }
-            ast::JoinConstraint::Using(_) => {
-                todo!();
+            if let Some(join_clause) = &inner_join.join_clause {
+                translate_condition_expr(
+                    program,
+                    select,
+                    &join_clause.constraint_expr,
+                    join_clause.no_match_jump_label,
+                    false,
+                )?;
             }
-        },
+        }
+        None => {}
     }
+
+    Ok(conditions)
+}
+
+#[derive(Debug)]
+struct Where {
+    constraint_expr: ast::Expr,
+    no_match_jump_label: BranchOffset,
+    no_match_target_cursor: usize,
+}
+
+#[derive(Debug)]
+struct Join {
+    constraint_expr: ast::Expr,
+    no_match_jump_label: BranchOffset,
+    no_match_target_cursor: usize,
+}
+
+#[derive(Debug)]
+struct Left {
+    where_clause: Option<Where>,
+    join_clause: Option<Join>,
+    match_flag: usize,
+    match_flag_hit_marker: BranchOffset,
+    found_match_next_row_label: BranchOffset,
+    left_cursor: usize,
+    right_cursor: usize,
+}
+
+#[derive(Debug)]
+struct Inner {
+    where_clause: Option<Where>,
+    join_clause: Option<Join>,
+}
+
+enum QueryConstraint {
+    Left(Left),
+    Inner(Inner),
 }
 
 fn translate_tables_begin(
     program: &mut ProgramBuilder,
     select: &mut Select,
-) -> Result<Option<BranchOffset>> {
+) -> Result<Option<QueryConstraint>> {
     for join in &select.src_tables {
         let loop_info = translate_table_open_cursor(program, join);
         select.loops.push(loop_info);
     }
 
+    let conditions = evaluate_conditions(program, select)?;
+
     for loop_info in &mut select.loops {
-        translate_table_open_loop(program, loop_info);
+        let mut left_join_match_flag_maybe = None;
+        if let Some(QueryConstraint::Left(Left {
+            match_flag,
+            right_cursor,
+            ..
+        })) = conditions.as_ref()
+        {
+            if loop_info.open_cursor == *right_cursor {
+                left_join_match_flag_maybe = Some(*match_flag);
+            }
+        }
+        translate_table_open_loop(program, loop_info, left_join_match_flag_maybe);
     }
 
-    translate_conditions(program, select)
+    translate_conditions(program, select, conditions)
 }
 
-fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
+fn handle_skip_row(
+    program: &mut ProgramBuilder,
+    cursor_id: usize,
+    next_row_instruction_offset: BranchOffset,
+    constraint: &Option<QueryConstraint>,
+) {
+    match constraint {
+        Some(QueryConstraint::Left(Left {
+            where_clause,
+            join_clause,
+            match_flag,
+            match_flag_hit_marker,
+            found_match_next_row_label,
+            left_cursor,
+            right_cursor,
+            ..
+        })) => {
+            if let Some(where_clause) = where_clause {
+                if where_clause.no_match_target_cursor == cursor_id {
+                    program.resolve_label(
+                        where_clause.no_match_jump_label,
+                        next_row_instruction_offset,
+                    );
+                }
+            }
+            if let Some(join_clause) = join_clause {
+                if join_clause.no_match_target_cursor == cursor_id {
+                    program.resolve_label(
+                        join_clause.no_match_jump_label,
+                        next_row_instruction_offset,
+                    );
+                }
+            }
+            if cursor_id == *right_cursor {
+                // If the left join match flag has been set to 1, we jump to the next row (result row has been emitted already)
+                program.emit_insn_with_label_dependency(
+                    Insn::IfPos {
+                        reg: *match_flag,
+                        target_pc: *found_match_next_row_label,
+                        decrement_by: 0,
+                    },
+                    *found_match_next_row_label,
+                );
+                // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
+                program.emit_insn(Insn::NullRow {
+                    cursor_id: *right_cursor,
+                });
+                // Jump to setting the left join match flag to 1 again, but this time the right table cursor will set everything to null
+                program.emit_insn_with_label_dependency(
+                    Insn::Goto {
+                        target_pc: *match_flag_hit_marker,
+                    },
+                    *match_flag_hit_marker,
+                );
+            }
+            if cursor_id == *left_cursor {
+                program.resolve_label(*found_match_next_row_label, next_row_instruction_offset);
+            }
+        }
+        Some(QueryConstraint::Inner(Inner {
+            where_clause,
+            join_clause,
+            ..
+        })) => {
+            if let Some(join_clause) = join_clause {
+                if cursor_id == join_clause.no_match_target_cursor {
+                    program.resolve_label(
+                        join_clause.no_match_jump_label,
+                        next_row_instruction_offset,
+                    );
+                }
+            }
+            if let Some(where_clause) = where_clause {
+                if cursor_id == where_clause.no_match_target_cursor {
+                    program.resolve_label(
+                        where_clause.no_match_jump_label,
+                        next_row_instruction_offset,
+                    );
+                }
+            }
+        }
+        None => {}
+    }
+}
+
+fn translate_tables_end(
+    program: &mut ProgramBuilder,
+    select: &Select,
+    constraint: Option<QueryConstraint>,
+) {
     // iterate in reverse order as we open cursors in order
     for table_loop in select.loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
+        let next_row_instruction_offset = program.offset();
         program.emit_insn(Insn::NextAsync { cursor_id });
         program.emit_insn(Insn::NextAwait {
             cursor_id,
             pc_if_next: table_loop.rewind_offset as BranchOffset,
         });
         program.resolve_label(table_loop.rewind_label, program.offset());
+        handle_skip_row(program, cursor_id, next_row_instruction_offset, &constraint);
     }
 }
 
@@ -418,7 +716,18 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
     }
 }
 
-fn translate_table_open_loop(program: &mut ProgramBuilder, loop_info: &mut LoopInfo) {
+fn translate_table_open_loop(
+    program: &mut ProgramBuilder,
+    loop_info: &mut LoopInfo,
+    left_join_match_flag_maybe: Option<usize>,
+) {
+    if let Some(match_flag) = left_join_match_flag_maybe {
+        // Initialize left join as not matched
+        program.emit_insn(Insn::Integer {
+            value: 0,
+            dest: match_flag,
+        });
+    }
     program.emit_insn(Insn::RewindAsync {
         cursor_id: loop_info.open_cursor,
     });
@@ -1487,6 +1796,7 @@ fn translate_pragma(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
+    program.resolve_deferred_labels();
     Ok(program.build())
 }
 
