@@ -6,6 +6,7 @@ source $testdir/tester.tcl
 source $testdir/agg-functions.test
 source $testdir/coalesce.test
 source $testdir/join.test
+source $testdir/pragma.test
 source $testdir/where.test
 
 do_execsql_test select-const-1 {
@@ -19,10 +20,6 @@ do_execsql_test select-const-2 {
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
 } {}
-
-do_execsql_test pragma-cache-size {
-  PRAGMA cache_size
-} {-2000}
 
 do_execsql_test realify {
     select price from products limit 1;
