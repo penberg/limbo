@@ -1,0 +1,24 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test select-const-1 {
+  SELECT 1
+} {1}
+
+do_execsql_test select-const-2 {
+  SELECT 2
+} {2}
+
+do_execsql_test select-limit-0 {
+  SELECT id FROM users LIMIT 0;
+} {}
+
+do_execsql_test realify {
+    select price from products limit 1;
+} {79.0}
+
+do_execsql_test select-add {
+    select u.age + 1 from users u where u.age = 91 limit 1;
+} {92}
