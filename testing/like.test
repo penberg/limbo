@@ -16,3 +16,13 @@ sneakers|0
 boots|0
 coat|0
 accessories|0}
+
+do_execsql_test where-like {
+    select * from products where name like 'sweat%';
+} {4|sweater|2.0
+5|sweatshirt|67.0}
+
+do_execsql_test where-not-like {
+    select * from products where name not like 'sneak%' and price >= 70.0;
+} {3|shirt|79.0
+7|jeans|80.0}

@@ -763,7 +763,48 @@ fn translate_condition_expr(
             op,
             rhs,
             escape,
-        } => {}
+        } => {
+            let cur_reg = program.alloc_register();
+            assert!(match rhs.as_ref() {
+                ast::Expr::Literal(_) => true,
+                _ => false,
+            });
+            match op {
+                ast::LikeOperator::Like => {
+                    let pattern_reg = program.alloc_register();
+                    let column_reg = program.alloc_register();
+                    // LIKE(pattern, column). We should translate the pattern first before the column
+                    let _ = translate_expr(program, select, rhs, pattern_reg)?;
+                    program.mark_last_insn_constant();
+                    let _ = translate_expr(program, select, lhs, column_reg)?;
+                    program.emit_insn(Insn::Function {
+                        func: SingleRowFunc::Like,
+                        start_reg: pattern_reg,
+                        dest: cur_reg,
+                    });
+                }
+                ast::LikeOperator::Glob => todo!(),
+                ast::LikeOperator::Match => todo!(),
+                ast::LikeOperator::Regexp => todo!(),
+            }
+            if *not {
+                program.emit_insn_with_label_dependency(
+                    Insn::If {
+                        reg: cur_reg,
+                        target_pc: target_jump,
+                    },
+                    target_jump,
+                )
+            } else {
+                program.emit_insn_with_label_dependency(
+                    Insn::IfNot {
+                        reg: cur_reg,
+                        target_pc: target_jump,
+                    },
+                    target_jump,
+                )
+            }
+        }
         _ => todo!("op {:?} not implemented", expr),
     }
     Ok(())

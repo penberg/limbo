@@ -74,6 +74,11 @@ pub enum Insn {
         rhs: usize,
         target_pc: BranchOffset,
     },
+    // Jump to target_pc if r[reg] is not zero
+    If {
+        reg: usize,
+        target_pc: BranchOffset,
+    },
     // Jump to the given PC if the register is zero.
     IfNot {
         reg: usize,
@@ -404,6 +409,13 @@ impl ProgramBuilder {
                 Insn::Ge {
                     lhs: _lhs,
                     rhs: _rhs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::If {
+                    reg: _reg,
                     target_pc,
                 } => {
                     assert!(*target_pc < 0);
@@ -769,6 +781,19 @@ impl Program {
                         }
                         _ => {
                             todo!();
+                        }
+                    }
+                }
+                Insn::If { reg, target_pc } => {
+                    assert!(*target_pc >= 0);
+                    let reg = *reg;
+                    let target_pc = *target_pc;
+                    match &state.registers[reg] {
+                        OwnedValue::Integer(0) => {
+                            state.pc += 1;
+                        }
+                        _ => {
+                            state.pc = target_pc;
                         }
                     }
                 }
@@ -1373,6 +1398,15 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
             ),
+            Insn::If { reg, target_pc } => (
+                "If",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}] goto {}", reg, target_pc),
+            ),
             Insn::IfNot { reg, target_pc } => (
                 "IfNot",
                 *reg as i32,
@@ -1380,7 +1414,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] -> {}", reg, target_pc),
+                format!("if !r[{}] goto {}", reg, target_pc),
             ),
             Insn::OpenReadAsync {
                 cursor_id,
