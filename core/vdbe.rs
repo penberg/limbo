@@ -612,29 +612,15 @@ impl Program {
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
-                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                            if lhs == rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                            if lhs == rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => {
-                            if lhs == rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
-                            todo!();
+                            if &state.registers[lhs] == &state.registers[rhs] {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                     }
                 }
@@ -648,29 +634,15 @@ impl Program {
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
-                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                            if lhs != rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                            if lhs != rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => {
-                            if lhs != rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
-                            todo!();
+                            if &state.registers[lhs] != &state.registers[rhs] {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                     }
                 }
@@ -684,22 +656,15 @@ impl Program {
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
-                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                            if lhs < rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                            if lhs < rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
-                            todo!();
+                            if &state.registers[lhs] < &state.registers[rhs] {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                     }
                 }
@@ -713,22 +678,15 @@ impl Program {
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
-                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                            if lhs <= rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                            if lhs <= rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
-                            todo!();
+                            if &state.registers[lhs] <= &state.registers[rhs] {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                     }
                 }
@@ -742,22 +700,15 @@ impl Program {
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
-                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                            if lhs > rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                            if lhs > rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
-                            todo!();
+                            if &state.registers[lhs] > &state.registers[rhs] {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                     }
                 }
@@ -771,22 +722,15 @@ impl Program {
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
-                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                            if lhs >= rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                            if lhs >= rhs {
-                                state.pc = target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
+                        (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
+                            state.pc = target_pc;
                         }
                         _ => {
-                            todo!();
+                            if &state.registers[lhs] >= &state.registers[rhs] {
+                                state.pc = target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                     }
                 }

@@ -66,6 +66,33 @@ pub enum AggContext {
     GroupConcat(OwnedValue),
 }
 
+impl std::cmp::PartialOrd<OwnedValue> for OwnedValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {
+                int_left.partial_cmp(int_right)
+            }
+            (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
+                float_right.partial_cmp(&(*int_left as f64))
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
+                float_left.partial_cmp(&(*int_right as f64))
+            }
+            (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
+                float_left.partial_cmp(float_right)
+            }
+            (OwnedValue::Text(text_left), OwnedValue::Text(text_right)) => {
+                text_left.partial_cmp(text_right)
+            }
+            (OwnedValue::Blob(blob_left), OwnedValue::Blob(blob_right)) => {
+                blob_left.partial_cmp(blob_right)
+            }
+            (OwnedValue::Null, OwnedValue::Null) => Some(std::cmp::Ordering::Equal),
+            _ => None,
+        }
+    }
+}
+
 impl std::ops::Add<OwnedValue> for OwnedValue {
     type Output = OwnedValue;
 

@@ -96,3 +96,16 @@ Jamie|88
 Jamie|41
 Jamie|73
 }
+
+do_execsql_test where-float-int {
+    select * from products where price > 50 and name != 'hat';
+} {2|cap|82.0
+5|sweatshirt|74.0
+6|shorts|70.0
+7|jeans|78.0
+8|sneakers|82.0
+11|accessories|81.0}
+
+do_execsql_test where-multiple-and {
+    select * from products where price > 50 and name != 'sweatshirt' and price < 75;
+} {6|shorts|70.0}
