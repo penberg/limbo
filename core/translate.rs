@@ -749,6 +749,7 @@ fn translate_condition_expr(
                     program.emit_insn(Insn::IfNot {
                         reg,
                         target_pc: target_jump,
+                        null_reg: reg,
                     });
                 } else {
                     anyhow::bail!("Parse error: unsupported literal type in condition");
@@ -763,7 +764,50 @@ fn translate_condition_expr(
             op,
             rhs,
             escape,
-        } => {}
+        } => {
+            let cur_reg = program.alloc_register();
+            assert!(match rhs.as_ref() {
+                ast::Expr::Literal(_) => true,
+                _ => false,
+            });
+            match op {
+                ast::LikeOperator::Like => {
+                    let pattern_reg = program.alloc_register();
+                    let column_reg = program.alloc_register();
+                    // LIKE(pattern, column). We should translate the pattern first before the column
+                    let _ = translate_expr(program, select, rhs, pattern_reg)?;
+                    program.mark_last_insn_constant();
+                    let _ = translate_expr(program, select, lhs, column_reg)?;
+                    program.emit_insn(Insn::Function {
+                        func: SingleRowFunc::Like,
+                        start_reg: pattern_reg,
+                        dest: cur_reg,
+                    });
+                }
+                ast::LikeOperator::Glob => todo!(),
+                ast::LikeOperator::Match => todo!(),
+                ast::LikeOperator::Regexp => todo!(),
+            }
+            if jump_if_true ^ *not {
+                program.emit_insn_with_label_dependency(
+                    Insn::If {
+                        reg: cur_reg,
+                        target_pc: target_jump,
+                        null_reg: cur_reg,
+                    },
+                    target_jump,
+                )
+            } else {
+                program.emit_insn_with_label_dependency(
+                    Insn::IfNot {
+                        reg: cur_reg,
+                        target_pc: target_jump,
+                        null_reg: cur_reg,
+                    },
+                    target_jump,
+                )
+            }
+        }
         _ => todo!("op {:?} not implemented", expr),
     }
     Ok(())
@@ -941,6 +985,32 @@ fn translate_expr(
                             }
                             program.preassign_label_to_next_insn(label_coalesce_end);
 
+                            Ok(target_register)
+                        }
+                        SingleRowFunc::Like => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 2 {
+                                    anyhow::bail!(
+                                        "Parse error: like function with less than 2 arguments"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: like function with no arguments");
+                            };
+                            for arg in args {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(program, select, arg, reg)?;
+                                match arg {
+                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                    _ => {}
+                                }
+                            }
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: SingleRowFunc::Like,
+                            });
                             Ok(target_register)
                         }
                     }

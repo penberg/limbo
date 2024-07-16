@@ -1,10 +1,11 @@
 use crate::btree::BTreeCursor;
-use crate::function::AggFunc;
+use crate::function::{AggFunc, SingleRowFunc};
 use crate::pager::Pager;
 use crate::schema::Table;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
 use anyhow::Result;
+use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -73,10 +74,19 @@ pub enum Insn {
         rhs: usize,
         target_pc: BranchOffset,
     },
-    // Jump to the given PC if the register is zero.
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
+    If {
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
+        null_reg: usize,
+    },
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
     IfNot {
-        reg: usize,
-        target_pc: BranchOffset,
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
+        null_reg: usize,
     },
     // Open a cursor for reading.
     OpenReadAsync {
@@ -220,6 +230,14 @@ pub enum Insn {
     SorterNext {
         cursor_id: CursorID,
         pc_if_next: BranchOffset,
+    },
+
+    // Function
+    Function {
+        // constant_mask: i32, // P1, not used for now
+        start_reg: usize,    // P2, start of argument registers
+        dest: usize,         // P3
+        func: SingleRowFunc, // P4
     },
 }
 
@@ -400,9 +418,18 @@ impl ProgramBuilder {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
+                Insn::If {
+                    reg: _reg,
+                    target_pc,
+                    null_reg,
+                } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
                 Insn::IfNot {
                     reg: _reg,
                     target_pc,
+                    null_reg,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -763,17 +790,28 @@ impl Program {
                         }
                     }
                 }
-                Insn::IfNot { reg, target_pc } => {
+                Insn::If {
+                    reg,
+                    target_pc,
+                    null_reg,
+                } => {
                     assert!(*target_pc >= 0);
-                    let reg = *reg;
-                    let target_pc = *target_pc;
-                    match &state.registers[reg] {
-                        OwnedValue::Integer(0) => {
-                            state.pc = target_pc;
-                        }
-                        _ => {
-                            state.pc += 1;
-                        }
+                    if exec_if(&state.registers[*reg], &state.registers[*null_reg], false) {
+                        state.pc = *target_pc;
+                    } else {
+                        state.pc += 1;
+                    }
+                }
+                Insn::IfNot {
+                    reg,
+                    target_pc,
+                    null_reg,
+                } => {
+                    assert!(*target_pc >= 0);
+                    if exec_if(&state.registers[*reg], &state.registers[*null_reg], true) {
+                        state.pc = *target_pc;
+                    } else {
+                        state.pc += 1;
                     }
                 }
                 Insn::OpenReadAsync {
@@ -1186,6 +1224,34 @@ impl Program {
                         state.pc += 1;
                     }
                 }
+                Insn::Function {
+                    func,
+                    start_reg,
+                    dest,
+                } => match func {
+                    SingleRowFunc::Coalesce => {}
+                    SingleRowFunc::Like => {
+                        let start_reg = *start_reg;
+                        assert!(
+                            start_reg + 2 <= state.registers.len(),
+                            "not enough registers {} < {}",
+                            start_reg,
+                            state.registers.len()
+                        );
+                        let pattern = state.registers[start_reg].clone();
+                        let text = state.registers[start_reg + 1].clone();
+                        let result = match (pattern, text) {
+                            (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
+                                OwnedValue::Integer(exec_like(&pattern, &text) as i64)
+                            }
+                            _ => {
+                                unreachable!("Like on non-text registers");
+                            }
+                        };
+                        state.registers[*dest] = result;
+                        state.pc += 1;
+                    }
+                },
             }
         }
     }
@@ -1336,14 +1402,31 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
             ),
-            Insn::IfNot { reg, target_pc } => (
+            Insn::If {
+                reg,
+                target_pc,
+                null_reg,
+            } => (
+                "If",
+                *reg as i32,
+                *target_pc as i32,
+                *null_reg as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}] goto {}", reg, target_pc),
+            ),
+            Insn::IfNot {
+                reg,
+                target_pc,
+                null_reg,
+            } => (
                 "IfNot",
                 *reg as i32,
                 *target_pc as i32,
-                0,
+                *null_reg as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] -> {}", reg, target_pc),
+                format!("if !r[{}] goto {}", reg, target_pc),
             ),
             Insn::OpenReadAsync {
                 cursor_id,
@@ -1630,6 +1713,19 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 "".to_string(),
             ),
+            Insn::Function {
+                start_reg,
+                dest,
+                func,
+            } => (
+                "Function",
+                1,
+                *start_reg as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new(func.to_string())),
+                0,
+                format!("r[{}]=func(r[{}..])", dest, start_reg),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
@@ -1665,5 +1761,66 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
             pc_if_next: _,
         } => indent_count - 1,
         _ => indent_count,
+    }
+}
+
+// Implements LIKE pattern matching.
+fn exec_like(pattern: &str, text: &str) -> bool {
+    let re = Regex::new(&format!("{}", pattern.replace("%", ".*").replace("_", "."))).unwrap();
+    re.is_match(text)
+}
+
+// exec_if returns whether you should jump
+fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
+    match reg {
+        OwnedValue::Integer(0) | OwnedValue::Float(0.0) => not,
+        OwnedValue::Integer(_) | OwnedValue::Float(_) => !not,
+        OwnedValue::Null => match null_reg {
+            OwnedValue::Integer(0) | OwnedValue::Float(0.0) => false,
+            OwnedValue::Integer(_) | OwnedValue::Float(_) => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_like() {
+        assert!(exec_like("a%", "aaaa"));
+        assert!(exec_like("%a%a", "aaaa"));
+        assert!(exec_like("%a.a", "aaaa"));
+        assert!(exec_like("a.a%", "aaaa"));
+        assert!(!exec_like("%a.ab", "aaaa"));
+    }
+
+    #[test]
+    fn test_exec_if() {
+        let reg = OwnedValue::Integer(0);
+        let null_reg = OwnedValue::Integer(0);
+        assert_eq!(exec_if(&reg, &null_reg, false), false);
+        assert_eq!(exec_if(&reg, &null_reg, true), true);
+
+        let reg = OwnedValue::Integer(1);
+        let null_reg = OwnedValue::Integer(0);
+        assert_eq!(exec_if(&reg, &null_reg, false), true);
+        assert_eq!(exec_if(&reg, &null_reg, true), false);
+
+        let reg = OwnedValue::Null;
+        let null_reg = OwnedValue::Integer(0);
+        assert_eq!(exec_if(&reg, &null_reg, false), false);
+        assert_eq!(exec_if(&reg, &null_reg, true), false);
+
+        let reg = OwnedValue::Null;
+        let null_reg = OwnedValue::Integer(1);
+        assert_eq!(exec_if(&reg, &null_reg, false), true);
+        assert_eq!(exec_if(&reg, &null_reg, true), true);
+
+        let reg = OwnedValue::Null;
+        let null_reg = OwnedValue::Null;
+        assert_eq!(exec_if(&reg, &null_reg, false), false);
+        assert_eq!(exec_if(&reg, &null_reg, true), false);
     }
 }
