@@ -1,13 +1,29 @@
 use super::{Completion, File, WriteCompletion, IO};
-use anyhow::Result;
+use anyhow::{ensure, Result};
 use libc::iovec;
-use log::trace;
+use log::{debug, trace};
 use std::cell::{Ref, RefCell};
 use nix::fcntl::{self, FcntlArg, OFlag};
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
+use std::fmt;
+use thiserror::Error;
 
 const MAX_IOVECS: usize = 128;
+
+#[derive(Debug, Error)]
+enum LinuxIOError {
+    IOUringCQError(i32),
+}
+
+// Implement the Display trait to customize error messages
+impl fmt::Display for LinuxIOError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LinuxIOError::IOUringCQError(code) => write!(f, "IOUring completion queue error occurred with code {}", code),
+        }
+    }
+}
 
 pub struct LinuxIO {
     inner: Rc<RefCell<InnerLinuxIO>>,
@@ -56,7 +72,10 @@ impl IO for LinuxIO {
         // Let's attempt to enable direct I/O. Not all filesystems support it
         // so ignore any errors.
         let fd = file.as_raw_fd();
-        let _= nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT));
+        match nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT)) {
+            Ok(_) => {},
+            Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
+        };
         Ok(Rc::new(LinuxFile {
             io: self.inner.clone(),
             file,
@@ -69,6 +88,11 @@ impl IO for LinuxIO {
         let mut ring = &mut inner.ring;
         ring.submit_and_wait(1)?;
         while let Some(cqe) = ring.completion().next() {
+            let result = cqe.result();
+            ensure!(
+                result >= 0,
+                LinuxIOError::IOUringCQError(result)
+            );
             let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
             c.complete();
         }
