@@ -19,10 +19,14 @@ accessories|0}
 
 do_execsql_test where-like {
     select * from products where name like 'sweat%';
-} {4|sweater|2.0
-5|sweatshirt|67.0}
+} {4|sweater|25.0
+5|sweatshirt|74.0}
 
 do_execsql_test where-not-like {
-    select * from products where name not like 'sneak%' and price >= 70.0;
-} {3|shirt|79.0
-7|jeans|80.0}
+    select * from products where name not like 'sweat%' and price >= 70.0;
+} {1|hat|79.0
+2|cap|82.0
+6|shorts|70.0
+7|jeans|78.0
+8|sneakers|82.0
+11|accessories|81.0}

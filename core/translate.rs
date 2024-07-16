@@ -749,6 +749,7 @@ fn translate_condition_expr(
                     program.emit_insn(Insn::IfNot {
                         reg,
                         target_pc: target_jump,
+                        null_reg: reg,
                     });
                 } else {
                     anyhow::bail!("Parse error: unsupported literal type in condition");
@@ -792,6 +793,7 @@ fn translate_condition_expr(
                     Insn::If {
                         reg: cur_reg,
                         target_pc: target_jump,
+                        null_reg: cur_reg,
                     },
                     target_jump,
                 )
@@ -800,6 +802,7 @@ fn translate_condition_expr(
                     Insn::IfNot {
                         reg: cur_reg,
                         target_pc: target_jump,
+                        null_reg: cur_reg,
                     },
                     target_jump,
                 )

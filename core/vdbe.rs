@@ -74,15 +74,19 @@ pub enum Insn {
         rhs: usize,
         target_pc: BranchOffset,
     },
-    // Jump to target_pc if r[reg] is not zero
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
     If {
-        reg: usize,
-        target_pc: BranchOffset,
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
+        null_reg: usize,
     },
-    // Jump to the given PC if the register is zero.
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
     IfNot {
-        reg: usize,
-        target_pc: BranchOffset,
+        reg: usize,              // P1
+        target_pc: BranchOffset, // P2
+        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
+        null_reg: usize,
     },
     // Open a cursor for reading.
     OpenReadAsync {
@@ -417,6 +421,7 @@ impl ProgramBuilder {
                 Insn::If {
                     reg: _reg,
                     target_pc,
+                    null_reg,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -424,6 +429,7 @@ impl ProgramBuilder {
                 Insn::IfNot {
                     reg: _reg,
                     target_pc,
+                    null_reg,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -784,30 +790,28 @@ impl Program {
                         }
                     }
                 }
-                Insn::If { reg, target_pc } => {
+                Insn::If {
+                    reg,
+                    target_pc,
+                    null_reg,
+                } => {
                     assert!(*target_pc >= 0);
-                    let reg = *reg;
-                    let target_pc = *target_pc;
-                    match &state.registers[reg] {
-                        OwnedValue::Integer(0) => {
-                            state.pc += 1;
-                        }
-                        _ => {
-                            state.pc = target_pc;
-                        }
+                    if jump_if(&state.registers[*reg], &state.registers[*null_reg], false) {
+                        state.pc = *target_pc;
+                    } else {
+                        state.pc += 1;
                     }
                 }
-                Insn::IfNot { reg, target_pc } => {
+                Insn::IfNot {
+                    reg,
+                    target_pc,
+                    null_reg,
+                } => {
                     assert!(*target_pc >= 0);
-                    let reg = *reg;
-                    let target_pc = *target_pc;
-                    match &state.registers[reg] {
-                        OwnedValue::Integer(0) => {
-                            state.pc = target_pc;
-                        }
-                        _ => {
-                            state.pc += 1;
-                        }
+                    if jump_if(&state.registers[*reg], &state.registers[*null_reg], true) {
+                        state.pc = *target_pc;
+                    } else {
+                        state.pc += 1;
                     }
                 }
                 Insn::OpenReadAsync {
@@ -1398,20 +1402,28 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
             ),
-            Insn::If { reg, target_pc } => (
+            Insn::If {
+                reg,
+                target_pc,
+                null_reg,
+            } => (
                 "If",
                 *reg as i32,
                 *target_pc as i32,
-                0,
+                *null_reg as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("if r[{}] goto {}", reg, target_pc),
             ),
-            Insn::IfNot { reg, target_pc } => (
+            Insn::IfNot {
+                reg,
+                target_pc,
+                null_reg,
+            } => (
                 "IfNot",
                 *reg as i32,
                 *target_pc as i32,
-                0,
+                *null_reg as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("if !r[{}] goto {}", reg, target_pc),
@@ -1756,4 +1768,59 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
 fn like(pattern: &str, text: &str) -> bool {
     let re = Regex::new(&format!("{}", pattern.replace("%", ".*").replace("_", "."))).unwrap();
     re.is_match(text)
+}
+
+// step_if returns whether you should jump
+fn jump_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
+    match reg {
+        OwnedValue::Integer(0) | OwnedValue::Float(0.0) => not,
+        OwnedValue::Integer(_) | OwnedValue::Float(_) => !not,
+        OwnedValue::Null => match null_reg {
+            OwnedValue::Integer(0) | OwnedValue::Float(0.0) => false,
+            OwnedValue::Integer(_) | OwnedValue::Float(_) => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_like() {
+        assert!(like("a%", "aaaa"));
+        assert!(like("%a%a", "aaaa"));
+        assert!(like("%a.a", "aaaa"));
+        assert!(like("a.a%", "aaaa"));
+        assert!(!like("%a.ab", "aaaa"));
+    }
+
+    #[test]
+    fn test_jump_if() {
+        let reg = OwnedValue::Integer(0);
+        let null_reg = OwnedValue::Integer(0);
+        assert_eq!(jump_if(&reg, &null_reg, false), false);
+        assert_eq!(jump_if(&reg, &null_reg, true), true);
+
+        let reg = OwnedValue::Integer(1);
+        let null_reg = OwnedValue::Integer(0);
+        assert_eq!(jump_if(&reg, &null_reg, false), true);
+        assert_eq!(jump_if(&reg, &null_reg, true), false);
+
+        let reg = OwnedValue::Null;
+        let null_reg = OwnedValue::Integer(0);
+        assert_eq!(jump_if(&reg, &null_reg, false), false);
+        assert_eq!(jump_if(&reg, &null_reg, true), false);
+
+        let reg = OwnedValue::Null;
+        let null_reg = OwnedValue::Integer(1);
+        assert_eq!(jump_if(&reg, &null_reg, false), true);
+        assert_eq!(jump_if(&reg, &null_reg, true), true);
+
+        let reg = OwnedValue::Null;
+        let null_reg = OwnedValue::Null;
+        assert_eq!(jump_if(&reg, &null_reg, false), false);
+        assert_eq!(jump_if(&reg, &null_reg, true), false);
+    }
 }
