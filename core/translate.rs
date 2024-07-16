@@ -306,7 +306,7 @@ fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder)
 fn translate_where(select: &Select, program: &mut ProgramBuilder) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
         let label = program.allocate_label();
-        translate_condition_expr(program, select, w, label)?;
+        translate_condition_expr(program, select, w, label, false)?;
         Ok(Some(label))
     } else {
         Ok(None)
@@ -339,8 +339,8 @@ fn translate_conditions(
                 ast::JoinConstraint::On(expr) => {
                     // Combine where clause and join condition
                     let label = program.allocate_label();
-                    translate_condition_expr(program, select, where_clause, label)?;
-                    translate_condition_expr(program, select, expr, label)?;
+                    translate_condition_expr(program, select, where_clause, label, false)?;
+                    translate_condition_expr(program, select, expr, label, false)?;
                     Ok(Some(label))
                 }
                 ast::JoinConstraint::Using(_) => {
@@ -351,13 +351,13 @@ fn translate_conditions(
         (None, None) => Ok(None),
         (Some(where_clause), None) => {
             let label = program.allocate_label();
-            translate_condition_expr(program, select, where_clause, label)?;
+            translate_condition_expr(program, select, where_clause, label, false)?;
             Ok(Some(label))
         }
         (None, Some(join)) => match join {
             ast::JoinConstraint::On(expr) => {
                 let label = program.allocate_label();
-                translate_condition_expr(program, select, expr, label)?;
+                translate_condition_expr(program, select, expr, label, false)?;
                 Ok(Some(label))
             }
             ast::JoinConstraint::Using(_) => {
@@ -568,7 +568,8 @@ fn translate_condition_expr(
     program: &mut ProgramBuilder,
     select: &Select,
     expr: &ast::Expr,
-    jump_target: BranchOffset,
+    target_jump: BranchOffset,
+    jump_if_true: bool, // if true jump to target on op == true, if false invert op
 ) -> Result<()> {
     match expr {
         ast::Expr::Binary(e1, op, e2) => match op {
@@ -591,56 +592,166 @@ fn translate_condition_expr_leaf(
 ) -> Result<()> {
     match expr {
         ast::Expr::Between { .. } => todo!(),
-        ast::Expr::Binary(e1, op, e2) => {
-            let e1_reg = program.alloc_register();
-            let e2_reg = program.alloc_register();
-            let _ = translate_expr(program, select, e1, e1_reg)?;
-            match e1.as_ref() {
-                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                _ => {}
+        ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
+            if jump_if_true {
+                let label = program.allocate_label();
+                let _ = translate_condition_expr(program, select, lhs, label, false);
+                let _ = translate_condition_expr(program, select, rhs, target_jump, true);
+                program.resolve_label(label, program.offset());
+            } else {
+                let _ = translate_condition_expr(program, select, lhs, target_jump, false);
+                let _ = translate_condition_expr(program, select, rhs, target_jump, false);
             }
-            let _ = translate_expr(program, select, e2, e2_reg)?;
-            match e2.as_ref() {
-                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                _ => {}
+        }
+        ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
+            if jump_if_true {
+                let _ = translate_condition_expr(program, select, lhs, target_jump, true);
+                let _ = translate_condition_expr(program, select, rhs, target_jump, true);
+            } else {
+                let label = program.allocate_label();
+                let _ = translate_condition_expr(program, select, lhs, label, true);
+                let _ = translate_condition_expr(program, select, rhs, target_jump, false);
+                program.resolve_label(label, program.offset());
             }
-            if jump_target < 0 {
-                program.add_label_dependency(jump_target, program.offset());
+        }
+        ast::Expr::Binary(lhs, op, rhs) => {
+            let lhs_reg = program.alloc_register();
+            let rhs_reg = program.alloc_register();
+            let _ = translate_expr(program, select, lhs, lhs_reg);
+            let _ = translate_expr(program, select, rhs, rhs_reg);
+            match op {
+                ast::Operator::Greater => {
+                    if jump_if_true {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Gt {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    } else {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Le {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    }
+                }
+                ast::Operator::GreaterEquals => {
+                    if jump_if_true {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Ge {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    } else {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Lt {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    }
+                }
+                ast::Operator::Less => {
+                    if jump_if_true {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Lt {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    } else {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Ge {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    }
+                }
+                ast::Operator::LessEquals => {
+                    if jump_if_true {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Le {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    } else {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Gt {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    }
+                }
+                ast::Operator::Equals => {
+                    if jump_if_true {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Eq {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    } else {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Ne {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    }
+                }
+                ast::Operator::NotEquals => {
+                    if jump_if_true {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Ne {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    } else {
+                        program.emit_insn_with_label_dependency(
+                            Insn::Eq {
+                                lhs: lhs_reg,
+                                rhs: rhs_reg,
+                                target_pc: target_jump,
+                            },
+                            target_jump,
+                        )
+                    }
+                }
+                ast::Operator::Is => todo!(),
+                ast::Operator::IsNot => todo!(),
+                _ => {
+                    todo!("op {:?} not implemented", op);
+                }
             }
-            program.emit_insn(match op {
-                ast::Operator::NotEquals => Insn::Eq {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: jump_target,
-                },
-                ast::Operator::Equals => Insn::Ne {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: jump_target,
-                },
-                ast::Operator::Less => Insn::Ge {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: jump_target,
-                },
-                ast::Operator::LessEquals => Insn::Gt {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: jump_target,
-                },
-                ast::Operator::Greater => Insn::Le {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: jump_target,
-                },
-                ast::Operator::GreaterEquals => Insn::Lt {
-                    lhs: e1_reg,
-                    rhs: e2_reg,
-                    target_pc: jump_target,
-                },
-                other => todo!("{:?}", other),
-            });
-            Ok(())
         }
         ast::Expr::Literal(lit) => match lit {
             ast::Literal::Numeric(val) => {
@@ -651,22 +762,30 @@ fn translate_condition_expr_leaf(
                         value: int_value,
                         dest: reg,
                     });
-                    if jump_target < 0 {
-                        program.add_label_dependency(jump_target, program.offset());
+                    if target_jump < 0 {
+                        program.add_label_dependency(target_jump, program.offset());
                     }
                     program.emit_insn(Insn::IfNot {
                         reg,
-                        target_pc: jump_target,
+                        target_pc: target_jump,
                     });
-                    Ok(())
                 } else {
                     anyhow::bail!("Parse error: unsupported literal type in condition");
                 }
             }
             _ => todo!(),
         },
-        _ => todo!(),
+        ast::Expr::InList { lhs, not, rhs } => {}
+        ast::Expr::Like {
+            lhs,
+            not,
+            op,
+            rhs,
+            escape,
+        } => {}
+        _ => todo!("op {:?} not implemented", expr),
     }
+    Ok(())
 }
 
 fn wrap_eval_jump_expr(

@@ -205,3 +205,51 @@ do_execsql_test select-add {
     select u.age + 1 from users u where u.age = 91 limit 1;
 } {92}
 
+do_execsql_test select-where-and {
+    select first_name, age from users where first_name = 'Jamie' and age > 80 
+} {Jamie|94
+Jamie|88
+Jamie|99
+Jamie|92
+Jamie|87
+Jamie|88
+}
+
+do_execsql_test select-where-or {
+    select first_name, age from users where first_name = 'Jamie' and age > 80 
+} {Jamie|94
+Jamie|88
+Jamie|99
+Jamie|92
+Jamie|87
+Jamie|88
+}
+
+do_execsql_test select-where-and-or {
+    select first_name, age from users where first_name = 'Jamie' or age = 1 and age = 2
+} {Jamie|94
+Jamie|88
+Jamie|31
+Jamie|26
+Jamie|71
+Jamie|50
+Jamie|28
+Jamie|46
+Jamie|17
+Jamie|64
+Jamie|76
+Jamie|99
+Jamie|92
+Jamie|47
+Jamie|27
+Jamie|54
+Jamie|47
+Jamie|15
+Jamie|12
+Jamie|71
+Jamie|87
+Jamie|34
+Jamie|88
+Jamie|41
+Jamie|73
+}
