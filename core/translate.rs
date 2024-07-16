@@ -943,6 +943,32 @@ fn translate_expr(
 
                             Ok(target_register)
                         }
+                        SingleRowFunc::Like => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 2 {
+                                    anyhow::bail!(
+                                        "Parse error: like function with less than 2 arguments"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: like function with no arguments");
+                            };
+                            for arg in args {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(program, select, arg, reg)?;
+                                match arg {
+                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                    _ => {}
+                                }
+                            }
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: SingleRowFunc::Like,
+                            });
+                            Ok(target_register)
+                        }
                     }
                 }
                 None => {

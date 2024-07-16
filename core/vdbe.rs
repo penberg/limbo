@@ -1,10 +1,11 @@
 use crate::btree::BTreeCursor;
-use crate::function::AggFunc;
+use crate::function::{AggFunc, SingleRowFunc};
 use crate::pager::Pager;
 use crate::schema::Table;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
 use anyhow::Result;
+use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -220,6 +221,14 @@ pub enum Insn {
     SorterNext {
         cursor_id: CursorID,
         pc_if_next: BranchOffset,
+    },
+
+    // Function
+    Function {
+        // constant_mask: i32, // P1, not used for now
+        start_reg: usize,    // P2, start of argument registers
+        dest: usize,         // P3
+        func: SingleRowFunc, // P4
     },
 }
 
@@ -1186,6 +1195,34 @@ impl Program {
                         state.pc += 1;
                     }
                 }
+                Insn::Function {
+                    func,
+                    start_reg,
+                    dest,
+                } => match func {
+                    SingleRowFunc::Coalesce => {}
+                    SingleRowFunc::Like => {
+                        let start_reg = *start_reg;
+                        assert!(
+                            start_reg + 2 <= state.registers.len(),
+                            "not enough registers {} < {}",
+                            start_reg,
+                            state.registers.len()
+                        );
+                        let pattern = state.registers[start_reg].clone();
+                        let text = state.registers[start_reg + 1].clone();
+                        let result = match (pattern, text) {
+                            (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
+                                OwnedValue::Integer(like(&pattern, &text) as i64)
+                            }
+                            _ => {
+                                unreachable!("Like on non-text registers");
+                            }
+                        };
+                        state.registers[*dest] = result;
+                        state.pc += 1;
+                    }
+                },
             }
         }
     }
@@ -1630,6 +1667,19 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 "".to_string(),
             ),
+            Insn::Function {
+                start_reg,
+                dest,
+                func,
+            } => (
+                "Function",
+                1,
+                *start_reg as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new(func.to_string())),
+                0,
+                format!("r[{}]=func(r[{}..])", dest, start_reg),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
@@ -1666,4 +1716,10 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
         } => indent_count - 1,
         _ => indent_count,
     }
+}
+
+// Implements LIKE pattern matching.
+fn like(pattern: &str, text: &str) -> bool {
+    let re = Regex::new(&format!("{}", pattern.replace("%", ".*").replace("_", "."))).unwrap();
+    re.is_match(text)
 }

@@ -1,0 +1,18 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test like-fn {
+    select name, like('sweat%', name) from products;
+} {hat|0
+cap|0
+shirt|0
+sweater|1
+sweatshirt|1
+shorts|0
+jeans|0
+sneakers|0
+boots|0
+coat|0
+accessories|0}

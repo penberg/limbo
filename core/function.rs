@@ -27,8 +27,19 @@ impl AggFunc {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum SingleRowFunc {
     Coalesce,
+    Like,
+}
+
+impl ToString for SingleRowFunc {
+    fn to_string(&self) -> String {
+        match self {
+            SingleRowFunc::Coalesce => "coalesce".to_string(),
+            SingleRowFunc::Like => "like(2)".to_string(),
+        }
+    }
 }
 
 pub enum Func {
@@ -50,6 +61,7 @@ impl FromStr for Func {
             "sum" => Ok(Func::Agg(AggFunc::Sum)),
             "total" => Ok(Func::Agg(AggFunc::Total)),
             "coalesce" => Ok(Func::SingleRow(SingleRowFunc::Coalesce)),
+            "like" => Ok(Func::SingleRow(SingleRowFunc::Like)),
             _ => Err(()),
         }
     }

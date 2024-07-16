@@ -975,6 +975,7 @@ dependencies = [
  "ordered-multimap",
  "polling",
  "pprof",
+ "regex",
  "rstest",
  "rusqlite",
  "rustix",
