@@ -96,10 +96,20 @@ impl BTreeCursor {
                     self.page.replace(Some(Rc::new(mem_page)));
                     continue;
                 }
-                BTreeCell::TableLeafCell(TableLeafCell { _rowid, _payload }) => {
+                BTreeCell::TableLeafCell(TableLeafCell {
+                    _rowid,
+                    _payload,
+                    first_overflow_page,
+                }) => {
                     mem_page.advance();
                     let record = crate::sqlite3_ondisk::read_record(_payload)?;
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
+                }
+                BTreeCell::IndexInteriorCell(_) => {
+                    unimplemented!();
+                }
+                BTreeCell::IndexLeafCell(_) => {
+                    unimplemented!();
                 }
             }
         }
