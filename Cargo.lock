@@ -206,6 +206,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
 name = "cfg_block"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -972,6 +978,7 @@ dependencies = [
  "libc",
  "log",
  "mimalloc",
+ "nix 0.29.0",
  "ordered-multimap",
  "polling",
  "pprof",
@@ -1074,6 +1081,18 @@ checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.6.0",
+ "cfg-if",
+ "cfg_aliases",
  "libc",
 ]
 
@@ -1275,7 +1294,7 @@ dependencies = [
  "inferno",
  "libc",
  "log",
- "nix",
+ "nix 0.26.4",
  "once_cell",
  "parking_lot",
  "smallvec",
@@ -1526,7 +1545,7 @@ dependencies = [
  "libc",
  "log",
  "memchr",
- "nix",
+ "nix 0.26.4",
  "radix_trie",
  "scopeguard",
  "unicode-segmentation",
