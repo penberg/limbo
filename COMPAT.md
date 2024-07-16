@@ -42,6 +42,7 @@ This document describes the SQLite compatibility status of Limbo:
 | SAVEPOINT                    | No      |         |
 | SELECT                       | Partial |         |
 | SELECT ... WHERE             | Partial |         |
+| SELECT ... WHERE ... LIKE    | Yes     |         |
 | SELECT ... LIMIT             | Yes     |         |
 | SELECT ... ORDER BY          | No      |         |
 | SELECT ... GROUP BY          | No      |         |

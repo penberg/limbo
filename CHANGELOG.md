@@ -4,7 +4,7 @@
 
 ### Added
 
-- Partial `SELECT` statement support, including `WHERE`, `LIMIT`, `CROSS JOIN`, and `INNER JOIN`.
+- Partial `SELECT` statement support, including `WHERE`, `LIKE`, `LIMIT`, `CROSS JOIN`, and `INNER JOIN`.
 
 - Aggregate function support.
 
