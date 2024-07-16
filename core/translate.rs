@@ -599,7 +599,15 @@ fn translate_condition_expr(
             let lhs_reg = program.alloc_register();
             let rhs_reg = program.alloc_register();
             let _ = translate_expr(program, select, lhs, lhs_reg);
+            match lhs.as_ref() {
+                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                _ => {}
+            }
             let _ = translate_expr(program, select, rhs, rhs_reg);
+            match rhs.as_ref() {
+                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                _ => {}
+            }
             match op {
                 ast::Operator::Greater => {
                     if jump_if_true {
