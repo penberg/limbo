@@ -291,6 +291,8 @@ fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<Page>) -> Resu
 pub enum BTreeCell {
     TableInteriorCell(TableInteriorCell),
     TableLeafCell(TableLeafCell),
+    IndexInteriorCell(IndexInteriorCell),
+    IndexLeafCell(IndexLeafCell),
 }
 
 #[derive(Debug)]
@@ -303,11 +305,38 @@ pub struct TableInteriorCell {
 pub struct TableLeafCell {
     pub _rowid: u64,
     pub _payload: Vec<u8>,
+    pub first_overflow_page: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct IndexInteriorCell {
+    pub left_child_page: u32,
+    pub payload: Vec<u8>,
+    pub first_overflow_page: Option<u32>,
+}
+
+#[derive(Debug)]
+pub struct IndexLeafCell {
+    pub payload: Vec<u8>,
+    pub first_overflow_page: Option<u32>,
 }
 
 pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<BTreeCell> {
     match page_type {
-        PageType::IndexInterior => todo!(),
+        PageType::IndexInterior => {
+            let mut pos = pos;
+            let left_child_page =
+                u32::from_be_bytes([page[pos], page[pos + 1], page[pos + 2], page[pos + 3]]);
+            pos += 4;
+            let (payload_size, nr) = read_varint(&page[pos..])?;
+            pos += nr;
+            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+            Ok(BTreeCell::IndexInteriorCell(IndexInteriorCell {
+                left_child_page,
+                payload,
+                first_overflow_page,
+            }))
+        }
         PageType::TableInterior => {
             let mut pos = pos;
             let left_child_page =
@@ -319,20 +348,48 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
                 _rowid: rowid,
             }))
         }
-        PageType::IndexLeaf => todo!(),
+        PageType::IndexLeaf => {
+            let mut pos = pos;
+            let (payload_size, nr) = read_varint(&page[pos..])?;
+            pos += nr;
+            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+            Ok(BTreeCell::IndexLeafCell(IndexLeafCell {
+                payload,
+                first_overflow_page,
+            }))
+        }
         PageType::TableLeaf => {
             let mut pos = pos;
             let (payload_size, nr) = read_varint(&page[pos..])?;
             pos += nr;
             let (rowid, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let payload = &page[pos..pos + payload_size as usize];
-            // FIXME: page overflows if the payload is too large
+            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
             Ok(BTreeCell::TableLeafCell(TableLeafCell {
                 _rowid: rowid,
-                _payload: payload.to_vec(),
+                _payload: payload,
+                first_overflow_page,
             }))
         }
+    }
+}
+
+/// read_payload takes in the unread bytearray with the payload size
+/// and returns the payload on the page, and optionally the first overflow page number.
+fn read_payload(unread: &[u8], payload_size: usize) -> (Vec<u8>, Option<u32>) {
+    let page_len = unread.len();
+    if payload_size <= page_len {
+        // fit within 1 page
+        (unread[..payload_size].to_vec(), None)
+    } else {
+        // overflow
+        let first_overflow_page = u32::from_be_bytes([
+            unread[page_len - 4],
+            unread[page_len - 3],
+            unread[page_len - 2],
+            unread[page_len - 1],
+        ]);
+        (unread[..page_len - 4].to_vec(), Some(first_overflow_page))
     }
 }
 
