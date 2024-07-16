@@ -1506,12 +1506,12 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
             ),
             Insn::Real { value, dest } => (
                 "Real",
+                0,
                 *dest as i32,
-                *value as i32,
                 0,
-                OwnedValue::Text(Rc::new("".to_string())),
+                OwnedValue::Float(*value),
                 0,
-                "".to_string(),
+                format!("r[{}]={}", dest, value),
             ),
             Insn::RealAffinity { register } => (
                 "RealAffinity",
