@@ -10,13 +10,13 @@ use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use anyhow::Result;
 use sqlite3_parser::ast::{self, Expr, Literal};
 
-struct Select {
-    columns: Vec<ast::ResultColumn>,
-    column_info: Vec<ColumnInfo>,
-    src_tables: Vec<SrcTable>, // Tables we use to get data from. This includes "from" and "joins"
-    limit: Option<ast::Limit>,
+struct Select<'a> {
+    columns: &'a Vec<ast::ResultColumn>,
+    column_info: Vec<ColumnInfo<'a>>,
+    src_tables: Vec<SrcTable<'a>>, // Tables we use to get data from. This includes "from" and "joins"
+    limit: &'a Option<ast::Limit>,
     exist_aggregation: bool,
-    where_clause: Option<ast::Expr>,
+    where_clause: &'a Option<ast::Expr>,
     /// Ordered list of opened read table loops
     /// Used for generating a loop that looks like this:
     /// cursor 0 = open table 0
@@ -35,23 +35,23 @@ struct LoopInfo {
     open_cursor: usize,
 }
 
-struct SrcTable {
+struct SrcTable<'a> {
     table: Table,
-    alias: Option<String>,
-    join_info: Option<ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
+    alias: Option<&'a String>,
+    join_info: Option<&'a ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
 }
 
-struct ColumnInfo {
+struct ColumnInfo<'a> {
     func: Option<Func>,
-    args: Option<Vec<ast::Expr>>,
+    args: &'a Option<Vec<ast::Expr>>,
     columns_to_allocate: usize, /* number of result columns this col will result on */
 }
 
-impl ColumnInfo {
+impl<'a> ColumnInfo<'a> {
     pub fn new() -> Self {
         Self {
             func: None,
-            args: None,
+            args: &None,
             columns_to_allocate: 1,
         }
     }
@@ -76,7 +76,7 @@ pub fn translate(
 ) -> Result<Program> {
     match stmt {
         ast::Stmt::Select(select) => {
-            let select = build_select(schema, select)?;
+            let select = build_select(schema, &select)?;
             translate_select(select)
         }
         ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
@@ -84,19 +84,19 @@ pub fn translate(
     }
 }
 
-fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
-    match select.body.select {
+fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
+    match &select.body.select {
         ast::OneSelect::Select {
             columns,
             from: Some(from),
             where_clause,
             ..
         } => {
-            let (table_name, maybe_alias) = match from.select {
-                Some(select_table) => match *select_table {
+            let (table_name, maybe_alias) = match &from.select {
+                Some(select_table) => match select_table.as_ref() {
                     ast::SelectTable::Table(name, alias, ..) => (
-                        name.name,
-                        alias.map(|als| match als {
+                        &name.name,
+                        alias.as_ref().map(|als| match als {
                             ast::As::As(alias) => alias,     // users as u
                             ast::As::Elided(alias) => alias, // users u
                         }),
@@ -105,8 +105,8 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 },
                 None => todo!(),
             };
-            let table_name = table_name.0;
-            let maybe_alias = maybe_alias.map(|als| als.0);
+            let table_name = &table_name.0;
+            let maybe_alias = maybe_alias.map(|als| &als.0);
             let table = match schema.get_table(&table_name) {
                 Some(table) => table,
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
@@ -117,12 +117,12 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 alias: maybe_alias,
                 join_info: None,
             });
-            if let Some(selected_joins) = from.joins {
+            if let Some(selected_joins) = &from.joins {
                 for join in selected_joins {
                     let (table_name, maybe_alias) = match &join.table {
                         ast::SelectTable::Table(name, alias, ..) => (
-                            name.name.clone(),
-                            alias.clone().map(|als| match als {
+                            &name.name,
+                            alias.as_ref().map(|als| match als {
                                 ast::As::As(alias) => alias,     // users as u
                                 ast::As::Elided(alias) => alias, // users u
                             }),
@@ -130,7 +130,7 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                         _ => todo!(),
                     };
                     let table_name = &table_name.0;
-                    let maybe_alias = maybe_alias.map(|als| als.0);
+                    let maybe_alias = maybe_alias.as_ref().map(|als| &als.0);
                     let table = match schema.get_table(table_name) {
                         Some(table) => table,
                         None => anyhow::bail!("Parse error: no such table: {}", table_name),
@@ -138,13 +138,13 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                     joins.push(SrcTable {
                         table: Table::BTree(table),
                         alias: maybe_alias,
-                        join_info: Some(join.clone()),
+                        join_info: Some(&join),
                     });
                 }
             }
 
             let _table = Table::BTree(table);
-            let column_info = analyze_columns(&columns, &joins);
+            let column_info = analyze_columns(columns, &joins);
             let exist_aggregation = column_info
                 .iter()
                 .any(|info| info.is_aggregation_function());
@@ -152,7 +152,7 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 columns,
                 column_info,
                 src_tables: joins,
-                limit: select.limit.clone(),
+                limit: &select.limit,
                 exist_aggregation,
                 where_clause,
                 loops: Vec::new(),
@@ -164,7 +164,7 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
             where_clause,
             ..
         } => {
-            let column_info = analyze_columns(&columns, &Vec::new());
+            let column_info = analyze_columns(columns, &Vec::new());
             let exist_aggregation = column_info
                 .iter()
                 .any(|info| info.is_aggregation_function());
@@ -172,7 +172,7 @@ fn build_select(schema: &Schema, select: ast::Select) -> Result<Select> {
                 columns,
                 column_info,
                 src_tables: Vec::new(),
-                limit: select.limit.clone(),
+                limit: &select.limit,
                 where_clause,
                 exist_aggregation,
                 loops: Vec::new(),
@@ -323,7 +323,7 @@ fn translate_conditions(
         .src_tables
         .iter()
         .map(|v| v.join_info.clone())
-        .filter_map(|v| v.map(|v| v.constraint))
+        .filter_map(|v| v.map(|v| v.constraint.clone()))
         .flatten()
         .collect::<Vec<_>>();
     // TODO: only supports one JOIN; -> add support for multiple JOINs, e.g. SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id
@@ -397,7 +397,7 @@ fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
 }
 
 fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -> LoopInfo {
-    let table_identifier = match &table.alias {
+    let table_identifier = match table.alias {
         Some(alias) => alias.clone(),
         None => table.table.get_name().to_string(),
     };
@@ -482,7 +482,7 @@ fn translate_column(
 }
 
 fn translate_table_star(table: &SrcTable, program: &mut ProgramBuilder, target_register: usize) {
-    let table_identifier = match &table.alias {
+    let table_identifier = match table.alias {
         Some(alias) => alias.clone(),
         None => table.table.get_name().to_string(),
     };
@@ -506,7 +506,10 @@ fn translate_table_star(table: &SrcTable, program: &mut ProgramBuilder, target_r
     }
 }
 
-fn analyze_columns(columns: &Vec<ast::ResultColumn>, joins: &Vec<SrcTable>) -> Vec<ColumnInfo> {
+fn analyze_columns<'a>(
+    columns: &'a Vec<ast::ResultColumn>,
+    joins: &Vec<SrcTable>,
+) -> Vec<ColumnInfo<'a>> {
     let mut column_information_list = Vec::with_capacity(columns.len());
     for column in columns {
         let mut info = ColumnInfo::new();
@@ -528,7 +531,7 @@ fn analyze_columns(columns: &Vec<ast::ResultColumn>, joins: &Vec<SrcTable>) -> V
 ///
 /// This function will walk all columns and find information about:
 /// * Aggregation functions.
-fn analyze_column(column: &ast::ResultColumn, column_info_out: &mut ColumnInfo) {
+fn analyze_column<'a>(column: &'a ast::ResultColumn, column_info_out: &mut ColumnInfo<'a>) {
     match column {
         ast::ResultColumn::Expr(expr, _) => analyze_expr(expr, column_info_out),
         ast::ResultColumn::Star => {}
@@ -536,7 +539,7 @@ fn analyze_column(column: &ast::ResultColumn, column_info_out: &mut ColumnInfo) 
     }
 }
 
-fn analyze_expr(expr: &Expr, column_info_out: &mut ColumnInfo) {
+fn analyze_expr<'a>(expr: &'a Expr, column_info_out: &mut ColumnInfo<'a>) {
     match expr {
         ast::Expr::FunctionCall {
             name,
@@ -556,7 +559,7 @@ fn analyze_expr(expr: &Expr, column_info_out: &mut ColumnInfo) {
             } else {
                 column_info_out.func = func_type;
                 // TODO(pere): use lifetimes for args? Arenas would be lovely here :(
-                column_info_out.args.clone_from(args);
+                column_info_out.args = args;
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
@@ -1116,7 +1119,7 @@ fn resolve_ident_qualified<'a>(
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
-                let table_identifier = match &join.alias {
+                let table_identifier = match join.alias {
                     Some(alias) => alias.clone(),
                     None => table.name.to_string(),
                 };
@@ -1152,7 +1155,7 @@ fn resolve_ident_table<'a>(
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
-                let table_identifier = match &join.alias {
+                let table_identifier = match join.alias {
                     Some(alias) => alias.clone(),
                     None => table.name.to_string(),
                 };
