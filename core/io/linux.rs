@@ -3,7 +3,7 @@ use anyhow::Result;
 use libc::iovec;
 use log::trace;
 use std::cell::{Ref, RefCell};
-use std::os::unix::fs::OpenOptionsExt;
+use nix::fcntl::{self, FcntlArg, OFlag};
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 
@@ -52,8 +52,11 @@ impl IO for LinuxIO {
         let file = std::fs::File::options()
             .read(true)
             .write(true)
-            .custom_flags(libc::O_DIRECT)
             .open(path)?;
+        // Let's attempt to enable direct I/O. Not all filesystems support it
+        // so ignore any errors.
+        let fd = file.as_raw_fd();
+        let _= nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT));
         Ok(Rc::new(LinuxFile {
             io: self.inner.clone(),
             file,
