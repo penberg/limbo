@@ -796,7 +796,7 @@ impl Program {
                     null_reg,
                 } => {
                     assert!(*target_pc >= 0);
-                    if jump_if(&state.registers[*reg], &state.registers[*null_reg], false) {
+                    if exec_if(&state.registers[*reg], &state.registers[*null_reg], false) {
                         state.pc = *target_pc;
                     } else {
                         state.pc += 1;
@@ -808,7 +808,7 @@ impl Program {
                     null_reg,
                 } => {
                     assert!(*target_pc >= 0);
-                    if jump_if(&state.registers[*reg], &state.registers[*null_reg], true) {
+                    if exec_if(&state.registers[*reg], &state.registers[*null_reg], true) {
                         state.pc = *target_pc;
                     } else {
                         state.pc += 1;
@@ -1242,7 +1242,7 @@ impl Program {
                         let text = state.registers[start_reg + 1].clone();
                         let result = match (pattern, text) {
                             (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
-                                OwnedValue::Integer(like(&pattern, &text) as i64)
+                                OwnedValue::Integer(exec_like(&pattern, &text) as i64)
                             }
                             _ => {
                                 unreachable!("Like on non-text registers");
@@ -1765,13 +1765,13 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
 }
 
 // Implements LIKE pattern matching.
-fn like(pattern: &str, text: &str) -> bool {
+fn exec_like(pattern: &str, text: &str) -> bool {
     let re = Regex::new(&format!("{}", pattern.replace("%", ".*").replace("_", "."))).unwrap();
     re.is_match(text)
 }
 
-// step_if returns whether you should jump
-fn jump_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
+// exec_if returns whether you should jump
+fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
     match reg {
         OwnedValue::Integer(0) | OwnedValue::Float(0.0) => not,
         OwnedValue::Integer(_) | OwnedValue::Float(_) => !not,
@@ -1789,38 +1789,38 @@ mod tests {
 
     #[test]
     fn test_like() {
-        assert!(like("a%", "aaaa"));
-        assert!(like("%a%a", "aaaa"));
-        assert!(like("%a.a", "aaaa"));
-        assert!(like("a.a%", "aaaa"));
-        assert!(!like("%a.ab", "aaaa"));
+        assert!(exec_like("a%", "aaaa"));
+        assert!(exec_like("%a%a", "aaaa"));
+        assert!(exec_like("%a.a", "aaaa"));
+        assert!(exec_like("a.a%", "aaaa"));
+        assert!(!exec_like("%a.ab", "aaaa"));
     }
 
     #[test]
-    fn test_jump_if() {
+    fn test_exec_if() {
         let reg = OwnedValue::Integer(0);
         let null_reg = OwnedValue::Integer(0);
-        assert_eq!(jump_if(&reg, &null_reg, false), false);
-        assert_eq!(jump_if(&reg, &null_reg, true), true);
+        assert_eq!(exec_if(&reg, &null_reg, false), false);
+        assert_eq!(exec_if(&reg, &null_reg, true), true);
 
         let reg = OwnedValue::Integer(1);
         let null_reg = OwnedValue::Integer(0);
-        assert_eq!(jump_if(&reg, &null_reg, false), true);
-        assert_eq!(jump_if(&reg, &null_reg, true), false);
+        assert_eq!(exec_if(&reg, &null_reg, false), true);
+        assert_eq!(exec_if(&reg, &null_reg, true), false);
 
         let reg = OwnedValue::Null;
         let null_reg = OwnedValue::Integer(0);
-        assert_eq!(jump_if(&reg, &null_reg, false), false);
-        assert_eq!(jump_if(&reg, &null_reg, true), false);
+        assert_eq!(exec_if(&reg, &null_reg, false), false);
+        assert_eq!(exec_if(&reg, &null_reg, true), false);
 
         let reg = OwnedValue::Null;
         let null_reg = OwnedValue::Integer(1);
-        assert_eq!(jump_if(&reg, &null_reg, false), true);
-        assert_eq!(jump_if(&reg, &null_reg, true), true);
+        assert_eq!(exec_if(&reg, &null_reg, false), true);
+        assert_eq!(exec_if(&reg, &null_reg, true), true);
 
         let reg = OwnedValue::Null;
         let null_reg = OwnedValue::Null;
-        assert_eq!(jump_if(&reg, &null_reg, false), false);
-        assert_eq!(jump_if(&reg, &null_reg, true), false);
+        assert_eq!(exec_if(&reg, &null_reg, false), false);
+        assert_eq!(exec_if(&reg, &null_reg, true), false);
     }
 }

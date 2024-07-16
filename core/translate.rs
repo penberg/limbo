@@ -788,7 +788,7 @@ fn translate_condition_expr(
                 ast::LikeOperator::Match => todo!(),
                 ast::LikeOperator::Regexp => todo!(),
             }
-            if *not {
+            if jump_if_true ^ *not {
                 program.emit_insn_with_label_dependency(
                     Insn::If {
                         reg: cur_reg,
