@@ -11,6 +11,18 @@ fn bench(c: &mut Criterion) {
     let db = Database::open_file(io.clone(), "../testing/testing.db").unwrap();
     let conn = db.connect();
 
+    group.bench_function("Prepare statement: 'SELECT 1'", |b| {
+        b.iter(|| {
+            conn.prepare("SELECT 1").unwrap();
+        });
+    });
+
+    group.bench_function("Prepare statement: 'SELECT * FROM users LIMIT 1'", |b| {
+        b.iter(|| {
+            conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
+        });
+    });
+
     let mut stmt = conn.prepare("SELECT 1").unwrap();
     group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
         let io = io.clone();
@@ -83,6 +95,18 @@ fn bench(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let conn = rusqlite::Connection::open("../testing/testing.db").unwrap();
+
+    group.bench_function("Prepare statement: 'SELECT 1'", |b| {
+        b.iter(|| {
+            conn.prepare("SELECT 1").unwrap();
+        });
+    });
+
+    group.bench_function("Prepare statement: 'SELECT * FROM users LIMIT 1'", |b| {
+        b.iter(|| {
+            conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
+        });
+    });
 
     let mut stmt = conn.prepare("SELECT 1").unwrap();
     group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
