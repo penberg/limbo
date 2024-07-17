@@ -3,14 +3,21 @@
     nixpkgs = {
       url = "github:nixos/nixpkgs";
     };
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
-  outputs = {nixpkgs, ...}: let
+
+  outputs = { nixpkgs, fenix, ... }: let
     systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
     forAllSystems = nixpkgs.lib.genAttrs systems;
   in {
     devShells = forAllSystems (
       system: let
         pkgs = nixpkgs.legacyPackages.${system};
+        rustStable = fenix.packages.${system}.stable.toolchain;
+        wasmTarget = fenix.packages.${system}.targets.wasm32-wasi.latest.rust-std;
       in {
         default = with pkgs;
           mkShell {
@@ -18,12 +25,11 @@
               clang
               libiconv
               sqlite
-              rustup
               gnumake
+              rustup # not used to install the toolchain, but the makefile uses it
+              rustStable
+              wasmTarget
             ];
-            shellHook = ''
-              rustup default stable
-            '';
           };
       }
     );
