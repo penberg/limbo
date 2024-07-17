@@ -91,6 +91,12 @@ fn bench(c: &mut Criterion) {
 
     drop(group);
 
+    // https://github.com/penberg/limbo/issues/174
+    // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
+    if std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_ok() {
+        return;
+    }
+
     let mut group = c.benchmark_group("rusqlite");
     group.throughput(Throughput::Elements(1));
 
