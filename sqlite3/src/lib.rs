@@ -51,6 +51,10 @@ pub unsafe extern "C" fn sqlite3_open(
     filename: *const ffi::c_char,
     db_out: *mut *mut sqlite3,
 ) -> ffi::c_int {
+    let rc = sqlite3_initialize();
+    if rc != SQLITE_OK {
+        return rc;
+    }
     if filename.is_null() {
         return SQLITE_MISUSE;
     }
