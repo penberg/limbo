@@ -32,6 +32,16 @@ pub struct GenericFile {
 }
 
 impl File for GenericFile {
+    // Since we let the OS handle the locking, file locking is not supported on the generic IO implementation
+    // No-op implementation allows compilation but provides no actual file locking.
+    fn lock_file(&self, exclusive: bool) -> Result<()> {
+        Ok(())
+    }
+
+    fn unlock_file(&self) -> Result<()> {
+        Ok(())
+    }
+
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
@@ -56,5 +66,11 @@ impl File for GenericFile {
         let buf = buf.as_slice();
         file.write_all(buf)?;
         Ok(())
+    }
+}
+
+impl Drop for GenericFile {
+    fn drop(&mut self) {
+        self.unlock_file().expect("Failed to unlock file");
     }
 }

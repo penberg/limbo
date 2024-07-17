@@ -8,6 +8,8 @@ use std::{
 };
 
 pub trait File {
+    fn lock_file(&self, exclusive: bool) -> Result<()>;
+    fn unlock_file(&self) -> Result<()>;
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
     fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<WriteCompletion>)
         -> Result<()>;
@@ -134,3 +136,5 @@ cfg_block! {
         pub use generic::GenericIO as PlatformIO;
     }
 }
+
+mod common;

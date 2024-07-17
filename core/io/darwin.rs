@@ -1,5 +1,8 @@
+use crate::io::common;
+
 use super::{Completion, File, WriteCompletion, IO};
 use anyhow::{Ok, Result};
+use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
 use rustix::fd::{AsFd, AsRawFd};
@@ -32,12 +35,18 @@ impl IO for DarwinIO {
         let file = std::fs::File::options()
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
+            .write(true)
             .open(path)?;
-        Ok(Rc::new(DarwinFile {
+
+        let darwin_file = Rc::new(DarwinFile {
             file: Rc::new(RefCell::new(file)),
             poller: self.poller.clone(),
             callbacks: self.callbacks.clone(),
-        }))
+        });
+        if std::env::var(common::ENV_DISABLE_FILE_LOCK).is_err() {
+            darwin_file.lock_file(true)?;
+        }
+        Ok(darwin_file)
     }
 
     fn run_once(&self) -> Result<()> {
@@ -108,6 +117,56 @@ pub struct DarwinFile {
 }
 
 impl File for DarwinFile {
+    fn lock_file(&self, exclusive: bool) -> Result<()> {
+        let fd = self.file.borrow().as_raw_fd();
+        let flock = flock {
+            l_type: if exclusive {
+                libc::F_WRLCK as c_short
+            } else {
+                libc::F_RDLCK as c_short
+            },
+            l_whence: libc::SEEK_SET as c_short,
+            l_start: 0,
+            l_len: 0, // Lock entire file
+            l_pid: 0,
+        };
+
+        // F_SETLK is a non-blocking lock. The lock will be released when the file is closed
+        // or the process exits or after an explicit unlock.
+        let lock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
+        if lock_result == -1 {
+            let err = std::io::Error::last_os_error();
+            if err.kind() == std::io::ErrorKind::WouldBlock {
+                return Err(anyhow::anyhow!(
+                    "Failed locking file. File is locked by another process"
+                ));
+            } else {
+                return Err(anyhow::anyhow!("Failed locking file, {}", err));
+            }
+        }
+        Ok(())
+    }
+
+    fn unlock_file(&self) -> Result<()> {
+        let fd = self.file.borrow().as_raw_fd();
+        let flock = flock {
+            l_type: libc::F_UNLCK as c_short,
+            l_whence: libc::SEEK_SET as c_short,
+            l_start: 0,
+            l_len: 0,
+            l_pid: 0,
+        };
+
+        let unlock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
+        if unlock_result == -1 {
+            return Err(anyhow::anyhow!(
+                "Failed to release file lock: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(())
+    }
+
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let file = self.file.borrow();
         let result = {
@@ -175,5 +234,21 @@ impl File for DarwinFile {
             }
             Err(e) => Err(e.into()),
         }
+    }
+}
+
+impl Drop for DarwinFile {
+    fn drop(&mut self) {
+        self.unlock_file().expect("Failed to unlock file");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_multiple_processes_cannot_open_file() {
+        common::tests::test_multiple_processes_cannot_open_file(DarwinIO::new);
     }
 }
