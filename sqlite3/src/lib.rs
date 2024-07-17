@@ -1,6 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(non_camel_case_types)]
 
+use log::trace;
 use std::cell::RefCell;
 use std::ffi;
 use std::rc::Rc;
@@ -36,8 +37,13 @@ impl<'a> sqlite3_stmt<'a> {
     }
 }
 
+static INIT_DONE: std::sync::Once = std::sync::Once::new();
+
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_initialize() -> ffi::c_int {
+    INIT_DONE.call_once(|| {
+        env_logger::init();
+    });
     SQLITE_OK
 }
 
@@ -51,6 +57,7 @@ pub unsafe extern "C" fn sqlite3_open(
     filename: *const ffi::c_char,
     db_out: *mut *mut sqlite3,
 ) -> ffi::c_int {
+    trace!("sqlite3_open");
     let rc = sqlite3_initialize();
     if rc != SQLITE_OK {
         return rc;
@@ -87,11 +94,13 @@ pub unsafe extern "C" fn sqlite3_open_v2(
     _flags: ffi::c_int,
     _z_vfs: *const ffi::c_char,
 ) -> ffi::c_int {
+    trace!("sqlite3_open_v2");
     sqlite3_open(filename, db_out)
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_close(db: *mut sqlite3) -> ffi::c_int {
+    trace!("sqlite3_close");
     if db.is_null() {
         return SQLITE_OK;
     }
@@ -101,6 +110,7 @@ pub unsafe extern "C" fn sqlite3_close(db: *mut sqlite3) -> ffi::c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_close_v2(db: *mut sqlite3) -> ffi::c_int {
+    trace!("sqlite3_close_v2");
     sqlite3_close(db)
 }
 

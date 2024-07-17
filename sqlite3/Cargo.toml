@@ -16,4 +16,6 @@ doc = false
 cbindgen = "0.24.0"
 
 [dependencies]
+env_logger = "0.11.3"
 limbo_core = { path = "../core" }
+log = "0.4.22"
