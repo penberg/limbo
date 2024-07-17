@@ -132,3 +132,9 @@ impl limbo_core::File for SimulatorFile {
         self.inner.pwrite(pos, buffer, c)
     }
 }
+
+impl Drop for SimulatorFile {
+    fn drop(&mut self) {
+        self.inner.unlock_file().expect("Failed to unlock file");
+    }
+}

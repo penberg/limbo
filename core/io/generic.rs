@@ -68,3 +68,9 @@ impl File for GenericFile {
         Ok(())
     }
 }
+
+impl Drop for GenericFile {
+    fn drop(&mut self) {
+        self.unlock_file().expect("Failed to unlock file");
+    }
+}

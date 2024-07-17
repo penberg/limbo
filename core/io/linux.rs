@@ -207,6 +207,12 @@ impl File for LinuxFile {
     }
 }
 
+impl Drop for LinuxFile {
+    fn drop(&mut self) {
+        self.unlock_file().expect("Failed to unlock file");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

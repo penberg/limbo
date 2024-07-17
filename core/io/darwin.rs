@@ -237,6 +237,12 @@ impl File for DarwinFile {
     }
 }
 
+impl Drop for DarwinFile {
+    fn drop(&mut self) {
+        self.unlock_file().expect("Failed to unlock file");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
