@@ -8,6 +8,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The Limbo deterministic simulator"
+publish = false
 
 [[bin]]
 name = "limbo_sim"
