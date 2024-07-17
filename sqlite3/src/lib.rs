@@ -773,15 +773,17 @@ pub unsafe extern "C" fn sqlite3_complete(_sql: *const std::ffi::c_char) -> ffi:
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_threadsafe() -> ffi::c_int {
-    todo!();
+    1
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_libversion() -> *const std::ffi::c_char {
-    todo!();
+    ffi::CStr::from_bytes_with_nul(b"3.42.0\0")
+        .unwrap()
+        .as_ptr()
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_libversion_number() -> ffi::c_int {
-    todo!();
+    3042000
 }

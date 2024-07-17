@@ -15,6 +15,7 @@ CFLAGS = -g -Wall -std=c17 -MMD -MP
 LIBS ?= -lsqlite3
 
 OBJS += main.o
+OBJS += test-aux.o
 OBJS += test-close.o
 OBJS += test-open.o
 OBJS += test-prepare.o
