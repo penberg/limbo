@@ -25,6 +25,7 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-
 pr-run-mode = "plan"
 install-path = "~/.limbo/"
 install-updater = true
+dist = false
 
 [profile.dist]
 inherits = "release"

@@ -10,6 +10,9 @@ license.workspace = true
 repository.workspace = true
 description = "The Limbo interactive SQL shell"
 
+[package.metadata.dist]
+dist = true
+
 [[bin]]
 name = "limbo"
 path = "main.rs"
