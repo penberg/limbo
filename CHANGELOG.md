@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Install to `~/.limbo/` instead of `CARGO_HOME`.
+
 ## 0.0.1 - 2024-07-17
 
 ### Added
