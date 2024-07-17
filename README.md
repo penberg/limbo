@@ -30,6 +30,12 @@
 
 ## Getting Started
 
+Installing:
+
+```
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/penberg/limbo/releases/latest/download/limbo-installer.sh | sh
+```
+
 Limbo is currently read-only. You can either use the `sqlite3` program to create a database:
 
 ```console
