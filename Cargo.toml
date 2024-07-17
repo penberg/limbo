@@ -15,3 +15,16 @@ authors = ["the Limbo authors"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/penberg/limbo"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.19.1"
+ci = "github"
+installers = ["shell"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+pr-run-mode = "plan"
+install-path = "CARGO_HOME"
+install-updater = true
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
