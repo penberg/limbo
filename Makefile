@@ -5,6 +5,9 @@ RUSTUP := $(shell command -v rustup 2> /dev/null)
 # Executable used to execute the compatibility tests.
 SQLITE_EXEC ?= ./target/debug/limbo
 
+# Static library to use for SQLite C API compatibility tests.
+SQLITE_LIB ?= ./target/debug/liblimbo_sqlite3.a
+
 all: check-rust-version check-wasm-target limbo limbo-wasm
 .PHONY: all
 
@@ -41,6 +44,13 @@ limbo-wasm:
 	cargo build --package limbo-wasm --target wasm32-wasi
 .PHONY: limbo-wasm
 
-test: limbo
-	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
+test: limbo test-compat test-sqlite3
 .PHONY: test
+
+test-compat:
+	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
+.PHONY: test-compat
+
+test-sqlite3:
+	LIBS=../../$(SQLITE_LIB) make -C sqlite3/tests test
+.PHONY: test-sqlite3

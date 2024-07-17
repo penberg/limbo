@@ -21,6 +21,10 @@ OBJS += test-prepare.o
 
 all: $(PROGRAM)
 
+test: $(PROGRAM)
+	$(E) "  TEST"
+	$(Q) $(CURDIR)/$(PROGRAM)
+
 %.o: %.c
 	$(E) "  CC      " $@
 	$(Q) $(CC) $(CFLAGS) -c $< -o $@
