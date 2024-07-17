@@ -2,7 +2,7 @@
 
 [package]
 name = "limbo"
-version = "0.0.0"
+version.workspace = true
 authors.workspace = true
 default-run = "limbo"
 edition.workspace = true
