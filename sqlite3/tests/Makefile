@@ -31,7 +31,7 @@ test: $(PROGRAM)
 
 $(PROGRAM): $(OBJS)
 	$(E) "  LINK    " $@
-	$(Q) $(CC) $(LIBS) -o $@ $^
+	$(Q) $(CC) -o $@ $^ $(LIBS)
 
 clean:
 	$(E) "  CLEAN"
