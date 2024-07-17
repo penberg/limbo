@@ -38,12 +38,12 @@ impl<'a> sqlite3_stmt<'a> {
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_initialize() -> ffi::c_int {
-    todo!();
+    SQLITE_OK
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_shutdown() -> ffi::c_int {
-    todo!();
+    SQLITE_OK
 }
 
 #[no_mangle]
