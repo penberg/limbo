@@ -11,6 +11,7 @@ mod translate;
 mod types;
 mod util;
 mod vdbe;
+mod datetime;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]

@@ -37,8 +37,12 @@ pub enum SingleRowFunc {
     Trim,
     Round,
     Length,
+<<<<<<< HEAD
     Min,
     Max,
+=======
+    Date,
+>>>>>>> d25b16e (Implement the Date() method)
 }
 
 impl ToString for SingleRowFunc {
@@ -53,8 +57,12 @@ impl ToString for SingleRowFunc {
             SingleRowFunc::Trim => "trim".to_string(),
             SingleRowFunc::Round => "round".to_string(),
             SingleRowFunc::Length => "length".to_string(),
+<<<<<<< HEAD
             SingleRowFunc::Min => "min".to_string(),
             SingleRowFunc::Max => "max".to_string(),
+=======
+            SingleRowFunc::Date => "date".to_string(),
+>>>>>>> d25b16e (Implement the Date() method)
         }
     }
 }
@@ -88,6 +96,7 @@ impl Func{
             "trim" => Ok(Func::SingleRow(SingleRowFunc::Trim)),
             "round" => Ok(Func::SingleRow(SingleRowFunc::Round)),
             "length" => Ok(Func::SingleRow(SingleRowFunc::Length)),
+            "date" => Ok(Func::SingleRow(SingleRowFunc::Date)),
             _ => Err(()),
         }
     }
