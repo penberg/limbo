@@ -46,10 +46,10 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... LIMIT             | Yes     |         |
 | SELECT ... ORDER BY          | No      |         |
 | SELECT ... GROUP BY          | No      |         |
-| SELECT ... JOIN              | Yes     |         |
-| SELECT ... CROSS JOIN        | Yes     |         |
-| SELECT ... INNER JOIN        | Yes     |         |
-| SELECT ... OUTER JOIN        | No      |         |
+| SELECT ... JOIN              | Partial |         |
+| SELECT ... CROSS JOIN        | Partial |         |
+| SELECT ... INNER JOIN        | Partial |         |
+| SELECT ... OUTER JOIN        | Partial |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |
