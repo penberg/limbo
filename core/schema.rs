@@ -155,11 +155,15 @@ impl BTreeTable {
 #[derive(Debug)]
 pub struct PseudoTable {
     pub columns: Vec<Column>,
+    pub row: Option<OwnedRecord>,
 }
 
 impl PseudoTable {
     pub fn new() -> Self {
-        Self { columns: vec![] }
+        Self {
+            columns: vec![],
+            row: None,
+        }
     }
 
     pub fn add_column(&mut self, name: &str, ty: Type, primary_key: bool) {

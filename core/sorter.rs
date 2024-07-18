@@ -1,24 +1,32 @@
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use anyhow::Result;
 use log::trace;
-use ordered_multimap::ListOrderedMultimap;
-use std::cell::{Ref, RefCell};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
+};
 
 pub struct Sorter {
-    records: ListOrderedMultimap<String, OwnedRecord>,
-    current: RefCell<Option<OwnedRecord>>,
+    records: BTreeMap<OwnedRecord, VecDeque<OwnedRecord>>,
+    current: RefCell<Option<VecDeque<OwnedRecord>>>,
+    order: Vec<bool>,
 }
 
 impl Sorter {
-    pub fn new() -> Self {
+    pub fn new(order: Vec<bool>) -> Self {
         Self {
-            records: ListOrderedMultimap::new(),
+            records: BTreeMap::new(),
             current: RefCell::new(None),
+            order,
         }
     }
 
-    pub fn insert(&mut self, key: String, record: OwnedRecord) {
-        self.records.insert(key, record);
+    pub fn insert(&mut self, key: OwnedRecord, record: OwnedRecord) {
+        if let Some(vec) = self.records.get_mut(&key) {
+            vec.push_back(record);
+        } else {
+            self.records.insert(key, VecDeque::from(vec![record]));
+        }
     }
 }
 
@@ -28,28 +36,26 @@ impl Cursor for Sorter {
     }
 
     fn rewind(&mut self) -> Result<CursorResult<()>> {
-        let current = self.records.pop_front();
-        match current {
-            Some((_, record)) => {
-                *self.current.borrow_mut() = Some(record);
-            }
-            None => {
-                *self.current.borrow_mut() = None;
-            }
+        let empty = {
+            let current = self.current.borrow();
+            current.as_ref().map(|r| r.is_empty()).unwrap_or(true)
         };
+        if empty {
+            let mut c = self.current.borrow_mut();
+            *c = self.records.pop_first().map(|(_, record)| record);
+        }
         Ok(CursorResult::Ok(()))
     }
 
     fn next(&mut self) -> Result<CursorResult<()>> {
-        let current = self.records.pop_front();
-        match current {
-            Some((_, record)) => {
-                *self.current.borrow_mut() = Some(record);
-            }
-            None => {
-                *self.current.borrow_mut() = None;
-            }
+        let empty = {
+            let current = self.current.borrow();
+            current.as_ref().map(|r| r.is_empty()).unwrap_or(true)
         };
+        if empty {
+            let mut c = self.current.borrow_mut();
+            *c = self.records.pop_first().map(|(_, record)| record);
+        }
         Ok(CursorResult::Ok(()))
     }
 
@@ -57,22 +63,20 @@ impl Cursor for Sorter {
         Ok(())
     }
 
-    fn rowid(&self) -> Result<Ref<Option<u64>>> {
+    fn rowid(&self) -> Result<Option<u64>> {
         todo!();
     }
 
-    fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
-        Ok(self.current.borrow())
+    fn record(&self) -> Result<Option<OwnedRecord>> {
+        let mut current = self.current.borrow_mut();
+        Ok(current.as_mut().map(|r| r.pop_front().unwrap()))
     }
 
     fn insert(&mut self, record: &OwnedRecord) -> Result<()> {
-        let key = match record.values[0] {
-            OwnedValue::Integer(i) => i.to_string(),
-            OwnedValue::Text(ref s) => s.to_string(),
-            _ => todo!(),
-        };
-        trace!("Inserting record with key: {}", key);
-        self.insert(key, record.clone());
+        let key_fields = self.order.len();
+        let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
+        trace!("Inserting record with key: {:?}", key);
+        self.insert(key, OwnedRecord::new(record.values[key_fields..].to_vec()));
         Ok(())
     }
 

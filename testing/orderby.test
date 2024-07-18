@@ -1,0 +1,26 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test basic-order-by {
+    select * from products order by price;
+} {9|boots|1.0
+3|shirt|18.0
+4|sweater|25.0
+10|coat|33.0
+6|shorts|70.0
+5|sweatshirt|74.0
+7|jeans|78.0
+1|hat|79.0
+11|accessories|81.0
+2|cap|82.0
+8|sneakers|82.0}
+
+do_execsql_test basic-order-by-and-limit {
+    select * from products order by name limit 5;
+} {11|accessories|81.0
+9|boots|1.0
+2|cap|82.0
+10|coat|33.0
+1|hat|79.0}

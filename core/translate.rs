@@ -7,6 +7,7 @@ use crate::pager::Pager;
 use crate::schema::{Schema, Table};
 use crate::select::{ColumnInfo, LoopInfo, Select, SrcTable};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use crate::types::{OwnedRecord, OwnedValue};
 use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use crate::where_clause::{
     evaluate_conditions, translate_conditions, translate_where, Inner, Left, QueryConstraint,
@@ -56,10 +57,20 @@ fn translate_select(mut select: Select) -> Result<Program> {
     );
     let start_offset = program.offset();
 
-    let mut sort_info = if let Some(_) = select.order_by {
+    let mut sort_info = if let Some(order_by) = select.order_by {
         let sorter_cursor = program.alloc_cursor_id(None, None);
+        let mut order = Vec::new();
+        for col in order_by {
+            order.push(OwnedValue::Integer(if let Some(ord) = col.order {
+                ord as i64
+            } else {
+                0
+            }));
+        }
         program.emit_insn(Insn::SorterOpen {
             cursor_id: sorter_cursor,
+            order: OwnedRecord::new(order),
+            columns: select.column_info.len() + 1, // +1 for the key
         });
         Some(SortInfo {
             sorter_cursor,
@@ -174,7 +185,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
 
     // now do the sort for ORDER BY
     if select.order_by.is_some() {
-        let _ = translate_sorter(&select, &mut program, &sort_info.unwrap());
+        let _ = translate_sorter(&select, &mut program, &sort_info.unwrap(), &limit_info);
     }
 
     program.emit_insn(Insn::Halt);
@@ -214,6 +225,7 @@ fn translate_sorter(
     select: &Select,
     program: &mut ProgramBuilder,
     sort_info: &SortInfo,
+    limit_info: &Option<LimitInfo>,
 ) -> Result<()> {
     assert!(sort_info.count > 0);
 
@@ -236,12 +248,14 @@ fn translate_sorter(
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_info.sorter_cursor,
         dest_reg: pseudo_content_reg,
+        pseudo_cursor,
     });
     let (register_start, count) = translate_columns(program, select, Some(pseudo_cursor))?;
     program.emit_insn(Insn::ResultRow {
         start_reg: register_start,
         count,
     });
+    emit_limit_insn(&limit_info, program);
     program.emit_insn(Insn::SorterNext {
         cursor_id: sort_info.sorter_cursor,
         pc_if_next: sorter_data_offset,

@@ -10,3 +10,4 @@ source $testdir/select.test
 source $testdir/where.test
 source $testdir/like.test
 source $testdir/scalar-functions.test
+source $testdir/orderby.test

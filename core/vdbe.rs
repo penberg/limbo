@@ -1,6 +1,7 @@
 use crate::btree::BTreeCursor;
 use crate::function::{AggFunc, SingleRowFunc};
 use crate::pager::Pager;
+use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
@@ -216,7 +217,9 @@ pub enum Insn {
 
     // Open a sorter.
     SorterOpen {
-        cursor_id: CursorID,
+        cursor_id: CursorID, // P1
+        columns: usize,      // P2
+        order: OwnedRecord,  // P4. 0 if ASC and 1 if DESC
     },
 
     // Insert a row into the sorter.
@@ -233,8 +236,9 @@ pub enum Insn {
 
     // Retrieve the next row from the sorter.
     SorterData {
-        cursor_id: CursorID, // P1
-        dest_reg: usize,     // P2
+        cursor_id: CursorID,  // P1
+        dest_reg: usize,      // P2
+        pseudo_cursor: usize, // P3
     },
 
     // Advance to the next row in the sorter.
@@ -871,13 +875,12 @@ impl Program {
                 }
                 Insn::OpenPseudo {
                     cursor_id,
-                    content_reg,
-                    num_fields,
+                    content_reg: _,
+                    num_fields: _,
                 } => {
-                    let _ = cursor_id;
-                    let _ = content_reg;
-                    let _ = num_fields;
-                    todo!();
+                    let cursor = Box::new(PseudoCursor::new());
+                    cursors.insert(*cursor_id, cursor);
+                    state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
@@ -908,7 +911,7 @@ impl Program {
                     dest,
                 } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    if let Some(ref record) = *cursor.record()? {
+                    if let Some(ref record) = cursor.record()? {
                         let null_flag = cursor.get_null_flag();
                         state.registers[*dest] = if null_flag {
                             OwnedValue::Null
@@ -989,7 +992,7 @@ impl Program {
                 }
                 Insn::RowId { cursor_id, dest } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    if let Some(ref rowid) = *cursor.rowid()? {
+                    if let Some(ref rowid) = cursor.rowid()? {
                         state.registers[*dest] = OwnedValue::Integer(*rowid as i64);
                     } else {
                         todo!();
@@ -1221,21 +1224,38 @@ impl Program {
                     };
                     state.pc += 1;
                 }
-                Insn::SorterOpen { cursor_id } => {
-                    let cursor = Box::new(crate::sorter::Sorter::new());
+                Insn::SorterOpen {
+                    cursor_id,
+                    columns,
+                    order,
+                } => {
+                    let order = order
+                        .values
+                        .iter()
+                        .map(|v| match v {
+                            OwnedValue::Integer(i) => *i == 0,
+                            _ => unreachable!(),
+                        })
+                        .collect();
+                    let cursor = Box::new(crate::sorter::Sorter::new(order));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
                 Insn::SorterData {
                     cursor_id,
                     dest_reg,
+                    pseudo_cursor: sorter_cursor,
                 } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    if let Some(ref record) = *cursor.record()? {
-                        state.registers[*dest_reg] = OwnedValue::Record(record.clone());
-                    } else {
-                        todo!();
-                    }
+                    let record = match cursor.record()? {
+                        Some(ref record) => record.clone(),
+                        None => {
+                            todo!();
+                        }
+                    };
+                    state.registers[*dest_reg] = OwnedValue::Record(record.clone());
+                    let sorter_cursor = cursors.get_mut(sorter_cursor).unwrap();
+                    sorter_cursor.insert(&record)?;
                     state.pc += 1;
                 }
                 Insn::SorterInsert {
@@ -1809,23 +1829,45 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 format!("accum=r[{}]", *register),
             ),
-            Insn::SorterOpen { cursor_id } => (
-                "SorterOpen",
-                *cursor_id as i32,
-                0,
-                0,
-                OwnedValue::Text(Rc::new("".to_string())),
-                0,
-                format!("cursor={}", cursor_id),
-            ),
+            Insn::SorterOpen {
+                cursor_id,
+                columns,
+                order,
+            } => {
+                let p4 = String::new();
+                let to_print: Vec<String> = order
+                    .values
+                    .iter()
+                    .map(|v| match v {
+                        OwnedValue::Integer(i) => {
+                            if *i == 0 {
+                                "B".to_string()
+                            } else {
+                                "-B".to_string()
+                            }
+                        }
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                (
+                    "SorterOpen",
+                    *cursor_id as i32,
+                    *columns as i32,
+                    0,
+                    OwnedValue::Text(Rc::new(format!("k({},{})", columns, to_print.join(",")))),
+                    0,
+                    format!("cursor={}", cursor_id),
+                )
+            }
             Insn::SorterData {
                 cursor_id,
                 dest_reg,
+                pseudo_cursor,
             } => (
                 "SorterData",
                 *cursor_id as i32,
                 *dest_reg as i32,
-                0,
+                *pseudo_cursor as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("r[{}]=data", dest_reg),

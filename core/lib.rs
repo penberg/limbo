@@ -4,6 +4,7 @@ mod expr;
 mod function;
 mod io;
 mod pager;
+mod pseudo;
 mod schema;
 mod select;
 mod sorter;
