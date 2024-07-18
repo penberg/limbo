@@ -31,6 +31,7 @@ impl AggFunc {
 pub enum SingleRowFunc {
     Coalesce,
     Like,
+    Abs,
 }
 
 impl ToString for SingleRowFunc {
@@ -38,6 +39,7 @@ impl ToString for SingleRowFunc {
         match self {
             SingleRowFunc::Coalesce => "coalesce".to_string(),
             SingleRowFunc::Like => "like(2)".to_string(),
+            SingleRowFunc::Abs => "abs".to_string(),
         }
     }
 }
@@ -62,6 +64,7 @@ impl FromStr for Func {
             "total" => Ok(Func::Agg(AggFunc::Total)),
             "coalesce" => Ok(Func::SingleRow(SingleRowFunc::Coalesce)),
             "like" => Ok(Func::SingleRow(SingleRowFunc::Like)),
+            "abs" => Ok(Func::SingleRow(SingleRowFunc::Abs)),
             _ => Err(()),
         }
     }

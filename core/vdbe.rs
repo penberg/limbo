@@ -1195,6 +1195,15 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
+                    SingleRowFunc::Abs => {
+                        let reg_value = state.registers[*start_reg].borrow_mut();
+                        if let Some(value) = exec_abs(reg_value) {
+                            state.registers[*dest] = value;
+                        } else {
+                            state.registers[*dest] = OwnedValue::Null;
+                        }
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1708,6 +1717,27 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
     }
 }
 
+fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
+    match reg {
+        OwnedValue::Integer(x) => {
+            if x < &0 {
+                Some(OwnedValue::Integer(-x))
+            } else {
+                Some(OwnedValue::Integer(*x))
+            }
+        }
+        OwnedValue::Float(x) => {
+            if x < &0.0 {
+                Some(OwnedValue::Float(-x))
+            } else {
+                Some(OwnedValue::Float(*x))
+            }
+        }
+        OwnedValue::Null => Some(OwnedValue::Null),
+        _ => Some(OwnedValue::Float(0.0)),
+    }
+}
+
 // Implements LIKE pattern matching.
 fn exec_like(pattern: &str, text: &str) -> bool {
     let re = Regex::new(&format!("{}", pattern.replace("%", ".*").replace("_", "."))).unwrap();
@@ -1731,6 +1761,24 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_abs() {
+        let int_positive_reg = OwnedValue::Integer(10);
+        let int_negative_reg = OwnedValue::Integer(-10);
+        assert_eq!(exec_abs(&int_positive_reg).unwrap(), int_positive_reg);
+        assert_eq!(exec_abs(&int_negative_reg).unwrap(), int_positive_reg);
+
+        let float_positive_reg = OwnedValue::Integer(10);
+        let float_negative_reg = OwnedValue::Integer(-10);
+        assert_eq!(exec_abs(&float_positive_reg).unwrap(), float_positive_reg);
+        assert_eq!(exec_abs(&float_negative_reg).unwrap(), float_positive_reg);
+
+        assert_eq!(
+            exec_abs(&OwnedValue::Text(Rc::new(String::from("a")))).unwrap(),
+            OwnedValue::Float(0.0)
+        );
+        assert_eq!(exec_abs(&OwnedValue::Null).unwrap(), OwnedValue::Null);
+    }
     #[test]
     fn test_like() {
         assert!(exec_like("a%", "aaaa"));

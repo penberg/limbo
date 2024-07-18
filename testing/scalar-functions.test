@@ -1,0 +1,20 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test abs {
+    select abs(1);
+} {1}
+
+do_execsql_test abs-negative {
+    select abs(-1);
+} {1}
+
+do_execsql_test abs-char {
+    select abs('a');
+} {0.0}
+
+do_execsql_test abs-null {
+    select abs(null);
+} {}

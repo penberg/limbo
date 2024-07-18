@@ -8,7 +8,7 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use anyhow::Result;
-use sqlite3_parser::ast::{self, Expr, Literal};
+use sqlite3_parser::ast::{self, Expr, Literal, UnaryOperator};
 
 struct Select<'a> {
     columns: &'a Vec<ast::ResultColumn>,
@@ -1024,6 +1024,28 @@ fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        SingleRowFunc::Abs => {
+                            let args = if let Some(args) = args {
+                                if args.len() != 1 {
+                                    anyhow::bail!(
+                                        "Parse error: abs function with not exactly 1 argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: abs function with no arguments");
+                            };
+
+                            let regs = program.alloc_register();
+                            let _ = translate_expr(program, select, &args[0], regs)?;
+                            program.emit_insn(Insn::Function {
+                                start_reg: regs,
+                                dest: target_register,
+                                func: SingleRowFunc::Abs,
+                            });
+
+                            Ok(target_register)
+                        }
                     }
                 }
                 None => {
@@ -1113,7 +1135,24 @@ fn translate_expr(
         }
         ast::Expr::Raise(_, _) => todo!(),
         ast::Expr::Subquery(_) => todo!(),
-        ast::Expr::Unary(_, _) => todo!(),
+        ast::Expr::Unary(op, expr) => match (op, expr.as_ref()) {
+            (UnaryOperator::Negative, ast::Expr::Literal(ast::Literal::Numeric(numeric_value))) => {
+                let maybe_int = numeric_value.parse::<i64>();
+                if let Ok(value) = maybe_int {
+                    program.emit_insn(Insn::Integer {
+                        value: -value,
+                        dest: target_register,
+                    });
+                } else {
+                    program.emit_insn(Insn::Real {
+                        value: -numeric_value.parse::<f64>()?,
+                        dest: target_register,
+                    });
+                }
+                Ok(target_register)
+            }
+            _ => todo!(),
+        },
         ast::Expr::Variable(_) => todo!(),
     }
 }
