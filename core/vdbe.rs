@@ -1832,7 +1832,7 @@ fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
 
 // Implements LIKE pattern matching.
 fn exec_like(pattern: &str, text: &str) -> bool {
-    let re = Regex::new(&format!("{}", pattern.replace("%", ".*").replace("_", "."))).unwrap();
+    let re = Regex::new(&pattern.replace('%', ".*").replace('_', ".").to_string()).unwrap();
     re.is_match(text)
 }
 
@@ -1850,8 +1850,10 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
     }
 }
 
+#[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{exec_abs, exec_if, exec_like, OwnedValue};
+    use std::rc::Rc;
 
     #[test]
     fn test_abs() {
@@ -1884,27 +1886,27 @@ mod tests {
     fn test_exec_if() {
         let reg = OwnedValue::Integer(0);
         let null_reg = OwnedValue::Integer(0);
-        assert_eq!(exec_if(&reg, &null_reg, false), false);
-        assert_eq!(exec_if(&reg, &null_reg, true), true);
+        assert!(!exec_if(&reg, &null_reg, false));
+        assert!(exec_if(&reg, &null_reg, true));
 
         let reg = OwnedValue::Integer(1);
         let null_reg = OwnedValue::Integer(0);
-        assert_eq!(exec_if(&reg, &null_reg, false), true);
-        assert_eq!(exec_if(&reg, &null_reg, true), false);
+        assert!(exec_if(&reg, &null_reg, false));
+        assert!(!exec_if(&reg, &null_reg, true));
 
         let reg = OwnedValue::Null;
         let null_reg = OwnedValue::Integer(0);
-        assert_eq!(exec_if(&reg, &null_reg, false), false);
-        assert_eq!(exec_if(&reg, &null_reg, true), false);
+        assert!(!exec_if(&reg, &null_reg, false));
+        assert!(!exec_if(&reg, &null_reg, true));
 
         let reg = OwnedValue::Null;
         let null_reg = OwnedValue::Integer(1);
-        assert_eq!(exec_if(&reg, &null_reg, false), true);
-        assert_eq!(exec_if(&reg, &null_reg, true), true);
+        assert!(exec_if(&reg, &null_reg, false));
+        assert!(exec_if(&reg, &null_reg, true));
 
         let reg = OwnedValue::Null;
         let null_reg = OwnedValue::Null;
-        assert_eq!(exec_if(&reg, &null_reg, false), false);
-        assert_eq!(exec_if(&reg, &null_reg, true), false);
+        assert!(!exec_if(&reg, &null_reg, false));
+        assert!(!exec_if(&reg, &null_reg, true));
     }
 }
