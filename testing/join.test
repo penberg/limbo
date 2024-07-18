@@ -11,6 +11,16 @@ do_execsql_test cross-join-specific-columns {
     select first_name, price from users, products limit 1;
 } {Jamie|79.0}
 
+do_execsql_test cross-join-where-right-tbl {
+    select users.first_name, products.name from users join products where products.id = 1 limit 2;
+} {Jamie|hat
+Cindy|hat}
+
+do_execsql_test cross-join-where-left-tbl {
+    select users.first_name, products.name from users join products where users.id = 1 limit 2;
+} {Jamie|hat
+Jamie|cap}
+
 do_execsql_test inner-join-pk {
     select users.first_name as user_name, products.name as product_name from users join products on users.id = products.id;
 } {Jamie|hat
@@ -45,3 +55,56 @@ do_execsql_test inner-join-self-with-where {
 #do_execsql_test inner-join-with-where-2 {
 #    select u.first_name from users u join products as p on u.first_name != p.name where u.last_name = 'Williams' limit 1;
 #} {Laura} <-- sqlite3 returns 'Aaron'
+
+do_execsql_test left-join-pk {
+    select users.first_name as user_name, products.name as product_name from users left join products on users.id = products.id limit 12;
+} {Jamie|hat
+Cindy|cap
+Tommy|shirt
+Jennifer|sweater
+Edward|sweatshirt
+Nicholas|shorts
+Aimee|jeans
+Rachel|sneakers
+Matthew|boots
+Daniel|coat
+Travis|accessories
+Alan|}
+
+do_execsql_test left-join-with-where {
+    select u.first_name, p.name from users u left join products as p on u.id = p.id where u.id >= 10 limit 5;
+} {Daniel|coat
+Travis|accessories
+Alan|
+Michael|
+Brianna|}
+
+do_execsql_test left-join-non-pk {
+    select users.first_name as user_name, products.name as product_name from users left join products on users.first_name = products.name limit 3;
+} {Jamie|
+Cindy|
+Tommy|}
+
+do_execsql_test left-join-self {
+    select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u1.id = u2.id + 1 limit 2;
+} {Jamie|
+Cindy|Jamie}
+
+do_execsql_test left-join-self-with-where {
+    select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u1.id = u2.id + 1 where u1.id = 5 limit 2;
+} {Edward|Jennifer}
+
+do_execsql_test left-join-multiple-cond-and {
+    select u.first_name, p.name from users u left join products as p on u.id = p.id and u.first_name = p.name limit 2;
+} {Jamie|
+Cindy|}
+
+do_execsql_test left-join-multiple-cond-or {
+    select u.first_name, p.name from users u left join products as p on u.id = p.id or u.first_name = p.name limit 2;
+} {Jamie|hat
+Cindy|cap}
+
+do_execsql_test left-join-no-join-conditions-but-multiple-where {
+    select u.first_name, p.name from users u left join products as p where u.id = p.id or u.first_name = p.name limit 2;
+} {Jamie|hat
+Cindy|cap}

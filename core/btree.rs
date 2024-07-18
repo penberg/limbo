@@ -38,6 +38,7 @@ pub struct BTreeCursor {
     page: RefCell<Option<Rc<MemPage>>>,
     rowid: RefCell<Option<u64>>,
     record: RefCell<Option<OwnedRecord>>,
+    null_flag: bool,
 }
 
 impl BTreeCursor {
@@ -48,6 +49,7 @@ impl BTreeCursor {
             page: RefCell::new(None),
             rowid: RefCell::new(None),
             record: RefCell::new(None),
+            null_flag: false,
         }
     }
 
@@ -160,5 +162,13 @@ impl Cursor for BTreeCursor {
 
     fn insert(&mut self, _record: &OwnedRecord) -> Result<()> {
         unimplemented!()
+    }
+
+    fn set_null_flag(&mut self, flag: bool) {
+        self.null_flag = flag;
+    }
+
+    fn get_null_flag(&self) -> bool {
+        self.null_flag
     }
 }

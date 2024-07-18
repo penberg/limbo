@@ -27,11 +27,21 @@ pub enum Insn {
     Null {
         dest: usize,
     },
+    // Move the cursor P1 to a null row. Any Column operations that occur while the cursor is on the null row will always write a NULL.
+    NullRow {
+        cursor_id: CursorID,
+    },
     // Add two registers and store the result in a third register.
     Add {
         lhs: usize,
         rhs: usize,
         dest: usize,
+    },
+    // If the given register is a positive integer, decrement it by decrement_by and jump to the given PC.
+    IfPos {
+        reg: usize,
+        target_pc: BranchOffset,
+        decrement_by: usize,
     },
     // If the given register is not NULL, jump to the given PC.
     NotNull {
@@ -257,6 +267,8 @@ pub struct ProgramBuilder {
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
     cursor_ref: Vec<(String, Table)>,
+    // List of deferred label resolutions. Each entry is a pair of (label, insn_reference).
+    deferred_label_resolutions: Vec<(BranchOffset, InsnReference)>,
 }
 
 impl ProgramBuilder {
@@ -270,6 +282,7 @@ impl ProgramBuilder {
             next_insn_label: None,
             cursor_ref: Vec::new(),
             constant_insns: Vec::new(),
+            deferred_label_resolutions: Vec::new(),
         }
     }
 
@@ -351,6 +364,11 @@ impl ProgramBuilder {
         let insn_reference = insn_reference as InsnReference;
         let label_references = &mut self.unresolved_labels[label_index];
         label_references.push(insn_reference);
+    }
+
+    pub fn defer_label_resolution(&mut self, label: BranchOffset, insn_reference: InsnReference) {
+        self.deferred_label_resolutions
+            .push((label, insn_reference));
     }
 
     pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
@@ -466,6 +484,10 @@ impl ProgramBuilder {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
+                Insn::IfPos { target_pc, .. } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }
@@ -482,7 +504,19 @@ impl ProgramBuilder {
             .unwrap()
     }
 
+    pub fn resolve_deferred_labels(&mut self) {
+        for i in 0..self.deferred_label_resolutions.len() {
+            let (label, insn_reference) = self.deferred_label_resolutions[i];
+            self.resolve_label(label, insn_reference as BranchOffset);
+        }
+        self.deferred_label_resolutions.clear();
+    }
+
     pub fn build(self) -> Program {
+        assert!(
+            self.deferred_label_resolutions.is_empty(),
+            "deferred_label_resolutions is not empty when build() is called, did you forget to call resolve_deferred_labels()?"
+        );
         assert!(
             self.constant_insns.is_empty(),
             "constant_insns is not empty when build() is called, did you forget to call emit_constant_insns()?"
@@ -589,6 +623,32 @@ impl Program {
                     state.registers[*dest] = OwnedValue::Null;
                     state.pc += 1;
                 }
+                Insn::NullRow { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.set_null_flag(true);
+                    state.pc += 1;
+                }
+                Insn::IfPos {
+                    reg,
+                    target_pc,
+                    decrement_by,
+                } => {
+                    assert!(*target_pc >= 0);
+                    let reg = *reg;
+                    let target_pc = *target_pc;
+                    match &state.registers[reg] {
+                        OwnedValue::Integer(n) if *n > 0 => {
+                            state.pc = target_pc;
+                            state.registers[reg] = OwnedValue::Integer(*n - *decrement_by as i64);
+                        }
+                        OwnedValue::Integer(_) => {
+                            state.pc += 1;
+                        }
+                        _ => {
+                            anyhow::bail!("IfPos: the value in the register is not an integer");
+                        }
+                    }
+                }
                 Insn::NotNull { reg, target_pc } => {
                     assert!(*target_pc >= 0);
                     let reg = *reg;
@@ -602,6 +662,7 @@ impl Program {
                         }
                     }
                 }
+
                 Insn::Eq {
                     lhs,
                     rhs,
@@ -809,9 +870,14 @@ impl Program {
                 } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
-                        state.registers[*dest] = record.values[*column].clone();
+                        let null_flag = cursor.get_null_flag();
+                        state.registers[*dest] = if null_flag {
+                            OwnedValue::Null
+                        } else {
+                            record.values[*column].clone()
+                        };
                     } else {
-                        todo!();
+                        state.registers[*dest] = OwnedValue::Null;
                     }
                     state.pc += 1;
                 }
@@ -831,6 +897,7 @@ impl Program {
                 }
                 Insn::NextAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.set_null_flag(false);
                     match cursor.next()? {
                         CursorResult::Ok(_) => {}
                         CursorResult::IO => {
@@ -1268,6 +1335,15 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 0,
                 format!("r[{}]=NULL", dest),
             ),
+            Insn::NullRow { cursor_id } => (
+                "NullRow",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("Set cursor {} to a (pseudo) NULL row", cursor_id),
+            ),
             Insn::NotNull { reg, target_pc } => (
                 "NotNull",
                 *reg as i32,
@@ -1276,6 +1352,22 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("r[{}] -> {}", reg, target_pc),
+            ),
+            Insn::IfPos {
+                reg,
+                target_pc,
+                decrement_by,
+            } => (
+                "IfPos",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "r[{}]>0 -> r[{}]-={}, goto {}",
+                    reg, reg, decrement_by, target_pc
+                ),
             ),
             Insn::Eq {
                 lhs,
