@@ -1,9 +1,11 @@
 mod btree;
 mod buffer_pool;
+mod expr;
 mod function;
 mod io;
 mod pager;
 mod schema;
+mod select;
 mod sorter;
 mod sqlite3_ondisk;
 mod storage;
@@ -11,6 +13,7 @@ mod translate;
 mod types;
 mod util;
 mod vdbe;
+mod where_clause;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]
