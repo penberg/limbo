@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Partial `LEFT JOIN` support.
+
 ### Fixed
 
 - Lock database file with POSIX filesystem advisory lock when database
