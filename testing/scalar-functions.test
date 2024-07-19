@@ -18,3 +18,35 @@ do_execsql_test abs-char {
 do_execsql_test abs-null {
     select abs(null);
 } {}
+
+do_execsql_test upper {
+  select upper('Limbo')
+} {LIMBO}
+
+do_execsql_test upper-number {
+  select upper(1)
+} {1}
+
+do_execsql_test upper-char {
+  select upper('a')
+} {A}
+
+do_execsql_test upper-null {
+  select upper(null)
+} {}
+
+do_execsql_test lower {
+  select lower('Limbo')
+} {limbo}
+
+do_execsql_test lower-number {
+  select lower(1)
+} {1}
+
+do_execsql_test lower-char {
+  select lower('A')
+} {a}
+
+do_execsql_test lower-null {
+  select lower(null)
+} {}

@@ -1271,6 +1271,24 @@ impl Program {
                         }
                         state.pc += 1;
                     }
+                    SingleRowFunc::Upper => {
+                        let reg_value = state.registers[*start_reg].borrow_mut();
+                        if let Some(value) = exec_upper(reg_value) {
+                            state.registers[*dest] = value;
+                        } else {
+                            state.registers[*dest] = OwnedValue::Null;
+                        }
+                        state.pc += 1;
+                    }
+                    SingleRowFunc::Lower => {
+                        let reg_value = state.registers[*start_reg].borrow_mut();
+                        if let Some(value) = exec_lower(reg_value) {
+                            state.registers[*dest] = value;
+                        } else {
+                            state.registers[*dest] = OwnedValue::Null;
+                        }
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1809,6 +1827,19 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
     }
 }
 
+fn exec_lower(reg: &OwnedValue) -> Option<OwnedValue> {
+    match reg {
+        OwnedValue::Text(t) => Some(OwnedValue::Text(Rc::new(t.to_lowercase()))),
+        t => Some(t.to_owned()),
+    }
+}
+
+fn exec_upper(reg: &OwnedValue) -> Option<OwnedValue> {
+    match reg {
+        OwnedValue::Text(t) => Some(OwnedValue::Text(Rc::new(t.to_uppercase()))),
+        t => Some(t.to_owned()),
+    }
+}
 fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
@@ -1852,8 +1883,30 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{exec_abs, exec_if, exec_like, OwnedValue};
+    use super::{exec_abs, exec_if, exec_like, exec_lower, exec_upper, OwnedValue};
     use std::rc::Rc;
+
+    #[test]
+    fn test_upper_case() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("Limbo")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("LIMBO")));
+        assert_eq!(exec_upper(&input_str).unwrap(), expected_str);
+
+        let input_int = OwnedValue::Integer(10);
+        assert_eq!(exec_upper(&input_int).unwrap(), input_int);
+        assert_eq!(exec_upper(&OwnedValue::Null).unwrap(), OwnedValue::Null)
+    }
+
+    #[test]
+    fn test_lower_case() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("Limbo")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("limbo")));
+        assert_eq!(exec_lower(&input_str).unwrap(), expected_str);
+
+        let input_int = OwnedValue::Integer(10);
+        assert_eq!(exec_lower(&input_int).unwrap(), input_int);
+        assert_eq!(exec_lower(&OwnedValue::Null).unwrap(), OwnedValue::Null)
+    }
 
     #[test]
     fn test_abs() {
