@@ -355,6 +355,21 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
+                        SingleRowFunc::Random => {
+                            if args.is_some() {
+                                anyhow::bail!("Parse error: random function withargumentst");
+                            }
+                            dbg!("random args", &args);
+                            let regs = program.alloc_register();
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: regs,
+                                dest: target_register,
+                                func: SingleRowFunc::Random,
+                            });
+
+                            Ok(target_register)
+                        }
                     }
                 }
                 None => {

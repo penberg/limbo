@@ -34,6 +34,7 @@ pub enum SingleRowFunc {
     Abs,
     Upper,
     Lower,
+    Random,
 }
 
 impl ToString for SingleRowFunc {
@@ -44,6 +45,7 @@ impl ToString for SingleRowFunc {
             SingleRowFunc::Abs => "abs".to_string(),
             SingleRowFunc::Upper => "upper".to_string(),
             SingleRowFunc::Lower => "lower".to_string(),
+            SingleRowFunc::Random => "random".to_string(),
         }
     }
 }
@@ -71,6 +73,7 @@ impl FromStr for Func {
             "abs" => Ok(Func::SingleRow(SingleRowFunc::Abs)),
             "upper" => Ok(Func::SingleRow(SingleRowFunc::Upper)),
             "lower" => Ok(Func::SingleRow(SingleRowFunc::Lower)),
+            "random" => Ok(Func::SingleRow(SingleRowFunc::Random)),
             _ => Err(()),
         }
     }
