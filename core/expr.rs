@@ -357,9 +357,8 @@ pub fn translate_expr(
                         }
                         SingleRowFunc::Random => {
                             if args.is_some() {
-                                anyhow::bail!("Parse error: random function withargumentst");
+                                anyhow::bail!("Parse error: random function with arguments");
                             }
-                            dbg!("random args", &args);
                             let regs = program.alloc_register();
 
                             program.emit_insn(Insn::Function {

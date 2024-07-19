@@ -38,7 +38,7 @@ ordered-multimap = "0.7.1"
 sieve-cache = "0.1.4"
 sqlite3-parser = "0.11.0"
 thiserror = "1.0.61"
-rand = "0.8.5"
+getrandom = { version = "0.2.15", features = ["js"] }
 regex = "1.10.5"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]

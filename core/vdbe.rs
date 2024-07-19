@@ -5,7 +5,6 @@ use crate::schema::Table;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 
 use anyhow::Result;
-use rand::Rng;
 use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
@@ -1867,8 +1866,9 @@ fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
 }
 
 fn exec_random() -> OwnedValue {
-    let mut rng = rand::thread_rng();
-    let random_number: i64 = rng.gen();
+    let mut buf = [0u8; 8];
+    getrandom::getrandom(&mut buf).unwrap();
+    let random_number = i64::from_ne_bytes(buf);
     OwnedValue::Integer(random_number)
 }
 
