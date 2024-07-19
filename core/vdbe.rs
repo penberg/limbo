@@ -892,7 +892,7 @@ impl Program {
                     dest,
                 } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    if let Some(ref record) = cursor.record()? {
+                    if let Some(ref record) = *cursor.record()? {
                         let null_flag = cursor.get_null_flag();
                         state.registers[*dest] = if null_flag {
                             OwnedValue::Null
@@ -1228,7 +1228,7 @@ impl Program {
                     pseudo_cursor: sorter_cursor,
                 } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    let record = match cursor.record()? {
+                    let record = match *cursor.record()? {
                         Some(ref record) => record.clone(),
                         None => {
                             todo!();

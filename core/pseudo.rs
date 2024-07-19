@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 
@@ -46,8 +46,8 @@ impl Cursor for PseudoCursor {
         Ok(x)
     }
 
-    fn record(&self) -> Result<Option<OwnedRecord>> {
-        Ok(self.current.borrow().to_owned())
+    fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
+        Ok(self.current.borrow())
     }
 
     fn insert(&mut self, record: &OwnedRecord) -> Result<()> {

@@ -1,13 +1,13 @@
 use crate::types::{Cursor, CursorResult, OwnedRecord};
 use anyhow::Result;
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     collections::{BTreeMap, VecDeque},
 };
 
 pub struct Sorter {
     records: BTreeMap<OwnedRecord, VecDeque<OwnedRecord>>,
-    current: RefCell<Option<VecDeque<OwnedRecord>>>,
+    current: RefCell<Option<OwnedRecord>>,
     order: Vec<bool>,
 }
 
@@ -35,25 +35,32 @@ impl Cursor for Sorter {
     }
 
     fn rewind(&mut self) -> Result<CursorResult<()>> {
-        let empty = {
-            let current = self.current.borrow();
-            current.as_ref().map(|r| r.is_empty()).unwrap_or(true)
-        };
-        if empty {
-            let mut c = self.current.borrow_mut();
-            *c = self.records.pop_first().map(|(_, record)| record);
+        let mut c = self.current.borrow_mut();
+        for (_, record) in self.records.iter_mut() {
+            let record = record.pop_front();
+            if record.is_some() {
+                *c = record;
+                break;
+            }
         }
+
         Ok(CursorResult::Ok(()))
     }
 
     fn next(&mut self) -> Result<CursorResult<()>> {
-        let empty = {
-            let current = self.current.borrow();
-            current.as_ref().map(|r| r.is_empty()).unwrap_or(true)
-        };
-        if empty {
-            let mut c = self.current.borrow_mut();
-            *c = self.records.pop_first().map(|(_, record)| record);
+        let mut c = self.current.borrow_mut();
+        let mut matched = false;
+        for (_, record) in self.records.iter_mut() {
+            let record = record.pop_front();
+            if record.is_some() {
+                *c = record;
+                matched = true;
+                break;
+            }
+        }
+        self.records.retain(|_, v| !v.is_empty());
+        if !matched {
+            *c = None;
         }
         Ok(CursorResult::Ok(()))
     }
@@ -66,9 +73,8 @@ impl Cursor for Sorter {
         todo!();
     }
 
-    fn record(&self) -> Result<Option<OwnedRecord>> {
-        let mut current = self.current.borrow_mut();
-        Ok(current.as_mut().map(|r| r.pop_front().unwrap()))
+    fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
+        Ok(self.current.borrow())
     }
 
     fn insert(&mut self, record: &OwnedRecord) -> Result<()> {

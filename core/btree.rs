@@ -4,7 +4,7 @@ use crate::types::{Cursor, CursorResult, OwnedRecord};
 
 use anyhow::Result;
 
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 pub struct MemPage {
@@ -156,8 +156,8 @@ impl Cursor for BTreeCursor {
         Ok(*self.rowid.borrow())
     }
 
-    fn record(&self) -> Result<Option<OwnedRecord>> {
-        Ok(self.record.borrow().to_owned())
+    fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
+        Ok(self.record.borrow())
     }
 
     fn insert(&mut self, _record: &OwnedRecord) -> Result<()> {
