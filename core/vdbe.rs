@@ -1289,6 +1289,10 @@ impl Program {
                         }
                         state.pc += 1;
                     }
+                    SingleRowFunc::Random => {
+                        state.registers[*dest] = exec_random();
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1861,6 +1865,13 @@ fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
     }
 }
 
+fn exec_random() -> OwnedValue {
+    let mut buf = [0u8; 8];
+    getrandom::getrandom(&mut buf).unwrap();
+    let random_number = i64::from_ne_bytes(buf);
+    OwnedValue::Integer(random_number)
+}
+
 // Implements LIKE pattern matching.
 fn exec_like(pattern: &str, text: &str) -> bool {
     let re = Regex::new(&pattern.replace('%', ".*").replace('_', ".").to_string()).unwrap();
@@ -1883,7 +1894,7 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{exec_abs, exec_if, exec_like, exec_lower, exec_upper, OwnedValue};
+    use super::{exec_abs, exec_if, exec_like, exec_lower, exec_random, exec_upper, OwnedValue};
     use std::rc::Rc;
 
     #[test]
@@ -1933,6 +1944,20 @@ mod tests {
         assert!(exec_like("%a.a", "aaaa"));
         assert!(exec_like("a.a%", "aaaa"));
         assert!(!exec_like("%a.ab", "aaaa"));
+    }
+
+    #[test]
+    fn test_random() {
+        match exec_random() {
+            OwnedValue::Integer(value) => {
+                // Check that the value is within the range of i64
+                assert!(
+                    value >= i64::MIN && value <= i64::MAX,
+                    "Random number out of range"
+                );
+            }
+            _ => panic!("exec_random did not return an Integer variant"),
+        }
     }
 
     #[test]

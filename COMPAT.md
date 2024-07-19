@@ -90,7 +90,7 @@ This document describes the SQLite compatibility status of Limbo:
 | octet_length(X)              | No     |         |
 | printf(FORMAT,...)           | No     |         |
 | quote(X)                     | No     |         |
-| random()                     | No     |         |
+| random()                     | Yes     |         |
 | randomblob(N)                | No     |         |
 | replace(X,Y,Z)               | No     |         |
 | round(X)                     | No     |         |
