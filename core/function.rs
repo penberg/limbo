@@ -32,6 +32,8 @@ pub enum SingleRowFunc {
     Coalesce,
     Like,
     Abs,
+    Upper,
+    Lower,
 }
 
 impl ToString for SingleRowFunc {
@@ -40,6 +42,8 @@ impl ToString for SingleRowFunc {
             SingleRowFunc::Coalesce => "coalesce".to_string(),
             SingleRowFunc::Like => "like(2)".to_string(),
             SingleRowFunc::Abs => "abs".to_string(),
+            SingleRowFunc::Upper => "upper".to_string(),
+            SingleRowFunc::Lower => "lower".to_string(),
         }
     }
 }
@@ -65,6 +69,8 @@ impl FromStr for Func {
             "coalesce" => Ok(Func::SingleRow(SingleRowFunc::Coalesce)),
             "like" => Ok(Func::SingleRow(SingleRowFunc::Like)),
             "abs" => Ok(Func::SingleRow(SingleRowFunc::Abs)),
+            "upper" => Ok(Func::SingleRow(SingleRowFunc::Upper)),
+            "lower" => Ok(Func::SingleRow(SingleRowFunc::Lower)),
             _ => Err(()),
         }
     }

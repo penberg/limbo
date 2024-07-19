@@ -81,7 +81,7 @@ This document describes the SQLite compatibility status of Limbo:
 | likely(X)                    | No     |         |
 | load_extension(X)            | No     |         |
 | load_extension(X,Y)          | No     |         |
-| lower(X)                     | No     |         |
+| lower(X)                     | Yes    |         |
 | ltrim(X)                     | No     |         |
 | ltrim(X,Y)                   | No     |         |
 | max(X,Y,...)                 | No     |         |
@@ -116,7 +116,7 @@ This document describes the SQLite compatibility status of Limbo:
 | unhex(X,Y)                   | No     |         |
 | unicode(X)                   | No     |         |
 | unlikely(X)                  | No     |         |
-| upper(X)                     | No     |         |
+| upper(X)                     | Yes    |         |
 | zeroblob(N)                  | No     |         |
 
 ### Aggregate functions

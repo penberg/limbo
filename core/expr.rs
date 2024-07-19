@@ -311,6 +311,50 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
+                        SingleRowFunc::Upper => {
+                            let args = if let Some(args) = args {
+                                if args.len() != 1 {
+                                    anyhow::bail!(
+                                        "Parse error: upper function with not exactly 1 argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: upper function with no arguments");
+                            };
+
+                            let regs = program.alloc_register();
+                            let _ = translate_expr(program, select, &args[0], regs)?;
+                            program.emit_insn(Insn::Function {
+                                start_reg: regs,
+                                dest: target_register,
+                                func: SingleRowFunc::Upper,
+                            });
+
+                            Ok(target_register)
+                        }
+                        SingleRowFunc::Lower => {
+                            let args = if let Some(args) = args {
+                                if args.len() != 1 {
+                                    anyhow::bail!(
+                                        "Parse error: lower function with not exactly 1 argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: lower function with no arguments");
+                            };
+
+                            let regs = program.alloc_register();
+                            let _ = translate_expr(program, select, &args[0], regs)?;
+                            program.emit_insn(Insn::Function {
+                                start_reg: regs,
+                                dest: target_register,
+                                func: SingleRowFunc::Lower,
+                            });
+
+                            Ok(target_register)
+                        }
                     }
                 }
                 None => {
