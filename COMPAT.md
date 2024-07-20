@@ -109,8 +109,8 @@ This document describes the SQLite compatibility status of Limbo:
 | substring(X,Y,Z)             | No     |         |
 | substring(X,Y)               | No     |         |
 | total_changes()              | No     |         |
-| trim(X)                      | No     |         |
-| trim(X,Y)                    | No     |         |
+| trim(X)                      | Yes     |         |
+| trim(X,Y)                    | Yes     |         |
 | typeof(X)                    | No     |         |
 | unhex(X)                     | No     |         |
 | unhex(X,Y)                   | No     |         |

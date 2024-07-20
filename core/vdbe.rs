@@ -1293,6 +1293,16 @@ impl Program {
                         state.registers[*dest] = exec_random();
                         state.pc += 1;
                     }
+                    SingleRowFunc::Trim => {
+                        let start_reg = *start_reg;
+                        let reg_value = state.registers[start_reg].clone();
+                        let pattern_value = state.registers.get(start_reg + 1).cloned();
+
+                        let result = exec_trim(&reg_value, pattern_value);
+
+                        state.registers[*dest] = result;
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1878,6 +1888,23 @@ fn exec_like(pattern: &str, text: &str) -> bool {
     re.is_match(text)
 }
 
+// Implements TRIM pattern matching.
+fn exec_trim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
+    match (reg, pattern) {
+        (reg, Some(pattern)) => match reg {
+            OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
+                let pattern_chars: Vec<char> = pattern.to_string().chars().collect();
+                OwnedValue::Text(Rc::new(
+                    reg.to_string().trim_matches(&pattern_chars[..]).to_string(),
+                ))
+            }
+            _ => reg.to_owned(),
+        },
+        (OwnedValue::Text(t), None) => OwnedValue::Text(Rc::new(t.trim().to_string())),
+        (reg, _) => reg.to_owned(),
+    }
+}
+
 // exec_if returns whether you should jump
 fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
     match reg {
@@ -1894,8 +1921,22 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{exec_abs, exec_if, exec_like, exec_lower, exec_random, exec_upper, OwnedValue};
+    use super::{
+        exec_abs, exec_if, exec_like, exec_lower, exec_random, exec_trim, exec_upper, OwnedValue,
+    };
     use std::rc::Rc;
+
+    #[test]
+    fn test_trim() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice     ")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("Bob and Alice")));
+        assert_eq!(exec_trim(&input_str, None), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice     ")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("Bob and")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("Alice")));
+        assert_eq!(exec_trim(&input_str, Some(pattern_str)), expected_str);
+    }
 
     #[test]
     fn test_upper_case() {
