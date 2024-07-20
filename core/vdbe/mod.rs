@@ -279,6 +279,61 @@ pub enum Insn {
         dest: usize,      // P3
         func: ScalarFunc, // P4
     },
+
+    InitCoroutine {
+        yield_reg: usize,
+        jump_on_definition: BranchOffset,
+        start_offset: BranchOffset,
+    },
+
+    EndCoroutine {
+        yield_reg: usize,
+    },
+
+    Yield {
+        yield_reg: usize,
+        end_offset: BranchOffset,
+    },
+
+    InsertAsync {
+        cursor: CursorID,
+        key_reg: usize,    // Must be int.
+        record_reg: usize, // Blob of record data.
+        flag: usize,       // Flags used by insert, for now not used.
+    },
+
+    InsertAwait {},
+
+    NewRowid {
+        reg: usize,
+    },
+
+    MustBeInt {
+        reg: usize,
+    },
+
+    SoftNull {
+        reg: usize,
+    },
+
+    NotExists {
+        cursor: CursorID,
+        rowid_reg: usize,
+        target_pc: BranchOffset,
+    },
+
+    OpenWriteAsync {
+        cursor_id: CursorID,
+        root_page: PageIdx,
+    },
+
+    OpenWriteAwait {},
+
+    Copy {
+        src_reg: usize,
+        dst_reg: usize,
+        amount: usize, // 0 amount means we include src_reg, dst_reg..=dst_reg+amount = src_reg..=src_reg+amount
+    },
 }
 
 // Index of insn in list of insns
@@ -1198,6 +1253,45 @@ impl Program {
                         state.pc += 1;
                     }
                 },
+                Insn::InitCoroutine {
+                    yield_reg,
+                    jump_on_definition,
+                    start_offset,
+                } => todo!(),
+                Insn::EndCoroutine { yield_reg } => todo!(),
+                Insn::Yield {
+                    yield_reg,
+                    end_offset,
+                } => todo!(),
+                Insn::InsertAsync {
+                    cursor,
+                    key_reg,
+                    record_reg,
+                    flag,
+                } => todo!(),
+                Insn::InsertAwait {} => todo!(),
+                Insn::NewRowid { reg } => todo!(),
+                Insn::MustBeInt { reg } => todo!(),
+                Insn::SoftNull { reg } => todo!(),
+                Insn::NotExists {
+                    cursor,
+                    rowid_reg,
+                    target_pc,
+                } => todo!(),
+                Insn::OpenWriteAsync {
+                    cursor_id,
+                    root_page,
+                } => todo!(),
+                Insn::OpenWriteAwait {} => todo!(),
+                Insn::Copy {
+                    src_reg,
+                    dst_reg,
+                    amount,
+                } => {
+                    for i in 0..=*amount {
+                        state.registers[*dst_reg + i] = state.registers[*src_reg + i].clone();
+                    }
+                }
             }
         }
     }

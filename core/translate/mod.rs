@@ -8,6 +8,7 @@
 //! will read rows from the database and filter them according to a WHERE clause.
 
 pub(crate) mod expr;
+pub(crate) mod insert;
 pub(crate) mod select;
 pub(crate) mod where_clause;
 
@@ -20,6 +21,7 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
 use crate::{bail_parse_error, Result};
+use insert::translate_insert;
 use select::{prepare_select, translate_select};
 use sqlite3_parser::ast;
 
@@ -49,7 +51,6 @@ pub fn translate(
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
         ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
-        ast::Stmt::Insert { .. } => bail_parse_error!("INSERT not supported yet"),
         ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
         ast::Stmt::Reindex { .. } => bail_parse_error!("REINDEX not supported yet"),
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
@@ -61,6 +62,22 @@ pub fn translate(
         }
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
+        ast::Stmt::Insert {
+            with,
+            or_conflict,
+            tbl_name,
+            columns,
+            body,
+            returning,
+        } => translate_insert(
+            schema,
+            &with,
+            &or_conflict,
+            &tbl_name,
+            &columns,
+            &body,
+            &returning,
+        ),
     }
 }
 
