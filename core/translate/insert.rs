@@ -7,7 +7,7 @@ use sqlite3_parser::ast::{
 use crate::Result;
 use crate::{
     schema::{self, Schema, Table},
-    translate::expr::resolve_ident_qualified,
+    translate::expr::{resolve_ident_qualified, translate_expr},
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
 
@@ -37,31 +37,6 @@ pub fn translate_insert(
     dbg!(returning);
     dbg!(with);
     dbg!(body);
-
-    let yield_reg = program.alloc_register();
-    let jump_on_definition_label = program.allocate_label();
-    program.emit_insn(Insn::InitCoroutine {
-        yield_reg,
-        jump_on_definition: jump_on_definition_label,
-        start_offset: program.offset() + 1,
-    });
-    match body {
-        InsertBody::Select(select, None) => match &select.body.select {
-            sqlite3_parser::ast::OneSelect::Select {
-                distinctness: _,
-                columns: _,
-                from: _,
-                where_clause: _,
-                group_by: _,
-                window_clause: _,
-            } => todo!(),
-            sqlite3_parser::ast::OneSelect::Values(values) => {}
-        },
-        InsertBody::DefaultValues => todo!("default values not yet supported"),
-        _ => todo!(),
-    }
-    program.emit_insn(Insn::EndCoroutine { yield_reg });
-
     // open table
     let table_name = &tbl_name.name;
 
@@ -78,12 +53,131 @@ pub fn translate_insert(
         Table::BTree(btree) => btree.root_page,
         Table::Pseudo(_) => todo!(),
     };
+
+    let mut num_cols = table.columns().len();
+    if table.has_rowid() {
+        num_cols += 1;
+    }
+    // column_registers_start[0] == rowid if has rowid
+    let column_registers_start = program.alloc_registers(num_cols);
+
+    // Coroutine for values
+    let yield_reg = program.alloc_register();
+    let jump_on_definition_label = program.allocate_label();
+    {
+        program.emit_insn_with_label_dependency(
+            Insn::InitCoroutine {
+                yield_reg,
+                jump_on_definition: jump_on_definition_label,
+                start_offset: program.offset() + 1,
+            },
+            jump_on_definition_label,
+        );
+        match body {
+            InsertBody::Select(select, None) => match &select.body.select {
+                sqlite3_parser::ast::OneSelect::Select {
+                    distinctness: _,
+                    columns: _,
+                    from: _,
+                    where_clause: _,
+                    group_by: _,
+                    window_clause: _,
+                } => todo!(),
+                sqlite3_parser::ast::OneSelect::Values(values) => {
+                    for value in values {
+                        for (col, expr) in value.iter().enumerate() {
+                            let mut col = col;
+                            if table.has_rowid() {
+                                col += 1;
+                            }
+                            translate_expr(
+                                &mut program,
+                                None,
+                                expr,
+                                column_registers_start + col,
+                                None,
+                            )?;
+                        }
+                        program.emit_insn(Insn::Yield {
+                            yield_reg,
+                            end_offset: 0,
+                        });
+                    }
+                }
+            },
+            InsertBody::DefaultValues => todo!("default values not yet supported"),
+            _ => todo!(),
+        }
+        program.emit_insn(Insn::EndCoroutine { yield_reg });
+    }
+
+    program.resolve_label(jump_on_definition_label, program.offset());
     program.emit_insn(Insn::OpenWriteAsync {
         cursor_id,
         root_page,
     });
     program.emit_insn(Insn::OpenWriteAwait {});
 
+    // Main loop
+    let record_register = program.alloc_register();
+    let halt_label = program.allocate_label();
+    program.emit_insn_with_label_dependency(
+        Insn::Yield {
+            yield_reg,
+            end_offset: halt_label,
+        },
+        halt_label,
+    );
+
+    if table.has_rowid() {
+        let key_reg = column_registers_start + 1;
+        let row_id_reg = column_registers_start;
+        // copy key to rowid
+        program.emit_insn(Insn::Copy {
+            src_reg: key_reg,
+            dst_reg: row_id_reg,
+            amount: 0,
+        });
+        program.emit_insn(Insn::SoftNull { reg: key_reg });
+
+        let notnull_label = program.allocate_label();
+        program.emit_insn_with_label_dependency(
+            Insn::NotNull {
+                reg: row_id_reg,
+                target_pc: notnull_label,
+            },
+            notnull_label,
+        );
+        program.emit_insn(Insn::NewRowid { reg: row_id_reg });
+
+        program.resolve_label(notnull_label, program.offset());
+        program.emit_insn(Insn::MustBeInt { reg: row_id_reg });
+        let make_record_label = program.allocate_label();
+        program.emit_insn_with_label_dependency(
+            Insn::NotExists {
+                cursor: cursor_id,
+                rowid_reg: row_id_reg,
+                target_pc: make_record_label,
+            },
+            make_record_label,
+        );
+        program.emit_insn(Insn::Halt); // Add error code 1555 and rollback
+        program.resolve_label(make_record_label, program.offset());
+        program.emit_insn(Insn::MakeRecord {
+            start_reg: column_registers_start,
+            count: num_cols,
+            dest_reg: record_register,
+        });
+        program.emit_insn(Insn::InsertAsync {
+            cursor: cursor_id,
+            key_reg: column_registers_start,
+            record_reg: record_register,
+            flag: 0,
+        });
+        program.emit_insn(Insn::InsertAwait {});
+    }
+
+    program.resolve_label(halt_label, program.offset());
     program.emit_insn(Insn::Halt);
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
