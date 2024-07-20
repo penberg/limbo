@@ -50,3 +50,39 @@ do_execsql_test lower-char {
 do_execsql_test lower-null {
   select lower(null)
 } {}
+
+do_execsql_test trim {
+  SELECT trim('   Limbo    ');
+} {Limbo}
+
+do_execsql_test trim-number {
+  SELECT trim(1);
+} {1}
+
+do_execsql_test trim-null {
+  SELECT trim(null);
+} {}
+
+do_execsql_test trim-leading-whitespace {
+  SELECT trim('   Leading');
+} {Leading}
+
+do_execsql_test trim-trailing-whitespace {
+  SELECT trim('Trailing   ');
+} {Trailing}
+
+do_execsql_test trim-pattern {
+  SELECT trim('Limbo', 'Limbo');
+} {}
+
+do_execsql_test trim-pattern-number {
+  SELECT trim(1, '1');
+} {}
+
+do_execsql_test trim-pattern-null {
+  SELECT trim(null, 'null');
+} {}
+
+do_execsql_test trim-no-match-pattern {
+  SELECT trim('Limbo', 'xyz');
+} {Limbo}

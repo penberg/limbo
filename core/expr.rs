@@ -366,7 +366,43 @@ pub fn translate_expr(
                                 dest: target_register,
                                 func: SingleRowFunc::Random,
                             });
+                            Ok(target_register)
+                        }
+                        SingleRowFunc::Trim => {
+                            let args = if let Some(args) = args {
+                                if args.len() > 2 {
+                                    anyhow::bail!(
+                                        "Parse error: trim function with more than 2 arguments"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: trim function with no arguments");
+                            };
 
+                            if args.len() == 1 {
+                                let regs = program.alloc_register();
+                                let _ = translate_expr(program, select, &args[0], regs)?;
+                                program.emit_insn(Insn::Function {
+                                    start_reg: regs,
+                                    dest: target_register,
+                                    func: SingleRowFunc::Trim,
+                                });
+                            } else {
+                                for arg in args {
+                                    let reg = program.alloc_register();
+                                    let _ = translate_expr(program, select, arg, reg)?;
+                                    match arg {
+                                        ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                        _ => {}
+                                    }
+                                }
+                                program.emit_insn(Insn::Function {
+                                    start_reg: target_register + 1,
+                                    dest: target_register,
+                                    func: SingleRowFunc::Trim,
+                                });
+                            }
                             Ok(target_register)
                         }
                     }
