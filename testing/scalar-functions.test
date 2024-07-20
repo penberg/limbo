@@ -86,3 +86,39 @@ do_execsql_test trim-pattern-null {
 do_execsql_test trim-no-match-pattern {
   SELECT trim('Limbo', 'xyz');
 } {Limbo}
+
+do_execsql_test round-float-no-precision {
+  SELECT round(123.456);
+} {123.0}
+
+do_execsql_test round-float-with-precision {
+  SELECT round(123.456, 2);
+} {123.46}
+
+do_execsql_test round-float-with-text-precision {
+  SELECT round(123.5, '1');
+} {123.5}
+
+do_execsql_test round-text-parsable {
+  SELECT round('123.456', 2);
+} {123.46}
+
+do_execsql_test round-text-non-parsable {
+  SELECT round('abc', 1);
+} {0.0}
+
+do_execsql_test round-integer-with-precision {
+  SELECT round(123, 1);
+} {123.0}
+
+do_execsql_test round-float-negative-precision {
+  SELECT round(123.456, -1);
+} {123.0}
+
+do_execsql_test round-float-zero-precision {
+  SELECT round(123.456, 0);
+} {123.0}
+
+do_execsql_test round-null-precision {
+  SELECT round(123.456, null);
+} {}

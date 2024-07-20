@@ -1303,6 +1303,14 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
+                    SingleRowFunc::Round => {
+                        let start_reg = *start_reg;
+                        let reg_value = state.registers[start_reg].clone();
+                        let precision_value = state.registers.get(start_reg + 1).cloned();
+                        let result = exec_round(&reg_value, precision_value);
+                        state.registers[*dest] = result;
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1888,6 +1896,27 @@ fn exec_like(pattern: &str, text: &str) -> bool {
     re.is_match(text)
 }
 
+fn exec_round(reg: &OwnedValue, precision: Option<OwnedValue>) -> OwnedValue {
+    let precision = match precision {
+        Some(OwnedValue::Text(x)) => x.parse().unwrap_or(0.0),
+        Some(OwnedValue::Integer(x)) => x as f64,
+        Some(OwnedValue::Float(x)) => x,
+        None => 0.0,
+        _ => return OwnedValue::Null,
+    };
+
+    let reg = match reg {
+        OwnedValue::Text(x) => x.parse().unwrap_or(0.0),
+        OwnedValue::Integer(x) => *x as f64,
+        OwnedValue::Float(x) => *x,
+        _ => return reg.to_owned(),
+    };
+
+    let precision = if precision < 1.0 { 0.0 } else { precision };
+    let multiplier = 10f64.powi(precision as i32);
+    OwnedValue::Float(((reg * multiplier).round()) / multiplier)
+}
+
 // Implements TRIM pattern matching.
 fn exec_trim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
     match (reg, pattern) {
@@ -1922,7 +1951,8 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_abs, exec_if, exec_like, exec_lower, exec_random, exec_trim, exec_upper, OwnedValue,
+        exec_abs, exec_if, exec_like, exec_lower, exec_random, exec_round, exec_trim, exec_upper,
+        OwnedValue,
     };
     use std::rc::Rc;
 
@@ -1999,6 +2029,33 @@ mod tests {
             }
             _ => panic!("exec_random did not return an Integer variant"),
         }
+    }
+
+    #[test]
+    fn test_exec_round() {
+        let input_val = OwnedValue::Float(123.456);
+        let expected_val = OwnedValue::Float(123.0);
+        assert_eq!(exec_round(&input_val, None), expected_val);
+
+        let input_val = OwnedValue::Float(123.456);
+        let precision_val = OwnedValue::Integer(2);
+        let expected_val = OwnedValue::Float(123.46);
+        assert_eq!(exec_round(&input_val, Some(precision_val)), expected_val);
+
+        let input_val = OwnedValue::Float(123.456);
+        let precision_val = OwnedValue::Text(Rc::new(String::from("1")));
+        let expected_val = OwnedValue::Float(123.5);
+        assert_eq!(exec_round(&input_val, Some(precision_val)), expected_val);
+
+        let input_val = OwnedValue::Text(Rc::new(String::from("123.456")));
+        let precision_val = OwnedValue::Integer(2);
+        let expected_val = OwnedValue::Float(123.46);
+        assert_eq!(exec_round(&input_val, Some(precision_val)), expected_val);
+
+        let input_val = OwnedValue::Integer(123);
+        let precision_val = OwnedValue::Integer(1);
+        let expected_val = OwnedValue::Float(123.0);
+        assert_eq!(exec_round(&input_val, Some(precision_val)), expected_val);
     }
 
     #[test]

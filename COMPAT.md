@@ -93,8 +93,8 @@ This document describes the SQLite compatibility status of Limbo:
 | random()                     | Yes     |         |
 | randomblob(N)                | No     |         |
 | replace(X,Y,Z)               | No     |         |
-| round(X)                     | No     |         |
-| round(X,Y)                   | No     |         |
+| round(X)                     | Yes     |         |
+| round(X,Y)                   | Yes     |         |
 | rtrim(X)                     | No     |         |
 | rtrim(X,Y)                   | No     |         |
 | sign(X)                      | No     |         |

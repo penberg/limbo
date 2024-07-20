@@ -13,6 +13,7 @@ PROGRAM = sqlite3-tests
 CFLAGS = -g -Wall -std=c17 -MMD -MP
 
 LIBS ?= -lsqlite3
+LIBS += -lm
 
 OBJS += main.o
 OBJS += test-aux.o
