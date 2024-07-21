@@ -7,7 +7,11 @@
 
 #define SQLITE_ERROR 1
 
+#define SQLITE_ABORT 4
+
 #define SQLITE_BUSY 5
+
+#define SQLITE_NOMEM 7
 
 #define SQLITE_NOTFOUND 14
 
@@ -16,6 +20,14 @@
 #define SQLITE_ROW 100
 
 #define SQLITE_DONE 101
+
+#define SQLITE_ABORT_ROLLBACK (SQLITE_ABORT | (2 << 8))
+
+#define SQLITE_STATE_OPEN 118
+
+#define SQLITE_STATE_SICK 186
+
+#define SQLITE_STATE_BUSY 109
 
 typedef struct sqlite3 sqlite3;
 
