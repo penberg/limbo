@@ -37,6 +37,7 @@ pub enum SingleRowFunc {
     Random,
     Trim,
     Round,
+    Length,
 }
 
 impl ToString for SingleRowFunc {
@@ -50,6 +51,7 @@ impl ToString for SingleRowFunc {
             SingleRowFunc::Random => "random".to_string(),
             SingleRowFunc::Trim => "trim".to_string(),
             SingleRowFunc::Round => "round".to_string(),
+            SingleRowFunc::Length => "length".to_string(),
         }
     }
 }
@@ -80,6 +82,7 @@ impl FromStr for Func {
             "random" => Ok(Func::SingleRow(SingleRowFunc::Random)),
             "trim" => Ok(Func::SingleRow(SingleRowFunc::Trim)),
             "round" => Ok(Func::SingleRow(SingleRowFunc::Round)),
+            "length" => Ok(Func::SingleRow(SingleRowFunc::Length)),
             _ => Err(()),
         }
     }
