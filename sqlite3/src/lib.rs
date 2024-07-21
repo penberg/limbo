@@ -6,6 +6,12 @@ use std::cell::RefCell;
 use std::ffi;
 use std::rc::Rc;
 
+macro_rules! stub {
+    () => {
+        todo!("{} is not implemented", stringify!($fn));
+    };
+}
+
 pub const SQLITE_OK: ffi::c_int = 0;
 pub const SQLITE_ERROR: ffi::c_int = 1;
 pub const SQLITE_ABORT: ffi::c_int = 4;
@@ -151,7 +157,7 @@ pub unsafe extern "C" fn sqlite3_trace_v2(
     >,
     _context: *mut std::ffi::c_void,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -161,12 +167,12 @@ pub unsafe extern "C" fn sqlite3_progress_handler(
     _callback: Option<unsafe extern "C" fn() -> ffi::c_int>,
     _context: *mut std::ffi::c_void,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_busy_timeout(_db: *mut sqlite3, _ms: ffi::c_int) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -175,14 +181,14 @@ pub unsafe extern "C" fn sqlite3_set_authorizer(
     _callback: Option<unsafe extern "C" fn() -> ffi::c_int>,
     _context: *mut std::ffi::c_void,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_context_db_handle(
     _context: *mut std::ffi::c_void,
 ) -> *mut std::ffi::c_void {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -268,17 +274,17 @@ pub unsafe extern "C" fn sqlite3_reset(stmt: *mut sqlite3_stmt) -> ffi::c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_changes(_db: *mut sqlite3) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_stmt_readonly(_stmt: *mut sqlite3_stmt) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_stmt_busy(_stmt: *mut sqlite3_stmt) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -289,7 +295,7 @@ pub unsafe extern "C" fn sqlite3_serialize(
     _out_bytes: *mut ffi::c_int,
     _flags: ffi::c_uint,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -300,42 +306,42 @@ pub unsafe extern "C" fn sqlite3_deserialize(
     _in_bytes: ffi::c_int,
     _flags: ffi::c_uint,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_get_autocommit(_db: *mut sqlite3) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_total_changes(_db: *mut sqlite3) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_last_insert_rowid(_db: *mut sqlite3) -> i64 {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_interrupt(_db: *mut sqlite3) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_db_config(_db: *mut sqlite3, _op: ffi::c_int) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_db_handle(_stmt: *mut sqlite3_stmt) -> *mut sqlite3 {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_sleep(_ms: ffi::c_int) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -344,17 +350,17 @@ pub unsafe extern "C" fn sqlite3_limit(
     _id: ffi::c_int,
     _new_value: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_malloc64(_n: ffi::c_int) -> *mut std::ffi::c_void {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_free(_ptr: *mut std::ffi::c_void) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -379,7 +385,7 @@ pub unsafe extern "C" fn sqlite3_errstr(_err: ffi::c_int) -> *const std::ffi::c_
 pub unsafe extern "C" fn sqlite3_user_data(
     _context: *mut std::ffi::c_void,
 ) -> *mut std::ffi::c_void {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -389,7 +395,7 @@ pub unsafe extern "C" fn sqlite3_backup_init(
     _source_db: *mut sqlite3,
     _source_name: *const std::ffi::c_char,
 ) -> *mut std::ffi::c_void {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -397,27 +403,27 @@ pub unsafe extern "C" fn sqlite3_backup_step(
     _backup: *mut std::ffi::c_void,
     _n_pages: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_backup_remaining(_backup: *mut std::ffi::c_void) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_backup_pagecount(_backup: *mut std::ffi::c_void) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_backup_finish(_backup: *mut std::ffi::c_void) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_expanded_sql(_stmt: *mut sqlite3_stmt) -> *mut std::ffi::c_char {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -433,7 +439,7 @@ pub unsafe extern "C" fn sqlite3_data_count(stmt: *mut sqlite3_stmt) -> ffi::c_i
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_bind_parameter_count(_stmt: *mut sqlite3_stmt) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -441,7 +447,7 @@ pub unsafe extern "C" fn sqlite3_bind_parameter_name(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> *const std::ffi::c_char {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -449,7 +455,7 @@ pub unsafe extern "C" fn sqlite3_bind_null(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -458,7 +464,7 @@ pub unsafe extern "C" fn sqlite3_bind_int64(
     _idx: ffi::c_int,
     _val: i64,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -467,7 +473,7 @@ pub unsafe extern "C" fn sqlite3_bind_double(
     _idx: ffi::c_int,
     _val: f64,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -478,7 +484,7 @@ pub unsafe extern "C" fn sqlite3_bind_text(
     _len: ffi::c_int,
     _destroy: *mut std::ffi::c_void,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -489,7 +495,7 @@ pub unsafe extern "C" fn sqlite3_bind_blob(
     _len: ffi::c_int,
     _destroy: *mut std::ffi::c_void,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -497,12 +503,12 @@ pub unsafe extern "C" fn sqlite3_column_type(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_count(_stmt: *mut sqlite3_stmt) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -510,7 +516,7 @@ pub unsafe extern "C" fn sqlite3_column_decltype(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> *const std::ffi::c_char {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -518,17 +524,17 @@ pub unsafe extern "C" fn sqlite3_column_name(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> *const std::ffi::c_char {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_int64(_stmt: *mut sqlite3_stmt, _idx: ffi::c_int) -> i64 {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_double(_stmt: *mut sqlite3_stmt, _idx: ffi::c_int) -> f64 {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -536,7 +542,7 @@ pub unsafe extern "C" fn sqlite3_column_blob(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> *const std::ffi::c_void {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -544,7 +550,7 @@ pub unsafe extern "C" fn sqlite3_column_bytes(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -633,17 +639,17 @@ pub unsafe extern "C" fn sqlite3_column_text(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_null(_context: *mut std::ffi::c_void) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_int64(_context: *mut std::ffi::c_void, _val: i64) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_double(_context: *mut std::ffi::c_void, _val: f64) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -653,7 +659,7 @@ pub unsafe extern "C" fn sqlite3_result_text(
     _len: ffi::c_int,
     _destroy: *mut std::ffi::c_void,
 ) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -663,17 +669,17 @@ pub unsafe extern "C" fn sqlite3_result_blob(
     _len: ffi::c_int,
     _destroy: *mut std::ffi::c_void,
 ) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_error_nomem(_context: *mut std::ffi::c_void) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_error_toobig(_context: *mut std::ffi::c_void) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -682,7 +688,7 @@ pub unsafe extern "C" fn sqlite3_result_error(
     _err: *const std::ffi::c_char,
     _len: ffi::c_int,
 ) {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -690,7 +696,7 @@ pub unsafe extern "C" fn sqlite3_aggregate_context(
     _context: *mut std::ffi::c_void,
     _n: ffi::c_int,
 ) -> *mut std::ffi::c_void {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -703,7 +709,7 @@ pub unsafe extern "C" fn sqlite3_blob_open(
     _flags: ffi::c_int,
     _blob_out: *mut *mut std::ffi::c_void,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -713,7 +719,7 @@ pub unsafe extern "C" fn sqlite3_blob_read(
     _n: ffi::c_int,
     _offset: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -723,17 +729,17 @@ pub unsafe extern "C" fn sqlite3_blob_write(
     _n: ffi::c_int,
     _offset: ffi::c_int,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_blob_bytes(_blob: *mut std::ffi::c_void) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_blob_close(_blob: *mut std::ffi::c_void) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -741,7 +747,7 @@ pub unsafe extern "C" fn sqlite3_stricmp(
     _a: *const std::ffi::c_char,
     _b: *const std::ffi::c_char,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -753,7 +759,7 @@ pub unsafe extern "C" fn sqlite3_create_collation_v2(
     _cmp: Option<unsafe extern "C" fn() -> ffi::c_int>,
     _destroy: Option<unsafe extern "C" fn()>,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -768,7 +774,7 @@ pub unsafe extern "C" fn sqlite3_create_function_v2(
     _final_: Option<unsafe extern "C" fn()>,
     _destroy: Option<unsafe extern "C" fn()>,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -784,7 +790,7 @@ pub unsafe extern "C" fn sqlite3_create_window_function(
     _x_inverse: Option<unsafe extern "C" fn()>,
     _destroy: Option<unsafe extern "C" fn()>,
 ) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
@@ -832,7 +838,7 @@ pub unsafe extern "C" fn sqlite3_extended_errcode(_db: *mut sqlite3) -> ffi::c_i
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_complete(_sql: *const std::ffi::c_char) -> ffi::c_int {
-    todo!();
+    stub!();
 }
 
 #[no_mangle]
