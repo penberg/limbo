@@ -1,4 +1,5 @@
 pub(crate) mod expr;
+pub(crate) mod where_clause;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -12,7 +13,7 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::normalize_ident;
 use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
-use crate::where_clause::{
+use crate::translate::where_clause::{
     evaluate_conditions, translate_conditions, translate_where, Inner, Left, QueryConstraint,
 };
 use anyhow::Result;

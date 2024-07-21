@@ -13,7 +13,6 @@ mod translate;
 mod types;
 mod util;
 mod vdbe;
-mod where_clause;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]
