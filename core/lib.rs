@@ -26,8 +26,8 @@ use pager::Pager;
 use schema::Schema;
 use sqlite3_ondisk::DatabaseHeader;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
-use std::{cell::RefCell, rc::Rc};
 use std::sync::Arc;
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;

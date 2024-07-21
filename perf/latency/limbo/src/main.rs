@@ -1,5 +1,6 @@
 #![feature(coroutines)]
 #![feature(coroutine_trait)]
+#![feature(stmt_expr_attributes)]
 
 use clap::Parser;
 use hdrhistogram::Histogram;
@@ -15,7 +16,7 @@ struct Opts {
 }
 
 fn main() {
-    env_logger::init();;
+    env_logger::init();
     let opts = Opts::parse();
     let mut hist = Histogram::<u64>::new(2).unwrap().into_sync();
     let io = Arc::new(PlatformIO::new().unwrap());
@@ -23,7 +24,7 @@ fn main() {
     for i in 0..opts.count {
         let mut recorder = hist.recorder();
         let io = io.clone();
-        let mut tenant = move || {
+        let tenant =  #[coroutine] move || {
             let database = format!("database{}.db", i);
             let db = Database::open_file(io.clone(), &database).unwrap();
             let conn = db.connect();

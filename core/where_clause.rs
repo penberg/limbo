@@ -416,7 +416,11 @@ fn translate_condition_expr(
             }
             _ => todo!(),
         },
-        ast::Expr::InList { lhs: _, not: _, rhs: _ } => {}
+        ast::Expr::InList {
+            lhs: _,
+            not: _,
+            rhs: _,
+        } => {}
         ast::Expr::Like {
             lhs,
             not,

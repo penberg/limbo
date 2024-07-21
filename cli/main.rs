@@ -8,7 +8,6 @@ use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputMode {
     Raw,

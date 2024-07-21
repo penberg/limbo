@@ -43,14 +43,14 @@ pub struct sqlite3 {
 
 impl sqlite3 {
     pub fn new(db: limbo_core::Database, conn: limbo_core::Connection) -> Self {
-        Self { 
-            _db: db, 
-            conn,            
+        Self {
+            _db: db,
+            conn,
             err_code: SQLITE_OK,
             err_mask: 0xFFFFFFFFu32 as i32,
             malloc_failed: false,
             e_open_state: SQLITE_STATE_OPEN,
-            p_err: std::ptr::null_mut(), 
+            p_err: std::ptr::null_mut(),
         }
     }
 }
@@ -373,7 +373,7 @@ pub unsafe extern "C" fn sqlite3_errcode(_db: *mut sqlite3) -> ffi::c_int {
     if _db.is_null() || (*_db).malloc_failed {
         return SQLITE_NOMEM;
     }
-    
+
     (*_db).err_code & (*_db).err_mask
 }
 
@@ -833,7 +833,7 @@ pub unsafe extern "C" fn sqlite3_extended_errcode(_db: *mut sqlite3) -> ffi::c_i
     if _db.is_null() || (*_db).malloc_failed {
         return SQLITE_NOMEM;
     }
-    
+
     (*_db).err_code & (*_db).err_mask
 }
 
@@ -861,38 +861,38 @@ pub unsafe extern "C" fn sqlite3_libversion_number() -> ffi::c_int {
 
 fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
     const ERROR_MESSAGES: [&str; 29] = [
-        "not an error", // SQLITE_OK
-        "SQL logic error", // SQLITE_ERROR
-        "", // SQLITE_INTERNAL
-        "access permission denied", // SQLITE_PERM
-        "query aborted", // SQLITE_ABORT
-        "database is locked", // SQLITE_BUSY
-        "database table is locked", // SQLITE_LOCKED
-        "out of memory", // SQLITE_NOMEM
+        "not an error",                         // SQLITE_OK
+        "SQL logic error",                      // SQLITE_ERROR
+        "",                                     // SQLITE_INTERNAL
+        "access permission denied",             // SQLITE_PERM
+        "query aborted",                        // SQLITE_ABORT
+        "database is locked",                   // SQLITE_BUSY
+        "database table is locked",             // SQLITE_LOCKED
+        "out of memory",                        // SQLITE_NOMEM
         "attempt to write a readonly database", // SQLITE_READONLY
-        "interrupted", // SQLITE_INTERRUPT
-        "disk I/O error", // SQLITE_IOERR
-        "database disk image is malformed", // SQLITE_CORRUPT
-        "unknown operation", // SQLITE_NOTFOUND
-        "database or disk is full", // SQLITE_FULL
-        "unable to open database file", // SQLITE_CANTOPEN
-        "locking protocol", // SQLITE_PROTOCOL
-        "", // SQLITE_EMPTY
-        "database schema has changed", // SQLITE_SCHEMA
-        "string or blob too big", // SQLITE_TOOBIG
-        "constraint failed", // SQLITE_CONSTRAINT
-        "datatype mismatch", // SQLITE_MISMATCH
-        "bad parameter or other API misuse", // SQLITE_MISUSE
+        "interrupted",                          // SQLITE_INTERRUPT
+        "disk I/O error",                       // SQLITE_IOERR
+        "database disk image is malformed",     // SQLITE_CORRUPT
+        "unknown operation",                    // SQLITE_NOTFOUND
+        "database or disk is full",             // SQLITE_FULL
+        "unable to open database file",         // SQLITE_CANTOPEN
+        "locking protocol",                     // SQLITE_PROTOCOL
+        "",                                     // SQLITE_EMPTY
+        "database schema has changed",          // SQLITE_SCHEMA
+        "string or blob too big",               // SQLITE_TOOBIG
+        "constraint failed",                    // SQLITE_CONSTRAINT
+        "datatype mismatch",                    // SQLITE_MISMATCH
+        "bad parameter or other API misuse",    // SQLITE_MISUSE
         #[cfg(not(feature = "SQLITE_DISABLE_LFS"))]
         "", // SQLITE_NOLFS
         #[cfg(feature = "SQLITE_DISABLE_LFS")]
         "large file support is disabled", // SQLITE_NOLFS
-        "authorization denied", // SQLITE_AUTH
-        "", // SQLITE_FORMAT
-        "column index out of range", // SQLITE_RANGE
-        "file is not a database", // SQLITE_NOTADB
-        "notification message", // SQLITE_NOTICE
-        "warning message", // SQLITE_WARNING
+        "authorization denied",                 // SQLITE_AUTH
+        "",                                     // SQLITE_FORMAT
+        "column index out of range",            // SQLITE_RANGE
+        "file is not a database",               // SQLITE_NOTADB
+        "notification message",                 // SQLITE_NOTICE
+        "warning message",                      // SQLITE_WARNING
     ];
 
     const UNKNOWN_ERROR: &str = "unknown error";
@@ -906,7 +906,10 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
         SQLITE_DONE => NO_MORE_ROWS_AVAILABLE.as_ptr() as *const std::ffi::c_char,
         _ => {
             let rc = rc & 0xff;
-            if rc >= 0 && rc < ERROR_MESSAGES.len() as i32 && !ERROR_MESSAGES[rc as usize].is_empty() {
+            if rc >= 0
+                && rc < ERROR_MESSAGES.len() as i32
+                && !ERROR_MESSAGES[rc as usize].is_empty()
+            {
                 ERROR_MESSAGES[rc as usize].as_ptr() as *const std::ffi::c_char
             } else {
                 UNKNOWN_ERROR.as_ptr() as *const std::ffi::c_char

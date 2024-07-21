@@ -9,6 +9,7 @@ members = [
   "core",
   "simulator",
 ]
+exclude = ["perf/latency/limbo"]
 
 [workspace.package]
 version = "0.0.1"
