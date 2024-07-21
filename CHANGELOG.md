@@ -12,7 +12,7 @@
   is opened to prevent concurrent processes from corrupting a file.
   Please note that the locking scheme differs from SQLite, which uses
   POSIX advisory locks for every transaction. We're defaulting to
-  locking on open because it's faster.
+  locking on open because it's faster. (Issue #94)
 
 ### Changed
 
