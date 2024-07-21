@@ -1289,6 +1289,11 @@ impl Program {
                         }
                         state.pc += 1;
                     }
+                    SingleRowFunc::Length => {
+                        let reg_value = state.registers[*start_reg].borrow_mut();
+                        state.registers[*dest] = exec_length(reg_value);
+                        state.pc += 1;
+                    }
                     SingleRowFunc::Random => {
                         state.registers[*dest] = exec_random();
                         state.pc += 1;
@@ -1856,12 +1861,23 @@ fn exec_lower(reg: &OwnedValue) -> Option<OwnedValue> {
     }
 }
 
+fn exec_length(reg: &OwnedValue) -> OwnedValue {
+    match reg {
+        OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
+            OwnedValue::Integer(reg.to_string().len() as i64)
+        }
+        OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
+        _ => reg.to_owned(),
+    }
+}
+
 fn exec_upper(reg: &OwnedValue) -> Option<OwnedValue> {
     match reg {
         OwnedValue::Text(t) => Some(OwnedValue::Text(Rc::new(t.to_uppercase()))),
         t => Some(t.to_owned()),
     }
 }
+
 fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
@@ -1951,10 +1967,30 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_abs, exec_if, exec_like, exec_lower, exec_random, exec_round, exec_trim, exec_upper,
-        OwnedValue,
+        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_random, exec_round, exec_trim,
+        exec_upper, OwnedValue,
     };
     use std::rc::Rc;
+
+    #[test]
+    fn test_length() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let expected_len = OwnedValue::Integer(3);
+        assert_eq!(exec_length(&input_str), expected_len);
+
+        let input_integer = OwnedValue::Integer(123);
+        let expected_len = OwnedValue::Integer(3);
+        assert_eq!(exec_length(&input_integer), expected_len);
+
+        let input_float = OwnedValue::Float(123.456);
+        let expected_len = OwnedValue::Integer(7);
+        assert_eq!(exec_length(&input_float), expected_len);
+
+        // Expected byte array for "example"
+        let expected_blob = OwnedValue::Blob(Rc::new(vec![101, 120, 97, 109, 112, 108, 101]));
+        let expected_len = OwnedValue::Integer(7);
+        assert_eq!(exec_length(&expected_blob), expected_len);
+    }
 
     #[test]
     fn test_trim() {

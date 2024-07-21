@@ -222,10 +222,8 @@ pub fn translate_expr(
             args,
             filter_over: _,
         } => {
-            let func_type: Option<Func> = match normalize_ident(name.0.as_str()).as_str().parse() {
-                Ok(func) => Some(func),
-                Err(_) => None,
-            };
+            let func_type: Option<Func> = normalize_ident(name.0.as_str()).as_str().parse().ok();
+
             match func_type {
                 Some(Func::Agg(_)) => {
                     anyhow::bail!("Parse error: aggregation function in non-aggregation context")
@@ -236,12 +234,16 @@ pub fn translate_expr(
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
                                     anyhow::bail!(
-                                        "Parse error: coalesce function with less than 2 arguments"
+                                        "Parse error: {} function with less than 2 arguments",
+                                        srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!("Parse error: coalesce function with no arguments");
+                                anyhow::bail!(
+                                    "Parse error: {} function with no arguments",
+                                    srf.to_string()
+                                );
                             };
 
                             // coalesce function is implemented as a series of not null checks
@@ -267,16 +269,20 @@ pub fn translate_expr(
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
                                     anyhow::bail!(
-                                        "Parse error: like function with less than 2 arguments"
+                                        "Parse error: {} function with less than 2 arguments",
+                                        srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!("Parse error: like function with no arguments");
+                                anyhow::bail!(
+                                    "Parse error: {} function with no arguments",
+                                    srf.to_string()
+                                );
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(program, select, arg, reg)?;
+                                let _ = translate_expr(program, select, &arg, reg)?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                                     _ => {}
@@ -285,161 +291,81 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: SingleRowFunc::Like,
+                                func: srf,
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Abs => {
+                        SingleRowFunc::Abs
+                        | SingleRowFunc::Lower
+                        | SingleRowFunc::Upper
+                        | SingleRowFunc::Length => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     anyhow::bail!(
-                                        "Parse error: abs function with not exactly 1 argument"
+                                        "Parse error: {} function with not exactly 1 argument",
+                                        srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!("Parse error: abs function with no arguments");
+                                anyhow::bail!(
+                                    "Parse error: {} function with no arguments",
+                                    srf.to_string()
+                                );
                             };
 
                             let regs = program.alloc_register();
-                            let _ = translate_expr(program, select, &args[0], regs)?;
+                            translate_expr(program, select, &args[0], regs)?;
                             program.emit_insn(Insn::Function {
                                 start_reg: regs,
                                 dest: target_register,
-                                func: SingleRowFunc::Abs,
+                                func: srf,
                             });
-
-                            Ok(target_register)
-                        }
-                        SingleRowFunc::Upper => {
-                            let args = if let Some(args) = args {
-                                if args.len() != 1 {
-                                    anyhow::bail!(
-                                        "Parse error: upper function with not exactly 1 argument"
-                                    );
-                                }
-                                args
-                            } else {
-                                anyhow::bail!("Parse error: upper function with no arguments");
-                            };
-
-                            let regs = program.alloc_register();
-                            let _ = translate_expr(program, select, &args[0], regs)?;
-                            program.emit_insn(Insn::Function {
-                                start_reg: regs,
-                                dest: target_register,
-                                func: SingleRowFunc::Upper,
-                            });
-
-                            Ok(target_register)
-                        }
-                        SingleRowFunc::Lower => {
-                            let args = if let Some(args) = args {
-                                if args.len() != 1 {
-                                    anyhow::bail!(
-                                        "Parse error: lower function with not exactly 1 argument"
-                                    );
-                                }
-                                args
-                            } else {
-                                anyhow::bail!("Parse error: lower function with no arguments");
-                            };
-
-                            let regs = program.alloc_register();
-                            let _ = translate_expr(program, select, &args[0], regs)?;
-                            program.emit_insn(Insn::Function {
-                                start_reg: regs,
-                                dest: target_register,
-                                func: SingleRowFunc::Lower,
-                            });
-
                             Ok(target_register)
                         }
                         SingleRowFunc::Random => {
                             if args.is_some() {
-                                anyhow::bail!("Parse error: random function with arguments");
+                                anyhow::bail!(
+                                    "Parse error: {} function with arguments",
+                                    srf.to_string()
+                                );
                             }
                             let regs = program.alloc_register();
-
                             program.emit_insn(Insn::Function {
                                 start_reg: regs,
                                 dest: target_register,
-                                func: SingleRowFunc::Random,
+                                func: srf,
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Trim => {
+                        SingleRowFunc::Trim | SingleRowFunc::Round => {
                             let args = if let Some(args) = args {
                                 if args.len() > 2 {
                                     anyhow::bail!(
-                                        "Parse error: trim function with more than 2 arguments"
+                                        "Parse error: {} function with more than 2 arguments",
+                                        srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!("Parse error: trim function with no arguments");
+                                anyhow::bail!(
+                                    "Parse error: {} function with no arguments",
+                                    srf.to_string()
+                                );
                             };
 
-                            if args.len() == 1 {
-                                let regs = program.alloc_register();
-                                let _ = translate_expr(program, select, &args[0], regs)?;
-                                program.emit_insn(Insn::Function {
-                                    start_reg: regs,
-                                    dest: target_register,
-                                    func: SingleRowFunc::Trim,
-                                });
-                            } else {
-                                for arg in args {
-                                    let reg = program.alloc_register();
-                                    let _ = translate_expr(program, select, arg, reg)?;
-                                    match arg {
-                                        ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                        _ => {}
-                                    }
+                            for arg in args.iter() {
+                                let reg = program.alloc_register();
+                                translate_expr(program, select, arg, reg)?;
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant();
                                 }
-                                program.emit_insn(Insn::Function {
-                                    start_reg: target_register + 1,
-                                    dest: target_register,
-                                    func: SingleRowFunc::Trim,
-                                });
                             }
-                            Ok(target_register)
-                        }
-                        SingleRowFunc::Round => {
-                            let args = if let Some(args) = args {
-                                if args.len() > 2 {
-                                    anyhow::bail!(
-                                        "Parse error: round function with more than 2 arguments"
-                                    );
-                                }
-                                args
-                            } else {
-                                anyhow::bail!("Parse error: round function with no arguments");
-                            };
-
-                            if args.len() == 1 {
-                                let regs = program.alloc_register();
-                                let _ = translate_expr(program, select, &args[0], regs)?;
-                                program.emit_insn(Insn::Function {
-                                    start_reg: regs,
-                                    dest: target_register,
-                                    func: SingleRowFunc::Round,
-                                });
-                            } else {
-                                for arg in args {
-                                    let reg = program.alloc_register();
-                                    let _ = translate_expr(program, select, arg, reg)?;
-                                    match arg {
-                                        ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                        _ => {}
-                                    }
-                                }
-                                program.emit_insn(Insn::Function {
-                                    start_reg: target_register + 1,
-                                    dest: target_register,
-                                    func: SingleRowFunc::Round,
-                                });
-                            }
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: srf,
+                            });
                             Ok(target_register)
                         }
                     }

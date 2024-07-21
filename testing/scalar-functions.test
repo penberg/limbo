@@ -122,3 +122,23 @@ do_execsql_test round-float-zero-precision {
 do_execsql_test round-null-precision {
   SELECT round(123.456, null);
 } {}
+
+do_execsql_test length-text {
+  SELECT length('limbo');
+} {5}
+
+do_execsql_test length-integer {
+  SELECT length(12345);
+} {5}
+
+do_execsql_test length-float {
+  SELECT length(123.456);
+} {7}
+
+do_execsql_test length-null {
+  SELECT length(NULL);
+} {}
+
+do_execsql_test length-empty-text {
+  SELECT length('');
+} {0}
