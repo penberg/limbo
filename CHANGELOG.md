@@ -6,6 +6,8 @@
 
 - Partial `LEFT JOIN` support.
 
+- Partial `ORDER BY` support.
+
 - Partial scalar function support.
 
 ### Fixed
