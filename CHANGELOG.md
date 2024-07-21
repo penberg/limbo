@@ -6,6 +6,8 @@
 
 - Partial `LEFT JOIN` support.
 
+- Partial scalar function support.
+
 ### Fixed
 
 - Lock database file with POSIX filesystem advisory lock when database
