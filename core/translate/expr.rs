@@ -390,7 +390,7 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(program, select, arg, reg)?;
+                                let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                                     _ => {}
@@ -417,7 +417,7 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(program, select, arg, reg)?;
+                                let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                                     _ => {}
