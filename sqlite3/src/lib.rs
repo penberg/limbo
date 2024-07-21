@@ -8,20 +8,43 @@ use std::rc::Rc;
 
 pub const SQLITE_OK: ffi::c_int = 0;
 pub const SQLITE_ERROR: ffi::c_int = 1;
+pub const SQLITE_ABORT: ffi::c_int = 4;
 pub const SQLITE_BUSY: ffi::c_int = 5;
+pub const SQLITE_NOMEM: ffi::c_int = 7;
 pub const SQLITE_NOTFOUND: ffi::c_int = 14;
 pub const SQLITE_MISUSE: ffi::c_int = 21;
 pub const SQLITE_ROW: ffi::c_int = 100;
 pub const SQLITE_DONE: ffi::c_int = 101;
+pub const SQLITE_ABORT_ROLLBACK: ffi::c_int = SQLITE_ABORT | (2 << 8);
+pub const SQLITE_STATE_OPEN: u8 = 0x76;
+pub const SQLITE_STATE_SICK: u8 = 0xba;
+pub const SQLITE_STATE_BUSY: u8 = 0x6d;
+
+pub mod util;
+
+use util::sqlite3_safety_check_sick_or_ok;
 
 pub struct sqlite3 {
     pub(crate) _db: limbo_core::Database,
     pub(crate) conn: limbo_core::Connection,
+    pub(crate) err_code: ffi::c_int,
+    pub(crate) err_mask: ffi::c_int,
+    pub(crate) malloc_failed: bool,
+    pub(crate) e_open_state: u8,
+    pub(crate) p_err: *mut std::ffi::c_void,
 }
 
 impl sqlite3 {
     pub fn new(db: limbo_core::Database, conn: limbo_core::Connection) -> Self {
-        Self { _db: db, conn }
+        Self { 
+            _db: db, 
+            conn,            
+            err_code: SQLITE_OK,
+            err_mask: 0xFFFFFFFFu32 as i32,
+            malloc_failed: false,
+            e_open_state: SQLITE_STATE_OPEN,
+            p_err: std::ptr::null_mut(), 
+        }
     }
 }
 
@@ -336,12 +359,20 @@ pub unsafe extern "C" fn sqlite3_free(_ptr: *mut std::ffi::c_void) {
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_errcode(_db: *mut sqlite3) -> ffi::c_int {
-    todo!();
+    if !_db.is_null() && !sqlite3_safety_check_sick_or_ok(&*_db) {
+        return SQLITE_MISUSE;
+    }
+
+    if _db.is_null() || (*_db).malloc_failed {
+        return SQLITE_NOMEM;
+    }
+    
+    (*_db).err_code & (*_db).err_mask
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_errstr(_err: ffi::c_int) -> *const std::ffi::c_char {
-    todo!();
+    sqlite3_errstr_impl(_err)
 }
 
 #[no_mangle]
@@ -758,12 +789,45 @@ pub unsafe extern "C" fn sqlite3_create_window_function(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_errmsg(_db: *mut sqlite3) -> *const std::ffi::c_char {
-    todo!();
+    if _db.is_null() {
+        return sqlite3_errstr(SQLITE_NOMEM);
+    }
+    if !sqlite3_safety_check_sick_or_ok(&*_db) {
+        return sqlite3_errstr(SQLITE_MISUSE);
+    }
+    if (*_db).malloc_failed {
+        return sqlite3_errstr(SQLITE_NOMEM);
+    }
+
+    let err_msg = if (*_db).err_code != SQLITE_OK {
+        if !(*_db).p_err.is_null() {
+            let cstr = (*_db).p_err as *const std::ffi::c_char;
+            cstr
+        } else {
+            std::ptr::null()
+        }
+    } else {
+        std::ptr::null()
+    };
+
+    if err_msg.is_null() {
+        return sqlite3_errstr((*_db).err_code);
+    }
+
+    err_msg
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_extended_errcode(_db: *mut sqlite3) -> ffi::c_int {
-    todo!();
+    if !_db.is_null() && !sqlite3_safety_check_sick_or_ok(&*_db) {
+        return SQLITE_MISUSE;
+    }
+
+    if _db.is_null() || (*_db).malloc_failed {
+        return SQLITE_NOMEM;
+    }
+    
+    (*_db).err_code & (*_db).err_mask
 }
 
 #[no_mangle]
@@ -786,4 +850,60 @@ pub unsafe extern "C" fn sqlite3_libversion() -> *const std::ffi::c_char {
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_libversion_number() -> ffi::c_int {
     3042000
+}
+
+fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
+    const ERROR_MESSAGES: [&str; 29] = [
+        "not an error", // SQLITE_OK
+        "SQL logic error", // SQLITE_ERROR
+        "", // SQLITE_INTERNAL
+        "access permission denied", // SQLITE_PERM
+        "query aborted", // SQLITE_ABORT
+        "database is locked", // SQLITE_BUSY
+        "database table is locked", // SQLITE_LOCKED
+        "out of memory", // SQLITE_NOMEM
+        "attempt to write a readonly database", // SQLITE_READONLY
+        "interrupted", // SQLITE_INTERRUPT
+        "disk I/O error", // SQLITE_IOERR
+        "database disk image is malformed", // SQLITE_CORRUPT
+        "unknown operation", // SQLITE_NOTFOUND
+        "database or disk is full", // SQLITE_FULL
+        "unable to open database file", // SQLITE_CANTOPEN
+        "locking protocol", // SQLITE_PROTOCOL
+        "", // SQLITE_EMPTY
+        "database schema has changed", // SQLITE_SCHEMA
+        "string or blob too big", // SQLITE_TOOBIG
+        "constraint failed", // SQLITE_CONSTRAINT
+        "datatype mismatch", // SQLITE_MISMATCH
+        "bad parameter or other API misuse", // SQLITE_MISUSE
+        #[cfg(not(feature = "SQLITE_DISABLE_LFS"))]
+        "", // SQLITE_NOLFS
+        #[cfg(feature = "SQLITE_DISABLE_LFS")]
+        "large file support is disabled", // SQLITE_NOLFS
+        "authorization denied", // SQLITE_AUTH
+        "", // SQLITE_FORMAT
+        "column index out of range", // SQLITE_RANGE
+        "file is not a database", // SQLITE_NOTADB
+        "notification message", // SQLITE_NOTICE
+        "warning message", // SQLITE_WARNING
+    ];
+
+    const UNKNOWN_ERROR: &str = "unknown error";
+    const ABORT_ROLLBACK: &str = "abort due to ROLLBACK";
+    const ANOTHER_ROW_AVAILABLE: &str = "another row available";
+    const NO_MORE_ROWS_AVAILABLE: &str = "no more rows available";
+
+    match rc {
+        SQLITE_ABORT_ROLLBACK => ABORT_ROLLBACK.as_ptr() as *const std::ffi::c_char,
+        SQLITE_ROW => ANOTHER_ROW_AVAILABLE.as_ptr() as *const std::ffi::c_char,
+        SQLITE_DONE => NO_MORE_ROWS_AVAILABLE.as_ptr() as *const std::ffi::c_char,
+        _ => {
+            let rc = rc & 0xff;
+            if rc >= 0 && rc < ERROR_MESSAGES.len() as i32 && !ERROR_MESSAGES[rc as usize].is_empty() {
+                ERROR_MESSAGES[rc as usize].as_ptr() as *const std::ffi::c_char
+            } else {
+                UNKNOWN_ERROR.as_ptr() as *const std::ffi::c_char
+            }
+        }
+    }
 }
