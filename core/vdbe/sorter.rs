@@ -1,5 +1,5 @@
 use crate::{
-    types::{Cursor, CursorResult, OwnedRecord},
+    types::{Cursor, CursorResult, OwnedRecord, OwnedValue},
     Result,
 };
 use std::{
@@ -92,5 +92,9 @@ impl Cursor for Sorter {
 
     fn get_null_flag(&self) -> bool {
         todo!();
+    }
+
+    fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+        todo!()
     }
 }

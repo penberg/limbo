@@ -174,7 +174,9 @@ pub fn translate_insert(
             record_reg: record_register,
             flag: 0,
         });
-        program.emit_insn(Insn::InsertAwait {});
+        program.emit_insn(Insn::InsertAwait {
+            cursor_id: cursor_id,
+        });
     }
 
     program.resolve_label(halt_label, program.offset());

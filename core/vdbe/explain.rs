@@ -555,9 +555,9 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 *flag as u16,
                 format!(""),
             ),
-            Insn::InsertAwait {} => (
+            Insn::InsertAwait { cursor_id } => (
                 "InsertAwait",
-                0,
+                *cursor_id as i32,
                 0,
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
@@ -617,7 +617,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 format!(""),
             ),
             Insn::OpenWriteAwait {} => (
-                "OpenWriteAsync",
+                "OpenWriteAwait",
                 0,
                 0,
                 0,

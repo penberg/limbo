@@ -302,7 +302,9 @@ pub enum Insn {
         flag: usize,       // Flags used by insert, for now not used.
     },
 
-    InsertAwait {},
+    InsertAwait {
+        cursor_id: usize,
+    },
 
     NewRowid {
         reg: usize,
@@ -350,6 +352,7 @@ pub struct ProgramState {
     pub pc: BranchOffset,
     cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
+    ended_coroutine: bool, // flag to notify yield coroutine finished
 }
 
 impl ProgramState {
@@ -361,6 +364,7 @@ impl ProgramState {
             pc: 0,
             cursors,
             registers,
+            ended_coroutine: false,
         }
     }
 
@@ -1257,32 +1261,92 @@ impl Program {
                     yield_reg,
                     jump_on_definition,
                     start_offset,
-                } => todo!(),
-                Insn::EndCoroutine { yield_reg } => todo!(),
+                } => {
+                    state.registers[*yield_reg] = OwnedValue::Integer(*start_offset);
+                    state.pc = *jump_on_definition;
+                }
+                Insn::EndCoroutine { yield_reg } => {
+                    if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
+                        state.ended_coroutine = true;
+                        state.pc = pc;
+                    } else {
+                        unreachable!();
+                    }
+                }
                 Insn::Yield {
                     yield_reg,
                     end_offset,
-                } => todo!(),
+                } => {
+                    if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
+                        if state.ended_coroutine {
+                            state.pc = *end_offset;
+                        } else {
+                            // swap
+                            (state.pc, state.registers[*yield_reg]) =
+                                (pc, OwnedValue::Integer(state.pc));
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                }
                 Insn::InsertAsync {
                     cursor,
                     key_reg,
                     record_reg,
                     flag,
-                } => todo!(),
-                Insn::InsertAwait {} => todo!(),
+                } => {
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = cursors.get_mut(cursor).unwrap();
+                    let record = match &state.registers[*record_reg] {
+                        OwnedValue::Record(r) => r,
+                        _ => unreachable!("Not a record! Cannot insert a non record value."),
+                    };
+                    cursor.insert(record).unwrap();
+                }
+                Insn::InsertAwait { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
+                    state.pc += 1;
+                }
                 Insn::NewRowid { reg } => todo!(),
-                Insn::MustBeInt { reg } => todo!(),
-                Insn::SoftNull { reg } => todo!(),
+                Insn::MustBeInt { reg } => {
+                    match state.registers[*reg] {
+                        OwnedValue::Integer(_) => {}
+                        _ => {
+                            crate::bail_parse_error!(
+                                "MustBeInt: the value in the register is not an integer"
+                            );
+                        }
+                    };
+                    state.pc += 1;
+                }
+                Insn::SoftNull { reg } => {
+                    state.registers[*reg] = OwnedValue::Null;
+                    state.pc += 1;
+                }
                 Insn::NotExists {
                     cursor,
                     rowid_reg,
                     target_pc,
-                } => todo!(),
+                } => {
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = cursors.get_mut(cursor).unwrap();
+                    cursor.exists(&state.registers[*rowid_reg]);
+                } // TODO(pere): how is not exists implemented? We probably need to traverse keys my pointing cursor.
+                // this cursor may be reused for next insert
+                // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
+                // If not there might be some optimizations obviously.
                 Insn::OpenWriteAsync {
                     cursor_id,
                     root_page,
-                } => todo!(),
-                Insn::OpenWriteAwait {} => todo!(),
+                } => {
+                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
+                    cursors.insert(*cursor_id, cursor);
+                    state.pc += 1;
+                }
+                Insn::OpenWriteAwait {} => {
+                    state.pc += 1;
+                }
                 Insn::Copy {
                     src_reg,
                     dst_reg,

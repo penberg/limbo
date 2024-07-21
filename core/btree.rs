@@ -1,6 +1,6 @@
 use crate::pager::Pager;
 use crate::sqlite3_ondisk::{BTreeCell, TableInteriorCell, TableLeafCell};
-use crate::types::{Cursor, CursorResult, OwnedRecord};
+use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
 use std::cell::{Ref, RefCell};
@@ -169,5 +169,9 @@ impl Cursor for BTreeCursor {
 
     fn get_null_flag(&self) -> bool {
         self.null_flag
+    }
+
+    fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+        unimplemented!()
     }
 }

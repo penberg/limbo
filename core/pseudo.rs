@@ -62,4 +62,8 @@ impl Cursor for PseudoCursor {
     fn set_null_flag(&mut self, _null_flag: bool) {
         // Do nothing
     }
+
+    fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+        todo!()
+    }
 }
