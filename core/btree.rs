@@ -101,7 +101,7 @@ impl BTreeCursor {
                 BTreeCell::TableLeafCell(TableLeafCell {
                     _rowid,
                     _payload,
-                    first_overflow_page,
+                    first_overflow_page: _,
                 }) => {
                     mem_page.advance();
                     let record = crate::sqlite3_ondisk::read_record(_payload)?;

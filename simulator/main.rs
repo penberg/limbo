@@ -4,6 +4,7 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 fn main() {
     let seed = match std::env::var("SEED") {
@@ -12,7 +13,7 @@ fn main() {
     };
     println!("Seed: {}", seed);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let io = Rc::new(SimulatorIO::new().unwrap());
+    let io = Arc::new(SimulatorIO::new().unwrap());
     for _ in 0..100000 {
         let db = match Database::open_file(io.clone(), "./testing/testing.db") {
             Ok(db) => db,

@@ -448,7 +448,7 @@ impl ProgramBuilder {
                 Insn::If {
                     reg: _reg,
                     target_pc,
-                    null_reg,
+                    null_reg: _,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -456,7 +456,7 @@ impl ProgramBuilder {
                 Insn::IfNot {
                     reg: _reg,
                     target_pc,
-                    null_reg,
+                    null_reg: _,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -1207,7 +1207,7 @@ impl Program {
                 }
                 Insn::SorterOpen {
                     cursor_id,
-                    columns,
+                    columns: _,
                     order,
                 } => {
                     let order = order
@@ -1815,7 +1815,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 columns,
                 order,
             } => {
-                let p4 = String::new();
+                let _p4 = String::new();
                 let to_print: Vec<String> = order
                     .values
                     .iter()

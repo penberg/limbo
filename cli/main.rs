@@ -5,7 +5,8 @@ use cli_table::{Cell, Table};
 use limbo_core::{Database, RowResult, Value};
 use opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::{path::PathBuf, rc::Rc};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
 enum OutputMode {
@@ -35,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     env_logger::init();
     let opts = Opts::parse();
     let path = opts.database.to_str().unwrap();
-    let io = Rc::new(limbo_core::PlatformIO::new()?);
+    let io = Arc::new(limbo_core::PlatformIO::new()?);
     let db = Database::open_file(io.clone(), path)?;
     let conn = db.connect();
     if let Some(sql) = opts.sql {
@@ -108,7 +109,7 @@ Note:
 }
 
 fn handle_dot_command(
-    io: Rc<dyn limbo_core::IO>,
+    io: Arc<dyn limbo_core::IO>,
     conn: &limbo_core::Connection,
     line: &str,
 ) -> anyhow::Result<()> {
@@ -153,7 +154,7 @@ fn handle_dot_command(
 }
 
 fn display_schema(
-    io: Rc<dyn limbo_core::IO>,
+    io: Arc<dyn limbo_core::IO>,
     conn: &limbo_core::Connection,
     table: Option<&str>,
 ) -> anyhow::Result<()> {
@@ -208,7 +209,7 @@ fn display_schema(
 }
 
 fn query(
-    io: Rc<dyn limbo_core::IO>,
+    io: Arc<dyn limbo_core::IO>,
     conn: &limbo_core::Connection,
     sql: &str,
     output_mode: &OutputMode,

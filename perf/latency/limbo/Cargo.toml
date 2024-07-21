@@ -7,7 +7,7 @@ edition = "2021"
 clap = { version = "4.4.2", features = ["derive"] }
 env_logger = "0.11.0"
 hdrhistogram = "7.5.2"
-limbo_core = { path = "../../../limbo/core" }
+limbo_core = { path = "../../../core" }
 
 [profile.release]
 debug = true
