@@ -4,7 +4,7 @@ use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 use crate::{
     function::{Func, SingleRowFunc},
     schema::{Schema, Table, Type},
-    select::{ColumnInfo, Select, SrcTable},
+    translate::select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
     vdbe::{BranchOffset, Insn, ProgramBuilder},
 };
