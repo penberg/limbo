@@ -54,7 +54,7 @@ impl Table {
     pub fn get_name(&self) -> &str {
         match self {
             Table::BTree(table) => &table.name,
-            Table::Pseudo(table) => &table.columns[0].name,
+            Table::Pseudo(_) => "",
         }
     }
 
@@ -297,7 +297,7 @@ pub fn _build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
     table
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Column {
     pub name: String,
     pub ty: Type,

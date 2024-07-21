@@ -152,8 +152,8 @@ impl Cursor for BTreeCursor {
         Ok(())
     }
 
-    fn rowid(&self) -> Result<Ref<Option<u64>>> {
-        Ok(self.rowid.borrow())
+    fn rowid(&self) -> Result<Option<u64>> {
+        Ok(*self.rowid.borrow())
     }
 
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {

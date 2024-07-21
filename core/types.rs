@@ -93,6 +93,14 @@ impl std::cmp::PartialOrd<OwnedValue> for OwnedValue {
     }
 }
 
+impl std::cmp::Eq for OwnedValue {}
+
+impl std::cmp::Ord for OwnedValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
 impl std::ops::Add<OwnedValue> for OwnedValue {
     type Output = OwnedValue;
 
@@ -267,7 +275,7 @@ impl<'a> Record<'a> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OwnedRecord {
     pub values: Vec<OwnedValue>,
 }
@@ -288,7 +296,7 @@ pub trait Cursor {
     fn rewind(&mut self) -> Result<CursorResult<()>>;
     fn next(&mut self) -> Result<CursorResult<()>>;
     fn wait_for_completion(&mut self) -> Result<()>;
-    fn rowid(&self) -> Result<Ref<Option<u64>>>;
+    fn rowid(&self) -> Result<Option<u64>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
     fn insert(&mut self, record: &OwnedRecord) -> Result<()>;
     fn set_null_flag(&mut self, flag: bool);

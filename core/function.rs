@@ -56,6 +56,7 @@ impl ToString for SingleRowFunc {
     }
 }
 
+#[derive(Debug)]
 pub enum Func {
     Agg(AggFunc),
     SingleRow(SingleRowFunc),
