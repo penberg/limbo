@@ -1,3 +1,4 @@
+use crate::types::OwnedRecord;
 use crate::util::normalize_ident;
 use anyhow::Result;
 use core::fmt;
@@ -54,7 +55,7 @@ impl Table {
     pub fn get_name(&self) -> &str {
         match self {
             Table::BTree(table) => &table.name,
-            Table::Pseudo(table) => &table.columns[0].name,
+            Table::Pseudo(table) => "pseudo",
         }
     }
 

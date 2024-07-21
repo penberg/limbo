@@ -78,6 +78,7 @@ pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Sele
                 column_info,
                 src_tables: joins,
                 limit: &select.limit,
+                order_by: &select.order_by,
                 exist_aggregation,
                 where_clause,
                 loops: Vec::new(),
@@ -98,6 +99,7 @@ pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Sele
                 column_info,
                 src_tables: Vec::new(),
                 limit: &select.limit,
+                order_by: &select.order_by,
                 where_clause,
                 exist_aggregation,
                 loops: Vec::new(),
@@ -112,14 +114,15 @@ pub fn translate_expr(
     select: &Select,
     expr: &ast::Expr,
     target_register: usize,
+    cursor_hint: Option<usize>,
 ) -> Result<usize> {
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
             let e1_reg = program.alloc_register();
             let e2_reg = program.alloc_register();
-            let _ = translate_expr(program, select, e1, e1_reg)?;
-            let _ = translate_expr(program, select, e2, e2_reg)?;
+            let _ = translate_expr(program, select, e1, e1_reg, cursor_hint)?;
+            let _ = translate_expr(program, select, e2, e2_reg, cursor_hint)?;
 
             match op {
                 ast::Operator::NotEquals => {
@@ -250,7 +253,13 @@ pub fn translate_expr(
                             // whenever a not null check succeeds, we jump to the end of the series
                             let label_coalesce_end = program.allocate_label();
                             for (index, arg) in args.iter().enumerate() {
-                                let reg = translate_expr(program, select, arg, target_register)?;
+                                let reg = translate_expr(
+                                    program,
+                                    select,
+                                    arg,
+                                    target_register,
+                                    cursor_hint,
+                                )?;
                                 if index < args.len() - 1 {
                                     program.emit_insn_with_label_dependency(
                                         Insn::NotNull {
@@ -282,7 +291,7 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(program, select, &arg, reg)?;
+                                let _ = translate_expr(program, select, &arg, reg, cursor_hint)?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                                     _ => {}
@@ -315,7 +324,7 @@ pub fn translate_expr(
                             };
 
                             let regs = program.alloc_register();
-                            translate_expr(program, select, &args[0], regs)?;
+                            translate_expr(program, select, &args[0], regs, cursor_hint)?;
                             program.emit_insn(Insn::Function {
                                 start_reg: regs,
                                 dest: target_register,
@@ -356,7 +365,7 @@ pub fn translate_expr(
 
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(program, select, arg, reg)?;
+                                translate_expr(program, select, arg, reg, cursor_hint)?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant();
                                 }
@@ -378,7 +387,8 @@ pub fn translate_expr(
         ast::Expr::FunctionCallStar { .. } => todo!(),
         ast::Expr::Id(ident) => {
             // let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
-            let (idx, col, cursor_id) = resolve_ident_table(program, &ident.0, select)?;
+            let (idx, col, cursor_id) =
+                resolve_ident_table(program, &ident.0, select, cursor_hint)?;
             if col.primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
@@ -439,7 +449,8 @@ pub fn translate_expr(
         ast::Expr::NotNull(_) => todo!(),
         ast::Expr::Parenthesized(_) => todo!(),
         ast::Expr::Qualified(tbl, ident) => {
-            let (idx, col, cursor_id) = resolve_ident_qualified(program, &tbl.0, &ident.0, select)?;
+            let (idx, col, cursor_id) =
+                resolve_ident_qualified(program, &tbl.0, &ident.0, select, cursor_hint)?;
             if col.primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
@@ -563,6 +574,7 @@ pub fn resolve_ident_qualified<'a>(
     table_name: &String,
     ident: &String,
     select: &'a Select,
+    cursor_hint: Option<usize>,
 ) -> Result<(usize, &'a Column, usize)> {
     for join in &select.src_tables {
         match join.table {
@@ -579,7 +591,7 @@ pub fn resolve_ident_qualified<'a>(
                         .find(|(_, col)| col.name == *ident);
                     if res.is_some() {
                         let (idx, col) = res.unwrap();
-                        let cursor_id = program.resolve_cursor_id(&table_identifier);
+                        let cursor_id = program.resolve_cursor_id(&table_identifier, cursor_hint);
                         return Ok((idx, col, cursor_id));
                     }
                 }
@@ -598,6 +610,7 @@ pub fn resolve_ident_table<'a>(
     program: &ProgramBuilder,
     ident: &String,
     select: &'a Select,
+    cursor_hint: Option<usize>,
 ) -> Result<(usize, &'a Column, usize)> {
     let mut found = Vec::new();
     for join in &select.src_tables {
@@ -614,7 +627,7 @@ pub fn resolve_ident_table<'a>(
                     .find(|(_, col)| col.name == *ident);
                 if res.is_some() {
                     let (idx, col) = res.unwrap();
-                    let cursor_id = program.resolve_cursor_id(&table_identifier);
+                    let cursor_id = program.resolve_cursor_id(&table_identifier, cursor_hint);
                     found.push((idx, col, cursor_id));
                 }
             }

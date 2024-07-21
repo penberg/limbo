@@ -228,6 +228,7 @@ pub enum Insn {
     // Sort the rows in the sorter.
     SorterSort {
         cursor_id: CursorID,
+        pc_if_empty: BranchOffset,
     },
 
     // Retrieve the next row from the sorter.
@@ -266,7 +267,7 @@ pub struct ProgramBuilder {
     unresolved_labels: Vec<Vec<InsnReference>>,
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
-    cursor_ref: Vec<(String, Table)>,
+    cursor_ref: Vec<(Option<String>, Option<Table>)>,
     // List of deferred label resolutions. Each entry is a pair of (label, insn_reference).
     deferred_label_resolutions: Vec<(BranchOffset, InsnReference)>,
 }
@@ -298,11 +299,23 @@ impl ProgramBuilder {
         reg
     }
 
+    pub fn drop_register(&mut self) {
+        self.next_free_register -= 1;
+    }
+
+    pub fn drop_registers(&mut self, amount: usize) {
+        self.next_free_register -= amount;
+    }
+
     pub fn next_free_register(&self) -> usize {
         self.next_free_register
     }
 
-    pub fn alloc_cursor_id(&mut self, table_identifier: String, table: Table) -> usize {
+    pub fn alloc_cursor_id(
+        &mut self,
+        table_identifier: Option<String>,
+        table: Option<Table>,
+    ) -> usize {
         let cursor = self.next_free_cursor_id;
         self.next_free_cursor_id += 1;
         self.cursor_ref.push((table_identifier, table));
@@ -316,6 +329,17 @@ impl ProgramBuilder {
             self.next_insn_label = None;
             self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
         }
+    }
+
+    pub fn last_insn(&self) -> Option<&Insn> {
+        self.insns.last()
+    }
+
+    pub fn last_of_type(&self, typ: std::mem::Discriminant<Insn>) -> Option<&Insn> {
+        self.insns
+            .iter()
+            .rev()
+            .find(|v| std::mem::discriminant(*v) == typ)
     }
 
     // Emit an instruction that will be put at the end of the program (after Transaction statement).
@@ -477,6 +501,10 @@ impl ProgramBuilder {
                     assert!(*pc_if_next < 0);
                     *pc_if_next = to_offset;
                 }
+                Insn::SorterSort { pc_if_empty, .. } => {
+                    assert!(*pc_if_empty < 0);
+                    *pc_if_empty = to_offset;
+                }
                 Insn::NotNull {
                     reg: _reg,
                     target_pc,
@@ -497,10 +525,21 @@ impl ProgramBuilder {
     }
 
     // translate table to cursor id
-    pub fn resolve_cursor_id(&self, table_identifier: &str) -> CursorID {
+    pub fn resolve_cursor_id(
+        &self,
+        table_identifier: &str,
+        cursor_hint: Option<CursorID>,
+    ) -> CursorID {
+        if let Some(cursor_hint) = cursor_hint {
+            return cursor_hint;
+        }
         self.cursor_ref
             .iter()
-            .position(|(t_ident, _)| *t_ident == table_identifier)
+            .position(|(t_ident, _)| {
+                t_ident
+                    .as_ref()
+                    .is_some_and(|ident| ident == table_identifier)
+            })
             .unwrap()
     }
 
@@ -566,7 +605,7 @@ impl ProgramState {
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
-    pub cursor_ref: Vec<(String, Table)>,
+    pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
 }
 
 impl Program {
@@ -1211,10 +1250,16 @@ impl Program {
                     cursor.insert(record)?;
                     state.pc += 1;
                 }
-                Insn::SorterSort { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
-                    cursor.rewind()?;
-                    state.pc += 1;
+                Insn::SorterSort {
+                    cursor_id,
+                    pc_if_empty,
+                } => {
+                    if let Some(cursor) = cursors.get_mut(cursor_id) {
+                        cursor.rewind()?;
+                        state.pc += 1;
+                    } else {
+                        state.pc = *pc_if_empty;
+                    }
                 }
                 Insn::SorterNext {
                     cursor_id,
@@ -1589,8 +1634,14 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                     format!(
                         "r[{}]={}.{}",
                         dest,
-                        table.get_name(),
-                        table.column_index_to_name(*column).unwrap()
+                        table
+                            .as_ref()
+                            .and_then(|x| Some(x.get_name()))
+                            .unwrap_or(format!("cursor {}", cursor_id).as_str()),
+                        table
+                            .as_ref()
+                            .and_then(|x| x.column_index_to_name(*column))
+                            .unwrap_or(format!("column {}", *column).as_str())
                     ),
                 )
             }
@@ -1605,7 +1656,12 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *dest_reg as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}..{}] -> r[{}]", start_reg, start_reg + count, dest_reg),
+                format!(
+                    "r[{}]=mkrec(r[{}..{}])",
+                    dest_reg,
+                    start_reg,
+                    start_reg + count - 1,
+                ),
             ),
             Insn::ResultRow { start_reg, count } => (
                 "ResultRow",
@@ -1714,7 +1770,11 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 format!(
                     "r[{}]={}.rowid",
                     dest,
-                    &program.cursor_ref[*cursor_id].1.get_name()
+                    &program.cursor_ref[*cursor_id]
+                        .1
+                        .as_ref()
+                        .and_then(|x| Some(x.get_name()))
+                        .unwrap_or(format!("cursor {}", cursor_id).as_str())
                 ),
             ),
             Insn::DecrJumpZero { reg, target_pc } => (
@@ -1778,14 +1838,17 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                 *cursor_id as i32,
                 *record_reg as i32,
                 0,
-                OwnedValue::Text(Rc::new("".to_string())),
+                OwnedValue::Integer(0),
                 0,
                 format!("key=r[{}]", record_reg),
             ),
-            Insn::SorterSort { cursor_id } => (
+            Insn::SorterSort {
+                cursor_id,
+                pc_if_empty,
+            } => (
                 "SorterSort",
                 *cursor_id as i32,
-                0,
+                *pc_if_empty as i32,
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
@@ -1833,11 +1896,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
 fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&Insn>) -> usize {
     let indent_count = if let Some(insn) = prev_insn {
         match insn {
-            Insn::RewindAwait {
-                cursor_id: _,
-                pc_if_empty: _,
-            } => indent_count + 1,
-            Insn::SorterSort { cursor_id: _ } => indent_count + 1,
+            Insn::RewindAwait { .. } | Insn::SorterSort { .. } => indent_count + 1,
             _ => indent_count,
         }
     } else {
@@ -1845,11 +1904,7 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
     };
 
     match curr_insn {
-        Insn::NextAsync { cursor_id: _ } => indent_count - 1,
-        Insn::SorterNext {
-            cursor_id: _,
-            pc_if_next: _,
-        } => indent_count - 1,
+        Insn::NextAsync { .. } | Insn::SorterNext { .. } => indent_count - 1,
         _ => indent_count,
     }
 }

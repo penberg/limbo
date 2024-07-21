@@ -8,6 +8,7 @@ pub struct SrcTable<'a> {
     pub join_info: Option<&'a ast::JoinedSelectTable>, // FIXME: preferably this should be a reference with lifetime == Select ast expr
 }
 
+#[derive(Debug)]
 pub struct ColumnInfo<'a> {
     pub func: Option<Func>,
     pub args: &'a Option<Vec<ast::Expr>>,
@@ -39,6 +40,7 @@ pub struct Select<'a> {
     pub column_info: Vec<ColumnInfo<'a>>,
     pub src_tables: Vec<SrcTable<'a>>, // Tables we use to get data from. This includes "from" and "joins"
     pub limit: &'a Option<ast::Limit>,
+    pub order_by: &'a Option<Vec<ast::SortedColumn>>,
     pub exist_aggregation: bool,
     pub where_clause: &'a Option<ast::Expr>,
     /// Ordered list of opened read table loops
