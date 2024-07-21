@@ -1,6 +1,5 @@
-use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
+use crate::types::{Cursor, CursorResult, OwnedRecord};
 use anyhow::Result;
-use log::trace;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, VecDeque},
@@ -75,7 +74,6 @@ impl Cursor for Sorter {
     fn insert(&mut self, record: &OwnedRecord) -> Result<()> {
         let key_fields = self.order.len();
         let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
-        trace!("Inserting record with key: {:?}", key);
         self.insert(key, OwnedRecord::new(record.values[key_fields..].to_vec()));
         Ok(())
     }

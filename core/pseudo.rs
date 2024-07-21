@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 
@@ -35,13 +35,14 @@ impl Cursor for PseudoCursor {
     }
 
     fn rowid(&self) -> Result<Option<u64>> {
-        let x = self.current.borrow().as_ref().map(|record| {
-            let rowid = match record.values[0] {
+        let x = self
+            .current
+            .borrow()
+            .as_ref()
+            .map(|record| match record.values[0] {
                 OwnedValue::Integer(rowid) => rowid as u64,
                 _ => panic!("Expected integer value"),
-            };
-            rowid
-        });
+            });
         Ok(x)
     }
 

@@ -518,11 +518,11 @@ fn introspect_expression_for_cursors(
             )?);
         }
         ast::Expr::Id(ident) => {
-            let (_, _, cursor_id) = resolve_ident_table(program, &ident.0, select, cursor_hint)?;
+            let (_, _, cursor_id, _) = resolve_ident_table(program, &ident.0, select, cursor_hint)?;
             cursors.push(cursor_id);
         }
         ast::Expr::Qualified(tbl, ident) => {
-            let (_, _, cursor_id) =
+            let (_, _, cursor_id, _) =
                 resolve_ident_qualified(program, &tbl.0, &ident.0, select, cursor_hint)?;
             cursors.push(cursor_id);
         }

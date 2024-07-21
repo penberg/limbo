@@ -4,10 +4,11 @@ use std::rc::Rc;
 use crate::expr::{build_select, maybe_apply_affinity, translate_expr};
 use crate::function::{AggFunc, Func};
 use crate::pager::Pager;
-use crate::schema::{Schema, Table};
+use crate::schema::{Column, PseudoTable, Schema, Table};
 use crate::select::{ColumnInfo, LoopInfo, Select, SrcTable};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::types::{OwnedRecord, OwnedValue};
+use crate::util::normalize_ident;
 use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use crate::where_clause::{
     evaluate_conditions, translate_conditions, translate_where, Inner, Left, QueryConstraint,
@@ -178,7 +179,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
         }
         program.emit_insn(Insn::ResultRow {
             start_reg: register_start,
-            count: count,
+            count,
         });
         emit_limit_insn(&limit_info, &mut program);
     };
@@ -228,8 +229,31 @@ fn translate_sorter(
     limit_info: &Option<LimitInfo>,
 ) -> Result<()> {
     assert!(sort_info.count > 0);
-
-    let pseudo_cursor = program.alloc_cursor_id(None, None);
+    let mut pseudo_columns = Vec::new();
+    for col in select.columns.iter() {
+        match col {
+            ast::ResultColumn::Expr(expr, _) => match expr {
+                ast::Expr::Id(ident) => {
+                    pseudo_columns.push(Column {
+                        name: normalize_ident(&ident.0),
+                        primary_key: false,
+                        ty: crate::schema::Type::Null,
+                    });
+                }
+                _ => {
+                    todo!();
+                }
+            },
+            ast::ResultColumn::Star => {}
+            ast::ResultColumn::TableStar(_) => {}
+        }
+    }
+    let pseudo_cursor = program.alloc_cursor_id(
+        None,
+        Some(Table::Pseudo(Rc::new(PseudoTable {
+            columns: pseudo_columns,
+        }))),
+    );
     let pseudo_content_reg = program.alloc_register();
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
@@ -530,7 +554,7 @@ fn translate_table_star(
                 dest: col_target_register,
                 cursor_id: table_cursor,
             });
-            maybe_apply_affinity(col, col_target_register, program);
+            maybe_apply_affinity(col.ty, col_target_register, program);
         }
     }
 }

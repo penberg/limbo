@@ -1,4 +1,3 @@
-use crate::types::OwnedRecord;
 use crate::util::normalize_ident;
 use anyhow::Result;
 use core::fmt;
@@ -55,7 +54,7 @@ impl Table {
     pub fn get_name(&self) -> &str {
         match self {
             Table::BTree(table) => &table.name,
-            Table::Pseudo(table) => "pseudo",
+            Table::Pseudo(_) => "",
         }
     }
 
@@ -155,15 +154,11 @@ impl BTreeTable {
 #[derive(Debug)]
 pub struct PseudoTable {
     pub columns: Vec<Column>,
-    pub row: Option<OwnedRecord>,
 }
 
 impl PseudoTable {
     pub fn new() -> Self {
-        Self {
-            columns: vec![],
-            row: None,
-        }
+        Self { columns: vec![] }
     }
 
     pub fn add_column(&mut self, name: &str, ty: Type, primary_key: bool) {
@@ -302,7 +297,7 @@ pub fn _build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
     table
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Column {
     pub name: String,
     pub ty: Type,

@@ -24,3 +24,20 @@ do_execsql_test basic-order-by-and-limit {
 2|cap|82.0
 10|coat|33.0
 1|hat|79.0}
+
+do_execsql_test basic-order-by-and-limit-2 {
+    select id, name from products order by name limit 5;
+} {11|accessories
+9|boots
+2|cap
+10|coat
+1|hat}
+
+do_execsql_test basic-order-by-and-limit-3 {
+    select price, name from products where price > 70 order by name;
+} {81.0|accessories
+82.0|cap
+79.0|hat
+78.0|jeans
+82.0|sneakers
+74.0|sweatshirt}

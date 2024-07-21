@@ -271,7 +271,7 @@ pub struct ProgramBuilder {
     unresolved_labels: Vec<Vec<InsnReference>>,
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
-    cursor_ref: Vec<(Option<String>, Option<Table>)>,
+    pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
     // List of deferred label resolutions. Each entry is a pair of (label, insn_reference).
     deferred_label_resolutions: Vec<(BranchOffset, InsnReference)>,
 }
@@ -303,14 +303,6 @@ impl ProgramBuilder {
         reg
     }
 
-    pub fn drop_register(&mut self) {
-        self.next_free_register -= 1;
-    }
-
-    pub fn drop_registers(&mut self, amount: usize) {
-        self.next_free_register -= amount;
-    }
-
     pub fn next_free_register(&self) -> usize {
         self.next_free_register
     }
@@ -333,17 +325,6 @@ impl ProgramBuilder {
             self.next_insn_label = None;
             self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
         }
-    }
-
-    pub fn last_insn(&self) -> Option<&Insn> {
-        self.insns.last()
-    }
-
-    pub fn last_of_type(&self, typ: std::mem::Discriminant<Insn>) -> Option<&Insn> {
-        self.insns
-            .iter()
-            .rev()
-            .find(|v| std::mem::discriminant(*v) == typ)
     }
 
     // Emit an instruction that will be put at the end of the program (after Transaction statement).
@@ -1656,7 +1637,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                         dest,
                         table
                             .as_ref()
-                            .and_then(|x| Some(x.get_name()))
+                            .map(|x| x.get_name())
                             .unwrap_or(format!("cursor {}", cursor_id).as_str()),
                         table
                             .as_ref()
@@ -1793,7 +1774,7 @@ fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: Stri
                     &program.cursor_ref[*cursor_id]
                         .1
                         .as_ref()
-                        .and_then(|x| Some(x.get_name()))
+                        .map(|x| x.get_name())
                         .unwrap_or(format!("cursor {}", cursor_id).as_str())
                 ),
             ),

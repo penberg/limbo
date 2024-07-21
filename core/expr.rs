@@ -3,7 +3,7 @@ use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
 use crate::{
     function::{Func, SingleRowFunc},
-    schema::{Column, Schema, Table},
+    schema::{Schema, Table, Type},
     select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
     vdbe::{BranchOffset, Insn, ProgramBuilder},
@@ -387,9 +387,9 @@ pub fn translate_expr(
         ast::Expr::FunctionCallStar { .. } => todo!(),
         ast::Expr::Id(ident) => {
             // let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
-            let (idx, col, cursor_id) =
+            let (idx, col_type, cursor_id, is_primary_key) =
                 resolve_ident_table(program, &ident.0, select, cursor_hint)?;
-            if col.primary_key {
+            if is_primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
                     dest: target_register,
@@ -401,7 +401,7 @@ pub fn translate_expr(
                     cursor_id,
                 });
             }
-            maybe_apply_affinity(col, target_register, program);
+            maybe_apply_affinity(col_type, target_register, program);
             Ok(target_register)
         }
         ast::Expr::InList { .. } => todo!(),
@@ -449,9 +449,9 @@ pub fn translate_expr(
         ast::Expr::NotNull(_) => todo!(),
         ast::Expr::Parenthesized(_) => todo!(),
         ast::Expr::Qualified(tbl, ident) => {
-            let (idx, col, cursor_id) =
+            let (idx, col_type, cursor_id, is_primary_key) =
                 resolve_ident_qualified(program, &tbl.0, &ident.0, select, cursor_hint)?;
-            if col.primary_key {
+            if is_primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
                     dest: target_register,
@@ -463,7 +463,7 @@ pub fn translate_expr(
                     cursor_id,
                 });
             }
-            maybe_apply_affinity(col, target_register, program);
+            maybe_apply_affinity(col_type, target_register, program);
             Ok(target_register)
         }
         ast::Expr::Raise(_, _) => todo!(),
@@ -575,7 +575,7 @@ pub fn resolve_ident_qualified<'a>(
     ident: &String,
     select: &'a Select,
     cursor_hint: Option<usize>,
-) -> Result<(usize, &'a Column, usize)> {
+) -> Result<(usize, Type, usize, bool)> {
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
@@ -592,7 +592,7 @@ pub fn resolve_ident_qualified<'a>(
                     if res.is_some() {
                         let (idx, col) = res.unwrap();
                         let cursor_id = program.resolve_cursor_id(&table_identifier, cursor_hint);
-                        return Ok((idx, col, cursor_id));
+                        return Ok((idx, col.ty, cursor_id, col.primary_key));
                     }
                 }
             }
@@ -611,7 +611,7 @@ pub fn resolve_ident_table<'a>(
     ident: &String,
     select: &'a Select,
     cursor_hint: Option<usize>,
-) -> Result<(usize, &'a Column, usize)> {
+) -> Result<(usize, Type, usize, bool)> {
     let mut found = Vec::new();
     for join in &select.src_tables {
         match join.table {
@@ -624,11 +624,29 @@ pub fn resolve_ident_table<'a>(
                     .columns
                     .iter()
                     .enumerate()
-                    .find(|(_, col)| col.name == *ident);
+                    .find(|(_, col)| col.name == *ident)
+                    .map(|(idx, col)| (idx, col.ty, col.primary_key));
+                let mut idx;
+                let mut col_type;
+                let mut is_primary_key;
                 if res.is_some() {
-                    let (idx, col) = res.unwrap();
+                    (idx, col_type, is_primary_key) = res.unwrap();
+                    // overwrite if cursor hint is provided
+                    if let Some(cursor_hint) = cursor_hint {
+                        let cols = &program.cursor_ref[cursor_hint].1;
+                        if let Some(res) = cols.as_ref().and_then(|res| {
+                            res.columns()
+                                .iter()
+                                .enumerate()
+                                .find(|x| x.1.name == *ident)
+                        }) {
+                            idx = res.0;
+                            col_type = res.1.ty;
+                            is_primary_key = res.1.primary_key;
+                        }
+                    }
                     let cursor_id = program.resolve_cursor_id(&table_identifier, cursor_hint);
-                    found.push((idx, col, cursor_id));
+                    found.push((idx, col_type, cursor_id, is_primary_key));
                 }
             }
             Table::Pseudo(_) => todo!(),
@@ -644,8 +662,8 @@ pub fn resolve_ident_table<'a>(
     anyhow::bail!("Parse error: ambiguous column name {}", ident.as_str());
 }
 
-pub fn maybe_apply_affinity(col: &Column, target_register: usize, program: &mut ProgramBuilder) {
-    if col.ty == crate::schema::Type::Real {
+pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mut ProgramBuilder) {
+    if col_type == crate::schema::Type::Real {
         program.emit_insn(Insn::RealAffinity {
             register: target_register,
         })

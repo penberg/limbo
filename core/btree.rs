@@ -4,7 +4,7 @@ use crate::types::{Cursor, CursorResult, OwnedRecord};
 
 use anyhow::Result;
 
-use std::cell::{Ref, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 pub struct MemPage {
