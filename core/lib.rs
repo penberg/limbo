@@ -27,6 +27,7 @@ use schema::Schema;
 use sqlite3_ondisk::DatabaseHeader;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::{cell::RefCell, rc::Rc};
+use std::sync::Arc;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -42,13 +43,13 @@ pub struct Database {
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Rc<dyn crate::io::IO>, path: &str) -> Result<Database> {
+    pub fn open_file(io: Arc<dyn crate::io::IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let storage = storage::PageSource::from_file(file);
         Self::open(io, storage)
     }
 
-    pub fn open(io: Rc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
+    pub fn open(io: Arc<dyn crate::io::IO>, page_source: PageSource) -> Result<Database> {
         let db_header = Pager::begin_open(&page_source)?;
         io.run_once()?;
         let pager = Rc::new(Pager::finish_open(

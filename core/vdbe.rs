@@ -439,7 +439,7 @@ impl ProgramBuilder {
                 Insn::If {
                     reg: _reg,
                     target_pc,
-                    null_reg,
+                    null_reg: _,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -447,7 +447,7 @@ impl ProgramBuilder {
                 Insn::IfNot {
                     reg: _reg,
                     target_pc,
-                    null_reg,
+                    null_reg: _,
                 } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;

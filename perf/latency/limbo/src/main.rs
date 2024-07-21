@@ -34,7 +34,7 @@ fn main() {
                     let mut rows = stmt.query().unwrap();
                     let mut count = 0;
                     loop {
-                        let row = rows.next().unwrap();
+                        let row = rows.next_row().unwrap();
                         match row {
                             limbo_core::RowResult::Row(_) => {
                                 count += 1;

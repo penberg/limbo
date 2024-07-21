@@ -416,13 +416,13 @@ fn translate_condition_expr(
             }
             _ => todo!(),
         },
-        ast::Expr::InList { lhs, not, rhs } => {}
+        ast::Expr::InList { lhs: _, not: _, rhs: _ } => {}
         ast::Expr::Like {
             lhs,
             not,
             op,
             rhs,
-            escape,
+            escape: _,
         } => {
             let cur_reg = program.alloc_register();
             assert!(match rhs.as_ref() {
@@ -494,10 +494,10 @@ fn introspect_expression_for_cursors(
         ast::Expr::Literal(_) => {}
         ast::Expr::Like {
             lhs,
-            not,
-            op,
+            not: _,
+            op: _,
             rhs,
-            escape,
+            escape: _,
         } => {
             cursors.extend(introspect_expression_for_cursors(program, select, lhs)?);
             cursors.extend(introspect_expression_for_cursors(program, select, rhs)?);

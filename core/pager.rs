@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 pub struct Page {
     flags: AtomicUsize,
@@ -102,7 +102,7 @@ pub struct Pager {
     pub page_source: PageSource,
     page_cache: RefCell<PageCache<usize, Rc<Page>>>,
     buffer_pool: Rc<BufferPool>,
-    pub io: Rc<dyn crate::io::IO>,
+    pub io: Arc<dyn crate::io::IO>,
 }
 
 impl Pager {
@@ -113,7 +113,7 @@ impl Pager {
     pub fn finish_open(
         db_header: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
-        io: Rc<dyn crate::io::IO>,
+        io: Arc<dyn crate::io::IO>,
     ) -> anyhow::Result<Self> {
         let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;

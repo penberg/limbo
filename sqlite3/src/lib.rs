@@ -4,7 +4,8 @@
 use log::trace;
 use std::cell::RefCell;
 use std::ffi;
-use std::rc::Rc;
+
+use std::sync::Arc;
 
 macro_rules! stub {
     () => {
@@ -103,7 +104,7 @@ pub unsafe extern "C" fn sqlite3_open(
         Err(_) => return SQLITE_MISUSE,
     };
     let io = match limbo_core::PlatformIO::new() {
-        Ok(io) => Rc::new(io),
+        Ok(io) => Arc::new(io),
         Err(_) => return SQLITE_MISUSE,
     };
     match limbo_core::Database::open_file(io, filename) {
