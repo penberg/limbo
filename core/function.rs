@@ -38,6 +38,8 @@ pub enum SingleRowFunc {
     Trim,
     Round,
     Length,
+    Min,
+    Max,
 }
 
 impl ToString for SingleRowFunc {
@@ -52,6 +54,8 @@ impl ToString for SingleRowFunc {
             SingleRowFunc::Trim => "trim".to_string(),
             SingleRowFunc::Round => "round".to_string(),
             SingleRowFunc::Length => "length".to_string(),
+            SingleRowFunc::Min => "min_arr".to_string(),
+            SingleRowFunc::Max => "max_arr".to_string(),
         }
     }
 }
@@ -84,6 +88,8 @@ impl FromStr for Func {
             "trim" => Ok(Func::SingleRow(SingleRowFunc::Trim)),
             "round" => Ok(Func::SingleRow(SingleRowFunc::Round)),
             "length" => Ok(Func::SingleRow(SingleRowFunc::Length)),
+            "min_arr" => Ok(Func::SingleRow(SingleRowFunc::Min)),
+            "max_arr" => Ok(Func::SingleRow(SingleRowFunc::Max)),
             _ => Err(()),
         }
     }

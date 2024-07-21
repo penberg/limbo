@@ -377,6 +377,60 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        SingleRowFunc::Min => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 1 {
+                                    anyhow::bail!(
+                                        "Parse error: min function with less than one argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: min function with no arguments");
+                            };
+                            for arg in args {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(program, select, arg, reg)?;
+                                match arg {
+                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                    _ => {}
+                                }
+                            }
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: SingleRowFunc::Min,
+                            });
+                            Ok(target_register)
+                        }
+                        SingleRowFunc::Max => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 1 {
+                                    anyhow::bail!(
+                                        "Parse error: max function with less than one argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: max function with no arguments");
+                            };
+                            for arg in args {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(program, select, arg, reg)?;
+                                match arg {
+                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                    _ => {}
+                                }
+                            }
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: SingleRowFunc::Max,
+                            });
+                            Ok(target_register)
+                        }
                     }
                 }
                 None => {
