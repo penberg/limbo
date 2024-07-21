@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlite3_parser::ast::{self, JoinOperator};
 
 use crate::{
-    expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
+    translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     function::SingleRowFunc,
     select::Select,
     vdbe::{BranchOffset, Insn, ProgramBuilder},

@@ -1,6 +1,5 @@
 mod btree;
 mod buffer_pool;
-mod expr;
 mod function;
 mod io;
 mod pager;

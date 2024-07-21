@@ -1,7 +1,9 @@
+pub(crate) mod expr;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::expr::{build_select, maybe_apply_affinity, translate_expr};
+use expr::{build_select, maybe_apply_affinity, translate_expr};
 use crate::function::{AggFunc, Func};
 use crate::pager::Pager;
 use crate::schema::{Column, PseudoTable, Schema, Table};
