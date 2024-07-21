@@ -72,3 +72,14 @@ The `simulator` directory contains a deterministic simulator for testing.
 What this means is that the behavior of a test run is deterministic based on the seed value.
 If the simulator catches a bug, you can always reproduce the exact same sequence of events by passing the same seed.
 The simulator also performs fault injection to discover interesting bugs.
+
+## Building perf/latency
+
+In order to build the perf/latency which simulates the multitenancy usage of Limbo, you will need to use the nightly compiler of Rust because it uses experimental features.
+
+```
+rustup toolchain install nightly
+cd perf/latency/limbo
+cargo +nightly build
+```
+
