@@ -4,9 +4,11 @@ use std::rc::Rc;
 use crate::expr::{build_select, maybe_apply_affinity, translate_expr};
 use crate::function::{AggFunc, Func};
 use crate::pager::Pager;
-use crate::schema::{Schema, Table};
+use crate::schema::{Column, PseudoTable, Schema, Table};
 use crate::select::{ColumnInfo, LoopInfo, Select, SrcTable};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use crate::types::{OwnedRecord, OwnedValue};
+use crate::util::normalize_ident;
 use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use crate::where_clause::{
     evaluate_conditions, translate_conditions, translate_where, Inner, Left, QueryConstraint,
@@ -18,6 +20,13 @@ struct LimitInfo {
     limit_reg: usize,
     num: i64,
     goto_label: BranchOffset,
+}
+
+#[derive(Debug)]
+struct SortInfo {
+    sorter_cursor: usize,
+    sorter_reg: usize,
+    count: usize,
 }
 
 /// Translate SQL statement into bytecode program.
@@ -49,10 +58,34 @@ fn translate_select(mut select: Select) -> Result<Program> {
     );
     let start_offset = program.offset();
 
+    let mut sort_info = if let Some(order_by) = select.order_by {
+        let sorter_cursor = program.alloc_cursor_id(None, None);
+        let mut order = Vec::new();
+        for col in order_by {
+            order.push(OwnedValue::Integer(if let Some(ord) = col.order {
+                ord as i64
+            } else {
+                0
+            }));
+        }
+        program.emit_insn(Insn::SorterOpen {
+            cursor_id: sorter_cursor,
+            order: OwnedRecord::new(order),
+            columns: select.column_info.len() + 1, // +1 for the key
+        });
+        Some(SortInfo {
+            sorter_cursor,
+            sorter_reg: 0, // will be overwritten later
+            count: 0,      // will be overwritten later
+        })
+    } else {
+        None
+    };
+
     let limit_info = if let Some(limit) = &select.limit {
         assert!(limit.offset.is_none());
         let target_register = program.alloc_register();
-        let limit_reg = translate_expr(&mut program, &select, &limit.expr, target_register)?;
+        let limit_reg = translate_expr(&mut program, &select, &limit.expr, target_register, None)?;
         let num = if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &limit.expr {
             num.parse::<i64>()?
         } else {
@@ -79,14 +112,41 @@ fn translate_select(mut select: Select) -> Result<Program> {
     if !select.src_tables.is_empty() {
         let constraint = translate_tables_begin(&mut program, &mut select)?;
 
-        let (register_start, register_end) = translate_columns(&mut program, &select)?;
+        let (register_start, column_count) = if let Some(sort_columns) = select.order_by {
+            let start = program.next_free_register();
+            for col in sort_columns.iter() {
+                let target = program.alloc_register();
+                translate_expr(&mut program, &select, &col.expr, target, None)?;
+            }
+            let (_, result_cols_count) = translate_columns(&mut program, &select, None)?;
+            sort_info
+                .as_mut()
+                .map(|inner| inner.count = result_cols_count + sort_columns.len() + 1); // +1 for the key
+            (start, result_cols_count + sort_columns.len())
+        } else {
+            translate_columns(&mut program, &select, None)?
+        };
 
         if !select.exist_aggregation {
-            program.emit_insn(Insn::ResultRow {
-                start_reg: register_start,
-                count: register_end - register_start,
-            });
-            emit_limit_insn(&limit_info, &mut program);
+            if let Some(ref mut sort_info) = sort_info {
+                let dest = program.alloc_register();
+                program.emit_insn(Insn::MakeRecord {
+                    start_reg: register_start,
+                    count: column_count,
+                    dest_reg: dest,
+                });
+                program.emit_insn(Insn::SorterInsert {
+                    cursor_id: sort_info.sorter_cursor,
+                    record_reg: dest,
+                });
+                sort_info.sorter_reg = register_start;
+            } else {
+                program.emit_insn(Insn::ResultRow {
+                    start_reg: register_start,
+                    count: column_count,
+                });
+                emit_limit_insn(&limit_info, &mut program);
+            }
         }
 
         translate_tables_end(&mut program, &select, constraint);
@@ -105,23 +165,30 @@ fn translate_select(mut select: Select) -> Result<Program> {
             // only one result row
             program.emit_insn(Insn::ResultRow {
                 start_reg: register_start,
-                count: register_end - register_start,
+                count: column_count,
             });
             emit_limit_insn(&limit_info, &mut program);
         }
     } else {
         assert!(!select.exist_aggregation);
+        assert!(sort_info.is_none());
         let where_maybe = translate_where(&select, &mut program)?;
-        let (register_start, register_end) = translate_columns(&mut program, &select)?;
+        let (register_start, count) = translate_columns(&mut program, &select, None)?;
         if let Some(where_clause_label) = where_maybe {
             program.resolve_label(where_clause_label, program.offset() + 1);
         }
         program.emit_insn(Insn::ResultRow {
             start_reg: register_start,
-            count: register_end - register_start,
+            count,
         });
         emit_limit_insn(&limit_info, &mut program);
     };
+
+    // now do the sort for ORDER BY
+    if select.order_by.is_some() {
+        let _ = translate_sorter(&select, &mut program, &sort_info.unwrap(), &limit_info);
+    }
+
     program.emit_insn(Insn::Halt);
     let halt_offset = program.offset() - 1;
     if let Some(limit_info) = limit_info {
@@ -155,6 +222,72 @@ fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder)
     }
 }
 
+fn translate_sorter(
+    select: &Select,
+    program: &mut ProgramBuilder,
+    sort_info: &SortInfo,
+    limit_info: &Option<LimitInfo>,
+) -> Result<()> {
+    assert!(sort_info.count > 0);
+    let mut pseudo_columns = Vec::new();
+    for col in select.columns.iter() {
+        match col {
+            ast::ResultColumn::Expr(expr, _) => match expr {
+                ast::Expr::Id(ident) => {
+                    pseudo_columns.push(Column {
+                        name: normalize_ident(&ident.0),
+                        primary_key: false,
+                        ty: crate::schema::Type::Null,
+                    });
+                }
+                _ => {
+                    todo!();
+                }
+            },
+            ast::ResultColumn::Star => {}
+            ast::ResultColumn::TableStar(_) => {}
+        }
+    }
+    let pseudo_cursor = program.alloc_cursor_id(
+        None,
+        Some(Table::Pseudo(Rc::new(PseudoTable {
+            columns: pseudo_columns,
+        }))),
+    );
+    let pseudo_content_reg = program.alloc_register();
+    program.emit_insn(Insn::OpenPseudo {
+        cursor_id: pseudo_cursor,
+        content_reg: pseudo_content_reg,
+        num_fields: sort_info.count,
+    });
+    let label = program.allocate_label();
+    program.emit_insn_with_label_dependency(
+        Insn::SorterSort {
+            cursor_id: sort_info.sorter_cursor,
+            pc_if_empty: label,
+        },
+        label,
+    );
+    let sorter_data_offset = program.offset();
+    program.emit_insn(Insn::SorterData {
+        cursor_id: sort_info.sorter_cursor,
+        dest_reg: pseudo_content_reg,
+        pseudo_cursor,
+    });
+    let (register_start, count) = translate_columns(program, select, Some(pseudo_cursor))?;
+    program.emit_insn(Insn::ResultRow {
+        start_reg: register_start,
+        count,
+    });
+    emit_limit_insn(&limit_info, program);
+    program.emit_insn(Insn::SorterNext {
+        cursor_id: sort_info.sorter_cursor,
+        pc_if_next: sorter_data_offset,
+    });
+    program.resolve_label(label, program.offset());
+    Ok(())
+}
+
 fn translate_tables_begin(
     program: &mut ProgramBuilder,
     select: &mut Select,
@@ -164,7 +297,7 @@ fn translate_tables_begin(
         select.loops.push(loop_info);
     }
 
-    let conditions = evaluate_conditions(program, select)?;
+    let conditions = evaluate_conditions(program, select, None)?;
 
     for loop_info in &mut select.loops {
         let mut left_join_match_flag_maybe = None;
@@ -181,7 +314,7 @@ fn translate_tables_begin(
         translate_table_open_loop(program, loop_info, left_join_match_flag_maybe);
     }
 
-    translate_conditions(program, select, conditions)
+    translate_conditions(program, select, conditions, None)
 }
 
 fn handle_skip_row(
@@ -293,7 +426,7 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
         Some(alias) => alias.clone(),
         None => table.table.get_name().to_string(),
     };
-    let cursor_id = program.alloc_cursor_id(table_identifier, table.table.clone());
+    let cursor_id = program.alloc_cursor_id(Some(table_identifier), Some(table.table.clone()));
     let root_page = match &table.table {
         Table::BTree(btree) => btree.root_page,
         Table::Pseudo(_) => todo!(),
@@ -337,7 +470,11 @@ fn translate_table_open_loop(
     loop_info.rewind_offset = program.offset() - 1;
 }
 
-fn translate_columns(program: &mut ProgramBuilder, select: &Select) -> Result<(usize, usize)> {
+fn translate_columns(
+    program: &mut ProgramBuilder,
+    select: &Select,
+    cursor_hint: Option<usize>,
+) -> Result<(usize, usize)> {
     let register_start = program.next_free_register();
 
     // allocate one register as output for each col
@@ -347,14 +484,14 @@ fn translate_columns(program: &mut ProgramBuilder, select: &Select) -> Result<(u
         .map(|col| col.columns_to_allocate)
         .sum();
     program.alloc_registers(registers);
-    let register_end = program.next_free_register();
+    let count = program.next_free_register() - register_start;
 
     let mut target = register_start;
     for (col, info) in select.columns.iter().zip(select.column_info.iter()) {
-        translate_column(program, select, col, info, target)?;
+        translate_column(program, select, col, info, target, cursor_hint)?;
         target += info.columns_to_allocate;
     }
-    Ok((register_start, register_end))
+    Ok((register_start, count))
 }
 
 fn translate_column(
@@ -363,19 +500,27 @@ fn translate_column(
     col: &ast::ResultColumn,
     info: &ColumnInfo,
     target_register: usize, // where to store the result, in case of star it will be the start of registers added
+    cursor_hint: Option<usize>,
 ) -> Result<()> {
     match col {
         ast::ResultColumn::Expr(expr, _) => {
             if info.is_aggregation_function() {
-                let _ = translate_aggregation(program, select, expr, info, target_register)?;
+                let _ = translate_aggregation(
+                    program,
+                    select,
+                    expr,
+                    info,
+                    target_register,
+                    cursor_hint,
+                )?;
             } else {
-                let _ = translate_expr(program, select, expr, target_register)?;
+                let _ = translate_expr(program, select, expr, target_register, cursor_hint)?;
             }
         }
         ast::ResultColumn::Star => {
             let mut target_register = target_register;
             for join in &select.src_tables {
-                translate_table_star(join, program, target_register);
+                translate_table_star(join, program, target_register, cursor_hint);
                 target_register += &join.table.columns().len();
             }
         }
@@ -384,12 +529,17 @@ fn translate_column(
     Ok(())
 }
 
-fn translate_table_star(table: &SrcTable, program: &mut ProgramBuilder, target_register: usize) {
+fn translate_table_star(
+    table: &SrcTable,
+    program: &mut ProgramBuilder,
+    target_register: usize,
+    cursor_hint: Option<usize>,
+) {
     let table_identifier = match table.alias {
         Some(alias) => alias.clone(),
         None => table.table.get_name().to_string(),
     };
-    let table_cursor = program.resolve_cursor_id(&table_identifier);
+    let table_cursor = program.resolve_cursor_id(&table_identifier, cursor_hint);
     let table = &table.table;
     for (i, col) in table.columns().iter().enumerate() {
         let col_target_register = target_register + i;
@@ -404,7 +554,7 @@ fn translate_table_star(table: &SrcTable, program: &mut ProgramBuilder, target_r
                 dest: col_target_register,
                 cursor_id: table_cursor,
             });
-            maybe_apply_affinity(col, col_target_register, program);
+            maybe_apply_affinity(col.ty, col_target_register, program);
         }
     }
 }
@@ -415,6 +565,7 @@ fn translate_aggregation(
     expr: &ast::Expr,
     info: &ColumnInfo,
     target_register: usize,
+    cursor_hint: Option<usize>,
 ) -> Result<usize> {
     let _ = expr;
     assert!(info.func.is_some());
@@ -430,7 +581,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg)?;
+                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint)?;
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -445,7 +596,7 @@ fn translate_aggregation(
                 } else {
                     let expr = &args[0];
                     let expr_reg = program.alloc_register();
-                    let _ = translate_expr(program, select, expr, expr_reg);
+                    let _ = translate_expr(program, select, expr, expr_reg, cursor_hint);
                     expr_reg
                 };
                 program.emit_insn(Insn::AggStep {
@@ -486,10 +637,11 @@ fn translate_aggregation(
                     delimiter_expr = ast::Expr::Literal(Literal::String(String::from("\",\"")));
                 }
 
-                if let Err(error) = translate_expr(program, select, expr, expr_reg) {
+                if let Err(error) = translate_expr(program, select, expr, expr_reg, cursor_hint) {
                     anyhow::bail!(error);
                 }
-                if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg)
+                if let Err(error) =
+                    translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)
                 {
                     anyhow::bail!(error);
                 }
@@ -509,7 +661,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg);
+                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint);
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -524,7 +676,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg);
+                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint);
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -558,10 +710,11 @@ fn translate_aggregation(
                     _ => anyhow::bail!("Incorrect delimiter parameter"),
                 };
 
-                if let Err(error) = translate_expr(program, select, expr, expr_reg) {
+                if let Err(error) = translate_expr(program, select, expr, expr_reg, cursor_hint) {
                     anyhow::bail!(error);
                 }
-                if let Err(error) = translate_expr(program, select, &delimiter_expr, delimiter_reg)
+                if let Err(error) =
+                    translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)
                 {
                     anyhow::bail!(error);
                 }
@@ -581,7 +734,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg)?;
+                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint)?;
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -596,7 +749,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg)?;
+                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint)?;
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,

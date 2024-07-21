@@ -53,7 +53,7 @@ pub fn translate_where(
 ) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
         let label = program.allocate_label();
-        translate_condition_expr(program, select, w, label, false)?;
+        translate_condition_expr(program, select, w, label, false, None)?;
         Ok(Some(label))
     } else {
         Ok(None)
@@ -63,6 +63,7 @@ pub fn translate_where(
 pub fn evaluate_conditions(
     program: &mut ProgramBuilder,
     select: &Select,
+    cursor_hint: Option<usize>,
 ) -> Result<Option<QueryConstraint>> {
     let join_constraints = select
         .src_tables
@@ -80,7 +81,12 @@ pub fn evaluate_conditions(
     let parsed_where_maybe = select.where_clause.as_ref().map(|where_clause| Where {
         constraint_expr: where_clause.clone(),
         no_match_jump_label: program.allocate_label(),
-        no_match_target_cursor: get_no_match_target_cursor(program, select, where_clause),
+        no_match_target_cursor: get_no_match_target_cursor(
+            program,
+            select,
+            where_clause,
+            cursor_hint,
+        ),
     });
 
     let parsed_join_maybe = join_maybe.and_then(|(constraint, _)| {
@@ -88,7 +94,12 @@ pub fn evaluate_conditions(
             Some(Join {
                 constraint_expr: expr.clone(),
                 no_match_jump_label: program.allocate_label(),
-                no_match_target_cursor: get_no_match_target_cursor(program, select, expr),
+                no_match_target_cursor: get_no_match_target_cursor(
+                    program,
+                    select,
+                    expr,
+                    cursor_hint,
+                ),
             })
         } else {
             None
@@ -155,6 +166,7 @@ pub fn translate_conditions(
     program: &mut ProgramBuilder,
     select: &Select,
     conditions: Option<QueryConstraint>,
+    cursor_hint: Option<usize>,
 ) -> Result<Option<QueryConstraint>> {
     match conditions.as_ref() {
         Some(QueryConstraint::Left(Left {
@@ -171,6 +183,7 @@ pub fn translate_conditions(
                     &where_clause.constraint_expr,
                     where_clause.no_match_jump_label,
                     false,
+                    cursor_hint,
                 )?;
             }
             if let Some(join_clause) = join_clause {
@@ -180,6 +193,7 @@ pub fn translate_conditions(
                     &join_clause.constraint_expr,
                     join_clause.no_match_jump_label,
                     false,
+                    cursor_hint,
                 )?;
             }
             // Set match flag to 1 if we hit the marker (i.e. jump didn't happen to no_match_label as a result of the condition)
@@ -197,6 +211,7 @@ pub fn translate_conditions(
                     &where_clause.constraint_expr,
                     where_clause.no_match_jump_label,
                     false,
+                    cursor_hint,
                 )?;
             }
             if let Some(join_clause) = &inner_join.join_clause {
@@ -206,6 +221,7 @@ pub fn translate_conditions(
                     &join_clause.constraint_expr,
                     join_clause.no_match_jump_label,
                     false,
+                    cursor_hint,
                 )?;
             }
         }
@@ -221,40 +237,47 @@ fn translate_condition_expr(
     expr: &ast::Expr,
     target_jump: BranchOffset,
     jump_if_true: bool, // if true jump to target on op == true, if false invert op
+    cursor_hint: Option<usize>,
 ) -> Result<()> {
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
             if jump_if_true {
                 let label = program.allocate_label();
-                let _ = translate_condition_expr(program, select, lhs, label, false);
-                let _ = translate_condition_expr(program, select, rhs, target_jump, true);
+                let _ = translate_condition_expr(program, select, lhs, label, false, cursor_hint);
+                let _ =
+                    translate_condition_expr(program, select, rhs, target_jump, true, cursor_hint);
                 program.resolve_label(label, program.offset());
             } else {
-                let _ = translate_condition_expr(program, select, lhs, target_jump, false);
-                let _ = translate_condition_expr(program, select, rhs, target_jump, false);
+                let _ =
+                    translate_condition_expr(program, select, lhs, target_jump, false, cursor_hint);
+                let _ =
+                    translate_condition_expr(program, select, rhs, target_jump, false, cursor_hint);
             }
         }
         ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
             if jump_if_true {
-                let _ = translate_condition_expr(program, select, lhs, target_jump, true);
-                let _ = translate_condition_expr(program, select, rhs, target_jump, true);
+                let _ =
+                    translate_condition_expr(program, select, lhs, target_jump, true, cursor_hint);
+                let _ =
+                    translate_condition_expr(program, select, rhs, target_jump, true, cursor_hint);
             } else {
                 let label = program.allocate_label();
-                let _ = translate_condition_expr(program, select, lhs, label, true);
-                let _ = translate_condition_expr(program, select, rhs, target_jump, false);
+                let _ = translate_condition_expr(program, select, lhs, label, true, cursor_hint);
+                let _ =
+                    translate_condition_expr(program, select, rhs, target_jump, false, cursor_hint);
                 program.resolve_label(label, program.offset());
             }
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = program.alloc_register();
             let rhs_reg = program.alloc_register();
-            let _ = translate_expr(program, select, lhs, lhs_reg);
+            let _ = translate_expr(program, select, lhs, lhs_reg, cursor_hint);
             match lhs.as_ref() {
                 ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                 _ => {}
             }
-            let _ = translate_expr(program, select, rhs, rhs_reg);
+            let _ = translate_expr(program, select, rhs, rhs_reg, cursor_hint);
             match rhs.as_ref() {
                 ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                 _ => {}
@@ -438,9 +461,9 @@ fn translate_condition_expr(
                     let pattern_reg = program.alloc_register();
                     let column_reg = program.alloc_register();
                     // LIKE(pattern, column). We should translate the pattern first before the column
-                    let _ = translate_expr(program, select, rhs, pattern_reg)?;
+                    let _ = translate_expr(program, select, rhs, pattern_reg, cursor_hint)?;
                     program.mark_last_insn_constant();
-                    let _ = translate_expr(program, select, lhs, column_reg)?;
+                    let _ = translate_expr(program, select, lhs, column_reg, cursor_hint)?;
                     program.emit_insn(Insn::Function {
                         func: SingleRowFunc::Like,
                         start_reg: pattern_reg,
@@ -480,19 +503,31 @@ fn introspect_expression_for_cursors(
     program: &ProgramBuilder,
     select: &Select,
     where_expr: &ast::Expr,
+    cursor_hint: Option<usize>,
 ) -> Result<Vec<usize>> {
     let mut cursors = vec![];
     match where_expr {
         ast::Expr::Binary(e1, _, e2) => {
-            cursors.extend(introspect_expression_for_cursors(program, select, e1)?);
-            cursors.extend(introspect_expression_for_cursors(program, select, e2)?);
+            cursors.extend(introspect_expression_for_cursors(
+                program,
+                select,
+                e1,
+                cursor_hint,
+            )?);
+            cursors.extend(introspect_expression_for_cursors(
+                program,
+                select,
+                e2,
+                cursor_hint,
+            )?);
         }
         ast::Expr::Id(ident) => {
-            let (_, _, cursor_id) = resolve_ident_table(program, &ident.0, select)?;
+            let (_, _, cursor_id, _) = resolve_ident_table(program, &ident.0, select, cursor_hint)?;
             cursors.push(cursor_id);
         }
         ast::Expr::Qualified(tbl, ident) => {
-            let (_, _, cursor_id) = resolve_ident_qualified(program, &tbl.0, &ident.0, select)?;
+            let (_, _, cursor_id, _) =
+                resolve_ident_qualified(program, &tbl.0, &ident.0, select, cursor_hint)?;
             cursors.push(cursor_id);
         }
         ast::Expr::Literal(_) => {}
@@ -503,8 +538,18 @@ fn introspect_expression_for_cursors(
             rhs,
             escape: _,
         } => {
-            cursors.extend(introspect_expression_for_cursors(program, select, lhs)?);
-            cursors.extend(introspect_expression_for_cursors(program, select, rhs)?);
+            cursors.extend(introspect_expression_for_cursors(
+                program,
+                select,
+                lhs,
+                cursor_hint,
+            )?);
+            cursors.extend(introspect_expression_for_cursors(
+                program,
+                select,
+                rhs,
+                cursor_hint,
+            )?);
         }
         other => {
             anyhow::bail!("Parse error: unsupported expression: {:?}", other);
@@ -518,12 +563,14 @@ fn get_no_match_target_cursor(
     program: &ProgramBuilder,
     select: &Select,
     expr: &ast::Expr,
+    cursor_hint: Option<usize>,
 ) -> usize {
     // This is the hackiest part of the code. We are finding the cursor that should be advanced to the next row
     // when the condition is not met. This is done by introspecting the expression and finding the innermost cursor that is
     // used in the expression. This is a very naive approach and will not work in all cases.
     // Thankfully though it might be possible to just refine the logic contained here to make it work in all cases. Maybe.
-    let cursors = introspect_expression_for_cursors(program, select, expr).unwrap_or_default();
+    let cursors =
+        introspect_expression_for_cursors(program, select, expr, cursor_hint).unwrap_or_default();
     if cursors.is_empty() {
         HARDCODED_CURSOR_LEFT_TABLE
     } else {
