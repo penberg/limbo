@@ -5,19 +5,19 @@ pub(crate) mod where_clause;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use expr::{build_select, maybe_apply_affinity, translate_expr};
 use crate::function::{AggFunc, Func};
 use crate::pager::Pager;
 use crate::schema::{Column, PseudoTable, Schema, Table};
-use crate::translate::select::{ColumnInfo, LoopInfo, Select, SrcTable};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
-use crate::types::{OwnedRecord, OwnedValue};
-use crate::util::normalize_ident;
-use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
+use crate::translate::select::{ColumnInfo, LoopInfo, Select, SrcTable};
 use crate::translate::where_clause::{
     evaluate_conditions, translate_conditions, translate_where, Inner, Left, QueryConstraint,
 };
+use crate::types::{OwnedRecord, OwnedValue};
+use crate::util::normalize_ident;
+use crate::vdbe::{BranchOffset, Insn, Program, ProgramBuilder};
 use anyhow::Result;
+use expr::{build_select, maybe_apply_affinity, translate_expr};
 use sqlite3_parser::ast::{self, Literal};
 
 struct LimitInfo {
@@ -426,10 +426,10 @@ fn translate_tables_end(
 }
 
 fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -> LoopInfo {
-    let table_identifier = match table.alias {
-        Some(alias) => alias.clone(),
-        None => table.table.get_name().to_string(),
-    };
+    let table_identifier = normalize_ident(match table.alias {
+        Some(alias) => alias,
+        None => &table.table.get_name(),
+    });
     let cursor_id = program.alloc_cursor_id(Some(table_identifier), Some(table.table.clone()));
     let root_page = match &table.table {
         Table::BTree(btree) => btree.root_page,
@@ -539,10 +539,10 @@ fn translate_table_star(
     target_register: usize,
     cursor_hint: Option<usize>,
 ) {
-    let table_identifier = match table.alias {
-        Some(alias) => alias.clone(),
-        None => table.table.get_name().to_string(),
-    };
+    let table_identifier = normalize_ident(match table.alias {
+        Some(alias) => alias,
+        None => &table.table.get_name(),
+    });
     let table_cursor = program.resolve_cursor_id(&table_identifier, cursor_hint);
     let table = &table.table;
     for (i, col) in table.columns().iter().enumerate() {

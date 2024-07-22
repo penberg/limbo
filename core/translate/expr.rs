@@ -576,13 +576,15 @@ pub fn resolve_ident_qualified<'a>(
     select: &'a Select,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
+    let ident = normalize_ident(ident);
+    let table_name = normalize_ident(table_name);
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
-                let table_identifier = match join.alias {
-                    Some(alias) => alias.clone(),
-                    None => table.name.to_string(),
-                };
+                let table_identifier = normalize_ident(match join.alias {
+                    Some(alias) => alias,
+                    None => &table.name,
+                });
                 if table_identifier == *table_name {
                     let res = table
                         .columns
@@ -612,14 +614,15 @@ pub fn resolve_ident_table<'a>(
     select: &'a Select,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
+    let ident = normalize_ident(ident);
     let mut found = Vec::new();
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
-                let table_identifier = match join.alias {
-                    Some(alias) => alias.clone(),
-                    None => table.name.to_string(),
-                };
+                let table_identifier = normalize_ident(match join.alias {
+                    Some(alias) => alias,
+                    None => &table.name,
+                });
                 let res = table
                     .columns
                     .iter()
