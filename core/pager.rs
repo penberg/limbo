@@ -1,11 +1,16 @@
+#![feature(box_into_raw_non_null)]
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
 use crate::{PageSource, Result};
 use log::trace;
 use sieve_cache::SieveCache;
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::hash::Hash;
+use std::mem;
+use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -21,6 +26,8 @@ const PAGE_UPTODATE: usize = 0b001;
 const PAGE_LOCKED: usize = 0b010;
 /// Page had an I/O error.
 const PAGE_ERROR: usize = 0b100;
+/// Page had an I/O error.
+const PAGE_DIRTY: usize = 0b1000;
 
 impl Default for Page {
     fn default() -> Self {
@@ -71,6 +78,166 @@ impl Page {
     pub fn clear_error(&self) {
         self.flags.fetch_and(!PAGE_ERROR, Ordering::SeqCst);
     }
+
+    pub fn is_dirty(&self) -> bool {
+        self.flags.load(Ordering::SeqCst) & PAGE_DIRTY != 0
+    }
+
+    pub fn set_dirty(&self) {
+        self.flags.fetch_or(PAGE_DIRTY, Ordering::SeqCst);
+    }
+
+    pub fn clear_dirty(&self) {
+        self.flags.fetch_and(!PAGE_DIRTY, Ordering::SeqCst);
+    }
+}
+
+struct PageCacheEntry {
+    key: usize,
+    page: Rc<RefCell<Page>>,
+    prev: Option<NonNull<PageCacheEntry>>,
+    next: Option<NonNull<PageCacheEntry>>,
+}
+
+impl PageCacheEntry {
+    fn into_non_null(&mut self) -> NonNull<PageCacheEntry> {
+        NonNull::new(&mut *self).unwrap()
+    }
+
+    unsafe fn from_non_null(ptr: NonNull<PageCacheEntry>) -> Box<Self> {
+        Box::from_raw(ptr.as_ptr())
+    }
+}
+
+struct DumbLruPageCache {
+    capacity: usize,
+    map: RefCell<HashMap<usize, NonNull<PageCacheEntry>>>,
+    head: RefCell<Option<NonNull<PageCacheEntry>>>,
+    tail: RefCell<Option<NonNull<PageCacheEntry>>>,
+}
+
+impl DumbLruPageCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity,
+            map: RefCell::new(HashMap::new()),
+            head: RefCell::new(None),
+            tail: RefCell::new(None),
+        }
+    }
+
+    pub fn insert(&mut self, key: usize, value: Rc<RefCell<Page>>) {
+        self.delete(key);
+        let mut entry = Box::new(PageCacheEntry {
+            key: key,
+            next: None,
+            prev: None,
+            page: value,
+        });
+        self.touch(&mut entry);
+
+        if self.map.borrow().len() >= self.capacity {
+            self.pop_if_not_dirty();
+        }
+        let b = Box::into_raw(entry);
+        let as_non_null = NonNull::new(b).unwrap();
+        self.map.borrow_mut().insert(key, as_non_null);
+    }
+
+    pub fn delete(&mut self, key: usize) {
+        let ptr = self.map.borrow_mut().remove(&key);
+        if ptr.is_none() {
+            return;
+        }
+        let mut ptr = ptr.unwrap();
+        {
+            let ptr = unsafe { ptr.as_mut() };
+            self.detach(ptr);
+        }
+        unsafe { drop_in_place(ptr.as_ptr()) };
+    }
+
+    fn get_ptr(&mut self, key: usize) -> Option<NonNull<PageCacheEntry>> {
+        let m = self.map.borrow_mut();
+        let ptr = m.get(&key);
+        match ptr {
+            Some(v) => Some(*v),
+            None => None,
+        }
+    }
+
+    pub fn get(&mut self, key: &usize) -> Option<Rc<RefCell<Page>>> {
+        let ptr = self.get_ptr(*key);
+        if ptr.is_none() {
+            return None;
+        }
+        let ptr = unsafe { ptr.unwrap().as_mut() };
+        let page = ptr.page.clone();
+        self.detach(ptr);
+        self.touch(ptr);
+        return Some(page);
+    }
+
+    pub fn resize(&mut self, capacity: usize) {
+        todo!();
+    }
+
+    fn detach(&mut self, entry: &mut PageCacheEntry) {
+        let mut current = entry.into_non_null();
+
+        let mut next = None;
+        let mut prev = None;
+        unsafe {
+            let c = current.as_mut();
+            next = c.next;
+            prev = c.prev;
+            c.prev = None;
+            c.next = None;
+        }
+
+        // detach
+        match (prev, next) {
+            (None, None) => {}
+            (None, Some(_)) => todo!(),
+            (Some(p), None) => {
+                self.tail = RefCell::new(Some(p));
+            }
+            (Some(mut p), Some(mut n)) => unsafe {
+                let p_mut = p.as_mut();
+                p_mut.next = Some(n);
+                let n_mut = n.as_mut();
+                n_mut.prev = Some(p);
+            },
+        };
+    }
+
+    fn touch(&mut self, entry: &mut PageCacheEntry) {
+        let mut current = entry.into_non_null();
+        unsafe {
+            let c = current.as_mut();
+            c.next = *self.head.borrow();
+        }
+
+        if let Some(mut head) = *self.head.borrow_mut() {
+            unsafe {
+                let head = head.as_mut();
+                head.prev = Some(current);
+            }
+        }
+    }
+
+    fn pop_if_not_dirty(&mut self) {
+        let tail = *self.tail.borrow();
+        if tail.is_none() {
+            return;
+        }
+        let tail = unsafe { tail.unwrap().as_mut() };
+        if tail.page.borrow().is_dirty() {
+            // TODO: drop from another clean entry?
+            return;
+        }
+        self.detach(tail);
+    }
 }
 
 pub struct PageCache<K: Eq + Hash + Clone, V> {
@@ -101,8 +268,7 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
 pub struct Pager {
     /// Source of the database pages.
     pub page_source: PageSource,
-    /// Cache for storing loaded pages.
-    page_cache: RefCell<PageCache<usize, Rc<Page>>>,
+    page_cache: RefCell<DumbLruPageCache>,
     /// Buffer pool for temporary data storage.
     buffer_pool: Rc<BufferPool>,
     /// I/O interface for input/output operations.
@@ -124,7 +290,7 @@ impl Pager {
         let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;
         let buffer_pool = Rc::new(BufferPool::new(page_size));
-        let page_cache = RefCell::new(PageCache::new(SieveCache::new(10).unwrap()));
+        let page_cache = RefCell::new(DumbLruPageCache::new(10));
         Ok(Self {
             page_source,
             buffer_pool,
@@ -134,14 +300,14 @@ impl Pager {
     }
 
     /// Reads a page from the database.
-    pub fn read_page(&self, page_idx: usize) -> Result<Rc<Page>> {
+    pub fn read_page(&self, page_idx: usize) -> crate::Result<Rc<RefCell<Page>>> {
         trace!("read_page(page_idx = {})", page_idx);
         let mut page_cache = self.page_cache.borrow_mut();
         if let Some(page) = page_cache.get(&page_idx) {
             return Ok(page.clone());
         }
-        let page = Rc::new(Page::new());
-        page.set_locked();
+        let page = Rc::new(RefCell::new(Page::new()));
+        page.borrow().set_locked();
         sqlite3_ondisk::begin_read_btree_page(
             &self.page_source,
             self.buffer_pool.clone(),

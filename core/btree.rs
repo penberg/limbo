@@ -61,6 +61,7 @@ impl BTreeCursor {
             };
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
+            let page = page.borrow();
             if page.is_locked() {
                 return Ok(CursorResult::IO);
             }
@@ -114,6 +115,11 @@ impl BTreeCursor {
                 }
             }
         }
+    }
+
+    fn move_to_root(&mut self) {
+        let root_page = self.pager.read_page(self.root_page).unwrap();
+        let current_page = root_page;
     }
 }
 

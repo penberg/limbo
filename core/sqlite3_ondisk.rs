@@ -226,7 +226,7 @@ pub struct BTreePage {
 pub fn begin_read_btree_page(
     page_source: &PageSource,
     buffer_pool: Rc<BufferPool>,
-    page: Rc<Page>,
+    page: Rc<RefCell<Page>>,
     page_idx: usize,
 ) -> Result<()> {
     trace!("begin_read_btree_page(page_idx = {})", page_idx);
@@ -239,7 +239,7 @@ pub fn begin_read_btree_page(
     let complete = Box::new(move |buf: &Buffer| {
         let page = page.clone();
         if finish_read_btree_page(page_idx, buf, page.clone()).is_err() {
-            page.set_error();
+            page.borrow_mut().set_error();
         }
     });
     let c = Rc::new(Completion::new(buf, complete));
@@ -247,7 +247,7 @@ pub fn begin_read_btree_page(
     Ok(())
 }
 
-fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<Page>) -> Result<()> {
+fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<RefCell<Page>>) -> Result<()> {
     trace!("finish_read_btree_page(page_idx = {})", page_idx);
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
@@ -281,9 +281,12 @@ fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<Page>) -> Resu
         cells.push(cell);
     }
     let inner = BTreePage { header, cells };
-    page.contents.write().unwrap().replace(inner);
-    page.set_uptodate();
-    page.clear_locked();
+    {
+        let page = page.borrow_mut();
+        page.contents.write().unwrap().replace(inner);
+        page.set_uptodate();
+        page.clear_locked();
+    }
     Ok(())
 }
 
