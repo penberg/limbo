@@ -1,0 +1,28 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test schema-1 {
+  .schema users
+} {{CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        email TEXT,
+        phone_number TEXT,
+        address TEXT,
+        city TEXT,
+        state TEXT,
+        zipcode TEXT,
+        age INTEGER
+    );}}
+
+do_execsql_test schema-2 {
+  .schema products
+} {{CREATE TABLE products (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        price REAL
+    );}}
+    

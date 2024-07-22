@@ -42,6 +42,7 @@ pub struct Inner {
     pub join_clause: Option<Join>,
 }
 
+#[derive(Debug)]
 pub enum QueryConstraint {
     Left(Left),
     Inner(Inner),
@@ -572,7 +573,11 @@ fn get_no_match_target_cursor(
     let cursors =
         introspect_expression_for_cursors(program, select, expr, cursor_hint).unwrap_or_default();
     if cursors.is_empty() {
-        HARDCODED_CURSOR_LEFT_TABLE
+        assert!(
+            select.loops.len() > 0,
+            "select.loops is populated based on select.src_tables. Expect at least 1 table if this function is called"
+        );
+        select.loops.first().unwrap().open_cursor
     } else {
         *cursors.iter().max().unwrap()
     }

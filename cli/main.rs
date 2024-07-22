@@ -40,7 +40,11 @@ fn main() -> anyhow::Result<()> {
     let db = Database::open_file(io.clone(), path)?;
     let conn = db.connect();
     if let Some(sql) = opts.sql {
-        query(io.clone(), &conn, &sql, &opts.output_mode)?;
+        if sql.trim().starts_with('.') {
+            handle_dot_command(io.clone(), &conn, &sql)?;
+        } else {
+            query(io.clone(), &conn, &sql, &opts.output_mode)?;
+        }
         return Ok(());
     }
     let mut rl = DefaultEditor::new()?;
