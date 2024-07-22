@@ -163,7 +163,7 @@ impl PseudoTable {
 
     pub fn add_column(&mut self, name: &str, ty: Type, primary_key: bool) {
         self.columns.push(Column {
-            name: name.to_string(),
+            name: normalize_ident(name),
             ty,
             primary_key,
         });
@@ -259,7 +259,7 @@ fn create_table(
                     primary_key = true;
                 }
                 cols.push(Column {
-                    name,
+                    name: normalize_ident(&name),
                     ty,
                     primary_key,
                 });
