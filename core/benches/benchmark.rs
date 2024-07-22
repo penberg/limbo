@@ -1,13 +1,13 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use limbo_core::{Database, PlatformIO, IO};
 use pprof::criterion::{Output, PProfProfiler};
-use std::rc::Rc;
+use std::sync::Arc;
 
 fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("limbo");
     group.throughput(Throughput::Elements(1));
 
-    let io = Rc::new(PlatformIO::new().unwrap());
+    let io = Arc::new(PlatformIO::new().unwrap());
     let db = Database::open_file(io.clone(), "../testing/testing.db").unwrap();
     let conn = db.connect();
 
