@@ -225,7 +225,8 @@ pub fn translate_expr(
             args,
             filter_over: _,
         } => {
-            let func_type: Option<Func> = normalize_ident(name.0.as_str()).as_str().parse().ok();
+            let args_count = if let Some(args) = args { args.len() } else { 0 };
+            let func_type: Option<Func> = Func::resolve_function(normalize_ident(name.0.as_str()).as_str(),args_count).ok();
 
             match func_type {
                 Some(Func::Agg(_)) => {
@@ -585,7 +586,8 @@ pub fn analyze_expr<'a>(expr: &'a Expr, column_info_out: &mut ColumnInfo<'a>) {
             args,
             filter_over: _,
         } => {
-            let func_type = match normalize_ident(name.0.as_str()).as_str().parse() {
+            let args_count = if let Some(args) = args { args.len() } else { 0 };
+            let func_type = match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(),args_count) {
                 Ok(func) => Some(func),
                 Err(_) => None,
             };

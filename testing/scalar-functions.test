@@ -143,25 +143,25 @@ do_execsql_test length-empty-text {
   SELECT length('');
 } {0}
 do_execsql_test min-number {
-  select min_arr(-10,2,3)
+  select min(-10,2,3)
 } {-10}
 
 do_execsql_test min-str {
-  select min_arr('b','a','z')
+  select min('b','a','z')
 } {a}
 
 do_execsql_test min-null {
-  select min_arr(null,null)
+  select min(null,null)
 } {}
 
 do_execsql_test max-number {
-  select max_arr(-10,2,3)
+  select max(-10,2,3)
 } {3}
 
 do_execsql_test max-str {
-  select max_arr('b','a','z')
+  select max('b','a','z')
 } {z}
 
 do_execsql_test max-null {
-  select max_arr(null,null)
+  select max(null,null)
 } {}
