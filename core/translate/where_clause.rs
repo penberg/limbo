@@ -1,51 +1,142 @@
 use anyhow::Result;
-use sqlite3_parser::ast::{self, JoinOperator};
+use sqlite3_parser::ast::{self};
 
 use crate::{
-    translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     function::SingleRowFunc,
+    translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     translate::select::Select,
     vdbe::{BranchOffset, Insn, builder::ProgramBuilder},
 };
 
-const HARDCODED_CURSOR_LEFT_TABLE: usize = 0;
-const HARDCODED_CURSOR_RIGHT_TABLE: usize = 1;
+use super::select::LoopInfo;
 
 #[derive(Debug)]
-pub struct Where {
-    pub constraint_expr: ast::Expr,
-    pub no_match_jump_label: BranchOffset,
-    pub no_match_target_cursor: usize,
+pub struct WhereTerm {
+    pub expr: ast::Expr,
+    pub evaluate_at_cursor: usize,
 }
 
 #[derive(Debug)]
-pub struct Join {
-    pub constraint_expr: ast::Expr,
-    pub no_match_jump_label: BranchOffset,
-    pub no_match_target_cursor: usize,
+pub struct ProcessedWhereClause {
+    pub terms: Vec<WhereTerm>,
 }
 
-#[derive(Debug)]
-pub struct Left {
-    pub where_clause: Option<Where>,
-    pub join_clause: Option<Join>,
-    pub match_flag: usize,
-    pub match_flag_hit_marker: BranchOffset,
-    pub found_match_next_row_label: BranchOffset,
-    pub left_cursor: usize,
-    pub right_cursor: usize,
+/**
+* Split a constraint into a flat list of WhereTerms.
+* The splitting is done at logical 'AND' operator boundaries.
+* WhereTerms are currently just a wrapper around an ast::Expr,
+* combined with the ID of the cursor where the term should be evaluated.
+*/
+pub fn split_constraint_to_terms<'a>(
+    program: &'a mut ProgramBuilder,
+    select: &'a Select,
+    where_clause_or_join_constraint: &ast::Expr,
+    outer_join_table_name: Option<&'a String>,
+) -> Result<Vec<WhereTerm>> {
+    let mut terms = Vec::new();
+    let mut queue = vec![where_clause_or_join_constraint];
+
+    while let Some(expr) = queue.pop() {
+        match expr {
+            ast::Expr::Binary(left, ast::Operator::And, right) => {
+                queue.push(left);
+                queue.push(right);
+            }
+            expr => {
+                let term = WhereTerm {
+                    expr: expr.clone(),
+                    evaluate_at_cursor: match outer_join_table_name {
+                        Some(table) => {
+                            // If we had e.g. SELECT * FROM t1 LEFT JOIN t2 WHERE t1.a > 10,
+                            // we could evaluate the t1.a > 10 condition at the cursor for t1, i.e. the outer table,
+                            // skipping t1 rows that don't match the condition.
+                            //
+                            // However, if we have SELECT * FROM t1 LEFT JOIN t2 ON t1.a > 10,
+                            // we need to evaluate the t1.a > 10 condition at the cursor for t2, i.e. the inner table,
+                            // because we need to skip rows from t2 that don't match the condition.
+                            //
+                            // In inner joins, both of the above are equivalent, but in left joins they are not.
+                            select
+                                .loops
+                                .iter()
+                                .find(|t| t.identifier == *table)
+                                .ok_or(anyhow::anyhow!(
+                                    "Could not find cursor for table {}",
+                                    table
+                                ))?
+                                .open_cursor
+                        }
+                        None => {
+                            // For any non-outer-join condition expression, find the cursor that it should be evaluated at.
+                            // This is the cursor that is the rightmost/innermost cursor that the expression depends on.
+                            // In SELECT * FROM t1, t2 WHERE t1.a > 10, the condition should be evaluated at the cursor for t1.
+                            // In SELECT * FROM t1, t2 WHERE t1.a > 10 OR t2.b > 20, the condition should be evaluated at the cursor for t2.
+                            //
+                            // We are splitting any AND expressions in this function, so for example in this query:
+                            // 'SELECT * FROM t1, t2 WHERE t1.a > 10 AND t2.b > 20'
+                            // we can evaluate the t1.a > 10 condition at the cursor for t1, and the t2.b > 20 condition at the cursor for t2.
+                            //
+                            // For expressions that don't depend on any cursor, we can evaluate them at the leftmost/outermost cursor.
+                            // E.g. 'SELECT * FROM t1 JOIN t2 ON false' can be evaluated at the cursor for t1.
+                            let cursors =
+                                introspect_expression_for_cursors(program, select, expr, None)?;
+
+                            let outermost_cursor = select
+                                .loops
+                                .iter()
+                                .map(|t| t.open_cursor)
+                                .min()
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!("No open cursors found in any of the loops")
+                                })?;
+
+                            *cursors.iter().max().unwrap_or(&outermost_cursor)
+                        }
+                    },
+                };
+                terms.push(term);
+            }
+        }
+    }
+
+    Ok(terms)
 }
 
-#[derive(Debug)]
-pub struct Inner {
-    pub where_clause: Option<Where>,
-    pub join_clause: Option<Join>,
-}
+/**
+* Split the WHERE clause and any JOIN ON clauses into a flat list of WhereTerms
+* that can be evaluated at the appropriate cursor.
+*/
+pub fn process_where<'a>(
+    program: &'a mut ProgramBuilder,
+    select: &'a Select,
+) -> Result<ProcessedWhereClause> {
+    let mut wc = ProcessedWhereClause { terms: Vec::new() };
+    if let Some(w) = &select.where_clause {
+        wc.terms
+            .extend(split_constraint_to_terms(program, select, w, None)?);
+    }
 
-#[derive(Debug)]
-pub enum QueryConstraint {
-    Left(Left),
-    Inner(Inner),
+    for table in select.src_tables.iter() {
+        if table.join_info.is_none() {
+            continue;
+        }
+        let join_info = table.join_info.unwrap();
+        if let Some(ast::JoinConstraint::On(expr)) = &join_info.constraint {
+            let terms = split_constraint_to_terms(
+                program,
+                select,
+                expr,
+                if table.is_outer_join() {
+                    Some(&table.identifier)
+                } else {
+                    None
+                },
+            )?;
+            wc.terms.extend(terms);
+        }
+    }
+
+    Ok(wc)
 }
 
 pub fn translate_where(
@@ -61,175 +152,27 @@ pub fn translate_where(
     }
 }
 
-pub fn evaluate_conditions(
+/**
+* Translate the WHERE clause and JOIN ON clauses into a series of conditional jump instructions.
+* At this point the WHERE clause and JOIN ON clauses have been split into a series of terms that can be evaluated at the appropriate cursor.
+* We evaluate each term at the appropriate cursor.
+*/
+pub fn translate_processed_where<'a>(
     program: &mut ProgramBuilder,
-    select: &Select,
+    select: &'a Select,
+    current_loop: &'a LoopInfo,
+    where_c: &'a ProcessedWhereClause,
     cursor_hint: Option<usize>,
-) -> Result<Option<QueryConstraint>> {
-    let join_constraints = select
-        .src_tables
-        .iter()
-        .map(|v| v.join_info)
-        .filter_map(|v| v.map(|v| (v.constraint.clone(), v.operator)))
-        .collect::<Vec<_>>();
-    // TODO: only supports one JOIN; -> add support for multiple JOINs, e.g. SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id
-    if join_constraints.len() > 1 {
-        anyhow::bail!("Parse error: multiple JOINs not supported");
+) -> Result<()> {
+    for term in where_c.terms.iter() {
+        if term.evaluate_at_cursor != current_loop.open_cursor {
+            continue;
+        }
+        let target_jump = current_loop.next_row_label;
+        translate_condition_expr(program, select, &term.expr, target_jump, false, cursor_hint)?;
     }
 
-    let join_maybe = join_constraints.first();
-
-    let parsed_where_maybe = select.where_clause.as_ref().map(|where_clause| Where {
-        constraint_expr: where_clause.clone(),
-        no_match_jump_label: program.allocate_label(),
-        no_match_target_cursor: get_no_match_target_cursor(
-            program,
-            select,
-            where_clause,
-            cursor_hint,
-        ),
-    });
-
-    let parsed_join_maybe = join_maybe.and_then(|(constraint, _)| {
-        if let Some(ast::JoinConstraint::On(expr)) = constraint {
-            Some(Join {
-                constraint_expr: expr.clone(),
-                no_match_jump_label: program.allocate_label(),
-                no_match_target_cursor: get_no_match_target_cursor(
-                    program,
-                    select,
-                    expr,
-                    cursor_hint,
-                ),
-            })
-        } else {
-            None
-        }
-    });
-
-    let constraint_maybe = match (parsed_where_maybe, parsed_join_maybe) {
-        (None, None) => None,
-        (Some(where_clause), None) => Some(QueryConstraint::Inner(Inner {
-            where_clause: Some(where_clause),
-            join_clause: None,
-        })),
-        (where_clause, Some(join_clause)) => {
-            let (_, op) = join_maybe.unwrap();
-            match op {
-                JoinOperator::TypedJoin { natural, join_type } => {
-                    if *natural {
-                        todo!("Natural join not supported");
-                    }
-                    // default to inner join when no join type is specified
-                    let join_type = join_type.unwrap_or(ast::JoinType::Inner);
-                    match join_type {
-                        ast::JoinType::Inner | ast::JoinType::Cross => {
-                            // cross join with a condition is an inner join
-                            Some(QueryConstraint::Inner(Inner {
-                                where_clause,
-                                join_clause: Some(join_clause),
-                            }))
-                        }
-                        ast::JoinType::LeftOuter | ast::JoinType::Left => {
-                            let left_join_match_flag = program.alloc_register();
-                            let left_join_match_flag_hit_marker = program.allocate_label();
-                            let left_join_found_match_next_row_label = program.allocate_label();
-
-                            Some(QueryConstraint::Left(Left {
-                                where_clause,
-                                join_clause: Some(join_clause),
-                                found_match_next_row_label: left_join_found_match_next_row_label,
-                                match_flag: left_join_match_flag,
-                                match_flag_hit_marker: left_join_match_flag_hit_marker,
-                                left_cursor: HARDCODED_CURSOR_LEFT_TABLE, // FIXME: hardcoded
-                                right_cursor: HARDCODED_CURSOR_RIGHT_TABLE, // FIXME: hardcoded
-                            }))
-                        }
-                        ast::JoinType::RightOuter | ast::JoinType::Right => {
-                            todo!();
-                        }
-                        ast::JoinType::FullOuter | ast::JoinType::Full => {
-                            todo!();
-                        }
-                    }
-                }
-                JoinOperator::Comma => {
-                    todo!();
-                }
-            }
-        }
-    };
-
-    Ok(constraint_maybe)
-}
-
-pub fn translate_conditions(
-    program: &mut ProgramBuilder,
-    select: &Select,
-    conditions: Option<QueryConstraint>,
-    cursor_hint: Option<usize>,
-) -> Result<Option<QueryConstraint>> {
-    match conditions.as_ref() {
-        Some(QueryConstraint::Left(Left {
-            where_clause,
-            join_clause,
-            match_flag,
-            match_flag_hit_marker,
-            ..
-        })) => {
-            if let Some(where_clause) = where_clause {
-                translate_condition_expr(
-                    program,
-                    select,
-                    &where_clause.constraint_expr,
-                    where_clause.no_match_jump_label,
-                    false,
-                    cursor_hint,
-                )?;
-            }
-            if let Some(join_clause) = join_clause {
-                translate_condition_expr(
-                    program,
-                    select,
-                    &join_clause.constraint_expr,
-                    join_clause.no_match_jump_label,
-                    false,
-                    cursor_hint,
-                )?;
-            }
-            // Set match flag to 1 if we hit the marker (i.e. jump didn't happen to no_match_label as a result of the condition)
-            program.emit_insn(Insn::Integer {
-                value: 1,
-                dest: *match_flag,
-            });
-            program.defer_label_resolution(*match_flag_hit_marker, (program.offset() - 1) as usize);
-        }
-        Some(QueryConstraint::Inner(inner_join)) => {
-            if let Some(where_clause) = &inner_join.where_clause {
-                translate_condition_expr(
-                    program,
-                    select,
-                    &where_clause.constraint_expr,
-                    where_clause.no_match_jump_label,
-                    false,
-                    cursor_hint,
-                )?;
-            }
-            if let Some(join_clause) = &inner_join.join_clause {
-                translate_condition_expr(
-                    program,
-                    select,
-                    &join_clause.constraint_expr,
-                    join_clause.no_match_jump_label,
-                    false,
-                    cursor_hint,
-                )?;
-            }
-        }
-        None => {}
-    }
-
-    Ok(conditions)
+    Ok(())
 }
 
 fn translate_condition_expr(
@@ -532,13 +475,7 @@ fn introspect_expression_for_cursors(
             cursors.push(cursor_id);
         }
         ast::Expr::Literal(_) => {}
-        ast::Expr::Like {
-            lhs,
-            not: _,
-            op: _,
-            rhs,
-            escape: _,
-        } => {
+        ast::Expr::Like { lhs, rhs, .. } => {
             cursors.extend(introspect_expression_for_cursors(
                 program,
                 select,
@@ -552,33 +489,22 @@ fn introspect_expression_for_cursors(
                 cursor_hint,
             )?);
         }
+        ast::Expr::FunctionCall { args, .. } => {
+            if let Some(args) = args {
+                for arg in args {
+                    cursors.extend(introspect_expression_for_cursors(
+                        program,
+                        select,
+                        arg,
+                        cursor_hint,
+                    )?);
+                }
+            }
+        }
         other => {
             anyhow::bail!("Parse error: unsupported expression: {:?}", other);
         }
     }
 
     Ok(cursors)
-}
-
-fn get_no_match_target_cursor(
-    program: &ProgramBuilder,
-    select: &Select,
-    expr: &ast::Expr,
-    cursor_hint: Option<usize>,
-) -> usize {
-    // This is the hackiest part of the code. We are finding the cursor that should be advanced to the next row
-    // when the condition is not met. This is done by introspecting the expression and finding the innermost cursor that is
-    // used in the expression. This is a very naive approach and will not work in all cases.
-    // Thankfully though it might be possible to just refine the logic contained here to make it work in all cases. Maybe.
-    let cursors =
-        introspect_expression_for_cursors(program, select, expr, cursor_hint).unwrap_or_default();
-    if cursors.is_empty() {
-        assert!(
-            select.loops.len() > 0,
-            "select.loops is populated based on select.src_tables. Expect at least 1 table if this function is called"
-        );
-        select.loops.first().unwrap().open_cursor
-    } else {
-        *cursors.iter().max().unwrap()
-    }
 }

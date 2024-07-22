@@ -242,6 +242,10 @@ impl ProgramBuilder {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
+                Insn::NextAwait { pc_if_next, .. } => {
+                    assert!(*pc_if_next < 0);
+                    *pc_if_next = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }

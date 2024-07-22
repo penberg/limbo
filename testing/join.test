@@ -79,6 +79,21 @@ Alan|
 Michael|
 Brianna|}
 
+do_execsql_test left-join-with-where-2 {
+   select users.first_name, products.name from users left join products on users.id < 2 where users.id < 3;
+} {Jamie|hat
+Jamie|cap
+Jamie|shirt
+Jamie|sweater
+Jamie|sweatshirt
+Jamie|shorts
+Jamie|jeans
+Jamie|sneakers
+Jamie|boots
+Jamie|coat
+Jamie|accessories
+Cindy|}
+
 do_execsql_test left-join-non-pk {
     select users.first_name as user_name, products.name as product_name from users left join products on users.first_name = products.name limit 3;
 } {Jamie|
@@ -108,3 +123,26 @@ do_execsql_test left-join-no-join-conditions-but-multiple-where {
     select u.first_name, p.name from users u left join products as p where u.id = p.id or u.first_name = p.name limit 2;
 } {Jamie|hat
 Cindy|cap}
+
+do_execsql_test four-way-inner-join {
+  select u1.first_name, u2.first_name, u3.first_name, u4.first_name from users u1 join users u2 on u1.id = u2.id join users u3 on u2.id = u3.id + 1 join users u4 on u3.id = u4.id + 1 limit 1;
+} {Tommy|Tommy|Cindy|Jamie}
+
+do_execsql_test leftjoin-innerjoin-where {
+  select u.first_name, p.name, p2.name from users u left join products p on p.name = u.first_name join products p2 on length(p2.name) > 8 where u.first_name = 'Franklin';
+} {Franklin||sweatshirt
+Franklin||accessories}
+
+do_execsql_test leftjoin-leftjoin-where {
+  select u.first_name, p.name, p2.name from users u left join products p on p.name = u.first_name join products p2 on length(p2.name) > 8 where u.first_name = 'Franklin';
+} {Franklin||sweatshirt
+Franklin||accessories}
+
+do_execsql_test innerjoin-leftjoin-where {
+  select u.first_name, u2.first_name, p.name from users u join users u2 on u.id = u2.id + 1 left join products p on p.name = u.first_name where u.first_name = 'Franklin';
+} {Franklin|Cynthia|}
+
+do_execsql_test innerjoin-leftjoin-with-or-terms {
+  select u.first_name, u2.first_name, p.name from users u join users u2 on u.id = u2.id + 1 left join products p on p.name = u.first_name or p.name like 'sweat%' where u.first_name = 'Franklin';
+} {Franklin|Cynthia|sweater
+Franklin|Cynthia|sweatshirt}

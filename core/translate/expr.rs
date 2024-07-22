@@ -36,10 +36,11 @@ pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Sele
                 Some(table) => table,
                 None => anyhow::bail!("Parse error: no such table: {}", table_name),
             };
+            let identifier = normalize_ident(maybe_alias.unwrap_or(table_name));
             let mut joins = Vec::new();
             joins.push(SrcTable {
                 table: Table::BTree(table.clone()),
-                alias: maybe_alias,
+                identifier,
                 join_info: None,
             });
             if let Some(selected_joins) = &from.joins {
@@ -60,9 +61,11 @@ pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Sele
                         Some(table) => table,
                         None => anyhow::bail!("Parse error: no such table: {}", table_name),
                     };
+                    let identifier = normalize_ident(maybe_alias.unwrap_or(table_name));
+
                     joins.push(SrcTable {
                         table: Table::BTree(table),
-                        alias: maybe_alias,
+                        identifier,
                         join_info: Some(join),
                     });
                 }
@@ -292,7 +295,7 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(program, select, &arg, reg, cursor_hint)?;
+                                let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                                     _ => {}
@@ -625,11 +628,11 @@ fn wrap_eval_jump_expr(
     program.preassign_label_to_next_insn(if_true_label);
 }
 
-pub fn resolve_ident_qualified<'a>(
+pub fn resolve_ident_qualified(
     program: &ProgramBuilder,
     table_name: &String,
     ident: &String,
-    select: &'a Select,
+    select: &Select,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
     let ident = normalize_ident(ident);
@@ -637,11 +640,7 @@ pub fn resolve_ident_qualified<'a>(
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
-                let table_identifier = normalize_ident(match join.alias {
-                    Some(alias) => alias,
-                    None => &table.name,
-                });
-                if table_identifier == *table_name {
+                if *join.identifier == table_name {
                     let res = table
                         .columns
                         .iter()
@@ -649,7 +648,7 @@ pub fn resolve_ident_qualified<'a>(
                         .find(|(_, col)| col.name == *ident);
                     if res.is_some() {
                         let (idx, col) = res.unwrap();
-                        let cursor_id = program.resolve_cursor_id(&table_identifier, cursor_hint);
+                        let cursor_id = program.resolve_cursor_id(&join.identifier, cursor_hint);
                         return Ok((idx, col.ty, cursor_id, col.primary_key));
                     }
                 }
@@ -664,10 +663,10 @@ pub fn resolve_ident_qualified<'a>(
     );
 }
 
-pub fn resolve_ident_table<'a>(
+pub fn resolve_ident_table(
     program: &ProgramBuilder,
     ident: &String,
-    select: &'a Select,
+    select: &Select,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
     let ident = normalize_ident(ident);
@@ -675,10 +674,6 @@ pub fn resolve_ident_table<'a>(
     for join in &select.src_tables {
         match join.table {
             Table::BTree(ref table) => {
-                let table_identifier = normalize_ident(match join.alias {
-                    Some(alias) => alias,
-                    None => &table.name,
-                });
                 let res = table
                     .columns
                     .iter()
@@ -704,7 +699,7 @@ pub fn resolve_ident_table<'a>(
                             is_primary_key = res.1.primary_key;
                         }
                     }
-                    let cursor_id = program.resolve_cursor_id(&table_identifier, cursor_hint);
+                    let cursor_id = program.resolve_cursor_id(&join.identifier, cursor_hint);
                     found.push((idx, col_type, cursor_id, is_primary_key));
                 }
             }
