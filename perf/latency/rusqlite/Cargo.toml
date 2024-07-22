@@ -7,3 +7,5 @@ edition = "2021"
 clap = { version = "4.4.2", features = ["derive"] }
 hdrhistogram = "7.5.2"
 rusqlite = "0.29.0"
+
+[workspace]
