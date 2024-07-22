@@ -11,3 +11,5 @@ limbo_core = { path = "../../../core" }
 
 [profile.release]
 debug = true
+
+[workspace]
