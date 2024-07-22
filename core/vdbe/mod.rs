@@ -1301,7 +1301,14 @@ impl Program {
                         OwnedValue::Record(r) => r,
                         _ => unreachable!("Not a record! Cannot insert a non record value."),
                     };
-                    cursor.insert(record).unwrap();
+                    let key = &state.registers[*key_reg];
+                    match cursor.insert(key, record)? {
+                        CursorResult::Ok(_) => {}
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
                 }
                 Insn::InsertAwait { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();

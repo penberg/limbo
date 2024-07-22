@@ -223,6 +223,17 @@ pub struct BTreePage {
     pub cells: Vec<BTreeCell>,
 }
 
+impl BTreePage {
+    pub fn is_leaf(&self) -> bool {
+        match self.header.page_type {
+            PageType::IndexInterior => false,
+            PageType::TableInterior => false,
+            PageType::IndexLeaf => true,
+            PageType::TableLeaf => true,
+        }
+    }
+}
+
 pub fn begin_read_btree_page(
     page_source: &PageSource,
     buffer_pool: Rc<BufferPool>,

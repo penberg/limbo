@@ -118,8 +118,79 @@ impl BTreeCursor {
     }
 
     fn move_to_root(&mut self) {
-        let root_page = self.pager.read_page(self.root_page).unwrap();
-        let current_page = root_page;
+        self.page
+            .replace(Some(Rc::new(MemPage::new(None, self.root_page, 0))));
+    }
+
+    pub fn move_to(&mut self, key: u64) -> Result<CursorResult<()>> {
+        self.move_to_root();
+
+        loop {
+            let mem_page = {
+                let mem_page = self.page.borrow();
+                let mem_page = mem_page.as_ref().unwrap();
+                mem_page.clone()
+            };
+            let page_idx = mem_page.page_idx;
+            let page = self.pager.read_page(page_idx)?;
+            let page = page.borrow();
+            if page.is_locked() {
+                return Ok(CursorResult::IO);
+            }
+            let page = page.contents.read().unwrap();
+            let page = page.as_ref().unwrap();
+            if page.is_leaf() {
+                return Ok(CursorResult::Ok(()));
+            }
+
+            let mut found_cell = false;
+            for cell in &page.cells {
+                match &cell {
+                    BTreeCell::TableInteriorCell(TableInteriorCell {
+                        _left_child_page,
+                        _rowid,
+                    }) => {
+                        if key < *_rowid {
+                            mem_page.advance();
+                            let mem_page =
+                                MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
+                            self.page.replace(Some(Rc::new(mem_page)));
+                            found_cell = true;
+                            break;
+                        }
+                    }
+                    BTreeCell::TableLeafCell(TableLeafCell {
+                        _rowid: _,
+                        _payload: _,
+                        first_overflow_page: _,
+                    }) => {
+                        unreachable!(
+                            "we don't iterate leaf cells while trying to move to a leaf cell"
+                        );
+                    }
+                    BTreeCell::IndexInteriorCell(_) => {
+                        unimplemented!();
+                    }
+                    BTreeCell::IndexLeafCell(_) => {
+                        unimplemented!();
+                    }
+                }
+            }
+
+            if !found_cell {
+                let parent = mem_page.parent.clone();
+                match page.header.right_most_pointer {
+                    Some(right_most_pointer) => {
+                        let mem_page = MemPage::new(parent, right_most_pointer as usize, 0);
+                        self.page.replace(Some(Rc::new(mem_page)));
+                        continue;
+                    }
+                    None => {
+                        unreachable!("we shall not go back up! The only way is down the slope")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -165,8 +236,12 @@ impl Cursor for BTreeCursor {
         Ok(self.record.borrow())
     }
 
-    fn insert(&mut self, _record: &OwnedRecord) -> Result<()> {
-        unimplemented!()
+    fn insert(&mut self, key: &OwnedValue, _record: &OwnedRecord) -> Result<CursorResult<()>> {
+        let int_key = match key {
+            OwnedValue::Integer(i) => i,
+            _ => unreachable!("btree tables are indexed by integers!"),
+        };
+        self.move_to(*int_key as u64)
     }
 
     fn set_null_flag(&mut self, flag: bool) {

@@ -315,7 +315,7 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Option<u64>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
-    fn insert(&mut self, record: &OwnedRecord) -> Result<()>;
+    fn insert(&mut self, key: &OwnedValue, record: &OwnedRecord) -> Result<CursorResult<()>>;
     fn exists(&mut self, key: &OwnedValue) -> Result<bool>;
     fn set_null_flag(&mut self, flag: bool);
     fn get_null_flag(&self) -> bool;
