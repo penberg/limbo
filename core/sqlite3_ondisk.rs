@@ -31,6 +31,7 @@ use crate::types::{OwnedRecord, OwnedValue};
 use crate::{PageSource, Result};
 use log::trace;
 use std::cell::RefCell;
+use std::ptr::NonNull;
 use std::rc::Rc;
 
 /// The size of the database header in bytes.
@@ -70,10 +71,10 @@ pub struct DatabaseHeader {
 
 pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Buffer::allocate(512, drop_fn);
+    let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let result = Rc::new(RefCell::new(DatabaseHeader::default()));
     let header = result.clone();
-    let complete = Box::new(move |buf: &Buffer| {
+    let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let header = header.clone();
         finish_read_database_header(buf, header).unwrap();
     });
@@ -82,7 +83,11 @@ pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell
     Ok(result)
 }
 
-fn finish_read_database_header(buf: &Buffer, header: Rc<RefCell<DatabaseHeader>>) -> Result<()> {
+fn finish_read_database_header(
+    buf: Rc<RefCell<Buffer>>,
+    header: Rc<RefCell<DatabaseHeader>>,
+) -> Result<()> {
+    let buf = buf.borrow();
     let buf = buf.as_slice();
     let mut header = std::cell::RefCell::borrow_mut(&header);
     header.magic.copy_from_slice(&buf[0..16]);
@@ -123,9 +128,9 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let buffer_to_copy_in_cb = buffer_to_copy.clone();
 
     let header_cb = header.clone();
-    let complete = Box::new(move |buffer: &Buffer| {
+    let complete = Box::new(move |buffer: Rc<RefCell<Buffer>>| {
         let header = header_cb.clone();
-        let buffer: Buffer = buffer.clone();
+        let buffer: Buffer = buffer.borrow().clone();
         let buffer = Rc::new(RefCell::new(buffer));
         {
             let mut buf_mut = std::cell::RefCell::borrow_mut(&buffer);
@@ -163,7 +168,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     });
 
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Buffer::allocate(512, drop_fn);
+    let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let c = Rc::new(Completion::new(buf.clone(), complete));
     page_source.get(1, c.clone())?;
     // run get header block
@@ -221,6 +226,7 @@ impl TryFrom<u8> for PageType {
 pub struct BTreePage {
     pub header: BTreePageHeader,
     pub cells: Vec<BTreeCell>,
+    pub buffer: Rc<RefCell<Buffer>>,
 }
 
 impl BTreePage {
@@ -246,8 +252,8 @@ pub fn begin_read_btree_page(
         let buffer_pool = buffer_pool.clone();
         buffer_pool.put(buf);
     });
-    let buf = Buffer::new(buf, drop_fn);
-    let complete = Box::new(move |buf: &Buffer| {
+    let buf = Rc::new(RefCell::new(Buffer::new(buf, drop_fn)));
+    let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let page = page.clone();
         if finish_read_btree_page(page_idx, buf, page.clone()).is_err() {
             page.borrow_mut().set_error();
@@ -258,13 +264,18 @@ pub fn begin_read_btree_page(
     Ok(())
 }
 
-fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<RefCell<Page>>) -> Result<()> {
+fn finish_read_btree_page(
+    page_idx: usize,
+    buffer_ref: Rc<RefCell<Buffer>>,
+    page: Rc<RefCell<Page>>,
+) -> Result<()> {
     trace!("finish_read_btree_page(page_idx = {})", page_idx);
     let mut pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
         0
     };
+    let buf = buffer_ref.borrow();
     let buf = buf.as_slice();
     let mut header = BTreePageHeader {
         page_type: buf[pos].try_into()?,
@@ -291,7 +302,11 @@ fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<RefCell<Page>>
         let cell = read_btree_cell(buf, &header.page_type, cell_pointer as usize)?;
         cells.push(cell);
     }
-    let inner = BTreePage { header, cells };
+    let inner = BTreePage {
+        header,
+        cells,
+        buffer: buffer_ref.clone(),
+    };
     {
         let page = page.borrow_mut();
         page.contents.write().unwrap().replace(inner);

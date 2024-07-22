@@ -1,7 +1,9 @@
 use crate::Result;
 use cfg_block::cfg_block;
+use std::fmt;
 use std::{
     cell::{Ref, RefCell, RefMut},
+    fmt::Debug,
     mem::ManuallyDrop,
     pin::Pin,
     rc::Rc,
@@ -21,11 +23,11 @@ pub trait IO {
     fn run_once(&self) -> Result<()>;
 }
 
-pub type Complete = dyn Fn(&Buffer);
+pub type Complete = dyn Fn(Rc<RefCell<Buffer>>);
 pub type WriteComplete = dyn Fn(usize);
 
 pub struct Completion {
-    pub buf: RefCell<Buffer>,
+    pub buf: Rc<RefCell<Buffer>>,
     pub complete: Box<Complete>,
 }
 
@@ -34,8 +36,7 @@ pub struct WriteCompletion {
 }
 
 impl Completion {
-    pub fn new(buf: Buffer, complete: Box<Complete>) -> Self {
-        let buf = RefCell::new(buf);
+    pub fn new(buf: Rc<RefCell<Buffer>>, complete: Box<Complete>) -> Self {
         Self { buf, complete }
     }
 
@@ -48,8 +49,7 @@ impl Completion {
     }
 
     pub fn complete(&self) {
-        let buf = self.buf.borrow_mut();
-        (self.complete)(&buf);
+        (self.complete)(self.buf.clone());
     }
 }
 
@@ -70,6 +70,12 @@ pub type BufferDropFn = Rc<dyn Fn(BufferData)>;
 pub struct Buffer {
     data: ManuallyDrop<BufferData>,
     drop: BufferDropFn,
+}
+
+impl Debug for Buffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.data)
+    }
 }
 
 impl Drop for Buffer {

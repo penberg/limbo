@@ -410,8 +410,6 @@ impl Program {
         loop {
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
-            dbg!(state.pc);
-            dbg!(insn);
             let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
