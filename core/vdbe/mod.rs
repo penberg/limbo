@@ -410,6 +410,8 @@ impl Program {
         loop {
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
+            dbg!(state.pc);
+            dbg!(insn);
             let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
@@ -1068,7 +1070,8 @@ impl Program {
                         OwnedValue::Record(record) => record,
                         _ => unreachable!("SorterInsert on non-record register"),
                     };
-                    cursor.insert(record)?;
+                    // TODO: set correct key
+                    cursor.insert(&OwnedValue::Integer(0), record)?;
                     state.pc += 1;
                 }
                 Insn::SorterSort {
@@ -1268,7 +1271,8 @@ impl Program {
                 Insn::EndCoroutine { yield_reg } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
                         state.ended_coroutine = true;
-                        state.pc = pc;
+                        println!("jumping to {}", pc);
+                        state.pc = pc - 1; // yield jump is always next to yield. Here we substract 1 to go back to yield instruction
                     } else {
                         unreachable!();
                     }
@@ -1278,12 +1282,13 @@ impl Program {
                     end_offset,
                 } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
+                        println!("yield {} to {}", state.pc, pc);
                         if state.ended_coroutine {
                             state.pc = *end_offset;
                         } else {
                             // swap
                             (state.pc, state.registers[*yield_reg]) =
-                                (pc, OwnedValue::Integer(state.pc));
+                                (pc, OwnedValue::Integer(state.pc + 1));
                         }
                     } else {
                         unreachable!();
@@ -1295,7 +1300,6 @@ impl Program {
                     record_reg,
                     flag,
                 } => {
-                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = cursors.get_mut(cursor).unwrap();
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(r) => r,
@@ -1303,7 +1307,9 @@ impl Program {
                     };
                     let key = &state.registers[*key_reg];
                     match cursor.insert(key, record)? {
-                        CursorResult::Ok(_) => {}
+                        CursorResult::Ok(_) => {
+                            state.pc += 1;
+                        }
                         CursorResult::IO => {
                             // If there is I/O, the instruction is restarted.
                             return Ok(StepResult::IO);
@@ -1336,9 +1342,11 @@ impl Program {
                     rowid_reg,
                     target_pc,
                 } => {
-                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = cursors.get_mut(cursor).unwrap();
-                    cursor.exists(&state.registers[*rowid_reg]);
+                    match cursor.exists(&state.registers[*rowid_reg])? {
+                        true => state.pc += 1,
+                        false => state.pc = *target_pc,
+                    };
                 } // TODO(pere): how is not exists implemented? We probably need to traverse keys my pointing cursor.
                 // this cursor may be reused for next insert
                 // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
@@ -1362,6 +1370,7 @@ impl Program {
                     for i in 0..=*amount {
                         state.registers[*dst_reg + i] = state.registers[*src_reg + i].clone();
                     }
+                    state.pc += 1;
                 }
             }
         }

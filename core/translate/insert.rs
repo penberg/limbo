@@ -121,6 +121,7 @@ pub fn translate_insert(
     // Main loop
     let record_register = program.alloc_register();
     let halt_label = program.allocate_label();
+    let loop_start_offset = program.offset();
     program.emit_insn_with_label_dependency(
         Insn::Yield {
             yield_reg,
@@ -178,6 +179,10 @@ pub fn translate_insert(
             cursor_id: cursor_id,
         });
     }
+
+    program.emit_insn(Insn::Goto {
+        target_pc: loop_start_offset,
+    });
 
     program.resolve_label(halt_label, program.offset());
     program.emit_insn(Insn::Halt);
