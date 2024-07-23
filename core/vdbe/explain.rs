@@ -1,0 +1,522 @@
+use super::{Program, InsnReference, Insn, OwnedValue};
+use std::rc::Rc;
+
+pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: String) -> String {
+    let (opcode, p1, p2, p3, p4, p5, comment): (&str, i32, i32, i32, OwnedValue, u16, String) =
+        match insn {
+            Insn::Init { target_pc } => (
+                "Init",
+                0,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("Start at {}", target_pc),
+            ),
+            Insn::Add { lhs, rhs, dest } => (
+                "Add",
+                *lhs as i32,
+                *rhs as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}]+r[{}]", dest, lhs, rhs),
+            ),
+            Insn::Null { dest } => (
+                "Null",
+                *dest as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=NULL", dest),
+            ),
+            Insn::NullRow { cursor_id } => (
+                "NullRow",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("Set cursor {} to a (pseudo) NULL row", cursor_id),
+            ),
+            Insn::NotNull { reg, target_pc } => (
+                "NotNull",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}] -> {}", reg, target_pc),
+            ),
+            Insn::IfPos {
+                reg,
+                target_pc,
+                decrement_by,
+            } => (
+                "IfPos",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "r[{}]>0 -> r[{}]-={}, goto {}",
+                    reg, reg, decrement_by, target_pc
+                ),
+            ),
+            Insn::Eq {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Eq",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}]==r[{}] goto {}", lhs, rhs, target_pc),
+            ),
+            Insn::Ne {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Ne",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}]!=r[{}] goto {}", lhs, rhs, target_pc),
+            ),
+            Insn::Lt {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Lt",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}]<r[{}] goto {}", lhs, rhs, target_pc),
+            ),
+            Insn::Le {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Le",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}]<=r[{}] goto {}", lhs, rhs, target_pc),
+            ),
+            Insn::Gt {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Gt",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}]>r[{}] goto {}", lhs, rhs, target_pc),
+            ),
+            Insn::Ge {
+                lhs,
+                rhs,
+                target_pc,
+            } => (
+                "Ge",
+                *lhs as i32,
+                *rhs as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
+            ),
+            Insn::If {
+                reg,
+                target_pc,
+                null_reg,
+            } => (
+                "If",
+                *reg as i32,
+                *target_pc as i32,
+                *null_reg as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if r[{}] goto {}", reg, target_pc),
+            ),
+            Insn::IfNot {
+                reg,
+                target_pc,
+                null_reg,
+            } => (
+                "IfNot",
+                *reg as i32,
+                *target_pc as i32,
+                *null_reg as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if !r[{}] goto {}", reg, target_pc),
+            ),
+            Insn::OpenReadAsync {
+                cursor_id,
+                root_page,
+            } => (
+                "OpenReadAsync",
+                *cursor_id as i32,
+                *root_page as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("root={}", root_page),
+            ),
+            Insn::OpenReadAwait => (
+                "OpenReadAwait",
+                0,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::OpenPseudo {
+                cursor_id,
+                content_reg,
+                num_fields,
+            } => (
+                "OpenPseudo",
+                *cursor_id as i32,
+                *content_reg as i32,
+                *num_fields as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("{} columns in r[{}]", num_fields, content_reg),
+            ),
+            Insn::RewindAsync { cursor_id } => (
+                "RewindAsync",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::RewindAwait {
+                cursor_id,
+                pc_if_empty,
+            } => (
+                "RewindAwait",
+                *cursor_id as i32,
+                *pc_if_empty as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Column {
+                cursor_id,
+                column,
+                dest,
+            } => {
+                let (_, table) = &program.cursor_ref[*cursor_id];
+                (
+                    "Column",
+                    *cursor_id as i32,
+                    *column as i32,
+                    *dest as i32,
+                    OwnedValue::Text(Rc::new("".to_string())),
+                    0,
+                    format!(
+                        "r[{}]={}.{}",
+                        dest,
+                        table
+                            .as_ref()
+                            .map(|x| x.get_name())
+                            .unwrap_or(format!("cursor {}", cursor_id).as_str()),
+                        table
+                            .as_ref()
+                            .and_then(|x| x.column_index_to_name(*column))
+                            .unwrap_or(format!("column {}", *column).as_str())
+                    ),
+                )
+            }
+            Insn::MakeRecord {
+                start_reg,
+                count,
+                dest_reg,
+            } => (
+                "MakeRecord",
+                *start_reg as i32,
+                *count as i32,
+                *dest_reg as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "r[{}]=mkrec(r[{}..{}])",
+                    dest_reg,
+                    start_reg,
+                    start_reg + count - 1,
+                ),
+            ),
+            Insn::ResultRow { start_reg, count } => (
+                "ResultRow",
+                *start_reg as i32,
+                *count as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                if *count == 1 {
+                    format!("output=r[{}]", start_reg)
+                } else {
+                    format!("output=r[{}..{}]", start_reg, start_reg + count - 1)
+                },
+            ),
+            Insn::NextAsync { cursor_id } => (
+                "NextAsync",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::NextAwait {
+                cursor_id,
+                pc_if_next,
+            } => (
+                "NextAwait",
+                *cursor_id as i32,
+                *pc_if_next as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Halt => (
+                "Halt",
+                0,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Transaction => (
+                "Transaction",
+                0,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Goto { target_pc } => (
+                "Goto",
+                0,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Integer { value, dest } => (
+                "Integer",
+                *value as i32,
+                *dest as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]={}", dest, value),
+            ),
+            Insn::Real { value, dest } => (
+                "Real",
+                0,
+                *dest as i32,
+                0,
+                OwnedValue::Float(*value),
+                0,
+                format!("r[{}]={}", dest, value),
+            ),
+            Insn::RealAffinity { register } => (
+                "RealAffinity",
+                *register as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::String8 { value, dest } => (
+                "String8",
+                0,
+                *dest as i32,
+                0,
+                OwnedValue::Text(Rc::new(value.clone())),
+                0,
+                format!("r[{}]='{}'", dest, value),
+            ),
+            Insn::RowId { cursor_id, dest } => (
+                "RowId",
+                *cursor_id as i32,
+                *dest as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "r[{}]={}.rowid",
+                    dest,
+                    &program.cursor_ref[*cursor_id]
+                        .1
+                        .as_ref()
+                        .map(|x| x.get_name())
+                        .unwrap_or(format!("cursor {}", cursor_id).as_str())
+                ),
+            ),
+            Insn::DecrJumpZero { reg, target_pc } => (
+                "DecrJumpZero",
+                *reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if (--r[{}]==0) goto {}", reg, target_pc),
+            ),
+            Insn::AggStep {
+                func,
+                acc_reg,
+                delimiter: _,
+                col,
+            } => (
+                "AggStep",
+                0,
+                *col as i32,
+                *acc_reg as i32,
+                OwnedValue::Text(Rc::new(func.to_string().into())),
+                0,
+                format!("accum=r[{}] step(r[{}])", *acc_reg, *col),
+            ),
+            Insn::AggFinal { register, func } => (
+                "AggFinal",
+                0,
+                *register as i32,
+                0,
+                OwnedValue::Text(Rc::new(func.to_string().into())),
+                0,
+                format!("accum=r[{}]", *register),
+            ),
+            Insn::SorterOpen {
+                cursor_id,
+                columns,
+                order,
+            } => {
+                let _p4 = String::new();
+                let to_print: Vec<String> = order
+                    .values
+                    .iter()
+                    .map(|v| match v {
+                        OwnedValue::Integer(i) => {
+                            if *i == 0 {
+                                "B".to_string()
+                            } else {
+                                "-B".to_string()
+                            }
+                        }
+                        _ => unreachable!(),
+                    })
+                    .collect();
+                (
+                    "SorterOpen",
+                    *cursor_id as i32,
+                    *columns as i32,
+                    0,
+                    OwnedValue::Text(Rc::new(format!("k({},{})", columns, to_print.join(",")))),
+                    0,
+                    format!("cursor={}", cursor_id),
+                )
+            }
+            Insn::SorterData {
+                cursor_id,
+                dest_reg,
+                pseudo_cursor,
+            } => (
+                "SorterData",
+                *cursor_id as i32,
+                *dest_reg as i32,
+                *pseudo_cursor as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=data", dest_reg),
+            ),
+            Insn::SorterInsert {
+                cursor_id,
+                record_reg,
+            } => (
+                "SorterInsert",
+                *cursor_id as i32,
+                *record_reg as i32,
+                0,
+                OwnedValue::Integer(0),
+                0,
+                format!("key=r[{}]", record_reg),
+            ),
+            Insn::SorterSort {
+                cursor_id,
+                pc_if_empty,
+            } => (
+                "SorterSort",
+                *cursor_id as i32,
+                *pc_if_empty as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::SorterNext {
+                cursor_id,
+                pc_if_next,
+            } => (
+                "SorterNext",
+                *cursor_id as i32,
+                *pc_if_next as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Function {
+                start_reg,
+                dest,
+                func,
+            } => (
+                "Function",
+                1,
+                *start_reg as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new(func.to_string())),
+                0,
+                format!("r[{}]=func(r[{}..])", dest, start_reg),
+            ),
+        };
+    format!(
+        "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
+        addr,
+        &(indent + opcode),
+        p1,
+        p2,
+        p3,
+        p4.to_string(),
+        p5,
+        comment
+    )
+}
