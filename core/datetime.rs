@@ -247,74 +247,198 @@ mod tests {
 
         let test_cases = [
             // Format 1: YYYY-MM-DD (no timezone applicable)
-            (OwnedValue::Text(Rc::new("2024-07-21".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21".to_string())),
+                test_date_str,
+            ),
             // Format 2: YYYY-MM-DD HH:MM
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30+02:00".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30-05:00".to_string())), next_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 01:30+05:00".to_string())), prev_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30Z".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30+02:00".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30-05:00".to_string())),
+                next_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 01:30+05:00".to_string())),
+                prev_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30Z".to_string())),
+                test_date_str,
+            ),
             // Format 3: YYYY-MM-DD HH:MM:SS
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45+02:00".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45-05:00".to_string())), next_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 01:30:45+05:00".to_string())), prev_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45Z".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45+02:00".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45-05:00".to_string())),
+                next_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 01:30:45+05:00".to_string())),
+                prev_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45Z".to_string())),
+                test_date_str,
+            ),
             // Format 4: YYYY-MM-DD HH:MM:SS.SSS
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123+02:00".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123-05:00".to_string())), next_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 01:30:45.123+05:00".to_string())), prev_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123Z".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123+02:00".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123-05:00".to_string())),
+                next_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 01:30:45.123+05:00".to_string())),
+                prev_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21 22:30:45.123Z".to_string())),
+                test_date_str,
+            ),
             // Format 5: YYYY-MM-DDTHH:MM
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30+02:00".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30-05:00".to_string())), next_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T01:30+05:00".to_string())), prev_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30Z".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30+02:00".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30-05:00".to_string())),
+                next_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T01:30+05:00".to_string())),
+                prev_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30Z".to_string())),
+                test_date_str,
+            ),
             // Format 6: YYYY-MM-DDTHH:MM:SS
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45+02:00".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45-05:00".to_string())), next_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T01:30:45+05:00".to_string())), prev_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45Z".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45+02:00".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45-05:00".to_string())),
+                next_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T01:30:45+05:00".to_string())),
+                prev_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45Z".to_string())),
+                test_date_str,
+            ),
             // Format 7: YYYY-MM-DDTHH:MM:SS.SSS
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123+02:00".to_string())), test_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123-05:00".to_string())), next_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T01:30:45.123+05:00".to_string())), prev_date_str),
-            (OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123Z".to_string())), test_date_str),
-
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123+02:00".to_string())),
+                test_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123-05:00".to_string())),
+                next_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T01:30:45.123+05:00".to_string())),
+                prev_date_str,
+            ),
+            (
+                OwnedValue::Text(Rc::new("2024-07-21T22:30:45.123Z".to_string())),
+                test_date_str,
+            ),
             // Format 8: HH:MM
             (OwnedValue::Text(Rc::new("22:30".to_string())), "2000-01-01"),
-            (OwnedValue::Text(Rc::new("22:30+02:00".to_string())), "2000-01-01"),
-            (OwnedValue::Text(Rc::new("22:30-05:00".to_string())), "2000-01-02"),
-            (OwnedValue::Text(Rc::new("01:30+05:00".to_string())), "1999-12-31"),
-            (OwnedValue::Text(Rc::new("22:30Z".to_string())), "2000-01-01"),
-
+            (
+                OwnedValue::Text(Rc::new("22:30+02:00".to_string())),
+                "2000-01-01",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30-05:00".to_string())),
+                "2000-01-02",
+            ),
+            (
+                OwnedValue::Text(Rc::new("01:30+05:00".to_string())),
+                "1999-12-31",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30Z".to_string())),
+                "2000-01-01",
+            ),
             // Format 9: HH:MM:SS
-            (OwnedValue::Text(Rc::new("22:30:45".to_string())), "2000-01-01"),
-            (OwnedValue::Text(Rc::new("22:30:45+02:00".to_string())), "2000-01-01"),
-            (OwnedValue::Text(Rc::new("22:30:45-05:00".to_string())), "2000-01-02"),
-            (OwnedValue::Text(Rc::new("01:30:45+05:00".to_string())), "1999-12-31"),
-            (OwnedValue::Text(Rc::new("22:30:45Z".to_string())), "2000-01-01"),
-
+            (
+                OwnedValue::Text(Rc::new("22:30:45".to_string())),
+                "2000-01-01",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30:45+02:00".to_string())),
+                "2000-01-01",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30:45-05:00".to_string())),
+                "2000-01-02",
+            ),
+            (
+                OwnedValue::Text(Rc::new("01:30:45+05:00".to_string())),
+                "1999-12-31",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30:45Z".to_string())),
+                "2000-01-01",
+            ),
             // Format 10: HH:MM:SS.SSS
-            (OwnedValue::Text(Rc::new("22:30:45.123".to_string())), "2000-01-01"),
-            (OwnedValue::Text(Rc::new("22:30:45.123+02:00".to_string())), "2000-01-01"),
-            (OwnedValue::Text(Rc::new("22:30:45.123-05:00".to_string())), "2000-01-02"),
-            (OwnedValue::Text(Rc::new("01:30:45.123+05:00".to_string())), "1999-12-31"),
-            (OwnedValue::Text(Rc::new("22:30:45.123Z".to_string())), "2000-01-01"),
-
+            (
+                OwnedValue::Text(Rc::new("22:30:45.123".to_string())),
+                "2000-01-01",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30:45.123+02:00".to_string())),
+                "2000-01-01",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30:45.123-05:00".to_string())),
+                "2000-01-02",
+            ),
+            (
+                OwnedValue::Text(Rc::new("01:30:45.123+05:00".to_string())),
+                "1999-12-31",
+            ),
+            (
+                OwnedValue::Text(Rc::new("22:30:45.123Z".to_string())),
+                "2000-01-01",
+            ),
             // Test Format 11: 'now'
             (OwnedValue::Text(Rc::new("now".to_string())), &now),
-        
             // Format 12: DDDDDDDDDD (Julian date as float or integer)
             (OwnedValue::Float(2460512.5), test_date_str),
             (OwnedValue::Integer(2460513), test_date_str),
@@ -333,13 +457,13 @@ mod tests {
     #[test]
     fn test_invalid_get_date_from_time_value() {
         let invalid_cases = [
-            OwnedValue::Text(Rc::new("2024-07-21 25:00".to_string())),       // Invalid hour
-            OwnedValue::Text(Rc::new("2024-07-21 24:00:00".to_string())),    // Invalid hour
-            OwnedValue::Text(Rc::new("2024-07-21 23:60:00".to_string())),    // Invalid minute
-            OwnedValue::Text(Rc::new("2024-07-21 22:58:60".to_string())),    // Invalid second
-            OwnedValue::Text(Rc::new("2024-07-32".to_string())),             // Invalid day
-            OwnedValue::Text(Rc::new("2024-13-01".to_string())),             // Invalid month
-            OwnedValue::Text(Rc::new("invalid_date".to_string())),           // Completely invalid string
+            OwnedValue::Text(Rc::new("2024-07-21 25:00".to_string())), // Invalid hour
+            OwnedValue::Text(Rc::new("2024-07-21 24:00:00".to_string())), // Invalid hour
+            OwnedValue::Text(Rc::new("2024-07-21 23:60:00".to_string())), // Invalid minute
+            OwnedValue::Text(Rc::new("2024-07-21 22:58:60".to_string())), // Invalid second
+            OwnedValue::Text(Rc::new("2024-07-32".to_string())),       // Invalid day
+            OwnedValue::Text(Rc::new("2024-13-01".to_string())),       // Invalid month
+            OwnedValue::Text(Rc::new("invalid_date".to_string())),     // Completely invalid string
             OwnedValue::Text(Rc::new("".to_string())),                 // Empty string
             OwnedValue::Integer(i64::MAX),                             // Large Julian day
             OwnedValue::Integer(-1),                                   // Negative Julian day
@@ -349,17 +473,15 @@ mod tests {
             OwnedValue::Float(f64::INFINITY), // Infinity
             OwnedValue::Null,                 // Null value
             OwnedValue::Blob(vec![1, 2, 3].into()), // Blob (unsupported type)
-
             // Invalid timezone tests
-            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+24:00".to_string())),  // Invalid timezone offset (too large)
-            OwnedValue::Text(Rc::new("2024-07-21T12:00:00-24:00".to_string())),  // Invalid timezone offset (too small)
-            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+00:60".to_string())),  // Invalid timezone minutes
+            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+24:00".to_string())), // Invalid timezone offset (too large)
+            OwnedValue::Text(Rc::new("2024-07-21T12:00:00-24:00".to_string())), // Invalid timezone offset (too small)
+            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+00:60".to_string())), // Invalid timezone minutes
             OwnedValue::Text(Rc::new("2024-07-21T12:00:00+00:00:00".to_string())), // Invalid timezone format (extra seconds)
-            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+".to_string())),       // Incomplete timezone
-            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+Z".to_string())),      // Invalid timezone format
+            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+".to_string())), // Incomplete timezone
+            OwnedValue::Text(Rc::new("2024-07-21T12:00:00+Z".to_string())), // Invalid timezone format
             OwnedValue::Text(Rc::new("2024-07-21T12:00:00+00:00Z".to_string())), // Mixing offset and Z
-            OwnedValue::Text(Rc::new("2024-07-21T12:00:00UTC".to_string())),     // Named timezone (not supported)
-
+            OwnedValue::Text(Rc::new("2024-07-21T12:00:00UTC".to_string())), // Named timezone (not supported)
         ];
 
         for case in invalid_cases.iter() {

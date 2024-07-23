@@ -15,7 +15,7 @@ use crate::translate::where_clause::{
 };
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::normalize_ident;
-use crate::vdbe::{BranchOffset, Insn, Program, builder::ProgramBuilder};
+use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn, Program};
 use anyhow::Result;
 use expr::{build_select, maybe_apply_affinity, translate_expr};
 use sqlite3_parser::ast::{self, Literal};

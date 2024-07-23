@@ -6,7 +6,7 @@ use crate::{
     schema::{Schema, Table, Type},
     translate::select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
-    vdbe::{BranchOffset, Insn, builder::ProgramBuilder},
+    vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
 };
 
 pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
@@ -226,7 +226,8 @@ pub fn translate_expr(
             filter_over: _,
         } => {
             let args_count = if let Some(args) = args { args.len() } else { 0 };
-            let func_type: Option<Func> = Func::resolve_function(normalize_ident(name.0.as_str()).as_str(),args_count).ok();
+            let func_type: Option<Func> =
+                Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), args_count).ok();
 
             match func_type {
                 Some(Func::Agg(_)) => {
@@ -355,10 +356,16 @@ pub fn translate_expr(
                                     anyhow::bail!("Parse error: date function with > 1 arguments. Modifiers are not yet supported.");
                                 } else if args.len() == 1 {
                                     let arg_reg = program.alloc_register();
-                                    let _ = translate_expr(program, select, &args[0], arg_reg, cursor_hint)?;
+                                    let _ = translate_expr(
+                                        program,
+                                        select,
+                                        &args[0],
+                                        arg_reg,
+                                        cursor_hint,
+                                    )?;
                                     start_reg = arg_reg;
-                                } 
-                            } 
+                                }
+                            }
                             program.emit_insn(Insn::Function {
                                 start_reg: start_reg,
                                 dest: target_register,
@@ -605,10 +612,12 @@ pub fn analyze_expr<'a>(expr: &'a Expr, column_info_out: &mut ColumnInfo<'a>) {
             filter_over: _,
         } => {
             let args_count = if let Some(args) = args { args.len() } else { 0 };
-            let func_type = match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(),args_count) {
-                Ok(func) => Some(func),
-                Err(_) => None,
-            };
+            let func_type =
+                match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), args_count)
+                {
+                    Ok(func) => Some(func),
+                    Err(_) => None,
+                };
             if func_type.is_none() {
                 let args = args.as_ref().unwrap();
                 if !args.is_empty() {

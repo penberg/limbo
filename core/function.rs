@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum AggFunc {
     Avg,
@@ -67,14 +66,13 @@ pub enum Func {
     SingleRow(SingleRowFunc),
 }
 
-impl Func{
-
-    pub fn resolve_function(name: &str, arg_count:usize) -> Result<Func, ()>{
+impl Func {
+    pub fn resolve_function(name: &str, arg_count: usize) -> Result<Func, ()> {
         match name {
             "avg" => Ok(Func::Agg(AggFunc::Avg)),
             "count" => Ok(Func::Agg(AggFunc::Count)),
             "group_concat" => Ok(Func::Agg(AggFunc::GroupConcat)),
-            "max"  if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Max)),
+            "max" if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Max)),
             "max" if arg_count > 1 => Ok(Func::SingleRow(SingleRowFunc::Max)),
             "min" if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Min)),
             "min" if arg_count > 1 => Ok(Func::SingleRow(SingleRowFunc::Min)),

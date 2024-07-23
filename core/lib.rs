@@ -1,5 +1,6 @@
 mod btree;
 mod buffer_pool;
+mod datetime;
 mod function;
 mod io;
 mod pager;
@@ -11,7 +12,6 @@ mod translate;
 mod types;
 mod util;
 mod vdbe;
-mod datetime;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]

@@ -42,7 +42,7 @@ fn main() {
                             break;
                         }
                     }
-                },
+                }
                 Err(_) => {
                     continue;
                 }
