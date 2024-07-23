@@ -5,7 +5,7 @@ use crate::{
     function::SingleRowFunc,
     translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     translate::select::Select,
-    vdbe::{BranchOffset, Insn, builder::ProgramBuilder},
+    vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
 };
 
 use super::select::LoopInfo;
@@ -30,10 +30,10 @@ pub struct ProcessedWhereClause {
 pub fn split_constraint_to_terms<'a>(
     program: &'a mut ProgramBuilder,
     select: &'a Select,
+    processed_where_clause: &mut ProcessedWhereClause,
     where_clause_or_join_constraint: &ast::Expr,
     outer_join_table_name: Option<&'a String>,
-) -> Result<Vec<WhereTerm>> {
-    let mut terms = Vec::new();
+) -> Result<()> {
     let mut queue = vec![where_clause_or_join_constraint];
 
     while let Some(expr) = queue.pop() {
@@ -94,12 +94,12 @@ pub fn split_constraint_to_terms<'a>(
                         }
                     },
                 };
-                terms.push(term);
+                processed_where_clause.terms.push(term);
             }
         }
     }
 
-    Ok(terms)
+    Ok(())
 }
 
 /**
@@ -112,8 +112,7 @@ pub fn process_where<'a>(
 ) -> Result<ProcessedWhereClause> {
     let mut wc = ProcessedWhereClause { terms: Vec::new() };
     if let Some(w) = &select.where_clause {
-        wc.terms
-            .extend(split_constraint_to_terms(program, select, w, None)?);
+        split_constraint_to_terms(program, select, &mut wc, w, None)?;
     }
 
     for table in select.src_tables.iter() {
@@ -122,9 +121,10 @@ pub fn process_where<'a>(
         }
         let join_info = table.join_info.unwrap();
         if let Some(ast::JoinConstraint::On(expr)) = &join_info.constraint {
-            let terms = split_constraint_to_terms(
+            split_constraint_to_terms(
                 program,
                 select,
+                &mut wc,
                 expr,
                 if table.is_outer_join() {
                     Some(&table.identifier)
@@ -132,7 +132,6 @@ pub fn process_where<'a>(
                     None
                 },
             )?;
-            wc.terms.extend(terms);
         }
     }
 
