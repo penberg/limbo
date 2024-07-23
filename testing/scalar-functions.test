@@ -142,6 +142,7 @@ do_execsql_test length-null {
 do_execsql_test length-empty-text {
   SELECT length('');
 } {0}
+
 do_execsql_test min-number {
   select min(-10,2,3)
 } {-10}
@@ -165,3 +166,47 @@ do_execsql_test max-str {
 do_execsql_test max-null {
   select max(null,null)
 } {}
+
+do_execsql_test date-current-date {
+  SELECT length(date('now')) = 10;
+} {1}
+
+do_execsql_test date-specific-date {
+  SELECT date('2023-05-18');
+} {2023-05-18}
+
+do_execsql_test date-with-time {
+  SELECT date('2023-05-18 15:30:45');
+} {2023-05-18}
+
+do_execsql_test date-iso8601 {
+  SELECT date('2023-05-18T15:30:45');
+} {2023-05-18}
+
+do_execsql_test date-with-milliseconds {
+  SELECT date('2023-05-18 15:30:45.123');
+} {2023-05-18}
+
+do_execsql_test date-julian-day-integer {
+  SELECT date(2460082);
+} {2023-05-17}
+
+do_execsql_test date-julian-day-float {
+  SELECT date(2460082.5);
+} {2023-05-18}
+
+do_execsql_test date-invalid-input {
+  SELECT date('not a date');
+} {{}}
+
+do_execsql_test date-null-input {
+  SELECT date(NULL);
+} {{}}
+
+do_execsql_test date-out-of-range {
+  SELECT date('10001-01-01');
+} {{}}
+
+do_execsql_test date-time-only {
+  SELECT date('15:30:45');
+} {2000-01-01}
