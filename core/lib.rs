@@ -5,7 +5,6 @@ mod io;
 mod pager;
 mod pseudo;
 mod schema;
-mod sorter;
 mod sqlite3_ondisk;
 mod storage;
 mod translate;

@@ -1,5 +1,6 @@
 pub mod builder;
 pub mod explain;
+pub mod sorter;
 
 use crate::btree::BTreeCursor;
 use crate::function::{AggFunc, SingleRowFunc};
@@ -927,7 +928,7 @@ impl Program {
                             _ => unreachable!(),
                         })
                         .collect();
-                    let cursor = Box::new(crate::sorter::Sorter::new(order));
+                    let cursor = Box::new(sorter::Sorter::new(order));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
