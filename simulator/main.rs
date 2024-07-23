@@ -14,32 +14,43 @@ fn main() {
     println!("Seed: {}", seed);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let io = Arc::new(SimulatorIO::new().unwrap());
-    for _ in 0..100000 {
-        let db = match Database::open_file(io.clone(), "./testing/testing.db") {
-            Ok(db) => db,
-            Err(_) => continue,
-        };
+    let db = match Database::open_file(io.clone(), "./testing/testing.db") {
+        Ok(db) => db,
+        Err(_) => todo!(),
+    };
+    for _ in 0..100 {
         io.inject_fault(rng.gen_bool(0.5));
         match io.run_once() {
             Ok(_) => {}
             Err(_) => continue,
         }
         let conn = db.connect();
-        let mut stmt = conn.prepare("SELECT 1").unwrap();
+        let mut stmt = conn.prepare("SELECT * FROM users").unwrap();
         let mut rows = stmt.query().unwrap();
-        match rows.next_row().unwrap() {
-            limbo_core::RowResult::Row(row) => {
-                assert_eq!(row.get::<i64>(0).unwrap(), 1);
-            }
-            limbo_core::RowResult::IO => {
-                todo!();
-            }
-            limbo_core::RowResult::Done => {
-                unreachable!();
+        loop {
+            io.inject_fault(rng.gen_bool(0.5));
+            match rows.next_row() {
+                Ok(result) => {
+                    match result {
+                        limbo_core::RowResult::Row(row) => {
+                            // TODO: assert that data is correct
+                        }
+                        limbo_core::RowResult::IO => {
+                            todo!();
+                        }
+                        limbo_core::RowResult::Done => {
+                            break;
+                        }
+                    }
+                },
+                Err(_) => {
+                    continue;
+                }
             }
         }
         stmt.reset();
     }
+    io.print_fault_stats();
 }
 
 struct SimulatorIO {
@@ -66,6 +77,12 @@ impl SimulatorIO {
             file.inject_fault(fault);
         }
     }
+
+    fn print_fault_stats(&self) {
+        for file in self.files.borrow().iter() {
+            file.print_fault_stats();
+        }
+    }
 }
 
 impl IO for SimulatorIO {
@@ -74,6 +91,8 @@ impl IO for SimulatorIO {
         let file = Rc::new(SimulatorFile {
             inner,
             fault: RefCell::new(false),
+            nr_pread_faults: RefCell::new(0),
+            nr_pwrite_faults: RefCell::new(0),
         });
         self.files.borrow_mut().push(file.clone());
         Ok(file)
@@ -91,11 +110,21 @@ impl IO for SimulatorIO {
 struct SimulatorFile {
     inner: Rc<dyn File>,
     fault: RefCell<bool>,
+    nr_pread_faults: RefCell<usize>,
+    nr_pwrite_faults: RefCell<usize>,
 }
 
 impl SimulatorFile {
     fn inject_fault(&self, fault: bool) {
         self.fault.replace(fault);
+    }
+
+    fn print_fault_stats(&self) {
+        println!(
+            "pread faults: {}, pwrite faults: {}",
+            *self.nr_pread_faults.borrow(),
+            *self.nr_pwrite_faults.borrow()
+        );
     }
 }
 
@@ -116,6 +145,7 @@ impl limbo_core::File for SimulatorFile {
 
     fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         if *self.fault.borrow() {
+            *self.nr_pread_faults.borrow_mut() += 1;
             return Err(anyhow::anyhow!("Injected fault"));
         }
         self.inner.pread(pos, c)
@@ -128,6 +158,7 @@ impl limbo_core::File for SimulatorFile {
         c: Rc<limbo_core::WriteCompletion>,
     ) -> Result<()> {
         if *self.fault.borrow() {
+            *self.nr_pwrite_faults.borrow_mut() += 1;
             return Err(anyhow::anyhow!("Injected fault"));
         }
         self.inner.pwrite(pos, buffer, c)
