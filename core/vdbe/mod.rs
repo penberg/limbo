@@ -733,12 +733,15 @@ impl Program {
                             AggFunc::Max => {
                                 let col = state.registers[*col].clone();
                                 match col {
-                                    OwnedValue::Integer(_) => OwnedValue::Agg(Box::new(
-                                        AggContext::Max(OwnedValue::Integer(i64::MIN)),
-                                    )),
-                                    OwnedValue::Float(_) => OwnedValue::Agg(Box::new(
-                                        AggContext::Max(OwnedValue::Float(f64::NEG_INFINITY)),
-                                    )),
+                                    OwnedValue::Integer(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Max(None)))
+                                    }
+                                    OwnedValue::Float(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Max(None)))
+                                    }
+                                    OwnedValue::Text(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Max(None)))
+                                    }
                                     _ => {
                                         unreachable!();
                                     }
@@ -747,12 +750,15 @@ impl Program {
                             AggFunc::Min => {
                                 let col = state.registers[*col].clone();
                                 match col {
-                                    OwnedValue::Integer(_) => OwnedValue::Agg(Box::new(
-                                        AggContext::Min(OwnedValue::Integer(i64::MAX)),
-                                    )),
-                                    OwnedValue::Float(_) => OwnedValue::Agg(Box::new(
-                                        AggContext::Min(OwnedValue::Float(f64::INFINITY)),
-                                    )),
+                                    OwnedValue::Integer(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Min(None)))
+                                    }
+                                    OwnedValue::Float(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Min(None)))
+                                    }
+                                    OwnedValue::Text(_) => {
+                                        OwnedValue::Agg(Box::new(AggContext::Min(None)))
+                                    }
                                     _ => {
                                         unreachable!();
                                     }
@@ -807,9 +813,12 @@ impl Program {
                                 unreachable!();
                             };
 
-                            match (acc, col) {
+                            match (acc.as_mut(), col) {
+                                (None, value) => {
+                                    *acc = Some(value);
+                                }
                                 (
-                                    OwnedValue::Integer(ref mut current_max),
+                                    Some(OwnedValue::Integer(ref mut current_max)),
                                     OwnedValue::Integer(value),
                                 ) => {
                                     if value > *current_max {
@@ -817,8 +826,16 @@ impl Program {
                                     }
                                 }
                                 (
-                                    OwnedValue::Float(ref mut current_max),
+                                    Some(OwnedValue::Float(ref mut current_max)),
                                     OwnedValue::Float(value),
+                                ) => {
+                                    if value > *current_max {
+                                        *current_max = value;
+                                    }
+                                }
+                                (
+                                    Some(OwnedValue::Text(ref mut current_max)),
+                                    OwnedValue::Text(value),
                                 ) => {
                                     if value > *current_max {
                                         *current_max = value;
@@ -839,9 +856,12 @@ impl Program {
                                 unreachable!();
                             };
 
-                            match (acc, col) {
+                            match (acc.as_mut(), col) {
+                                (None, value) => {
+                                    *acc.borrow_mut() = Some(value);
+                                }
                                 (
-                                    OwnedValue::Integer(ref mut current_min),
+                                    Some(OwnedValue::Integer(ref mut current_min)),
                                     OwnedValue::Integer(value),
                                 ) => {
                                     if value < *current_min {
@@ -849,8 +869,16 @@ impl Program {
                                     }
                                 }
                                 (
-                                    OwnedValue::Float(ref mut current_min),
+                                    Some(OwnedValue::Float(ref mut current_min)),
                                     OwnedValue::Float(value),
+                                ) => {
+                                    if value < *current_min {
+                                        *current_min = value;
+                                    }
+                                }
+                                (
+                                    Some(OwnedValue::Text(ref mut current_min)),
+                                    OwnedValue::Text(value),
                                 ) => {
                                     if value < *current_min {
                                         *current_min = value;
