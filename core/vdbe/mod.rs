@@ -3,6 +3,7 @@ pub mod explain;
 pub mod sorter;
 
 use crate::btree::BTreeCursor;
+use crate::datetime::get_date_from_time_value;
 use crate::function::{AggFunc, SingleRowFunc};
 use crate::pager::Pager;
 use crate::pseudo::PseudoCursor;
@@ -1095,6 +1096,22 @@ impl Program {
                             state.registers[*dest] = value;
                         } else {
                             state.registers[*dest] = OwnedValue::Null;
+                        }
+                        state.pc += 1;
+                    }
+                    SingleRowFunc::Date => {
+                        if *start_reg == 0 {
+                            let date_str = get_date_from_time_value(&OwnedValue::Text(Rc::new("now".to_string())))?;
+                            state.registers[*dest] = OwnedValue::Text(Rc::new(date_str));
+                        } else {
+                            let time_value = &state.registers[*start_reg];
+                            let date_str = get_date_from_time_value(time_value);
+                            match date_str {
+                                Ok(date) => state.registers[*dest] = OwnedValue::Text(Rc::new(date)),
+                                Err(e) => {
+                                    anyhow::bail!("Error encountered while parsing time value: {}", e)
+                                }
+                            }
                         }
                         state.pc += 1;
                     }

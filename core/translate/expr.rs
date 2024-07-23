@@ -348,6 +348,24 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        SingleRowFunc::Date => {
+                            let mut start_reg = 0;
+                            if let Some(args) = args {
+                                if args.len() > 1 {
+                                    anyhow::bail!("Parse error: date function with > 1 arguments. Modifiers are not yet supported.");
+                                } else if args.len() == 1 {
+                                    let arg_reg = program.alloc_register();
+                                    let _ = translate_expr(program, select, &args[0], arg_reg, cursor_hint)?;
+                                    start_reg = arg_reg;
+                                } 
+                            } 
+                            program.emit_insn(Insn::Function {
+                                start_reg: start_reg,
+                                dest: target_register,
+                                func: SingleRowFunc::Date,
+                            });
+                            Ok(target_register)
+                        }
                         SingleRowFunc::Trim | SingleRowFunc::Round => {
                             let args = if let Some(args) = args {
                                 if args.len() > 2 {

@@ -139,7 +139,7 @@ This document describes the SQLite compatibility status of Limbo:
 
 | Function                     | Status  | Comment |
 |------------------------------|---------|---------|
-| date()                       | No      |         |
+| date()                       | Partial |     |
 | time()                       | No      |         |
 | datetime()                   | No      |         |
 | julianday()                  | No      |         |

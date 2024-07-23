@@ -39,6 +39,8 @@ sqlite3-parser = "0.11.0"
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15", features = ["js"] }
 regex = "1.10.5"
+chrono = "0.4.38"
+julian_day_converter = "0.3.2"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
