@@ -142,3 +142,26 @@ do_execsql_test length-null {
 do_execsql_test length-empty-text {
   SELECT length('');
 } {0}
+do_execsql_test min-number {
+  select min(-10,2,3)
+} {-10}
+
+do_execsql_test min-str {
+  select min('b','a','z')
+} {a}
+
+do_execsql_test min-null {
+  select min(null,null)
+} {}
+
+do_execsql_test max-number {
+  select max(-10,2,3)
+} {3}
+
+do_execsql_test max-str {
+  select max('b','a','z')
+} {z}
+
+do_execsql_test max-null {
+  select max(null,null)
+} {}

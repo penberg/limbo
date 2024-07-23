@@ -1362,6 +1362,32 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
+                    SingleRowFunc::Min => {
+                        let start_reg = *start_reg;
+                        let reg_values = state.registers[start_reg..state.registers.len()]
+                            .iter()
+                            .collect();
+                        let min_fn = |a, b| if a < b { a } else { b };
+                        if let Some(value) = exec_minmax(reg_values, min_fn) {
+                            state.registers[*dest] = value;
+                        } else {
+                            state.registers[*dest] = OwnedValue::Null;
+                        }
+                        state.pc += 1;
+                    }
+                    SingleRowFunc::Max => {
+                        let start_reg = *start_reg;
+                        let reg_values = state.registers[start_reg..state.registers.len()]
+                            .iter()
+                            .collect();
+                        let max_fn = |a, b| if a > b { a } else { b };
+                        if let Some(value) = exec_minmax(reg_values, max_fn) {
+                            state.registers[*dest] = value;
+                        } else {
+                            state.registers[*dest] = OwnedValue::Null;
+                        }
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1990,6 +2016,13 @@ fn exec_like(pattern: &str, text: &str) -> bool {
     re.is_match(text)
 }
 
+fn exec_minmax<'a>(
+    regs: Vec<&'a OwnedValue>,
+    op: fn(&'a OwnedValue, &'a OwnedValue) -> &'a OwnedValue,
+) -> Option<OwnedValue> {
+    regs.into_iter().reduce(|a, b| op(a, b)).cloned()
+}
+
 fn exec_round(reg: &OwnedValue, precision: Option<OwnedValue>) -> OwnedValue {
     let precision = match precision {
         Some(OwnedValue::Text(x)) => x.parse().unwrap_or(0.0),
@@ -2045,7 +2078,7 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_random, exec_round, exec_trim,
+        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_minmax, exec_random, exec_round, exec_trim,
         exec_upper, OwnedValue,
     };
     use std::rc::Rc;
@@ -2068,6 +2101,43 @@ mod tests {
         let expected_blob = OwnedValue::Blob(Rc::new(vec![101, 120, 97, 109, 112, 108, 101]));
         let expected_len = OwnedValue::Integer(7);
         assert_eq!(exec_length(&expected_blob), expected_len);
+    }
+
+    #[test]
+    fn test_minmax() {
+        let min_fn = |a, b| if a < b { a } else { b };
+        let max_fn = |a, b| if a > b { a } else { b };
+        let input_int_vec = vec![&OwnedValue::Integer(-1), &OwnedValue::Integer(10)];
+        assert_eq!(
+            exec_minmax(input_int_vec.clone(), min_fn),
+            Some(OwnedValue::Integer(-1))
+        );
+        assert_eq!(
+            exec_minmax(input_int_vec.clone(), max_fn),
+            Some(OwnedValue::Integer(10))
+        );
+
+        let str1 = OwnedValue::Text(Rc::new(String::from("A")));
+        let str2 = OwnedValue::Text(Rc::new(String::from("z")));
+        let input_str_vec = vec![&str2, &str1];
+        assert_eq!(
+            exec_minmax(input_str_vec.clone(), min_fn),
+            Some(OwnedValue::Text(Rc::new(String::from("A"))))
+        );
+        assert_eq!(
+            exec_minmax(input_str_vec.clone(), max_fn),
+            Some(OwnedValue::Text(Rc::new(String::from("z"))))
+        );
+
+        let input_null_vec = vec![&OwnedValue::Null, &OwnedValue::Null];
+        assert_eq!(
+            exec_minmax(input_null_vec.clone(), min_fn),
+            Some(OwnedValue::Null)
+        );
+        assert_eq!(
+            exec_minmax(input_null_vec.clone(), max_fn),
+            Some(OwnedValue::Null)
+        );
     }
 
     #[test]

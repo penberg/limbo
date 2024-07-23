@@ -225,7 +225,8 @@ pub fn translate_expr(
             args,
             filter_over: _,
         } => {
-            let func_type: Option<Func> = normalize_ident(name.0.as_str()).as_str().parse().ok();
+            let args_count = if let Some(args) = args { args.len() } else { 0 };
+            let func_type: Option<Func> = Func::resolve_function(normalize_ident(name.0.as_str()).as_str(),args_count).ok();
 
             match func_type {
                 Some(Func::Agg(_)) => {
@@ -374,6 +375,60 @@ pub fn translate_expr(
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: srf,
+                            });
+                            Ok(target_register)
+                        }
+                        SingleRowFunc::Min => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 1 {
+                                    anyhow::bail!(
+                                        "Parse error: min function with less than one argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: min function with no arguments");
+                            };
+                            for arg in args {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
+                                match arg {
+                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                    _ => {}
+                                }
+                            }
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: SingleRowFunc::Min,
+                            });
+                            Ok(target_register)
+                        }
+                        SingleRowFunc::Max => {
+                            let args = if let Some(args) = args {
+                                if args.len() < 1 {
+                                    anyhow::bail!(
+                                        "Parse error: max function with less than one argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                anyhow::bail!("Parse error: max function with no arguments");
+                            };
+                            for arg in args {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
+                                match arg {
+                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
+                                    _ => {}
+                                }
+                            }
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: SingleRowFunc::Max,
                             });
                             Ok(target_register)
                         }
@@ -531,7 +586,8 @@ pub fn analyze_expr<'a>(expr: &'a Expr, column_info_out: &mut ColumnInfo<'a>) {
             args,
             filter_over: _,
         } => {
-            let func_type = match normalize_ident(name.0.as_str()).as_str().parse() {
+            let args_count = if let Some(args) = args { args.len() } else { 0 };
+            let func_type = match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(),args_count) {
                 Ok(func) => Some(func),
                 Err(_) => None,
             };

@@ -1,4 +1,3 @@
-use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AggFunc {
@@ -38,6 +37,8 @@ pub enum SingleRowFunc {
     Trim,
     Round,
     Length,
+    Min,
+    Max,
 }
 
 impl ToString for SingleRowFunc {
@@ -52,6 +53,8 @@ impl ToString for SingleRowFunc {
             SingleRowFunc::Trim => "trim".to_string(),
             SingleRowFunc::Round => "round".to_string(),
             SingleRowFunc::Length => "length".to_string(),
+            SingleRowFunc::Min => "min".to_string(),
+            SingleRowFunc::Max => "max".to_string(),
         }
     }
 }
@@ -62,16 +65,17 @@ pub enum Func {
     SingleRow(SingleRowFunc),
 }
 
-impl FromStr for Func {
-    type Err = ();
+impl Func{
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
+    pub fn resolve_function(name: &str, arg_count:usize) -> Result<Func, ()>{
+        match name {
             "avg" => Ok(Func::Agg(AggFunc::Avg)),
             "count" => Ok(Func::Agg(AggFunc::Count)),
             "group_concat" => Ok(Func::Agg(AggFunc::GroupConcat)),
-            "max" => Ok(Func::Agg(AggFunc::Max)),
-            "min" => Ok(Func::Agg(AggFunc::Min)),
+            "max"  if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Max)),
+            "max" if arg_count > 1 => Ok(Func::SingleRow(SingleRowFunc::Max)),
+            "min" if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Min)),
+            "min" if arg_count > 1 => Ok(Func::SingleRow(SingleRowFunc::Min)),
             "string_agg" => Ok(Func::Agg(AggFunc::StringAgg)),
             "sum" => Ok(Func::Agg(AggFunc::Sum)),
             "total" => Ok(Func::Agg(AggFunc::Total)),
