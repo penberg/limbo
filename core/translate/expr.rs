@@ -6,7 +6,7 @@ use crate::{
     schema::{Schema, Table, Type},
     translate::select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
-    vdbe::{BranchOffset, Insn, ProgramBuilder},
+    vdbe::{BranchOffset, Insn, builder::ProgramBuilder},
 };
 
 pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {

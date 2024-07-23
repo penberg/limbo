@@ -5,7 +5,7 @@ use crate::{
     translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     function::SingleRowFunc,
     translate::select::Select,
-    vdbe::{BranchOffset, Insn, ProgramBuilder},
+    vdbe::{BranchOffset, Insn, builder::ProgramBuilder},
 };
 
 const HARDCODED_CURSOR_LEFT_TABLE: usize = 0;
