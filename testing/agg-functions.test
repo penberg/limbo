@@ -7,13 +7,25 @@ do_execsql_test select-avg {
   SELECT avg(age) FROM users;
 } {50.396}
 
+do_execsql_test select-avg-text {
+  SELECT avg(first_name) FROM users;
+} {0.0}
+
 do_execsql_test select-sum {
   SELECT sum(age) FROM users;
 } {503960}
 
+do_execsql_test select-sum-text {
+  SELECT sum(first_name) FROM users;
+} {0.0}
+
 do_execsql_test select-total {
-  SELECT sum(age) FROM users;
-} {503960}
+  SELECT total(age) FROM users;
+} {503960.0}
+
+do_execsql_test select-total-text {
+  SELECT total(first_name) FROM users WHERE id < 3;
+} {0.0}
 
 do_execsql_test select-limit {
   SELECT id FROM users LIMIT 1;
@@ -30,6 +42,14 @@ do_execsql_test select-max {
 do_execsql_test select-min {
   SELECT min(age) FROM users;
 } {1}
+
+do_execsql_test select-max-text {
+  SELECT max(first_name) FROM users;
+} {Zoe}
+
+do_execsql_test select-min-text {
+  SELECT min(first_name) FROM users;
+} {Aaron}
 
 do_execsql_test select-group-concat {
   SELECT group_concat(name) FROM products;
@@ -50,4 +70,3 @@ do_execsql_test select-string-agg-with-delimiter {
 do_execsql_test select-string-agg-with-column-delimiter {
   SELECT string_agg(name, id) FROM products;
 } {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
-

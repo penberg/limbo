@@ -47,8 +47,8 @@ impl Display for OwnedValue {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
                 AggContext::Sum(acc) => write!(f, "{}", acc),
                 AggContext::Count(count) => write!(f, "{}", count),
-                AggContext::Max(max) => write!(f, "{}", max),
-                AggContext::Min(min) => write!(f, "{}", min),
+                AggContext::Max(max) => write!(f, "{}", max.as_ref().unwrap_or(&OwnedValue::Null)),
+                AggContext::Min(min) => write!(f, "{}", min.as_ref().unwrap_or(&OwnedValue::Null)),
                 AggContext::GroupConcat(s) => write!(f, "{}", s),
             },
             OwnedValue::Record(r) => write!(f, "{:?}", r),
@@ -61,8 +61,8 @@ pub enum AggContext {
     Avg(OwnedValue, OwnedValue), // acc and count
     Sum(OwnedValue),
     Count(OwnedValue),
-    Max(OwnedValue),
-    Min(OwnedValue),
+    Max(Option<OwnedValue>),
+    Min(Option<OwnedValue>),
     GroupConcat(OwnedValue),
 }
 
@@ -201,7 +201,7 @@ impl std::ops::Div<OwnedValue> for OwnedValue {
             (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
                 OwnedValue::Float(float_left / float_right)
             }
-            _ => unreachable!(),
+            _ => OwnedValue::Float(0.0),
         }
     }
 }
@@ -220,11 +220,25 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Text(s) => Value::Text(s),
         OwnedValue::Blob(b) => Value::Blob(b),
         OwnedValue::Agg(a) => match a.as_ref() {
-            AggContext::Avg(acc, _count) => to_value(acc), // we assume aggfinal was called
-            AggContext::Sum(acc) => to_value(acc),
+            AggContext::Avg(acc, _count) => match acc {
+                OwnedValue::Integer(i) => Value::Integer(*i),
+                OwnedValue::Float(f) => Value::Float(*f),
+                _ => Value::Float(0.0),
+            },
+            AggContext::Sum(acc) => match acc {
+                OwnedValue::Integer(i) => Value::Integer(*i),
+                OwnedValue::Float(f) => Value::Float(*f),
+                _ => Value::Float(0.0),
+            },
             AggContext::Count(count) => to_value(count),
-            AggContext::Max(max) => to_value(max),
-            AggContext::Min(min) => to_value(min),
+            AggContext::Max(max) => match max {
+                Some(max) => to_value(max),
+                None => Value::Null,
+            },
+            AggContext::Min(min) => match min {
+                Some(min) => to_value(min),
+                None => Value::Null,
+            },
             AggContext::GroupConcat(s) => to_value(s),
         },
         OwnedValue::Record(_) => todo!(),
