@@ -210,3 +210,36 @@ do_execsql_test date-out-of-range {
 do_execsql_test date-time-only {
   SELECT date('15:30:45');
 } {2000-01-01}
+
+do_execsql_test date-with-timezone-utc {
+  SELECT date('2023-05-18 15:30:45Z');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-positive {
+  SELECT date('2023-05-18 23:30:45+02:00');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-negative {
+  SELECT date('2023-05-19 01:30:45-05:00');
+} {2023-05-19}
+
+do_execsql_test date-with-timezone-day-change-positive {
+  SELECT date('2023-05-18 23:30:45-03:00');
+} {2023-05-19}
+
+do_execsql_test date-with-timezone-day-change-negative {
+  SELECT date('2023-05-19 01:30:45+03:00');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-iso8601 {
+  SELECT date('2023-05-18T15:30:45+02:00');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-and-milliseconds {
+  SELECT date('2023-05-18 15:30:45.123+02:00');
+} {2023-05-18}
+
+do_execsql_test date-with-invalid-timezone {
+  SELECT date('2023-05-18 15:30:45+25:00');
+} {{}}
+
