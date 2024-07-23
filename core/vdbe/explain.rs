@@ -1,4 +1,4 @@
-use super::{Program, InsnReference, Insn, OwnedValue};
+use super::{Insn, InsnReference, OwnedValue, Program};
 use std::rc::Rc;
 
 pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: String) -> String {

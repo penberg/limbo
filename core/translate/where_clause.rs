@@ -2,10 +2,10 @@ use anyhow::Result;
 use sqlite3_parser::ast::{self, JoinOperator};
 
 use crate::{
-    translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     function::SingleRowFunc,
+    translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     translate::select::Select,
-    vdbe::{BranchOffset, Insn, builder::ProgramBuilder},
+    vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
 };
 
 const HARDCODED_CURSOR_LEFT_TABLE: usize = 0;

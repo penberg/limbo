@@ -1101,15 +1101,22 @@ impl Program {
                     }
                     SingleRowFunc::Date => {
                         if *start_reg == 0 {
-                            let date_str = get_date_from_time_value(&OwnedValue::Text(Rc::new("now".to_string())))?;
+                            let date_str = get_date_from_time_value(&OwnedValue::Text(Rc::new(
+                                "now".to_string(),
+                            )))?;
                             state.registers[*dest] = OwnedValue::Text(Rc::new(date_str));
                         } else {
                             let time_value = &state.registers[*start_reg];
                             let date_str = get_date_from_time_value(time_value);
                             match date_str {
-                                Ok(date) => state.registers[*dest] = OwnedValue::Text(Rc::new(date)),
+                                Ok(date) => {
+                                    state.registers[*dest] = OwnedValue::Text(Rc::new(date))
+                                }
                                 Err(e) => {
-                                    anyhow::bail!("Error encountered while parsing time value: {}", e)
+                                    anyhow::bail!(
+                                        "Error encountered while parsing time value: {}",
+                                        e
+                                    )
                                 }
                             }
                         }
@@ -1141,7 +1148,10 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
     if !log::log_enabled!(log::Level::Trace) {
         return;
     }
-    log::trace!("{}", explain::insn_to_str(program, addr, insn, String::new()));
+    log::trace!(
+        "{}",
+        explain::insn_to_str(program, addr, insn, String::new())
+    );
 }
 
 fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: String) {
@@ -1285,8 +1295,8 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_minmax, exec_random, exec_round, exec_trim,
-        exec_upper, OwnedValue,
+        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_minmax, exec_random,
+        exec_round, exec_trim, exec_upper, OwnedValue,
     };
     use std::rc::Rc;
 

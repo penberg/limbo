@@ -10,6 +10,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  cargo-fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Check formatting
+      run: cargo fmt --check
   build-native:
     strategy:
       matrix:
