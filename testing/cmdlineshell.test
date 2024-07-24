@@ -5,12 +5,7 @@ source $testdir/tester.tcl
 
 do_execsql_test schema {
   .schema
-} {{CREATE TABLE products (
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        price REAL
-    );
-CREATE TABLE users (
+} {{CREATE TABLE users (
         id INTEGER PRIMARY KEY,
         first_name TEXT,
         last_name TEXT,
@@ -21,6 +16,11 @@ CREATE TABLE users (
         state TEXT,
         zipcode TEXT,
         age INTEGER
+    );
+CREATE TABLE products (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        price REAL
     );}}
 
 do_execsql_test schema-1 {

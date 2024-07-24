@@ -168,7 +168,7 @@ fn display_schema(
             table_name
         ),
         None => String::from(
-            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%' ORDER BY type, name"
+            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
         ),
     };
 
