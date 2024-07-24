@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlite3_parser::ast::{self};
 
 use crate::{
-    function::SingleRowFunc,
+    function::ScalarFunc,
     translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
     translate::select::Select,
     vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
@@ -408,7 +408,7 @@ fn translate_condition_expr(
                     program.mark_last_insn_constant();
                     let _ = translate_expr(program, select, lhs, column_reg, cursor_hint)?;
                     program.emit_insn(Insn::Function {
-                        func: SingleRowFunc::Like,
+                        func: ScalarFunc::Like,
                         start_reg: pattern_reg,
                         dest: cur_reg,
                     });
