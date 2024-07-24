@@ -244,8 +244,15 @@ fn translate_sorter(
                         ty: crate::schema::Type::Null,
                     });
                 }
-                _ => {
-                    todo!();
+                ast::Expr::Qualified(table_name, ident) => {
+                    pseudo_columns.push(Column {
+                        name: normalize_ident(format!("{}.{}", table_name.0, ident.0).as_str()),
+                        primary_key: false,
+                        ty: crate::schema::Type::Null,
+                    });
+                }
+                other => {
+                    todo!("translate_sorter: {:?}", other);
                 }
             },
             ast::ResultColumn::Star => {}

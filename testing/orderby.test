@@ -41,3 +41,7 @@ do_execsql_test basic-order-by-and-limit-3 {
 78.0|jeans
 82.0|sneakers
 74.0|sweatshirt}
+
+do_execsql_test order-by-qualified {
+    select u.first_name from users u order by u.first_name limit 1;
+} {Aaron}

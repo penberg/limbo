@@ -674,11 +674,29 @@ pub fn resolve_ident_qualified(
                         .columns
                         .iter()
                         .enumerate()
-                        .find(|(_, col)| col.name == *ident);
+                        .find(|(_, col)| col.name == *ident)
+                        .map(|(idx, col)| (idx, col.ty, col.primary_key));
+                    let mut idx;
+                    let mut col_type;
+                    let mut is_primary_key;
                     if res.is_some() {
-                        let (idx, col) = res.unwrap();
+                        (idx, col_type, is_primary_key) = res.unwrap();
+                        // overwrite if cursor hint is provided
+                        if let Some(cursor_hint) = cursor_hint {
+                            let cols = &program.cursor_ref[cursor_hint].1;
+                            if let Some(res) = cols.as_ref().and_then(|res| {
+                                res.columns()
+                                    .iter()
+                                    .enumerate()
+                                    .find(|x| x.1.name == format!("{}.{}", table_name, ident))
+                            }) {
+                                idx = res.0;
+                                col_type = res.1.ty;
+                                is_primary_key = res.1.primary_key;
+                            }
+                        }
                         let cursor_id = program.resolve_cursor_id(&join.identifier, cursor_hint);
-                        return Ok((idx, col.ty, cursor_id, col.primary_key));
+                        return Ok((idx, col_type, cursor_id, is_primary_key));
                     }
                 }
             }

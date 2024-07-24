@@ -124,6 +124,15 @@ do_execsql_test left-join-no-join-conditions-but-multiple-where {
 } {Jamie|hat
 Cindy|cap}
 
+do_execsql_test left-join-order-by-qualified {
+    select users.first_name, products.name from users left join products on users.id = products.id where users.first_name like 'Jam%' order by null limit 2;
+} {Jamie|hat
+James|}
+
+do_execsql_test left-join-order-by-qualified-nullable-sorting-col {
+    select users.first_name, products.name from users left join products on users.id = products.id order by products.name limit 1;
+} {Alan|}
+
 do_execsql_test four-way-inner-join {
   select u1.first_name, u2.first_name, u3.first_name, u4.first_name from users u1 join users u2 on u1.id = u2.id join users u3 on u2.id = u3.id + 1 join users u4 on u3.id = u4.id + 1 limit 1;
 } {Tommy|Tommy|Cindy|Jamie}
