@@ -10,15 +10,15 @@ use crate::pager::Pager;
 use crate::schema::{Column, PseudoTable, Schema, Table};
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::translate::select::{ColumnInfo, LoopInfo, Select, SrcTable};
-use crate::translate::where_clause::{
-    evaluate_conditions, translate_conditions, translate_where, Inner, Left, QueryConstraint,
-};
+use crate::translate::where_clause::{translate_processed_where, translate_where};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn, Program};
 use anyhow::Result;
 use expr::{build_select, maybe_apply_affinity, translate_expr};
+use select::LeftJoinBookkeeping;
 use sqlite3_parser::ast::{self, Literal};
+use where_clause::{process_where, ProcessedWhereClause};
 
 struct LimitInfo {
     limit_reg: usize,
@@ -114,7 +114,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
     };
 
     if !select.src_tables.is_empty() {
-        let constraint = translate_tables_begin(&mut program, &mut select)?;
+        translate_tables_begin(&mut program, &mut select)?;
 
         let (register_start, column_count) = if let Some(sort_columns) = select.order_by {
             let start = program.next_free_register();
@@ -153,7 +153,7 @@ fn translate_select(mut select: Select) -> Result<Program> {
             }
         }
 
-        translate_tables_end(&mut program, &select, constraint);
+        translate_tables_end(&mut program, &select);
 
         if select.exist_aggregation {
             let mut target = register_start;
@@ -283,7 +283,7 @@ fn translate_sorter(
         start_reg: register_start,
         count,
     });
-    emit_limit_insn(&limit_info, program);
+    emit_limit_insn(limit_info, program);
     program.emit_insn(Insn::SorterNext {
         cursor_id: sort_info.sorter_cursor,
         pc_if_next: sorter_data_offset,
@@ -292,145 +292,44 @@ fn translate_sorter(
     Ok(())
 }
 
-fn translate_tables_begin(
-    program: &mut ProgramBuilder,
-    select: &mut Select,
-) -> Result<Option<QueryConstraint>> {
+fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) -> Result<()> {
     for join in &select.src_tables {
         let loop_info = translate_table_open_cursor(program, join);
         select.loops.push(loop_info);
     }
 
-    let conditions = evaluate_conditions(program, select, None)?;
+    let processed_where = process_where(program, select)?;
 
-    for loop_info in &mut select.loops {
-        let mut left_join_match_flag_maybe = None;
-        if let Some(QueryConstraint::Left(Left {
-            match_flag,
-            right_cursor,
-            ..
-        })) = conditions.as_ref()
-        {
-            if loop_info.open_cursor == *right_cursor {
-                left_join_match_flag_maybe = Some(*match_flag);
-            }
-        }
-        translate_table_open_loop(program, loop_info, left_join_match_flag_maybe);
+    for loop_info in &select.loops {
+        translate_table_open_loop(program, select, loop_info, &processed_where)?;
     }
 
-    translate_conditions(program, select, conditions, None)
+    Ok(())
 }
 
-fn handle_skip_row(
-    program: &mut ProgramBuilder,
-    cursor_id: usize,
-    next_row_instruction_offset: BranchOffset,
-    constraint: &Option<QueryConstraint>,
-) {
-    match constraint {
-        Some(QueryConstraint::Left(Left {
-            where_clause,
-            join_clause,
-            match_flag,
-            match_flag_hit_marker,
-            found_match_next_row_label,
-            left_cursor,
-            right_cursor,
-            ..
-        })) => {
-            if let Some(where_clause) = where_clause {
-                if where_clause.no_match_target_cursor == cursor_id {
-                    program.resolve_label(
-                        where_clause.no_match_jump_label,
-                        next_row_instruction_offset,
-                    );
-                }
-            }
-            if let Some(join_clause) = join_clause {
-                if join_clause.no_match_target_cursor == cursor_id {
-                    program.resolve_label(
-                        join_clause.no_match_jump_label,
-                        next_row_instruction_offset,
-                    );
-                }
-            }
-            if cursor_id == *right_cursor {
-                // If the left join match flag has been set to 1, we jump to the next row (result row has been emitted already)
-                program.emit_insn_with_label_dependency(
-                    Insn::IfPos {
-                        reg: *match_flag,
-                        target_pc: *found_match_next_row_label,
-                        decrement_by: 0,
-                    },
-                    *found_match_next_row_label,
-                );
-                // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
-                program.emit_insn(Insn::NullRow {
-                    cursor_id: *right_cursor,
-                });
-                // Jump to setting the left join match flag to 1 again, but this time the right table cursor will set everything to null
-                program.emit_insn_with_label_dependency(
-                    Insn::Goto {
-                        target_pc: *match_flag_hit_marker,
-                    },
-                    *match_flag_hit_marker,
-                );
-            }
-            if cursor_id == *left_cursor {
-                program.resolve_label(*found_match_next_row_label, next_row_instruction_offset);
-            }
-        }
-        Some(QueryConstraint::Inner(Inner {
-            where_clause,
-            join_clause,
-            ..
-        })) => {
-            if let Some(join_clause) = join_clause {
-                if cursor_id == join_clause.no_match_target_cursor {
-                    program.resolve_label(
-                        join_clause.no_match_jump_label,
-                        next_row_instruction_offset,
-                    );
-                }
-            }
-            if let Some(where_clause) = where_clause {
-                if cursor_id == where_clause.no_match_target_cursor {
-                    program.resolve_label(
-                        where_clause.no_match_jump_label,
-                        next_row_instruction_offset,
-                    );
-                }
-            }
-        }
-        None => {}
-    }
-}
-
-fn translate_tables_end(
-    program: &mut ProgramBuilder,
-    select: &Select,
-    constraint: Option<QueryConstraint>,
-) {
+fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
     // iterate in reverse order as we open cursors in order
     for table_loop in select.loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
-        let next_row_instruction_offset = program.offset();
+        program.resolve_label(table_loop.next_row_label, program.offset());
         program.emit_insn(Insn::NextAsync { cursor_id });
-        program.emit_insn(Insn::NextAwait {
-            cursor_id,
-            pc_if_next: table_loop.rewind_offset as BranchOffset,
-        });
-        program.resolve_label(table_loop.rewind_label, program.offset());
-        handle_skip_row(program, cursor_id, next_row_instruction_offset, &constraint);
+        program.emit_insn_with_label_dependency(
+            Insn::NextAwait {
+                cursor_id,
+                pc_if_next: table_loop.rewind_label,
+            },
+            table_loop.rewind_label,
+        );
+
+        if let Some(ljbk) = &table_loop.left_join_bookkeeping {
+            left_join_match_flag_check(program, ljbk, cursor_id);
+        }
     }
 }
 
 fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -> LoopInfo {
-    let table_identifier = normalize_ident(match table.alias {
-        Some(alias) => alias,
-        None => &table.table.get_name(),
-    });
-    let cursor_id = program.alloc_cursor_id(Some(table_identifier), Some(table.table.clone()));
+    let cursor_id =
+        program.alloc_cursor_id(Some(table.identifier.clone()), Some(table.table.clone()));
     let root_page = match &table.table {
         Table::BTree(btree) => btree.root_page,
         Table::Pseudo(_) => todo!(),
@@ -441,37 +340,109 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
     });
     program.emit_insn(Insn::OpenReadAwait);
     LoopInfo {
+        identifier: table.identifier.clone(),
+        left_join_bookkeeping: if table.is_outer_join() {
+            Some(LeftJoinBookkeeping {
+                match_flag_register: program.alloc_register(),
+                on_match_jump_to_label: program.allocate_label(),
+                set_match_flag_true_label: program.allocate_label(),
+            })
+        } else {
+            None
+        },
         open_cursor: cursor_id,
-        rewind_offset: 0,
-        rewind_label: 0,
+        next_row_label: program.allocate_label(),
+        rewind_label: program.allocate_label(),
+        rewind_on_empty_label: program.allocate_label(),
     }
+}
+
+/**
+* initialize left join match flag to false
+* if condition checks pass, it will eventually be set to true
+*/
+fn left_join_match_flag_initialize(program: &mut ProgramBuilder, ljbk: &LeftJoinBookkeeping) {
+    program.emit_insn(Insn::Integer {
+        value: 0,
+        dest: ljbk.match_flag_register,
+    });
+}
+
+/**
+* after the relevant conditional jumps have been emitted, set the left join match flag to true
+*/
+fn left_join_match_flag_set_true(program: &mut ProgramBuilder, ljbk: &LeftJoinBookkeeping) {
+    program.defer_label_resolution(ljbk.set_match_flag_true_label, program.offset() as usize);
+    program.emit_insn(Insn::Integer {
+        value: 1,
+        dest: ljbk.match_flag_register,
+    });
+}
+
+/**
+* check if the left join match flag is set to true
+* if it is, jump to the next row on the outer table
+* if not, set the right table cursor's "pseudo null bit" on
+* then jump to setting the left join match flag to true again,
+* which will effectively emit all nulls for the right table.
+*/
+fn left_join_match_flag_check(
+    program: &mut ProgramBuilder,
+    ljbk: &LeftJoinBookkeeping,
+    cursor_id: usize,
+) {
+    // If the left join match flag has been set to 1, we jump to the next row on the outer table (result row has been emitted already)
+    program.emit_insn_with_label_dependency(
+        Insn::IfPos {
+            reg: ljbk.match_flag_register,
+            target_pc: ljbk.on_match_jump_to_label,
+            decrement_by: 0,
+        },
+        ljbk.on_match_jump_to_label,
+    );
+    // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
+    program.emit_insn(Insn::NullRow { cursor_id });
+    // Jump to setting the left join match flag to 1 again, but this time the right table cursor will set everything to null
+    program.emit_insn_with_label_dependency(
+        Insn::Goto {
+            target_pc: ljbk.set_match_flag_true_label,
+        },
+        ljbk.set_match_flag_true_label,
+    );
+    // This points to the NextAsync instruction of the next table in the loop
+    // (i.e. the outer table, since we're iterating in reverse order)
+    program.resolve_label(ljbk.on_match_jump_to_label, program.offset());
 }
 
 fn translate_table_open_loop(
     program: &mut ProgramBuilder,
-    loop_info: &mut LoopInfo,
-    left_join_match_flag_maybe: Option<usize>,
-) {
-    if let Some(match_flag) = left_join_match_flag_maybe {
-        // Initialize left join as not matched
-        program.emit_insn(Insn::Integer {
-            value: 0,
-            dest: match_flag,
-        });
+    select: &Select,
+    loop_info: &LoopInfo,
+    w: &ProcessedWhereClause,
+) -> Result<()> {
+    if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
+        left_join_match_flag_initialize(program, ljbk);
     }
+
     program.emit_insn(Insn::RewindAsync {
         cursor_id: loop_info.open_cursor,
     });
-    let rewind_await_label = program.allocate_label();
+    program.defer_label_resolution(loop_info.rewind_label, program.offset() as usize);
     program.emit_insn_with_label_dependency(
         Insn::RewindAwait {
             cursor_id: loop_info.open_cursor,
-            pc_if_empty: rewind_await_label,
+            pc_if_empty: loop_info.rewind_on_empty_label,
         },
-        rewind_await_label,
+        loop_info.rewind_on_empty_label,
     );
-    loop_info.rewind_label = rewind_await_label;
-    loop_info.rewind_offset = program.offset() - 1;
+
+    translate_processed_where(program, select, loop_info, w, None)?;
+
+    if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
+        left_join_match_flag_set_true(program, ljbk);
+    }
+
+    Ok(())
 }
 
 fn translate_columns(
@@ -539,11 +510,7 @@ fn translate_table_star(
     target_register: usize,
     cursor_hint: Option<usize>,
 ) {
-    let table_identifier = normalize_ident(match table.alias {
-        Some(alias) => alias,
-        None => &table.table.get_name(),
-    });
-    let table_cursor = program.resolve_cursor_id(&table_identifier, cursor_hint);
+    let table_cursor = program.resolve_cursor_id(&table.identifier, cursor_hint);
     let table = &table.table;
     for (i, col) in table.columns().iter().enumerate() {
         let col_target_register = target_register + i;

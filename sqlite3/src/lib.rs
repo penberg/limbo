@@ -808,8 +808,7 @@ pub unsafe extern "C" fn sqlite3_errmsg(_db: *mut sqlite3) -> *const std::ffi::c
 
     let err_msg = if (*_db).err_code != SQLITE_OK {
         if !(*_db).p_err.is_null() {
-            let cstr = (*_db).p_err as *const std::ffi::c_char;
-            cstr
+            (*_db).p_err as *const std::ffi::c_char
         } else {
             std::ptr::null()
         }

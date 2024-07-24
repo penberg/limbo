@@ -687,7 +687,7 @@ impl Program {
                     if let Some(ref rowid) = cursor.rowid()? {
                         state.registers[*dest] = OwnedValue::Integer(*rowid as i64);
                     } else {
-                        todo!();
+                        state.registers[*dest] = OwnedValue::Null;
                     }
                     state.pc += 1;
                 }
@@ -1452,7 +1452,7 @@ mod tests {
             OwnedValue::Integer(value) => {
                 // Check that the value is within the range of i64
                 assert!(
-                    value >= i64::MIN && value <= i64::MAX,
+                    (i64::MIN..=i64::MAX).contains(&value),
                     "Random number out of range"
                 );
             }
