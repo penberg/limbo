@@ -191,11 +191,11 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
 
 #[derive(Debug)]
 pub struct BTreePageHeader {
-    page_type: PageType,
-    _first_freeblock_offset: u16,
-    num_cells: u16,
-    _cell_content_area: u16,
-    _num_frag_free_bytes: u8,
+    pub(crate) page_type: PageType,
+    pub(crate) _first_freeblock_offset: u16,
+    pub(crate) num_cells: u16,
+    pub(crate) _cell_content_area: u16,
+    pub(crate) _num_frag_free_bytes: u8,
     pub(crate) right_most_pointer: Option<u32>,
 }
 

@@ -1,5 +1,5 @@
 use crate::pager::Pager;
-use crate::sqlite3_ondisk::{BTreeCell, TableInteriorCell, TableLeafCell};
+use crate::sqlite3_ondisk::{BTreeCell, BTreePage, TableInteriorCell, TableLeafCell};
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
@@ -192,6 +192,95 @@ impl BTreeCursor {
             }
         }
     }
+
+    fn insert_to_page(
+        &mut self,
+        key: &OwnedValue,
+        _record: &OwnedRecord,
+    ) -> Result<CursorResult<()>> {
+        let mem_page = {
+            let mem_page = self.page.borrow();
+            let mem_page = mem_page.as_ref().unwrap();
+            mem_page.clone()
+        };
+        let page_idx = mem_page.page_idx;
+        let page = self.pager.read_page(page_idx)?;
+        let page = page.borrow();
+        if page.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+
+        page.set_dirty();
+
+        let page = page.contents.read().unwrap();
+        let page = page.as_ref().unwrap();
+
+        let free = self.compute_free_space(page);
+        dbg!(free);
+
+        Ok(CursorResult::Ok(()))
+    }
+
+    fn compute_free_space(&self, page: &BTreePage) -> u16 {
+        let buffer = page.buffer.borrow();
+        let buf = buffer.as_slice();
+
+        let mut first_byte_in_cell_content = page.header._cell_content_area;
+        if first_byte_in_cell_content == 0 {
+            first_byte_in_cell_content = u16::MAX;
+        }
+
+        let fragmented_free_bytes = page.header._num_frag_free_bytes;
+        let free_block_pointer = page.header._first_freeblock_offset;
+        let ncell = page.cells.len();
+
+        // 8 + 4 == header end
+        let first_cell = 8 + 4 + (2 * ncell) as u16;
+
+        dbg!(first_byte_in_cell_content);
+        dbg!(fragmented_free_bytes);
+        let mut nfree = fragmented_free_bytes as usize + first_byte_in_cell_content as usize;
+
+        dbg!(nfree);
+        let mut pc = free_block_pointer as usize;
+        if pc > 0 {
+            let mut next = 0;
+            let mut size = 0;
+            if pc < first_byte_in_cell_content as usize {
+                // corrupt
+                todo!("corrupted page");
+            }
+
+            loop {
+                // TODO: check corruption icellast
+                next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize;
+                size = u16::from_be_bytes(buf[pc + 2..pc + 4].try_into().unwrap()) as usize;
+                nfree += size as usize;
+                if next <= pc + size + 3 {
+                    break;
+                }
+                pc = next as usize;
+            }
+
+            if next > 0 {
+                /* Freeblock not in ascending order */
+                todo!("corrupted page ascending order");
+            }
+            // if( pc+size>(unsigned int)usableSize ){
+            //   /* Last freeblock extends past page end */
+            //   todo!("corrupted page last freeblock extends last page end");
+            // }
+        }
+
+        // if( nFree>usableSize || nFree<iCellFirst ){
+        //   return SQLITE_CORRUPT_PAGE(pPage);
+        // }
+        // pPage->nFree = (u16)(nFree - iCellFirst);
+
+        // don't count header and cell pointers?
+        nfree = nfree - first_cell as usize;
+        return nfree as u16;
+    }
 }
 
 impl Cursor for BTreeCursor {
@@ -241,7 +330,15 @@ impl Cursor for BTreeCursor {
             OwnedValue::Integer(i) => i,
             _ => unreachable!("btree tables are indexed by integers!"),
         };
-        self.move_to(*int_key as u64)
+        match self.move_to(*int_key as u64)? {
+            CursorResult::Ok(_) => {}
+            CursorResult::IO => return Ok(CursorResult::IO),
+        };
+
+        match self.insert_to_page(key, _record)? {
+            CursorResult::Ok(_) => Ok(CursorResult::Ok(())),
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
     }
 
     fn set_null_flag(&mut self, flag: bool) {
@@ -253,6 +350,6 @@ impl Cursor for BTreeCursor {
     }
 
     fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
-        unimplemented!()
+        Ok(false)
     }
 }
