@@ -11,21 +11,21 @@ pub struct SrcTable<'a> {
 
 impl SrcTable<'_> {
     pub fn is_outer_join(&self) -> bool {
-        matches!(
-            self.join_info,
-            Some(ast::JoinedSelectTable {
-                operator: JoinOperator::TypedJoin {
-                    natural: false,
-                    join_type: Some(
-                        JoinType::Left
-                            | JoinType::LeftOuter
-                            | JoinType::Right
-                            | JoinType::RightOuter
-                    )
-                },
-                ..
-            })
-        )
+        if let Some(ast::JoinedSelectTable {
+            operator: JoinOperator::TypedJoin(Some(join_type)),
+            ..
+        }) = self.join_info
+        {
+            if *join_type == JoinType::LEFT | JoinType::OUTER {
+                true
+            } else if *join_type == JoinType::RIGHT | JoinType::OUTER {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 }
 

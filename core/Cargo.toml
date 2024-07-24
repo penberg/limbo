@@ -35,7 +35,7 @@ libc = "0.2.155"
 log = "0.4.20"
 nix = { version = "0.29.0", features = ["fs"] }
 sieve-cache = "0.1.4"
-sqlite3-parser = "0.11.0"
+sqlite3-parser = "0.13.0"
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15", features = ["js"] }
 regex = "1.10.5"
@@ -46,7 +46,11 @@ julian_day_converter = "0.3.2"
 pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
 
 [dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports", "async", "async_futures"] }
+criterion = { version = "0.5", features = [
+    "html_reports",
+    "async",
+    "async_futures",
+] }
 rstest = "0.18.2"
 rusqlite = "0.29.0"
 tempfile = "3.8.0"

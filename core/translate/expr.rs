@@ -227,6 +227,7 @@ pub fn translate_expr(
             distinctness: _,
             args,
             filter_over: _,
+            order_by: _,
         } => {
             let args_count = if let Some(args) = args { args.len() } else { 0 };
             let func_type: Option<Func> =
@@ -613,6 +614,7 @@ pub fn analyze_expr<'a>(expr: &'a Expr, column_info_out: &mut ColumnInfo<'a>) {
             distinctness: _,
             args,
             filter_over: _,
+            order_by: _,
         } => {
             let args_count = if let Some(args) = args { args.len() } else { 0 };
             let func_type =
