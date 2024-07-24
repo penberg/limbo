@@ -1,3 +1,7 @@
+use std::{cell::RefCell, rc::Rc};
+
+use crate::sqlite3_ondisk::DatabaseHeader;
+
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program, Table};
 
 pub struct ProgramBuilder {
@@ -281,7 +285,7 @@ impl ProgramBuilder {
         self.deferred_label_resolutions.clear();
     }
 
-    pub fn build(self) -> Program {
+    pub fn build(self, database_header: Rc<RefCell<DatabaseHeader>>) -> Program {
         assert!(
             self.deferred_label_resolutions.is_empty(),
             "deferred_label_resolutions is not empty when build() is called, did you forget to call resolve_deferred_labels()?"
@@ -294,6 +298,7 @@ impl ProgramBuilder {
             max_registers: self.next_free_register,
             insns: self.insns,
             cursor_ref: self.cursor_ref,
+            database_header,
         }
     }
 }

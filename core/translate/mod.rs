@@ -58,7 +58,7 @@ pub fn translate(
         ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
         ast::Stmt::Select(select) => {
             let select = prepare_select(schema, &select)?;
-            translate_select(select)
+            translate_select(select, database_header)
         }
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
@@ -77,6 +77,7 @@ pub fn translate(
             &columns,
             &body,
             &returning,
+            database_header,
         ),
     }
 }
@@ -124,7 +125,12 @@ fn translate_pragma(
                 },
                 _ => 0,
             };
-            update_pragma(&name.name.0, value_to_update, database_header, pager);
+            update_pragma(
+                &name.name.0,
+                value_to_update,
+                database_header.clone(),
+                pager,
+            );
         }
         Some(ast::PragmaBody::Call(_)) => {
             todo!()
@@ -138,7 +144,7 @@ fn translate_pragma(
         target_pc: start_offset,
     });
     program.resolve_deferred_labels();
-    Ok(program.build())
+    Ok(program.build(database_header))
 }
 
 fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {

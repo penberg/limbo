@@ -1,4 +1,4 @@
-use std::{ops::Deref, rc::Rc};
+use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use sqlite3_parser::ast::{
     DistinctNames, InsertBody, Name, QualifiedName, ResolveType, ResultColumn, Select, With,
@@ -7,6 +7,7 @@ use sqlite3_parser::ast::{
 use crate::Result;
 use crate::{
     schema::{self, Schema, Table},
+    sqlite3_ondisk::DatabaseHeader,
     translate::expr::{resolve_ident_qualified, translate_expr},
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
@@ -19,6 +20,7 @@ pub fn translate_insert(
     columns: &Option<DistinctNames>,
     body: &InsertBody,
     returning: &Option<Vec<ResultColumn>>,
+    database_header: Rc<RefCell<DatabaseHeader>>,
 ) -> Result<Program> {
     assert!(with.is_none());
     assert!(or_conflict.is_none());
@@ -193,5 +195,5 @@ pub fn translate_insert(
         target_pc: start_offset,
     });
     program.resolve_deferred_labels();
-    Ok(program.build())
+    Ok(program.build(database_header))
 }

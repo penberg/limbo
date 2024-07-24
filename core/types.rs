@@ -305,8 +305,7 @@ impl OwnedRecord {
         Self { values }
     }
 
-    pub fn serialize(&self) -> Vec<u8> {
-        let mut buf: Vec<u8> = Vec::new();
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
         let mut header_bytes: usize = 0;
         let mut buf_i = 0;
 
@@ -315,7 +314,7 @@ impl OwnedRecord {
                 // ensure we have enough space for 9 bytes
                 buf.extend(std::iter::repeat(0).take(9));
             }
-            let n = write_varint(&mut buf.as_mut_slice()[buf_i..], value);
+            let n = write_varint(&mut buf.as_mut_slice()[buf_i..buf_i + 9], value);
             buf_i += n;
             return n;
         };
@@ -326,8 +325,8 @@ impl OwnedRecord {
                 OwnedValue::Null => write_and_advance(0),
                 OwnedValue::Integer(_) => write_and_advance(6), // for now let's only do i64
                 OwnedValue::Float(_) => write_and_advance(7),
-                OwnedValue::Text(t) => write_and_advance((t.len() * 2 - 12) as u64),
-                OwnedValue::Blob(b) => write_and_advance((b.len() * 2 - 13) as u64),
+                OwnedValue::Text(t) => write_and_advance((t.len() * 2 + 13) as u64),
+                OwnedValue::Blob(b) => write_and_advance((b.len() * 2 + 12) as u64),
                 // not serializable values
                 OwnedValue::Agg(_) => unreachable!(),
                 OwnedValue::Record(_) => unreachable!(),
@@ -340,7 +339,7 @@ impl OwnedRecord {
                 // ensure we have enough space for data
                 buf.extend(std::iter::repeat(0).take(data.len()));
             }
-            let n = buf.as_mut_slice()[buf_i..].clone_from_slice(data);
+            let n = buf.as_mut_slice()[buf_i..buf_i + data.len()].clone_from_slice(data);
             buf_i += data.len();
             return n;
         };
@@ -374,8 +373,6 @@ impl OwnedRecord {
 
         // cleanup extra extends
         buf.truncate(buf_i);
-
-        buf
     }
 }
 

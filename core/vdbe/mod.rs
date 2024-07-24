@@ -28,6 +28,7 @@ use crate::function::{AggFunc, ScalarFunc};
 use crate::pager::Pager;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
+use crate::sqlite3_ondisk::DatabaseHeader;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 use crate::Result;
 
@@ -381,6 +382,7 @@ pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
+    pub database_header: Rc<RefCell<DatabaseHeader>>,
 }
 
 impl Program {
@@ -639,7 +641,11 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
+                    let cursor = Box::new(BTreeCursor::new(
+                        pager.clone(),
+                        *root_page,
+                        self.database_header.clone(),
+                    ));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
@@ -1056,7 +1062,7 @@ impl Program {
                     };
                     state.registers[*dest_reg] = OwnedValue::Record(record.clone());
                     let sorter_cursor = cursors.get_mut(sorter_cursor).unwrap();
-                    sorter_cursor.insert(&record)?;
+                    sorter_cursor.insert(&OwnedValue::Integer(0), &record)?; // fix key later
                     state.pc += 1;
                 }
                 Insn::SorterInsert {
@@ -1353,7 +1359,11 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
+                    let cursor = Box::new(BTreeCursor::new(
+                        pager.clone(),
+                        *root_page,
+                        self.database_header.clone(),
+                    ));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }

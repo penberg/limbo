@@ -1,5 +1,6 @@
 use crate::function::{AggFunc, Func};
 use crate::schema::{Column, PseudoTable, Schema, Table};
+use crate::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,
@@ -11,6 +12,7 @@ use crate::Result;
 
 use sqlite3_parser::ast::{self, JoinOperator, JoinType, ResultColumn};
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A representation of a `SELECT` statement that has all the information
@@ -235,7 +237,10 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
 }
 
 /// Generate code for a SELECT statement.
-pub fn translate_select(mut select: Select) -> Result<Program> {
+pub fn translate_select(
+    mut select: Select,
+    database_header: Rc<RefCell<DatabaseHeader>>,
+) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
     let early_terminate_label = program.allocate_label();
@@ -423,7 +428,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
         target_pc: start_offset,
     });
     program.resolve_deferred_labels();
-    Ok(program.build())
+    Ok(program.build(database_header))
 }
 
 fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder) {

@@ -50,9 +50,9 @@ impl Cursor for PseudoCursor {
         Ok(self.current.borrow())
     }
 
-    fn insert(&mut self, record: &OwnedRecord) -> Result<()> {
+    fn insert(&mut self, key: &OwnedValue, record: &OwnedRecord) -> Result<CursorResult<()>> {
         *self.current.borrow_mut() = Some(record.clone());
-        Ok(())
+        Ok(CursorResult::Ok(()))
     }
 
     fn get_null_flag(&self) -> bool {

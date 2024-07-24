@@ -79,11 +79,11 @@ impl Cursor for Sorter {
         Ok(self.current.borrow())
     }
 
-    fn insert(&mut self, record: &OwnedRecord) -> Result<()> {
+    fn insert(&mut self, key: &OwnedValue, record: &OwnedRecord) -> Result<CursorResult<()>> {
         let key_fields = self.order.len();
         let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
         self.insert(key, OwnedRecord::new(record.values[key_fields..].to_vec()));
-        Ok(())
+        Ok(CursorResult::Ok(()))
     }
 
     fn set_null_flag(&mut self, _flag: bool) {

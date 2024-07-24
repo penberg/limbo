@@ -48,7 +48,7 @@ pub struct DatabaseHeader {
     pub page_size: u16,
     write_version: u8,
     read_version: u8,
-    unused_space: u8,
+    pub unused_space: u8,
     max_embed_frac: u8,
     min_embed_frac: u8,
     min_leaf_frac: u8,
@@ -194,6 +194,7 @@ pub struct BTreePageHeader {
     pub(crate) page_type: PageType,
     pub(crate) _first_freeblock_offset: u16,
     pub(crate) num_cells: u16,
+    // First byte of content area
     pub(crate) _cell_content_area: u16,
     pub(crate) _num_frag_free_bytes: u8,
     pub(crate) right_most_pointer: Option<u32>,
@@ -573,7 +574,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
     }
 }
 
-fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
+pub fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     let mut v: u64 = 0;
     for i in 0..8 {
         match buf.get(i) {
