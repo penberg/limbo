@@ -592,7 +592,7 @@ fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     Ok((v, 9))
 }
 
-fn write_varint(buf: &mut [u8], value: u64) -> usize {
+pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     if value <= 0x7f {
         buf[0] = (value & 0x7f) as u8;
         return 1;
