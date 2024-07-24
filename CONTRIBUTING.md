@@ -4,6 +4,19 @@ We'd love to have you contribute to Limbo!
 
 This document is a quick helper to get you going.
 
+## Getting started
+
+Limbo is a rewrite of SQLite in Rust. If you are new to SQLite, the following articles and books are a good starting point:
+
+* [Architecture of SQLite](https://www.sqlite.org/arch.html)
+* Sibsankar Haldar. [SQLite Database System Design and Implementation (2nd Edition)](https://books.google.fi/books/?id=yWzwCwAAQBAJ&redir_esc=y). 2016
+* Jay Kreibich. [Using SQLite: Small. Fast. Reliable. Choose Any Three. 1st Edition](https://www.oreilly.com/library/view/using-sqlite/9781449394592/). 2010
+
+If you are new to Rust, the following books are recommended reading:
+
+* Jim Blandy et al. [Programming Rust, 2nd Edition](https://www.oreilly.com/library/view/programming-rust-2nd/9781492052586/). 2021
+* Steve Klabnik and Carol Nichols. [The Rust Programming Language](https://doc.rust-lang.org/book/#the-rust-programming-language). 2022
+
 ## Finding things to work on
 
 The issue tracker has issues tagged with [good first issue](https://github.com/penberg/limbo/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
