@@ -500,6 +500,24 @@ fn introspect_expression_for_cursors(
                 }
             }
         }
+        ast::Expr::InList { lhs, rhs, .. } => {
+            cursors.extend(introspect_expression_for_cursors(
+                program,
+                select,
+                lhs,
+                cursor_hint,
+            )?);
+            if let Some(rhs_list) = rhs {
+                for rhs_expr in rhs_list {
+                    cursors.extend(introspect_expression_for_cursors(
+                        program,
+                        select,
+                        rhs_expr,
+                        cursor_hint,
+                    )?);
+                }
+            }
+        }
         other => {
             anyhow::bail!("Parse error: unsupported expression: {:?}", other);
         }
