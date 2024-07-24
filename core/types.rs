@@ -88,6 +88,8 @@ impl std::cmp::PartialOrd<OwnedValue> for OwnedValue {
                 blob_left.partial_cmp(blob_right)
             }
             (OwnedValue::Null, OwnedValue::Null) => Some(std::cmp::Ordering::Equal),
+            (OwnedValue::Null, _) => Some(std::cmp::Ordering::Less),
+            (_, OwnedValue::Null) => Some(std::cmp::Ordering::Greater),
             _ => None,
         }
     }
