@@ -592,6 +592,46 @@ fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     Ok((v, 9))
 }
 
+fn write_varint(buf: &mut [u8], value: u64) -> usize {
+    if value <= 0x7f {
+        buf[0] = (value & 0x7f) as u8;
+        return 1;
+    }
+
+    if value <= 0x3fff {
+        buf[0] = (((value >> 7) & 0x7f) | 0x80) as u8;
+        buf[1] = (value & 0x7f) as u8;
+        return 2;
+    }
+
+    let mut value = value;
+    if (value & ((0xff000000_u64) << 32)) > 0 {
+        buf[8] = value as u8;
+        value >>= 8;
+        for i in (0..8).rev() {
+            buf[i] = ((value & 0x7f) | 0x80) as u8;
+            value >>= 7;
+        }
+        return 9;
+    }
+
+    let mut encoded: [u8; 10] = [0; 10];
+    let mut bytes = value;
+    let mut n = 0;
+    while bytes != 0 {
+        let v = 0x80 | (bytes & 0x7f);
+        encoded[n] = v as u8;
+        bytes >>= 7;
+        n += 1;
+    }
+    encoded[0] &= 0x7f;
+    dbg!(encoded);
+    for i in 0..n {
+        buf[i] = encoded[n - 1 - i];
+    }
+    return n;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -679,5 +719,35 @@ mod tests {
         let buf = [0b11111110];
         let result = read_varint(&buf);
         assert!(result.is_err());
+    }
+
+    // **    0x00                      becomes  0x00000000
+    // **    0x7f                      becomes  0x0000007f
+    // **    0x81 0x00                 becomes  0x00000080
+    // **    0x82 0x00                 becomes  0x00000100
+    // **    0x80 0x7f                 becomes  0x0000007f
+    // **    0x81 0x91 0xd1 0xac 0x78  becomes  0x12345678
+    // **    0x81 0x81 0x81 0x81 0x01  becomes  0x10204081
+    #[rstest]
+    #[case((0, 1), &[0x00])]
+    #[case((1, 1), &[0x01])]
+    #[case((129, 2), &[0x81, 0x01] )]
+    #[case((16513, 3), &[0x81, 0x81, 0x01] )]
+    #[case((2113665, 4), &[0x81, 0x81, 0x81, 0x01] )]
+    #[case((270549121, 5), &[0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((34630287489, 6), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((4432676798593, 7), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((567382630219905, 8), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((145249953336295681, 9), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    fn test_write_varint(#[case] value: (u64, usize), #[case] output: &[u8]) {
+        let mut buf: [u8; 10] = [0; 10];
+        let n = write_varint(&mut buf, value.0);
+        assert_eq!(n, value.1);
+        dbg!(value);
+        dbg!(buf);
+        dbg!(output);
+        for i in 0..output.len() {
+            assert_eq!(buf[i], output[i]);
+        }
     }
 }
