@@ -518,9 +518,7 @@ fn introspect_expression_for_cursors(
                 }
             }
         }
-        other => {
-            anyhow::bail!("Parse error: unsupported expression: {:?}", other);
-        }
+        _ => {}
     }
 
     Ok(cursors)
