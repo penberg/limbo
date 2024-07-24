@@ -4,7 +4,7 @@ pub mod sorter;
 
 use crate::btree::BTreeCursor;
 use crate::datetime::get_date_from_time_value;
-use crate::function::{AggFunc, SingleRowFunc};
+use crate::function::{AggFunc, ScalarFunc};
 use crate::pager::Pager;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
@@ -255,9 +255,9 @@ pub enum Insn {
     // Function
     Function {
         // constant_mask: i32, // P1, not used for now
-        start_reg: usize,    // P2, start of argument registers
-        dest: usize,         // P3
-        func: SingleRowFunc, // P4
+        start_reg: usize, // P2, start of argument registers
+        dest: usize,      // P3
+        func: ScalarFunc, // P4
     },
 }
 
@@ -1025,8 +1025,8 @@ impl Program {
                     start_reg,
                     dest,
                 } => match func {
-                    SingleRowFunc::Coalesce => {}
-                    SingleRowFunc::Like => {
+                    ScalarFunc::Coalesce => {}
+                    ScalarFunc::Like => {
                         let start_reg = *start_reg;
                         assert!(
                             start_reg + 2 <= state.registers.len(),
@@ -1047,7 +1047,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    SingleRowFunc::Abs => {
+                    ScalarFunc::Abs => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         if let Some(value) = exec_abs(reg_value) {
                             state.registers[*dest] = value;
@@ -1056,7 +1056,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    SingleRowFunc::Upper => {
+                    ScalarFunc::Upper => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         if let Some(value) = exec_upper(reg_value) {
                             state.registers[*dest] = value;
@@ -1065,7 +1065,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    SingleRowFunc::Lower => {
+                    ScalarFunc::Lower => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         if let Some(value) = exec_lower(reg_value) {
                             state.registers[*dest] = value;
@@ -1074,16 +1074,16 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    SingleRowFunc::Length => {
+                    ScalarFunc::Length => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         state.registers[*dest] = exec_length(reg_value);
                         state.pc += 1;
                     }
-                    SingleRowFunc::Random => {
+                    ScalarFunc::Random => {
                         state.registers[*dest] = exec_random();
                         state.pc += 1;
                     }
-                    SingleRowFunc::Trim => {
+                    ScalarFunc::Trim => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
                         let pattern_value = state.registers.get(start_reg + 1).cloned();
@@ -1093,7 +1093,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    SingleRowFunc::Round => {
+                    ScalarFunc::Round => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
                         let precision_value = state.registers.get(start_reg + 1).cloned();
@@ -1101,7 +1101,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    SingleRowFunc::Min => {
+                    ScalarFunc::Min => {
                         let start_reg = *start_reg;
                         let reg_values = state.registers[start_reg..state.registers.len()]
                             .iter()
@@ -1114,7 +1114,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    SingleRowFunc::Max => {
+                    ScalarFunc::Max => {
                         let start_reg = *start_reg;
                         let reg_values = state.registers[start_reg..state.registers.len()]
                             .iter()
@@ -1127,7 +1127,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    SingleRowFunc::Date => {
+                    ScalarFunc::Date => {
                         if *start_reg == 0 {
                             let date_str = get_date_from_time_value(&OwnedValue::Text(Rc::new(
                                 "now".to_string(),

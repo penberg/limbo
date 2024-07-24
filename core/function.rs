@@ -26,7 +26,7 @@ impl AggFunc {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SingleRowFunc {
+pub enum ScalarFunc {
     Coalesce,
     Like,
     Abs,
@@ -41,21 +41,21 @@ pub enum SingleRowFunc {
     Date,
 }
 
-impl ToString for SingleRowFunc {
+impl ToString for ScalarFunc {
     fn to_string(&self) -> String {
         match self {
-            SingleRowFunc::Coalesce => "coalesce".to_string(),
-            SingleRowFunc::Like => "like(2)".to_string(),
-            SingleRowFunc::Abs => "abs".to_string(),
-            SingleRowFunc::Upper => "upper".to_string(),
-            SingleRowFunc::Lower => "lower".to_string(),
-            SingleRowFunc::Random => "random".to_string(),
-            SingleRowFunc::Trim => "trim".to_string(),
-            SingleRowFunc::Round => "round".to_string(),
-            SingleRowFunc::Length => "length".to_string(),
-            SingleRowFunc::Min => "min".to_string(),
-            SingleRowFunc::Max => "max".to_string(),
-            SingleRowFunc::Date => "date".to_string(),
+            ScalarFunc::Coalesce => "coalesce".to_string(),
+            ScalarFunc::Like => "like(2)".to_string(),
+            ScalarFunc::Abs => "abs".to_string(),
+            ScalarFunc::Upper => "upper".to_string(),
+            ScalarFunc::Lower => "lower".to_string(),
+            ScalarFunc::Random => "random".to_string(),
+            ScalarFunc::Trim => "trim".to_string(),
+            ScalarFunc::Round => "round".to_string(),
+            ScalarFunc::Length => "length".to_string(),
+            ScalarFunc::Min => "min".to_string(),
+            ScalarFunc::Max => "max".to_string(),
+            ScalarFunc::Date => "date".to_string(),
         }
     }
 }
@@ -63,7 +63,7 @@ impl ToString for SingleRowFunc {
 #[derive(Debug)]
 pub enum Func {
     Agg(AggFunc),
-    SingleRow(SingleRowFunc),
+    Scalar(ScalarFunc),
 }
 
 impl Func {
@@ -73,22 +73,22 @@ impl Func {
             "count" => Ok(Func::Agg(AggFunc::Count)),
             "group_concat" => Ok(Func::Agg(AggFunc::GroupConcat)),
             "max" if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Max)),
-            "max" if arg_count > 1 => Ok(Func::SingleRow(SingleRowFunc::Max)),
+            "max" if arg_count > 1 => Ok(Func::Scalar(ScalarFunc::Max)),
             "min" if arg_count == 0 || arg_count == 1 => Ok(Func::Agg(AggFunc::Min)),
-            "min" if arg_count > 1 => Ok(Func::SingleRow(SingleRowFunc::Min)),
+            "min" if arg_count > 1 => Ok(Func::Scalar(ScalarFunc::Min)),
             "string_agg" => Ok(Func::Agg(AggFunc::StringAgg)),
             "sum" => Ok(Func::Agg(AggFunc::Sum)),
             "total" => Ok(Func::Agg(AggFunc::Total)),
-            "coalesce" => Ok(Func::SingleRow(SingleRowFunc::Coalesce)),
-            "like" => Ok(Func::SingleRow(SingleRowFunc::Like)),
-            "abs" => Ok(Func::SingleRow(SingleRowFunc::Abs)),
-            "upper" => Ok(Func::SingleRow(SingleRowFunc::Upper)),
-            "lower" => Ok(Func::SingleRow(SingleRowFunc::Lower)),
-            "random" => Ok(Func::SingleRow(SingleRowFunc::Random)),
-            "trim" => Ok(Func::SingleRow(SingleRowFunc::Trim)),
-            "round" => Ok(Func::SingleRow(SingleRowFunc::Round)),
-            "length" => Ok(Func::SingleRow(SingleRowFunc::Length)),
-            "date" => Ok(Func::SingleRow(SingleRowFunc::Date)),
+            "coalesce" => Ok(Func::Scalar(ScalarFunc::Coalesce)),
+            "like" => Ok(Func::Scalar(ScalarFunc::Like)),
+            "abs" => Ok(Func::Scalar(ScalarFunc::Abs)),
+            "upper" => Ok(Func::Scalar(ScalarFunc::Upper)),
+            "lower" => Ok(Func::Scalar(ScalarFunc::Lower)),
+            "random" => Ok(Func::Scalar(ScalarFunc::Random)),
+            "trim" => Ok(Func::Scalar(ScalarFunc::Trim)),
+            "round" => Ok(Func::Scalar(ScalarFunc::Round)),
+            "length" => Ok(Func::Scalar(ScalarFunc::Length)),
+            "date" => Ok(Func::Scalar(ScalarFunc::Date)),
             _ => Err(()),
         }
     }

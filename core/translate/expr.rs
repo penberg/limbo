@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
 use crate::{
-    function::{Func, SingleRowFunc},
+    function::{Func, ScalarFunc},
     schema::{Schema, Table, Type},
     translate::select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
@@ -237,9 +237,9 @@ pub fn translate_expr(
                 Some(Func::Agg(_)) => {
                     anyhow::bail!("Parse error: aggregation function in non-aggregation context")
                 }
-                Some(Func::SingleRow(srf)) => {
+                Some(Func::Scalar(srf)) => {
                     match srf {
-                        SingleRowFunc::Coalesce => {
+                        ScalarFunc::Coalesce => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
                                     anyhow::bail!(
@@ -280,7 +280,7 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
-                        SingleRowFunc::Like => {
+                        ScalarFunc::Like => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
                                     anyhow::bail!(
@@ -310,10 +310,10 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Abs
-                        | SingleRowFunc::Lower
-                        | SingleRowFunc::Upper
-                        | SingleRowFunc::Length => {
+                        ScalarFunc::Abs
+                        | ScalarFunc::Lower
+                        | ScalarFunc::Upper
+                        | ScalarFunc::Length => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     anyhow::bail!(
@@ -338,7 +338,7 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Random => {
+                        ScalarFunc::Random => {
                             if args.is_some() {
                                 anyhow::bail!(
                                     "Parse error: {} function with arguments",
@@ -353,7 +353,7 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Date => {
+                        ScalarFunc::Date => {
                             let mut start_reg = 0;
                             if let Some(args) = args {
                                 if args.len() > 1 {
@@ -373,11 +373,11 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: start_reg,
                                 dest: target_register,
-                                func: SingleRowFunc::Date,
+                                func: ScalarFunc::Date,
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Trim | SingleRowFunc::Round => {
+                        ScalarFunc::Trim | ScalarFunc::Round => {
                             let args = if let Some(args) = args {
                                 if args.len() > 2 {
                                     anyhow::bail!(
@@ -407,7 +407,7 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Min => {
+                        ScalarFunc::Min => {
                             let args = if let Some(args) = args {
                                 if args.len() < 1 {
                                     anyhow::bail!(
@@ -430,11 +430,11 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: SingleRowFunc::Min,
+                                func: ScalarFunc::Min,
                             });
                             Ok(target_register)
                         }
-                        SingleRowFunc::Max => {
+                        ScalarFunc::Max => {
                             let args = if let Some(args) = args {
                                 if args.len() < 1 {
                                     anyhow::bail!(
@@ -457,7 +457,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: SingleRowFunc::Max,
+                                func: ScalarFunc::Max,
                             });
                             Ok(target_register)
                         }
