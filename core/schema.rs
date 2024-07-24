@@ -222,9 +222,9 @@ fn create_table(
                     }
                 }
             }
-            for column in columns {
-                let name = column.col_name.0.to_string();
-                let ty = match column.col_type {
+            for (col_name, col_def) in columns {
+                let name = col_name.0.to_string();
+                let ty = match col_def.col_type {
                     Some(data_type) => {
                         let type_name = data_type.name.as_str();
                         if type_name.contains("INTEGER") {
@@ -247,7 +247,7 @@ fn create_table(
                     }
                     None => Type::Null,
                 };
-                let mut primary_key = column.constraints.iter().any(|c| {
+                let mut primary_key = col_def.constraints.iter().any(|c| {
                     matches!(
                         c.constraint,
                         sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
