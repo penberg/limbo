@@ -19,6 +19,26 @@ use crate::{function::Func, schema::Table, vdbe::BranchOffset};
 
 use super::SortInfo;
 
+pub struct Select<'a> {
+    pub columns: &'a Vec<ast::ResultColumn>,
+    pub column_info: Vec<ColumnInfo<'a>>,
+    pub src_tables: Vec<SrcTable<'a>>, // Tables we use to get data from. This includes "from" and "joins"
+    pub limit: &'a Option<ast::Limit>,
+    pub order_by: &'a Option<Vec<ast::SortedColumn>>,
+    pub exist_aggregation: bool,
+    pub where_clause: &'a Option<ast::Expr>,
+    /// Ordered list of opened read table loops
+    /// Used for generating a loop that looks like this:
+    /// cursor 0 = open table 0
+    /// for each row in cursor 0
+    ///     cursor 1 = open table 1
+    ///     for each row in cursor 1
+    ///         ...
+    ///     end cursor 1
+    /// end cursor 0
+    pub loops: Vec<LoopInfo>,
+}
+
 #[derive(Debug)]
 pub struct SrcTable<'a> {
     pub table: Table,
@@ -89,26 +109,6 @@ pub struct LoopInfo {
     pub rewind_on_empty_label: BranchOffset,
     // The ID of the cursor that is opened for this table
     pub open_cursor: usize,
-}
-
-pub struct Select<'a> {
-    pub columns: &'a Vec<ast::ResultColumn>,
-    pub column_info: Vec<ColumnInfo<'a>>,
-    pub src_tables: Vec<SrcTable<'a>>, // Tables we use to get data from. This includes "from" and "joins"
-    pub limit: &'a Option<ast::Limit>,
-    pub order_by: &'a Option<Vec<ast::SortedColumn>>,
-    pub exist_aggregation: bool,
-    pub where_clause: &'a Option<ast::Expr>,
-    /// Ordered list of opened read table loops
-    /// Used for generating a loop that looks like this:
-    /// cursor 0 = open table 0
-    /// for each row in cursor 0
-    ///     cursor 1 = open table 1
-    ///     for each row in cursor 1
-    ///         ...
-    ///     end cursor 1
-    /// end cursor 0
-    pub loops: Vec<LoopInfo>,
 }
 
 pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
