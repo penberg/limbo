@@ -53,9 +53,10 @@ fn main() -> anyhow::Result<()> {
     if history_file.exists() {
         rl.load_history(history_file.as_path())?;
     }
-    println!("Welcome to Limbo SQL shell!");
+    println!("Limbo v{}", env!("CARGO_PKG_VERSION"));
+    println!("Enter \".help\" for usage hints.");
     loop {
-        let readline = rl.readline("\x1b[90m>\x1b[0m ");
+        let readline = rl.readline("limbo> ");
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.to_owned())?;
