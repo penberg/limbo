@@ -15,7 +15,7 @@ fn bench(c: &mut Criterion) {
     rusqlite_bench(c)
 }
 
-fn limbo_bench(criterion: &mut Criterion){
+fn limbo_bench(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("limbo");
     group.throughput(Throughput::Elements(1));
     let io = Arc::new(PlatformIO::new().unwrap());
@@ -101,7 +101,7 @@ fn limbo_bench(criterion: &mut Criterion){
     );
 }
 
-fn rusqlite_bench(criterion: &mut Criterion){
+fn rusqlite_bench(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("rusqlite");
     group.throughput(Throughput::Elements(1));
 
