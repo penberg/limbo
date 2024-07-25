@@ -1,23 +1,17 @@
-use std::rc::Rc;
-
-use crate::Result;
-use sqlite3_parser::ast::{self, JoinOperator, JoinType};
-
-use crate::function::AggFunc;
-use crate::schema::{Column, PseudoTable, Schema};
-use crate::translate::expr::analyze_columns;
-use crate::translate::expr::maybe_apply_affinity;
-use crate::translate::expr::translate_expr;
-use crate::translate::normalize_ident;
+use crate::function::{AggFunc, Func};
+use crate::schema::{Column, PseudoTable, Schema, Table};
+use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_where, ProcessedWhereClause,
 };
-use crate::translate::{Insn, LimitInfo};
+use crate::translate::{normalize_ident, Insn, LimitInfo, SortInfo};
 use crate::types::{OwnedRecord, OwnedValue};
-use crate::vdbe::{builder::ProgramBuilder, Program};
-use crate::{function::Func, schema::Table, vdbe::BranchOffset};
+use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Program};
+use crate::Result;
 
-use super::SortInfo;
+use sqlite3_parser::ast::{self, JoinOperator, JoinType};
+
+use std::rc::Rc;
 
 /// A representation of a `SELECT` statement that has all the information
 /// needed for code generation.
