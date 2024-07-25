@@ -235,7 +235,7 @@ impl BTreeCursor {
         for cell in &page.cells {
             match cell {
                 BTreeCell::TableLeafCell(cell) => {
-                    if int_key >= cell._rowid {
+                    if int_key <= cell._rowid {
                         break;
                     }
                 }
@@ -264,15 +264,16 @@ impl BTreeCursor {
         // Data payload
         let payload_size_before_record = payload.len();
         _record.serialize(&mut payload);
-        let data_size = payload.len() - payload_size_before_record;
-        payload[0..8].copy_from_slice(&(data_size as u64).to_be_bytes());
+        let header_size = payload.len() - payload_size_before_record;
 
         {
             // Data len
             let mut data_len_varint: Vec<u8> = Vec::new();
             data_len_varint.extend(std::iter::repeat(0).take(9));
-            let n = write_varint(&mut data_len_varint.as_mut_slice()[0..9], int_key);
-            write_varint(&mut data_len_varint, int_key);
+            let n = write_varint(
+                &mut data_len_varint.as_mut_slice()[0..9],
+                header_size as u64,
+            );
             data_len_varint.truncate(n);
             payload.splice(0..0, data_len_varint.iter().cloned());
         }
@@ -305,8 +306,6 @@ impl BTreeCursor {
                     first_overflow_page: None,
                 }),
             );
-
-            dbg!(pc);
         }
 
         Ok(CursorResult::Ok(()))
@@ -321,15 +320,11 @@ impl BTreeCursor {
         let mut gap = cell_offset + 2 * page_ref.cells.len();
         let mut top = page_ref.header._cell_content_area as usize;
 
-        dbg!(gap);
-        dbg!(top);
         // there are free blocks and enough space
         if page_ref.header._first_freeblock_offset != 0 && gap + 2 <= top {
             // find slot
             let db_header = self.database_header.borrow();
             let pc = find_free_cell(page_ref, db_header, amount, buf);
-            dbg!("found");
-            dbg!(pc);
             return pc as u16;
         }
 

@@ -306,59 +306,35 @@ impl OwnedRecord {
     }
 
     pub fn serialize(&self, buf: &mut Vec<u8>) {
-        let mut header_bytes: usize = 0;
-        let mut buf_i = 0;
+        let initial_i = buf.len();
 
-        let mut write_and_advance = |value: u64| {
-            if buf.len() - buf_i < 9 {
-                // ensure we have enough space for 9 bytes
-                buf.extend(std::iter::repeat(0).take(9));
-            }
-            let n = write_varint(&mut buf.as_mut_slice()[buf_i..buf_i + 9], value);
-            buf_i += n;
-            return n;
-        };
-
-        // calculate header_bytes and write serial types
         for value in &self.values {
-            let n = match value {
-                OwnedValue::Null => write_and_advance(0),
-                OwnedValue::Integer(_) => write_and_advance(6), // for now let's only do i64
-                OwnedValue::Float(_) => write_and_advance(7),
-                OwnedValue::Text(t) => write_and_advance((t.len() * 2 + 13) as u64),
-                OwnedValue::Blob(b) => write_and_advance((b.len() * 2 + 12) as u64),
+            let serial_type = match value {
+                OwnedValue::Null => 0,
+                OwnedValue::Integer(_) => 6, // for now let's only do i64
+                OwnedValue::Float(_) => 7,
+                OwnedValue::Text(t) => (t.len() * 2 + 13) as u64,
+                OwnedValue::Blob(b) => (b.len() * 2 + 12) as u64,
                 // not serializable values
                 OwnedValue::Agg(_) => unreachable!(),
                 OwnedValue::Record(_) => unreachable!(),
             };
-            header_bytes += n;
+
+            buf.resize(buf.len() + 9, 0); // Ensure space for varint
+            let len = buf.len();
+            let n = write_varint(&mut buf[len - 9..], serial_type);
+            buf.truncate(buf.len() - 9 + n); // Remove unused bytes
         }
 
-        let mut write_and_advance_payload = |data: &[u8]| {
-            if buf.len() - buf_i < data.len() {
-                // ensure we have enough space for data
-                buf.extend(std::iter::repeat(0).take(data.len()));
-            }
-            let n = buf.as_mut_slice()[buf_i..buf_i + data.len()].clone_from_slice(data);
-            buf_i += data.len();
-            return n;
-        };
+        let mut header_size = buf.len() - initial_i;
         // write content
         for value in &self.values {
             match value {
                 OwnedValue::Null => {}
-                OwnedValue::Integer(i) => {
-                    write_and_advance_payload(&i.to_be_bytes());
-                }
-                OwnedValue::Float(f) => {
-                    write_and_advance_payload(&f.to_be_bytes());
-                }
-                OwnedValue::Text(t) => {
-                    write_and_advance_payload(t.as_bytes());
-                }
-                OwnedValue::Blob(b) => {
-                    write_and_advance_payload(b.as_slice());
-                }
+                OwnedValue::Integer(i) => buf.extend_from_slice(&i.to_be_bytes()),
+                OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
+                OwnedValue::Text(t) => buf.extend_from_slice(t.as_bytes()),
+                OwnedValue::Blob(b) => buf.extend_from_slice(b),
                 // non serializable
                 OwnedValue::Agg(_) => unreachable!(),
                 OwnedValue::Record(_) => unreachable!(),
@@ -366,13 +342,20 @@ impl OwnedRecord {
         }
 
         let mut header_bytes_buf: Vec<u8> = Vec::new();
+        if header_size <= 126 {
+            // common case
+            header_size += 1;
+        } else {
+            todo!("calculate big header size extra bytes");
+            // get header varint len
+            // header_size += n;
+            // if( nVarint<sqlite3VarintLen(nHdr) ) nHdr++;
+        }
+        assert!(header_size <= 126);
         header_bytes_buf.extend(std::iter::repeat(0).take(9));
-        let n = write_varint(&mut header_bytes_buf.as_mut_slice(), header_bytes as u64);
+        let n = write_varint(&mut header_bytes_buf.as_mut_slice(), header_size as u64);
+        header_bytes_buf.truncate(n);
         buf.splice(0..0, header_bytes_buf.iter().cloned());
-        buf_i += n;
-
-        // cleanup extra extends
-        buf.truncate(buf_i);
     }
 }
 

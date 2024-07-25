@@ -479,8 +479,8 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
     }
     let mut values = Vec::with_capacity(serial_types.len());
     for serial_type in &serial_types {
-        let (value, usize) = read_value(&payload[pos..], serial_type)?;
-        pos += usize;
+        let (value, n) = read_value(&payload[pos..], serial_type)?;
+        pos += n;
         values.push(value);
     }
     Ok(OwnedRecord::new(values))
@@ -626,7 +626,6 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
         n += 1;
     }
     encoded[0] &= 0x7f;
-    dbg!(encoded);
     for i in 0..n {
         buf[i] = encoded[n - 1 - i];
     }
@@ -744,9 +743,6 @@ mod tests {
         let mut buf: [u8; 10] = [0; 10];
         let n = write_varint(&mut buf, value.0);
         assert_eq!(n, value.1);
-        dbg!(value);
-        dbg!(buf);
-        dbg!(output);
         for i in 0..output.len() {
             assert_eq!(buf[i], output[i]);
         }

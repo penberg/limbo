@@ -1275,7 +1275,6 @@ impl Program {
                 Insn::EndCoroutine { yield_reg } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
                         state.ended_coroutine = true;
-                        println!("jumping to {}", pc);
                         state.pc = pc - 1; // yield jump is always next to yield. Here we substract 1 to go back to yield instruction
                     } else {
                         unreachable!();
@@ -1286,7 +1285,6 @@ impl Program {
                     end_offset,
                 } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
-                        println!("yield {} to {}", state.pc, pc);
                         if state.ended_coroutine {
                             state.pc = *end_offset;
                         } else {

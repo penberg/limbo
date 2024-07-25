@@ -34,11 +34,6 @@ pub fn translate_insert(
     );
     let start_offset = program.offset();
 
-    dbg!(tbl_name);
-    dbg!(columns);
-    dbg!(returning);
-    dbg!(with);
-    dbg!(body);
     // open table
     let table_name = &tbl_name.name;
 
@@ -167,8 +162,8 @@ pub fn translate_insert(
         program.emit_insn(Insn::Halt); // Add error code 1555 and rollback
         program.resolve_label(make_record_label, program.offset());
         program.emit_insn(Insn::MakeRecord {
-            start_reg: column_registers_start,
-            count: num_cols,
+            start_reg: column_registers_start + 1,
+            count: num_cols - 1,
             dest_reg: record_register,
         });
         program.emit_insn(Insn::InsertAsync {
