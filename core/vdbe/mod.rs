@@ -1150,6 +1150,11 @@ impl Program {
                         }
                         state.pc += 1;
                     }
+                    ScalarFunc::Unicode => {
+                        let reg_value = state.registers[*start_reg].borrow_mut();
+                        state.registers[*dest] = exec_unicode(reg_value);
+                        state.pc += 1;
+                    }
                 },
             }
         }
@@ -1268,6 +1273,23 @@ fn exec_minmax<'a>(
     regs.into_iter().reduce(|a, b| op(a, b)).cloned()
 }
 
+fn exec_unicode(reg: &OwnedValue) -> OwnedValue {
+    match reg {
+        OwnedValue::Text(_)
+        | OwnedValue::Integer(_)
+        | OwnedValue::Float(_)
+        | OwnedValue::Blob(_) => {
+            let text = reg.to_string();
+            if let Some(first_char) = text.chars().next() {
+                OwnedValue::Integer(first_char as u32 as i64)
+            } else {
+                OwnedValue::Null
+            }
+        }
+        _ => OwnedValue::Null,
+    }
+}
+
 fn exec_round(reg: &OwnedValue, precision: Option<OwnedValue>) -> OwnedValue {
     let precision = match precision {
         Some(OwnedValue::Text(x)) => x.parse().unwrap_or(0.0),
@@ -1324,7 +1346,7 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::{
         exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_minmax, exec_random,
-        exec_round, exec_trim, exec_upper, OwnedValue,
+        exec_round, exec_trim, exec_unicode, exec_upper, OwnedValue,
     };
     use std::rc::Rc;
 
@@ -1342,10 +1364,46 @@ mod tests {
         let expected_len = OwnedValue::Integer(7);
         assert_eq!(exec_length(&input_float), expected_len);
 
-        // Expected byte array for "example"
-        let expected_blob = OwnedValue::Blob(Rc::new(vec![101, 120, 97, 109, 112, 108, 101]));
+        let expected_blob = OwnedValue::Blob(Rc::new("example".as_bytes().to_vec()));
         let expected_len = OwnedValue::Integer(7);
         assert_eq!(exec_length(&expected_blob), expected_len);
+    }
+
+    #[test]
+    fn test_unicode() {
+        assert_eq!(
+            exec_unicode(&OwnedValue::Text(Rc::new("a".to_string()))),
+            OwnedValue::Integer(97)
+        );
+        assert_eq!(
+            exec_unicode(&OwnedValue::Text(Rc::new("😊".to_string()))),
+            OwnedValue::Integer(128522)
+        );
+        assert_eq!(
+            exec_unicode(&OwnedValue::Text(Rc::new("".to_string()))),
+            OwnedValue::Null
+        );
+        assert_eq!(
+            exec_unicode(&OwnedValue::Integer(23)),
+            OwnedValue::Integer(50)
+        );
+        assert_eq!(
+            exec_unicode(&OwnedValue::Integer(0)),
+            OwnedValue::Integer(48)
+        );
+        assert_eq!(
+            exec_unicode(&OwnedValue::Float(0.0)),
+            OwnedValue::Integer(48)
+        );
+        assert_eq!(
+            exec_unicode(&OwnedValue::Float(23.45)),
+            OwnedValue::Integer(50)
+        );
+        assert_eq!(exec_unicode(&OwnedValue::Null), OwnedValue::Null);
+        assert_eq!(
+            exec_unicode(&OwnedValue::Blob(Rc::new("example".as_bytes().to_vec()))),
+            OwnedValue::Integer(101)
+        );
     }
 
     #[test]

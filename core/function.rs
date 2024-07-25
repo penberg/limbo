@@ -39,6 +39,7 @@ pub enum ScalarFunc {
     Min,
     Max,
     Date,
+    Unicode,
 }
 
 impl ToString for ScalarFunc {
@@ -56,6 +57,7 @@ impl ToString for ScalarFunc {
             ScalarFunc::Min => "min".to_string(),
             ScalarFunc::Max => "max".to_string(),
             ScalarFunc::Date => "date".to_string(),
+            ScalarFunc::Unicode => "unicode".to_string(),
         }
     }
 }
@@ -89,6 +91,7 @@ impl Func {
             "round" => Ok(Func::Scalar(ScalarFunc::Round)),
             "length" => Ok(Func::Scalar(ScalarFunc::Length)),
             "date" => Ok(Func::Scalar(ScalarFunc::Date)),
+            "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             _ => Err(()),
         }
     }

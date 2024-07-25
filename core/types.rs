@@ -42,7 +42,7 @@ impl Display for OwnedValue {
             OwnedValue::Integer(i) => write!(f, "{}", i),
             OwnedValue::Float(fl) => write!(f, "{:?}", fl),
             OwnedValue::Text(s) => write!(f, "{}", s),
-            OwnedValue::Blob(b) => write!(f, "{:?}", b),
+            OwnedValue::Blob(b) => write!(f, "{}", String::from_utf8_lossy(b)),
             OwnedValue::Agg(a) => match a.as_ref() {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
                 AggContext::Sum(acc) => write!(f, "{}", acc),
