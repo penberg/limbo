@@ -10,7 +10,7 @@ use crate::schema::Schema;
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn, Program};
-use anyhow::Result;
+use crate::Result;
 use select::{build_select, translate_select};
 use sqlite3_parser::ast;
 

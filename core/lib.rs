@@ -1,6 +1,7 @@
 mod btree;
 mod buffer_pool;
 mod datetime;
+mod error;
 mod function;
 mod io;
 mod pager;
@@ -17,7 +18,6 @@ mod vdbe;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use anyhow::Result;
 use fallible_iterator::FallibleIterator;
 use log::trace;
 use pager::Pager;
@@ -26,6 +26,9 @@ use sqlite3_ondisk::DatabaseHeader;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
+
+pub use error::LimboError;
+pub type Result<T> = std::result::Result<T, error::LimboError>;
 
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;

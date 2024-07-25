@@ -1,4 +1,4 @@
-use anyhow::Result;
+use limbo_core::Result;
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;

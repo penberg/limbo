@@ -1024,7 +1024,6 @@ dependencies = [
 name = "limbo-wasm"
 version = "0.0.2"
 dependencies = [
- "anyhow",
  "limbo_core",
  "wasm-bindgen",
 ]
@@ -1033,7 +1032,6 @@ dependencies = [
 name = "limbo_core"
 version = "0.0.2"
 dependencies = [
- "anyhow",
  "cfg_block",
  "chrono",
  "criterion",
@@ -1061,7 +1059,6 @@ dependencies = [
 name = "limbo_sim"
 version = "0.0.2"
 dependencies = [
- "anyhow",
  "limbo_core",
  "rand",
  "rand_chacha",

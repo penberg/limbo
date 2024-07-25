@@ -15,7 +15,6 @@ name = "limbo_sim"
 path = "main.rs"
 
 [dependencies]
-anyhow = "1.0.86"
 limbo_core = { path = "../core" }
 rand = "0.8.5"
 rand_chacha = "0.3.1"

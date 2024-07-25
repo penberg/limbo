@@ -24,11 +24,11 @@
 ///
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
+use crate::error::LimboError;
 use crate::io::{Buffer, Completion, WriteCompletion};
 use crate::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
-use crate::PageSource;
-use anyhow::{anyhow, Result};
+use crate::{PageSource, Result};
 use log::trace;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -204,7 +204,7 @@ pub enum PageType {
 }
 
 impl TryFrom<u8> for PageType {
-    type Error = anyhow::Error;
+    type Error = crate::error::LimboError;
 
     fn try_from(value: u8) -> Result<Self> {
         match value {
@@ -212,7 +212,7 @@ impl TryFrom<u8> for PageType {
             5 => Ok(Self::TableInterior),
             10 => Ok(Self::IndexLeaf),
             13 => Ok(Self::TableLeaf),
-            _ => Err(anyhow!("Invalid page type: {}", value)),
+            _ => Err(LimboError::Corrupt(format!("Invalid page type: {}", value))),
         }
     }
 }
@@ -410,7 +410,7 @@ pub enum SerialType {
 }
 
 impl TryFrom<u64> for SerialType {
-    type Error = anyhow::Error;
+    type Error = crate::error::LimboError;
 
     fn try_from(value: u64) -> Result<Self> {
         match value {
@@ -426,7 +426,7 @@ impl TryFrom<u64> for SerialType {
             9 => Ok(Self::ConstInt1),
             n if value > 12 && value % 2 == 0 => Ok(Self::Blob(((n - 12) / 2) as usize)),
             n if value > 13 && value % 2 == 1 => Ok(Self::String(((n - 13) / 2) as usize)),
-            _ => Err(anyhow!("Invalid serial type: {}", value)),
+            _ => crate::bail_corrupt_error!("Invalid serial type: {}", value),
         }
     }
 }
@@ -461,13 +461,13 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         SerialType::Null => Ok((OwnedValue::Null, 0)),
         SerialType::UInt8 => {
             if buf.is_empty() {
-                return Err(anyhow!("Invalid UInt8 value"));
+                crate::bail_corrupt_error!("Invalid UInt8 value");
             }
             Ok((OwnedValue::Integer(buf[0] as i64), 1))
         }
         SerialType::BEInt16 => {
             if buf.len() < 2 {
-                return Err(anyhow!("Invalid BEInt16 value"));
+                crate::bail_corrupt_error!("Invalid BEInt16 value");
             }
             Ok((
                 OwnedValue::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64),
@@ -476,7 +476,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::BEInt24 => {
             if buf.len() < 3 {
-                return Err(anyhow!("Invalid BEInt24 value"));
+                crate::bail_corrupt_error!("Invalid BEInt24 value");
             }
             Ok((
                 OwnedValue::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
@@ -485,7 +485,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::BEInt32 => {
             if buf.len() < 4 {
-                return Err(anyhow!("Invalid BEInt32 value"));
+                crate::bail_corrupt_error!("Invalid BEInt32 value");
             }
             Ok((
                 OwnedValue::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64),
@@ -494,7 +494,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::BEInt48 => {
             if buf.len() < 6 {
-                return Err(anyhow!("Invalid BEInt48 value"));
+                crate::bail_corrupt_error!("Invalid BEInt48 value");
             }
             Ok((
                 OwnedValue::Integer(i64::from_be_bytes([
@@ -505,7 +505,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::BEInt64 => {
             if buf.len() < 8 {
-                return Err(anyhow!("Invalid BEInt64 value"));
+                crate::bail_corrupt_error!("Invalid BEInt64 value");
             }
             Ok((
                 OwnedValue::Integer(i64::from_be_bytes([
@@ -516,7 +516,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::BEFloat64 => {
             if buf.len() < 8 {
-                return Err(anyhow!("Invalid BEFloat64 value"));
+                crate::bail_corrupt_error!("Invalid BEFloat64 value");
             }
             Ok((
                 OwnedValue::Float(f64::from_be_bytes([
@@ -529,13 +529,13 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         SerialType::ConstInt1 => Ok((OwnedValue::Integer(1), 0)),
         SerialType::Blob(n) => {
             if buf.len() < n {
-                return Err(anyhow!("Invalid Blob value"));
+                crate::bail_corrupt_error!("Invalid Blob value");
             }
             Ok((OwnedValue::Blob(buf[0..n].to_vec().into()), n))
         }
         SerialType::String(n) => {
             if buf.len() < n {
-                return Err(anyhow!("Invalid String value"));
+                crate::bail_corrupt_error!("Invalid String value");
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
@@ -555,7 +555,7 @@ fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
                 }
             }
             None => {
-                return Err(anyhow!("Invalid varint"));
+                crate::bail_corrupt_error!("Invalid varint");
             }
         }
     }

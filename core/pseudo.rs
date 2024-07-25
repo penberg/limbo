@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::Result;
 use std::cell::{Ref, RefCell};
 
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};

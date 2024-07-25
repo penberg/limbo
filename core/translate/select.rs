@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use anyhow::Result;
+use crate::Result;
 use sqlite3_parser::ast::{self, JoinOperator, JoinType};
 
 use crate::function::AggFunc;
@@ -136,7 +136,7 @@ pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Sele
             let maybe_alias = maybe_alias.map(|als| &als.0);
             let table = match schema.get_table(table_name) {
                 Some(table) => table,
-                None => anyhow::bail!("Parse error: no such table: {}", table_name),
+                None => crate::bail_parse_error!("no such table: {}", table_name),
             };
             let identifier = normalize_ident(maybe_alias.unwrap_or(table_name));
             let mut joins = Vec::new();
@@ -161,7 +161,9 @@ pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Sele
                     let maybe_alias = maybe_alias.as_ref().map(|als| &als.0);
                     let table = match schema.get_table(table_name) {
                         Some(table) => table,
-                        None => anyhow::bail!("Parse error: no such table: {}", table_name),
+                        None => {
+                            crate::bail_parse_error!("no such table: {}", table_name)
+                        }
                     };
                     let identifier = normalize_ident(maybe_alias.unwrap_or(table_name));
 
@@ -715,11 +717,13 @@ fn translate_aggregation(
     let empty_args = &Vec::<ast::Expr>::new();
     let args = info.args.as_ref().unwrap_or(empty_args);
     let dest = match func {
-        Func::Scalar(_) => anyhow::bail!("Parse error: single row function in aggregation"),
+        Func::Scalar(_) => {
+            crate::bail_parse_error!("single row function in aggregation")
+        }
         Func::Agg(agg_func) => match agg_func {
             AggFunc::Avg => {
                 if args.len() != 1 {
-                    anyhow::bail!("Parse error: avg bad number of arguments");
+                    crate::bail_parse_error!("avg bad number of arguments");
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
@@ -751,7 +755,7 @@ fn translate_aggregation(
             }
             AggFunc::GroupConcat => {
                 if args.len() != 1 && args.len() != 2 {
-                    anyhow::bail!("Parse error: group_concat bad number of arguments");
+                    crate::bail_parse_error!("group_concat bad number of arguments");
                 }
 
                 let expr_reg = program.alloc_register();
@@ -774,21 +778,15 @@ fn translate_aggregation(
                             delimiter_expr =
                                 ast::Expr::Literal(ast::Literal::String(s.to_string()));
                         }
-                        _ => anyhow::bail!("Incorrect delimiter parameter"),
+                        _ => crate::bail_parse_error!("Incorrect delimiter parameter"),
                     };
                 } else {
                     delimiter_expr =
                         ast::Expr::Literal(ast::Literal::String(String::from("\",\"")));
                 }
 
-                if let Err(error) = translate_expr(program, select, expr, expr_reg, cursor_hint) {
-                    anyhow::bail!(error);
-                }
-                if let Err(error) =
-                    translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)
-                {
-                    anyhow::bail!(error);
-                }
+                translate_expr(program, select, expr, expr_reg, cursor_hint)?;
+                translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)?;
 
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
@@ -801,7 +799,7 @@ fn translate_aggregation(
             }
             AggFunc::Max => {
                 if args.len() != 1 {
-                    anyhow::bail!("Parse error: max bad number of arguments");
+                    crate::bail_parse_error!("max bad number of arguments");
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
@@ -816,7 +814,7 @@ fn translate_aggregation(
             }
             AggFunc::Min => {
                 if args.len() != 1 {
-                    anyhow::bail!("Parse error: min bad number of arguments");
+                    crate::bail_parse_error!("min bad number of arguments");
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
@@ -831,7 +829,7 @@ fn translate_aggregation(
             }
             AggFunc::StringAgg => {
                 if args.len() != 2 {
-                    anyhow::bail!("Parse error: string_agg bad number of arguments");
+                    crate::bail_parse_error!("string_agg bad number of arguments");
                 }
 
                 let expr_reg = program.alloc_register();
@@ -843,7 +841,7 @@ fn translate_aggregation(
                 match &args[1] {
                     ast::Expr::Id(ident) => {
                         if ident.0.starts_with('"') {
-                            anyhow::bail!("Parse error: no such column: \",\" - should this be a string literal in single-quotes?");
+                            crate::bail_parse_error!("no such column: \",\" - should this be a string literal in single-quotes?");
                         } else {
                             delimiter_expr = args[1].clone();
                         }
@@ -851,17 +849,11 @@ fn translate_aggregation(
                     ast::Expr::Literal(ast::Literal::String(s)) => {
                         delimiter_expr = ast::Expr::Literal(ast::Literal::String(s.to_string()));
                     }
-                    _ => anyhow::bail!("Incorrect delimiter parameter"),
+                    _ => crate::bail_parse_error!("Incorrect delimiter parameter"),
                 };
 
-                if let Err(error) = translate_expr(program, select, expr, expr_reg, cursor_hint) {
-                    anyhow::bail!(error);
-                }
-                if let Err(error) =
-                    translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)
-                {
-                    anyhow::bail!(error);
-                }
+                translate_expr(program, select, expr, expr_reg, cursor_hint)?;
+                translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)?;
 
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
@@ -874,7 +866,7 @@ fn translate_aggregation(
             }
             AggFunc::Sum => {
                 if args.len() != 1 {
-                    anyhow::bail!("Parse error: sum bad number of arguments");
+                    crate::bail_parse_error!("sum bad number of arguments");
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
@@ -889,7 +881,7 @@ fn translate_aggregation(
             }
             AggFunc::Total => {
                 if args.len() != 1 {
-                    anyhow::bail!("Parse error: total bad number of arguments");
+                    crate::bail_parse_error!("total bad number of arguments");
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();

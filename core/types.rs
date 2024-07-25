@@ -1,7 +1,8 @@
 use std::fmt::Display;
 use std::{cell::Ref, rc::Rc};
 
-use anyhow::Result;
+use crate::error::LimboError;
+use crate::Result;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
@@ -257,7 +258,7 @@ impl<'a> FromValue<'a> for i64 {
     fn from_value(value: &Value<'a>) -> Result<Self> {
         match value {
             Value::Integer(i) => Ok(*i),
-            _ => anyhow::bail!("Expected integer value"),
+            _ => Err(LimboError::ConversionError("Expected integer value".into())),
         }
     }
 }
@@ -266,7 +267,7 @@ impl<'a> FromValue<'a> for String {
     fn from_value(value: &Value<'a>) -> Result<Self> {
         match value {
             Value::Text(s) => Ok(s.to_string()),
-            _ => anyhow::bail!("Expected text value"),
+            _ => Err(LimboError::ConversionError("Expected text value".into())),
         }
     }
 }
@@ -275,7 +276,7 @@ impl<'a> FromValue<'a> for &'a str {
     fn from_value(value: &Value<'a>) -> Result<&'a str> {
         match value {
             Value::Text(s) => Ok(s),
-            _ => anyhow::bail!("Expected text value"),
+            _ => Err(LimboError::ConversionError("Expected text value".into())),
         }
     }
 }

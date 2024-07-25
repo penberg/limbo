@@ -1,14 +1,17 @@
-use anyhow::Result;
-use sqlite3_parser::ast::{self};
-
 use crate::{
+    error::LimboError,
     function::ScalarFunc,
-    translate::expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
-    translate::select::Select,
+    translate::{
+        expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
+        select::Select,
+    },
     vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
+    Result,
 };
 
 use super::select::LoopInfo;
+
+use sqlite3_parser::ast::{self};
 
 #[derive(Debug)]
 pub struct WhereTerm {
@@ -60,10 +63,10 @@ pub fn split_constraint_to_terms<'a>(
                                 .loops
                                 .iter()
                                 .find(|t| t.identifier == *table)
-                                .ok_or(anyhow::anyhow!(
+                                .ok_or(LimboError::ParseError(format!(
                                     "Could not find cursor for table {}",
                                     table
-                                ))?
+                                )))?
                                 .open_cursor
                         }
                         None => {
@@ -87,7 +90,9 @@ pub fn split_constraint_to_terms<'a>(
                                 .map(|t| t.open_cursor)
                                 .min()
                                 .ok_or_else(|| {
-                                    anyhow::anyhow!("No open cursors found in any of the loops")
+                                    LimboError::ParseError(format!(
+                                        "No open cursors found in any of the loops"
+                                    ))
                                 })?;
 
                             *cursors.iter().max().unwrap_or(&outermost_cursor)
@@ -377,7 +382,7 @@ fn translate_condition_expr(
                         null_reg: reg,
                     });
                 } else {
-                    anyhow::bail!("Parse error: unsupported literal type in condition");
+                    crate::bail_parse_error!("unsupported literal type in condition");
                 }
             }
             _ => todo!(),

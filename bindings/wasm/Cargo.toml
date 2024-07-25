@@ -11,6 +11,5 @@ crate-type = ["cdylib"]
 path = "lib.rs"
 
 [dependencies]
-anyhow = "1.0.75"
 limbo_core = { path = "../../core", default-features = false }
 wasm-bindgen = "0.2"

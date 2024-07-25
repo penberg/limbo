@@ -1,18 +1,11 @@
 #[cfg(feature = "fs")]
 use crate::io::File;
 use crate::{
+    error::LimboError,
     io::{Completion, WriteCompletion},
-    Buffer,
+    Buffer, Result,
 };
-use anyhow::{ensure, Result};
 use std::{cell::RefCell, rc::Rc};
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum StorageError {
-    #[error("file is not a database")]
-    NotADB,
-}
 
 pub struct PageSource {
     io: Rc<dyn PageIO>,
@@ -72,10 +65,9 @@ impl PageIO for FileStorage {
     fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         let size = c.buf().len();
         assert!(page_idx > 0);
-        ensure!(
-            (1 << 9..=1 << 16).contains(&size) && size & (size - 1) == 0,
-            StorageError::NotADB
-        );
+        if size < 512 || size > 65536 || size & (size - 1) != 0 {
+            return Err(LimboError::NotADB.into());
+        }
         let pos = (page_idx - 1) * size;
         self.file.pread(pos, c)?;
         Ok(())

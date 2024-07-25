@@ -1,7 +1,7 @@
 use crate::types::OwnedValue;
-use anyhow;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use log::trace;
+use std::result::Result;
 use std::{error::Error, fmt::Display};
 
 #[derive(Debug)]
@@ -86,7 +86,7 @@ fn get_max_datetime_exclusive() -> NaiveDateTime {
     )
 }
 
-pub fn get_date_from_time_value(time_value: &OwnedValue) -> anyhow::Result<String> {
+pub fn get_date_from_time_value(time_value: &OwnedValue) -> crate::Result<String> {
     let dt = match time_value {
         OwnedValue::Text(s) => get_date_time_from_time_value_string(s),
         OwnedValue::Integer(i) => get_date_time_from_time_value_integer(*i),
@@ -106,7 +106,7 @@ pub fn get_date_from_time_value(time_value: &OwnedValue) -> anyhow::Result<Strin
             }
             DateTimeError::Other(s) => {
                 trace!("Other date time error: {}", s);
-                anyhow::bail!(s)
+                Err(crate::error::LimboError::InvalidDate(s))
             }
         }
     }

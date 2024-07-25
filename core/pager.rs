@@ -1,7 +1,7 @@
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
-use crate::PageSource;
+use crate::{PageSource, Result};
 use log::trace;
 use sieve_cache::SieveCache;
 use std::cell::RefCell;
@@ -106,7 +106,7 @@ pub struct Pager {
 }
 
 impl Pager {
-    pub fn begin_open(page_source: &PageSource) -> anyhow::Result<Rc<RefCell<DatabaseHeader>>> {
+    pub fn begin_open(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
         sqlite3_ondisk::begin_read_database_header(page_source)
     }
 
@@ -114,7 +114,7 @@ impl Pager {
         db_header: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
         io: Arc<dyn crate::io::IO>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let db_header = db_header.borrow();
         let page_size = db_header.page_size as usize;
         let buffer_pool = Rc::new(BufferPool::new(page_size));
@@ -127,7 +127,7 @@ impl Pager {
         })
     }
 
-    pub fn read_page(&self, page_idx: usize) -> anyhow::Result<Rc<Page>> {
+    pub fn read_page(&self, page_idx: usize) -> Result<Rc<Page>> {
         trace!("read_page(page_idx = {})", page_idx);
         let mut page_cache = self.page_cache.borrow_mut();
         if let Some(page) = page_cache.get(&page_idx) {

@@ -1,5 +1,4 @@
-use super::{Completion, File, WriteCompletion, IO};
-use anyhow::{Ok, Result};
+use crate::{Completion, File, Result, WriteCompletion, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
