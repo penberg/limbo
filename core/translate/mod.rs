@@ -11,7 +11,7 @@ use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn, Program};
 use crate::Result;
-use select::{build_select, translate_select};
+use select::{prepare_select, translate_select};
 use sqlite3_parser::ast;
 
 struct LimitInfo {
@@ -36,7 +36,7 @@ pub fn translate(
 ) -> Result<Program> {
     match stmt {
         ast::Stmt::Select(select) => {
-            let select = build_select(schema, &select)?;
+            let select = prepare_select(schema, &select)?;
             translate_select(select)
         }
         ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),

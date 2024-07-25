@@ -117,7 +117,7 @@ pub struct LoopInfo {
     pub open_cursor: usize,
 }
 
-pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
+pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
     match &select.body.select {
         ast::OneSelect::Select {
             columns,
