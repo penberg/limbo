@@ -9,17 +9,10 @@ use crate::pager::Pager;
 use crate::schema::Schema;
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
-use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn, Program};
+use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
 use crate::Result;
 use select::{prepare_select, translate_select};
 use sqlite3_parser::ast;
-
-#[derive(Debug)]
-struct SortInfo {
-    sorter_cursor: usize,
-    sorter_reg: usize,
-    count: usize,
-}
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
