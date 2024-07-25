@@ -24,13 +24,13 @@ pub mod sorter;
 mod datetime;
 
 use crate::error::LimboError;
-use crate::function::{AggFunc, ScalarFunc};
+use crate::function::{AggFunc, JsonFunc, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
-use crate::Result;
+use crate::{json, Result};
 
 use datetime::{exec_date, exec_time};
 

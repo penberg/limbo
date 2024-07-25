@@ -40,6 +40,9 @@ getrandom = { version = "0.2.15", features = ["js"] }
 regex = "1.10.5"
 chrono = "0.4.38"
 julian_day_converter = "0.3.2"
+jsonb = "0.4.1"
+json5 = "0.4.1"
+serde_json = "1.0.120"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }

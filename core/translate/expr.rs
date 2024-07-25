@@ -1,4 +1,4 @@
-use crate::Result;
+use crate::{function::JsonFunc, Result};
 use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
 use crate::{
@@ -134,6 +134,32 @@ pub fn translate_expr(
                 Some(Func::Agg(_)) => {
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
+                Some(Func::Json(j)) => match j {
+                    JsonFunc::JSON => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 1 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 1 argument",
+                                    j.to_string()
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!(
+                                "{} function with no arguments",
+                                j.to_string()
+                            );
+                        };
+                        let regs = program.alloc_register();
+                        translate_expr(program, select, &args[0], regs, cursor_hint)?;
+                        program.emit_insn(Insn::Json {
+                            start_reg: regs,
+                            dest: target_register,
+                            func: j,
+                        });
+                        Ok(target_register)
+                    }
+                },
                 Some(Func::Scalar(srf)) => {
                     match srf {
                         ScalarFunc::Coalesce => {

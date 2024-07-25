@@ -1,4 +1,17 @@
 #[derive(Debug, Clone, PartialEq)]
+pub enum JsonFunc {
+    JSON,
+}
+
+impl ToString for JsonFunc {
+    fn to_string(&self) -> String {
+        match self {
+            JsonFunc::JSON => "json".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum AggFunc {
     Avg,
     Count,
@@ -72,6 +85,7 @@ impl ToString for ScalarFunc {
 pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
+    Json(JsonFunc),
 }
 
 impl Func {
@@ -101,6 +115,7 @@ impl Func {
             "date" => Ok(Func::Scalar(ScalarFunc::Date)),
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
+            "json" => Ok(Func::Json((JsonFunc::JSON))),
             _ => Err(()),
         }
     }
