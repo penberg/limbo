@@ -65,4 +65,4 @@ jobs:
         unzip sqlite-tools-linux-x64-3460000.zip
 
     - name: Test
-      run: SQLITE_EXEC="$(pwd)/download/sqlite3" make test
+      run: SQLITE_EXEC="$(pwd)/download/sqlite3" make test-compat
