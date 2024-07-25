@@ -277,5 +277,7 @@ fn query(
             eprintln!("{}", err);
         }
     }
+    // for now let's cache flush always
+    conn.cacheflush()?;
     Ok(())
 }
