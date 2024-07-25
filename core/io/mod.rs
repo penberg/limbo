@@ -13,8 +13,7 @@ pub trait File {
     fn lock_file(&self, exclusive: bool) -> Result<()>;
     fn unlock_file(&self) -> Result<()>;
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
-    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<WriteCompletion>)
-        -> Result<()>;
+    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
 }
 
 pub trait IO {
@@ -26,16 +25,30 @@ pub trait IO {
 pub type Complete = dyn Fn(Rc<RefCell<Buffer>>);
 pub type WriteComplete = dyn Fn(usize);
 
-pub struct Completion {
+pub enum Completion {
+    Read(ReadCompletion),
+    Write(WriteCompletion),
+}
+
+pub struct ReadCompletion {
     pub buf: Rc<RefCell<Buffer>>,
     pub complete: Box<Complete>,
+}
+
+impl Completion {
+    pub fn complete(&self) {
+        match self {
+            Completion::Read(r) => r.complete(),
+            Completion::Write(w) => w.complete(234234), // fix
+        }
+    }
 }
 
 pub struct WriteCompletion {
     pub complete: Box<WriteComplete>,
 }
 
-impl Completion {
+impl ReadCompletion {
     pub fn new(buf: Rc<RefCell<Buffer>>, complete: Box<Complete>) -> Self {
         Self { buf, complete }
     }

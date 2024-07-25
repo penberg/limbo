@@ -201,6 +201,11 @@ impl Connection {
         }
         Ok(())
     }
+
+    pub fn cacheflush(&self) -> Result<()> {
+        self.pager.cacheflush()?;
+        Ok(())
+    }
 }
 
 pub struct Statement {

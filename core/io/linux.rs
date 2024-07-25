@@ -159,11 +159,15 @@ impl File for LinuxFile {
     }
 
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-        trace!("pread(pos = {}, length = {})", pos, c.buf().len());
+        let r = match &(*c) {
+            Completion::Read(r) => r,
+            Completion::Write(_) => unreachable!(),
+        };
+        trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let mut io = self.io.borrow_mut();
         let read_e = {
-            let mut buf = c.buf_mut();
+            let mut buf = r.buf_mut();
             let len = buf.len();
             let buf = buf.as_mut_ptr();
             let ptr = Rc::into_raw(c.clone());
@@ -186,7 +190,7 @@ impl File for LinuxFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<WriteCompletion>,
+        c: Rc<Completion>,
     ) -> Result<()> {
         let mut io = self.io.borrow_mut();
         let fd = io_uring::types::Fd(self.file.as_raw_fd());

@@ -6,6 +6,7 @@ use crate::sqlite3_ondisk::{
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
+use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
@@ -213,13 +214,14 @@ impl BTreeCursor {
             mem_page.clone()
         };
         let page_idx = mem_page.page_idx;
-        let page = self.pager.read_page(page_idx)?;
-        let page = page.borrow_mut();
+        let page_ref = self.pager.read_page(page_idx)?;
+        let page = page_ref.borrow();
         if page.is_locked() {
             return Ok(CursorResult::IO);
         }
 
         page.set_dirty();
+        self.pager.add_dirty(page_ref.clone());
 
         let mut page = page.contents.write().unwrap();
         let page = page.as_mut().unwrap();
@@ -284,8 +286,8 @@ impl BTreeCursor {
         } else {
             // insert
             let pc = self.allocate_cell_space(page, payload.len() as u16);
-            let mut buf = page.buffer.borrow_mut();
-            let mut buf = buf.as_mut_slice();
+            let mut buf_ref = RefCell::borrow_mut(&page.buffer);
+            let buf: &mut [u8] = buf_ref.as_mut_slice();
             buf[pc as usize..pc as usize + payload.len()].copy_from_slice(&payload);
             //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
             let pointer_area_pc_by_idx = 8 + 2 * cell_idx;
@@ -313,11 +315,11 @@ impl BTreeCursor {
 
     fn allocate_cell_space(&mut self, page_ref: &BTreePage, amount: u16) -> u16 {
         let amount = amount as usize;
-        let mut page = page_ref.buffer.borrow_mut();
-        let buf = page.as_mut_slice();
+        let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
+        let buf = buf_ref.as_mut_slice();
 
         let cell_offset = 8;
-        let mut gap = cell_offset + 2 * page_ref.cells.len();
+        let gap = cell_offset + 2 * page_ref.cells.len();
         let mut top = page_ref.header._cell_content_area as usize;
 
         // there are free blocks and enough space
@@ -355,7 +357,7 @@ impl BTreeCursor {
         if cloned_page.cells.len() > 0 {
             let buf = cloned_page.buffer.borrow();
             let buf = buf.as_slice();
-            let mut write_buf = page.buffer.borrow_mut();
+            let mut write_buf = RefCell::borrow_mut(&page.buffer);
             let write_buf = write_buf.as_mut_slice();
 
             for i in 0..cloned_page.cells.len() {
@@ -393,7 +395,7 @@ impl BTreeCursor {
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
         assert!(cbrk >= first_cell);
-        let mut write_buf = page.buffer.borrow_mut();
+        let mut write_buf = RefCell::borrow_mut(&page.buffer);
         let write_buf = write_buf.as_mut_slice();
 
         // set new first byte of cell content

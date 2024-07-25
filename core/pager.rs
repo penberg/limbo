@@ -18,6 +18,7 @@ use std::sync::{Arc, RwLock};
 pub struct Page {
     flags: AtomicUsize,
     pub contents: RwLock<Option<BTreePage>>,
+    pub id: usize,
 }
 
 /// Page is up-to-date.
@@ -31,15 +32,16 @@ const PAGE_DIRTY: usize = 0b1000;
 
 impl Default for Page {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
 }
 
 impl Page {
-    pub fn new() -> Page {
+    pub fn new(id: usize) -> Page {
         Page {
             flags: AtomicUsize::new(0),
             contents: RwLock::new(None),
+            id,
         }
     }
 
@@ -273,6 +275,7 @@ pub struct Pager {
     buffer_pool: Rc<BufferPool>,
     /// I/O interface for input/output operations.
     pub io: Arc<dyn crate::io::IO>,
+    dirty_pages: Rc<RefCell<Vec<Rc<RefCell<Page>>>>>,
 }
 
 impl Pager {
@@ -296,6 +299,7 @@ impl Pager {
             buffer_pool,
             page_cache,
             io,
+            dirty_pages: Rc::new(RefCell::new(Vec::new())),
         })
     }
 
@@ -306,7 +310,7 @@ impl Pager {
         if let Some(page) = page_cache.get(&page_idx) {
             return Ok(page.clone());
         }
-        let page = Rc::new(RefCell::new(Page::new()));
+        let page = Rc::new(RefCell::new(Page::new(page_idx)));
         page.borrow().set_locked();
         sqlite3_ondisk::begin_read_btree_page(
             &self.page_source,
@@ -326,5 +330,24 @@ impl Pager {
     /// Changes the size of the page cache.
     pub fn change_page_cache_size(&self, capacity: usize) {
         self.page_cache.borrow_mut().resize(capacity);
+    }
+
+    pub fn add_dirty(&self, page: Rc<RefCell<Page>>) {
+        // TODO: cehck duplicates?
+        let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
+        dirty_pages.push(page);
+    }
+
+    pub fn cacheflush(&self) -> anyhow::Result<()> {
+        let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
+        loop {
+            if dirty_pages.len() == 0 {
+                break;
+            }
+            let page = dirty_pages.pop().unwrap();
+            sqlite3_ondisk::begin_write_btree_page(self, &page)?;
+            self.io.run_once()?;
+        }
+        Ok(())
     }
 }

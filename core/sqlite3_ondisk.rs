@@ -25,13 +25,12 @@
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
 use crate::error::LimboError;
-use crate::io::{Buffer, Completion, WriteCompletion};
+use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
 use crate::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{PageSource, Result};
 use log::trace;
 use std::cell::RefCell;
-use std::ptr::NonNull;
 use std::rc::Rc;
 
 /// The size of the database header in bytes.
@@ -78,7 +77,7 @@ pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell
         let header = header.clone();
         finish_read_database_header(buf, header).unwrap();
     });
-    let c = Rc::new(Completion::new(buf, complete));
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
     page_source.get(1, c.clone())?;
     Ok(result)
 }
@@ -169,7 +168,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
 
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
-    let c = Rc::new(Completion::new(buf.clone(), complete));
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf.clone(), complete)));
     page_source.get(1, c.clone())?;
     // run get header block
     pager.io.run_once()?;
@@ -183,7 +182,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
         }
         // finish_read_database_header(buf, header).unwrap();
     });
-    let c = Rc::new(WriteCompletion::new(write_complete));
+    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
     page_source.write(0, buffer_to_copy.clone(), c).unwrap();
 
     Ok(())
@@ -260,7 +259,7 @@ pub fn begin_read_btree_page(
             page.borrow_mut().set_error();
         }
     });
-    let c = Rc::new(Completion::new(buf, complete));
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
     page_source.get(page_idx, c.clone())?;
     Ok(())
 }
@@ -314,6 +313,30 @@ fn finish_read_btree_page(
         page.set_uptodate();
         page.clear_locked();
     }
+    Ok(())
+}
+
+pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result<()> {
+    let page_source = &pager.page_source;
+    let page = page.borrow();
+    let contents = page.contents.read().unwrap();
+    let contents = contents.as_ref().unwrap();
+    let buffer = contents.buffer.clone();
+    let write_complete = {
+        let buf_copy = buffer.clone();
+        Box::new(move |bytes_written: usize| {
+            let buf_copy = buf_copy.clone();
+            let buf_len = buf_copy.borrow().len();
+            if bytes_written < buf_len {
+                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+            }
+            println!("done");
+            // finish_read_database_header(buf, header).unwrap();
+        })
+    };
+    dbg!(buffer.borrow().len());
+    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    page_source.write(page.id, buffer.clone(), c)?;
     Ok(())
 }
 
