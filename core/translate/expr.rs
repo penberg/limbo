@@ -210,7 +210,8 @@ pub fn translate_expr(
                         ScalarFunc::Abs
                         | ScalarFunc::Lower
                         | ScalarFunc::Upper
-                        | ScalarFunc::Length => {
+                        | ScalarFunc::Length
+                        | ScalarFunc::Unicode => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     crate::bail_parse_error!(

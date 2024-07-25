@@ -243,3 +243,26 @@ do_execsql_test date-with-invalid-timezone {
   SELECT date('2023-05-18 15:30:45+25:00');
 } {{}}
 
+do_execsql_test unicode-a {
+  SELECT unicode('a');
+} {97}
+
+do_execsql_test unicode-emoji {
+  SELECT unicode('😊');
+} {128522}
+
+do_execsql_test unicode-empty {
+  SELECT unicode('');
+} {}
+
+do_execsql_test unicode-number {
+  SELECT unicode(23);
+} {50}
+
+do_execsql_test unicode-float {
+  SELECT unicode(23.45);
+} {50}
+
+do_execsql_test unicode-null {
+  SELECT unicode(NULL);
+} {}
