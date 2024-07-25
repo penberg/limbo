@@ -1,23 +1,49 @@
-use std::rc::Rc;
-
-use crate::Result;
-use sqlite3_parser::ast::{self, JoinOperator, JoinType};
-
-use crate::function::AggFunc;
-use crate::schema::{Column, PseudoTable, Schema};
-use crate::translate::expr::analyze_columns;
-use crate::translate::expr::maybe_apply_affinity;
-use crate::translate::expr::translate_expr;
-use crate::translate::normalize_ident;
+use crate::function::{AggFunc, Func};
+use crate::schema::{Column, PseudoTable, Schema, Table};
+use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_where, ProcessedWhereClause,
 };
-use crate::translate::{Insn, LimitInfo};
+use crate::translate::{normalize_ident, Insn};
 use crate::types::{OwnedRecord, OwnedValue};
-use crate::vdbe::{builder::ProgramBuilder, Program};
-use crate::{function::Func, schema::Table, vdbe::BranchOffset};
+use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Program};
+use crate::Result;
 
-use super::SortInfo;
+use sqlite3_parser::ast::{self, JoinOperator, JoinType};
+
+use std::rc::Rc;
+
+/// A representation of a `SELECT` statement that has all the information
+/// needed for code generation.
+pub struct Select<'a> {
+    /// The columns that are being selected.
+    pub columns: &'a Vec<ast::ResultColumn>,
+    /// Information about each column.
+    pub column_info: Vec<ColumnInfo<'a>>,
+    /// The tables we are retrieving data from, including tables mentioned
+    /// in `FROM` and `JOIN` clauses.
+    pub src_tables: Vec<SrcTable<'a>>,
+    /// The `LIMIT` clause.
+    pub limit: &'a Option<ast::Limit>,
+    /// The `ORDER BY` clause.
+    pub order_by: &'a Option<Vec<ast::SortedColumn>>,
+    /// Whether the query contains an aggregation function.
+    pub exist_aggregation: bool,
+    /// The `WHERE` clause.
+    pub where_clause: &'a Option<ast::Expr>,
+    /// Ordered list of opened read table loops.
+    ///
+    /// The list is used to generate inner loops like this:
+    ///
+    ///   cursor 0 = open table 0
+    ///   for each row in cursor 0
+    ///       cursor 1 = open table 1
+    ///       for each row in cursor 1
+    ///           ...
+    ///       end cursor 1
+    ///   end cursor 0
+    pub loops: Vec<LoopInfo>,
+}
 
 #[derive(Debug)]
 pub struct SrcTable<'a> {
@@ -91,27 +117,20 @@ pub struct LoopInfo {
     pub open_cursor: usize,
 }
 
-pub struct Select<'a> {
-    pub columns: &'a Vec<ast::ResultColumn>,
-    pub column_info: Vec<ColumnInfo<'a>>,
-    pub src_tables: Vec<SrcTable<'a>>, // Tables we use to get data from. This includes "from" and "joins"
-    pub limit: &'a Option<ast::Limit>,
-    pub order_by: &'a Option<Vec<ast::SortedColumn>>,
-    pub exist_aggregation: bool,
-    pub where_clause: &'a Option<ast::Expr>,
-    /// Ordered list of opened read table loops
-    /// Used for generating a loop that looks like this:
-    /// cursor 0 = open table 0
-    /// for each row in cursor 0
-    ///     cursor 1 = open table 1
-    ///     for each row in cursor 1
-    ///         ...
-    ///     end cursor 1
-    /// end cursor 0
-    pub loops: Vec<LoopInfo>,
+struct LimitInfo {
+    limit_reg: usize,
+    num: i64,
+    goto_label: BranchOffset,
 }
 
-pub fn build_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
+#[derive(Debug)]
+struct SortInfo {
+    sorter_cursor: usize,
+    sorter_reg: usize,
+    count: usize,
+}
+
+pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {
     match &select.body.select {
         ast::OneSelect::Select {
             columns,
