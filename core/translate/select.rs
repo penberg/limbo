@@ -19,23 +19,35 @@ use crate::{function::Func, schema::Table, vdbe::BranchOffset};
 
 use super::SortInfo;
 
+/// A representation of a `SELECT` statement that has all the information
+/// needed for code generation.
 pub struct Select<'a> {
+    /// The columns that are being selected.
     pub columns: &'a Vec<ast::ResultColumn>,
+    /// Information about each column.
     pub column_info: Vec<ColumnInfo<'a>>,
-    pub src_tables: Vec<SrcTable<'a>>, // Tables we use to get data from. This includes "from" and "joins"
+    /// The tables we are retrieving data from, including tables mentioned
+    /// in `FROM` and `JOIN` clauses.
+    pub src_tables: Vec<SrcTable<'a>>,
+    /// The `LIMIT` clause.
     pub limit: &'a Option<ast::Limit>,
+    /// The `ORDER BY` clause.
     pub order_by: &'a Option<Vec<ast::SortedColumn>>,
+    /// Whether the query contains an aggregation function.
     pub exist_aggregation: bool,
+    /// The `WHERE` clause.
     pub where_clause: &'a Option<ast::Expr>,
-    /// Ordered list of opened read table loops
-    /// Used for generating a loop that looks like this:
-    /// cursor 0 = open table 0
-    /// for each row in cursor 0
-    ///     cursor 1 = open table 1
-    ///     for each row in cursor 1
-    ///         ...
-    ///     end cursor 1
-    /// end cursor 0
+    /// Ordered list of opened read table loops.
+    ///
+    /// The list is used to generate inner loops like this:
+    ///
+    ///   cursor 0 = open table 0
+    ///   for each row in cursor 0
+    ///       cursor 1 = open table 1
+    ///       for each row in cursor 1
+    ///           ...
+    ///       end cursor 1
+    ///   end cursor 0
     pub loops: Vec<LoopInfo>,
 }
 
