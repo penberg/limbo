@@ -4,7 +4,7 @@ use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_ex
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_where, ProcessedWhereClause,
 };
-use crate::translate::{normalize_ident, Insn, LimitInfo, SortInfo};
+use crate::translate::{normalize_ident, Insn, SortInfo};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Program};
 use crate::Result;
@@ -115,6 +115,12 @@ pub struct LoopInfo {
     pub rewind_on_empty_label: BranchOffset,
     // The ID of the cursor that is opened for this table
     pub open_cursor: usize,
+}
+
+struct LimitInfo {
+    limit_reg: usize,
+    num: i64,
+    goto_label: BranchOffset,
 }
 
 pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Select<'a>> {

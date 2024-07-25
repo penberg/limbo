@@ -14,12 +14,6 @@ use crate::Result;
 use select::{prepare_select, translate_select};
 use sqlite3_parser::ast;
 
-struct LimitInfo {
-    limit_reg: usize,
-    num: i64,
-    goto_label: BranchOffset,
-}
-
 #[derive(Debug)]
 struct SortInfo {
     sorter_cursor: usize,
