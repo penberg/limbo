@@ -4,13 +4,14 @@ pub mod sorter;
 
 use crate::btree::BTreeCursor;
 use crate::datetime::get_date_from_time_value;
+use crate::error::LimboError;
 use crate::function::{AggFunc, ScalarFunc};
 use crate::pager::Pager;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
+use crate::Result;
 
-use anyhow::Result;
 use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
@@ -380,7 +381,9 @@ impl Program {
                             state.pc += 1;
                         }
                         _ => {
-                            anyhow::bail!("IfPos: the value in the register is not an integer");
+                            return Err(LimboError::InternalError(
+                                "IfPos: the value in the register is not an integer".into(),
+                            ));
                         }
                     }
                 }
@@ -1141,10 +1144,10 @@ impl Program {
                                     state.registers[*dest] = OwnedValue::Text(Rc::new(date))
                                 }
                                 Err(e) => {
-                                    anyhow::bail!(
+                                    return Err(LimboError::ParseError(format!(
                                         "Error encountered while parsing time value: {}",
                                         e
-                                    )
+                                    )));
                                 }
                             }
                         }

@@ -1,5 +1,4 @@
-use crate::util::normalize_ident;
-use anyhow::Result;
+use crate::{util::normalize_ident, Result};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use log::trace;
@@ -130,7 +129,7 @@ impl BTreeTable {
             Some(Cmd::Stmt(Stmt::CreateTable { tbl_name, body, .. })) => {
                 create_table(tbl_name, body, root_page)
             }
-            _ => anyhow::bail!("Expected CREATE TABLE statement"),
+            _ => todo!("Expected CREATE TABLE statement"),
         }
     }
 
@@ -213,9 +212,7 @@ fn create_table(
                                     value.trim_matches('\'').to_owned()
                                 }
                                 _ => {
-                                    return Err(anyhow::anyhow!(
-                                        "Unsupported primary key expression"
-                                    ))
+                                    todo!("Unsupported primary key expression");
                                 }
                             });
                         }

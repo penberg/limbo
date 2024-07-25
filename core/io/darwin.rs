@@ -1,7 +1,8 @@
+use crate::error::LimboError;
 use crate::io::common;
+use crate::Result;
 
 use super::{Completion, File, WriteCompletion, IO};
-use anyhow::{Ok, Result};
 use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
@@ -137,11 +138,11 @@ impl File for DarwinFile {
         if lock_result == -1 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(anyhow::anyhow!(
+                return Err(LimboError::LockingError(format!(
                     "Failed locking file. File is locked by another process"
-                ));
+                )));
             } else {
-                return Err(anyhow::anyhow!("Failed locking file, {}", err));
+                return Err(LimboError::LockingError(format!("Failed locking file, {}", err)));
             }
         }
         Ok(())
@@ -159,10 +160,10 @@ impl File for DarwinFile {
 
         let unlock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
         if unlock_result == -1 {
-            return Err(anyhow::anyhow!(
+            return Err(LimboError::LockingError(format!(
                 "Failed to release file lock: {}",
                 std::io::Error::last_os_error()
-            ));
+            )));
         }
         Ok(())
     }

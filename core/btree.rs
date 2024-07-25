@@ -1,8 +1,7 @@
 use crate::pager::Pager;
 use crate::sqlite3_ondisk::{BTreeCell, TableInteriorCell, TableLeafCell};
 use crate::types::{Cursor, CursorResult, OwnedRecord};
-
-use anyhow::Result;
+use crate::Result;
 
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;

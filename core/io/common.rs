@@ -2,8 +2,7 @@ pub const ENV_DISABLE_FILE_LOCK: &str = "LIMBO_DISABLE_FILE_LOCK";
 
 #[cfg(test)]
 pub mod tests {
-    use crate::IO;
-    use anyhow::Result;
+    use crate::{Result, IO};
     use std::process::{Command, Stdio};
     use tempfile::NamedTempFile;
 

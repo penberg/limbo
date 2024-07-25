@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::Result;
 use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
 use crate::{
@@ -132,22 +132,22 @@ pub fn translate_expr(
 
             match func_type {
                 Some(Func::Agg(_)) => {
-                    anyhow::bail!("Parse error: aggregation function in non-aggregation context")
+                    crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
                 Some(Func::Scalar(srf)) => {
                     match srf {
                         ScalarFunc::Coalesce => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
-                                    anyhow::bail!(
-                                        "Parse error: {} function with less than 2 arguments",
+                                    crate::bail_parse_error!(
+                                        "{} function with less than 2 arguments",
                                         srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!(
-                                    "Parse error: {} function with no arguments",
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
                                     srf.to_string()
                                 );
                             };
@@ -180,15 +180,15 @@ pub fn translate_expr(
                         ScalarFunc::Like => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
-                                    anyhow::bail!(
-                                        "Parse error: {} function with less than 2 arguments",
+                                    crate::bail_parse_error!(
+                                        "{} function with less than 2 arguments",
                                         srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!(
-                                    "Parse error: {} function with no arguments",
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
                                     srf.to_string()
                                 );
                             };
@@ -213,15 +213,15 @@ pub fn translate_expr(
                         | ScalarFunc::Length => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
-                                    anyhow::bail!(
-                                        "Parse error: {} function with not exactly 1 argument",
+                                    crate::bail_parse_error!(
+                                        "{} function with not exactly 1 argument",
                                         srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!(
-                                    "Parse error: {} function with no arguments",
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
                                     srf.to_string()
                                 );
                             };
@@ -237,8 +237,8 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Random => {
                             if args.is_some() {
-                                anyhow::bail!(
-                                    "Parse error: {} function with arguments",
+                                crate::bail_parse_error!(
+                                    "{} function with arguments",
                                     srf.to_string()
                                 );
                             }
@@ -254,7 +254,7 @@ pub fn translate_expr(
                             let mut start_reg = 0;
                             if let Some(args) = args {
                                 if args.len() > 1 {
-                                    anyhow::bail!("Parse error: date function with > 1 arguments. Modifiers are not yet supported.");
+                                    crate::bail_parse_error!("date function with > 1 arguments. Modifiers are not yet supported.");
                                 } else if args.len() == 1 {
                                     let arg_reg = program.alloc_register();
                                     let _ = translate_expr(
@@ -277,15 +277,15 @@ pub fn translate_expr(
                         ScalarFunc::Trim | ScalarFunc::Round => {
                             let args = if let Some(args) = args {
                                 if args.len() > 2 {
-                                    anyhow::bail!(
-                                        "Parse error: {} function with more than 2 arguments",
+                                    crate::bail_parse_error!(
+                                        "{} function with more than 2 arguments",
                                         srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!(
-                                    "Parse error: {} function with no arguments",
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
                                     srf.to_string()
                                 );
                             };
@@ -307,13 +307,13 @@ pub fn translate_expr(
                         ScalarFunc::Min => {
                             let args = if let Some(args) = args {
                                 if args.len() < 1 {
-                                    anyhow::bail!(
-                                        "Parse error: min function with less than one argument"
+                                    crate::bail_parse_error!(
+                                        "min function with less than one argument"
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!("Parse error: min function with no arguments");
+                                crate::bail_parse_error!("min function with no arguments");
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
@@ -334,13 +334,13 @@ pub fn translate_expr(
                         ScalarFunc::Max => {
                             let args = if let Some(args) = args {
                                 if args.len() < 1 {
-                                    anyhow::bail!(
-                                        "Parse error: max function with less than one argument"
+                                    crate::bail_parse_error!(
+                                        "max function with less than one argument"
                                     );
                                 }
                                 args
                             } else {
-                                anyhow::bail!("Parse error: max function with no arguments");
+                                crate::bail_parse_error!("max function with no arguments");
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
@@ -361,7 +361,7 @@ pub fn translate_expr(
                     }
                 }
                 None => {
-                    anyhow::bail!("Parse error: unknown function {}", name.0);
+                    crate::bail_parse_error!("unknown function {}", name.0);
                 }
             }
         }
@@ -600,8 +600,8 @@ pub fn resolve_ident_qualified(
             Table::Pseudo(_) => todo!(),
         }
     }
-    anyhow::bail!(
-        "Parse error: column with qualified name {}.{} not found",
+    crate::bail_parse_error!(
+        "column with qualified name {}.{} not found",
         table_name,
         ident
     );
@@ -654,10 +654,10 @@ pub fn resolve_ident_table(
         return Ok(found[0]);
     }
     if found.is_empty() {
-        anyhow::bail!("Parse error: column with name {} not found", ident.as_str());
+        crate::bail_parse_error!("column with name {} not found", ident.as_str());
     }
 
-    anyhow::bail!("Parse error: ambiguous column name {}", ident.as_str());
+    crate::bail_parse_error!("ambiguous column name {}", ident.as_str());
 }
 
 pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mut ProgramBuilder) {

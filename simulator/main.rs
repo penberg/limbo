@@ -1,5 +1,4 @@
-use anyhow::Result;
-use limbo_core::{Database, File, PlatformIO, IO};
+use limbo_core::{Database, File, PlatformIO, Result, IO};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
@@ -100,7 +99,9 @@ impl IO for SimulatorIO {
 
     fn run_once(&self) -> Result<()> {
         if *self.fault.borrow() {
-            return Err(anyhow::anyhow!("Injected fault"));
+            return Err(limbo_core::LimboError::InternalError(
+                "Injected fault".into(),
+            ));
         }
         self.inner.run_once().unwrap();
         Ok(())
@@ -131,14 +132,18 @@ impl SimulatorFile {
 impl limbo_core::File for SimulatorFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
         if *self.fault.borrow() {
-            return Err(anyhow::anyhow!("Injected fault"));
+            return Err(limbo_core::LimboError::InternalError(
+                "Injected fault".into(),
+            ));
         }
         self.inner.lock_file(exclusive)
     }
 
     fn unlock_file(&self) -> Result<()> {
         if *self.fault.borrow() {
-            return Err(anyhow::anyhow!("Injected fault"));
+            return Err(limbo_core::LimboError::InternalError(
+                "Injected fault".into(),
+            ));
         }
         self.inner.unlock_file()
     }
@@ -146,7 +151,9 @@ impl limbo_core::File for SimulatorFile {
     fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         if *self.fault.borrow() {
             *self.nr_pread_faults.borrow_mut() += 1;
-            return Err(anyhow::anyhow!("Injected fault"));
+            return Err(limbo_core::LimboError::InternalError(
+                "Injected fault".into(),
+            ));
         }
         self.inner.pread(pos, c)
     }
@@ -159,7 +166,9 @@ impl limbo_core::File for SimulatorFile {
     ) -> Result<()> {
         if *self.fault.borrow() {
             *self.nr_pwrite_faults.borrow_mut() += 1;
-            return Err(anyhow::anyhow!("Injected fault"));
+            return Err(limbo_core::LimboError::InternalError(
+                "Injected fault".into(),
+            ));
         }
         self.inner.pwrite(pos, buffer, c)
     }

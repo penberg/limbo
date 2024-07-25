@@ -1,5 +1,7 @@
-use crate::types::{Cursor, CursorResult, OwnedRecord};
-use anyhow::Result;
+use crate::{
+    types::{Cursor, CursorResult, OwnedRecord},
+    Result,
+};
 use std::{
     cell::{Ref, RefCell},
     collections::{BTreeMap, VecDeque},
