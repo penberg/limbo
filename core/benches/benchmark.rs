@@ -4,9 +4,20 @@ use pprof::criterion::{Output, PProfProfiler};
 use std::sync::Arc;
 
 fn bench(c: &mut Criterion) {
-    let mut group = c.benchmark_group("limbo");
-    group.throughput(Throughput::Elements(1));
+    limbo_bench(c);
 
+    // https://github.com/penberg/limbo/issues/174
+    // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
+    if std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_ok() {
+        return;
+    }
+
+    rusqlite_bench(c)
+}
+
+fn limbo_bench(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("limbo");
+    group.throughput(Throughput::Elements(1));
     let io = Arc::new(PlatformIO::new().unwrap());
     let db = Database::open_file(io.clone(), "../testing/testing.db").unwrap();
     let conn = db.connect();
@@ -88,16 +99,10 @@ fn bench(c: &mut Criterion) {
             });
         },
     );
+}
 
-    drop(group);
-
-    // https://github.com/penberg/limbo/issues/174
-    // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
-    if std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_ok() {
-        return;
-    }
-
-    let mut group = c.benchmark_group("rusqlite");
+fn rusqlite_bench(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("rusqlite");
     group.throughput(Throughput::Elements(1));
 
     let conn = rusqlite::Connection::open("../testing/testing.db").unwrap();
