@@ -99,17 +99,23 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
 pub struct Pager {
+    /// Source of the database pages.
     pub page_source: PageSource,
+    /// Cache for storing loaded pages.
     page_cache: RefCell<PageCache<usize, Rc<Page>>>,
+    /// Buffer pool for temporary data storage.
     buffer_pool: Rc<BufferPool>,
+    /// I/O interface for input/output operations.
     pub io: Arc<dyn crate::io::IO>,
 }
 
 impl Pager {
+    /// Begins opening a database by reading the database header.
     pub fn begin_open(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
         sqlite3_ondisk::begin_read_database_header(page_source)
     }
 
+    /// Completes opening a database by initializing the Pager with the database header.
     pub fn finish_open(
         db_header: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
@@ -127,6 +133,7 @@ impl Pager {
         })
     }
 
+    /// Reads a page from the database.
     pub fn read_page(&self, page_idx: usize) -> Result<Rc<Page>> {
         trace!("read_page(page_idx = {})", page_idx);
         let mut page_cache = self.page_cache.borrow_mut();
@@ -145,10 +152,12 @@ impl Pager {
         Ok(page)
     }
 
+    /// Writes the database header.
     pub fn write_database_header(&self, header: &DatabaseHeader) {
         sqlite3_ondisk::begin_write_database_header(header, self).expect("failed to write header");
     }
 
+    /// Changes the size of the page cache.
     pub fn change_page_cache_size(&self, capacity: usize) {
         self.page_cache.borrow_mut().resize(capacity);
     }
