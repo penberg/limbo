@@ -248,7 +248,6 @@ impl BTreeCursor {
         // if overwrite drop cell
 
         // insert cell
-        assert!(page.header.page_type == PageType::TableLeaf);
         let mut payload: Vec<u8> = Vec::new();
 
         {
@@ -287,15 +286,28 @@ impl BTreeCursor {
             let pc = self.allocate_cell_space(page, payload.len() as u16);
             let mut buf_ref = RefCell::borrow_mut(&page.buffer);
             let buf: &mut [u8] = buf_ref.as_mut_slice();
+
+            // copy data
             buf[pc as usize..pc as usize + payload.len()].copy_from_slice(&payload);
             //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
             let pointer_area_pc_by_idx = 8 + 2 * cell_idx;
+
             // move previous pointers forward and insert new pointer there
             let n_cells_forward = 2 * (page.cells.len() - cell_idx);
             buf.copy_within(
                 pointer_area_pc_by_idx..pointer_area_pc_by_idx + n_cells_forward,
                 pointer_area_pc_by_idx + 2,
             );
+            buf[pointer_area_pc_by_idx..pointer_area_pc_by_idx + 2]
+                .copy_from_slice(&pc.to_be_bytes());
+
+            // update first byte of content area
+            buf[5..7].copy_from_slice(&pc.to_be_bytes());
+
+            // update cell count
+            let new_n_cells = (page.cells.len() + 1) as u16;
+            buf[3..5].copy_from_slice(&new_n_cells.to_be_bytes());
+
             // TODo: refactor cells to be lazy loadable because this will be crazy slow
             let mut payload_for_cell_in_memory: Vec<u8> = Vec::new();
             _record.serialize(&mut payload_for_cell_in_memory);

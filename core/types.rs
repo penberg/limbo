@@ -354,7 +354,7 @@ impl OwnedRecord {
         header_bytes_buf.extend(std::iter::repeat(0).take(9));
         let n = write_varint(&mut header_bytes_buf.as_mut_slice(), header_size as u64);
         header_bytes_buf.truncate(n);
-        buf.splice(0..0, header_bytes_buf.iter().cloned());
+        buf.splice(initial_i..initial_i, header_bytes_buf.iter().cloned());
     }
 }
 
