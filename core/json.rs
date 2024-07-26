@@ -6,7 +6,10 @@ use serde_json::Value;
 pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
     match json_value {
         OwnedValue::Text(ref t) => {
-            if let Ok(json) = json5::from_str::<Value>(t.as_str()) {
+            // Replace instances of two single quotes ('') with a double quote (")
+            // This is necessary to correctly format the string for parsing
+            let corrected_t = t.replace("''", "\"");
+            if let Ok(json) = json5::from_str::<Value>(&corrected_t) {
                 Ok(OwnedValue::Text(Rc::new(json.to_string())))
             } else {
                 crate::bail_parse_error!("malformed JSON");
