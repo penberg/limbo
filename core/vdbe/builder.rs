@@ -250,6 +250,26 @@ impl ProgramBuilder {
                     assert!(*pc_if_next < 0);
                     *pc_if_next = to_offset;
                 }
+                Insn::InitCoroutine {
+                    yield_reg,
+                    jump_on_definition,
+                    start_offset,
+                } => {
+                    *jump_on_definition = to_offset;
+                }
+                Insn::NotExists {
+                    cursor,
+                    rowid_reg,
+                    target_pc,
+                } => {
+                    *target_pc = to_offset;
+                }
+                Insn::Yield {
+                    yield_reg,
+                    end_offset,
+                } => {
+                    *end_offset = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }

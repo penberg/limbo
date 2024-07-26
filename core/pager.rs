@@ -338,7 +338,7 @@ impl Pager {
         dirty_pages.push(page);
     }
 
-    pub fn cacheflush(&self) -> anyhow::Result<()> {
+    pub fn cacheflush(&self) -> Result<()> {
         let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
         loop {
             if dirty_pages.len() == 0 {
