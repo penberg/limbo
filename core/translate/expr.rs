@@ -152,10 +152,10 @@ pub fn translate_expr(
                         };
                         let regs = program.alloc_register();
                         translate_expr(program, select, &args[0], regs, cursor_hint)?;
-                        program.emit_insn(Insn::Json {
+                        program.emit_insn(Insn::Function {
                             start_reg: regs,
                             dest: target_register,
-                            func: j,
+                            func: crate::vdbe::Func::Json(j),
                         });
                         Ok(target_register)
                     }
@@ -229,7 +229,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: srf,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
@@ -258,7 +258,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: regs,
                                 dest: target_register,
-                                func: srf,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
@@ -273,7 +273,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: regs,
                                 dest: target_register,
-                                func: srf,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
@@ -297,7 +297,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: start_reg,
                                 dest: target_register,
-                                func: ScalarFunc::Date,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
@@ -354,7 +354,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: srf,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
@@ -381,7 +381,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: ScalarFunc::Min,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
@@ -408,7 +408,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: ScalarFunc::Max,
+                                func: crate::vdbe::Func::Scalar(srf),
                             });
                             Ok(target_register)
                         }
