@@ -224,6 +224,7 @@ impl BTreeCursor {
 
         let mut page = page.contents.write().unwrap();
         let page = page.as_mut().unwrap();
+        assert!(matches!(page.header.page_type, PageType::TableLeaf));
 
         let free = self.compute_free_space(page, self.database_header.borrow());
 
@@ -536,15 +537,22 @@ impl Cursor for BTreeCursor {
         Ok(self.record.borrow())
     }
 
-    fn insert(&mut self, key: &OwnedValue, _record: &OwnedRecord) -> Result<CursorResult<()>> {
+    fn insert(
+        &mut self,
+        key: &OwnedValue,
+        _record: &OwnedRecord,
+        moved_before: bool, /* Indicate whether it's necessary to traverse to find the leaf page */
+    ) -> Result<CursorResult<()>> {
         let int_key = match key {
             OwnedValue::Integer(i) => i,
             _ => unreachable!("btree tables are indexed by integers!"),
         };
-        match self.move_to(*int_key as u64)? {
-            CursorResult::Ok(_) => {}
-            CursorResult::IO => return Ok(CursorResult::IO),
-        };
+        if !moved_before {
+            match self.move_to(*int_key as u64)? {
+                CursorResult::Ok(_) => {}
+                CursorResult::IO => return Ok(CursorResult::IO),
+            };
+        }
 
         match self.insert_to_page(key, _record)? {
             CursorResult::Ok(_) => Ok(CursorResult::Ok(())),

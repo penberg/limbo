@@ -1062,7 +1062,7 @@ impl Program {
                     };
                     state.registers[*dest_reg] = OwnedValue::Record(record.clone());
                     let sorter_cursor = cursors.get_mut(sorter_cursor).unwrap();
-                    sorter_cursor.insert(&OwnedValue::Integer(0), &record)?; // fix key later
+                    sorter_cursor.insert(&OwnedValue::Integer(0), &record, false)?; // fix key later
                     state.pc += 1;
                 }
                 Insn::SorterInsert {
@@ -1075,7 +1075,7 @@ impl Program {
                         _ => unreachable!("SorterInsert on non-record register"),
                     };
                     // TODO: set correct key
-                    cursor.insert(&OwnedValue::Integer(0), record)?;
+                    cursor.insert(&OwnedValue::Integer(0), record, false)?;
                     state.pc += 1;
                 }
                 Insn::SorterSort {
@@ -1308,7 +1308,7 @@ impl Program {
                         _ => unreachable!("Not a record! Cannot insert a non record value."),
                     };
                     let key = &state.registers[*key_reg];
-                    match cursor.insert(key, record)? {
+                    match cursor.insert(key, record, true)? {
                         CursorResult::Ok(_) => {
                             state.pc += 1;
                         }
