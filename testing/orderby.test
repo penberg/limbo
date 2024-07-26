@@ -45,3 +45,8 @@ do_execsql_test basic-order-by-and-limit-3 {
 do_execsql_test order-by-qualified {
     select u.first_name from users u order by u.first_name limit 1;
 } {Aaron}
+
+do_execsql_test order-by-column-number {
+    select first_name, last_name, age from users order by 3,2 limit 2;
+} {Teresa|Allen|1
+David|Baker|1}
