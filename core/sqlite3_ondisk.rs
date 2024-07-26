@@ -174,10 +174,10 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     pager.io.run_once()?;
 
     let buffer_in_cb = buffer_to_copy.clone();
-    let write_complete = Box::new(move |bytes_written: usize| {
+    let write_complete = Box::new(move |bytes_written: i32| {
         let buf = buffer_in_cb.clone();
         let buf_len = std::cell::RefCell::borrow(&buf).len();
-        if bytes_written < buf_len {
+        if bytes_written < buf_len as i32 {
             log::error!("wrote({bytes_written}) less than expected({buf_len})");
         }
         // finish_read_database_header(buf, header).unwrap();
@@ -324,14 +324,12 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
     let buffer = contents.buffer.clone();
     let write_complete = {
         let buf_copy = buffer.clone();
-        Box::new(move |bytes_written: usize| {
+        Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
-            if bytes_written < buf_len {
+            if bytes_written < buf_len as i32 {
                 log::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
-            println!("done");
-            // finish_read_database_header(buf, header).unwrap();
         })
     };
     dbg!(buffer.borrow().len());

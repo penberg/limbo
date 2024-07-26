@@ -101,7 +101,7 @@ impl IO for LinuxIO {
                 )));
             }
             let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
-            c.complete();
+            c.complete(cqe.result());
         }
         Ok(())
     }

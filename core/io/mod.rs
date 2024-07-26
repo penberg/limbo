@@ -23,7 +23,7 @@ pub trait IO {
 }
 
 pub type Complete = dyn Fn(Rc<RefCell<Buffer>>);
-pub type WriteComplete = dyn Fn(usize);
+pub type WriteComplete = dyn Fn(i32);
 
 pub enum Completion {
     Read(ReadCompletion),
@@ -36,10 +36,10 @@ pub struct ReadCompletion {
 }
 
 impl Completion {
-    pub fn complete(&self) {
+    pub fn complete(&self, result: i32) {
         match self {
             Completion::Read(r) => r.complete(),
-            Completion::Write(w) => w.complete(234234), // fix
+            Completion::Write(w) => w.complete(result), // fix
         }
     }
 }
@@ -70,7 +70,7 @@ impl WriteCompletion {
     pub fn new(complete: Box<WriteComplete>) -> Self {
         Self { complete }
     }
-    pub fn complete(&self, bytes_written: usize) {
+    pub fn complete(&self, bytes_written: i32) {
         (self.complete)(bytes_written);
     }
 }
