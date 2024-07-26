@@ -1,5 +1,5 @@
 use crate::buffer_pool::BufferPool;
-use crate::sqlite3_ondisk::BTreePage;
+use crate::sqlite3_ondisk::PageContent;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
 use crate::{PageSource, Result};
 use log::trace;
@@ -14,7 +14,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct Page {
     flags: AtomicUsize,
-    pub contents: RwLock<Option<BTreePage>>,
+    pub contents: RwLock<Option<PageContent>>,
     pub id: usize,
 }
 
@@ -305,7 +305,7 @@ impl Pager {
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         page.borrow().set_locked();
-        sqlite3_ondisk::begin_read_btree_page(
+        sqlite3_ondisk::begin_read_page(
             &self.page_source,
             self.buffer_pool.clone(),
             page.clone(),

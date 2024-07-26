@@ -188,17 +188,6 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct BTreePageHeader {
-    pub(crate) page_type: PageType,
-    pub(crate) _first_freeblock_offset: u16,
-    pub(crate) num_cells: u16,
-    // First byte of content area
-    pub(crate) _cell_content_area: u16,
-    pub(crate) _num_frag_free_bytes: u8,
-    pub(crate) right_most_pointer: Option<u32>,
-}
-
 #[repr(u8)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum PageType {
@@ -223,15 +212,84 @@ impl TryFrom<u8> for PageType {
 }
 
 #[derive(Debug, Clone)]
-pub struct BTreePage {
-    pub header: BTreePageHeader,
-    pub cells: Vec<BTreeCell>,
+pub struct PageContent {
+    pub offset: usize,
     pub buffer: Rc<RefCell<Buffer>>,
 }
 
-impl BTreePage {
+impl PageContent {
+    pub fn page_type(&self) -> PageType {
+        let buf = self.buffer.borrow();
+        let buf = buf.as_slice();
+        buf[self.offset].try_into().unwrap()
+    }
+
+    fn read_u16(&self, pos: usize) -> u16 {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
+            u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
+        }
+    }
+
+    fn read_u32(&self, pos: usize) -> u32 {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
+            u32::from_be_bytes([
+                buf[self.offset + pos],
+                buf[self.offset + pos + 1],
+                buf[self.offset + pos + 2],
+                buf[self.offset + pos + 3],
+            ])
+        }
+    }
+
+    pub fn first_freeblock(&self) -> u16 {
+        self.read_u16(1)
+    }
+
+    pub fn cell_count(&self) -> usize {
+        self.read_u16(3) as usize
+    }
+
+    pub fn cell_content_area(&self) -> u16 {
+        self.read_u16(5) as u16
+    }
+
+    pub fn num_frag_free_bytes(&self) -> u16 {
+        self.read_u16(7) as u16
+    }
+
+    pub fn rightmost_pointer(&self) -> Option<u32> {
+        match self.page_type() {
+            PageType::IndexInterior => Some(self.read_u32(8)),
+            PageType::TableInterior => Some(self.read_u32(8)),
+            PageType::IndexLeaf => None,
+            PageType::TableLeaf => None,
+        }
+    }
+
+    pub fn cell_get(&self, idx: usize) -> Result<BTreeCell> {
+        let buf = self.buffer.borrow();
+        let buf = buf.as_slice();
+
+        let ncells = self.cell_count();
+        let cell_start = match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        };
+        assert!(idx < ncells, "cell_get: idx out of bounds");
+        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = self.read_u16(cell_pointer) as usize;
+
+        read_btree_cell(buf, &self.page_type(), cell_pointer)
+    }
+
     pub fn is_leaf(&self) -> bool {
-        match self.header.page_type {
+        match self.page_type() {
             PageType::IndexInterior => false,
             PageType::TableInterior => false,
             PageType::IndexLeaf => true,
@@ -240,7 +298,7 @@ impl BTreePage {
     }
 }
 
-pub fn begin_read_btree_page(
+pub fn begin_read_page(
     page_source: &PageSource,
     buffer_pool: Rc<BufferPool>,
     page: Rc<RefCell<Page>>,
@@ -255,7 +313,7 @@ pub fn begin_read_btree_page(
     let buf = Rc::new(RefCell::new(Buffer::new(buf, drop_fn)));
     let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let page = page.clone();
-        if finish_read_btree_page(page_idx, buf, page.clone()).is_err() {
+        if finish_read_page(page_idx, buf, page.clone()).is_err() {
             page.borrow_mut().set_error();
         }
     });
@@ -264,47 +322,19 @@ pub fn begin_read_btree_page(
     Ok(())
 }
 
-fn finish_read_btree_page(
+fn finish_read_page(
     page_idx: usize,
     buffer_ref: Rc<RefCell<Buffer>>,
     page: Rc<RefCell<Page>>,
 ) -> Result<()> {
     trace!("finish_read_btree_page(page_idx = {})", page_idx);
-    let mut pos = if page_idx == 1 {
+    let pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
         0
     };
-    let buf = buffer_ref.borrow();
-    let buf = buf.as_slice();
-    let mut header = BTreePageHeader {
-        page_type: buf[pos].try_into()?,
-        _first_freeblock_offset: u16::from_be_bytes([buf[pos + 1], buf[pos + 2]]),
-        num_cells: u16::from_be_bytes([buf[pos + 3], buf[pos + 4]]),
-        _cell_content_area: u16::from_be_bytes([buf[pos + 5], buf[pos + 6]]),
-        _num_frag_free_bytes: buf[pos + 7],
-        right_most_pointer: None,
-    };
-    pos += 8;
-    if header.page_type == PageType::IndexInterior || header.page_type == PageType::TableInterior {
-        header.right_most_pointer = Some(u32::from_be_bytes([
-            buf[pos],
-            buf[pos + 1],
-            buf[pos + 2],
-            buf[pos + 3],
-        ]));
-        pos += 4;
-    }
-    let mut cells = Vec::with_capacity(header.num_cells as usize);
-    for _ in 0..header.num_cells {
-        let cell_pointer = u16::from_be_bytes([buf[pos], buf[pos + 1]]);
-        pos += 2;
-        let cell = read_btree_cell(buf, &header.page_type, cell_pointer as usize)?;
-        cells.push(cell);
-    }
-    let inner = BTreePage {
-        header,
-        cells,
+    let inner = PageContent {
+        offset: pos,
         buffer: buffer_ref.clone(),
     };
     {

@@ -1,6 +1,6 @@
 use crate::pager::Pager;
 use crate::sqlite3_ondisk::{
-    read_varint, write_varint, BTreeCell, BTreePage, DatabaseHeader, PageType, TableInteriorCell,
+    read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType, TableInteriorCell,
     TableLeafCell,
 };
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
@@ -76,9 +76,9 @@ impl BTreeCursor {
             }
             let page = page.contents.read().unwrap();
             let page = page.as_ref().unwrap();
-            if mem_page.cell_idx() >= page.cells.len() {
+            if mem_page.cell_idx() >= page.cell_count() {
                 let parent = mem_page.parent.clone();
-                match page.header.right_most_pointer {
+                match page.rightmost_pointer() {
                     Some(right_most_pointer) => {
                         let mem_page = MemPage::new(parent.clone(), right_most_pointer as usize, 0);
                         self.page.replace(Some(Rc::new(mem_page)));
@@ -95,7 +95,7 @@ impl BTreeCursor {
                     },
                 }
             }
-            let cell = &page.cells[mem_page.cell_idx()];
+            let cell = page.cell_get(mem_page.cell_idx())?;
             match &cell {
                 BTreeCell::TableInteriorCell(TableInteriorCell {
                     _left_child_page,
@@ -153,8 +153,8 @@ impl BTreeCursor {
             }
 
             let mut found_cell = false;
-            for cell in &page.cells {
-                match &cell {
+            for cell_idx in 0..page.cell_count() {
+                match &page.cell_get(cell_idx)? {
                     BTreeCell::TableInteriorCell(TableInteriorCell {
                         _left_child_page,
                         _rowid,
@@ -188,7 +188,7 @@ impl BTreeCursor {
 
             if !found_cell {
                 let parent = mem_page.parent.clone();
-                match page.header.right_most_pointer {
+                match page.rightmost_pointer() {
                     Some(right_most_pointer) => {
                         let mem_page = MemPage::new(parent, right_most_pointer as usize, 0);
                         self.page.replace(Some(Rc::new(mem_page)));
@@ -224,7 +224,7 @@ impl BTreeCursor {
 
         let mut page = page.contents.write().unwrap();
         let page = page.as_mut().unwrap();
-        assert!(matches!(page.header.page_type, PageType::TableLeaf));
+        assert!(matches!(page.page_type(), PageType::TableLeaf));
 
         let free = self.compute_free_space(page, self.database_header.borrow());
 
@@ -283,7 +283,7 @@ impl BTreeCursor {
             let pointer_area_pc_by_idx = 8 + 2 * cell_idx;
 
             // move previous pointers forward and insert new pointer there
-            let n_cells_forward = 2 * (page.cells.len() - cell_idx);
+            let n_cells_forward = 2 * (page.cell_count() - cell_idx);
             buf.copy_within(
                 pointer_area_pc_by_idx..pointer_area_pc_by_idx + n_cells_forward,
                 pointer_area_pc_by_idx + 2,
@@ -295,36 +295,27 @@ impl BTreeCursor {
             buf[5..7].copy_from_slice(&pc.to_be_bytes());
 
             // update cell count
-            let new_n_cells = (page.cells.len() + 1) as u16;
+            let new_n_cells = (page.cell_count() + 1) as u16;
             buf[3..5].copy_from_slice(&new_n_cells.to_be_bytes());
 
-            // TODo: refactor cells to be lazy loadable because this will be crazy slow
             let mut payload_for_cell_in_memory: Vec<u8> = Vec::new();
             _record.serialize(&mut payload_for_cell_in_memory);
-            page.cells.insert(
-                cell_idx,
-                BTreeCell::TableLeafCell(TableLeafCell {
-                    _rowid: int_key,
-                    _payload: payload_for_cell_in_memory,
-                    first_overflow_page: None,
-                }),
-            );
         }
 
         Ok(CursorResult::Ok(()))
     }
 
-    fn allocate_cell_space(&mut self, page_ref: &BTreePage, amount: u16) -> u16 {
+    fn allocate_cell_space(&mut self, page_ref: &PageContent, amount: u16) -> u16 {
         let amount = amount as usize;
         let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
         let buf = buf_ref.as_mut_slice();
 
         let cell_offset = 8;
-        let gap = cell_offset + 2 * page_ref.cells.len();
-        let mut top = page_ref.header._cell_content_area as usize;
+        let gap = cell_offset + 2 * page_ref.cell_count();
+        let mut top = page_ref.cell_content_area() as usize;
 
         // there are free blocks and enough space
-        if page_ref.header._first_freeblock_offset != 0 && gap + 2 <= top {
+        if page_ref.first_freeblock() != 0 && gap + 2 <= top {
             // find slot
             let db_header = self.database_header.borrow();
             let pc = find_free_cell(page_ref, db_header, amount, buf);
@@ -346,7 +337,7 @@ impl BTreeCursor {
         return top as u16;
     }
 
-    fn defragment_page(&self, page: &BTreePage, db_header: Ref<DatabaseHeader>) {
+    fn defragment_page(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) {
         let cloned_page = page.clone();
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as u64;
         let mut cbrk = usable_space as u64;
@@ -354,14 +345,14 @@ impl BTreeCursor {
         // TODO: implement fast algorithm
 
         let last_cell = (usable_space - 4) as u64;
-        let first_cell = cloned_page.header._cell_content_area as u64;
-        if cloned_page.cells.len() > 0 {
+        let first_cell = cloned_page.cell_content_area() as u64;
+        if cloned_page.cell_count() > 0 {
             let buf = cloned_page.buffer.borrow();
             let buf = buf.as_slice();
             let mut write_buf = RefCell::borrow_mut(&page.buffer);
             let write_buf = write_buf.as_mut_slice();
 
-            for i in 0..cloned_page.cells.len() {
+            for i in 0..cloned_page.cell_count() {
                 let cell_offset = 8;
                 let cell_idx = cell_offset + i * 2;
 
@@ -411,19 +402,19 @@ impl BTreeCursor {
 
     // Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
     // and end of cell pointer area.
-    fn compute_free_space(&self, page: &BTreePage, db_header: Ref<DatabaseHeader>) -> u16 {
+    fn compute_free_space(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) -> u16 {
         let buffer = page.buffer.borrow();
         let buf = buffer.as_slice();
 
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
-        let mut first_byte_in_cell_content = page.header._cell_content_area;
+        let mut first_byte_in_cell_content = page.cell_content_area();
         if first_byte_in_cell_content == 0 {
             first_byte_in_cell_content = u16::MAX;
         }
 
-        let fragmented_free_bytes = page.header._num_frag_free_bytes;
-        let free_block_pointer = page.header._first_freeblock_offset;
-        let ncell = page.cells.len();
+        let fragmented_free_bytes = page.num_frag_free_bytes();
+        let free_block_pointer = page.first_freeblock();
+        let ncell = page.cell_count();
 
         // 8 + 4 == header end
         let first_cell = 8 + 4 + (2 * ncell) as u16;
@@ -469,14 +460,14 @@ impl BTreeCursor {
 }
 
 fn find_free_cell(
-    page_ref: &BTreePage,
+    page_ref: &PageContent,
     db_header: Ref<DatabaseHeader>,
     amount: usize,
     buf: &[u8],
 ) -> usize {
     // NOTE: freelist is in ascending order of keys and pc
     // unuse_space is reserved bytes at the end of page, therefore we must substract from maxpc
-    let mut pc = page_ref.header._first_freeblock_offset as usize;
+    let mut pc = page_ref.first_freeblock() as usize;
     let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
     let maxpc = (usable_space - amount as usize) as usize;
     let mut found = false;
@@ -598,10 +589,10 @@ impl Cursor for BTreeCursor {
             _ => unreachable!("btree tables are indexed by integers!"),
         };
         let cell_idx = find_cell(page, int_key);
-        if cell_idx >= page.cells.len() {
+        if cell_idx >= page.cell_count() {
             Ok(CursorResult::Ok(false))
         } else {
-            let equals = match &page.cells[cell_idx] {
+            let equals = match &page.cell_get(cell_idx)? {
                 BTreeCell::TableLeafCell(l) => l._rowid == int_key,
                 _ => unreachable!(),
             };
@@ -610,10 +601,10 @@ impl Cursor for BTreeCursor {
     }
 }
 
-fn find_cell(page: &BTreePage, int_key: u64) -> usize {
+fn find_cell(page: &PageContent, int_key: u64) -> usize {
     let mut cell_idx = 0;
-    for cell in &page.cells {
-        match cell {
+    while cell_idx < page.cell_count() {
+        match page.cell_get(cell_idx).unwrap() {
             BTreeCell::TableLeafCell(cell) => {
                 if int_key <= cell._rowid {
                     break;
