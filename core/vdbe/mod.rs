@@ -1,3 +1,22 @@
+//! The virtual database engine (VDBE).
+//!
+//! The VDBE is a register-based virtual machine that execute bytecode
+//! instructions that represent SQL statements. When an application prepares
+//! an SQL statement, the statement is compiled into a sequence of bytecode
+//! instructions that perform the needed operations, such as reading or
+//! writing to a b-tree, sorting, or aggregating data.
+//!
+//! The instruction set of the VDBE is similar to SQLite's instruction set,
+//! but with the exception that bytecodes that perform I/O operations are
+//! return execution back to the caller instead of blocking. This is because
+//! Limbo is designed for applications that need high concurrency such as
+//! serverless runtimes. In addition, asynchronous I/O makes storage
+//! disaggregation easier.
+//!
+//! You can find a full list of SQLite opcodes at:
+//!
+//! https://www.sqlite.org/opcode.html
+
 pub mod builder;
 pub mod explain;
 pub mod sorter;
