@@ -49,7 +49,7 @@ do_execsql_test where-clause-no-table-unary-false {
 } {}
 
 do_execsql_test select-where-and {
-    select first_name, age from users where first_name = 'Jamie' and age > 80 
+    select first_name, age from users where first_name = 'Jamie' and age > 80
 } {Jamie|94
 Jamie|88
 Jamie|99
@@ -59,7 +59,7 @@ Jamie|88
 }
 
 do_execsql_test select-where-or {
-    select first_name, age from users where first_name = 'Jamie' and age > 80 
+    select first_name, age from users where first_name = 'Jamie' and age > 80
 } {Jamie|94
 Jamie|88
 Jamie|99
@@ -109,3 +109,95 @@ do_execsql_test where-float-int {
 do_execsql_test where-multiple-and {
     select * from products where price > 50 and name != 'sweatshirt' and price < 75;
 } {6|shorts|70.0}
+
+do_execsql_test where-multiple-or {
+    select * from products where price > 75 or name = 'shirt' or name = 'coat';
+} {1|hat|79.0
+2|cap|82.0
+3|shirt|18.0
+7|jeans|78.0
+8|sneakers|82.0
+10|coat|33.0
+11|accessories|81.0}
+
+do_execsql_test where_in_list {
+    select * from products where name in ('hat', 'sweatshirt', 'shorts');
+} {1|hat|79.0
+5|sweatshirt|74.0
+6|shorts|70.0}
+
+do_execsql_test where_not_in_list {
+    select * from products where name not in ('hat', 'sweatshirt', 'shorts');
+} {2|cap|82.0
+3|shirt|18.0
+4|sweater|25.0
+7|jeans|78.0
+8|sneakers|82.0
+9|boots|1.0
+10|coat|33.0
+11|accessories|81.0}
+
+do_execsql_test where_in_list_or_another_list {
+    select * from products where name in ('hat', 'sweatshirt', 'shorts') or price in (81.0, 82.0);
+} {1|hat|79.0
+2|cap|82.0
+5|sweatshirt|74.0
+6|shorts|70.0
+8|sneakers|82.0
+11|accessories|81.0}
+
+do_execsql_test where_not_in_list_and_not_in_another_list {
+    select * from products where name not in ('hat', 'sweatshirt', 'shorts') and price not in (81.0, 82.0, 78.0, 1.0, 33.0);
+} {3|shirt|18.0
+4|sweater|25.0}
+
+do_execsql_test where_in_list_or_not_in_another_list {
+    select * from products where name in ('hat', 'sweatshirt', 'shorts') or price not in (82.0, 18.0, 78.0, 33.0, 81.0);
+} {1|hat|79.0
+4|sweater|25.0
+5|sweatshirt|74.0
+6|shorts|70.0
+9|boots|1.0}
+
+do_execsql_test where_in_empty_list {
+    select * from products where name in ();
+} {}
+
+do_execsql_test where_not_in_empty_list {
+    select * from products where name not in ();
+} {1|hat|79.0
+2|cap|82.0
+3|shirt|18.0
+4|sweater|25.0
+5|sweatshirt|74.0
+6|shorts|70.0
+7|jeans|78.0
+8|sneakers|82.0
+9|boots|1.0
+10|coat|33.0
+11|accessories|81.0}
+
+do_execsql_test where_name_in_list_and_price_gt_70_or_name_exactly_boots {
+    select * from products where name in ('hat', 'sweatshirt', 'shorts') and price > 70 or name = 'boots';
+} {1|hat|79.0
+5|sweatshirt|74.0
+9|boots|1.0}
+
+do_execsql_test where_name_in_list_or_price_gt_70_and_name_like_shirt {
+    select * from products where name in ('hat', 'shorts') or price > 70 and name like '%shirt%';
+} {1|hat|79.0
+5|sweatshirt|74.0
+6|shorts|70.0}
+
+do_execsql_test where_name_not_in_list_or_name_eq_shirt {
+    select * from products where name not in ('shirt', 'boots') or name = 'shirt';
+} {1|hat|79.0
+2|cap|82.0
+3|shirt|18.0
+4|sweater|25.0
+5|sweatshirt|74.0
+6|shorts|70.0
+7|jeans|78.0
+8|sneakers|82.0
+10|coat|33.0
+11|accessories|81.0}
