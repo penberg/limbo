@@ -18,7 +18,7 @@ proc run_test {sqlite_exec sql expected_output} {
 
 proc do_execsql_test {test_name sql_statements expected_outputs} {
     puts "Running test: $test_name"
-    set combined_sql [join $sql_statements " "]
+    set combined_sql [string trim $sql_statements]
     set combined_expected_output [join $expected_outputs "\n"]
     run_test $::sqlite_exec $combined_sql $combined_expected_output
 }
