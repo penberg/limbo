@@ -1,3 +1,12 @@
+//! The VDBE bytecode code generator.
+//!
+//! This module is responsible for translating the SQL AST into a sequence of
+//! instructions for the VDBE. The VDBE is a register-based virtual machine that
+//! executes bytecode instructions. This code generator is responsible for taking
+//! the SQL AST and generating the corresponding VDBE instructions. For example,
+//! a SELECT statement will be translated into a sequence of instructions that
+//! will read rows from the database and filter them according to a WHERE clause.
+
 pub(crate) mod expr;
 pub(crate) mod select;
 pub(crate) mod where_clause;
