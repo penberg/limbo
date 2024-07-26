@@ -24,7 +24,7 @@ const PAGE_UPTODATE: usize = 0b001;
 const PAGE_LOCKED: usize = 0b010;
 /// Page had an I/O error.
 const PAGE_ERROR: usize = 0b100;
-/// Page had an I/O error.
+/// Page is dirty. Flush needed.
 const PAGE_DIRTY: usize = 0b1000;
 
 impl Default for Page {
@@ -333,14 +333,17 @@ impl Pager {
 
     pub fn cacheflush(&self) -> Result<()> {
         let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
+        if dirty_pages.len() == 0 {
+            return Ok(());
+        }
         loop {
             if dirty_pages.len() == 0 {
                 break;
             }
             let page = dirty_pages.pop().unwrap();
             sqlite3_ondisk::begin_write_btree_page(self, &page)?;
-            self.io.run_once()?;
         }
+        self.io.run_once()?;
         Ok(())
     }
 }

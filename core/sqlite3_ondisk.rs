@@ -318,6 +318,7 @@ fn finish_read_btree_page(
 
 pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result<()> {
     let page_source = &pager.page_source;
+    let page_finish = page.clone();
     let page = page.borrow();
     let contents = page.contents.read().unwrap();
     let contents = contents.as_ref().unwrap();
@@ -327,6 +328,7 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
+            page_finish.borrow_mut().clear_dirty();
             if bytes_written < buf_len as i32 {
                 log::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
