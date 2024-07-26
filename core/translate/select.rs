@@ -9,7 +9,7 @@ use crate::types::{OwnedRecord, OwnedValue};
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Program};
 use crate::Result;
 
-use sqlite3_parser::ast::{self, JoinOperator, JoinType};
+use sqlite3_parser::ast::{self, JoinOperator, JoinType, ResultColumn};
 
 use std::rc::Rc;
 
@@ -305,7 +305,25 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
             let start = program.next_free_register();
             for col in sort_columns.iter() {
                 let target = program.alloc_register();
-                translate_expr(&mut program, &select, &col.expr, target, None)?;
+                // if the ORDER BY expression is a number, interpret it as an 1-indexed column number
+                // otherwise, interpret it normally as an expression
+                let sort_col_expr = if let ast::Expr::Literal(ast::Literal::Numeric(num)) =
+                    &col.expr
+                {
+                    let column_number = num.parse::<usize>()?;
+                    if column_number == 0 {
+                        crate::bail_parse_error!("invalid column index: {}", column_number);
+                    }
+                    let maybe_result_column = select.columns.get(column_number - 1);
+                    match maybe_result_column {
+                        Some(ResultColumn::Expr(expr, _)) => expr,
+                        None => crate::bail_parse_error!("invalid column index: {}", column_number),
+                        _ => todo!(),
+                    }
+                } else {
+                    &col.expr
+                };
+                translate_expr(&mut program, &select, sort_col_expr, target, None)?;
             }
             let (_, result_cols_count) = translate_columns(&mut program, &select, None)?;
             sort_info
