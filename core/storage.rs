@@ -1,10 +1,6 @@
 #[cfg(feature = "fs")]
 use crate::io::File;
-use crate::{
-    error::LimboError,
-    io::{Completion, WriteCompletion},
-    Buffer, Result,
-};
+use crate::{error::LimboError, io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
 
 pub struct PageSource {
@@ -73,10 +69,6 @@ impl PageIO for FileStorage {
     }
 
     fn write(&self, page_idx: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()> {
-        let w = match &(*c) {
-            Completion::Read(_) => unreachable!(),
-            Completion::Write(w) => w,
-        };
         let buffer_size = buffer.borrow().len();
         assert!(buffer_size >= 512);
         assert!(buffer_size <= 65536);

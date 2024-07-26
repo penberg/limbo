@@ -1300,7 +1300,7 @@ impl Program {
                     cursor,
                     key_reg,
                     record_reg,
-                    flag,
+                    flag: _,
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
                     let record = match &state.registers[*record_reg] {
@@ -1323,7 +1323,7 @@ impl Program {
                     cursor.wait_for_completion()?;
                     state.pc += 1;
                 }
-                Insn::NewRowid { reg } => todo!(),
+                Insn::NewRowid { reg: _ } => todo!(),
                 Insn::MustBeInt { reg } => {
                     match state.registers[*reg] {
                         OwnedValue::Integer(_) => {}

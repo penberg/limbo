@@ -3,7 +3,7 @@ use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
 use crate::{
     function::{Func, ScalarFunc},
-    schema::{Schema, Table, Type},
+    schema::{Table, Type},
     translate::select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
     vdbe::{builder::ProgramBuilder, BranchOffset, Insn},

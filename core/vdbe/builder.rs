@@ -251,21 +251,21 @@ impl ProgramBuilder {
                     *pc_if_next = to_offset;
                 }
                 Insn::InitCoroutine {
-                    yield_reg,
+                    yield_reg: _,
                     jump_on_definition,
-                    start_offset,
+                    start_offset: _,
                 } => {
                     *jump_on_definition = to_offset;
                 }
                 Insn::NotExists {
-                    cursor,
-                    rowid_reg,
+                    cursor: _,
+                    rowid_reg: _,
                     target_pc,
                 } => {
                     *target_pc = to_offset;
                 }
                 Insn::Yield {
-                    yield_reg,
+                    yield_reg: _,
                     end_offset,
                 } => {
                     *end_offset = to_offset;

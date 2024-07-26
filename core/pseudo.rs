@@ -51,6 +51,7 @@ impl Cursor for PseudoCursor {
     }
 
     fn insert(&mut self, key: &OwnedValue, record: &OwnedRecord) -> Result<CursorResult<()>> {
+        let _ = key;
         *self.current.borrow_mut() = Some(record.clone());
         Ok(CursorResult::Ok(()))
     }
@@ -64,6 +65,7 @@ impl Cursor for PseudoCursor {
     }
 
     fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+        let _ = key;
         todo!()
     }
 }

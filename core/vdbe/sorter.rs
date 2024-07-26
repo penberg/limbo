@@ -80,6 +80,7 @@ impl Cursor for Sorter {
     }
 
     fn insert(&mut self, key: &OwnedValue, record: &OwnedRecord) -> Result<CursorResult<()>> {
+        let _ = key;
         let key_fields = self.order.len();
         let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
         self.insert(key, OwnedRecord::new(record.values[key_fields..].to_vec()));
@@ -95,6 +96,7 @@ impl Cursor for Sorter {
     }
 
     fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+        let _ = key;
         todo!()
     }
 }

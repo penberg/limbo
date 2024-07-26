@@ -6,7 +6,6 @@ use crate::sqlite3_ondisk::{
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
-use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 

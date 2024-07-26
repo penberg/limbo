@@ -188,7 +188,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BTreePageHeader {
     pub(crate) page_type: PageType,
     pub(crate) _first_freeblock_offset: u16,
@@ -200,7 +200,7 @@ pub struct BTreePageHeader {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum PageType {
     IndexInterior = 2,
     TableInterior = 5,
@@ -222,7 +222,7 @@ impl TryFrom<u8> for PageType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BTreePage {
     pub header: BTreePageHeader,
     pub cells: Vec<BTreeCell>,
@@ -340,7 +340,7 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BTreeCell {
     TableInteriorCell(TableInteriorCell),
     TableLeafCell(TableLeafCell),
@@ -348,27 +348,27 @@ pub enum BTreeCell {
     IndexLeafCell(IndexLeafCell),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableInteriorCell {
     pub _left_child_page: u32,
     pub _rowid: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableLeafCell {
     pub _rowid: u64,
     pub _payload: Vec<u8>,
     pub first_overflow_page: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexInteriorCell {
     pub left_child_page: u32,
     pub payload: Vec<u8>,
     pub first_overflow_page: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexLeafCell {
     pub payload: Vec<u8>,
     pub first_overflow_page: Option<u32>,

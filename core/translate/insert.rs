@@ -1,14 +1,14 @@
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use sqlite3_parser::ast::{
-    DistinctNames, InsertBody, Name, QualifiedName, ResolveType, ResultColumn, Select, With,
+    DistinctNames, InsertBody, QualifiedName, ResolveType, ResultColumn, With,
 };
 
 use crate::Result;
 use crate::{
-    schema::{self, Schema, Table},
+    schema::{Schema, Table},
     sqlite3_ondisk::DatabaseHeader,
-    translate::expr::{resolve_ident_qualified, translate_expr},
+    translate::expr::translate_expr,
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
 
@@ -17,9 +17,9 @@ pub fn translate_insert(
     with: &Option<With>,
     or_conflict: &Option<ResolveType>,
     tbl_name: &QualifiedName,
-    columns: &Option<DistinctNames>,
+    _columns: &Option<DistinctNames>,
     body: &InsertBody,
-    returning: &Option<Vec<ResultColumn>>,
+    _returning: &Option<Vec<ResultColumn>>,
     database_header: Rc<RefCell<DatabaseHeader>>,
 ) -> Result<Program> {
     assert!(with.is_none());

@@ -1,15 +1,12 @@
-#![feature(box_into_raw_non_null)]
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk::BTreePage;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
 use crate::{PageSource, Result};
 use log::trace;
 use sieve_cache::SieveCache;
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::mem;
 use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -105,10 +102,6 @@ impl PageCacheEntry {
     fn into_non_null(&mut self) -> NonNull<PageCacheEntry> {
         NonNull::new(&mut *self).unwrap()
     }
-
-    unsafe fn from_non_null(ptr: NonNull<PageCacheEntry>) -> Box<Self> {
-        Box::from_raw(ptr.as_ptr())
-    }
 }
 
 struct DumbLruPageCache {
@@ -181,21 +174,21 @@ impl DumbLruPageCache {
     }
 
     pub fn resize(&mut self, capacity: usize) {
+        let _ = capacity;
         todo!();
     }
 
     fn detach(&mut self, entry: &mut PageCacheEntry) {
         let mut current = entry.into_non_null();
 
-        let mut next = None;
-        let mut prev = None;
-        unsafe {
+        let (next, prev) = unsafe {
             let c = current.as_mut();
-            next = c.next;
-            prev = c.prev;
+            let next = c.next;
+            let prev = c.prev;
             c.prev = None;
             c.next = None;
-        }
+            (next, prev)
+        };
 
         // detach
         match (prev, next) {

@@ -1,5 +1,5 @@
-use super::{common, Completion, File, WriteCompletion, IO};
-use crate::{Result, LimboError};
+use super::{common, Completion, File, IO};
+use crate::{LimboError, Result};
 use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
@@ -95,7 +95,10 @@ impl IO for LinuxIO {
         while let Some(cqe) = ring.completion().next() {
             let result = cqe.result();
             if result < 0 {
-                return Err(LimboError::LinuxIOError(format!("{}", LinuxIOError::IOUringCQError(result))));
+                return Err(LimboError::LinuxIOError(format!(
+                    "{}",
+                    LinuxIOError::IOUringCQError(result)
+                )));
             }
             let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
             c.complete();
@@ -130,7 +133,9 @@ impl File for LinuxFile {
         if lock_result == -1 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError("File is locked by another process".into()));
+                return Err(LimboError::LockingError(
+                    "File is locked by another process".into(),
+                ));
             } else {
                 return Err(LimboError::IOError(err));
             }
