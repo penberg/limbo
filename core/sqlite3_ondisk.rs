@@ -334,7 +334,6 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
             }
         })
     };
-    dbg!(buffer.borrow().len());
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
     page_source.write(page.id, buffer.clone(), c)?;
     Ok(())

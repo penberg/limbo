@@ -232,20 +232,9 @@ impl BTreeCursor {
             OwnedValue::Integer(i) => *i as u64,
             _ => unreachable!("btree tables are indexed by integers!"),
         };
-        let mut cell_idx = 0;
-        for cell in &page.cells {
-            match cell {
-                BTreeCell::TableLeafCell(cell) => {
-                    if int_key <= cell._rowid {
-                        break;
-                    }
-                }
-                _ => todo!(),
-            }
-            cell_idx += 1;
-        }
+        let cell_idx = find_cell(page, int_key);
 
-        // if overwrite drop cell
+        // TODO: if overwrite drop cell
 
         // insert cell
         let mut payload: Vec<u8> = Vec::new();
@@ -571,7 +560,60 @@ impl Cursor for BTreeCursor {
         self.null_flag
     }
 
-    fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
-        Ok(false)
+    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>> {
+        let int_key = match key {
+            OwnedValue::Integer(i) => i,
+            _ => unreachable!("btree tables are indexed by integers!"),
+        };
+        match self.move_to(*int_key as u64)? {
+            CursorResult::Ok(_) => {}
+            CursorResult::IO => return Ok(CursorResult::IO),
+        };
+        let mem_page = {
+            let mem_page = self.page.borrow();
+            let mem_page = mem_page.as_ref().unwrap();
+            mem_page.clone()
+        };
+        let page_idx = mem_page.page_idx;
+        let page_ref = self.pager.read_page(page_idx)?;
+        let page = page_ref.borrow();
+        if page.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+
+        let page = page.contents.read().unwrap();
+        let page = page.as_ref().unwrap();
+
+        // find cell
+        let int_key = match key {
+            OwnedValue::Integer(i) => *i as u64,
+            _ => unreachable!("btree tables are indexed by integers!"),
+        };
+        let cell_idx = find_cell(page, int_key);
+        if cell_idx >= page.cells.len() {
+            Ok(CursorResult::Ok(false))
+        } else {
+            let equals = match &page.cells[cell_idx] {
+                BTreeCell::TableLeafCell(l) => l._rowid == int_key,
+                _ => unreachable!(),
+            };
+            Ok(CursorResult::Ok(equals))
+        }
     }
+}
+
+fn find_cell(page: &BTreePage, int_key: u64) -> usize {
+    let mut cell_idx = 0;
+    for cell in &page.cells {
+        match cell {
+            BTreeCell::TableLeafCell(cell) => {
+                if int_key <= cell._rowid {
+                    break;
+                }
+            }
+            _ => todo!(),
+        }
+        cell_idx += 1;
+    }
+    cell_idx
 }

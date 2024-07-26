@@ -95,7 +95,7 @@ impl Cursor for Sorter {
         todo!();
     }
 
-    fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>> {
         let _ = key;
         todo!()
     }

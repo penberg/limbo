@@ -371,7 +371,7 @@ pub trait Cursor {
     fn rowid(&self) -> Result<Option<u64>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
     fn insert(&mut self, key: &OwnedValue, record: &OwnedRecord) -> Result<CursorResult<()>>;
-    fn exists(&mut self, key: &OwnedValue) -> Result<bool>;
+    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
     fn set_null_flag(&mut self, flag: bool);
     fn get_null_flag(&self) -> bool;
 }

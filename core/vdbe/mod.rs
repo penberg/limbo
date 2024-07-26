@@ -1346,10 +1346,11 @@ impl Program {
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
                     match cursor.exists(&state.registers[*rowid_reg])? {
-                        true => state.pc += 1,
-                        false => state.pc = *target_pc,
+                        CursorResult::Ok(true) => state.pc += 1,
+                        CursorResult::Ok(false) => state.pc = *target_pc,
+                        CursorResult::IO => return Ok(StepResult::IO),
                     };
-                } // TODO(pere): how is not exists implemented? We probably need to traverse keys my pointing cursor.
+                }
                 // this cursor may be reused for next insert
                 // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
                 // If not there might be some optimizations obviously.

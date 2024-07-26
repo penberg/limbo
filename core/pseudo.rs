@@ -64,7 +64,7 @@ impl Cursor for PseudoCursor {
         // Do nothing
     }
 
-    fn exists(&mut self, key: &OwnedValue) -> Result<bool> {
+    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>> {
         let _ = key;
         todo!()
     }
