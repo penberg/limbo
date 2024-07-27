@@ -478,7 +478,7 @@ pub fn analyze_columns<'a>(
 ) -> Vec<ColumnInfo<'a>> {
     let mut column_information_list = Vec::with_capacity(columns.len());
     for column in columns {
-        let mut info = ColumnInfo::new();
+        let mut info = ColumnInfo::new(column);
         if let ast::ResultColumn::Star = column {
             info.columns_to_allocate = 0;
             for join in joins {

@@ -16,8 +16,6 @@ use std::rc::Rc;
 /// A representation of a `SELECT` statement that has all the information
 /// needed for code generation.
 pub struct Select<'a> {
-    /// The columns that are being selected.
-    pub columns: &'a Vec<ast::ResultColumn>,
     /// Information about each column.
     pub column_info: Vec<ColumnInfo<'a>>,
     /// The tables we are retrieving data from, including tables mentioned
@@ -74,14 +72,16 @@ impl SrcTable<'_> {
 
 #[derive(Debug)]
 pub struct ColumnInfo<'a> {
+    pub raw_column: &'a ast::ResultColumn,
     pub func: Option<Func>,
     pub args: &'a Option<Vec<ast::Expr>>,
     pub columns_to_allocate: usize, /* number of result columns this col will result on */
 }
 
 impl<'a> ColumnInfo<'a> {
-    pub fn new() -> Self {
+    pub fn new(raw_column: &'a ast::ResultColumn) -> Self {
         Self {
+            raw_column,
             func: None,
             args: &None,
             columns_to_allocate: 1,
@@ -200,7 +200,6 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
                 .iter()
                 .any(|info| info.is_aggregation_function());
             Ok(Select {
-                columns,
                 column_info,
                 src_tables: joins,
                 limit: &select.limit,
@@ -221,7 +220,6 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
                 .iter()
                 .any(|info| info.is_aggregation_function());
             Ok(Select {
-                columns,
                 column_info,
                 src_tables: Vec::new(),
                 limit: &select.limit,
@@ -314,7 +312,10 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
                     if column_number == 0 {
                         crate::bail_parse_error!("invalid column index: {}", column_number);
                     }
-                    let maybe_result_column = select.columns.get(column_number - 1);
+                    let maybe_result_column = select
+                        .column_info
+                        .get(column_number - 1)
+                        .map(|col| &col.raw_column);
                     match maybe_result_column {
                         Some(ResultColumn::Expr(expr, _)) => expr,
                         None => crate::bail_parse_error!("invalid column index: {}", column_number),
@@ -437,8 +438,8 @@ fn translate_sorter(
 ) -> Result<()> {
     assert!(sort_info.count > 0);
     let mut pseudo_columns = Vec::new();
-    for col in select.columns.iter() {
-        match col {
+    for col in select.column_info.iter() {
+        match col.raw_column {
             ast::ResultColumn::Expr(expr, _) => match expr {
                 ast::Expr::Id(ident) => {
                     pseudo_columns.push(Column {
@@ -672,8 +673,8 @@ fn translate_columns(
     let count = program.next_free_register() - register_start;
 
     let mut target = register_start;
-    for (col, info) in select.columns.iter().zip(select.column_info.iter()) {
-        translate_column(program, select, col, info, target, cursor_hint)?;
+    for info in select.column_info.iter() {
+        translate_column(program, select, info.raw_column, info, target, cursor_hint)?;
         target += info.columns_to_allocate;
     }
     Ok((register_start, count))
