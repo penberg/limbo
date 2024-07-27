@@ -526,7 +526,8 @@ fn translate_tables_begin(
     for loop_info in &select.loops {
         // early_terminate_label decides where to jump _IF_ there exists a condition on this loop that is always false.
         // this is part of a constant folding optimization where we can skip the loop entirely if we know it will never produce any rows.
-        let early_terminate_label = if let Some(left_join) = &loop_info.left_join_maybe {
+        let current_loop_early_terminate_label = if let Some(left_join) = &loop_info.left_join_maybe
+        {
             // If there exists a condition on the LEFT JOIN that is always false, e.g.:
             // 'SELECT * FROM x LEFT JOIN y ON false'
             // then we can't jump to e.g. Halt, but instead we need to still emit all rows from the 'x' table, with NULLs for the 'y' table.
@@ -544,7 +545,7 @@ fn translate_tables_begin(
             select,
             loop_info,
             &processed_where,
-            early_terminate_label,
+            current_loop_early_terminate_label,
         )?;
     }
 
