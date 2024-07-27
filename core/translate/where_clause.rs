@@ -477,9 +477,6 @@ fn translate_condition_expr(
             // which is what SQLite also does for small lists of values.
             // TODO: Let's refactor this later to use a more efficient implementation conditionally based on the number of values.
 
-            let lhs_reg = program.alloc_register();
-            let _ = translate_expr(program, select, lhs, lhs_reg, cursor_hint)?;
-
             if rhs.is_none() {
                 // If rhs is None, IN expressions are always false and NOT IN expressions are always true.
                 if *not {
@@ -505,6 +502,10 @@ fn translate_condition_expr(
                 }
                 return Ok(());
             }
+
+            // The left hand side only needs to be evaluated once we have a list of values to compare against.
+            let lhs_reg = program.alloc_register();
+            let _ = translate_expr(program, select, lhs, lhs_reg, cursor_hint)?;
 
             let rhs = rhs.as_ref().unwrap();
 
