@@ -84,8 +84,8 @@ This document describes the SQLite compatibility status of Limbo:
 | lower(X)                     | Yes    |         |
 | ltrim(X)                     | Yes    |         |
 | ltrim(X,Y)                   | Yes    |         |
-| max(X,Y,...)                 | No     |         |
-| min(X,Y,...)                 | No     |         |
+| max(X,Y,...)                 | Yes    |         |
+| min(X,Y,...)                 | Yes    |         |
 | nullif(X,Y)                  | No     |         |
 | octet_length(X)              | No     |         |
 | printf(FORMAT,...)           | No     |         |
