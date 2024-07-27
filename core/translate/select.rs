@@ -2,7 +2,7 @@ use crate::function::{AggFunc, Func};
 use crate::schema::{Column, PseudoTable, Schema, Table};
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
-    process_where, translate_processed_where, translate_where, ProcessedWhereClause,
+    process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,
 };
 use crate::translate::{normalize_ident, Insn};
 use crate::types::{OwnedRecord, OwnedValue};
@@ -93,15 +93,19 @@ impl<'a> ColumnInfo<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct LeftJoinBookkeeping {
     // integer register that holds a flag that is set to true if the current row has a match for the left join
     pub match_flag_register: usize,
     // label for the instruction that sets the match flag to true
     pub set_match_flag_true_label: BranchOffset,
+    // label for the instruction that checks if the match flag is true
+    pub check_match_flag_label: BranchOffset,
     // label for the instruction where the program jumps to if the current row has a match for the left join
     pub on_match_jump_to_label: BranchOffset,
 }
 
+#[derive(Debug)]
 pub struct LoopInfo {
     // The table or table alias that we are looping over
     pub identifier: String,
@@ -239,6 +243,7 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
 pub fn translate_select(mut select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
+    let early_terminate_label = program.allocate_label();
     program.emit_insn_with_label_dependency(
         Insn::Init {
             target_pc: init_label,
@@ -299,7 +304,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
     };
 
     if !select.src_tables.is_empty() {
-        translate_tables_begin(&mut program, &mut select)?;
+        translate_tables_begin(&mut program, &mut select, early_terminate_label)?;
 
         let (register_start, column_count) = if let Some(sort_columns) = select.order_by {
             let start = program.next_free_register();
@@ -359,6 +364,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
         translate_tables_end(&mut program, &select);
 
         if select.exist_aggregation {
+            program.resolve_label(early_terminate_label, program.offset());
             let mut target = register_start;
             for info in &select.column_info {
                 if let Some(Func::Agg(func)) = &info.func {
@@ -379,7 +385,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
     } else {
         assert!(!select.exist_aggregation);
         assert!(sort_info.is_none());
-        let where_maybe = translate_where(&select, &mut program)?;
+        let where_maybe = translate_tableless_where(&select, &mut program, early_terminate_label)?;
         let (register_start, count) = translate_columns(&mut program, &select, None)?;
         if let Some(where_clause_label) = where_maybe {
             program.resolve_label(where_clause_label, program.offset() + 1);
@@ -396,6 +402,9 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
         let _ = translate_sorter(&select, &mut program, &sort_info.unwrap(), &limit_info);
     }
 
+    if !select.exist_aggregation {
+        program.resolve_label(early_terminate_label, program.offset());
+    }
     program.emit_insn(Insn::Halt);
     let halt_offset = program.offset() - 1;
     if let Some(limit_info) = limit_info {
@@ -502,7 +511,11 @@ fn translate_sorter(
     Ok(())
 }
 
-fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) -> Result<()> {
+fn translate_tables_begin(
+    program: &mut ProgramBuilder,
+    select: &mut Select,
+    early_terminate_label: BranchOffset,
+) -> Result<()> {
     for join in &select.src_tables {
         let loop_info = translate_table_open_cursor(program, join);
         select.loops.push(loop_info);
@@ -511,7 +524,22 @@ fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) -> 
     let processed_where = process_where(program, select)?;
 
     for loop_info in &select.loops {
-        translate_table_open_loop(program, select, loop_info, &processed_where)?;
+        // if there is a left join and there is a condition on the join that is always false,
+        // every row in the outer table will be emitted with nulls for the right table
+        let early_terminate_label = if let Some(ljbk) = &loop_info.left_join_bookkeeping {
+            ljbk.check_match_flag_label
+        } else {
+            // if there is an inner join or a where (same thing) and the condition is always false,
+            // no rows will be emitted
+            early_terminate_label
+        };
+        translate_table_open_loop(
+            program,
+            select,
+            loop_info,
+            &processed_where,
+            early_terminate_label,
+        )?;
     }
 
     Ok(())
@@ -555,6 +583,7 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
             Some(LeftJoinBookkeeping {
                 match_flag_register: program.alloc_register(),
                 on_match_jump_to_label: program.allocate_label(),
+                check_match_flag_label: program.allocate_label(),
                 set_match_flag_true_label: program.allocate_label(),
             })
         } else {
@@ -602,6 +631,7 @@ fn left_join_match_flag_check(
     cursor_id: usize,
 ) {
     // If the left join match flag has been set to 1, we jump to the next row on the outer table (result row has been emitted already)
+    program.resolve_label(ljbk.check_match_flag_label, program.offset());
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
             reg: ljbk.match_flag_register,
@@ -629,6 +659,7 @@ fn translate_table_open_loop(
     select: &Select,
     loop_info: &LoopInfo,
     w: &ProcessedWhereClause,
+    early_terminate_label: BranchOffset,
 ) -> Result<()> {
     if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
         left_join_match_flag_initialize(program, ljbk);
@@ -646,7 +677,7 @@ fn translate_table_open_loop(
         loop_info.rewind_on_empty_label,
     );
 
-    translate_processed_where(program, select, loop_info, w, None)?;
+    translate_processed_where(program, select, loop_info, w, early_terminate_label, None)?;
 
     if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
         left_join_match_flag_set_true(program, ljbk);

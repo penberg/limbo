@@ -56,6 +56,18 @@ do_execsql_test inner-join-self-with-where {
 #    select u.first_name from users u join products as p on u.first_name != p.name where u.last_name = 'Williams' limit 1;
 #} {Laura} <-- sqlite3 returns 'Aaron'
 
+do_execsql_test inner-join-constant-condition-true {
+    select u.first_name, p.name from users u join products as p where 1 limit 5;
+} {Jamie|hat
+Jamie|cap
+Jamie|shirt
+Jamie|sweater
+Jamie|sweatshirt}
+
+do_execsql_test inner-join-constant-condition-false {
+    select u.first_name from users u join products as p where 0 limit 5;
+} {}
+
 do_execsql_test left-join-pk {
     select users.first_name as user_name, products.name as product_name from users left join products on users.id = products.id limit 12;
 } {Jamie|hat
@@ -133,6 +145,22 @@ do_execsql_test left-join-order-by-qualified-nullable-sorting-col {
     select users.first_name, products.name from users left join products on users.id = products.id order by products.name limit 1;
 } {Alan|}
 
+do_execsql_test left-join-constant-condition-true {
+    select u.first_name, p.name from users u left join products as p on 1 limit 5;
+} {Jamie|hat
+Jamie|cap
+Jamie|shirt
+Jamie|sweater
+Jamie|sweatshirt}
+
+do_execsql_test left-join-constant-condition-false {
+    select u.first_name, p.name from users u left join products as p on 0 limit 5;
+} {Jamie|
+Cindy|
+Tommy|
+Jennifer|
+Edward|}
+
 do_execsql_test four-way-inner-join {
   select u1.first_name, u2.first_name, u3.first_name, u4.first_name from users u1 join users u2 on u1.id = u2.id join users u3 on u2.id = u3.id + 1 join users u4 on u3.id = u4.id + 1 limit 1;
 } {Tommy|Tommy|Cindy|Jamie}
@@ -155,3 +183,15 @@ do_execsql_test innerjoin-leftjoin-with-or-terms {
   select u.first_name, u2.first_name, p.name from users u join users u2 on u.id = u2.id + 1 left join products p on p.name = u.first_name or p.name like 'sweat%' where u.first_name = 'Franklin';
 } {Franklin|Cynthia|sweater
 Franklin|Cynthia|sweatshirt}
+
+do_execsql_test left-join-constant-condition-false-inner-join-constant-condition-true {
+    select u.first_name, p.name, u2.first_name from users u left join products as p on 0 join users u2 on 1 limit 5;
+} {Jamie||Jamie
+Jamie||Cindy
+Jamie||Tommy
+Jamie||Jennifer
+Jamie||Edward}
+
+do_execsql_test left-join-constant-condition-true-inner-join-constant-condition-false {
+    select u.first_name, p.name, u2.first_name from users u left join products as p on 1 join users u2 on 0 limit 5;
+} {}

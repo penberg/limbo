@@ -40,12 +40,56 @@ do_execsql_test where-clause-unary-false {
     select count(1) from users where 0;
 } {0}
 
-do_execsql_test where-clause-no-table-unary-true {
+do_execsql_test where-clause-no-table-constant-condition-true {
     select 1 where 1;
 } {1}
 
-do_execsql_test where-clause-no-table-unary-false {
+do_execsql_test where-clause-no-table-constant-condition-true-2 {
+    select 1 where '1';
+} {1}
+
+do_execsql_test where-clause-no-table-constant-condition-true-3 {
+    select 1 where 6.66;
+} {1}
+
+do_execsql_test where-clause-no-table-constant-condition-true-4 {
+    select 1 where '6.66';
+} {1}
+
+do_execsql_test where-clause-no-table-constant-condition-true-5 {
+    select 1 where -1;
+} {1}
+
+do_execsql_test where-clause-no-table-constant-condition-true-6 {
+    select 1 where '-1';
+} {1}
+
+do_execsql_test where-clause-no-table-constant-condition-false {
     select 1 where 0;
+} {}
+
+do_execsql_test where-clause-no-table-constant-condition-false-2 {
+    select 1 where '0';
+} {}
+
+do_execsql_test where-clause-no-table-constant-condition-false-3 {
+    select 1 where 0.0;
+} {}
+
+do_execsql_test where-clause-no-table-constant-condition-false-4 {
+    select 1 where '0.0';
+} {}
+
+do_execsql_test where-clause-no-table-constant-condition-false-5 {
+    select 1 where -0.0;
+} {}
+
+do_execsql_test where-clause-no-table-constant-condition-false-6 {
+    select 1 where '-0.0';
+} {}
+
+do_execsql_test where-clause-no-table-constant-condition-false-7 {
+    select 1 where 'hamburger';
 } {}
 
 do_execsql_test select-where-and {
