@@ -82,8 +82,8 @@ This document describes the SQLite compatibility status of Limbo:
 | load_extension(X)            | No     |         |
 | load_extension(X,Y)          | No     |         |
 | lower(X)                     | Yes    |         |
-| ltrim(X)                     | No     |         |
-| ltrim(X,Y)                   | No     |         |
+| ltrim(X)                     | Yes    |         |
+| ltrim(X,Y)                   | Yes    |         |
 | max(X,Y,...)                 | No     |         |
 | min(X,Y,...)                 | No     |         |
 | nullif(X,Y)                  | No     |         |

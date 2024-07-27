@@ -87,6 +87,42 @@ do_execsql_test trim-no-match-pattern {
   SELECT trim('Limbo', 'xyz');
 } {Limbo}
 
+do_execsql_test ltrim {
+  SELECT ltrim('   Limbo    ');
+} {"Limbo    "}
+
+do_execsql_test ltrim-number {
+  SELECT ltrim(1);
+} {1}
+
+do_execsql_test ltrim-null {
+  SELECT ltrim(null);
+} {}
+
+do_execsql_test ltrim-leading-whitespace {
+  SELECT ltrim('   Leading');
+} {Leading}
+
+do_execsql_test ltrim-no-leading-whitespace {
+  SELECT ltrim('Limbo');
+} {Limbo}
+
+do_execsql_test ltrim-pattern {
+  SELECT ltrim('Limbo', 'Limbo');
+} {}
+
+do_execsql_test ltrim-pattern-number {
+  SELECT ltrim(1, '1');
+} {}
+
+do_execsql_test ltrim-pattern-null {
+  SELECT ltrim(null, 'null');
+} {}
+
+do_execsql_test ltrim-no-match-pattern {
+  SELECT ltrim('Limbo', 'xyz');
+} {Limbo}
+
 do_execsql_test round-float-no-precision {
   SELECT round(123.456);
 } {123.0}
