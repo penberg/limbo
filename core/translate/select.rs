@@ -524,13 +524,19 @@ fn translate_tables_begin(
     let processed_where = process_where(program, select)?;
 
     for loop_info in &select.loops {
-        // if there is a left join and there is a condition on the join that is always false,
-        // every row in the outer table will be emitted with nulls for the right table
+        // early_terminate_label decides where to jump _IF_ there exists a condition on this loop that is always false.
+        // this is part of a constant folding optimization where we can skip the loop entirely if we know it will never produce any rows.
         let early_terminate_label = if let Some(left_join) = &loop_info.left_join_maybe {
+            // If there exists a condition on the LEFT JOIN that is always false, e.g.:
+            // 'SELECT * FROM x LEFT JOIN y ON false'
+            // then we can't jump to e.g. Halt, but instead we need to still emit all rows from the 'x' table, with NULLs for the 'y' table.
+            // 'check_match_flag_label' is the label that checks if the left join match flag has been set to true, and if not (which it by default isn't),
+            // sets the 'y' cursor's "pseudo null bit" on, which means any Insn::Column after that will return NULL for the 'y' table.
             left_join.check_match_flag_label
         } else {
-            // if there is an inner join or a where (same thing) and the condition is always false,
-            // no rows will be emitted
+            // If there exists a condition in an INNER JOIN (or WHERE) that is always false, then the query will not produce any rows.
+            // Example: 'SELECT * FROM x JOIN y ON false' or 'SELECT * FROM x WHERE false'
+            // Here we should jump to Halt (or e.g. AggFinal in case we have an aggregation expression like count() that should produce a 0 on empty input.
             early_terminate_label
         };
         translate_table_open_loop(
