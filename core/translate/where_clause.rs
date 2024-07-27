@@ -46,6 +46,9 @@ pub fn split_constraint_to_terms<'a>(
                 queue.push(right);
             }
             expr => {
+                if expr.is_always_true()? {
+                    continue;
+                }
                 let term = WhereTerm {
                     expr: expr.clone(),
                     evaluate_at_cursor: match outer_join_table_name {
@@ -143,11 +146,29 @@ pub fn process_where<'a>(
     Ok(wc)
 }
 
-pub fn translate_where(
+/**
+ * Translate the WHERE clause of a SELECT statement that doesn't have any tables.
+ * TODO: refactor this to use the same code path as the other WHERE clause translation functions.
+ */
+pub fn translate_tableless_where(
     select: &Select,
     program: &mut ProgramBuilder,
+    early_terminate_label: BranchOffset,
 ) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
+        if w.is_always_false()? {
+            program.emit_insn_with_label_dependency(
+                Insn::Goto {
+                    target_pc: early_terminate_label,
+                },
+                early_terminate_label,
+            );
+            return Ok(None);
+        }
+        if w.is_always_true()? {
+            return Ok(None);
+        }
+
         let jump_target_when_false = program.allocate_label();
         let jump_target_when_true = program.allocate_label();
         translate_condition_expr(
@@ -180,12 +201,28 @@ pub fn translate_processed_where<'a>(
     select: &'a Select,
     current_loop: &'a LoopInfo,
     where_c: &'a ProcessedWhereClause,
+    skip_entire_table_label: BranchOffset,
     cursor_hint: Option<usize>,
 ) -> Result<()> {
-    for term in where_c.terms.iter() {
-        if term.evaluate_at_cursor != current_loop.open_cursor {
-            continue;
-        }
+    if where_c
+        .terms
+        .iter()
+        .filter(|t| t.evaluate_at_cursor == current_loop.open_cursor)
+        .any(|t| t.expr.is_always_false().unwrap_or(false))
+    {
+        program.emit_insn_with_label_dependency(
+            Insn::Goto {
+                target_pc: skip_entire_table_label,
+            },
+            skip_entire_table_label,
+        );
+        return Ok(());
+    }
+    for term in where_c
+        .terms
+        .iter()
+        .filter(|t| t.evaluate_at_cursor == current_loop.open_cursor)
+    {
         let jump_target_when_false = current_loop.next_row_label;
         let jump_target_when_true = program.allocate_label();
         translate_condition_expr(
@@ -748,4 +785,144 @@ fn introspect_expression_for_cursors(
     }
 
     Ok(cursors)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstantCondition {
+    AlwaysTrue,
+    AlwaysFalse,
+}
+
+pub trait Evaluatable {
+    fn check_constant(&self) -> Result<Option<ConstantCondition>>;
+    fn is_always_true(&self) -> Result<bool> {
+        Ok(self
+            .check_constant()?
+            .map_or(false, |c| c == ConstantCondition::AlwaysTrue))
+    }
+    fn is_always_false(&self) -> Result<bool> {
+        Ok(self
+            .check_constant()?
+            .map_or(false, |c| c == ConstantCondition::AlwaysFalse))
+    }
+}
+
+impl Evaluatable for ast::Expr {
+    fn check_constant(&self) -> Result<Option<ConstantCondition>> {
+        match self {
+            ast::Expr::Literal(lit) => match lit {
+                ast::Literal::Null => Ok(Some(ConstantCondition::AlwaysFalse)),
+                ast::Literal::Numeric(b) => {
+                    if let Ok(int_value) = b.parse::<i64>() {
+                        return Ok(Some(if int_value == 0 {
+                            ConstantCondition::AlwaysFalse
+                        } else {
+                            ConstantCondition::AlwaysTrue
+                        }));
+                    }
+                    if let Ok(float_value) = b.parse::<f64>() {
+                        return Ok(Some(if float_value == 0.0 {
+                            ConstantCondition::AlwaysFalse
+                        } else {
+                            ConstantCondition::AlwaysTrue
+                        }));
+                    }
+
+                    Ok(None)
+                }
+                ast::Literal::String(s) => {
+                    let without_quotes = s.trim_matches('\'');
+                    if let Ok(int_value) = without_quotes.parse::<i64>() {
+                        return Ok(Some(if int_value == 0 {
+                            ConstantCondition::AlwaysFalse
+                        } else {
+                            ConstantCondition::AlwaysTrue
+                        }));
+                    }
+
+                    if let Ok(float_value) = without_quotes.parse::<f64>() {
+                        return Ok(Some(if float_value == 0.0 {
+                            ConstantCondition::AlwaysFalse
+                        } else {
+                            ConstantCondition::AlwaysTrue
+                        }));
+                    }
+
+                    Ok(Some(ConstantCondition::AlwaysFalse))
+                }
+                _ => Ok(None),
+            },
+            ast::Expr::Unary(op, expr) => {
+                if *op == ast::UnaryOperator::Not {
+                    let trivial = expr.check_constant()?;
+                    return Ok(trivial.map(|t| match t {
+                        ConstantCondition::AlwaysTrue => ConstantCondition::AlwaysFalse,
+                        ConstantCondition::AlwaysFalse => ConstantCondition::AlwaysTrue,
+                    }));
+                }
+
+                if *op == ast::UnaryOperator::Negative {
+                    let trivial = expr.check_constant()?;
+                    return Ok(trivial);
+                }
+
+                Ok(None)
+            }
+            ast::Expr::InList { lhs: _, not, rhs } => {
+                if rhs.is_none() {
+                    return Ok(Some(if *not {
+                        ConstantCondition::AlwaysTrue
+                    } else {
+                        ConstantCondition::AlwaysFalse
+                    }));
+                }
+                let rhs = rhs.as_ref().unwrap();
+                if rhs.is_empty() {
+                    return Ok(Some(if *not {
+                        ConstantCondition::AlwaysTrue
+                    } else {
+                        ConstantCondition::AlwaysFalse
+                    }));
+                }
+
+                Ok(None)
+            }
+            ast::Expr::Binary(lhs, op, rhs) => {
+                let lhs_trivial = lhs.check_constant()?;
+                let rhs_trivial = rhs.check_constant()?;
+                match op {
+                    ast::Operator::And => {
+                        if lhs_trivial == Some(ConstantCondition::AlwaysFalse)
+                            || rhs_trivial == Some(ConstantCondition::AlwaysFalse)
+                        {
+                            return Ok(Some(ConstantCondition::AlwaysFalse));
+                        }
+                        if lhs_trivial == Some(ConstantCondition::AlwaysTrue)
+                            && rhs_trivial == Some(ConstantCondition::AlwaysTrue)
+                        {
+                            return Ok(Some(ConstantCondition::AlwaysTrue));
+                        }
+
+                        Ok(None)
+                    }
+                    ast::Operator::Or => {
+                        if lhs_trivial == Some(ConstantCondition::AlwaysTrue)
+                            || rhs_trivial == Some(ConstantCondition::AlwaysTrue)
+                        {
+                            return Ok(Some(ConstantCondition::AlwaysTrue));
+                        }
+                        if lhs_trivial == Some(ConstantCondition::AlwaysFalse)
+                            && rhs_trivial == Some(ConstantCondition::AlwaysFalse)
+                        {
+                            return Ok(Some(ConstantCondition::AlwaysFalse));
+                        }
+
+                        Ok(None)
+                    }
+                    _ => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
+    }
 }

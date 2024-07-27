@@ -2,7 +2,7 @@ use crate::function::{AggFunc, Func};
 use crate::schema::{Column, PseudoTable, Schema, Table};
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
-    process_where, translate_processed_where, translate_where, ProcessedWhereClause,
+    process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,
 };
 use crate::translate::{normalize_ident, Insn};
 use crate::types::{OwnedRecord, OwnedValue};
@@ -93,20 +93,24 @@ impl<'a> ColumnInfo<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct LeftJoinBookkeeping {
     // integer register that holds a flag that is set to true if the current row has a match for the left join
     pub match_flag_register: usize,
     // label for the instruction that sets the match flag to true
     pub set_match_flag_true_label: BranchOffset,
+    // label for the instruction that checks if the match flag is true
+    pub check_match_flag_label: BranchOffset,
     // label for the instruction where the program jumps to if the current row has a match for the left join
     pub on_match_jump_to_label: BranchOffset,
 }
 
+#[derive(Debug)]
 pub struct LoopInfo {
     // The table or table alias that we are looping over
     pub identifier: String,
     // Metadata about a left join, if any
-    pub left_join_bookkeeping: Option<LeftJoinBookkeeping>,
+    pub left_join_maybe: Option<LeftJoinBookkeeping>,
     // The label for the instruction that reads the next row for this table
     pub next_row_label: BranchOffset,
     // The label for the instruction that rewinds the cursor for this table
@@ -239,6 +243,7 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
 pub fn translate_select(mut select: Select) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
+    let early_terminate_label = program.allocate_label();
     program.emit_insn_with_label_dependency(
         Insn::Init {
             target_pc: init_label,
@@ -299,7 +304,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
     };
 
     if !select.src_tables.is_empty() {
-        translate_tables_begin(&mut program, &mut select)?;
+        translate_tables_begin(&mut program, &mut select, early_terminate_label)?;
 
         let (register_start, column_count) = if let Some(sort_columns) = select.order_by {
             let start = program.next_free_register();
@@ -359,6 +364,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
         translate_tables_end(&mut program, &select);
 
         if select.exist_aggregation {
+            program.resolve_label(early_terminate_label, program.offset());
             let mut target = register_start;
             for info in &select.column_info {
                 if let Some(Func::Agg(func)) = &info.func {
@@ -379,7 +385,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
     } else {
         assert!(!select.exist_aggregation);
         assert!(sort_info.is_none());
-        let where_maybe = translate_where(&select, &mut program)?;
+        let where_maybe = translate_tableless_where(&select, &mut program, early_terminate_label)?;
         let (register_start, count) = translate_columns(&mut program, &select, None)?;
         if let Some(where_clause_label) = where_maybe {
             program.resolve_label(where_clause_label, program.offset() + 1);
@@ -396,6 +402,9 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
         let _ = translate_sorter(&select, &mut program, &sort_info.unwrap(), &limit_info);
     }
 
+    if !select.exist_aggregation {
+        program.resolve_label(early_terminate_label, program.offset());
+    }
     program.emit_insn(Insn::Halt);
     let halt_offset = program.offset() - 1;
     if let Some(limit_info) = limit_info {
@@ -502,7 +511,11 @@ fn translate_sorter(
     Ok(())
 }
 
-fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) -> Result<()> {
+fn translate_tables_begin(
+    program: &mut ProgramBuilder,
+    select: &mut Select,
+    early_terminate_label: BranchOffset,
+) -> Result<()> {
     for join in &select.src_tables {
         let loop_info = translate_table_open_cursor(program, join);
         select.loops.push(loop_info);
@@ -511,7 +524,29 @@ fn translate_tables_begin(program: &mut ProgramBuilder, select: &mut Select) -> 
     let processed_where = process_where(program, select)?;
 
     for loop_info in &select.loops {
-        translate_table_open_loop(program, select, loop_info, &processed_where)?;
+        // early_terminate_label decides where to jump _IF_ there exists a condition on this loop that is always false.
+        // this is part of a constant folding optimization where we can skip the loop entirely if we know it will never produce any rows.
+        let current_loop_early_terminate_label = if let Some(left_join) = &loop_info.left_join_maybe
+        {
+            // If there exists a condition on the LEFT JOIN that is always false, e.g.:
+            // 'SELECT * FROM x LEFT JOIN y ON false'
+            // then we can't jump to e.g. Halt, but instead we need to still emit all rows from the 'x' table, with NULLs for the 'y' table.
+            // 'check_match_flag_label' is the label that checks if the left join match flag has been set to true, and if not (which it by default isn't),
+            // sets the 'y' cursor's "pseudo null bit" on, which means any Insn::Column after that will return NULL for the 'y' table.
+            left_join.check_match_flag_label
+        } else {
+            // If there exists a condition in an INNER JOIN (or WHERE) that is always false, then the query will not produce any rows.
+            // Example: 'SELECT * FROM x JOIN y ON false' or 'SELECT * FROM x WHERE false'
+            // Here we should jump to Halt (or e.g. AggFinal in case we have an aggregation expression like count() that should produce a 0 on empty input.
+            early_terminate_label
+        };
+        translate_table_open_loop(
+            program,
+            select,
+            loop_info,
+            &processed_where,
+            current_loop_early_terminate_label,
+        )?;
     }
 
     Ok(())
@@ -531,8 +566,8 @@ fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
             table_loop.rewind_label,
         );
 
-        if let Some(ljbk) = &table_loop.left_join_bookkeeping {
-            left_join_match_flag_check(program, ljbk, cursor_id);
+        if let Some(left_join) = &table_loop.left_join_maybe {
+            left_join_match_flag_check(program, left_join, cursor_id);
         }
     }
 }
@@ -551,10 +586,11 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
     program.emit_insn(Insn::OpenReadAwait);
     LoopInfo {
         identifier: table.identifier.clone(),
-        left_join_bookkeeping: if table.is_outer_join() {
+        left_join_maybe: if table.is_outer_join() {
             Some(LeftJoinBookkeeping {
                 match_flag_register: program.alloc_register(),
                 on_match_jump_to_label: program.allocate_label(),
+                check_match_flag_label: program.allocate_label(),
                 set_match_flag_true_label: program.allocate_label(),
             })
         } else {
@@ -571,21 +607,24 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
 * initialize left join match flag to false
 * if condition checks pass, it will eventually be set to true
 */
-fn left_join_match_flag_initialize(program: &mut ProgramBuilder, ljbk: &LeftJoinBookkeeping) {
+fn left_join_match_flag_initialize(program: &mut ProgramBuilder, left_join: &LeftJoinBookkeeping) {
     program.emit_insn(Insn::Integer {
         value: 0,
-        dest: ljbk.match_flag_register,
+        dest: left_join.match_flag_register,
     });
 }
 
 /**
 * after the relevant conditional jumps have been emitted, set the left join match flag to true
 */
-fn left_join_match_flag_set_true(program: &mut ProgramBuilder, ljbk: &LeftJoinBookkeeping) {
-    program.defer_label_resolution(ljbk.set_match_flag_true_label, program.offset() as usize);
+fn left_join_match_flag_set_true(program: &mut ProgramBuilder, left_join: &LeftJoinBookkeeping) {
+    program.defer_label_resolution(
+        left_join.set_match_flag_true_label,
+        program.offset() as usize,
+    );
     program.emit_insn(Insn::Integer {
         value: 1,
-        dest: ljbk.match_flag_register,
+        dest: left_join.match_flag_register,
     });
 }
 
@@ -598,30 +637,31 @@ fn left_join_match_flag_set_true(program: &mut ProgramBuilder, ljbk: &LeftJoinBo
 */
 fn left_join_match_flag_check(
     program: &mut ProgramBuilder,
-    ljbk: &LeftJoinBookkeeping,
+    left_join: &LeftJoinBookkeeping,
     cursor_id: usize,
 ) {
     // If the left join match flag has been set to 1, we jump to the next row on the outer table (result row has been emitted already)
+    program.resolve_label(left_join.check_match_flag_label, program.offset());
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
-            reg: ljbk.match_flag_register,
-            target_pc: ljbk.on_match_jump_to_label,
+            reg: left_join.match_flag_register,
+            target_pc: left_join.on_match_jump_to_label,
             decrement_by: 0,
         },
-        ljbk.on_match_jump_to_label,
+        left_join.on_match_jump_to_label,
     );
     // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
     program.emit_insn(Insn::NullRow { cursor_id });
     // Jump to setting the left join match flag to 1 again, but this time the right table cursor will set everything to null
     program.emit_insn_with_label_dependency(
         Insn::Goto {
-            target_pc: ljbk.set_match_flag_true_label,
+            target_pc: left_join.set_match_flag_true_label,
         },
-        ljbk.set_match_flag_true_label,
+        left_join.set_match_flag_true_label,
     );
     // This points to the NextAsync instruction of the next table in the loop
     // (i.e. the outer table, since we're iterating in reverse order)
-    program.resolve_label(ljbk.on_match_jump_to_label, program.offset());
+    program.resolve_label(left_join.on_match_jump_to_label, program.offset());
 }
 
 fn translate_table_open_loop(
@@ -629,9 +669,10 @@ fn translate_table_open_loop(
     select: &Select,
     loop_info: &LoopInfo,
     w: &ProcessedWhereClause,
+    early_terminate_label: BranchOffset,
 ) -> Result<()> {
-    if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
-        left_join_match_flag_initialize(program, ljbk);
+    if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
+        left_join_match_flag_initialize(program, left_join);
     }
 
     program.emit_insn(Insn::RewindAsync {
@@ -646,10 +687,10 @@ fn translate_table_open_loop(
         loop_info.rewind_on_empty_label,
     );
 
-    translate_processed_where(program, select, loop_info, w, None)?;
+    translate_processed_where(program, select, loop_info, w, early_terminate_label, None)?;
 
-    if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
-        left_join_match_flag_set_true(program, ljbk);
+    if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
+        left_join_match_flag_set_true(program, left_join);
     }
 
     Ok(())
