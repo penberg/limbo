@@ -148,23 +148,23 @@ pub fn translate_where(
     program: &mut ProgramBuilder,
 ) -> Result<Option<BranchOffset>> {
     if let Some(w) = &select.where_clause {
-        let failure_label = program.allocate_label();
-        let success_label = program.allocate_label();
+        let jump_target_when_false = program.allocate_label();
+        let jump_target_when_true = program.allocate_label();
         translate_condition_expr(
             program,
             select,
             w,
             None,
             ConditionMetadata {
-                on_failure_jump_label: failure_label,
-                on_success_jump_label: success_label,
-                ..Default::default()
+                jump_if_condition_is_true: false,
+                jump_target_when_false,
+                jump_target_when_true,
             },
         )?;
 
-        program.resolve_label(success_label, program.offset());
+        program.resolve_label(jump_target_when_true, program.offset());
 
-        Ok(Some(failure_label))
+        Ok(Some(jump_target_when_false))
     } else {
         Ok(None)
     }
@@ -186,21 +186,21 @@ pub fn translate_processed_where<'a>(
         if term.evaluate_at_cursor != current_loop.open_cursor {
             continue;
         }
-        let target_jump = current_loop.next_row_label;
-        let success_label = program.allocate_label();
+        let jump_target_when_false = current_loop.next_row_label;
+        let jump_target_when_true = program.allocate_label();
         translate_condition_expr(
             program,
             select,
             &term.expr,
             cursor_hint,
             ConditionMetadata {
-                jump_on_success: false,
-                on_failure_jump_label: target_jump,
-                on_success_jump_label: success_label,
+                jump_if_condition_is_true: false,
+                jump_target_when_false,
+                jump_target_when_true,
             },
         )?;
 
-        program.resolve_label(success_label, program.offset());
+        program.resolve_label(jump_target_when_true, program.offset());
     }
 
     Ok(())
@@ -208,9 +208,9 @@ pub fn translate_processed_where<'a>(
 
 #[derive(Default, Debug, Clone, Copy)]
 struct ConditionMetadata {
-    jump_on_success: bool,
-    on_success_jump_label: BranchOffset,
-    on_failure_jump_label: BranchOffset,
+    jump_if_condition_is_true: bool,
+    jump_target_when_true: BranchOffset,
+    jump_target_when_false: BranchOffset,
 }
 
 fn translate_condition_expr(
@@ -223,7 +223,7 @@ fn translate_condition_expr(
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
-            // In a binary AND, never jump to the success label on the first condition, because
+            // In a binary AND, never jump to the 'jump_target_when_true' label on the first condition, because
             // the second condition must also be true.
             let _ = translate_condition_expr(
                 program,
@@ -231,26 +231,27 @@ fn translate_condition_expr(
                 lhs,
                 cursor_hint,
                 ConditionMetadata {
-                    jump_on_success: false,
+                    jump_if_condition_is_true: false,
                     ..condition_metadata
                 },
             );
             let _ = translate_condition_expr(program, select, rhs, cursor_hint, condition_metadata);
         }
         ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
-            let on_failure_jump_label = program.allocate_label();
+            let jump_target_when_false = program.allocate_label();
             let _ = translate_condition_expr(
                 program,
                 select,
                 lhs,
                 cursor_hint,
                 ConditionMetadata {
-                    jump_on_success: true,
-                    on_failure_jump_label,
+                    // If the first condition is true, we don't need to evaluate the second condition.
+                    jump_if_condition_is_true: true,
+                    jump_target_when_false,
                     ..condition_metadata
                 },
             );
-            program.resolve_label(on_failure_jump_label, program.offset());
+            program.resolve_label(jump_target_when_false, program.offset());
             let _ = translate_condition_expr(program, select, rhs, cursor_hint, condition_metadata);
         }
         ast::Expr::Binary(lhs, op, rhs) => {
@@ -268,128 +269,128 @@ fn translate_condition_expr(
             }
             match op {
                 ast::Operator::Greater => {
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Gt {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::Le {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 }
                 ast::Operator::GreaterEquals => {
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Ge {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::Lt {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 }
                 ast::Operator::Less => {
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Lt {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::Ge {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 }
                 ast::Operator::LessEquals => {
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Le {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::Gt {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 }
                 ast::Operator::Equals => {
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Eq {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::Ne {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 }
                 ast::Operator::NotEquals => {
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Ne {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::Eq {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 }
@@ -409,27 +410,27 @@ fn translate_condition_expr(
                         value: int_value,
                         dest: reg,
                     });
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::If {
                                 reg,
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                                 null_reg: reg,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         )
                     } else {
                         program.emit_insn_with_label_dependency(
                             Insn::IfNot {
                                 reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                                 null_reg: reg,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         )
                     }
                 } else {
-                    crate::bail_parse_error!("Parse error: unsupported literal type in condition");
+                    crate::bail_parse_error!("unsupported literal type in condition");
                 }
             }
             ast::Literal::String(string) => {
@@ -438,23 +439,23 @@ fn translate_condition_expr(
                     value: string.clone(),
                     dest: reg,
                 });
-                if condition_metadata.jump_on_success {
+                if condition_metadata.jump_if_condition_is_true {
                     program.emit_insn_with_label_dependency(
                         Insn::If {
                             reg,
-                            target_pc: condition_metadata.on_success_jump_label,
+                            target_pc: condition_metadata.jump_target_when_true,
                             null_reg: reg,
                         },
-                        condition_metadata.on_success_jump_label,
+                        condition_metadata.jump_target_when_true,
                     )
                 } else {
                     program.emit_insn_with_label_dependency(
                         Insn::IfNot {
                             reg,
-                            target_pc: condition_metadata.on_failure_jump_label,
+                            target_pc: condition_metadata.jump_target_when_false,
                             null_reg: reg,
                         },
-                        condition_metadata.on_failure_jump_label,
+                        condition_metadata.jump_target_when_false,
                     )
                 }
             }
@@ -482,24 +483,24 @@ fn translate_condition_expr(
             if rhs.is_none() {
                 // If rhs is None, IN expressions are always false and NOT IN expressions are always true.
                 if *not {
-                    // On a trivially successful NOT IN () expression we can only jump to the success label if 'jump_on_success' is true; otherwise me must fall through.
+                    // On a trivially true NOT IN () expression we can only jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'; otherwise me must fall through.
                     // This is because in a more complex condition we might need to evaluate the rest of the condition.
-                    // Note that we are already breaking up our WHERE clauses into a series of terms at "AND" boundaries, so right now we won't be running into cases where success-jumping would be incorrect,
+                    // Note that we are already breaking up our WHERE clauses into a series of terms at "AND" boundaries, so right now we won't be running into cases where jumping on true would be incorrect,
                     // but once we have e.g. parenthesization and more complex conditions, not having this 'if' here would introduce a bug.
-                    if condition_metadata.jump_on_success {
+                    if condition_metadata.jump_if_condition_is_true {
                         program.emit_insn_with_label_dependency(
                             Insn::Goto {
-                                target_pc: condition_metadata.on_success_jump_label,
+                                target_pc: condition_metadata.jump_target_when_true,
                             },
-                            condition_metadata.on_success_jump_label,
+                            condition_metadata.jump_target_when_true,
                         );
                     }
                 } else {
                     program.emit_insn_with_label_dependency(
                         Insn::Goto {
-                            target_pc: condition_metadata.on_failure_jump_label,
+                            target_pc: condition_metadata.jump_target_when_false,
                         },
-                        condition_metadata.on_failure_jump_label,
+                        condition_metadata.jump_target_when_false,
                     );
                 }
                 return Ok(());
@@ -509,58 +510,58 @@ fn translate_condition_expr(
 
             // The difference between a local jump and an "upper level" jump is that for example in this case:
             // WHERE foo IN (1,2,3) OR bar = 5,
-            // we can immediately jump to the success label of the ENTIRE CONDITION if foo = 1, foo = 2, or foo = 3 without evaluating the bar = 5 condition.
-            // This is why in Binary-OR expressions we set jump_on_success to true for the first condition.
+            // we can immediately jump to the 'jump_target_when_true' label of the ENTIRE CONDITION if foo = 1, foo = 2, or foo = 3 without evaluating the bar = 5 condition.
+            // This is why in Binary-OR expressions we set jump_if_condition_is_true to true for the first condition.
             // However, in this example:
             // WHERE foo IN (1,2,3) AND bar = 5,
-            // we can't jump to the success label of the entire condition foo = 1, foo = 2, or foo = 3, because we still need to evaluate the bar = 5 condition later.
+            // we can't jump to the 'jump_target_when_true' label of the entire condition foo = 1, foo = 2, or foo = 3, because we still need to evaluate the bar = 5 condition later.
             // This is why in that case we just jump over the rest of the IN conditions in this "local" branch which evaluates the IN condition.
-            let success_label = if condition_metadata.jump_on_success {
-                condition_metadata.on_success_jump_label
+            let jump_target_when_true = if condition_metadata.jump_if_condition_is_true {
+                condition_metadata.jump_target_when_true
             } else {
                 program.allocate_label()
             };
 
             if !*not {
-                // If it's an IN expression, we need to jump to the success label if any of the conditions are true.
+                // If it's an IN expression, we need to jump to the 'jump_target_when_true' label if any of the conditions are true.
                 for (i, expr) in rhs.iter().enumerate() {
                     let rhs_reg = program.alloc_register();
                     let last_condition = i == rhs.len() - 1;
                     let _ = translate_expr(program, select, expr, rhs_reg, cursor_hint)?;
-                    // If this is not the last condition, we need to jump to the success label if the condition is true.
+                    // If this is not the last condition, we need to jump to the 'jump_target_when_true' label if the condition is true.
                     if !last_condition {
                         program.emit_insn_with_label_dependency(
                             Insn::Eq {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: success_label,
+                                target_pc: jump_target_when_true,
                             },
-                            success_label,
+                            jump_target_when_true,
                         );
                     } else {
-                        // If this is the last condition, we need to jump to the failure label if there is no match.
+                        // If this is the last condition, we need to jump to the 'jump_target_when_false' label if there is no match.
                         program.emit_insn_with_label_dependency(
                             Insn::Ne {
                                 lhs: lhs_reg,
                                 rhs: rhs_reg,
-                                target_pc: condition_metadata.on_failure_jump_label,
+                                target_pc: condition_metadata.jump_target_when_false,
                             },
-                            condition_metadata.on_failure_jump_label,
+                            condition_metadata.jump_target_when_false,
                         );
                     }
                 }
-                // If we got here, then the last condition was a match, so we jump to the success label if 'jump_on_success' is true.
+                // If we got here, then the last condition was a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
                 // If not, we can just fall through without emitting an unnecessary instruction.
-                if condition_metadata.jump_on_success {
+                if condition_metadata.jump_if_condition_is_true {
                     program.emit_insn_with_label_dependency(
                         Insn::Goto {
-                            target_pc: condition_metadata.on_success_jump_label,
+                            target_pc: condition_metadata.jump_target_when_true,
                         },
-                        condition_metadata.on_success_jump_label,
+                        condition_metadata.jump_target_when_true,
                     );
                 }
             } else {
-                // If it's a NOT IN expression, we need to jump to the failure label if any of the conditions are true.
+                // If it's a NOT IN expression, we need to jump to the 'jump_target_when_false' label if any of the conditions are true.
                 for expr in rhs.iter() {
                     let rhs_reg = program.alloc_register();
                     let _ = translate_expr(program, select, expr, rhs_reg, cursor_hint)?;
@@ -568,25 +569,25 @@ fn translate_condition_expr(
                         Insn::Eq {
                             lhs: lhs_reg,
                             rhs: rhs_reg,
-                            target_pc: condition_metadata.on_failure_jump_label,
+                            target_pc: condition_metadata.jump_target_when_false,
                         },
-                        condition_metadata.on_failure_jump_label,
+                        condition_metadata.jump_target_when_false,
                     );
                 }
-                // If we got here, then none of the conditions were a match, so we jump to the success label if 'jump_on_success' is true.
+                // If we got here, then none of the conditions were a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
                 // If not, we can just fall through without emitting an unnecessary instruction.
-                if condition_metadata.jump_on_success {
+                if condition_metadata.jump_if_condition_is_true {
                     program.emit_insn_with_label_dependency(
                         Insn::Goto {
-                            target_pc: condition_metadata.on_success_jump_label,
+                            target_pc: condition_metadata.jump_target_when_true,
                         },
-                        condition_metadata.on_success_jump_label,
+                        condition_metadata.jump_target_when_true,
                     );
                 }
             }
 
-            if !condition_metadata.jump_on_success {
-                program.resolve_label(success_label, program.offset());
+            if !condition_metadata.jump_if_condition_is_true {
+                program.resolve_label(jump_target_when_true, program.offset());
             }
         }
         ast::Expr::Like {
@@ -620,43 +621,43 @@ fn translate_condition_expr(
                 ast::LikeOperator::Regexp => todo!(),
             }
             if !*not {
-                if condition_metadata.jump_on_success {
+                if condition_metadata.jump_if_condition_is_true {
                     program.emit_insn_with_label_dependency(
                         Insn::If {
                             reg: cur_reg,
-                            target_pc: condition_metadata.on_success_jump_label,
+                            target_pc: condition_metadata.jump_target_when_true,
                             null_reg: cur_reg,
                         },
-                        condition_metadata.on_success_jump_label,
+                        condition_metadata.jump_target_when_true,
                     );
                 } else {
                     program.emit_insn_with_label_dependency(
                         Insn::IfNot {
                             reg: cur_reg,
-                            target_pc: condition_metadata.on_failure_jump_label,
+                            target_pc: condition_metadata.jump_target_when_false,
                             null_reg: cur_reg,
                         },
-                        condition_metadata.on_failure_jump_label,
+                        condition_metadata.jump_target_when_false,
                     );
                 }
             } else {
-                if condition_metadata.jump_on_success {
+                if condition_metadata.jump_if_condition_is_true {
                     program.emit_insn_with_label_dependency(
                         Insn::IfNot {
                             reg: cur_reg,
-                            target_pc: condition_metadata.on_success_jump_label,
+                            target_pc: condition_metadata.jump_target_when_true,
                             null_reg: cur_reg,
                         },
-                        condition_metadata.on_success_jump_label,
+                        condition_metadata.jump_target_when_true,
                     );
                 } else {
                     program.emit_insn_with_label_dependency(
                         Insn::If {
                             reg: cur_reg,
-                            target_pc: condition_metadata.on_failure_jump_label,
+                            target_pc: condition_metadata.jump_target_when_false,
                             null_reg: cur_reg,
                         },
-                        condition_metadata.on_failure_jump_label,
+                        condition_metadata.jump_target_when_false,
                     );
                 }
             }
