@@ -110,7 +110,7 @@ pub struct LoopInfo {
     // The table or table alias that we are looping over
     pub identifier: String,
     // Metadata about a left join, if any
-    pub left_join_bookkeeping: Option<LeftJoinBookkeeping>,
+    pub left_join_maybe: Option<LeftJoinBookkeeping>,
     // The label for the instruction that reads the next row for this table
     pub next_row_label: BranchOffset,
     // The label for the instruction that rewinds the cursor for this table
@@ -526,8 +526,8 @@ fn translate_tables_begin(
     for loop_info in &select.loops {
         // if there is a left join and there is a condition on the join that is always false,
         // every row in the outer table will be emitted with nulls for the right table
-        let early_terminate_label = if let Some(ljbk) = &loop_info.left_join_bookkeeping {
-            ljbk.check_match_flag_label
+        let early_terminate_label = if let Some(left_join) = &loop_info.left_join_maybe {
+            left_join.check_match_flag_label
         } else {
             // if there is an inner join or a where (same thing) and the condition is always false,
             // no rows will be emitted
@@ -559,8 +559,8 @@ fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
             table_loop.rewind_label,
         );
 
-        if let Some(ljbk) = &table_loop.left_join_bookkeeping {
-            left_join_match_flag_check(program, ljbk, cursor_id);
+        if let Some(left_join) = &table_loop.left_join_maybe {
+            left_join_match_flag_check(program, left_join, cursor_id);
         }
     }
 }
@@ -579,7 +579,7 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
     program.emit_insn(Insn::OpenReadAwait);
     LoopInfo {
         identifier: table.identifier.clone(),
-        left_join_bookkeeping: if table.is_outer_join() {
+        left_join_maybe: if table.is_outer_join() {
             Some(LeftJoinBookkeeping {
                 match_flag_register: program.alloc_register(),
                 on_match_jump_to_label: program.allocate_label(),
@@ -600,21 +600,24 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
 * initialize left join match flag to false
 * if condition checks pass, it will eventually be set to true
 */
-fn left_join_match_flag_initialize(program: &mut ProgramBuilder, ljbk: &LeftJoinBookkeeping) {
+fn left_join_match_flag_initialize(program: &mut ProgramBuilder, left_join: &LeftJoinBookkeeping) {
     program.emit_insn(Insn::Integer {
         value: 0,
-        dest: ljbk.match_flag_register,
+        dest: left_join.match_flag_register,
     });
 }
 
 /**
 * after the relevant conditional jumps have been emitted, set the left join match flag to true
 */
-fn left_join_match_flag_set_true(program: &mut ProgramBuilder, ljbk: &LeftJoinBookkeeping) {
-    program.defer_label_resolution(ljbk.set_match_flag_true_label, program.offset() as usize);
+fn left_join_match_flag_set_true(program: &mut ProgramBuilder, left_join: &LeftJoinBookkeeping) {
+    program.defer_label_resolution(
+        left_join.set_match_flag_true_label,
+        program.offset() as usize,
+    );
     program.emit_insn(Insn::Integer {
         value: 1,
-        dest: ljbk.match_flag_register,
+        dest: left_join.match_flag_register,
     });
 }
 
@@ -627,31 +630,31 @@ fn left_join_match_flag_set_true(program: &mut ProgramBuilder, ljbk: &LeftJoinBo
 */
 fn left_join_match_flag_check(
     program: &mut ProgramBuilder,
-    ljbk: &LeftJoinBookkeeping,
+    left_join: &LeftJoinBookkeeping,
     cursor_id: usize,
 ) {
     // If the left join match flag has been set to 1, we jump to the next row on the outer table (result row has been emitted already)
-    program.resolve_label(ljbk.check_match_flag_label, program.offset());
+    program.resolve_label(left_join.check_match_flag_label, program.offset());
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
-            reg: ljbk.match_flag_register,
-            target_pc: ljbk.on_match_jump_to_label,
+            reg: left_join.match_flag_register,
+            target_pc: left_join.on_match_jump_to_label,
             decrement_by: 0,
         },
-        ljbk.on_match_jump_to_label,
+        left_join.on_match_jump_to_label,
     );
     // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
     program.emit_insn(Insn::NullRow { cursor_id });
     // Jump to setting the left join match flag to 1 again, but this time the right table cursor will set everything to null
     program.emit_insn_with_label_dependency(
         Insn::Goto {
-            target_pc: ljbk.set_match_flag_true_label,
+            target_pc: left_join.set_match_flag_true_label,
         },
-        ljbk.set_match_flag_true_label,
+        left_join.set_match_flag_true_label,
     );
     // This points to the NextAsync instruction of the next table in the loop
     // (i.e. the outer table, since we're iterating in reverse order)
-    program.resolve_label(ljbk.on_match_jump_to_label, program.offset());
+    program.resolve_label(left_join.on_match_jump_to_label, program.offset());
 }
 
 fn translate_table_open_loop(
@@ -661,8 +664,8 @@ fn translate_table_open_loop(
     w: &ProcessedWhereClause,
     early_terminate_label: BranchOffset,
 ) -> Result<()> {
-    if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
-        left_join_match_flag_initialize(program, ljbk);
+    if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
+        left_join_match_flag_initialize(program, left_join);
     }
 
     program.emit_insn(Insn::RewindAsync {
@@ -679,8 +682,8 @@ fn translate_table_open_loop(
 
     translate_processed_where(program, select, loop_info, w, early_terminate_label, None)?;
 
-    if let Some(ljbk) = loop_info.left_join_bookkeeping.as_ref() {
-        left_join_match_flag_set_true(program, ljbk);
+    if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
+        left_join_match_flag_set_true(program, left_join);
     }
 
     Ok(())
