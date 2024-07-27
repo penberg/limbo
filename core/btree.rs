@@ -1,4 +1,4 @@
-use crate::pager::Pager;
+use crate::pager::{Page, Pager};
 use crate::sqlite3_ondisk::{
     read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType, TableInteriorCell,
     TableLeafCell,
@@ -6,6 +6,8 @@ use crate::sqlite3_ondisk::{
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
+use std::any::Any;
+use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
@@ -70,7 +72,7 @@ impl BTreeCursor {
             };
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
-            let page = page.borrow();
+            let page = RefCell::borrow(&page);
             if page.is_locked() {
                 return Ok(CursorResult::IO);
             }
@@ -142,7 +144,7 @@ impl BTreeCursor {
             };
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
-            let page = page.borrow();
+            let page = RefCell::borrow(&page);
             if page.is_locked() {
                 return Ok(CursorResult::IO);
             }
@@ -207,14 +209,8 @@ impl BTreeCursor {
         key: &OwnedValue,
         _record: &OwnedRecord,
     ) -> Result<CursorResult<()>> {
-        let mem_page = {
-            let mem_page = self.page.borrow();
-            let mem_page = mem_page.as_ref().unwrap();
-            mem_page.clone()
-        };
-        let page_idx = mem_page.page_idx;
-        let page_ref = self.pager.read_page(page_idx)?;
-        let page = page_ref.borrow();
+        let page_ref = self.get_page()?;
+        let page = RefCell::borrow(&page_ref);
         if page.is_locked() {
             return Ok(CursorResult::IO);
         }
@@ -225,8 +221,6 @@ impl BTreeCursor {
         let mut page = page.contents.write().unwrap();
         let page = page.as_mut().unwrap();
         assert!(matches!(page.page_type(), PageType::TableLeaf));
-
-        let free = self.compute_free_space(page, self.database_header.borrow());
 
         // find cell
         let int_key = match key {
@@ -268,9 +262,18 @@ impl BTreeCursor {
             payload.splice(0..0, data_len_varint.iter().cloned());
         }
 
+        let usable_space = {
+            let db_header = RefCell::borrow(&self.database_header);
+            (db_header.page_size - db_header.unused_space as u16) as usize
+        };
+        let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
+        assert!(
+            payload.len() <= usable_space - 100, /* 100 bytes minus for precaution to remember */
+            "need to implemented overflow pages, too big to even add to a an empty page"
+        );
         if payload.len() + 2 > free as usize {
             // overflow or balance
-            todo!("overflow/balance");
+            self.balance_leaf(int_key, &payload);
         } else {
             // insert
             let pc = self.allocate_cell_space(page, payload.len() as u16);
@@ -305,6 +308,76 @@ impl BTreeCursor {
         Ok(CursorResult::Ok(()))
     }
 
+    fn get_page(&mut self) -> crate::Result<Rc<RefCell<Page>>> {
+        let mem_page = {
+            let mem_page = self.page.borrow();
+            let mem_page = mem_page.as_ref().unwrap();
+            mem_page.clone()
+        };
+        let page_idx = mem_page.page_idx;
+        let page_ref = self.pager.read_page(page_idx)?;
+        Ok(page_ref)
+    }
+
+    fn balance_leaf(&mut self, key: u64, payload: &Vec<u8>) {
+        // This is a naive algorithm that doesn't try to distribute cells evenly by content.
+        // It will try to split the page in half by keys not by content.
+        // Sqlite tries to have a page at least 40% full.
+        loop {
+            let mem_page = {
+                let mem_page = self.page.borrow();
+                let mem_page = mem_page.as_ref().unwrap();
+                mem_page.clone()
+            };
+            let page_ref = self.read_page_sync(mem_page.page_idx);
+            let page = RefCell::borrow_mut(&page_ref);
+            let mut page = page.contents.write().unwrap();
+            let page = page.as_mut().unwrap();
+            let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
+            if payload.len() + 2 <= free as usize {
+                break;
+            }
+
+            let right_page_ref = self.allocate_page(page.page_type());
+            let right_page = RefCell::borrow_mut(&right_page_ref);
+            let mut right_page = right_page.contents.write().unwrap();
+            let right_page = right_page.as_mut().unwrap();
+        }
+    }
+
+    fn read_page_sync(&mut self, page_idx: usize) -> Rc<RefCell<Page>> {
+        loop {
+            let page_ref = self.pager.read_page(page_idx);
+            match page_ref {
+                Ok(p) => return p,
+                Err(_) => {}
+            }
+        }
+    }
+
+    fn allocate_page(&mut self, page_type: PageType) -> Rc<RefCell<Page>> {
+        let page = self.pager.allocate_page().unwrap();
+
+        {
+            // setup btree page
+            let contents = RefCell::borrow(&page);
+            let mut contents = contents.contents.write().unwrap();
+            let contents = contents.as_mut().unwrap();
+            let id = page_type as u8;
+            contents.write_u8(0, id);
+            contents.write_u16(1, 0);
+            contents.write_u16(3, 0);
+            contents.write_u16(5, 0);
+            contents.write_u8(7, 0);
+            contents.write_u32(8, 0);
+        }
+
+        page
+    }
+
+    /*
+        Allocate space for a cell on a page.
+    */
     fn allocate_cell_space(&mut self, page_ref: &PageContent, amount: u16) -> u16 {
         let amount = amount as usize;
         let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
@@ -317,19 +390,19 @@ impl BTreeCursor {
         // there are free blocks and enough space
         if page_ref.first_freeblock() != 0 && gap + 2 <= top {
             // find slot
-            let db_header = self.database_header.borrow();
+            let db_header = RefCell::borrow(&self.database_header);
             let pc = find_free_cell(page_ref, db_header, amount, buf);
             return pc as u16;
         }
 
         if gap + 2 + amount as usize > top {
             // defragment
-            self.defragment_page(page_ref, self.database_header.borrow());
+            self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
             top = u16::from_be_bytes([buf[5], buf[6]]) as usize;
             return 0;
         }
 
-        let db_header = self.database_header.borrow();
+        let db_header = RefCell::borrow(&self.database_header);
         top -= amount;
         buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
@@ -347,7 +420,7 @@ impl BTreeCursor {
         let last_cell = (usable_space - 4) as u64;
         let first_cell = cloned_page.cell_content_area() as u64;
         if cloned_page.cell_count() > 0 {
-            let buf = cloned_page.buffer.borrow();
+            let buf = RefCell::borrow(&cloned_page.buffer);
             let buf = buf.as_slice();
             let mut write_buf = RefCell::borrow_mut(&page.buffer);
             let write_buf = write_buf.as_mut_slice();
@@ -403,7 +476,7 @@ impl BTreeCursor {
     // Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
     // and end of cell pointer area.
     fn compute_free_space(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) -> u16 {
-        let buffer = page.buffer.borrow();
+        let buffer = RefCell::borrow(&page.buffer);
         let buf = buffer.as_slice();
 
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
@@ -568,14 +641,8 @@ impl Cursor for BTreeCursor {
             CursorResult::Ok(_) => {}
             CursorResult::IO => return Ok(CursorResult::IO),
         };
-        let mem_page = {
-            let mem_page = self.page.borrow();
-            let mem_page = mem_page.as_ref().unwrap();
-            mem_page.clone()
-        };
-        let page_idx = mem_page.page_idx;
-        let page_ref = self.pager.read_page(page_idx)?;
-        let page = page_ref.borrow();
+        let page_ref = self.get_page()?;
+        let page = RefCell::borrow(&page_ref);
         if page.is_locked() {
             return Ok(CursorResult::IO);
         }

@@ -1,9 +1,10 @@
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk::PageContent;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
-use crate::{PageSource, Result};
+use crate::{Buffer, PageSource, Result};
 use log::trace;
 use sieve_cache::SieveCache;
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -227,7 +228,7 @@ impl DumbLruPageCache {
             return;
         }
         let tail = unsafe { tail.unwrap().as_mut() };
-        if tail.page.borrow().is_dirty() {
+        if RefCell::borrow(&tail.page).is_dirty() {
             // TODO: drop from another clean entry?
             return;
         }
@@ -269,6 +270,7 @@ pub struct Pager {
     /// I/O interface for input/output operations.
     pub io: Arc<dyn crate::io::IO>,
     dirty_pages: Rc<RefCell<Vec<Rc<RefCell<Page>>>>>,
+    db_header: Rc<RefCell<DatabaseHeader>>,
 }
 
 impl Pager {
@@ -279,11 +281,11 @@ impl Pager {
 
     /// Completes opening a database by initializing the Pager with the database header.
     pub fn finish_open(
-        db_header: Rc<RefCell<DatabaseHeader>>,
+        db_header_ref: Rc<RefCell<DatabaseHeader>>,
         page_source: PageSource,
         io: Arc<dyn crate::io::IO>,
     ) -> Result<Self> {
-        let db_header = db_header.borrow();
+        let db_header = RefCell::borrow(&db_header_ref);
         let page_size = db_header.page_size as usize;
         let buffer_pool = Rc::new(BufferPool::new(page_size));
         let page_cache = RefCell::new(DumbLruPageCache::new(10));
@@ -293,6 +295,7 @@ impl Pager {
             page_cache,
             io,
             dirty_pages: Rc::new(RefCell::new(Vec::new())),
+            db_header: db_header_ref.clone(),
         })
     }
 
@@ -304,7 +307,7 @@ impl Pager {
             return Ok(page.clone());
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
-        page.borrow().set_locked();
+        RefCell::borrow(&page).set_locked();
         sqlite3_ondisk::begin_read_page(
             &self.page_source,
             self.buffer_pool.clone(),
@@ -345,5 +348,45 @@ impl Pager {
         }
         self.io.run_once()?;
         Ok(())
+    }
+
+    /*
+        Get's a new page that increasing the size of the page or uses a free page.
+        Currently free list pages are not yet supported.
+    */
+    pub fn allocate_page(&self) -> Result<Rc<RefCell<Page>>> {
+        let header = &self.db_header;
+        let mut header = RefCell::borrow_mut(&header);
+        header.database_size += 1;
+        {
+            // update database size
+            let first_page_ref = self.read_page(1).unwrap();
+            let first_page = RefCell::borrow_mut(&first_page_ref);
+            first_page.set_dirty();
+            self.add_dirty(first_page_ref.clone());
+
+            let contents = first_page.contents.write().unwrap();
+            let contents = contents.as_ref().unwrap();
+            contents.write_database_header(&header);
+        }
+
+        let page_ref = Rc::new(RefCell::new(Page::new(0)));
+        {
+            // setup page and add to cache
+            self.add_dirty(page_ref.clone());
+            let mut page = RefCell::borrow_mut(&page_ref);
+            page.set_dirty();
+            page.id = header.database_size as usize;
+            let buffer = self.buffer_pool.get();
+            let bp = self.buffer_pool.clone();
+            let drop_fn = Rc::new(move |buf| {
+                bp.put(buf);
+            });
+            let buffer = Rc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
+            page.contents = RwLock::new(Some(PageContent { offset: 0, buffer }));
+            let mut cache = RefCell::borrow_mut(&self.page_cache);
+            cache.insert(page.id, page_ref.clone());
+        }
+        Ok(page_ref)
     }
 }

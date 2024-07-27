@@ -52,7 +52,7 @@ pub struct DatabaseHeader {
     min_embed_frac: u8,
     min_leaf_frac: u8,
     change_counter: u32,
-    database_size: u32,
+    pub database_size: u32,
     freelist_trunk_page: u32,
     freelist_pages: u32,
     schema_cookie: u32,
@@ -134,31 +134,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
         {
             let mut buf_mut = std::cell::RefCell::borrow_mut(&buffer);
             let buf = buf_mut.as_mut_slice();
-            buf[0..16].copy_from_slice(&header.magic);
-            buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
-            buf[18] = header.write_version;
-            buf[19] = header.read_version;
-            buf[20] = header.unused_space;
-            buf[21] = header.max_embed_frac;
-            buf[22] = header.min_embed_frac;
-            buf[23] = header.min_leaf_frac;
-            buf[24..28].copy_from_slice(&header.change_counter.to_be_bytes());
-            buf[28..32].copy_from_slice(&header.database_size.to_be_bytes());
-            buf[32..36].copy_from_slice(&header.freelist_trunk_page.to_be_bytes());
-            buf[36..40].copy_from_slice(&header.freelist_pages.to_be_bytes());
-            buf[40..44].copy_from_slice(&header.schema_cookie.to_be_bytes());
-            buf[44..48].copy_from_slice(&header.schema_format.to_be_bytes());
-            buf[48..52].copy_from_slice(&header.default_cache_size.to_be_bytes());
-
-            buf[52..56].copy_from_slice(&header.vacuum.to_be_bytes());
-            buf[56..60].copy_from_slice(&header.text_encoding.to_be_bytes());
-            buf[60..64].copy_from_slice(&header.user_version.to_be_bytes());
-            buf[64..68].copy_from_slice(&header.incremental_vacuum.to_be_bytes());
-
-            buf[68..72].copy_from_slice(&header.application_id.to_be_bytes());
-            buf[72..92].copy_from_slice(&header.reserved);
-            buf[92..96].copy_from_slice(&header.version_valid_for.to_be_bytes());
-            buf[96..100].copy_from_slice(&header.version_number.to_be_bytes());
+            write_header_to_buf(buf, &header);
             let mut buffer_to_copy = std::cell::RefCell::borrow_mut(&buffer_to_copy_in_cb);
             let buffer_to_copy_slice = buffer_to_copy.as_mut_slice();
 
@@ -186,6 +162,34 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     page_source.write(0, buffer_to_copy.clone(), c).unwrap();
 
     Ok(())
+}
+
+fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
+    buf[0..16].copy_from_slice(&header.magic);
+    buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
+    buf[18] = header.write_version;
+    buf[19] = header.read_version;
+    buf[20] = header.unused_space;
+    buf[21] = header.max_embed_frac;
+    buf[22] = header.min_embed_frac;
+    buf[23] = header.min_leaf_frac;
+    buf[24..28].copy_from_slice(&header.change_counter.to_be_bytes());
+    buf[28..32].copy_from_slice(&header.database_size.to_be_bytes());
+    buf[32..36].copy_from_slice(&header.freelist_trunk_page.to_be_bytes());
+    buf[36..40].copy_from_slice(&header.freelist_pages.to_be_bytes());
+    buf[40..44].copy_from_slice(&header.schema_cookie.to_be_bytes());
+    buf[44..48].copy_from_slice(&header.schema_format.to_be_bytes());
+    buf[48..52].copy_from_slice(&header.default_cache_size.to_be_bytes());
+
+    buf[52..56].copy_from_slice(&header.vacuum.to_be_bytes());
+    buf[56..60].copy_from_slice(&header.text_encoding.to_be_bytes());
+    buf[60..64].copy_from_slice(&header.user_version.to_be_bytes());
+    buf[64..68].copy_from_slice(&header.incremental_vacuum.to_be_bytes());
+
+    buf[68..72].copy_from_slice(&header.application_id.to_be_bytes());
+    buf[72..92].copy_from_slice(&header.reserved);
+    buf[92..96].copy_from_slice(&header.version_valid_for.to_be_bytes());
+    buf[96..100].copy_from_slice(&header.version_number.to_be_bytes());
 }
 
 #[repr(u8)]
@@ -245,6 +249,30 @@ impl PageContent {
         }
     }
 
+    pub fn write_u8(&self, pos: usize, value: u8) {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf[self.offset + pos] = value;
+        }
+    }
+
+    pub fn write_u16(&self, pos: usize, value: u16) {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
+        }
+    }
+
+    pub fn write_u32(&self, pos: usize, value: u32) {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
+        }
+    }
+
     pub fn first_freeblock(&self) -> u16 {
         self.read_u16(1)
     }
@@ -295,6 +323,12 @@ impl PageContent {
             PageType::IndexLeaf => true,
             PageType::TableLeaf => true,
         }
+    }
+
+    pub fn write_database_header(&self, header: &DatabaseHeader) {
+        let mut buf = self.buffer.borrow_mut();
+        let buf = buf.as_mut_slice();
+        write_header_to_buf(buf, header);
     }
 }
 
