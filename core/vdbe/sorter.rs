@@ -75,6 +75,10 @@ impl Cursor for Sorter {
         todo!();
     }
 
+    fn seek_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
         Ok(self.current.borrow())
     }

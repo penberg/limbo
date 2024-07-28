@@ -137,6 +137,90 @@ impl BTreeCursor {
         }
     }
 
+    fn btree_seek_rowid(
+        &mut self,
+        rowid: u64,
+    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+        // For a table with N rows, we can find any row by row id in O(log(N)) time by starting at the root page and following the B-tree pointers.
+        // B-trees consist of interior pages and leaf pages. Interior pages contain pointers to other pages, while leaf pages contain the actual row data.
+        //
+        // Conceptually, each Interior Cell in a interior page has a rowid and a left child node, and the page itself has a right-most child node.
+        // Example: consider an interior page that contains cells C1(rowid=10), C2(rowid=20), C3(rowid=30).
+        // - All rows with rowids <= 10 are in the left child node of C1.
+        // - All rows with rowids > 10 and <= 20 are in the left child node of C2.
+        // - All rows with rowids > 20 and <= 30 are in the left child node of C3.
+        // - All rows with rowids > 30 are in the right-most child node of the page.
+        //
+        // There will generally be multiple levels of interior pages before we reach a leaf page,
+        // so we need to follow the interior page pointers until we reach the leaf page that contains the row we are looking for (if it exists).
+        //
+        // Here's a high-level overview of the algorithm:
+        // 1. Since we start at the root page, its cells are all interior cells.
+        // 2. We scan the interior cells until we find a cell whose rowid is greater than or equal to the rowid we are looking for.
+        // 3. Follow the left child pointer of the cell we found in step 2.
+        //    a. In case none of the cells in the page have a rowid greater than or equal to the rowid we are looking for,
+        //       we follow the right-most child pointer of the page instead (since all rows with rowids greater than the rowid we are looking for are in the right-most child node).
+        // 4. We are now at a new page. If it's another interior page, we repeat the process from step 2. If it's a leaf page, we continue to step 5.
+        // 5. We scan the leaf cells in the leaf page until we find the cell whose rowid is equal to the rowid we are looking for.
+        //    This cell contains the actual data we are looking for.
+        // 6. If we find the cell, we return the record. Otherwise, we return an empty result.
+        let mut current_page = self.root_page;
+
+        loop {
+            let page = self.pager.read_page(current_page)?;
+            let page = RefCell::borrow(&page);
+            if page.is_locked() {
+                return Ok(CursorResult::IO);
+            }
+            let page = page.contents.read().unwrap();
+            let page = page.as_ref().unwrap();
+            let mut next_page_found = false;
+            for cell_idx in 0..page.cell_count() {
+                match &page.cell_get(cell_idx)? {
+                    BTreeCell::TableInteriorCell(TableInteriorCell {
+                        _left_child_page: lcp,
+                        _rowid: cell_rowid,
+                    }) => {
+                        if rowid <= *cell_rowid {
+                            current_page = *lcp as usize;
+                            next_page_found = true;
+                            break;
+                        }
+                    }
+                    BTreeCell::TableLeafCell(TableLeafCell {
+                        _rowid: cell_rowid,
+                        _payload: p,
+                        first_overflow_page: _,
+                    }) => {
+                        if *cell_rowid == rowid {
+                            let record = crate::sqlite3_ondisk::read_record(&p)?;
+                            return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
+                        }
+                    }
+                    BTreeCell::IndexInteriorCell(_) => {
+                        unimplemented!();
+                    }
+                    BTreeCell::IndexLeafCell(_) => {
+                        unimplemented!();
+                    }
+                }
+            }
+
+            if next_page_found {
+                continue;
+            }
+
+            match page.rightmost_pointer() {
+                Some(right_most_pointer) => {
+                    current_page = right_most_pointer as usize;
+                }
+                None => {
+                    return Ok(CursorResult::Ok((None, None)));
+                }
+            }
+        }
+    }
+
     fn move_to_root(&mut self) {
         self.page
             .replace(Some(Rc::new(MemPage::new(None, self.root_page, 0))));
@@ -798,6 +882,17 @@ impl Cursor for BTreeCursor {
 
     fn rowid(&self) -> Result<Option<u64>> {
         Ok(*self.rowid.borrow())
+    }
+
+    fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
+        match self.btree_seek_rowid(rowid)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
     }
 
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
