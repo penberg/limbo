@@ -19,7 +19,7 @@ use crate::schema::Schema;
 use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
-use crate::Result;
+use crate::{bail_parse_error, Result};
 use select::{prepare_select, translate_select};
 use sqlite3_parser::ast;
 
@@ -31,12 +31,36 @@ pub fn translate(
     pager: Rc<Pager>,
 ) -> Result<Program> {
     match stmt {
+        ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
+        ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
+        ast::Stmt::Attach { .. } => bail_parse_error!("ATTACH not supported yet"),
+        ast::Stmt::Begin(_, _) => bail_parse_error!("BEGIN not supported yet"),
+        ast::Stmt::Commit(_) => bail_parse_error!("COMMIT not supported yet"),
+        ast::Stmt::CreateIndex { .. } => bail_parse_error!("CREATE INDEX not supported yet"),
+        ast::Stmt::CreateTable { .. } => bail_parse_error!("CREATE TABLE not supported yet"),
+        ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
+        ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
+        ast::Stmt::CreateVirtualTable { .. } => {
+            bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
+        }
+        ast::Stmt::Delete { .. } => bail_parse_error!("DELETE not supported yet"),
+        ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
+        ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
+        ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
+        ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
+        ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
+        ast::Stmt::Insert { .. } => bail_parse_error!("INSERT not supported yet"),
+        ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
+        ast::Stmt::Reindex { .. } => bail_parse_error!("REINDEX not supported yet"),
+        ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
+        ast::Stmt::Rollback { .. } => bail_parse_error!("ROLLBACK not supported yet"),
+        ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
         ast::Stmt::Select(select) => {
             let select = prepare_select(schema, &select)?;
             translate_select(select)
         }
-        ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
-        _ => todo!(),
+        ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
+        ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
     }
 }
 
