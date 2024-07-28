@@ -383,6 +383,28 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                         .unwrap_or(format!("cursor {}", cursor_id).as_str())
                 ),
             ),
+            Insn::SeekRowid {
+                cursor_id,
+                src_reg,
+                target_pc,
+            } => (
+                "SeekRowid",
+                *cursor_id as i32,
+                *src_reg as i32,
+                *target_pc as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "if (r[{}]!={}.rowid) goto {}",
+                    src_reg,
+                    &program.cursor_ref[*cursor_id]
+                        .1
+                        .as_ref()
+                        .map(|x| x.get_name())
+                        .unwrap_or(format!("cursor {}", cursor_id).as_str()),
+                    target_pc
+                ),
+            ),
             Insn::DecrJumpZero { reg, target_pc } => (
                 "DecrJumpZero",
                 *reg as i32,

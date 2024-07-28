@@ -270,6 +270,10 @@ impl ProgramBuilder {
                 } => {
                     *end_offset = to_offset;
                 }
+                Insn::SeekRowid { target_pc, .. } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }

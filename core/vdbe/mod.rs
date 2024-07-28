@@ -222,6 +222,13 @@ pub enum Insn {
         dest: usize,
     },
 
+    // Seek to a rowid in the cursor. If not found, jump to the given PC. Otherwise, continue to the next instruction.
+    SeekRowid {
+        cursor_id: CursorID,
+        src_reg: usize,
+        target_pc: BranchOffset,
+    },
+
     // Decrement the given register and jump to the given PC if the result is zero.
     DecrJumpZero {
         reg: usize,
@@ -778,6 +785,34 @@ impl Program {
                         state.registers[*dest] = OwnedValue::Null;
                     }
                     state.pc += 1;
+                }
+                Insn::SeekRowid {
+                    cursor_id,
+                    src_reg,
+                    target_pc,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let rowid = match &state.registers[*src_reg] {
+                        OwnedValue::Integer(rowid) => *rowid as u64,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "SeekRowid: the value in the register is not an integer".into(),
+                            ));
+                        }
+                    };
+                    match cursor.seek_rowid(rowid)? {
+                        CursorResult::Ok(found) => {
+                            if !found {
+                                state.pc = *target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
                 }
                 Insn::DecrJumpZero { reg, target_pc } => {
                     assert!(*target_pc >= 0);
