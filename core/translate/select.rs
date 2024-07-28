@@ -29,18 +29,6 @@ pub struct Select<'a> {
     pub exist_aggregation: bool,
     /// The `WHERE` clause.
     pub where_clause: &'a Option<ast::Expr>,
-    /// Ordered list of opened read table loops.
-    ///
-    /// The list is used to generate inner loops like this:
-    ///
-    ///   cursor 0 = open table 0
-    ///   for each row in cursor 0
-    ///       cursor 1 = open table 1
-    ///       for each row in cursor 1
-    ///           ...
-    ///       end cursor 1
-    ///   end cursor 0
-    pub loops: Vec<LoopInfo>,
 }
 
 #[derive(Debug)]
@@ -105,6 +93,17 @@ pub struct LeftJoinBookkeeping {
     pub on_match_jump_to_label: BranchOffset,
 }
 
+/// Represents a single loop in an ordered list of opened read table loops.
+///
+/// The list is used to generate inner loops like this:
+///
+///   cursor 0 = open table 0
+///   for each row in cursor 0
+///       cursor 1 = open table 1
+///       for each row in cursor 1
+///           ...
+///       end cursor 1
+///   end cursor 0
 #[derive(Debug)]
 pub struct LoopInfo {
     // The table or table alias that we are looping over
@@ -210,7 +209,6 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
                 order_by: &select.order_by,
                 exist_aggregation,
                 where_clause,
-                loops: Vec::new(),
             })
         }
         ast::OneSelect::Select {
@@ -230,7 +228,6 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
                 order_by: &select.order_by,
                 where_clause,
                 exist_aggregation,
-                loops: Vec::new(),
             })
         }
         _ => todo!(),
@@ -302,7 +299,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
     };
 
     if !select.src_tables.is_empty() {
-        translate_tables_begin(&mut program, &mut select, early_terminate_label)?;
+        let loops = translate_tables_begin(&mut program, &mut select, early_terminate_label)?;
 
         let (register_start, column_count) = if let Some(sort_columns) = select.order_by {
             let start = program.next_free_register();
@@ -362,7 +359,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
             }
         }
 
-        translate_tables_end(&mut program, &select);
+        translate_tables_end(&mut program, &loops);
 
         if select.exist_aggregation {
             program.resolve_label(early_terminate_label, program.offset());
@@ -516,15 +513,19 @@ fn translate_tables_begin(
     program: &mut ProgramBuilder,
     select: &mut Select,
     early_terminate_label: BranchOffset,
-) -> Result<()> {
-    for join in &select.src_tables {
+) -> Result<Vec<LoopInfo>> {
+    let processed_where = process_where(select)?;
+    let mut loops = Vec::with_capacity(select.src_tables.len());
+    for idx in &processed_where.loop_order {
+        let join = select
+            .src_tables
+            .get(*idx)
+            .expect("loop order out of bounds");
         let loop_info = translate_table_open_cursor(program, join);
-        select.loops.push(loop_info);
+        loops.push(loop_info);
     }
 
-    let processed_where = process_where(program, select)?;
-
-    for loop_info in &select.loops {
+    for loop_info in &loops {
         // early_terminate_label decides where to jump _IF_ there exists a condition on this loop that is always false.
         // this is part of a constant folding optimization where we can skip the loop entirely if we know it will never produce any rows.
         let current_loop_early_terminate_label = if let Some(left_join) = &loop_info.left_join_maybe
@@ -550,12 +551,12 @@ fn translate_tables_begin(
         )?;
     }
 
-    Ok(())
+    Ok(loops)
 }
 
-fn translate_tables_end(program: &mut ProgramBuilder, select: &Select) {
+fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     // iterate in reverse order as we open cursors in order
-    for table_loop in select.loops.iter().rev() {
+    for table_loop in loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
         program.resolve_label(table_loop.next_row_label, program.offset());
         program.emit_insn(Insn::NextAsync { cursor_id });

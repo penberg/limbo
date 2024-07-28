@@ -1,10 +1,8 @@
 use crate::{
     error::LimboError,
     function::ScalarFunc,
-    translate::{
-        expr::{resolve_ident_qualified, resolve_ident_table, translate_expr},
-        select::Select,
-    },
+    translate::{expr::translate_expr, select::Select},
+    util::normalize_ident,
     vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
     Result,
 };
@@ -14,14 +12,15 @@ use super::select::LoopInfo;
 use sqlite3_parser::ast::{self};
 
 #[derive(Debug)]
-pub struct WhereTerm {
-    pub expr: ast::Expr,
-    pub evaluate_at_cursor: usize,
+pub struct WhereTerm<'a> {
+    pub expr: &'a ast::Expr,
+    pub evaluate_at_tbl: &'a String,
 }
 
 #[derive(Debug)]
-pub struct ProcessedWhereClause {
-    pub terms: Vec<WhereTerm>,
+pub struct ProcessedWhereClause<'a> {
+    pub loop_order: Vec<usize>,
+    pub terms: Vec<WhereTerm<'a>>,
 }
 
 /**
@@ -31,12 +30,11 @@ pub struct ProcessedWhereClause {
 * combined with the ID of the cursor where the term should be evaluated.
 */
 pub fn split_constraint_to_terms<'a>(
-    program: &'a mut ProgramBuilder,
     select: &'a Select,
-    processed_where_clause: &mut ProcessedWhereClause,
-    where_clause_or_join_constraint: &ast::Expr,
+    mut processed_where_clause: ProcessedWhereClause<'a>,
+    where_clause_or_join_constraint: &'a ast::Expr,
     outer_join_table_name: Option<&'a String>,
-) -> Result<()> {
+) -> Result<ProcessedWhereClause<'a>> {
     let mut queue = vec![where_clause_or_join_constraint];
 
     while let Some(expr) = queue.pop() {
@@ -50,8 +48,8 @@ pub fn split_constraint_to_terms<'a>(
                     continue;
                 }
                 let term = WhereTerm {
-                    expr: expr.clone(),
-                    evaluate_at_cursor: match outer_join_table_name {
+                    expr,
+                    evaluate_at_tbl: match outer_join_table_name {
                         Some(table) => {
                             // If we had e.g. SELECT * FROM t1 LEFT JOIN t2 WHERE t1.a > 10,
                             // we could evaluate the t1.a > 10 condition at the cursor for t1, i.e. the outer table,
@@ -62,15 +60,16 @@ pub fn split_constraint_to_terms<'a>(
                             // because we need to skip rows from t2 that don't match the condition.
                             //
                             // In inner joins, both of the above are equivalent, but in left joins they are not.
-                            select
-                                .loops
+                            let tbl = select
+                                .src_tables
                                 .iter()
                                 .find(|t| t.identifier == *table)
                                 .ok_or(LimboError::ParseError(format!(
                                     "Could not find cursor for table {}",
                                     table
-                                )))?
-                                .open_cursor
+                                )))?;
+
+                            &tbl.identifier
                         }
                         None => {
                             // For any non-outer-join condition expression, find the cursor that it should be evaluated at.
@@ -84,21 +83,28 @@ pub fn split_constraint_to_terms<'a>(
                             //
                             // For expressions that don't depend on any cursor, we can evaluate them at the leftmost/outermost cursor.
                             // E.g. 'SELECT * FROM t1 JOIN t2 ON false' can be evaluated at the cursor for t1.
-                            let cursors =
-                                introspect_expression_for_cursors(program, select, expr, None)?;
+                            let table_refs = introspect_expression_for_table_refs(select, expr)?;
 
-                            let outermost_cursor = select
-                                .loops
-                                .iter()
-                                .map(|t| t.open_cursor)
-                                .min()
-                                .ok_or_else(|| {
-                                    LimboError::ParseError(format!(
-                                        "No open cursors found in any of the loops"
-                                    ))
-                                })?;
+                            // Get the innermost loop that matches any table_refs, and if not found, fall back to outermost loop
 
-                            *cursors.iter().max().unwrap_or(&outermost_cursor)
+                            let tbl =
+                                processed_where_clause
+                                    .loop_order
+                                    .iter()
+                                    .rev()
+                                    .find_map(|i| {
+                                        let tbl = &select.src_tables[*i];
+                                        if table_refs.contains(&&tbl.identifier) {
+                                            Some(tbl)
+                                        } else {
+                                            None
+                                        }
+                                    });
+
+                            let first_loop = processed_where_clause.loop_order[0];
+
+                            tbl.map(|t| &t.identifier)
+                                .unwrap_or(&select.src_tables[first_loop].identifier)
                         }
                     },
                 };
@@ -107,20 +113,27 @@ pub fn split_constraint_to_terms<'a>(
         }
     }
 
-    Ok(())
+    Ok(processed_where_clause)
 }
 
 /**
 * Split the WHERE clause and any JOIN ON clauses into a flat list of WhereTerms
 * that can be evaluated at the appropriate cursor.
 */
-pub fn process_where<'a>(
-    program: &'a mut ProgramBuilder,
-    select: &'a Select,
-) -> Result<ProcessedWhereClause> {
-    let mut wc = ProcessedWhereClause { terms: Vec::new() };
+pub fn process_where<'a>(select: &'a Select) -> Result<ProcessedWhereClause<'a>> {
+    let mut wc = ProcessedWhereClause {
+        terms: Vec::new(),
+        // In the future, analysis of the WHERE clause and JOIN ON clauses will be used to determine the optimal loop order.
+        // For now, we just use the order of the tables in the FROM clause.
+        loop_order: select
+            .src_tables
+            .iter()
+            .enumerate()
+            .map(|(i, _)| i)
+            .collect(),
+    };
     if let Some(w) = &select.where_clause {
-        split_constraint_to_terms(program, select, &mut wc, w, None)?;
+        wc = split_constraint_to_terms(select, wc, w, None)?;
     }
 
     for table in select.src_tables.iter() {
@@ -129,10 +142,9 @@ pub fn process_where<'a>(
         }
         let join_info = table.join_info.unwrap();
         if let Some(ast::JoinConstraint::On(expr)) = &join_info.constraint {
-            split_constraint_to_terms(
-                program,
+            wc = split_constraint_to_terms(
                 select,
-                &mut wc,
+                wc,
                 expr,
                 if table.is_outer_join() {
                     Some(&table.identifier)
@@ -207,7 +219,7 @@ pub fn translate_processed_where<'a>(
     if where_c
         .terms
         .iter()
-        .filter(|t| t.evaluate_at_cursor == current_loop.open_cursor)
+        .filter(|t| *t.evaluate_at_tbl == current_loop.identifier)
         .any(|t| t.expr.is_always_false().unwrap_or(false))
     {
         program.emit_insn_with_label_dependency(
@@ -221,7 +233,7 @@ pub fn translate_processed_where<'a>(
     for term in where_c
         .terms
         .iter()
-        .filter(|t| t.evaluate_at_cursor == current_loop.open_cursor)
+        .filter(|t| *t.evaluate_at_tbl == current_loop.identifier)
     {
         let jump_target_when_false = current_loop.next_row_label;
         let jump_target_when_true = program.allocate_label();
@@ -705,86 +717,78 @@ fn translate_condition_expr(
     Ok(())
 }
 
-fn introspect_expression_for_cursors(
-    program: &ProgramBuilder,
-    select: &Select,
-    where_expr: &ast::Expr,
-    cursor_hint: Option<usize>,
-) -> Result<Vec<usize>> {
-    let mut cursors = vec![];
+fn introspect_expression_for_table_refs<'a>(
+    select: &'a Select,
+    where_expr: &'a ast::Expr,
+) -> Result<Vec<&'a String>> {
+    let mut table_refs = vec![];
     match where_expr {
         ast::Expr::Binary(e1, _, e2) => {
-            cursors.extend(introspect_expression_for_cursors(
-                program,
-                select,
-                e1,
-                cursor_hint,
-            )?);
-            cursors.extend(introspect_expression_for_cursors(
-                program,
-                select,
-                e2,
-                cursor_hint,
-            )?);
+            table_refs.extend(introspect_expression_for_table_refs(select, e1)?);
+            table_refs.extend(introspect_expression_for_table_refs(select, e2)?);
         }
         ast::Expr::Id(ident) => {
-            let (_, _, cursor_id, _) = resolve_ident_table(program, &ident.0, select, cursor_hint)?;
-            cursors.push(cursor_id);
+            let ident = normalize_ident(&ident.0);
+            let matching_tables = select
+                .src_tables
+                .iter()
+                .filter(|t| t.table.get_column(&ident).is_some());
+
+            let mut matches = 0;
+            let mut matching_tbl = None;
+            for table in matching_tables {
+                matching_tbl = Some(table);
+                matches += 1;
+                if matches > 1 {
+                    crate::bail_parse_error!("ambiguous column name {}", &ident)
+                }
+            }
+
+            if let Some(tbl) = matching_tbl {
+                table_refs.push(&tbl.identifier);
+            } else {
+                crate::bail_parse_error!("column not found: {}", &ident)
+            }
         }
         ast::Expr::Qualified(tbl, ident) => {
-            let (_, _, cursor_id, _) =
-                resolve_ident_qualified(program, &tbl.0, &ident.0, select, cursor_hint)?;
-            cursors.push(cursor_id);
+            let tbl = normalize_ident(&tbl.0);
+            let ident = normalize_ident(&ident.0);
+            let matching_table = select.src_tables.iter().find(|t| t.identifier == tbl);
+
+            if matching_table.is_none() {
+                crate::bail_parse_error!("table not found: {}", &tbl)
+            }
+            let matching_table = matching_table.unwrap();
+            if matching_table.table.get_column(&ident).is_none() {
+                crate::bail_parse_error!("column with qualified name {}.{} not found", &tbl, &ident)
+            }
+
+            table_refs.push(&matching_table.identifier);
         }
         ast::Expr::Literal(_) => {}
         ast::Expr::Like { lhs, rhs, .. } => {
-            cursors.extend(introspect_expression_for_cursors(
-                program,
-                select,
-                lhs,
-                cursor_hint,
-            )?);
-            cursors.extend(introspect_expression_for_cursors(
-                program,
-                select,
-                rhs,
-                cursor_hint,
-            )?);
+            table_refs.extend(introspect_expression_for_table_refs(select, lhs)?);
+            table_refs.extend(introspect_expression_for_table_refs(select, rhs)?);
         }
         ast::Expr::FunctionCall { args, .. } => {
             if let Some(args) = args {
                 for arg in args {
-                    cursors.extend(introspect_expression_for_cursors(
-                        program,
-                        select,
-                        arg,
-                        cursor_hint,
-                    )?);
+                    table_refs.extend(introspect_expression_for_table_refs(select, arg)?);
                 }
             }
         }
         ast::Expr::InList { lhs, rhs, .. } => {
-            cursors.extend(introspect_expression_for_cursors(
-                program,
-                select,
-                lhs,
-                cursor_hint,
-            )?);
+            table_refs.extend(introspect_expression_for_table_refs(select, lhs)?);
             if let Some(rhs_list) = rhs {
                 for rhs_expr in rhs_list {
-                    cursors.extend(introspect_expression_for_cursors(
-                        program,
-                        select,
-                        rhs_expr,
-                        cursor_hint,
-                    )?);
+                    table_refs.extend(introspect_expression_for_table_refs(select, rhs_expr)?);
                 }
             }
         }
         _ => {}
     }
 
-    Ok(cursors)
+    Ok(table_refs)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
