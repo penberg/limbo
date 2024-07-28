@@ -275,7 +275,10 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Trim | ScalarFunc::LTrim | ScalarFunc::Round => {
+                        ScalarFunc::Trim
+                        | ScalarFunc::LTrim
+                        | ScalarFunc::RTrim
+                        | ScalarFunc::Round => {
                             let args = if let Some(args) = args {
                                 if args.len() > 2 {
                                     crate::bail_parse_error!(
