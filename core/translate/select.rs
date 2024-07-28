@@ -4,6 +4,7 @@ use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,
+    SeekRowid, WhereExpr,
 };
 use crate::translate::{normalize_ident, Insn};
 use crate::types::{OwnedRecord, OwnedValue};
@@ -95,6 +96,12 @@ pub struct LeftJoinBookkeeping {
     pub on_match_jump_to_label: BranchOffset,
 }
 
+#[derive(Debug)]
+pub enum Plan {
+    Scan,
+    SeekRowid,
+}
+
 /// Represents a single loop in an ordered list of opened read table loops.
 ///
 /// The list is used to generate inner loops like this:
@@ -110,6 +117,8 @@ pub struct LeftJoinBookkeeping {
 pub struct LoopInfo {
     // The table or table alias that we are looping over
     pub identifier: String,
+    // The plan for this loop
+    pub plan: Plan,
     // Metadata about a left join, if any
     pub left_join_maybe: Option<LeftJoinBookkeeping>,
     // The label for the instruction that reads the next row for this table
@@ -532,7 +541,7 @@ fn translate_tables_begin(
             .src_tables
             .get(*idx)
             .expect("loop order out of bounds");
-        let loop_info = translate_table_open_cursor(program, join);
+        let loop_info = translate_table_open_cursor(program, join, &processed_where);
         loops.push(loop_info);
     }
 
@@ -569,15 +578,17 @@ fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     // iterate in reverse order as we open cursors in order
     for table_loop in loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
-        program.resolve_label(table_loop.next_row_label, program.offset());
-        program.emit_insn(Insn::NextAsync { cursor_id });
-        program.emit_insn_with_label_dependency(
-            Insn::NextAwait {
-                cursor_id,
-                pc_if_next: table_loop.rewind_label,
-            },
-            table_loop.rewind_label,
-        );
+        if let Plan::Scan { .. } = table_loop.plan {
+            program.resolve_label(table_loop.next_row_label, program.offset());
+            program.emit_insn(Insn::NextAsync { cursor_id });
+            program.emit_insn_with_label_dependency(
+                Insn::NextAwait {
+                    cursor_id,
+                    pc_if_next: table_loop.rewind_label,
+                },
+                table_loop.rewind_label,
+            );
+        }
 
         if let Some(left_join) = &table_loop.left_join_maybe {
             left_join_match_flag_check(program, left_join, cursor_id);
@@ -585,7 +596,11 @@ fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     }
 }
 
-fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -> LoopInfo {
+fn translate_table_open_cursor(
+    program: &mut ProgramBuilder,
+    table: &SrcTable,
+    w: &ProcessedWhereClause,
+) -> LoopInfo {
     let cursor_id =
         program.alloc_cursor_id(Some(table.identifier.clone()), Some(table.table.clone()));
     let root_page = match &table.table {
@@ -597,8 +612,20 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
         root_page,
     });
     program.emit_insn(Insn::OpenReadAwait);
+
+    let has_indexable_where_term = w.terms.iter().any(|term| {
+        matches!(
+            term.expr,
+            WhereExpr::SeekRowid(SeekRowid { table: t, .. }) if *t == table.identifier
+        )
+    });
     LoopInfo {
         identifier: table.identifier.clone(),
+        plan: if has_indexable_where_term {
+            Plan::SeekRowid
+        } else {
+            Plan::Scan
+        },
         left_join_maybe: if table.is_outer_join() {
             Some(LeftJoinBookkeeping {
                 match_flag_register: program.alloc_register(),
@@ -688,17 +715,19 @@ fn translate_table_open_loop(
         left_join_match_flag_initialize(program, left_join);
     }
 
-    program.emit_insn(Insn::RewindAsync {
-        cursor_id: loop_info.open_cursor,
-    });
-    program.defer_label_resolution(loop_info.rewind_label, program.offset() as usize);
-    program.emit_insn_with_label_dependency(
-        Insn::RewindAwait {
+    if let Plan::Scan = loop_info.plan {
+        program.emit_insn(Insn::RewindAsync {
             cursor_id: loop_info.open_cursor,
-            pc_if_empty: loop_info.rewind_on_empty_label,
-        },
-        loop_info.rewind_on_empty_label,
-    );
+        });
+        program.defer_label_resolution(loop_info.rewind_label, program.offset() as usize);
+        program.emit_insn_with_label_dependency(
+            Insn::RewindAwait {
+                cursor_id: loop_info.open_cursor,
+                pc_if_empty: loop_info.rewind_on_empty_label,
+            },
+            loop_info.rewind_on_empty_label,
+        );
+    }
 
     translate_processed_where(program, select, loop_info, w, early_terminate_label, None)?;
 

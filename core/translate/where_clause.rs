@@ -12,8 +12,20 @@ use super::select::LoopInfo;
 use sqlite3_parser::ast::{self};
 
 #[derive(Debug)]
+pub struct SeekRowid<'a> {
+    pub table: &'a String,
+    pub rowid: &'a ast::Expr,
+}
+
+#[derive(Debug)]
+pub enum WhereExpr<'a> {
+    Expr(&'a ast::Expr),
+    SeekRowid(SeekRowid<'a>),
+}
+
+#[derive(Debug)]
 pub struct WhereTerm<'a> {
-    pub expr: &'a ast::Expr,
+    pub expr: WhereExpr<'a>,
     pub evaluate_at_tbl: &'a String,
 }
 
@@ -48,7 +60,20 @@ pub fn split_constraint_to_terms<'a>(
                     continue;
                 }
                 let term = WhereTerm {
-                    expr,
+                    expr: {
+                        let seekrowid_candidate = select.src_tables.iter().rev().find_map(|t| {
+                            let indexable = expr
+                                .check_seekrowid_candidate(&t.identifier, select)
+                                .unwrap_or(None);
+                            indexable
+                        });
+
+                        if let Some(seekrowid) = seekrowid_candidate {
+                            WhereExpr::SeekRowid(seekrowid)
+                        } else {
+                            WhereExpr::Expr(expr)
+                        }
+                    },
                     evaluate_at_tbl: match outer_join_table_name {
                         Some(table) => {
                             // If we had e.g. SELECT * FROM t1 LEFT JOIN t2 WHERE t1.a > 10,
@@ -155,6 +180,27 @@ pub fn process_where<'a>(select: &'a Select) -> Result<ProcessedWhereClause<'a>>
         }
     }
 
+    // Sort the terms by the loop_order.
+    // Inside a loop, sort by indexable_by, so that we can evaluate the most selective terms first.
+
+    wc.terms.sort_by(|a, b| {
+        let a_loop = wc
+            .loop_order
+            .iter()
+            .position(|i| &select.src_tables[*i].identifier == a.evaluate_at_tbl)
+            .unwrap();
+        let b_loop = wc
+            .loop_order
+            .iter()
+            .position(|i| &select.src_tables[*i].identifier == b.evaluate_at_tbl)
+            .unwrap();
+        a_loop.cmp(&b_loop).then_with(|| match (&a.expr, &b.expr) {
+            (WhereExpr::SeekRowid(_), WhereExpr::Expr(_)) => std::cmp::Ordering::Less,
+            (WhereExpr::Expr(_), WhereExpr::SeekRowid(_)) => std::cmp::Ordering::Greater,
+            _ => std::cmp::Ordering::Equal,
+        })
+    });
+
     Ok(wc)
 }
 
@@ -216,12 +262,28 @@ pub fn translate_processed_where<'a>(
     skip_entire_table_label: BranchOffset,
     cursor_hint: Option<usize>,
 ) -> Result<()> {
-    if where_c
+    let mut always_false_condition_exists = false;
+    let mut seekrowid_term_exists = false;
+    for t in where_c
         .terms
         .iter()
         .filter(|t| *t.evaluate_at_tbl == current_loop.identifier)
-        .any(|t| t.expr.is_always_false().unwrap_or(false))
     {
+        if always_false_condition_exists && seekrowid_term_exists {
+            break;
+        }
+        match t.expr {
+            WhereExpr::Expr(e) => {
+                if e.is_always_false().unwrap_or(false) {
+                    always_false_condition_exists = true;
+                }
+            }
+            WhereExpr::SeekRowid(_) => {
+                seekrowid_term_exists = true;
+            }
+        }
+    }
+    if always_false_condition_exists {
         program.emit_insn_with_label_dependency(
             Insn::Goto {
                 target_pc: skip_entire_table_label,
@@ -230,24 +292,46 @@ pub fn translate_processed_where<'a>(
         );
         return Ok(());
     }
+
+    let jump_target_when_false = if seekrowid_term_exists {
+        skip_entire_table_label
+    } else {
+        current_loop.next_row_label
+    };
+
     for term in where_c
         .terms
         .iter()
         .filter(|t| *t.evaluate_at_tbl == current_loop.identifier)
     {
-        let jump_target_when_false = current_loop.next_row_label;
         let jump_target_when_true = program.allocate_label();
-        translate_condition_expr(
-            program,
-            select,
-            &term.expr,
-            cursor_hint,
-            ConditionMetadata {
-                jump_if_condition_is_true: false,
-                jump_target_when_false,
-                jump_target_when_true,
-            },
-        )?;
+        match &term.expr {
+            WhereExpr::Expr(e) => {
+                translate_condition_expr(
+                    program,
+                    select,
+                    e,
+                    cursor_hint,
+                    ConditionMetadata {
+                        jump_if_condition_is_true: false,
+                        jump_target_when_false,
+                        jump_target_when_true,
+                    },
+                )?;
+            }
+            WhereExpr::SeekRowid(s) => {
+                let computed_rowid_reg = program.alloc_register();
+                let _ = translate_expr(program, select, s.rowid, computed_rowid_reg, cursor_hint)?;
+                program.emit_insn_with_label_dependency(
+                    Insn::SeekRowid {
+                        cursor_id: current_loop.open_cursor,
+                        src_reg: computed_rowid_reg,
+                        target_pc: skip_entire_table_label,
+                    },
+                    skip_entire_table_label,
+                );
+            }
+        }
 
         program.resolve_label(jump_target_when_true, program.offset());
     }
@@ -797,7 +881,7 @@ pub enum ConstantCondition {
     AlwaysFalse,
 }
 
-pub trait Evaluatable {
+pub trait Evaluatable<'a> {
     fn check_constant(&self) -> Result<Option<ConstantCondition>>;
     fn is_always_true(&self) -> Result<bool> {
         Ok(self
@@ -809,9 +893,108 @@ pub trait Evaluatable {
             .check_constant()?
             .map_or(false, |c| c == ConstantCondition::AlwaysFalse))
     }
+    fn is_primary_key_of_table(&self, select: &'a Select) -> Result<Option<&'a String>>;
+    fn references_positive_integer(&self, select: &'a Select) -> bool;
+    fn check_seekrowid_candidate(
+        &'a self,
+        table_identifier: &'a String,
+        select: &'a Select,
+    ) -> Result<Option<SeekRowid<'a>>>;
 }
 
-impl Evaluatable for ast::Expr {
+impl<'a> Evaluatable<'a> for ast::Expr {
+    fn references_positive_integer(&self, select: &'a Select) -> bool {
+        match self {
+            ast::Expr::Literal(ast::Literal::Numeric(n)) => {
+                n.parse::<i64>().map_or(false, |n| n > 0)
+            }
+            expr => expr
+                .is_primary_key_of_table(select)
+                .map_or(false, |t| t.is_some()),
+        }
+    }
+    fn is_primary_key_of_table(&self, select: &'a Select) -> Result<Option<&'a String>> {
+        match self {
+            ast::Expr::Id(ident) => {
+                let ident = normalize_ident(&ident.0);
+                let tables = select.src_tables.iter().filter_map(|t| {
+                    if t.table
+                        .get_column(&ident)
+                        .map_or(false, |(_, c)| c.primary_key)
+                    {
+                        Some(&t.identifier)
+                    } else {
+                        None
+                    }
+                });
+
+                let mut matches = 0;
+                let mut matching_tbl = None;
+
+                for tbl in tables {
+                    matching_tbl = Some(tbl);
+                    matches += 1;
+                    if matches > 1 {
+                        crate::bail_parse_error!("ambiguous column name {}", ident)
+                    }
+                }
+
+                Ok(matching_tbl)
+            }
+            ast::Expr::Qualified(tbl, ident) => {
+                let tbl = normalize_ident(&tbl.0);
+                let ident = normalize_ident(&ident.0);
+                let table = select.src_tables.iter().find(|t| {
+                    t.identifier == tbl
+                        && t.table
+                            .get_column(&ident)
+                            .map_or(false, |(_, c)| c.primary_key)
+                });
+
+                if table.is_none() {
+                    crate::bail_parse_error!("table not found: {}", tbl)
+                }
+
+                let table = table.unwrap();
+
+                Ok(Some(&table.identifier))
+            }
+            _ => Ok(None),
+        }
+    }
+    fn check_seekrowid_candidate(
+        &'a self,
+        table_identifier: &'a String,
+        select: &'a Select,
+    ) -> Result<Option<SeekRowid<'a>>> {
+        match self {
+            ast::Expr::Binary(lhs, ast::Operator::Equals, rhs) => {
+                let lhs = lhs.as_ref();
+                let rhs = rhs.as_ref();
+
+                if let Some(table) = lhs.is_primary_key_of_table(select)? {
+                    if table == table_identifier && rhs.references_positive_integer(select) {
+                        return Ok(Some(SeekRowid {
+                            table: table_identifier,
+                            rowid: rhs,
+                        }));
+                    }
+                }
+
+                if let Some(table) = rhs.is_primary_key_of_table(select)? {
+                    if table == table_identifier && lhs.references_positive_integer(select) {
+                        return Ok(Some(SeekRowid {
+                            table: table_identifier,
+                            rowid: lhs,
+                        }));
+                    }
+                }
+
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
     fn check_constant(&self) -> Result<Option<ConstantCondition>> {
         match self {
             ast::Expr::Literal(lit) => match lit {
