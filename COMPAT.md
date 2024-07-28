@@ -95,8 +95,8 @@ This document describes the SQLite compatibility status of Limbo:
 | replace(X,Y,Z)               | No     |         |
 | round(X)                     | Yes    |         |
 | round(X,Y)                   | Yes    |         |
-| rtrim(X)                     | No     |         |
-| rtrim(X,Y)                   | No     |         |
+| rtrim(X)                     | Yes    |         |
+| rtrim(X,Y)                   | Yes    |         |
 | sign(X)                      | No     |         |
 | soundex(X)                   | No     |         |
 | sqlite_compileoption_get(N)  | No     |         |

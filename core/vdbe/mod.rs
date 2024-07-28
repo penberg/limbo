@@ -1125,6 +1125,16 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
+                    ScalarFunc::RTrim => {
+                        let start_reg = *start_reg;
+                        let reg_value = state.registers[start_reg].clone();
+                        let pattern_value = state.registers.get(start_reg + 1).cloned();
+
+                        let result = exec_rtrim(&reg_value, pattern_value);
+
+                        state.registers[*dest] = result;
+                        state.pc += 1;
+                    }
                     ScalarFunc::Round => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
@@ -1379,6 +1389,25 @@ fn exec_ltrim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
     }
 }
 
+// Implements RTRIM pattern matching.
+fn exec_rtrim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
+    match (reg, pattern) {
+        (reg, Some(pattern)) => match reg {
+            OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
+                let pattern_chars: Vec<char> = pattern.to_string().chars().collect();
+                OwnedValue::Text(Rc::new(
+                    reg.to_string()
+                        .trim_end_matches(&pattern_chars[..])
+                        .to_string(),
+                ))
+            }
+            _ => reg.to_owned(),
+        },
+        (OwnedValue::Text(t), None) => OwnedValue::Text(Rc::new(t.trim_end().to_string())),
+        (reg, _) => reg.to_owned(),
+    }
+}
+
 // exec_if returns whether you should jump
 fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
     match reg {
@@ -1397,7 +1426,7 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::{
         exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
-        exec_random, exec_round, exec_trim, exec_unicode, exec_upper, OwnedValue,
+        exec_random, exec_round, exec_rtrim, exec_trim, exec_unicode, exec_upper, OwnedValue,
     };
     use std::rc::Rc;
 
@@ -1516,6 +1545,23 @@ mod tests {
         let pattern_str = OwnedValue::Text(Rc::new(String::from("Bob and")));
         let expected_str = OwnedValue::Text(Rc::new(String::from("Alice     ")));
         assert_eq!(exec_ltrim(&input_str, Some(pattern_str)), expected_str);
+    }
+
+    #[test]
+    fn test_rtrim() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice     ")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice")));
+        assert_eq!(exec_rtrim(&input_str, None), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice     ")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("Bob and")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice")));
+        assert_eq!(exec_rtrim(&input_str, Some(pattern_str)), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("     Bob and Alice     ")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("and Alice")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("     Bob")));
+        assert_eq!(exec_rtrim(&input_str, Some(pattern_str)), expected_str);
     }
 
     #[test]

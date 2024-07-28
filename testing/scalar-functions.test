@@ -123,6 +123,42 @@ do_execsql_test ltrim-no-match-pattern {
   SELECT ltrim('Limbo', 'xyz');
 } {Limbo}
 
+do_execsql_test rtrim {
+  SELECT rtrim('   Limbo    ');
+} {"   Limbo"}
+
+do_execsql_test rtrim-number {
+  SELECT rtrim(1);
+} {1}
+
+do_execsql_test rtrim-null {
+  SELECT rtrim(null);
+} {}
+
+do_execsql_test rtrim-trailing-whitespace {
+  SELECT rtrim('Trailing   ');
+} {Trailing}
+
+do_execsql_test rtrim-no-trailing-whitespace {
+  SELECT rtrim('Limbo');
+} {Limbo}
+
+do_execsql_test rtrim-pattern {
+  SELECT rtrim('Limbo', 'Limbo');
+} {}
+
+do_execsql_test rtrim-pattern-number {
+  SELECT rtrim(1, '1');
+} {}
+
+do_execsql_test rtrim-pattern-null {
+  SELECT rtrim(null, 'null');
+} {}
+
+do_execsql_test rtrim-no-match-pattern {
+  SELECT rtrim('Limbo', 'xyz');
+} {Limbo}
+
 do_execsql_test round-float-no-precision {
   SELECT round(123.456);
 } {123.0}
