@@ -215,10 +215,19 @@ impl TryFrom<u8> for PageType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PageContent {
     pub offset: usize,
     pub buffer: Rc<RefCell<Buffer>>,
+}
+
+impl Clone for PageContent {
+    fn clone(&self) -> Self {
+        Self {
+            offset: self.offset,
+            buffer: Rc::new(RefCell::new((*self.buffer.borrow()).clone())),
+        }
+    }
 }
 
 impl PageContent {
@@ -226,6 +235,14 @@ impl PageContent {
         let buf = self.buffer.borrow();
         let buf = buf.as_slice();
         buf[self.offset].try_into().unwrap()
+    }
+
+    fn read_u8(&self, pos: usize) -> u8 {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
+            buf[pos]
+        }
     }
 
     fn read_u16(&self, pos: usize) -> u16 {
@@ -285,8 +302,8 @@ impl PageContent {
         self.read_u16(5) as u16
     }
 
-    pub fn num_frag_free_bytes(&self) -> u16 {
-        self.read_u16(7) as u16
+    pub fn num_frag_free_bytes(&self) -> u8 {
+        self.read_u8(7) as u8
     }
 
     pub fn rightmost_pointer(&self) -> Option<u32> {
@@ -323,7 +340,7 @@ impl PageContent {
             PageType::IndexLeaf => 8,
             PageType::TableLeaf => 8,
         };
-        (cell_start, self.cell_count() * 2)
+        (self.offset + cell_start, self.cell_count() * 2)
     }
 
     pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {

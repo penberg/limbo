@@ -293,7 +293,6 @@ impl BTreeCursor {
 
     /* insert to postion and shift other pointers */
     fn insert_into_cell(&mut self, page: &mut PageContent, payload: &Vec<u8>, cell_idx: usize) {
-        dbg!(page.is_leaf(), cell_idx);
         assert!(
             page.is_leaf() || (!page.is_leaf() && cell_idx < page.cell_count()),
             "if it's greater it might mean we need to insert in a rightmost pointer?"
@@ -557,10 +556,8 @@ impl BTreeCursor {
     */
     fn allocate_cell_space(&mut self, page_ref: &PageContent, amount: u16) -> u16 {
         let amount = amount as usize;
-        let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
-        let buf = buf_ref.as_mut_slice();
 
-        let cell_offset = 8;
+        let (cell_offset, _) = page_ref.cell_get_raw_pointer_region();
         let gap = cell_offset + 2 * page_ref.cell_count();
         let mut top = page_ref.cell_content_area() as usize;
 
@@ -568,20 +565,30 @@ impl BTreeCursor {
         if page_ref.first_freeblock() != 0 && gap + 2 <= top {
             // find slot
             let db_header = RefCell::borrow(&self.database_header);
-            let pc = find_free_cell(page_ref, db_header, amount, buf);
-            return pc as u16;
+            let pc = find_free_cell(page_ref, db_header, amount);
+            if pc != 0 {
+                return pc as u16;
+            }
+            /* fall through, we might need to defragment */
         }
 
         if gap + 2 + amount as usize > top {
             // defragment
             self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
+            let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
+            let buf = buf_ref.as_mut_slice();
             top = u16::from_be_bytes([buf[5], buf[6]]) as usize;
-            return 0;
         }
 
         let db_header = RefCell::borrow(&self.database_header);
         top -= amount;
-        buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+
+        {
+            let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
+            let buf = buf_ref.as_mut_slice();
+            buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+        }
+
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
         assert!(top + amount <= usable_space);
         return top as u16;
@@ -595,15 +602,20 @@ impl BTreeCursor {
         // TODO: implement fast algorithm
 
         let last_cell = (usable_space - 4) as u64;
-        let first_cell = cloned_page.cell_content_area() as u64;
+        let first_cell = {
+            let (start, end) = cloned_page.cell_get_raw_pointer_region();
+            start + end
+        };
+
         if cloned_page.cell_count() > 0 {
+            let page_type = page.page_type();
             let buf = RefCell::borrow(&cloned_page.buffer);
             let buf = buf.as_slice();
             let mut write_buf = RefCell::borrow_mut(&page.buffer);
             let write_buf = write_buf.as_mut_slice();
 
             for i in 0..cloned_page.cell_count() {
-                let cell_offset = 8;
+                let cell_offset = page.offset + 8;
                 let cell_idx = cell_offset + i * 2;
 
                 let pc = u16::from_be_bytes([buf[cell_idx], buf[cell_idx + 1]]) as u64;
@@ -613,19 +625,42 @@ impl BTreeCursor {
 
                 assert!(pc <= last_cell);
 
-                let size = match read_varint(&buf[pc as usize..pc as usize + 9]) {
-                    Ok(v) => v.0,
-                    Err(_) => todo!(
-                        "error while parsing varint from cell, probably treat this as corruption?"
-                    ),
+                let size = match page_type {
+                    PageType::TableInterior => {
+                        let (_, nr_key) = match read_varint(&buf[pc as usize ..]) {
+                            Ok(v) => v,
+                            Err(_) => todo!(
+                                "error while parsing varint from cell, probably treat this as corruption?"
+                            ),
+                        };
+                        4 + nr_key as u64
+                    }
+                    PageType::TableLeaf => {
+                        let (payload_size, nr_payload) = match read_varint(&buf[pc as usize..]) {
+                            Ok(v) => v,
+                            Err(_) => todo!(
+                                "error while parsing varint from cell, probably treat this as corruption?"
+                            ),
+                        };
+                        let (_, nr_key) = match read_varint(&buf[pc as usize + nr_payload as usize..]) {
+                            Ok(v) => v,
+                            Err(_) => todo!(
+                                "error while parsing varint from cell, probably treat this as corruption?"
+                            ),
+                        };
+                        // TODO: add overflow page calculation
+                        payload_size + nr_payload as u64 + nr_key as u64
+                    }
+                    PageType::IndexInterior => todo!(),
+                    PageType::IndexLeaf => todo!(),
                 };
                 cbrk -= size;
                 if cbrk < first_cell as u64 || pc as u64 + size > usable_space as u64 {
                     todo!("corrupt");
                 }
-                assert!(cbrk + size <= usable_space && cbrk >= first_cell);
+                assert!(cbrk + size <= usable_space && cbrk >= first_cell as u64);
                 // set new pointer
-                write_buf[cell_idx..cell_idx + 2].copy_from_slice(&cbrk.to_be_bytes());
+                write_buf[cell_idx..cell_idx + 2].copy_from_slice(&(cbrk as u16).to_be_bytes());
                 // copy payload
                 write_buf[cbrk as usize..cbrk as usize + size as usize]
                     .copy_from_slice(&buf[pc as usize..pc as usize + size as usize]);
@@ -636,18 +671,19 @@ impl BTreeCursor {
         // if( data[hdr+7]+cbrk-iCellFirst!=pPage->nFree ){
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
-        assert!(cbrk >= first_cell);
+        assert!(cbrk >= first_cell as u64);
         let mut write_buf = RefCell::borrow_mut(&page.buffer);
         let write_buf = write_buf.as_mut_slice();
 
         // set new first byte of cell content
-        write_buf[5..7].copy_from_slice(&cbrk.to_be_bytes());
+        write_buf[5..7].copy_from_slice(&(cbrk as u16).to_be_bytes());
         // set free block to 0, unused spaced can be retrieved from gap between cell pointer end and content start
         write_buf[1] = 0;
         write_buf[2] = 0;
         // set unused space to 0
-        write_buf[first_cell as usize..first_cell as usize + cbrk as usize - first_cell as usize]
-            .fill(0);
+        let first_cell = cloned_page.cell_content_area() as u64;
+        assert!(first_cell <= cbrk);
+        write_buf[first_cell as usize..cbrk as usize].fill(0);
     }
 
     // Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
@@ -667,7 +703,7 @@ impl BTreeCursor {
         let ncell = page.cell_count();
 
         // 8 + 4 == header end
-        let first_cell = 8 + 4 + (2 * ncell) as u16;
+        let first_cell = (page.offset + 8 + 4 + (2 * ncell)) as u16;
 
         let mut nfree = fragmented_free_bytes as usize + first_byte_in_cell_content as usize;
 
@@ -709,15 +745,14 @@ impl BTreeCursor {
     }
 }
 
-fn find_free_cell(
-    page_ref: &PageContent,
-    db_header: Ref<DatabaseHeader>,
-    amount: usize,
-    buf: &[u8],
-) -> usize {
+fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount: usize) -> usize {
     // NOTE: freelist is in ascending order of keys and pc
     // unuse_space is reserved bytes at the end of page, therefore we must substract from maxpc
     let mut pc = page_ref.first_freeblock() as usize;
+
+    let buf_ref = RefCell::borrow(&page_ref.buffer);
+    let buf = buf_ref.as_slice();
+
     let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
     let maxpc = (usable_space - amount as usize) as usize;
     let mut found = false;
@@ -731,9 +766,10 @@ fn find_free_cell(
         pc = next as usize;
     }
     if !found {
-        unimplemented!("recover for fragmented space");
+        0
+    } else {
+        pc
     }
-    pc
 }
 
 impl Cursor for BTreeCursor {
@@ -847,7 +883,8 @@ impl Cursor for BTreeCursor {
 
 fn find_cell(page: &PageContent, int_key: u64) -> usize {
     let mut cell_idx = 0;
-    while cell_idx < page.cell_count() {
+    let cell_count = page.cell_count();
+    while cell_idx < cell_count {
         match page.cell_get(cell_idx).unwrap() {
             BTreeCell::TableLeafCell(cell) => {
                 if int_key <= cell._rowid {
