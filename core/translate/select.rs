@@ -578,7 +578,8 @@ fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     // iterate in reverse order as we open cursors in order
     for table_loop in loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
-        if let Plan::Scan { .. } = table_loop.plan {
+        if let Plan::Scan = table_loop.plan {
+            // If we're scanning a table, we need to emit a Next instruction to fetch the next row.
             program.resolve_label(table_loop.next_row_label, program.offset());
             program.emit_insn(Insn::NextAsync { cursor_id });
             program.emit_insn_with_label_dependency(
@@ -613,7 +614,7 @@ fn translate_table_open_cursor(
     });
     program.emit_insn(Insn::OpenReadAwait);
 
-    let has_indexable_where_term = w.terms.iter().any(|term| {
+    let has_where_term_where_rowid_index_usable = w.terms.iter().any(|term| {
         matches!(
             term.expr,
             WhereExpr::SeekRowid(SeekRowid { table: t, .. }) if *t == table.identifier
@@ -621,7 +622,7 @@ fn translate_table_open_cursor(
     });
     LoopInfo {
         identifier: table.identifier.clone(),
-        plan: if has_indexable_where_term {
+        plan: if has_where_term_where_rowid_index_usable {
             Plan::SeekRowid
         } else {
             Plan::Scan
@@ -712,10 +713,22 @@ fn translate_table_open_loop(
     early_terminate_label: BranchOffset,
 ) -> Result<()> {
     if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
+        // In a left join loop, initialize the left join match flag to false
+        // If the condition checks pass, it will eventually be set to true
+        // If not, NULLs will be emitted for the right table for this row in the outer table.
         left_join_match_flag_initialize(program, left_join);
     }
 
     if let Plan::Scan = loop_info.plan {
+        // If we're scanning, we need to rewind the cursor to the beginning of the table
+        // before we start processing the rows in the loop.
+        // Consider a nested loop query like:
+        // SELECT * FROM a JOIN b ON a.someprop = b.someprop;
+        // We need to rewind the cursor to the beginning of b for each row in a,
+        // so that we can iterate over all rows in b for each row in a.
+        //
+        // If we're not scanning, we're seeking by rowid, so we don't need to rewind the cursor,
+        // since we're only going to be reading one row.
         program.emit_insn(Insn::RewindAsync {
             cursor_id: loop_info.open_cursor,
         });

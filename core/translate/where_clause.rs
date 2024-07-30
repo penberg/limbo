@@ -14,7 +14,7 @@ use sqlite3_parser::ast::{self};
 #[derive(Debug)]
 pub struct SeekRowid<'a> {
     pub table: &'a String,
-    pub rowid: &'a ast::Expr,
+    pub rowid_expr: &'a ast::Expr,
 }
 
 #[derive(Debug)]
@@ -57,22 +57,22 @@ pub fn split_constraint_to_terms<'a>(
             }
             expr => {
                 if expr.is_always_true()? {
+                    // Terms that are always true can be skipped, as they don't constrain the result set in any way.
                     continue;
                 }
                 let term = WhereTerm {
                     expr: {
-                        let seekrowid_candidate = select.src_tables.iter().rev().find_map(|t| {
-                            let indexable = expr
-                                .check_seekrowid_candidate(&t.identifier, select)
-                                .unwrap_or(None);
-                            indexable
-                        });
+                        let seekrowid_candidate = select
+                            .src_tables
+                            .iter()
+                            .rev()
+                            .find_map(|t| {
+                                expr.check_seekrowid_candidate(&t.identifier, select)
+                                    .unwrap_or(None)
+                            })
+                            .map(|s| WhereExpr::SeekRowid(s));
 
-                        if let Some(seekrowid) = seekrowid_candidate {
-                            WhereExpr::SeekRowid(seekrowid)
-                        } else {
-                            WhereExpr::Expr(expr)
-                        }
+                        seekrowid_candidate.unwrap_or(WhereExpr::Expr(expr))
                     },
                     evaluate_at_tbl: match outer_join_table_name {
                         Some(table) => {
@@ -110,7 +110,11 @@ pub fn split_constraint_to_terms<'a>(
                             // E.g. 'SELECT * FROM t1 JOIN t2 ON false' can be evaluated at the cursor for t1.
                             let table_refs = introspect_expression_for_table_refs(select, expr)?;
 
-                            // Get the innermost loop that matches any table_refs, and if not found, fall back to outermost loop
+                            // Get the innermost loop that matches any table_refs, and if not found, fall back to outermost loop.
+                            // The reasoning is that if a condition depends on a table, it should be evaluated at the cursor for that table,
+                            // and if it depends on multiple tables, it should be evaluated inside the innermost loop that contains all of them.
+                            // If a condition doesn't depend on any table, it doesn't functionally matter where it is evaluated, but
+                            // the most efficient place to evaluate it is at the outermost loop.
 
                             let tbl =
                                 processed_where_clause
@@ -181,7 +185,7 @@ pub fn process_where<'a>(select: &'a Select) -> Result<ProcessedWhereClause<'a>>
     }
 
     // Sort the terms by the loop_order.
-    // Inside a loop, sort by indexable_by, so that we can evaluate the most selective terms first.
+    // Inside a loop, put the most selective terms first, which currently means SeekRowid terms first (since we literally narrow down to a single row).
 
     wc.terms.sort_by(|a, b| {
         let a_loop = wc
@@ -321,7 +325,13 @@ pub fn translate_processed_where<'a>(
             }
             WhereExpr::SeekRowid(s) => {
                 let computed_rowid_reg = program.alloc_register();
-                let _ = translate_expr(program, select, s.rowid, computed_rowid_reg, cursor_hint)?;
+                let _ = translate_expr(
+                    program,
+                    select,
+                    s.rowid_expr,
+                    computed_rowid_reg,
+                    cursor_hint,
+                )?;
                 program.emit_insn_with_label_dependency(
                     Insn::SeekRowid {
                         cursor_id: current_loop.open_cursor,
@@ -882,6 +892,7 @@ pub enum ConstantCondition {
 }
 
 pub trait Evaluatable<'a> {
+    // Returns the constant condition if the expression is a constant expression e.g. '1'
     fn check_constant(&self) -> Result<Option<ConstantCondition>>;
     fn is_always_true(&self) -> Result<bool> {
         Ok(self
@@ -893,8 +904,10 @@ pub trait Evaluatable<'a> {
             .check_constant()?
             .map_or(false, |c| c == ConstantCondition::AlwaysFalse))
     }
-    fn is_primary_key_of_table(&self, select: &'a Select) -> Result<Option<&'a String>>;
+    // Returns the table identifier if the expression is the primary key of a table
+    fn check_primary_key(&self, select: &'a Select) -> Result<Option<&'a String>>;
     fn references_positive_integer(&self, select: &'a Select) -> bool;
+    // Checks if the expression is a candidate for seekrowid optimization
     fn check_seekrowid_candidate(
         &'a self,
         table_identifier: &'a String,
@@ -909,11 +922,11 @@ impl<'a> Evaluatable<'a> for ast::Expr {
                 n.parse::<i64>().map_or(false, |n| n > 0)
             }
             expr => expr
-                .is_primary_key_of_table(select)
+                .check_primary_key(select)
                 .map_or(false, |t| t.is_some()),
         }
     }
-    fn is_primary_key_of_table(&self, select: &'a Select) -> Result<Option<&'a String>> {
+    fn check_primary_key(&self, select: &'a Select) -> Result<Option<&'a String>> {
         match self {
             ast::Expr::Id(ident) => {
                 let ident = normalize_ident(&ident.0);
@@ -972,20 +985,20 @@ impl<'a> Evaluatable<'a> for ast::Expr {
                 let lhs = lhs.as_ref();
                 let rhs = rhs.as_ref();
 
-                if let Some(table) = lhs.is_primary_key_of_table(select)? {
+                if let Some(table) = lhs.check_primary_key(select)? {
                     if table == table_identifier && rhs.references_positive_integer(select) {
                         return Ok(Some(SeekRowid {
                             table: table_identifier,
-                            rowid: rhs,
+                            rowid_expr: rhs,
                         }));
                     }
                 }
 
-                if let Some(table) = rhs.is_primary_key_of_table(select)? {
+                if let Some(table) = rhs.check_primary_key(select)? {
                     if table == table_identifier && lhs.references_positive_integer(select) {
                         return Ok(Some(SeekRowid {
                             table: table_identifier,
-                            rowid: lhs,
+                            rowid_expr: lhs,
                         }));
                     }
                 }
