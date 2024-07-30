@@ -316,6 +316,53 @@ impl PageContent {
         read_btree_cell(buf, &self.page_type(), cell_pointer)
     }
 
+    pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
+        let cell_start = match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        };
+        (cell_start, self.cell_count() * 2)
+    }
+
+    pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {
+        let buf = self.buffer.borrow();
+        let buf = buf.as_slice();
+
+        let ncells = self.cell_count();
+        let cell_start = match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        };
+        assert!(idx < ncells, "cell_get: idx out of bounds");
+        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = self.read_u16(cell_pointer) as usize;
+        let start = cell_pointer;
+        let len = match self.page_type() {
+            PageType::IndexInterior => {
+                let (len_payload, n_payload) = read_varint(&buf[cell_pointer + 4..]).unwrap();
+                4 + len_payload as usize + n_payload + 4
+            }
+            PageType::TableInterior => {
+                let (_, n_rowid) = read_varint(&buf[cell_pointer + 4..]).unwrap();
+                4 + n_rowid
+            }
+            PageType::IndexLeaf => {
+                let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
+                len_payload as usize + n_payload + 4
+            }
+            PageType::TableLeaf => {
+                let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
+                let (_, n_rowid) = read_varint(&buf[cell_pointer + n_payload..]).unwrap();
+                len_payload as usize + n_payload + n_rowid + 4
+            }
+        };
+        (start, len)
+    }
+
     pub fn is_leaf(&self) -> bool {
         match self.page_type() {
             PageType::IndexInterior => false,
@@ -558,7 +605,6 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
         let (serial_type, nr) = read_varint(&payload[pos..])?;
         let serial_type = SerialType::try_from(serial_type)?;
         serial_types.push(serial_type);
-        assert!(pos + nr < payload.len());
         pos += nr;
         assert!(header_size >= nr);
         header_size -= nr;

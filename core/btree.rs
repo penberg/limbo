@@ -6,10 +6,19 @@ use crate::sqlite3_ondisk::{
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
-use std::any::Any;
-use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
+use std::mem;
 use std::rc::Rc;
+
+/*
+    These are offsets of fields in the header of a b-tree page.
+*/
+const BTREE_HEADER_OFFSET_TYPE: usize = 0; /* type of btree page -> u8 */
+const BTREE_HEADER_OFFSET_FREEBLOCK: usize = 1; /* pointer to first freeblock -> u16 */
+const BTREE_HEADER_OFFSET_CELL_COUNT: usize = 3; /* number of cells in the page -> u16 */
+const BTREE_HEADER_OFFSET_CELL_CONTENT: usize = 5; /* pointer to first byte of cell allocated content from top -> u16 */
+const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -> u8 */
+const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
 
 pub struct MemPage {
     parent: Option<Rc<MemPage>>,
@@ -273,39 +282,46 @@ impl BTreeCursor {
         );
         if payload.len() + 2 > free as usize {
             // overflow or balance
-            self.balance_leaf(int_key, &payload);
+            self.balance_leaf(int_key, payload);
         } else {
             // insert
-            let pc = self.allocate_cell_space(page, payload.len() as u16);
-            let mut buf_ref = RefCell::borrow_mut(&page.buffer);
-            let buf: &mut [u8] = buf_ref.as_mut_slice();
-
-            // copy data
-            buf[pc as usize..pc as usize + payload.len()].copy_from_slice(&payload);
-            //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
-            let pointer_area_pc_by_idx = 8 + 2 * cell_idx;
-
-            // move previous pointers forward and insert new pointer there
-            let n_cells_forward = 2 * (page.cell_count() - cell_idx);
-            buf.copy_within(
-                pointer_area_pc_by_idx..pointer_area_pc_by_idx + n_cells_forward,
-                pointer_area_pc_by_idx + 2,
-            );
-            buf[pointer_area_pc_by_idx..pointer_area_pc_by_idx + 2]
-                .copy_from_slice(&pc.to_be_bytes());
-
-            // update first byte of content area
-            buf[5..7].copy_from_slice(&pc.to_be_bytes());
-
-            // update cell count
-            let new_n_cells = (page.cell_count() + 1) as u16;
-            buf[3..5].copy_from_slice(&new_n_cells.to_be_bytes());
-
-            let mut payload_for_cell_in_memory: Vec<u8> = Vec::new();
-            _record.serialize(&mut payload_for_cell_in_memory);
+            self.insert_into_cell(page, &payload, cell_idx);
         }
 
         Ok(CursorResult::Ok(()))
+    }
+
+    /* insert to postion and shift other pointers */
+    fn insert_into_cell(&mut self, page: &mut PageContent, payload: &Vec<u8>, cell_idx: usize) {
+        dbg!(page.is_leaf(), cell_idx);
+        assert!(
+            page.is_leaf() || (!page.is_leaf() && cell_idx < page.cell_count()),
+            "if it's greater it might mean we need to insert in a rightmost pointer?"
+        );
+        // TODO: insert into cell payload in internal page
+        let pc = self.allocate_cell_space(page, payload.len() as u16);
+        let mut buf_ref = RefCell::borrow_mut(&page.buffer);
+        let buf: &mut [u8] = buf_ref.as_mut_slice();
+
+        // copy data
+        buf[pc as usize..pc as usize + payload.len()].copy_from_slice(&payload);
+        //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
+        let pointer_area_pc_by_idx = page.offset + 8 + 2 * cell_idx;
+
+        // move previous pointers forward and insert new pointer there
+        let n_cells_forward = 2 * (page.cell_count() - cell_idx);
+        buf.copy_within(
+            pointer_area_pc_by_idx..pointer_area_pc_by_idx + n_cells_forward,
+            pointer_area_pc_by_idx + 2,
+        );
+        buf[pointer_area_pc_by_idx..pointer_area_pc_by_idx + 2].copy_from_slice(&pc.to_be_bytes());
+
+        // update first byte of content area
+        buf[5..7].copy_from_slice(&pc.to_be_bytes());
+
+        // update cell count
+        let new_n_cells = (page.cell_count() + 1) as u16;
+        buf[3..5].copy_from_slice(&new_n_cells.to_be_bytes());
     }
 
     fn get_page(&mut self) -> crate::Result<Rc<RefCell<Page>>> {
@@ -319,10 +335,12 @@ impl BTreeCursor {
         Ok(page_ref)
     }
 
-    fn balance_leaf(&mut self, key: u64, payload: &Vec<u8>) {
+    fn balance_leaf(&mut self, key: u64, payload: Vec<u8>) {
         // This is a naive algorithm that doesn't try to distribute cells evenly by content.
         // It will try to split the page in half by keys not by content.
         // Sqlite tries to have a page at least 40% full.
+        let mut key = key;
+        let mut payload = payload;
         loop {
             let mem_page = {
                 let mem_page = self.page.borrow();
@@ -330,18 +348,173 @@ impl BTreeCursor {
                 mem_page.clone()
             };
             let page_ref = self.read_page_sync(mem_page.page_idx);
-            let page = RefCell::borrow_mut(&page_ref);
-            let mut page = page.contents.write().unwrap();
-            let page = page.as_mut().unwrap();
-            let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
-            if payload.len() + 2 <= free as usize {
+            let mut page_rc = RefCell::borrow_mut(&page_ref);
+
+            let right_page_id = {
+                // split procedure
+                let mut page = page_rc.contents.write().unwrap();
+                let page = page.as_mut().unwrap();
+                let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
+                assert!(
+                    matches!(
+                        page.page_type(),
+                        PageType::TableLeaf | PageType::TableInterior
+                    ),
+                    "indexes still not supported "
+                );
+                if payload.len() + 2 <= free as usize {
+                    let cell_idx = find_cell(page, key);
+                    self.insert_into_cell(page, &payload, cell_idx);
+                    break;
+                }
+
+                let right_page_ref = self.allocate_page(page.page_type());
+                let right_page = RefCell::borrow_mut(&right_page_ref);
+                let right_page_id = right_page.id;
+                let mut right_page = right_page.contents.write().unwrap();
+                let right_page = right_page.as_mut().unwrap();
+                {
+                    // move data from one buffer to another
+                    // done in a separate block to satisfy borrow checker
+                    let mut left_buf = RefCell::borrow_mut(&page.buffer);
+                    let left_buf: &mut [u8] = left_buf.as_mut_slice();
+                    let mut right_buf = RefCell::borrow_mut(&right_page.buffer);
+                    let right_buf: &mut [u8] = right_buf.as_mut_slice();
+
+                    let mut rbrk = right_page.cell_content_area() as usize;
+
+                    // move half of cells to right page
+                    for cell_idx in 0..page.cell_count() {
+                        let (start, len) = page.cell_get_raw_region(cell_idx);
+                        rbrk -= len;
+                        right_buf[rbrk..rbrk + len].copy_from_slice(&left_buf[start..start + len]);
+                    }
+                    // move half of keys to right page
+                    let (src_pointers_start, src_pointers_len) = page.cell_get_raw_pointer_region();
+                    assert!(page.cell_count() >= 2);
+                    let keys_to_move_start = page.cell_count() / 2;
+                    let (dst_pointers_start, _) = right_page.cell_get_raw_pointer_region();
+                    /*
+                        Copy half
+                        count = 8
+                        k-v = 2 bytes
+                                            keys_to_move_start
+                                                     V
+                        -------------------------------------------------
+                        | 0k-v | 1k-v | 2k-v | 3k-v | 4k-v | 5k-v | 7k-v |
+                        -------------------------------------------------
+
+                    */
+                    let pointer_data_to_move = (page.cell_count() - keys_to_move_start - 1) * 2;
+                    right_buf[dst_pointers_start + pointer_data_to_move
+                        ..dst_pointers_start + pointer_data_to_move]
+                        .copy_from_slice(
+                            &left_buf[src_pointers_start + pointer_data_to_move
+                                ..src_pointers_start + (pointer_data_to_move * 2)],
+                        );
+                    // update cell count in both pages
+                    let keys_moved = page.cell_count() - keys_to_move_start + 1;
+                    page.write_u16(
+                        BTREE_HEADER_OFFSET_CELL_COUNT,
+                        (page.cell_count() - keys_moved) as u16,
+                    );
+                    right_page.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, keys_moved as u16);
+                    // update cell content are start
+                    right_page.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, rbrk as u16);
+                }
+                let last_cell = page.cell_get(page.cell_count() - 1).unwrap();
+                let last_cell_key = match &last_cell {
+                    BTreeCell::TableLeafCell(cell) => cell._rowid,
+                    BTreeCell::TableInteriorCell(cell) => cell._rowid,
+                    _ => unreachable!(), /* not yet supported index tables */
+                };
+                // if not leaf page update rightmost pointer
+                if let PageType::TableInterior = page.page_type() {
+                    right_page.write_u32(
+                        BTREE_HEADER_OFFSET_RIGHTMOST,
+                        page.rightmost_pointer().unwrap(),
+                    );
+                    // convert last cell to rightmost pointer
+                    let BTreeCell::TableInteriorCell(last_cell) = &last_cell else {
+                        unreachable!();
+                    };
+                    page.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, last_cell._left_child_page);
+                    // page count now has one less cell because we've added the last one to rightmost pointer
+                    page.write_u16(
+                        BTREE_HEADER_OFFSET_CELL_COUNT,
+                        (page.cell_count() - 1) as u16,
+                    );
+                }
+
+                // update free list block by defragmenting page
+                self.defragment_page(page, RefCell::borrow(&self.database_header));
+                // insert into one of the pages
+                if key < last_cell_key {
+                    let cell_idx = find_cell(page, key);
+                    self.insert_into_cell(page, &payload, cell_idx);
+                } else {
+                    let cell_idx = find_cell(right_page, key);
+                    self.insert_into_cell(right_page, &payload, cell_idx);
+                }
+                // propagate parent split
+                key = last_cell_key;
+                right_page_id
+            };
+
+            payload = Vec::new();
+            if mem_page.page_idx == self.root_page {
+                /* if we are in root page then we just need to create a new root and push key there */
+                let new_root_page_ref = self.allocate_page(PageType::TableInterior);
+                let mut new_root_page = RefCell::borrow_mut(&new_root_page_ref);
+                let new_root_page_id = new_root_page.id;
+                new_root_page.set_dirty();
+                self.pager.add_dirty(new_root_page_ref.clone());
+                {
+                    let mut new_root_page_contents = new_root_page.contents.write().unwrap();
+                    let new_root_page_contents = new_root_page_contents.as_mut().unwrap();
+                    /*
+                        Note that we set cell pointer to point to itself, because we will later swap this page's
+                        content with splitted page in order to not update root page idx.
+                    */
+                    payload.extend_from_slice(&(new_root_page_id as u32).to_be_bytes());
+                    payload.extend(std::iter::repeat(0).take(9));
+                    let n = write_varint(&mut payload.as_mut_slice()[0..9], key as u64);
+                    payload.truncate(n);
+
+                    // write left child cell
+                    self.insert_into_cell(new_root_page_contents, &payload, 0);
+
+                    // write right child cell
+                    new_root_page_contents
+                        .write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, right_page_id as u32);
+                }
+
+                /* swap splitted page buffer with new root buffer so we don't have to update page idx */
+                {
+                    let mut new_root_page_contents = new_root_page.contents.write().unwrap();
+                    let new_root_page_contents = new_root_page_contents.as_mut().unwrap();
+                    let root_buf = new_root_page_contents.buffer.as_ptr();
+                    let root_buf = unsafe { (*root_buf).as_mut_slice() };
+                    let mut page = page_rc.contents.write().unwrap();
+                    let page = page.as_mut().unwrap();
+                    let mut left_buf = RefCell::borrow_mut(&page.buffer);
+                    let left_buf: &mut [u8] = left_buf.as_mut_slice();
+
+                    left_buf.swap_with_slice(root_buf);
+                }
+                // swap in memory state of pages
+                mem::swap(&mut page_rc.id, &mut new_root_page.id);
+                self.page = RefCell::new(Some(Rc::new(MemPage::new(None, new_root_page.id, 0))));
+
                 break;
             }
 
-            let right_page_ref = self.allocate_page(page.page_type());
-            let right_page = RefCell::borrow_mut(&right_page_ref);
-            let mut right_page = right_page.contents.write().unwrap();
-            let right_page = right_page.as_mut().unwrap();
+            payload.extend_from_slice(&(mem_page.page_idx as u32).to_be_bytes());
+            payload.extend(std::iter::repeat(0).take(9));
+            let n = write_varint(&mut payload.as_mut_slice()[0..9], key as u64);
+            payload.truncate(n);
+
+            self.page = RefCell::new(Some(mem_page.parent.as_ref().unwrap().clone()));
         }
     }
 
@@ -364,12 +537,16 @@ impl BTreeCursor {
             let mut contents = contents.contents.write().unwrap();
             let contents = contents.as_mut().unwrap();
             let id = page_type as u8;
-            contents.write_u8(0, id);
-            contents.write_u16(1, 0);
-            contents.write_u16(3, 0);
-            contents.write_u16(5, 0);
-            contents.write_u8(7, 0);
-            contents.write_u32(8, 0);
+            contents.write_u8(BTREE_HEADER_OFFSET_TYPE, id);
+            contents.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);
+            contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
+
+            let db_header = RefCell::borrow(&self.database_header);
+            let cell_content_area_start = db_header.page_size - db_header.unused_space as u16;
+            contents.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, cell_content_area_start);
+
+            contents.write_u8(BTREE_HEADER_OFFSET_FRAGMENTED, 0);
+            contents.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, 0);
         }
 
         page
