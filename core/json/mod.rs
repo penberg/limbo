@@ -1,20 +1,38 @@
+mod de;
+mod error;
+mod ser;
+
 use std::rc::Rc;
 
+pub use crate::json::de::from_str;
+pub use crate::json::ser::to_string;
 use crate::types::OwnedValue;
-use serde_json::Value;
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(untagged)]
+pub enum Val {
+    Null,
+    Bool(bool),
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Array(Vec<Val>),
+    Object(IndexMap<String, Val>),
+}
 
 pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
     match json_value {
-        OwnedValue::Text(ref t) => {
-            // Replace instances of two single quotes ('') with a double quote (")
-            // This is necessary to correctly format the string for parsing
-            let corrected_t = t.replace("''", "\"");
-            if let Ok(json) = json5::from_str::<Value>(&corrected_t) {
-                Ok(OwnedValue::Text(Rc::new(json.to_string())))
-            } else {
-                crate::bail_parse_error!("malformed JSON");
+        OwnedValue::Text(ref t) => match crate::json::from_str::<Val>(t) {
+            Ok(json) => {
+                let json = crate::json::to_string(&json).unwrap();
+                Ok(OwnedValue::Text(Rc::new(json)))
             }
-        }
+            Err(_) => {
+                crate::bail_parse_error!("malformed JSON")
+            }
+        },
         OwnedValue::Blob(b) => {
             if let Ok(json) = jsonb::from_slice(b) {
                 Ok(OwnedValue::Text(Rc::new(json.to_string())))
@@ -33,10 +51,54 @@ mod tests {
 
     #[test]
     fn test_get_json_valid_json5() {
-        let input = OwnedValue::Text(Rc::new("{ key: 'value' }".to_string())); // Valid JSON5
+        let input = OwnedValue::Text(Rc::new("{ key: 'value' }".to_string()));
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.contains("\"key\":\"value\""));
+        } else {
+            panic!("Expected OwnedValue::Text");
+        }
+    }
+
+    #[test]
+    fn test_get_json_valid_json5_double_single_quotes() {
+        let input = OwnedValue::Text(Rc::new("{ key: ''value'' }".to_string()));
+        let result = get_json(&input).unwrap();
+        if let OwnedValue::Text(result_str) = result {
+            assert!(result_str.contains("\"key\":\"value\""));
+        } else {
+            panic!("Expected OwnedValue::Text");
+        }
+    }
+
+    #[test]
+    fn test_get_json_valid_json5_infinity() {
+        let input = OwnedValue::Text(Rc::new("{ \"key\": Infinity }".to_string()));
+        let result = get_json(&input).unwrap();
+        if let OwnedValue::Text(result_str) = result {
+            assert!(result_str.contains("{\"key\":9e999}"));
+        } else {
+            panic!("Expected OwnedValue::Text");
+        }
+    }
+
+    #[test]
+    fn test_get_json_valid_json5_negative_infinity() {
+        let input = OwnedValue::Text(Rc::new("{ \"key\": -Infinity }".to_string()));
+        let result = get_json(&input).unwrap();
+        if let OwnedValue::Text(result_str) = result {
+            assert!(result_str.contains("{\"key\":-9e999}"));
+        } else {
+            panic!("Expected OwnedValue::Text");
+        }
+    }
+
+    #[test]
+    fn test_get_json_valid_json5_nan() {
+        let input = OwnedValue::Text(Rc::new("{ \"key\": NaN }".to_string()));
+        let result = get_json(&input).unwrap();
+        if let OwnedValue::Text(result_str) = result {
+            assert!(result_str.contains("{\"key\":null}"));
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -65,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_get_json_invalid_jsonb() {
-        let input = OwnedValue::Text(Rc::new("{key:\"value\"".to_string())); // Invalid JSON
+        let input = OwnedValue::Text(Rc::new("{key:\"value\"".to_string()));
         let result = get_json(&input);
         match result {
             Ok(_) => panic!("Expected error for malformed JSON"),

@@ -1,8 +1,8 @@
 mod error;
 mod function;
 mod io;
-mod pseudo;
 mod json;
+mod pseudo;
 mod schema;
 mod storage;
 mod translate;

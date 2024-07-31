@@ -25,6 +25,7 @@ mod datetime;
 
 use crate::error::LimboError;
 use crate::function::{AggFunc, JsonFunc, ScalarFunc};
+use crate::json::get_json;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -302,7 +303,7 @@ pub enum Insn {
         // constant_mask: i32, // P1, not used for now
         start_reg: usize, // P2, start of argument registers
         dest: usize,      // P3
-        func: Func, // P4
+        func: Func,       // P4
     },
 
     InitCoroutine {

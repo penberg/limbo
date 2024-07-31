@@ -945,6 +945,7 @@ checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.5",
+ "serde",
 ]
 
 [[package]]
@@ -1014,17 +1015,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c15563dc2726973df627357ce0c9ddddbea194836909d655df6a75d2cf296d"
 dependencies = [
  "wasm-bindgen",
-]
-
-[[package]]
-name = "json5"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96b0db21af676c1ce64250b5f40f3ce2cf27e4e47cb91ed91eb6fe9350b430c1"
-dependencies = [
- "pest",
- "pest_derive",
- "serde",
 ]
 
 [[package]]
@@ -1124,21 +1114,23 @@ dependencies = [
  "criterion",
  "fallible-iterator 0.3.0",
  "getrandom",
+ "indexmap 2.2.6",
  "io-uring",
- "json5",
  "jsonb",
  "julian_day_converter",
  "libc",
  "log",
  "mimalloc",
  "nix 0.29.0",
+ "pest",
+ "pest_derive",
  "polling",
  "pprof",
  "regex",
  "rstest",
  "rusqlite",
  "rustix",
- "serde_json",
+ "serde",
  "sieve-cache",
  "sqlite3-parser",
  "tempfile",

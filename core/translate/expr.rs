@@ -321,7 +321,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 start_reg: start_reg,
                                 dest: target_register,
-                                func: ScalarFunc::Time,
+                                func: crate::vdbe::Func::Scalar(ScalarFunc::Time),
                             });
                             Ok(target_register)
                         }
