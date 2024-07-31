@@ -15,20 +15,37 @@
 ///
 /// Each page consists of a page header and N cells, which contain the records.
 ///
+/// ```text
 /// +-----------------+----------------+---------------------+----------------+
 /// |                 |                |                     |                |
 /// |   Page header   |  Cell pointer  |     Unallocated     |  Cell content  |
 /// | (8 or 12 bytes) |     array      |        space        |      area      |
 /// |                 |                |                     |                |
 /// +-----------------+----------------+---------------------+----------------+
+/// ```
 ///
-/// For more information, see: https://www.sqlite.org/fileformat.html
+/// The write-ahead log (WAL) is a separate file that contains the physical
+/// log of changes to a database file. The file starts with a WAL header and
+/// is followed by a sequence of WAL frames, which are database pages with
+/// additional metadata.
+///
+/// ```text
+/// +-----------------+-----------------+-----------------+-----------------+
+/// |                 |                 |                 |                 |
+/// |    WAL header   |    WAL frame 1  |    WAL frame 2  |    WAL frame N  |
+/// |                 |                 |                 |                 |
+/// +-----------------+-----------------+-----------------+-----------------+
+/// ```
+///
+/// For more information, see the SQLite file format specification:
+///
+/// https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
 use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
 use crate::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
-use crate::{PageSource, Result};
+use crate::{File, PageSource, Result};
 use log::trace;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -66,6 +83,28 @@ pub struct DatabaseHeader {
     reserved: [u8; 20],
     version_valid_for: u32,
     version_number: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct WalHeader {
+    magic: [u8; 4],
+    file_format: u32,
+    page_size: u32,
+    checkpoint_seq: u32,
+    salt_1: u32,
+    salt_2: u32,
+    checksum_1: u32,
+    checksum_2: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct WalFrameHeader {
+    page_number: u32,
+    db_size: u32,
+    salt_1: u32,
+    salt_2: u32,
+    checksum_1: u32,
+    checksum_2: u32,
 }
 
 pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
@@ -783,6 +822,68 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
         buf[i] = encoded[n - 1 - i];
     }
     return n;
+}
+
+pub fn begin_read_wal_header(io: &Box<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
+    let drop_fn = Rc::new(|_buf| {});
+    let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
+    let result = Rc::new(RefCell::new(WalHeader::default()));
+    let header = result.clone();
+    let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
+        let header = header.clone();
+        finish_read_wal_header(buf, header).unwrap();
+    });
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
+    io.pread(0, c)?;
+    Ok(result)
+}
+
+fn finish_read_wal_header(buf: Rc<RefCell<Buffer>>, header: Rc<RefCell<WalHeader>>) -> Result<()> {
+    let buf = buf.borrow();
+    let buf = buf.as_slice();
+    let mut header = header.borrow_mut();
+    header.magic.copy_from_slice(&buf[0..4]);
+    header.file_format = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+    header.page_size = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    header.checkpoint_seq = u32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    header.salt_1 = u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    header.salt_2 = u32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    header.checksum_1 = u32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]);
+    header.checksum_2 = u32::from_be_bytes([buf[28], buf[29], buf[30], buf[31]]);
+    Ok(())
+}
+
+pub fn begin_read_wal_frame_header(
+    io: &Box<dyn File>,
+    offset: usize,
+) -> Result<Rc<RefCell<WalFrameHeader>>> {
+    let drop_fn = Rc::new(|_buf| {});
+    let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
+    let result = Rc::new(RefCell::new(WalFrameHeader::default()));
+    let frame = result.clone();
+    let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
+        let frame = frame.clone();
+        finish_read_wal_frame_header(buf, frame).unwrap();
+    });
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
+    io.pread(offset, c)?;
+    Ok(result)
+}
+
+fn finish_read_wal_frame_header(
+    buf: Rc<RefCell<Buffer>>,
+    frame: Rc<RefCell<WalFrameHeader>>,
+) -> Result<()> {
+    let buf = buf.borrow();
+    let buf = buf.as_slice();
+    let mut frame = frame.borrow_mut();
+    frame.page_number = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+    frame.db_size = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+    frame.salt_1 = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
+    frame.salt_2 = u32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]);
+    frame.checksum_1 = u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]);
+    frame.checksum_2 = u32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]);
+    Ok(())
 }
 
 #[cfg(test)]

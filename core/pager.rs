@@ -1,10 +1,10 @@
 use crate::buffer_pool::BufferPool;
 use crate::sqlite3_ondisk::PageContent;
 use crate::sqlite3_ondisk::{self, DatabaseHeader};
+use crate::wal::Wal;
 use crate::{Buffer, PageSource, Result};
 use log::trace;
 use sieve_cache::SieveCache;
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -264,6 +264,9 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
 pub struct Pager {
     /// Source of the database pages.
     pub page_source: PageSource,
+    /// The write-ahead log (WAL) for the database.
+    wal: Option<Wal>,
+    /// A page cache for the database.
     page_cache: RefCell<DumbLruPageCache>,
     /// Buffer pool for temporary data storage.
     buffer_pool: Rc<BufferPool>,
@@ -291,12 +294,27 @@ impl Pager {
         let page_cache = RefCell::new(DumbLruPageCache::new(10));
         Ok(Self {
             page_source,
+            wal: None,
             buffer_pool,
             page_cache,
             io,
             dirty_pages: Rc::new(RefCell::new(Vec::new())),
             db_header: db_header_ref.clone(),
         })
+    }
+
+    pub fn begin_read_tx(&self) -> Result<()> {
+        if let Some(wal) = &self.wal {
+            wal.begin_read_tx()?;
+        }
+        Ok(())
+    }
+
+    pub fn end_read_tx(&self) -> Result<()> {
+        if let Some(wal) = &self.wal {
+            wal.end_read_tx()?;
+        }
+        Ok(())
     }
 
     /// Reads a page from the database.
@@ -308,6 +326,17 @@ impl Pager {
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         RefCell::borrow(&page).set_locked();
+        if let Some(wal) = &self.wal {
+            if let Some(frame_id) = wal.find_frame(page_idx as u64)? {
+                wal.read_frame(frame_id, page.clone())?;
+                {
+                    let page = page.borrow_mut();
+                    page.set_uptodate();
+                }
+                page_cache.insert(page_idx, page.clone());
+                return Ok(page);
+            }
+        }
         sqlite3_ondisk::begin_read_page(
             &self.page_source,
             self.buffer_pool.clone(),
