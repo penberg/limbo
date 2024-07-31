@@ -4,6 +4,8 @@
 
 ### Added
 
+- Initial pass on the write path. Note that the write path is not transactional yet. (Pere Diaz Bou)
+
 - More scalar functions: `unicode()` (Ethan Niser)
 
 ### Fixed

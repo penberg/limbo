@@ -24,7 +24,7 @@
 * Asynchronous I/O support with `io_uring`
 * SQLite compatibility ([status](COMPAT.md))
   * SQL dialect support
-  * File format support (_read-only_)
+  * File format support
   * SQLite C API
 * JavaScript/WebAssembly bindings (_wip_)
 
@@ -37,7 +37,7 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/penberg/limbo/releases/latest/download/limbo-installer.sh | sh
 ```
 
-Limbo is currently read-only. You can either use the `sqlite3` program to create a database:
+Limbo is currently work-in-progress so it's recommended that you either use the `sqlite3` program to create a test database:
 
 ```console
 $ sqlite3 database.db
