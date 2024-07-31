@@ -198,15 +198,15 @@ impl BTreeCursor {
             }
 
             if !found_cell {
-                let parent = mem_page.parent.clone();
+                let parent = mem_page.clone();
                 match page.rightmost_pointer() {
                     Some(right_most_pointer) => {
-                        let mem_page = MemPage::new(parent, right_most_pointer as usize, 0);
+                        let mem_page = MemPage::new(Some(parent), right_most_pointer as usize, 0);
                         self.page.replace(Some(Rc::new(mem_page)));
                         continue;
                     }
                     None => {
-                        unreachable!("we shall not go back up! The only way is down the slope")
+                        unreachable!("we shall not go back up! The only way is down the slope");
                     }
                 }
             }
@@ -877,6 +877,11 @@ fn find_cell(page: &PageContent, int_key: u64) -> usize {
     while cell_idx < cell_count {
         match page.cell_get(cell_idx).unwrap() {
             BTreeCell::TableLeafCell(cell) => {
+                if int_key <= cell._rowid {
+                    break;
+                }
+            }
+            BTreeCell::TableInteriorCell(cell) => {
                 if int_key <= cell._rowid {
                     break;
                 }
