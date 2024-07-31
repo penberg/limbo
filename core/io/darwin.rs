@@ -90,7 +90,7 @@ impl IO for DarwinIO {
                                 c.complete(0);
                             }
                             CompletionCallback::Write(_, ref c, _, _) => {
-                                c.complete(n);
+                                c.complete(n as i32);
                             }
                         }
                         return Ok(());
@@ -178,14 +178,18 @@ impl File for DarwinFile {
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let file = self.file.borrow();
         let result = {
-            let mut buf = c.buf_mut();
+            let r = match &(*c) {
+                Completion::Read(r) => r,
+                Completion::Write(_) => unreachable!(),
+            };
+            let mut buf = r.buf_mut();
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
         };
         match result {
             std::result::Result::Ok(n) => {
                 trace!("pread n: {}", n);
                 // Read succeeded immediately
-                c.complete();
+                c.complete(0);
                 Ok(())
             }
             Err(Errno::AGAIN) => {
@@ -222,7 +226,7 @@ impl File for DarwinFile {
             std::result::Result::Ok(n) => {
                 trace!("pwrite n: {}", n);
                 // Read succeeded immediately
-                c.complete(n);
+                c.complete(n as i32);
                 Ok(())
             }
             Err(Errno::AGAIN) => {
