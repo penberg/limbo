@@ -554,7 +554,7 @@ fn translate_condition_expr(
 
             // The left hand side only needs to be evaluated once we have a list of values to compare against.
             let lhs_reg = program.alloc_register();
-            let _ = translate_expr(program, select, lhs, lhs_reg, cursor_hint)?;
+            let _ = translate_expr(program, Some(select), lhs, lhs_reg, cursor_hint)?;
 
             let rhs = rhs.as_ref().unwrap();
 
@@ -577,7 +577,7 @@ fn translate_condition_expr(
                 for (i, expr) in rhs.iter().enumerate() {
                     let rhs_reg = program.alloc_register();
                     let last_condition = i == rhs.len() - 1;
-                    let _ = translate_expr(program, select, expr, rhs_reg, cursor_hint)?;
+                    let _ = translate_expr(program, Some(select), expr, rhs_reg, cursor_hint)?;
                     // If this is not the last condition, we need to jump to the 'jump_target_when_true' label if the condition is true.
                     if !last_condition {
                         program.emit_insn_with_label_dependency(
@@ -614,7 +614,7 @@ fn translate_condition_expr(
                 // If it's a NOT IN expression, we need to jump to the 'jump_target_when_false' label if any of the conditions are true.
                 for expr in rhs.iter() {
                     let rhs_reg = program.alloc_register();
-                    let _ = translate_expr(program, select, expr, rhs_reg, cursor_hint)?;
+                    let _ = translate_expr(program, Some(select), expr, rhs_reg, cursor_hint)?;
                     program.emit_insn_with_label_dependency(
                         Insn::Eq {
                             lhs: lhs_reg,

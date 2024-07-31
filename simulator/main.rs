@@ -162,7 +162,7 @@ impl limbo_core::File for SimulatorFile {
         &self,
         pos: usize,
         buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        c: Rc<limbo_core::WriteCompletion>,
+        c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
         if *self.fault.borrow() {
             *self.nr_pwrite_faults.borrow_mut() += 1;
