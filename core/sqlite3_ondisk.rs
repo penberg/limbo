@@ -232,12 +232,11 @@ impl Clone for PageContent {
 
 impl PageContent {
     pub fn page_type(&self) -> PageType {
-        let buf = self.buffer.borrow();
-        let buf = buf.as_slice();
-        buf[self.offset].try_into().unwrap()
+        self.read_u8(self.offset).try_into().unwrap()
     }
 
     fn read_u8(&self, pos: usize) -> u8 {
+        // unsafe trick to borrow twice
         unsafe {
             let buf_pointer = &self.buffer.as_ptr();
             let buf = (*buf_pointer).as_ref().unwrap().as_slice();
@@ -344,9 +343,12 @@ impl PageContent {
     }
 
     pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {
-        let buf = self.buffer.borrow();
-        let buf = buf.as_slice();
+        let mut buf = self.buffer.borrow_mut();
+        let buf = buf.as_mut_slice();
+        self.cell_get_raw_region_borrowed(idx, buf)
+    }
 
+    pub fn cell_get_raw_region_borrowed(&self, idx: usize, buf: &mut [u8]) -> (usize, usize) {
         let ncells = self.cell_count();
         let cell_start = match self.page_type() {
             PageType::IndexInterior => 12,
@@ -374,7 +376,8 @@ impl PageContent {
             PageType::TableLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
                 let (_, n_rowid) = read_varint(&buf[cell_pointer + n_payload..]).unwrap();
-                len_payload as usize + n_payload + n_rowid + 4
+                // TODO: add overflow 4 bytes
+                len_payload as usize + n_payload + n_rowid
             }
         };
         (start, len)
@@ -448,6 +451,7 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
     let page_source = &pager.page_source;
     let page_finish = page.clone();
     let page = page.borrow();
+
     let contents = page.contents.read().unwrap();
     let contents = contents.as_ref().unwrap();
     let buffer = contents.buffer.clone();

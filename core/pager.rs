@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 pub struct Page {
-    flags: AtomicUsize,
+    pub flags: AtomicUsize,
     pub contents: RwLock<Option<PageContent>>,
     pub id: usize,
 }
