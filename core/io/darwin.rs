@@ -2,7 +2,7 @@ use crate::error::LimboError;
 use crate::io::common;
 use crate::Result;
 
-use super::{Completion, File, WriteCompletion, IO};
+use super::{Completion, File, IO};
 use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
@@ -67,7 +67,8 @@ impl IO for DarwinIO {
                     match cf {
                         CompletionCallback::Read(ref file, ref c, pos) => {
                             let mut file = file.borrow_mut();
-                            let r = match *c {
+                            let c: &Completion = &c;
+                            let r = match c {
                                 Completion::Read(r) => r,
                                 Completion::Write(_) => unreachable!(),
                             };
@@ -85,7 +86,7 @@ impl IO for DarwinIO {
                 };
                 match result {
                     std::result::Result::Ok(n) => {
-                        match cf {
+                        match &cf {
                             CompletionCallback::Read(_, ref c, _) => {
                                 c.complete(0);
                             }
@@ -109,7 +110,7 @@ enum CompletionCallback {
     Read(Rc<RefCell<std::fs::File>>, Rc<Completion>, usize),
     Write(
         Rc<RefCell<std::fs::File>>,
-        Rc<WriteCompletion>,
+        Rc<Completion>,
         Rc<RefCell<crate::Buffer>>,
         usize,
     ),
@@ -175,10 +176,10 @@ impl File for DarwinFile {
         Ok(())
     }
 
-    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-        let file = self.file.borrow();
+     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
+       let file = self.file.borrow();
         let result = {
-            let r = match *c {
+            let r = match &(*c) {
                 Completion::Read(r) => r,
                 Completion::Write(_) => unreachable!(),
             };
@@ -215,7 +216,7 @@ impl File for DarwinFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<WriteCompletion>,
+        c: Rc<Completion>,
     ) -> Result<()> {
         let file = self.file.borrow();
         let result = {
