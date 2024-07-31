@@ -67,7 +67,11 @@ impl IO for DarwinIO {
                     match cf {
                         CompletionCallback::Read(ref file, ref c, pos) => {
                             let mut file = file.borrow_mut();
-                            let mut buf = c.buf_mut();
+                            let r = match &(*c) {
+                                Completion::Read(r) => r,
+                                Completion::Write(_) => unreachable!(),
+                            };
+                            let mut buf = r.buf_mut();
                             file.seek(std::io::SeekFrom::Start(pos as u64))?;
                             file.read(buf.as_mut_slice())
                         }
@@ -83,7 +87,7 @@ impl IO for DarwinIO {
                     std::result::Result::Ok(n) => {
                         match cf {
                             CompletionCallback::Read(_, ref c, _) => {
-                                c.complete();
+                                c.complete(0);
                             }
                             CompletionCallback::Write(_, ref c, _, _) => {
                                 c.complete(n);
@@ -142,7 +146,10 @@ impl File for DarwinFile {
                     "Failed locking file. File is locked by another process"
                 )));
             } else {
-                return Err(LimboError::LockingError(format!("Failed locking file, {}", err)));
+                return Err(LimboError::LockingError(format!(
+                    "Failed locking file, {}",
+                    err
+                )));
             }
         }
         Ok(())
