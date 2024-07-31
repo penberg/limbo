@@ -19,6 +19,8 @@ pub struct ProgramBuilder {
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
     // List of deferred label resolutions. Each entry is a pair of (label, insn_reference).
     deferred_label_resolutions: Vec<(BranchOffset, InsnReference)>,
+    // Bitmask of cursors that have emitted a SeekRowid instruction.
+    seekrowid_emitted_bitmask: u64,
 }
 
 impl ProgramBuilder {
@@ -33,6 +35,7 @@ impl ProgramBuilder {
             cursor_ref: Vec::new(),
             constant_insns: Vec::new(),
             deferred_label_resolutions: Vec::new(),
+            seekrowid_emitted_bitmask: 0,
         }
     }
 
@@ -64,8 +67,20 @@ impl ProgramBuilder {
         cursor
     }
 
-    pub fn emit_insn(&mut self, insn: Insn) {
+    pub fn has_cursor_emitted_seekrowid(&self, cursor_id: CursorID) -> bool {
+        (self.seekrowid_emitted_bitmask & (1 << cursor_id)) != 0
+    }
+
+    fn _emit_insn(&mut self, insn: Insn) {
+        if let Insn::SeekRowid { cursor_id, .. } = insn {
+            // set the nth bit to 1, where n is the cursor_id, and the first bit is 0
+            self.seekrowid_emitted_bitmask |= 1 << cursor_id;
+        }
         self.insns.push(insn);
+    }
+
+    pub fn emit_insn(&mut self, insn: Insn) {
+        self._emit_insn(insn);
         if let Some(label) = self.next_insn_label {
             self.next_insn_label = None;
             self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
@@ -85,7 +100,7 @@ impl ProgramBuilder {
     }
 
     pub fn emit_insn_with_label_dependency(&mut self, insn: Insn, label: BranchOffset) {
-        self.insns.push(insn);
+        self._emit_insn(insn);
         self.add_label_dependency(label, (self.insns.len() - 1) as BranchOffset);
     }
 

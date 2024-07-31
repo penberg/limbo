@@ -179,7 +179,14 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("root={}", root_page),
+                format!(
+                    "table={}, root={}",
+                    program.cursor_ref[*cursor_id]
+                        .0
+                        .as_ref()
+                        .unwrap_or(&format!("cursor {}", cursor_id)),
+                    root_page
+                ),
             ),
             Insn::OpenReadAwait => (
                 "OpenReadAwait",
@@ -222,14 +229,20 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                "".to_string(),
+                format!(
+                    "Rewind table {}",
+                    program.cursor_ref[*cursor_id]
+                        .0
+                        .as_ref()
+                        .unwrap_or(&format!("cursor {}", cursor_id))
+                ),
             ),
             Insn::Column {
                 cursor_id,
                 column,
                 dest,
             } => {
-                let (_, table) = &program.cursor_ref[*cursor_id];
+                let (table_identifier, table) = &program.cursor_ref[*cursor_id];
                 (
                     "Column",
                     *cursor_id as i32,
@@ -240,10 +253,9 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                     format!(
                         "r[{}]={}.{}",
                         dest,
-                        table
+                        table_identifier
                             .as_ref()
-                            .map(|x| x.get_name())
-                            .unwrap_or(format!("cursor {}", cursor_id).as_str()),
+                            .unwrap_or(&format!("cursor {}", cursor_id)),
                         table
                             .as_ref()
                             .and_then(|x| x.column_index_to_name(*column))
@@ -377,10 +389,9 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                     "r[{}]={}.rowid",
                     dest,
                     &program.cursor_ref[*cursor_id]
-                        .1
+                        .0
                         .as_ref()
-                        .map(|x| x.get_name())
-                        .unwrap_or(format!("cursor {}", cursor_id).as_str())
+                        .unwrap_or(&format!("cursor {}", cursor_id))
                 ),
             ),
             Insn::SeekRowid {
@@ -398,10 +409,9 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                     "if (r[{}]!={}.rowid) goto {}",
                     src_reg,
                     &program.cursor_ref[*cursor_id]
-                        .1
+                        .0
                         .as_ref()
-                        .map(|x| x.get_name())
-                        .unwrap_or(format!("cursor {}", cursor_id).as_str()),
+                        .unwrap_or(&format!("cursor {}", cursor_id)),
                     target_pc
                 ),
             ),

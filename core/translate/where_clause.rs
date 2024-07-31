@@ -1,5 +1,4 @@
 use crate::{
-    error::LimboError,
     function::ScalarFunc,
     translate::{expr::translate_expr, select::Select},
     util::normalize_ident,
@@ -13,7 +12,7 @@ use sqlite3_parser::ast::{self};
 
 #[derive(Debug)]
 pub struct SeekRowid<'a> {
-    pub table: &'a String,
+    pub table: &'a str,
     pub rowid_expr: &'a ast::Expr,
 }
 
@@ -26,7 +25,28 @@ pub enum WhereExpr<'a> {
 #[derive(Debug)]
 pub struct WhereTerm<'a> {
     pub expr: WhereExpr<'a>,
-    pub evaluate_at_tbl: &'a String,
+    pub outer_join_table: Option<usize>,
+    pub table_references_bitmask: usize,
+}
+
+impl<'a> WhereTerm<'a> {
+    pub fn evaluate_at_loop(&self, select: &'a Select) -> usize {
+        if let Some(outer_join_table) = self.outer_join_table {
+            outer_join_table
+        } else {
+            self.innermost_table(select)
+        }
+    }
+
+    pub fn innermost_table(&self, select: &'a Select) -> usize {
+        let mut table = 0;
+        for i in 0..select.src_tables.len() {
+            if self.table_references_bitmask & (1 << i) != 0 {
+                table = i;
+            }
+        }
+        table
+    }
 }
 
 #[derive(Debug)]
@@ -45,7 +65,7 @@ pub fn split_constraint_to_terms<'a>(
     select: &'a Select,
     mut processed_where_clause: ProcessedWhereClause<'a>,
     where_clause_or_join_constraint: &'a ast::Expr,
-    outer_join_table_name: Option<&'a String>,
+    outer_join_table: Option<usize>,
 ) -> Result<ProcessedWhereClause<'a>> {
     let mut queue = vec![where_clause_or_join_constraint];
 
@@ -65,77 +85,16 @@ pub fn split_constraint_to_terms<'a>(
                         let seekrowid_candidate = select
                             .src_tables
                             .iter()
-                            .rev()
-                            .find_map(|t| {
-                                expr.check_seekrowid_candidate(&t.identifier, select)
-                                    .unwrap_or(None)
+                            .enumerate()
+                            .find_map(|(i, _)| {
+                                expr.check_seekrowid_candidate(i, select).unwrap_or(None)
                             })
-                            .map(|s| WhereExpr::SeekRowid(s));
+                            .map(WhereExpr::SeekRowid);
 
                         seekrowid_candidate.unwrap_or(WhereExpr::Expr(expr))
                     },
-                    evaluate_at_tbl: match outer_join_table_name {
-                        Some(table) => {
-                            // If we had e.g. SELECT * FROM t1 LEFT JOIN t2 WHERE t1.a > 10,
-                            // we could evaluate the t1.a > 10 condition at the cursor for t1, i.e. the outer table,
-                            // skipping t1 rows that don't match the condition.
-                            //
-                            // However, if we have SELECT * FROM t1 LEFT JOIN t2 ON t1.a > 10,
-                            // we need to evaluate the t1.a > 10 condition at the cursor for t2, i.e. the inner table,
-                            // because we need to skip rows from t2 that don't match the condition.
-                            //
-                            // In inner joins, both of the above are equivalent, but in left joins they are not.
-                            let tbl = select
-                                .src_tables
-                                .iter()
-                                .find(|t| t.identifier == *table)
-                                .ok_or(LimboError::ParseError(format!(
-                                    "Could not find cursor for table {}",
-                                    table
-                                )))?;
-
-                            &tbl.identifier
-                        }
-                        None => {
-                            // For any non-outer-join condition expression, find the cursor that it should be evaluated at.
-                            // This is the cursor that is the rightmost/innermost cursor that the expression depends on.
-                            // In SELECT * FROM t1, t2 WHERE t1.a > 10, the condition should be evaluated at the cursor for t1.
-                            // In SELECT * FROM t1, t2 WHERE t1.a > 10 OR t2.b > 20, the condition should be evaluated at the cursor for t2.
-                            //
-                            // We are splitting any AND expressions in this function, so for example in this query:
-                            // 'SELECT * FROM t1, t2 WHERE t1.a > 10 AND t2.b > 20'
-                            // we can evaluate the t1.a > 10 condition at the cursor for t1, and the t2.b > 20 condition at the cursor for t2.
-                            //
-                            // For expressions that don't depend on any cursor, we can evaluate them at the leftmost/outermost cursor.
-                            // E.g. 'SELECT * FROM t1 JOIN t2 ON false' can be evaluated at the cursor for t1.
-                            let table_refs = introspect_expression_for_table_refs(select, expr)?;
-
-                            // Get the innermost loop that matches any table_refs, and if not found, fall back to outermost loop.
-                            // The reasoning is that if a condition depends on a table, it should be evaluated at the cursor for that table,
-                            // and if it depends on multiple tables, it should be evaluated inside the innermost loop that contains all of them.
-                            // If a condition doesn't depend on any table, it doesn't functionally matter where it is evaluated, but
-                            // the most efficient place to evaluate it is at the outermost loop.
-
-                            let tbl =
-                                processed_where_clause
-                                    .loop_order
-                                    .iter()
-                                    .rev()
-                                    .find_map(|i| {
-                                        let tbl = &select.src_tables[*i];
-                                        if table_refs.contains(&&tbl.identifier) {
-                                            Some(tbl)
-                                        } else {
-                                            None
-                                        }
-                                    });
-
-                            let first_loop = processed_where_clause.loop_order[0];
-
-                            tbl.map(|t| &t.identifier)
-                                .unwrap_or(&select.src_tables[first_loop].identifier)
-                        }
-                    },
+                    outer_join_table,
+                    table_references_bitmask: introspect_expression_for_table_refs(select, expr)?,
                 };
                 processed_where_clause.terms.push(term);
             }
@@ -165,7 +124,7 @@ pub fn process_where<'a>(select: &'a Select) -> Result<ProcessedWhereClause<'a>>
         wc = split_constraint_to_terms(select, wc, w, None)?;
     }
 
-    for table in select.src_tables.iter() {
+    for (i, table) in select.src_tables.iter().enumerate() {
         if table.join_info.is_none() {
             continue;
         }
@@ -175,34 +134,18 @@ pub fn process_where<'a>(select: &'a Select) -> Result<ProcessedWhereClause<'a>>
                 select,
                 wc,
                 expr,
-                if table.is_outer_join() {
-                    Some(&table.identifier)
-                } else {
-                    None
-                },
+                if table.is_outer_join() { Some(i) } else { None },
             )?;
         }
     }
 
-    // Sort the terms by the loop_order.
-    // Inside a loop, put the most selective terms first, which currently means SeekRowid terms first (since we literally narrow down to a single row).
-
+    // sort seekrowids first (if e.g. u.id = 1 and u.age > 50, we want to seek on u.id = 1 first)
     wc.terms.sort_by(|a, b| {
-        let a_loop = wc
-            .loop_order
-            .iter()
-            .position(|i| &select.src_tables[*i].identifier == a.evaluate_at_tbl)
-            .unwrap();
-        let b_loop = wc
-            .loop_order
-            .iter()
-            .position(|i| &select.src_tables[*i].identifier == b.evaluate_at_tbl)
-            .unwrap();
-        a_loop.cmp(&b_loop).then_with(|| match (&a.expr, &b.expr) {
-            (WhereExpr::SeekRowid(_), WhereExpr::Expr(_)) => std::cmp::Ordering::Less,
-            (WhereExpr::Expr(_), WhereExpr::SeekRowid(_)) => std::cmp::Ordering::Greater,
-            _ => std::cmp::Ordering::Equal,
-        })
+        if let WhereExpr::SeekRowid(_) = a.expr {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        }
     });
 
     Ok(wc)
@@ -261,53 +204,32 @@ pub fn translate_tableless_where(
 pub fn translate_processed_where<'a>(
     program: &mut ProgramBuilder,
     select: &'a Select,
+    loops: &[LoopInfo],
     current_loop: &'a LoopInfo,
     where_c: &'a ProcessedWhereClause,
     skip_entire_table_label: BranchOffset,
     cursor_hint: Option<usize>,
 ) -> Result<()> {
-    let mut always_false_condition_exists = false;
-    let mut seekrowid_term_exists = false;
-    for t in where_c
-        .terms
-        .iter()
-        .filter(|t| *t.evaluate_at_tbl == current_loop.identifier)
-    {
-        if always_false_condition_exists && seekrowid_term_exists {
-            break;
-        }
-        match t.expr {
-            WhereExpr::Expr(e) => {
-                if e.is_always_false().unwrap_or(false) {
-                    always_false_condition_exists = true;
-                }
-            }
-            WhereExpr::SeekRowid(_) => {
-                seekrowid_term_exists = true;
+    for t in where_c.terms.iter().filter(|t| {
+        select.src_tables[t.evaluate_at_loop(select)].identifier == current_loop.identifier
+    }) {
+        if let WhereExpr::Expr(e) = &t.expr {
+            if e.is_always_false().unwrap_or(false) {
+                program.emit_insn_with_label_dependency(
+                    Insn::Goto {
+                        target_pc: skip_entire_table_label,
+                    },
+                    skip_entire_table_label,
+                );
+                return Ok(());
             }
         }
     }
-    if always_false_condition_exists {
-        program.emit_insn_with_label_dependency(
-            Insn::Goto {
-                target_pc: skip_entire_table_label,
-            },
-            skip_entire_table_label,
-        );
-        return Ok(());
-    }
 
-    let jump_target_when_false = if seekrowid_term_exists {
-        skip_entire_table_label
-    } else {
-        current_loop.next_row_label
-    };
-
-    for term in where_c
-        .terms
-        .iter()
-        .filter(|t| *t.evaluate_at_tbl == current_loop.identifier)
-    {
+    for term in where_c.terms.iter().filter(|t| {
+        select.src_tables[t.evaluate_at_loop(select)].identifier == current_loop.identifier
+    }) {
+        let jump_target_when_false = loops[term.evaluate_at_loop(select)].next_row_label;
         let jump_target_when_true = program.allocate_label();
         match &term.expr {
             WhereExpr::Expr(e) => {
@@ -324,6 +246,8 @@ pub fn translate_processed_where<'a>(
                 )?;
             }
             WhereExpr::SeekRowid(s) => {
+                let cursor_id = program.resolve_cursor_id(s.table, cursor_hint);
+
                 let computed_rowid_reg = program.alloc_register();
                 let _ = translate_expr(
                     program,
@@ -332,14 +256,41 @@ pub fn translate_processed_where<'a>(
                     computed_rowid_reg,
                     cursor_hint,
                 )?;
-                program.emit_insn_with_label_dependency(
-                    Insn::SeekRowid {
-                        cursor_id: current_loop.open_cursor,
-                        src_reg: computed_rowid_reg,
-                        target_pc: skip_entire_table_label,
-                    },
-                    skip_entire_table_label,
-                );
+
+                if !program.has_cursor_emitted_seekrowid(cursor_id) {
+                    program.emit_insn_with_label_dependency(
+                        Insn::SeekRowid {
+                            cursor_id,
+                            src_reg: computed_rowid_reg,
+                            target_pc: jump_target_when_false,
+                        },
+                        jump_target_when_false,
+                    );
+                } else {
+                    // If we have already emitted a SeekRowid instruction for this cursor, then other equality checks
+                    // against that table should be done using the row that was already fetched.
+                    // e.g. select u.age, p.name from users u join products p on u.id = p.id and p.id = 5;
+                    // emitting two SeekRowid instructions for the same 'p' cursor would yield an incorrect result.
+                    // Assume we are looping over users u, and right now u.id = 3.
+                    // We first SeekRowid on p.id = 3, and find a row.
+                    // If we then SeekRowid for p.id = 5, we would find a row with p.id = 5,
+                    // and end up with a result where u.id = 3 and p.id = 5, which is incorrect.
+                    // Instead we replace the second SeekRowid with a comparison against the row that was already fetched,
+                    // i.e. we compare p.id == 5, which would not match (and is the correct result).
+                    let rowid_reg = program.alloc_register();
+                    program.emit_insn(Insn::RowId {
+                        cursor_id,
+                        dest: rowid_reg,
+                    });
+                    program.emit_insn_with_label_dependency(
+                        Insn::Ne {
+                            lhs: rowid_reg,
+                            rhs: computed_rowid_reg,
+                            target_pc: jump_target_when_false,
+                        },
+                        jump_target_when_false,
+                    );
+                }
             }
         }
 
@@ -814,19 +765,20 @@ fn translate_condition_expr(
 fn introspect_expression_for_table_refs<'a>(
     select: &'a Select,
     where_expr: &'a ast::Expr,
-) -> Result<Vec<&'a String>> {
-    let mut table_refs = vec![];
+) -> Result<usize> {
+    let mut table_refs_mask = 0;
     match where_expr {
         ast::Expr::Binary(e1, _, e2) => {
-            table_refs.extend(introspect_expression_for_table_refs(select, e1)?);
-            table_refs.extend(introspect_expression_for_table_refs(select, e2)?);
+            table_refs_mask |= introspect_expression_for_table_refs(select, e1)?;
+            table_refs_mask |= introspect_expression_for_table_refs(select, e2)?;
         }
         ast::Expr::Id(ident) => {
             let ident = normalize_ident(&ident.0);
             let matching_tables = select
                 .src_tables
                 .iter()
-                .filter(|t| t.table.get_column(&ident).is_some());
+                .enumerate()
+                .filter(|(_, t)| t.table.get_column(&ident).is_some());
 
             let mut matches = 0;
             let mut matching_tbl = None;
@@ -838,8 +790,8 @@ fn introspect_expression_for_table_refs<'a>(
                 }
             }
 
-            if let Some(tbl) = matching_tbl {
-                table_refs.push(&tbl.identifier);
+            if let Some((tbl_index, _)) = matching_tbl {
+                table_refs_mask |= 1 << tbl_index;
             } else {
                 crate::bail_parse_error!("column not found: {}", &ident)
             }
@@ -847,42 +799,46 @@ fn introspect_expression_for_table_refs<'a>(
         ast::Expr::Qualified(tbl, ident) => {
             let tbl = normalize_ident(&tbl.0);
             let ident = normalize_ident(&ident.0);
-            let matching_table = select.src_tables.iter().find(|t| t.identifier == tbl);
+            let matching_table = select
+                .src_tables
+                .iter()
+                .enumerate()
+                .find(|(_, t)| t.identifier == tbl);
 
             if matching_table.is_none() {
                 crate::bail_parse_error!("table not found: {}", &tbl)
             }
             let matching_table = matching_table.unwrap();
-            if matching_table.table.get_column(&ident).is_none() {
+            if matching_table.1.table.get_column(&ident).is_none() {
                 crate::bail_parse_error!("column with qualified name {}.{} not found", &tbl, &ident)
             }
 
-            table_refs.push(&matching_table.identifier);
+            table_refs_mask |= 1 << matching_table.0;
         }
         ast::Expr::Literal(_) => {}
         ast::Expr::Like { lhs, rhs, .. } => {
-            table_refs.extend(introspect_expression_for_table_refs(select, lhs)?);
-            table_refs.extend(introspect_expression_for_table_refs(select, rhs)?);
+            table_refs_mask |= introspect_expression_for_table_refs(select, lhs)?;
+            table_refs_mask |= introspect_expression_for_table_refs(select, rhs)?;
         }
-        ast::Expr::FunctionCall { args, .. } => {
-            if let Some(args) = args {
-                for arg in args {
-                    table_refs.extend(introspect_expression_for_table_refs(select, arg)?);
-                }
+        ast::Expr::FunctionCall {
+            args: Some(args), ..
+        } => {
+            for arg in args {
+                table_refs_mask |= introspect_expression_for_table_refs(select, arg)?;
             }
         }
         ast::Expr::InList { lhs, rhs, .. } => {
-            table_refs.extend(introspect_expression_for_table_refs(select, lhs)?);
+            table_refs_mask |= introspect_expression_for_table_refs(select, lhs)?;
             if let Some(rhs_list) = rhs {
                 for rhs_expr in rhs_list {
-                    table_refs.extend(introspect_expression_for_table_refs(select, rhs_expr)?);
+                    table_refs_mask |= introspect_expression_for_table_refs(select, rhs_expr)?;
                 }
             }
         }
         _ => {}
     }
 
-    Ok(table_refs)
+    Ok(table_refs_mask)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -892,7 +848,7 @@ pub enum ConstantCondition {
 }
 
 pub trait Evaluatable<'a> {
-    // Returns the constant condition if the expression is a constant expression e.g. '1'
+    // if the expression is a constant expression e.g. '1', returns the constant condition
     fn check_constant(&self) -> Result<Option<ConstantCondition>>;
     fn is_always_true(&self) -> Result<bool> {
         Ok(self
@@ -904,38 +860,80 @@ pub trait Evaluatable<'a> {
             .check_constant()?
             .map_or(false, |c| c == ConstantCondition::AlwaysFalse))
     }
-    // Returns the table identifier if the expression is the primary key of a table
-    fn check_primary_key(&self, select: &'a Select) -> Result<Option<&'a String>>;
-    fn references_positive_integer(&self, select: &'a Select) -> bool;
+    // if the expression is the primary key of a table, returns the index of the table
+    fn check_primary_key(&self, select: &'a Select) -> Result<Option<usize>>;
+    // Returns a bitmask of which table indexes the expression references
+    fn get_table_references_bitmask(&self, select: &'a Select) -> Result<usize>;
     // Checks if the expression is a candidate for seekrowid optimization
     fn check_seekrowid_candidate(
         &'a self,
-        table_identifier: &'a String,
+        table_index: usize,
         select: &'a Select,
     ) -> Result<Option<SeekRowid<'a>>>;
 }
 
 impl<'a> Evaluatable<'a> for ast::Expr {
-    fn references_positive_integer(&self, select: &'a Select) -> bool {
-        match self {
-            ast::Expr::Literal(ast::Literal::Numeric(n)) => {
-                n.parse::<i64>().map_or(false, |n| n > 0)
-            }
-            expr => expr
-                .check_primary_key(select)
-                .map_or(false, |t| t.is_some()),
-        }
-    }
-    fn check_primary_key(&self, select: &'a Select) -> Result<Option<&'a String>> {
+    fn get_table_references_bitmask(&self, select: &'a Select) -> Result<usize> {
         match self {
             ast::Expr::Id(ident) => {
                 let ident = normalize_ident(&ident.0);
-                let tables = select.src_tables.iter().filter_map(|t| {
+                let tables = select.src_tables.iter().enumerate().filter_map(|(i, t)| {
+                    if t.table.get_column(&ident).is_some() {
+                        Some(i)
+                    } else {
+                        None
+                    }
+                });
+
+                let mut matches = 0;
+                let mut matching_tbl = None;
+
+                for tbl in tables {
+                    matching_tbl = Some(tbl);
+                    matches += 1;
+                    if matches > 1 {
+                        crate::bail_parse_error!("ambiguous column name {}", ident)
+                    }
+                }
+
+                Ok(matching_tbl.unwrap_or(0))
+            }
+            ast::Expr::Qualified(tbl, ident) => {
+                let tbl = normalize_ident(&tbl.0);
+                let ident = normalize_ident(&ident.0);
+                let table = select
+                    .src_tables
+                    .iter()
+                    .enumerate()
+                    .find(|(_, t)| t.identifier == tbl && t.table.get_column(&ident).is_some());
+
+                if table.is_none() {
+                    crate::bail_parse_error!("table not found: {}", tbl)
+                }
+
+                let table = table.unwrap();
+
+                Ok(table.0)
+            }
+            ast::Expr::Binary(lhs, _, rhs) => {
+                let lhs = lhs.as_ref().get_table_references_bitmask(select)?;
+                let rhs = rhs.as_ref().get_table_references_bitmask(select)?;
+
+                Ok(lhs | rhs)
+            }
+            _ => Ok(0),
+        }
+    }
+    fn check_primary_key(&self, select: &'a Select) -> Result<Option<usize>> {
+        match self {
+            ast::Expr::Id(ident) => {
+                let ident = normalize_ident(&ident.0);
+                let tables = select.src_tables.iter().enumerate().filter_map(|(i, t)| {
                     if t.table
                         .get_column(&ident)
                         .map_or(false, |(_, c)| c.primary_key)
                     {
-                        Some(&t.identifier)
+                        Some(i)
                     } else {
                         None
                     }
@@ -957,7 +955,7 @@ impl<'a> Evaluatable<'a> for ast::Expr {
             ast::Expr::Qualified(tbl, ident) => {
                 let tbl = normalize_ident(&tbl.0);
                 let ident = normalize_ident(&ident.0);
-                let table = select.src_tables.iter().find(|t| {
+                let table = select.src_tables.iter().enumerate().find(|(_, t)| {
                     t.identifier == tbl
                         && t.table
                             .get_column(&ident)
@@ -970,14 +968,14 @@ impl<'a> Evaluatable<'a> for ast::Expr {
 
                 let table = table.unwrap();
 
-                Ok(Some(&table.identifier))
+                Ok(Some(table.0))
             }
             _ => Ok(None),
         }
     }
     fn check_seekrowid_candidate(
         &'a self,
-        table_identifier: &'a String,
+        table_index: usize,
         select: &'a Select,
     ) -> Result<Option<SeekRowid<'a>>> {
         match self {
@@ -985,19 +983,27 @@ impl<'a> Evaluatable<'a> for ast::Expr {
                 let lhs = lhs.as_ref();
                 let rhs = rhs.as_ref();
 
-                if let Some(table) = lhs.check_primary_key(select)? {
-                    if table == table_identifier && rhs.references_positive_integer(select) {
+                if let Some(lhs_table_index) = lhs.check_primary_key(select)? {
+                    let rhs_table_refs_bitmask = rhs.get_table_references_bitmask(select)?;
+                    // For now, we only support seekrowid optimization if the primary key is in an inner loop compared to the other expression.
+                    // Example: explain select u.age, p.name from users u join products p on u.id = p.id;
+                    // In this case, we loop over the users table and seek the products table.
+                    // We also support the case where the other expression is a constant,
+                    // e.g. SELECT * FROM USERS u WHERE u.id = 5.
+                    // In this case the bitmask of the other expression is 0.
+                    if lhs_table_index == table_index && lhs_table_index >= rhs_table_refs_bitmask {
                         return Ok(Some(SeekRowid {
-                            table: table_identifier,
+                            table: &select.src_tables[table_index].identifier,
                             rowid_expr: rhs,
                         }));
                     }
                 }
 
-                if let Some(table) = rhs.check_primary_key(select)? {
-                    if table == table_identifier && lhs.references_positive_integer(select) {
+                if let Some(rhs_table_index) = rhs.check_primary_key(select)? {
+                    let lhs_table_refs_bitmask = lhs.get_table_references_bitmask(select)?;
+                    if rhs_table_index == table_index && rhs_table_index >= lhs_table_refs_bitmask {
                         return Ok(Some(SeekRowid {
-                            table: table_identifier,
+                            table: &select.src_tables[table_index].identifier,
                             rowid_expr: lhs,
                         }));
                     }

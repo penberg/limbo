@@ -565,6 +565,7 @@ fn translate_tables_begin(
         translate_table_open_loop(
             program,
             select,
+            &loops,
             loop_info,
             &processed_where,
             current_loop_early_terminate_label,
@@ -578,9 +579,9 @@ fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     // iterate in reverse order as we open cursors in order
     for table_loop in loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
+        program.resolve_label(table_loop.next_row_label, program.offset());
         if let Plan::Scan = table_loop.plan {
             // If we're scanning a table, we need to emit a Next instruction to fetch the next row.
-            program.resolve_label(table_loop.next_row_label, program.offset());
             program.emit_insn(Insn::NextAsync { cursor_id });
             program.emit_insn_with_label_dependency(
                 Insn::NextAwait {
@@ -708,6 +709,7 @@ fn left_join_match_flag_check(
 fn translate_table_open_loop(
     program: &mut ProgramBuilder,
     select: &Select,
+    loops: &[LoopInfo],
     loop_info: &LoopInfo,
     w: &ProcessedWhereClause,
     early_terminate_label: BranchOffset,
@@ -742,7 +744,15 @@ fn translate_table_open_loop(
         );
     }
 
-    translate_processed_where(program, select, loop_info, w, early_terminate_label, None)?;
+    translate_processed_where(
+        program,
+        select,
+        loops,
+        loop_info,
+        w,
+        early_terminate_label,
+        None,
+    )?;
 
     if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
         left_join_match_flag_set_true(program, left_join);

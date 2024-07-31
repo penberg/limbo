@@ -435,6 +435,9 @@ impl Program {
                         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
                             state.registers[dest] = OwnedValue::Float(lhs + rhs);
                         }
+                        ((OwnedValue::Null, _) | (_, OwnedValue::Null)) => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
                         _ => {
                             todo!();
                         }
