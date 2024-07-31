@@ -497,9 +497,10 @@ impl BTreeCursor {
                 break;
             }
 
+            // Propagate split divided to top.
             payload.extend_from_slice(&(mem_page.page_idx as u32).to_be_bytes());
             payload.extend(std::iter::repeat(0).take(9));
-            let n = write_varint(&mut payload.as_mut_slice()[0..9], key as u64);
+            let n = write_varint(&mut payload.as_mut_slice()[4..], key as u64);
             payload.truncate(n);
 
             self.page = RefCell::new(Some(mem_page.parent.as_ref().unwrap().clone()));
