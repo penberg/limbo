@@ -67,7 +67,7 @@ impl IO for DarwinIO {
                     match cf {
                         CompletionCallback::Read(ref file, ref c, pos) => {
                             let mut file = file.borrow_mut();
-                            let r = match &(*c) {
+                            let r = match *c {
                                 Completion::Read(r) => r,
                                 Completion::Write(_) => unreachable!(),
                             };
@@ -178,7 +178,7 @@ impl File for DarwinFile {
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let file = self.file.borrow();
         let result = {
-            let r = match &(*c) {
+            let r = match *c {
                 Completion::Read(r) => r,
                 Completion::Write(_) => unreachable!(),
             };
