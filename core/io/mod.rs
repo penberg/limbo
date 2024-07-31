@@ -1,7 +1,9 @@
 use crate::Result;
 use cfg_block::cfg_block;
+use std::fmt;
 use std::{
     cell::{Ref, RefCell, RefMut},
+    fmt::Debug,
     mem::ManuallyDrop,
     pin::Pin,
     rc::Rc,
@@ -11,8 +13,7 @@ pub trait File {
     fn lock_file(&self, exclusive: bool) -> Result<()>;
     fn unlock_file(&self) -> Result<()>;
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
-    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<WriteCompletion>)
-        -> Result<()>;
+    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
 }
 
 pub trait IO {
@@ -21,21 +22,34 @@ pub trait IO {
     fn run_once(&self) -> Result<()>;
 }
 
-pub type Complete = dyn Fn(&Buffer);
-pub type WriteComplete = dyn Fn(usize);
+pub type Complete = dyn Fn(Rc<RefCell<Buffer>>);
+pub type WriteComplete = dyn Fn(i32);
 
-pub struct Completion {
-    pub buf: RefCell<Buffer>,
+pub enum Completion {
+    Read(ReadCompletion),
+    Write(WriteCompletion),
+}
+
+pub struct ReadCompletion {
+    pub buf: Rc<RefCell<Buffer>>,
     pub complete: Box<Complete>,
+}
+
+impl Completion {
+    pub fn complete(&self, result: i32) {
+        match self {
+            Completion::Read(r) => r.complete(),
+            Completion::Write(w) => w.complete(result), // fix
+        }
+    }
 }
 
 pub struct WriteCompletion {
     pub complete: Box<WriteComplete>,
 }
 
-impl Completion {
-    pub fn new(buf: Buffer, complete: Box<Complete>) -> Self {
-        let buf = RefCell::new(buf);
+impl ReadCompletion {
+    pub fn new(buf: Rc<RefCell<Buffer>>, complete: Box<Complete>) -> Self {
         Self { buf, complete }
     }
 
@@ -48,8 +62,7 @@ impl Completion {
     }
 
     pub fn complete(&self) {
-        let buf = self.buf.borrow_mut();
-        (self.complete)(&buf);
+        (self.complete)(self.buf.clone());
     }
 }
 
@@ -57,7 +70,7 @@ impl WriteCompletion {
     pub fn new(complete: Box<WriteComplete>) -> Self {
         Self { complete }
     }
-    pub fn complete(&self, bytes_written: usize) {
+    pub fn complete(&self, bytes_written: i32) {
         (self.complete)(bytes_written);
     }
 }
@@ -70,6 +83,12 @@ pub type BufferDropFn = Rc<dyn Fn(BufferData)>;
 pub struct Buffer {
     data: ManuallyDrop<BufferData>,
     drop: BufferDropFn,
+}
+
+impl Debug for Buffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.data)
+    }
 }
 
 impl Drop for Buffer {

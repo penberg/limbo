@@ -1,4 +1,4 @@
-use crate::{Completion, File, Result, WriteCompletion, IO};
+use crate::{Completion, File, Result, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
@@ -45,11 +45,15 @@ impl File for GenericFile {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         {
-            let mut buf = c.buf_mut();
+            let r = match &(*c) {
+                Completion::Read(r) => r,
+                Completion::Write(_) => unreachable!(),
+            };
+            let mut buf = r.buf_mut();
             let buf = buf.as_mut_slice();
             file.read_exact(buf)?;
         }
-        c.complete();
+        c.complete(0);
         Ok(())
     }
 
@@ -57,7 +61,7 @@ impl File for GenericFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<WriteCompletion>,
+        c: Rc<Completion>,
     ) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;

@@ -4,6 +4,8 @@ use std::{cell::Ref, rc::Rc};
 use crate::error::LimboError;
 use crate::Result;
 
+use crate::sqlite3_ondisk::write_varint;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
     Null,
@@ -301,6 +303,59 @@ impl OwnedRecord {
     pub fn new(values: Vec<OwnedValue>) -> Self {
         Self { values }
     }
+
+    pub fn serialize(&self, buf: &mut Vec<u8>) {
+        let initial_i = buf.len();
+
+        for value in &self.values {
+            let serial_type = match value {
+                OwnedValue::Null => 0,
+                OwnedValue::Integer(_) => 6, // for now let's only do i64
+                OwnedValue::Float(_) => 7,
+                OwnedValue::Text(t) => (t.len() * 2 + 13) as u64,
+                OwnedValue::Blob(b) => (b.len() * 2 + 12) as u64,
+                // not serializable values
+                OwnedValue::Agg(_) => unreachable!(),
+                OwnedValue::Record(_) => unreachable!(),
+            };
+
+            buf.resize(buf.len() + 9, 0); // Ensure space for varint
+            let len = buf.len();
+            let n = write_varint(&mut buf[len - 9..], serial_type);
+            buf.truncate(buf.len() - 9 + n); // Remove unused bytes
+        }
+
+        let mut header_size = buf.len() - initial_i;
+        // write content
+        for value in &self.values {
+            match value {
+                OwnedValue::Null => {}
+                OwnedValue::Integer(i) => buf.extend_from_slice(&i.to_be_bytes()),
+                OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
+                OwnedValue::Text(t) => buf.extend_from_slice(t.as_bytes()),
+                OwnedValue::Blob(b) => buf.extend_from_slice(b),
+                // non serializable
+                OwnedValue::Agg(_) => unreachable!(),
+                OwnedValue::Record(_) => unreachable!(),
+            };
+        }
+
+        let mut header_bytes_buf: Vec<u8> = Vec::new();
+        if header_size <= 126 {
+            // common case
+            header_size += 1;
+        } else {
+            todo!("calculate big header size extra bytes");
+            // get header varint len
+            // header_size += n;
+            // if( nVarint<sqlite3VarintLen(nHdr) ) nHdr++;
+        }
+        assert!(header_size <= 126);
+        header_bytes_buf.extend(std::iter::repeat(0).take(9));
+        let n = write_varint(&mut header_bytes_buf.as_mut_slice(), header_size as u64);
+        header_bytes_buf.truncate(n);
+        buf.splice(initial_i..initial_i, header_bytes_buf.iter().cloned());
+    }
 }
 
 pub enum CursorResult<T> {
@@ -315,7 +370,13 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Option<u64>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
-    fn insert(&mut self, record: &OwnedRecord) -> Result<()>;
+    fn insert(
+        &mut self,
+        key: &OwnedValue,
+        record: &OwnedRecord,
+        moved_before: bool, /* Tells inserter that it doesn't need to traverse in order to find leaf page */
+    ) -> Result<CursorResult<()>>; //
+    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
     fn set_null_flag(&mut self, flag: bool);
     fn get_null_flag(&self) -> bool;
 }

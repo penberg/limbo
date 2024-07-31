@@ -25,7 +25,7 @@
 /// For more information, see: https://www.sqlite.org/fileformat.html
 use crate::buffer_pool::BufferPool;
 use crate::error::LimboError;
-use crate::io::{Buffer, Completion, WriteCompletion};
+use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
 use crate::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{PageSource, Result};
@@ -47,12 +47,12 @@ pub struct DatabaseHeader {
     pub page_size: u16,
     write_version: u8,
     read_version: u8,
-    unused_space: u8,
+    pub unused_space: u8,
     max_embed_frac: u8,
     min_embed_frac: u8,
     min_leaf_frac: u8,
     change_counter: u32,
-    database_size: u32,
+    pub database_size: u32,
     freelist_trunk_page: u32,
     freelist_pages: u32,
     schema_cookie: u32,
@@ -70,19 +70,23 @@ pub struct DatabaseHeader {
 
 pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Buffer::allocate(512, drop_fn);
+    let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let result = Rc::new(RefCell::new(DatabaseHeader::default()));
     let header = result.clone();
-    let complete = Box::new(move |buf: &Buffer| {
+    let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let header = header.clone();
         finish_read_database_header(buf, header).unwrap();
     });
-    let c = Rc::new(Completion::new(buf, complete));
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
     page_source.get(1, c.clone())?;
     Ok(result)
 }
 
-fn finish_read_database_header(buf: &Buffer, header: Rc<RefCell<DatabaseHeader>>) -> Result<()> {
+fn finish_read_database_header(
+    buf: Rc<RefCell<Buffer>>,
+    header: Rc<RefCell<DatabaseHeader>>,
+) -> Result<()> {
+    let buf = buf.borrow();
     let buf = buf.as_slice();
     let mut header = std::cell::RefCell::borrow_mut(&header);
     header.magic.copy_from_slice(&buf[0..16]);
@@ -123,38 +127,14 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let buffer_to_copy_in_cb = buffer_to_copy.clone();
 
     let header_cb = header.clone();
-    let complete = Box::new(move |buffer: &Buffer| {
+    let complete = Box::new(move |buffer: Rc<RefCell<Buffer>>| {
         let header = header_cb.clone();
-        let buffer: Buffer = buffer.clone();
+        let buffer: Buffer = buffer.borrow().clone();
         let buffer = Rc::new(RefCell::new(buffer));
         {
             let mut buf_mut = std::cell::RefCell::borrow_mut(&buffer);
             let buf = buf_mut.as_mut_slice();
-            buf[0..16].copy_from_slice(&header.magic);
-            buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
-            buf[18] = header.write_version;
-            buf[19] = header.read_version;
-            buf[20] = header.unused_space;
-            buf[21] = header.max_embed_frac;
-            buf[22] = header.min_embed_frac;
-            buf[23] = header.min_leaf_frac;
-            buf[24..28].copy_from_slice(&header.change_counter.to_be_bytes());
-            buf[28..32].copy_from_slice(&header.database_size.to_be_bytes());
-            buf[32..36].copy_from_slice(&header.freelist_trunk_page.to_be_bytes());
-            buf[36..40].copy_from_slice(&header.freelist_pages.to_be_bytes());
-            buf[40..44].copy_from_slice(&header.schema_cookie.to_be_bytes());
-            buf[44..48].copy_from_slice(&header.schema_format.to_be_bytes());
-            buf[48..52].copy_from_slice(&header.default_cache_size.to_be_bytes());
-
-            buf[52..56].copy_from_slice(&header.vacuum.to_be_bytes());
-            buf[56..60].copy_from_slice(&header.text_encoding.to_be_bytes());
-            buf[60..64].copy_from_slice(&header.user_version.to_be_bytes());
-            buf[64..68].copy_from_slice(&header.incremental_vacuum.to_be_bytes());
-
-            buf[68..72].copy_from_slice(&header.application_id.to_be_bytes());
-            buf[72..92].copy_from_slice(&header.reserved);
-            buf[92..96].copy_from_slice(&header.version_valid_for.to_be_bytes());
-            buf[96..100].copy_from_slice(&header.version_number.to_be_bytes());
+            write_header_to_buf(buf, &header);
             let mut buffer_to_copy = std::cell::RefCell::borrow_mut(&buffer_to_copy_in_cb);
             let buffer_to_copy_slice = buffer_to_copy.as_mut_slice();
 
@@ -163,39 +143,57 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     });
 
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Buffer::allocate(512, drop_fn);
-    let c = Rc::new(Completion::new(buf.clone(), complete));
+    let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf.clone(), complete)));
     page_source.get(1, c.clone())?;
     // run get header block
     pager.io.run_once()?;
 
     let buffer_in_cb = buffer_to_copy.clone();
-    let write_complete = Box::new(move |bytes_written: usize| {
+    let write_complete = Box::new(move |bytes_written: i32| {
         let buf = buffer_in_cb.clone();
         let buf_len = std::cell::RefCell::borrow(&buf).len();
-        if bytes_written < buf_len {
+        if bytes_written < buf_len as i32 {
             log::error!("wrote({bytes_written}) less than expected({buf_len})");
         }
         // finish_read_database_header(buf, header).unwrap();
     });
-    let c = Rc::new(WriteCompletion::new(write_complete));
+    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
     page_source.write(0, buffer_to_copy.clone(), c).unwrap();
 
     Ok(())
 }
 
-#[derive(Debug)]
-pub struct BTreePageHeader {
-    page_type: PageType,
-    _first_freeblock_offset: u16,
-    num_cells: u16,
-    _cell_content_area: u16,
-    _num_frag_free_bytes: u8,
-    pub(crate) right_most_pointer: Option<u32>,
+fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
+    buf[0..16].copy_from_slice(&header.magic);
+    buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
+    buf[18] = header.write_version;
+    buf[19] = header.read_version;
+    buf[20] = header.unused_space;
+    buf[21] = header.max_embed_frac;
+    buf[22] = header.min_embed_frac;
+    buf[23] = header.min_leaf_frac;
+    buf[24..28].copy_from_slice(&header.change_counter.to_be_bytes());
+    buf[28..32].copy_from_slice(&header.database_size.to_be_bytes());
+    buf[32..36].copy_from_slice(&header.freelist_trunk_page.to_be_bytes());
+    buf[36..40].copy_from_slice(&header.freelist_pages.to_be_bytes());
+    buf[40..44].copy_from_slice(&header.schema_cookie.to_be_bytes());
+    buf[44..48].copy_from_slice(&header.schema_format.to_be_bytes());
+    buf[48..52].copy_from_slice(&header.default_cache_size.to_be_bytes());
+
+    buf[52..56].copy_from_slice(&header.vacuum.to_be_bytes());
+    buf[56..60].copy_from_slice(&header.text_encoding.to_be_bytes());
+    buf[60..64].copy_from_slice(&header.user_version.to_be_bytes());
+    buf[64..68].copy_from_slice(&header.incremental_vacuum.to_be_bytes());
+
+    buf[68..72].copy_from_slice(&header.application_id.to_be_bytes());
+    buf[72..92].copy_from_slice(&header.reserved);
+    buf[92..96].copy_from_slice(&header.version_valid_for.to_be_bytes());
+    buf[96..100].copy_from_slice(&header.version_number.to_be_bytes());
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum PageType {
     IndexInterior = 2,
     TableInterior = 5,
@@ -218,15 +216,193 @@ impl TryFrom<u8> for PageType {
 }
 
 #[derive(Debug)]
-pub struct BTreePage {
-    pub header: BTreePageHeader,
-    pub cells: Vec<BTreeCell>,
+pub struct PageContent {
+    pub offset: usize,
+    pub buffer: Rc<RefCell<Buffer>>,
 }
 
-pub fn begin_read_btree_page(
+impl Clone for PageContent {
+    fn clone(&self) -> Self {
+        Self {
+            offset: self.offset,
+            buffer: Rc::new(RefCell::new((*self.buffer.borrow()).clone())),
+        }
+    }
+}
+
+impl PageContent {
+    pub fn page_type(&self) -> PageType {
+        self.read_u8(self.offset).try_into().unwrap()
+    }
+
+    fn read_u8(&self, pos: usize) -> u8 {
+        // unsafe trick to borrow twice
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
+            buf[pos]
+        }
+    }
+
+    fn read_u16(&self, pos: usize) -> u16 {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
+            u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
+        }
+    }
+
+    fn read_u32(&self, pos: usize) -> u32 {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
+            u32::from_be_bytes([
+                buf[self.offset + pos],
+                buf[self.offset + pos + 1],
+                buf[self.offset + pos + 2],
+                buf[self.offset + pos + 3],
+            ])
+        }
+    }
+
+    pub fn write_u8(&self, pos: usize, value: u8) {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf[self.offset + pos] = value;
+        }
+    }
+
+    pub fn write_u16(&self, pos: usize, value: u16) {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
+        }
+    }
+
+    pub fn write_u32(&self, pos: usize, value: u32) {
+        unsafe {
+            let buf_pointer = &self.buffer.as_ptr();
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
+        }
+    }
+
+    pub fn first_freeblock(&self) -> u16 {
+        self.read_u16(1)
+    }
+
+    pub fn cell_count(&self) -> usize {
+        self.read_u16(3) as usize
+    }
+
+    pub fn cell_content_area(&self) -> u16 {
+        self.read_u16(5) as u16
+    }
+
+    pub fn num_frag_free_bytes(&self) -> u8 {
+        self.read_u8(7) as u8
+    }
+
+    pub fn rightmost_pointer(&self) -> Option<u32> {
+        match self.page_type() {
+            PageType::IndexInterior => Some(self.read_u32(8)),
+            PageType::TableInterior => Some(self.read_u32(8)),
+            PageType::IndexLeaf => None,
+            PageType::TableLeaf => None,
+        }
+    }
+
+    pub fn cell_get(&self, idx: usize) -> Result<BTreeCell> {
+        let buf = self.buffer.borrow();
+        let buf = buf.as_slice();
+
+        let ncells = self.cell_count();
+        let cell_start = match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        };
+        assert!(idx < ncells, "cell_get: idx out of bounds");
+        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = self.read_u16(cell_pointer) as usize;
+
+        read_btree_cell(buf, &self.page_type(), cell_pointer)
+    }
+
+    pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
+        let cell_start = match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        };
+        (self.offset + cell_start, self.cell_count() * 2)
+    }
+
+    pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {
+        let mut buf = self.buffer.borrow_mut();
+        let buf = buf.as_mut_slice();
+        self.cell_get_raw_region_borrowed(idx, buf)
+    }
+
+    pub fn cell_get_raw_region_borrowed(&self, idx: usize, buf: &mut [u8]) -> (usize, usize) {
+        let ncells = self.cell_count();
+        let cell_start = match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        };
+        assert!(idx < ncells, "cell_get: idx out of bounds");
+        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = self.read_u16(cell_pointer) as usize;
+        let start = cell_pointer;
+        let len = match self.page_type() {
+            PageType::IndexInterior => {
+                let (len_payload, n_payload) = read_varint(&buf[cell_pointer + 4..]).unwrap();
+                4 + len_payload as usize + n_payload + 4
+            }
+            PageType::TableInterior => {
+                let (_, n_rowid) = read_varint(&buf[cell_pointer + 4..]).unwrap();
+                4 + n_rowid
+            }
+            PageType::IndexLeaf => {
+                let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
+                len_payload as usize + n_payload + 4
+            }
+            PageType::TableLeaf => {
+                let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
+                let (_, n_rowid) = read_varint(&buf[cell_pointer + n_payload..]).unwrap();
+                // TODO: add overflow 4 bytes
+                len_payload as usize + n_payload + n_rowid
+            }
+        };
+        (start, len)
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        match self.page_type() {
+            PageType::IndexInterior => false,
+            PageType::TableInterior => false,
+            PageType::IndexLeaf => true,
+            PageType::TableLeaf => true,
+        }
+    }
+
+    pub fn write_database_header(&self, header: &DatabaseHeader) {
+        let mut buf = self.buffer.borrow_mut();
+        let buf = buf.as_mut_slice();
+        write_header_to_buf(buf, header);
+    }
+}
+
+pub fn begin_read_page(
     page_source: &PageSource,
     buffer_pool: Rc<BufferPool>,
-    page: Rc<Page>,
+    page: Rc<RefCell<Page>>,
     page_idx: usize,
 ) -> Result<()> {
     trace!("begin_read_btree_page(page_idx = {})", page_idx);
@@ -235,59 +411,67 @@ pub fn begin_read_btree_page(
         let buffer_pool = buffer_pool.clone();
         buffer_pool.put(buf);
     });
-    let buf = Buffer::new(buf, drop_fn);
-    let complete = Box::new(move |buf: &Buffer| {
+    let buf = Rc::new(RefCell::new(Buffer::new(buf, drop_fn)));
+    let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let page = page.clone();
-        if finish_read_btree_page(page_idx, buf, page.clone()).is_err() {
-            page.set_error();
+        if finish_read_page(page_idx, buf, page.clone()).is_err() {
+            page.borrow_mut().set_error();
         }
     });
-    let c = Rc::new(Completion::new(buf, complete));
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
     page_source.get(page_idx, c.clone())?;
     Ok(())
 }
 
-fn finish_read_btree_page(page_idx: usize, buf: &Buffer, page: Rc<Page>) -> Result<()> {
+fn finish_read_page(
+    page_idx: usize,
+    buffer_ref: Rc<RefCell<Buffer>>,
+    page: Rc<RefCell<Page>>,
+) -> Result<()> {
     trace!("finish_read_btree_page(page_idx = {})", page_idx);
-    let mut pos = if page_idx == 1 {
+    let pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
     } else {
         0
     };
-    let buf = buf.as_slice();
-    let mut header = BTreePageHeader {
-        page_type: buf[pos].try_into()?,
-        _first_freeblock_offset: u16::from_be_bytes([buf[pos + 1], buf[pos + 2]]),
-        num_cells: u16::from_be_bytes([buf[pos + 3], buf[pos + 4]]),
-        _cell_content_area: u16::from_be_bytes([buf[pos + 5], buf[pos + 6]]),
-        _num_frag_free_bytes: buf[pos + 7],
-        right_most_pointer: None,
+    let inner = PageContent {
+        offset: pos,
+        buffer: buffer_ref.clone(),
     };
-    pos += 8;
-    if header.page_type == PageType::IndexInterior || header.page_type == PageType::TableInterior {
-        header.right_most_pointer = Some(u32::from_be_bytes([
-            buf[pos],
-            buf[pos + 1],
-            buf[pos + 2],
-            buf[pos + 3],
-        ]));
-        pos += 4;
+    {
+        let page = page.borrow_mut();
+        page.contents.write().unwrap().replace(inner);
+        page.set_uptodate();
+        page.clear_locked();
     }
-    let mut cells = Vec::with_capacity(header.num_cells as usize);
-    for _ in 0..header.num_cells {
-        let cell_pointer = u16::from_be_bytes([buf[pos], buf[pos + 1]]);
-        pos += 2;
-        let cell = read_btree_cell(buf, &header.page_type, cell_pointer as usize)?;
-        cells.push(cell);
-    }
-    let inner = BTreePage { header, cells };
-    page.contents.write().unwrap().replace(inner);
-    page.set_uptodate();
-    page.clear_locked();
     Ok(())
 }
 
-#[derive(Debug)]
+pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result<()> {
+    let page_source = &pager.page_source;
+    let page_finish = page.clone();
+    let page = page.borrow();
+
+    let contents = page.contents.read().unwrap();
+    let contents = contents.as_ref().unwrap();
+    let buffer = contents.buffer.clone();
+    let write_complete = {
+        let buf_copy = buffer.clone();
+        Box::new(move |bytes_written: i32| {
+            let buf_copy = buf_copy.clone();
+            let buf_len = buf_copy.borrow().len();
+            page_finish.borrow_mut().clear_dirty();
+            if bytes_written < buf_len as i32 {
+                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+            }
+        })
+    };
+    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    page_source.write(page.id, buffer.clone(), c)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
 pub enum BTreeCell {
     TableInteriorCell(TableInteriorCell),
     TableLeafCell(TableLeafCell),
@@ -295,27 +479,27 @@ pub enum BTreeCell {
     IndexLeafCell(IndexLeafCell),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableInteriorCell {
     pub _left_child_page: u32,
     pub _rowid: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TableLeafCell {
     pub _rowid: u64,
     pub _payload: Vec<u8>,
     pub first_overflow_page: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexInteriorCell {
     pub left_child_page: u32,
     pub payload: Vec<u8>,
     pub first_overflow_page: Option<u32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexLeafCell {
     pub payload: Vec<u8>,
     pub first_overflow_page: Option<u32>,
@@ -442,15 +626,14 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
         let (serial_type, nr) = read_varint(&payload[pos..])?;
         let serial_type = SerialType::try_from(serial_type)?;
         serial_types.push(serial_type);
-        assert!(pos + nr < payload.len());
         pos += nr;
         assert!(header_size >= nr);
         header_size -= nr;
     }
     let mut values = Vec::with_capacity(serial_types.len());
     for serial_type in &serial_types {
-        let (value, usize) = read_value(&payload[pos..], serial_type)?;
-        pos += usize;
+        let (value, n) = read_value(&payload[pos..], serial_type)?;
+        pos += n;
         values.push(value);
     }
     Ok(OwnedRecord::new(values))
@@ -544,7 +727,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
     }
 }
 
-fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
+pub fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     let mut v: u64 = 0;
     for i in 0..8 {
         match buf.get(i) {
@@ -561,6 +744,45 @@ fn read_varint(buf: &[u8]) -> Result<(u64, usize)> {
     }
     v = (v << 8) + buf[8] as u64;
     Ok((v, 9))
+}
+
+pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
+    if value <= 0x7f {
+        buf[0] = (value & 0x7f) as u8;
+        return 1;
+    }
+
+    if value <= 0x3fff {
+        buf[0] = (((value >> 7) & 0x7f) | 0x80) as u8;
+        buf[1] = (value & 0x7f) as u8;
+        return 2;
+    }
+
+    let mut value = value;
+    if (value & ((0xff000000_u64) << 32)) > 0 {
+        buf[8] = value as u8;
+        value >>= 8;
+        for i in (0..8).rev() {
+            buf[i] = ((value & 0x7f) | 0x80) as u8;
+            value >>= 7;
+        }
+        return 9;
+    }
+
+    let mut encoded: [u8; 10] = [0; 10];
+    let mut bytes = value;
+    let mut n = 0;
+    while bytes != 0 {
+        let v = 0x80 | (bytes & 0x7f);
+        encoded[n] = v as u8;
+        bytes >>= 7;
+        n += 1;
+    }
+    encoded[0] &= 0x7f;
+    for i in 0..n {
+        buf[i] = encoded[n - 1 - i];
+    }
+    return n;
 }
 
 #[cfg(test)]
@@ -650,5 +872,32 @@ mod tests {
         let buf = [0b11111110];
         let result = read_varint(&buf);
         assert!(result.is_err());
+    }
+
+    // **    0x00                      becomes  0x00000000
+    // **    0x7f                      becomes  0x0000007f
+    // **    0x81 0x00                 becomes  0x00000080
+    // **    0x82 0x00                 becomes  0x00000100
+    // **    0x80 0x7f                 becomes  0x0000007f
+    // **    0x81 0x91 0xd1 0xac 0x78  becomes  0x12345678
+    // **    0x81 0x81 0x81 0x81 0x01  becomes  0x10204081
+    #[rstest]
+    #[case((0, 1), &[0x00])]
+    #[case((1, 1), &[0x01])]
+    #[case((129, 2), &[0x81, 0x01] )]
+    #[case((16513, 3), &[0x81, 0x81, 0x01] )]
+    #[case((2113665, 4), &[0x81, 0x81, 0x81, 0x01] )]
+    #[case((270549121, 5), &[0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((34630287489, 6), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((4432676798593, 7), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((567382630219905, 8), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    #[case((145249953336295681, 9), &[0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x01] )]
+    fn test_write_varint(#[case] value: (u64, usize), #[case] output: &[u8]) {
+        let mut buf: [u8; 10] = [0; 10];
+        let n = write_varint(&mut buf, value.0);
+        assert_eq!(n, value.1);
+        for i in 0..output.len() {
+            assert_eq!(buf[i], output[i]);
+        }
     }
 }

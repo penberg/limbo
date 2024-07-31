@@ -28,6 +28,7 @@ use crate::function::{AggFunc, ScalarFunc};
 use crate::pager::Pager;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
+use crate::sqlite3_ondisk::DatabaseHeader;
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 use crate::Result;
 
@@ -279,6 +280,63 @@ pub enum Insn {
         dest: usize,      // P3
         func: ScalarFunc, // P4
     },
+
+    InitCoroutine {
+        yield_reg: usize,
+        jump_on_definition: BranchOffset,
+        start_offset: BranchOffset,
+    },
+
+    EndCoroutine {
+        yield_reg: usize,
+    },
+
+    Yield {
+        yield_reg: usize,
+        end_offset: BranchOffset,
+    },
+
+    InsertAsync {
+        cursor: CursorID,
+        key_reg: usize,    // Must be int.
+        record_reg: usize, // Blob of record data.
+        flag: usize,       // Flags used by insert, for now not used.
+    },
+
+    InsertAwait {
+        cursor_id: usize,
+    },
+
+    NewRowid {
+        reg: usize,
+    },
+
+    MustBeInt {
+        reg: usize,
+    },
+
+    SoftNull {
+        reg: usize,
+    },
+
+    NotExists {
+        cursor: CursorID,
+        rowid_reg: usize,
+        target_pc: BranchOffset,
+    },
+
+    OpenWriteAsync {
+        cursor_id: CursorID,
+        root_page: PageIdx,
+    },
+
+    OpenWriteAwait {},
+
+    Copy {
+        src_reg: usize,
+        dst_reg: usize,
+        amount: usize, // 0 amount means we include src_reg, dst_reg..=dst_reg+amount = src_reg..=src_reg+amount
+    },
 }
 
 // Index of insn in list of insns
@@ -295,6 +353,7 @@ pub struct ProgramState {
     pub pc: BranchOffset,
     cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
+    ended_coroutine: bool, // flag to notify yield coroutine finished
 }
 
 impl ProgramState {
@@ -306,6 +365,7 @@ impl ProgramState {
             pc: 0,
             cursors,
             registers,
+            ended_coroutine: false,
         }
     }
 
@@ -322,6 +382,7 @@ pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
+    pub database_header: Rc<RefCell<DatabaseHeader>>,
 }
 
 impl Program {
@@ -580,7 +641,11 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(pager.clone(), *root_page));
+                    let cursor = Box::new(BTreeCursor::new(
+                        pager.clone(),
+                        *root_page,
+                        self.database_header.clone(),
+                    ));
                     cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
@@ -997,7 +1062,7 @@ impl Program {
                     };
                     state.registers[*dest_reg] = OwnedValue::Record(record.clone());
                     let sorter_cursor = cursors.get_mut(sorter_cursor).unwrap();
-                    sorter_cursor.insert(&record)?;
+                    sorter_cursor.insert(&OwnedValue::Integer(0), &record, false)?; // fix key later
                     state.pc += 1;
                 }
                 Insn::SorterInsert {
@@ -1009,7 +1074,8 @@ impl Program {
                         OwnedValue::Record(record) => record,
                         _ => unreachable!("SorterInsert on non-record register"),
                     };
-                    cursor.insert(record)?;
+                    // TODO: set correct key
+                    cursor.insert(&OwnedValue::Integer(0), record, false)?;
                     state.pc += 1;
                 }
                 Insn::SorterSort {
@@ -1198,6 +1264,121 @@ impl Program {
                         state.pc += 1;
                     }
                 },
+                Insn::InitCoroutine {
+                    yield_reg,
+                    jump_on_definition,
+                    start_offset,
+                } => {
+                    state.registers[*yield_reg] = OwnedValue::Integer(*start_offset);
+                    state.pc = *jump_on_definition;
+                }
+                Insn::EndCoroutine { yield_reg } => {
+                    if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
+                        state.ended_coroutine = true;
+                        state.pc = pc - 1; // yield jump is always next to yield. Here we substract 1 to go back to yield instruction
+                    } else {
+                        unreachable!();
+                    }
+                }
+                Insn::Yield {
+                    yield_reg,
+                    end_offset,
+                } => {
+                    if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
+                        if state.ended_coroutine {
+                            state.pc = *end_offset;
+                        } else {
+                            // swap
+                            (state.pc, state.registers[*yield_reg]) =
+                                (pc, OwnedValue::Integer(state.pc + 1));
+                        }
+                    } else {
+                        unreachable!();
+                    }
+                }
+                Insn::InsertAsync {
+                    cursor,
+                    key_reg,
+                    record_reg,
+                    flag: _,
+                } => {
+                    let cursor = cursors.get_mut(cursor).unwrap();
+                    let record = match &state.registers[*record_reg] {
+                        OwnedValue::Record(r) => r,
+                        _ => unreachable!("Not a record! Cannot insert a non record value."),
+                    };
+                    let key = &state.registers[*key_reg];
+                    match cursor.insert(key, record, true)? {
+                        CursorResult::Ok(_) => {
+                            state.pc += 1;
+                        }
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
+                }
+                Insn::InsertAwait { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
+                    state.pc += 1;
+                }
+                Insn::NewRowid { reg: _ } => todo!(),
+                Insn::MustBeInt { reg } => {
+                    match state.registers[*reg] {
+                        OwnedValue::Integer(_) => {}
+                        _ => {
+                            crate::bail_parse_error!(
+                                "MustBeInt: the value in the register is not an integer"
+                            );
+                        }
+                    };
+                    state.pc += 1;
+                }
+                Insn::SoftNull { reg } => {
+                    state.registers[*reg] = OwnedValue::Null;
+                    state.pc += 1;
+                }
+                Insn::NotExists {
+                    cursor,
+                    rowid_reg,
+                    target_pc,
+                } => {
+                    let cursor = cursors.get_mut(cursor).unwrap();
+                    match cursor.exists(&state.registers[*rowid_reg])? {
+                        CursorResult::Ok(true) => state.pc += 1,
+                        CursorResult::Ok(false) => state.pc = *target_pc,
+                        CursorResult::IO => return Ok(StepResult::IO),
+                    };
+                }
+                // this cursor may be reused for next insert
+                // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
+                // If not there might be some optimizations obviously.
+                Insn::OpenWriteAsync {
+                    cursor_id,
+                    root_page,
+                } => {
+                    let cursor = Box::new(BTreeCursor::new(
+                        pager.clone(),
+                        *root_page,
+                        self.database_header.clone(),
+                    ));
+                    cursors.insert(*cursor_id, cursor);
+                    state.pc += 1;
+                }
+                Insn::OpenWriteAwait {} => {
+                    state.pc += 1;
+                }
+                Insn::Copy {
+                    src_reg,
+                    dst_reg,
+                    amount,
+                } => {
+                    for i in 0..=*amount {
+                        state.registers[*dst_reg + i] = state.registers[*src_reg + i].clone();
+                    }
+                    state.pc += 1;
+                }
             }
         }
     }

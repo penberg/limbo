@@ -45,7 +45,7 @@ impl limbo_core::PageIO for PageIO {
         &self,
         _page_idx: usize,
         _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        _c: Rc<limbo_core::WriteCompletion>,
+        _c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
         todo!()
     }

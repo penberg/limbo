@@ -83,6 +83,13 @@ impl Table {
             Table::Pseudo(table) => &table.columns,
         }
     }
+
+    pub fn has_rowid(&self) -> bool {
+        match self {
+            Table::BTree(table) => table.has_rowid,
+            Table::Pseudo(_) => todo!(),
+        }
+    }
 }
 
 impl PartialEq for Table {

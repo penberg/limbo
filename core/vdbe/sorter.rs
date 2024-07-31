@@ -1,5 +1,5 @@
 use crate::{
-    types::{Cursor, CursorResult, OwnedRecord},
+    types::{Cursor, CursorResult, OwnedRecord, OwnedValue},
     Result,
 };
 use std::{
@@ -79,11 +79,18 @@ impl Cursor for Sorter {
         Ok(self.current.borrow())
     }
 
-    fn insert(&mut self, record: &OwnedRecord) -> Result<()> {
+    fn insert(
+        &mut self,
+        key: &OwnedValue,
+        record: &OwnedRecord,
+        moved_before: bool,
+    ) -> Result<CursorResult<()>> {
+        let _ = key;
+        let _ = moved_before;
         let key_fields = self.order.len();
         let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
         self.insert(key, OwnedRecord::new(record.values[key_fields..].to_vec()));
-        Ok(())
+        Ok(CursorResult::Ok(()))
     }
 
     fn set_null_flag(&mut self, _flag: bool) {
@@ -92,5 +99,10 @@ impl Cursor for Sorter {
 
     fn get_null_flag(&self) -> bool {
         todo!();
+    }
+
+    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>> {
+        let _ = key;
+        todo!()
     }
 }

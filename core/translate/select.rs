@@ -1,5 +1,6 @@
 use crate::function::{AggFunc, Func};
 use crate::schema::{Column, PseudoTable, Schema, Table};
+use crate::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,
@@ -11,6 +12,7 @@ use crate::Result;
 
 use sqlite3_parser::ast::{self, JoinOperator, JoinType, ResultColumn};
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 /// A representation of a `SELECT` statement that has all the information
@@ -235,7 +237,10 @@ pub fn prepare_select<'a>(schema: &Schema, select: &'a ast::Select) -> Result<Se
 }
 
 /// Generate code for a SELECT statement.
-pub fn translate_select(mut select: Select) -> Result<Program> {
+pub fn translate_select(
+    mut select: Select,
+    database_header: Rc<RefCell<DatabaseHeader>>,
+) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
     let early_terminate_label = program.allocate_label();
@@ -274,7 +279,13 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
     let limit_info = if let Some(limit) = &select.limit {
         assert!(limit.offset.is_none());
         let target_register = program.alloc_register();
-        let limit_reg = translate_expr(&mut program, &select, &limit.expr, target_register, None)?;
+        let limit_reg = translate_expr(
+            &mut program,
+            Some(&select),
+            &limit.expr,
+            target_register,
+            None,
+        )?;
         let num = if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &limit.expr {
             num.parse::<i64>()?
         } else {
@@ -326,7 +337,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
                 } else {
                     &col.expr
                 };
-                translate_expr(&mut program, &select, sort_col_expr, target, None)?;
+                translate_expr(&mut program, Some(&select), sort_col_expr, target, None)?;
             }
             let (_, result_cols_count) = translate_columns(&mut program, &select, None)?;
             sort_info
@@ -417,7 +428,7 @@ pub fn translate_select(mut select: Select) -> Result<Program> {
         target_pc: start_offset,
     });
     program.resolve_deferred_labels();
-    Ok(program.build())
+    Ok(program.build(database_header))
 }
 
 fn emit_limit_insn(limit_info: &Option<LimitInfo>, program: &mut ProgramBuilder) {
@@ -742,7 +753,7 @@ fn translate_column(
                     cursor_hint,
                 )?;
             } else {
-                let _ = translate_expr(program, select, expr, target_register, cursor_hint)?;
+                let _ = translate_expr(program, Some(select), expr, target_register, cursor_hint)?;
             }
         }
         ast::ResultColumn::Star => {
@@ -807,7 +818,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint)?;
+                let _ = translate_expr(program, Some(select), expr, expr_reg, cursor_hint)?;
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -822,7 +833,7 @@ fn translate_aggregation(
                 } else {
                     let expr = &args[0];
                     let expr_reg = program.alloc_register();
-                    let _ = translate_expr(program, select, expr, expr_reg, cursor_hint);
+                    let _ = translate_expr(program, Some(select), expr, expr_reg, cursor_hint);
                     expr_reg
                 };
                 program.emit_insn(Insn::AggStep {
@@ -865,8 +876,14 @@ fn translate_aggregation(
                         ast::Expr::Literal(ast::Literal::String(String::from("\",\"")));
                 }
 
-                translate_expr(program, select, expr, expr_reg, cursor_hint)?;
-                translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)?;
+                translate_expr(program, Some(select), expr, expr_reg, cursor_hint)?;
+                translate_expr(
+                    program,
+                    Some(select),
+                    &delimiter_expr,
+                    delimiter_reg,
+                    cursor_hint,
+                )?;
 
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
@@ -883,7 +900,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint);
+                let _ = translate_expr(program, Some(select), expr, expr_reg, cursor_hint);
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -898,7 +915,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint);
+                let _ = translate_expr(program, Some(select), expr, expr_reg, cursor_hint);
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -932,8 +949,14 @@ fn translate_aggregation(
                     _ => crate::bail_parse_error!("Incorrect delimiter parameter"),
                 };
 
-                translate_expr(program, select, expr, expr_reg, cursor_hint)?;
-                translate_expr(program, select, &delimiter_expr, delimiter_reg, cursor_hint)?;
+                translate_expr(program, Some(select), expr, expr_reg, cursor_hint)?;
+                translate_expr(
+                    program,
+                    Some(select),
+                    &delimiter_expr,
+                    delimiter_reg,
+                    cursor_hint,
+                )?;
 
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
@@ -950,7 +973,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint)?;
+                let _ = translate_expr(program, Some(select), expr, expr_reg, cursor_hint)?;
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,
@@ -965,7 +988,7 @@ fn translate_aggregation(
                 }
                 let expr = &args[0];
                 let expr_reg = program.alloc_register();
-                let _ = translate_expr(program, select, expr, expr_reg, cursor_hint)?;
+                let _ = translate_expr(program, Some(select), expr, expr_reg, cursor_hint)?;
                 program.emit_insn(Insn::AggStep {
                     acc_reg: target_register,
                     col: expr_reg,

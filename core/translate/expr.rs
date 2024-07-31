@@ -3,7 +3,7 @@ use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
 use crate::{
     function::{Func, ScalarFunc},
-    schema::{Schema, Table, Type},
+    schema::{Table, Type},
     translate::select::{ColumnInfo, Select, SrcTable},
     util::normalize_ident,
     vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
@@ -11,7 +11,7 @@ use crate::{
 
 pub fn translate_expr(
     program: &mut ProgramBuilder,
-    select: &Select,
+    select: Option<&Select>,
     expr: &ast::Expr,
     target_register: usize,
     cursor_hint: Option<usize>,
@@ -435,7 +435,7 @@ pub fn translate_expr(
         ast::Expr::Parenthesized(_) => todo!(),
         ast::Expr::Qualified(tbl, ident) => {
             let (idx, col_type, cursor_id, is_primary_key) =
-                resolve_ident_qualified(program, &tbl.0, &ident.0, select, cursor_hint)?;
+                resolve_ident_qualified(program, &tbl.0, &ident.0, select.unwrap(), cursor_hint)?;
             if is_primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
@@ -614,12 +614,12 @@ pub fn resolve_ident_qualified(
 pub fn resolve_ident_table(
     program: &ProgramBuilder,
     ident: &String,
-    select: &Select,
+    select: Option<&Select>,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
     let ident = normalize_ident(ident);
     let mut found = Vec::new();
-    for join in &select.src_tables {
+    for join in &select.unwrap().src_tables {
         match join.table {
             Table::BTree(ref table) => {
                 let res = table

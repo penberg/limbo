@@ -2,7 +2,7 @@ use crate::error::LimboError;
 use crate::io::common;
 use crate::Result;
 
-use super::{Completion, File, WriteCompletion, IO};
+use super::{Completion, File, IO};
 use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
@@ -67,7 +67,12 @@ impl IO for DarwinIO {
                     match cf {
                         CompletionCallback::Read(ref file, ref c, pos) => {
                             let mut file = file.borrow_mut();
-                            let mut buf = c.buf_mut();
+                            let c: &Completion = &c;
+                            let r = match c {
+                                Completion::Read(r) => r,
+                                Completion::Write(_) => unreachable!(),
+                            };
+                            let mut buf = r.buf_mut();
                             file.seek(std::io::SeekFrom::Start(pos as u64))?;
                             file.read(buf.as_mut_slice())
                         }
@@ -81,12 +86,12 @@ impl IO for DarwinIO {
                 };
                 match result {
                     std::result::Result::Ok(n) => {
-                        match cf {
+                        match &cf {
                             CompletionCallback::Read(_, ref c, _) => {
-                                c.complete();
+                                c.complete(0);
                             }
                             CompletionCallback::Write(_, ref c, _, _) => {
-                                c.complete(n);
+                                c.complete(n as i32);
                             }
                         }
                         return Ok(());
@@ -105,7 +110,7 @@ enum CompletionCallback {
     Read(Rc<RefCell<std::fs::File>>, Rc<Completion>, usize),
     Write(
         Rc<RefCell<std::fs::File>>,
-        Rc<WriteCompletion>,
+        Rc<Completion>,
         Rc<RefCell<crate::Buffer>>,
         usize,
     ),
@@ -142,7 +147,10 @@ impl File for DarwinFile {
                     "Failed locking file. File is locked by another process"
                 )));
             } else {
-                return Err(LimboError::LockingError(format!("Failed locking file, {}", err)));
+                return Err(LimboError::LockingError(format!(
+                    "Failed locking file, {}",
+                    err
+                )));
             }
         }
         Ok(())
@@ -168,17 +176,21 @@ impl File for DarwinFile {
         Ok(())
     }
 
-    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-        let file = self.file.borrow();
+     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
+       let file = self.file.borrow();
         let result = {
-            let mut buf = c.buf_mut();
+            let r = match &(*c) {
+                Completion::Read(r) => r,
+                Completion::Write(_) => unreachable!(),
+            };
+            let mut buf = r.buf_mut();
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
         };
         match result {
             std::result::Result::Ok(n) => {
                 trace!("pread n: {}", n);
                 // Read succeeded immediately
-                c.complete();
+                c.complete(0);
                 Ok(())
             }
             Err(Errno::AGAIN) => {
@@ -204,7 +216,7 @@ impl File for DarwinFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<WriteCompletion>,
+        c: Rc<Completion>,
     ) -> Result<()> {
         let file = self.file.borrow();
         let result = {
@@ -215,7 +227,7 @@ impl File for DarwinFile {
             std::result::Result::Ok(n) => {
                 trace!("pwrite n: {}", n);
                 // Read succeeded immediately
-                c.complete(n);
+                c.complete(n as i32);
                 Ok(())
             }
             Err(Errno::AGAIN) => {

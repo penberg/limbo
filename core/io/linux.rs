@@ -1,5 +1,5 @@
-use super::{common, Completion, File, WriteCompletion, IO};
-use crate::{Result, LimboError};
+use super::{common, Completion, File, IO};
+use crate::{LimboError, Result};
 use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
@@ -95,10 +95,13 @@ impl IO for LinuxIO {
         while let Some(cqe) = ring.completion().next() {
             let result = cqe.result();
             if result < 0 {
-                return Err(LimboError::LinuxIOError(format!("{}", LinuxIOError::IOUringCQError(result))));
+                return Err(LimboError::LinuxIOError(format!(
+                    "{}",
+                    LinuxIOError::IOUringCQError(result)
+                )));
             }
             let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
-            c.complete();
+            c.complete(cqe.result());
         }
         Ok(())
     }
@@ -130,7 +133,9 @@ impl File for LinuxFile {
         if lock_result == -1 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError("File is locked by another process".into()));
+                return Err(LimboError::LockingError(
+                    "File is locked by another process".into(),
+                ));
             } else {
                 return Err(LimboError::IOError(err));
             }
@@ -159,11 +164,15 @@ impl File for LinuxFile {
     }
 
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-        trace!("pread(pos = {}, length = {})", pos, c.buf().len());
+        let r = match &(*c) {
+            Completion::Read(r) => r,
+            Completion::Write(_) => unreachable!(),
+        };
+        trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let mut io = self.io.borrow_mut();
         let read_e = {
-            let mut buf = c.buf_mut();
+            let mut buf = r.buf_mut();
             let len = buf.len();
             let buf = buf.as_mut_ptr();
             let ptr = Rc::into_raw(c.clone());
@@ -186,7 +195,7 @@ impl File for LinuxFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<WriteCompletion>,
+        c: Rc<Completion>,
     ) -> Result<()> {
         let mut io = self.io.borrow_mut();
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
