@@ -7,12 +7,12 @@
 # ```
 # pip install PyGithub
 # ```
-
 import sys
 import re
 from github import Github
 import os
 import subprocess
+import tempfile
 
 def run_command(command):
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
@@ -34,44 +34,53 @@ def get_pr_info(repo, pr_number):
 def merge_pr(pr_number):
     # GitHub authentication
     token = os.getenv('GITHUB_TOKEN')
-
     g = Github(token)
-    
+
     # Get the repository
     repo_name = os.getenv('GITHUB_REPOSITORY')
     if not repo_name:
         print("Error: GITHUB_REPOSITORY environment variable not set")
         sys.exit(1)
-    
     repo = g.get_repo(repo_name)
-    
+
     # Get PR information
     pr_info = get_pr_info(repo, pr_number)
-    
+
     # Format commit message
     commit_message = f"Merge '{pr_info['title']}' from {pr_info['author']}\n\n{pr_info['body']}\n\nCloses #{pr_info['number']}"
-    
+
+    # Create a temporary file for the commit message
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
+        temp_file.write(commit_message)
+        temp_file_path = temp_file.name
+
     # Fetch the PR branch
     cmd = f"git fetch origin pull/{pr_number}/head:{pr_info['head']}"
     output, error, returncode = run_command(cmd)
     if returncode != 0:
         print(f"Error fetching PR branch: {error}")
+        os.unlink(temp_file_path)
         sys.exit(1)
-    
+
     # Checkout main branch
     cmd = "git checkout main"
     output, error, returncode = run_command(cmd)
     if returncode != 0:
         print(f"Error checking out main branch: {error}")
+        os.unlink(temp_file_path)
         sys.exit(1)
-    
+
     # Merge the PR
-    cmd = f"git merge --no-ff {pr_info['head']} -m \"{commit_message}\""
+    cmd = f"git merge --no-ff {pr_info['head']} -F {temp_file_path}"
     output, error, returncode = run_command(cmd)
     if returncode != 0:
         print(f"Error merging PR: {error}")
+        os.unlink(temp_file_path)
         sys.exit(1)
-    
+
+    # Clean up the temporary file
+    os.unlink(temp_file_path)
+
     print("Pull request merged successfully!")
     print(f"Merge commit message:\n{commit_message}")
 
@@ -79,10 +88,10 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python merge_pr.py <pr_number>")
         sys.exit(1)
-    
+
     pr_number = sys.argv[1]
     if not re.match(r'^\d+$', pr_number):
         print("Error: PR number must be a positive integer")
         sys.exit(1)
-    
+
     merge_pr(pr_number)
