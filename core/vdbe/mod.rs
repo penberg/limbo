@@ -742,9 +742,11 @@ impl Program {
                     }
                 }
                 Insn::Halt => {
+                    pager.end_read_tx()?;
                     return Ok(StepResult::Done);
                 }
                 Insn::Transaction => {
+                    pager.begin_read_tx()?;
                     state.pc += 1;
                 }
                 Insn::Goto { target_pc } => {
