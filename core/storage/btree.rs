@@ -1,5 +1,5 @@
-use crate::pager::{Page, Pager};
-use crate::sqlite3_ondisk::{
+use crate::storage::pager::{Page, Pager};
+use crate::storage::sqlite3_ondisk::{
     read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType, TableInteriorCell,
     TableLeafCell,
 };
@@ -124,7 +124,7 @@ impl BTreeCursor {
                     first_overflow_page: _,
                 }) => {
                     mem_page.advance();
-                    let record = crate::sqlite3_ondisk::read_record(_payload)?;
+                    let record = crate::storage::sqlite3_ondisk::read_record(_payload)?;
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
                 BTreeCell::IndexInteriorCell(_) => {

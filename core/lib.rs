@@ -1,19 +1,14 @@
-mod btree;
-mod buffer_pool;
 mod datetime;
 mod error;
 mod function;
 mod io;
-mod pager;
 mod pseudo;
 mod schema;
-mod sqlite3_ondisk;
 mod storage;
 mod translate;
 mod types;
 mod util;
 mod vdbe;
-mod wal;
 
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]
@@ -21,12 +16,12 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use fallible_iterator::FallibleIterator;
 use log::trace;
-use pager::Pager;
 use schema::Schema;
-use sqlite3_ondisk::DatabaseHeader;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
+use storage::pager::Pager;
+use storage::sqlite3_ondisk::DatabaseHeader;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;

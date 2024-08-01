@@ -7,7 +7,7 @@ use sqlite3_parser::ast::{
 use crate::Result;
 use crate::{
     schema::{Schema, Table},
-    sqlite3_ondisk::DatabaseHeader,
+    storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };

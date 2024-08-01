@@ -1,6 +1,6 @@
 use crate::function::{AggFunc, Func};
 use crate::schema::{Column, PseudoTable, Schema, Table};
-use crate::sqlite3_ondisk::DatabaseHeader;
+use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,

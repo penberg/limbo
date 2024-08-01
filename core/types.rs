@@ -4,7 +4,7 @@ use std::{cell::Ref, rc::Rc};
 use crate::error::LimboError;
 use crate::Result;
 
-use crate::sqlite3_ondisk::write_varint;
+use crate::storage::sqlite3_ondisk::write_varint;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
