@@ -22,7 +22,7 @@ pub mod explain;
 pub mod sorter;
 
 use crate::btree::BTreeCursor;
-use crate::datetime::get_date_from_time_value;
+use crate::datetime::{get_date_from_time_value, get_time_from_datetime_value};
 use crate::error::LimboError;
 use crate::function::{AggFunc, ScalarFunc};
 use crate::pager::Pager;
@@ -1247,6 +1247,29 @@ impl Program {
                             match date_str {
                                 Ok(date) => {
                                     state.registers[*dest] = OwnedValue::Text(Rc::new(date))
+                                }
+                                Err(e) => {
+                                    return Err(LimboError::ParseError(format!(
+                                        "Error encountered while parsing time value: {}",
+                                        e
+                                    )));
+                                }
+                            }
+                        }
+                        state.pc += 1;
+                    }
+                    ScalarFunc::Time => {
+                        if *start_reg == 0 {
+                            let time_str = get_time_from_datetime_value(&OwnedValue::Text(
+                                Rc::new("now".to_string()),
+                            ))?;
+                            state.registers[*dest] = OwnedValue::Text(Rc::new(time_str));
+                        } else {
+                            let datetime_value = &state.registers[*start_reg];
+                            let time_str = get_time_from_datetime_value(datetime_value);
+                            match time_str {
+                                Ok(time) => {
+                                    state.registers[*dest] = OwnedValue::Text(Rc::new(time))
                                 }
                                 Err(e) => {
                                     return Err(LimboError::ParseError(format!(
