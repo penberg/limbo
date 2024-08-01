@@ -1,4 +1,3 @@
-mod buffer_pool;
 mod datetime;
 mod error;
 mod function;

@@ -41,9 +41,9 @@
 //!
 //! https://www.sqlite.org/fileformat.html
 
-use crate::buffer_pool::BufferPool;
 use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
+use crate::storage::buffer_pool::BufferPool;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, PageSource, Result};
