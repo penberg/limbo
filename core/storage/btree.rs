@@ -141,6 +141,50 @@ impl BTreeCursor {
         &mut self,
         rowid: u64,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+        self.move_to(rowid)?;
+
+        let mem_page = {
+            let mem_page = self.page.borrow();
+            let mem_page = mem_page.as_ref().unwrap();
+            mem_page.clone()
+        };
+
+        let page_idx = mem_page.page_idx;
+        let page = self.pager.read_page(page_idx)?;
+        let page = RefCell::borrow(&page);
+        if page.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+        let page = page.contents.read().unwrap();
+        let page = page.as_ref().unwrap();
+
+        for cell_idx in 0..page.cell_count() {
+            match &page.cell_get(cell_idx)? {
+                BTreeCell::TableLeafCell(TableLeafCell {
+                    _rowid: cell_rowid,
+                    _payload: p,
+                    first_overflow_page: _,
+                }) => {
+                    if *cell_rowid == rowid {
+                        let record = crate::storage::sqlite3_ondisk::read_record(p)?;
+                        return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
+                    }
+                }
+                cell_type => {
+                    unreachable!("unexpected cell type: {:?}", cell_type);
+                }
+            }
+        }
+
+        Ok(CursorResult::Ok((None, None)))
+    }
+
+    fn move_to_root(&mut self) {
+        self.page
+            .replace(Some(Rc::new(MemPage::new(None, self.root_page, 0))));
+    }
+
+    pub fn move_to(&mut self, key: u64) -> Result<CursorResult<()>> {
         // For a table with N rows, we can find any row by row id in O(log(N)) time by starting at the root page and following the B-tree pointers.
         // B-trees consist of interior pages and leaf pages. Interior pages contain pointers to other pages, while leaf pages contain the actual row data.
         //
@@ -164,69 +208,6 @@ impl BTreeCursor {
         // 5. We scan the leaf cells in the leaf page until we find the cell whose rowid is equal to the rowid we are looking for.
         //    This cell contains the actual data we are looking for.
         // 6. If we find the cell, we return the record. Otherwise, we return an empty result.
-        let mut current_page = self.root_page;
-
-        loop {
-            let page = self.pager.read_page(current_page)?;
-            let page = RefCell::borrow(&page);
-            if page.is_locked() {
-                return Ok(CursorResult::IO);
-            }
-            let page = page.contents.read().unwrap();
-            let page = page.as_ref().unwrap();
-            let mut next_page_found = false;
-            for cell_idx in 0..page.cell_count() {
-                match &page.cell_get(cell_idx)? {
-                    BTreeCell::TableInteriorCell(TableInteriorCell {
-                        _left_child_page: lcp,
-                        _rowid: cell_rowid,
-                    }) => {
-                        if rowid <= *cell_rowid {
-                            current_page = *lcp as usize;
-                            next_page_found = true;
-                            break;
-                        }
-                    }
-                    BTreeCell::TableLeafCell(TableLeafCell {
-                        _rowid: cell_rowid,
-                        _payload: p,
-                        first_overflow_page: _,
-                    }) => {
-                        if *cell_rowid == rowid {
-                            let record = crate::storage::sqlite3_ondisk::read_record(p)?;
-                            return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
-                        }
-                    }
-                    BTreeCell::IndexInteriorCell(_) => {
-                        unimplemented!();
-                    }
-                    BTreeCell::IndexLeafCell(_) => {
-                        unimplemented!();
-                    }
-                }
-            }
-
-            if next_page_found {
-                continue;
-            }
-
-            match page.rightmost_pointer() {
-                Some(right_most_pointer) => {
-                    current_page = right_most_pointer as usize;
-                }
-                None => {
-                    return Ok(CursorResult::Ok((None, None)));
-                }
-            }
-        }
-    }
-
-    fn move_to_root(&mut self) {
-        self.page
-            .replace(Some(Rc::new(MemPage::new(None, self.root_page, 0))));
-    }
-
-    pub fn move_to(&mut self, key: u64) -> Result<CursorResult<()>> {
         self.move_to_root();
 
         loop {
