@@ -32,6 +32,8 @@ pub enum LimboError {
     ParseFloatError(#[from] std::num::ParseFloatError),
     #[error("Parse error: {0}")]
     InvalidDate(String),
+    #[error("Parse error: {0}")]
+    InvalidTime(String),
 }
 
 #[macro_export]
