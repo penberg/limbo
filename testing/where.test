@@ -245,3 +245,11 @@ do_execsql_test where_name_not_in_list_or_name_eq_shirt {
 8|sneakers|82.0
 10|coat|33.0
 11|accessories|81.0}
+
+do_execsql_test where_multiple {
+    select id, first_name, age from users where id = 5 and age < 50;
+} {5|Edward|15}
+
+do_execsql_test where_multiple_flipped {
+    select id, first_name, age from users where age < 50 and id = 5;
+} {5|Edward|15}
