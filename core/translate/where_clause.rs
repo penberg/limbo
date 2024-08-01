@@ -277,6 +277,11 @@ pub fn translate_processed_where<'a>(
                     // and end up with a result where u.id = 3 and p.id = 5, which is incorrect.
                     // Instead we replace the second SeekRowid with a comparison against the row that was already fetched,
                     // i.e. we compare p.id == 5, which would not match (and is the correct result).
+                    //
+                    // It would probably be better to modify the AST in the WhereTerms directly, but that would require
+                    // refactoring to not use &'a Ast::Expr references in the WhereTerms, i.e. the WhereClause would own its data
+                    // and could mutate it to change the query as needed. We probably need to do this anyway if we want to have some
+                    // kind of Query Plan construct that is not just a container for AST nodes.
                     let rowid_reg = program.alloc_register();
                     program.emit_insn(Insn::RowId {
                         cursor_id,
