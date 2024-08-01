@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::sqlite3_ondisk::DatabaseHeader;
+use crate::storage::sqlite3_ondisk::DatabaseHeader;
 
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program, Table};
 

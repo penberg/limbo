@@ -24,11 +24,10 @@ pub mod sorter;
 use crate::datetime::{get_date_from_time_value, get_time_from_datetime_value};
 use crate::error::LimboError;
 use crate::function::{AggFunc, ScalarFunc};
-use crate::pager::Pager;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
-use crate::sqlite3_ondisk::DatabaseHeader;
-use crate::storage::btree::BTreeCursor;
+use crate::storage::sqlite3_ondisk::DatabaseHeader;
+use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 use crate::Result;
 

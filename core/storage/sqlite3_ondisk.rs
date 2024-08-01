@@ -44,7 +44,7 @@
 use crate::buffer_pool::BufferPool;
 use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
-use crate::pager::{Page, Pager};
+use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, PageSource, Result};
 use log::trace;

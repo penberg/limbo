@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{pager::Page, Result};
+use crate::{storage::pager::Page, Result};
 
 /// Write-ahead log (WAL).
 pub struct Wal {}

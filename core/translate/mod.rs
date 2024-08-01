@@ -15,9 +15,9 @@ pub(crate) mod where_clause;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::pager::Pager;
 use crate::schema::Schema;
-use crate::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use crate::storage::pager::Pager;
+use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
 use crate::{bail_parse_error, Result};

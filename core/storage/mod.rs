@@ -1,4 +1,6 @@
 pub(crate) mod btree;
+pub(crate) mod pager;
+pub(crate) mod sqlite3_ondisk;
 
 #[cfg(feature = "fs")]
 use crate::io::File;
