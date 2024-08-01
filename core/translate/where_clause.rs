@@ -223,9 +223,10 @@ pub fn translate_processed_where<'a>(
     loops: &[LoopInfo],
     current_loop: &'a LoopInfo,
     where_c: &'a ProcessedWhereClause,
-    skip_entire_table_label: BranchOffset,
+    skip_entire_loop_label: BranchOffset,
     cursor_hint: Option<usize>,
 ) -> Result<()> {
+    // If any of the terms are always false, we can skip the entire loop.
     for t in where_c.terms.iter().filter(|t| {
         select.src_tables[t.evaluate_at_loop(select)].identifier == current_loop.identifier
     }) {
@@ -233,9 +234,9 @@ pub fn translate_processed_where<'a>(
             if e.is_always_false().unwrap_or(false) {
                 program.emit_insn_with_label_dependency(
                     Insn::Goto {
-                        target_pc: skip_entire_table_label,
+                        target_pc: skip_entire_loop_label,
                     },
-                    skip_entire_table_label,
+                    skip_entire_loop_label,
                 );
                 return Ok(());
             }
