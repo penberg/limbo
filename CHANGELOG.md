@@ -8,6 +8,8 @@
 
 - More scalar functions: `unicode()` (Ethan Niser)
 
+- Optimize point queries with integer keys (Jussi Saurio)
+
 ### Fixed
 
 - `ORDER BY` support for nullable sorting columns and qualified identifiers (Jussi Saurio)
