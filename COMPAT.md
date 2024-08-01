@@ -30,7 +30,7 @@ This document describes the SQLite compatibility status of Limbo:
 | END TRANSACTION              | No      |         |
 | EXPLAIN                      | Yes     |         |
 | INDEXED BY                   | No      |         |
-| INSERT                       | No      |         |
+| INSERT                       | Partial |         |
 | ON CONFLICT clause           | No      |         |
 | PRAGMA                       | Partial |         |
 | PRAGMA cache_size            | Yes     |         |
