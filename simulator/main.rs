@@ -31,7 +31,7 @@ fn main() {
             match rows.next_row() {
                 Ok(result) => {
                     match result {
-                        limbo_core::RowResult::Row(row) => {
+                        limbo_core::RowResult::Row(_row) => {
                             // TODO: assert that data is correct
                         }
                         limbo_core::RowResult::IO => {

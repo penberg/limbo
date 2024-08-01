@@ -518,7 +518,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 *start_offset as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::EndCoroutine { yield_reg } => (
                 "EndCoroutine",
@@ -527,7 +527,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::Yield {
                 yield_reg,
@@ -539,7 +539,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::InsertAsync {
                 cursor,
@@ -553,7 +553,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 *key_reg as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 *flag as u16,
-                format!(""),
+                "".to_string(),
             ),
             Insn::InsertAwait { cursor_id } => (
                 "InsertAwait",
@@ -562,7 +562,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::NewRowid { reg } => (
                 "NewRowId",
@@ -571,7 +571,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::MustBeInt { reg } => (
                 "MustBeInt",
@@ -580,7 +580,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::SoftNull { reg } => (
                 "SoftNull",
@@ -589,7 +589,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::NotExists {
                 cursor,
@@ -602,7 +602,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 *rowid_reg as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::OpenWriteAsync {
                 cursor_id,
@@ -614,7 +614,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::OpenWriteAwait {} => (
                 "OpenWriteAwait",
@@ -623,7 +623,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
             Insn::Copy {
                 src_reg,
@@ -636,7 +636,7 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
                 *amount as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                "".to_string(),
             ),
         };
     format!(
