@@ -1,6 +1,6 @@
 use crate::buffer_pool::BufferPool;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
-use crate::wal::Wal;
+use crate::storage::wal::Wal;
 use crate::{Buffer, PageSource, Result};
 use log::trace;
 use sieve_cache::SieveCache;
