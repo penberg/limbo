@@ -71,10 +71,13 @@ impl ProgramBuilder {
         (self.seekrowid_emitted_bitmask & (1 << cursor_id)) != 0
     }
 
+    fn set_cursor_emitted_seekrowid(&mut self, cursor_id: CursorID) {
+        self.seekrowid_emitted_bitmask |= 1 << cursor_id;
+    }
+
     fn _emit_insn(&mut self, insn: Insn) {
         if let Insn::SeekRowid { cursor_id, .. } = insn {
-            // set the nth bit to 1, where n is the cursor_id, and the first bit is 0
-            self.seekrowid_emitted_bitmask |= 1 << cursor_id;
+            self.set_cursor_emitted_seekrowid(cursor_id);
         }
         self.insns.push(insn);
     }
