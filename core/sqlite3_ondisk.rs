@@ -1,45 +1,46 @@
-/// SQLite on-disk file format.
-///
-/// SQLite stores data in a single database file, which is divided into fixed-size
-/// pages:
-///
-/// ```text
-/// +----------+----------+----------+-----------------------------+----------+
-/// |          |          |          |                             |          |
-/// |  Page 1  |  Page 2  |  Page 3  |           ...               |  Page N  |
-/// |          |          |          |                             |          |
-/// +----------+----------+----------+-----------------------------+----------+
-/// ```
-///
-/// The first page is special because it contains a 100 byte header at the beginning.
-///
-/// Each page consists of a page header and N cells, which contain the records.
-///
-/// ```text
-/// +-----------------+----------------+---------------------+----------------+
-/// |                 |                |                     |                |
-/// |   Page header   |  Cell pointer  |     Unallocated     |  Cell content  |
-/// | (8 or 12 bytes) |     array      |        space        |      area      |
-/// |                 |                |                     |                |
-/// +-----------------+----------------+---------------------+----------------+
-/// ```
-///
-/// The write-ahead log (WAL) is a separate file that contains the physical
-/// log of changes to a database file. The file starts with a WAL header and
-/// is followed by a sequence of WAL frames, which are database pages with
-/// additional metadata.
-///
-/// ```text
-/// +-----------------+-----------------+-----------------+-----------------+
-/// |                 |                 |                 |                 |
-/// |    WAL header   |    WAL frame 1  |    WAL frame 2  |    WAL frame N  |
-/// |                 |                 |                 |                 |
-/// +-----------------+-----------------+-----------------+-----------------+
-/// ```
-///
-/// For more information, see the SQLite file format specification:
-///
-/// https://www.sqlite.org/fileformat.html
+//! SQLite on-disk file format.
+//!
+//! SQLite stores data in a single database file, which is divided into fixed-size
+//! pages:
+//!
+//! ```text
+//! +----------+----------+----------+-----------------------------+----------+
+//! |          |          |          |                             |          |
+//! |  Page 1  |  Page 2  |  Page 3  |           ...               |  Page N  |
+//! |          |          |          |                             |          |
+//! +----------+----------+----------+-----------------------------+----------+
+//! ```
+//!
+//! The first page is special because it contains a 100 byte header at the beginning.
+//!
+//! Each page consists of a page header and N cells, which contain the records.
+//!
+//! ```text
+//! +-----------------+----------------+---------------------+----------------+
+//! |                 |                |                     |                |
+//! |   Page header   |  Cell pointer  |     Unallocated     |  Cell content  |
+//! | (8 or 12 bytes) |     array      |        space        |      area      |
+//! |                 |                |                     |                |
+//! +-----------------+----------------+---------------------+----------------+
+//! ```
+//!
+//! The write-ahead log (WAL) is a separate file that contains the physical
+//! log of changes to a database file. The file starts with a WAL header and
+//! is followed by a sequence of WAL frames, which are database pages with
+//! additional metadata.
+//!
+//! ```text
+//! +-----------------+-----------------+-----------------+-----------------+
+//! |                 |                 |                 |                 |
+//! |    WAL header   |    WAL frame 1  |    WAL frame 2  |    WAL frame N  |
+//! |                 |                 |                 |                 |
+//! +-----------------+-----------------+-----------------+-----------------+
+//! ```
+//!
+//! For more information, see the SQLite file format specification:
+//!
+//! https://www.sqlite.org/fileformat.html
+
 use crate::buffer_pool::BufferPool;
 use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
