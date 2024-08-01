@@ -1,3 +1,5 @@
+pub(crate) mod btree;
+
 #[cfg(feature = "fs")]
 use crate::io::File;
 use crate::{error::LimboError, io::Completion, Buffer, Result};

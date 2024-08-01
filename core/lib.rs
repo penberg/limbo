@@ -1,4 +1,3 @@
-mod btree;
 mod buffer_pool;
 mod datetime;
 mod error;
