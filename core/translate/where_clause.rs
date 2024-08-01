@@ -24,20 +24,31 @@ pub enum WhereExpr<'a> {
 
 #[derive(Debug)]
 pub struct WhereTerm<'a> {
+    // The expression that should be evaluated.
     pub expr: WhereExpr<'a>,
-    pub outer_join_table: Option<usize>,
+    // If this term is part of an outer join, this is the index of the outer join table in select.src_tables
+    pub outer_join_table_index: Option<usize>,
+    // A bitmask of which table indexes (in select.src_tables) the expression references.
     pub table_references_bitmask: usize,
 }
 
 impl<'a> WhereTerm<'a> {
     pub fn evaluate_at_loop(&self, select: &'a Select) -> usize {
-        if let Some(outer_join_table) = self.outer_join_table {
+        if let Some(outer_join_table) = self.outer_join_table_index {
+            // E.g.
+            // SELECT u.age, p.name FROM users u LEFT JOIN products p ON u.id = 5;
+            // We can't skip rows from the 'users' table since u.id = 5 is a LEFT JOIN condition; instead we need to skip/null out rows from the 'products' table.
             outer_join_table
         } else {
+            // E.g.
+            // SELECT u.age, p.name FROM users u WHERE u.id = 5;
+            // We can skip rows from the 'users' table if u.id = 5 is false.
             self.innermost_table(select)
         }
     }
 
+    // Find the innermost table that the expression references.
+    // Innermost means 'most nested in the nested loop'.
     pub fn innermost_table(&self, select: &'a Select) -> usize {
         let mut table = 0;
         for i in 0..select.src_tables.len() {
@@ -93,7 +104,7 @@ pub fn split_constraint_to_terms<'a>(
 
                         seekrowid_candidate.unwrap_or(WhereExpr::Expr(expr))
                     },
-                    outer_join_table,
+                    outer_join_table_index: outer_join_table,
                     table_references_bitmask: introspect_expression_for_table_refs(select, expr)?,
                 };
                 processed_where_clause.terms.push(term);
