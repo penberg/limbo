@@ -467,9 +467,9 @@ impl BTreeCursor {
                         content with splitted page in order to not update root page idx.
                     */
                     let new_root_page_id = new_root_page_id as u32;
-                    payload.extend_from_slice(&(new_root_page_id as u32).to_be_bytes());
+                    payload.extend_from_slice(&new_root_page_id.to_be_bytes());
                     payload.extend(std::iter::repeat(0).take(9));
-                    let n = write_varint(&mut payload.as_mut_slice()[4..], key as u64);
+                    let n = write_varint(&mut payload.as_mut_slice()[4..], key);
                     payload.truncate(4 + n);
 
                     // write left child cell
@@ -500,7 +500,7 @@ impl BTreeCursor {
             // Propagate split divided to top.
             payload.extend_from_slice(&(mem_page.page_idx as u32).to_be_bytes());
             payload.extend(std::iter::repeat(0).take(9));
-            let n = write_varint(&mut payload.as_mut_slice()[4..], key as u64);
+            let n = write_varint(&mut payload.as_mut_slice()[4..], key);
             payload.truncate(n);
 
             self.page = RefCell::new(Some(mem_page.parent.as_ref().unwrap().clone()));
@@ -562,7 +562,7 @@ impl BTreeCursor {
             /* fall through, we might need to defragment */
         }
 
-        if gap + 2 + amount as usize > top {
+        if gap + 2 + amount > top {
             // defragment
             self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
             let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
@@ -587,11 +587,11 @@ impl BTreeCursor {
     fn defragment_page(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) {
         let cloned_page = page.clone();
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as u64;
-        let mut cbrk = usable_space as u64;
+        let mut cbrk = usable_space;
 
         // TODO: implement fast algorithm
 
-        let last_cell = (usable_space - 4) as u64;
+        let last_cell = usable_space - 4;
         let first_cell = {
             let (start, end) = cloned_page.cell_get_raw_pointer_region();
             start + end
@@ -632,7 +632,7 @@ impl BTreeCursor {
                                 "error while parsing varint from cell, probably treat this as corruption?"
                             ),
                         };
-                        let (_, nr_key) = match read_varint(&buf[pc as usize + nr_payload as usize..]) {
+                        let (_, nr_key) = match read_varint(&buf[pc as usize + nr_payload..]) {
                             Ok(v) => v,
                             Err(_) => todo!(
                                 "error while parsing varint from cell, probably treat this as corruption?"
@@ -645,7 +645,7 @@ impl BTreeCursor {
                     PageType::IndexLeaf => todo!(),
                 };
                 cbrk -= size;
-                if cbrk < first_cell as u64 || pc as u64 + size > usable_space as u64 {
+                if cbrk < first_cell as u64 || pc + size > usable_space {
                     todo!("corrupt");
                 }
                 assert!(cbrk + size <= usable_space && cbrk >= first_cell as u64);
@@ -710,11 +710,11 @@ impl BTreeCursor {
                 // TODO: check corruption icellast
                 next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize;
                 size = u16::from_be_bytes(buf[pc + 2..pc + 4].try_into().unwrap()) as usize;
-                nfree += size as usize;
+                nfree += size;
                 if next <= pc + size + 3 {
                     break;
                 }
-                pc = next as usize;
+                pc = next;
             }
 
             if next > 0 {
@@ -744,7 +744,7 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
     let buf = buf_ref.as_slice();
 
     let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
-    let maxpc = (usable_space - amount as usize) as usize;
+    let maxpc = (usable_space - amount);
     let mut found = false;
     while pc <= maxpc {
         let next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap());

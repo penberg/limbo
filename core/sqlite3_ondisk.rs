@@ -298,11 +298,11 @@ impl PageContent {
     }
 
     pub fn cell_content_area(&self) -> u16 {
-        self.read_u16(5) as u16
+        self.read_u16(5)
     }
 
     pub fn num_frag_free_bytes(&self) -> u8 {
-        self.read_u8(7) as u8
+        self.read_u8(7)
     }
 
     pub fn rightmost_pointer(&self) -> Option<u32> {
