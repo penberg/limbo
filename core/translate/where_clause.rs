@@ -151,6 +151,11 @@ pub fn process_where<'a>(select: &'a Select) -> Result<ProcessedWhereClause<'a>>
     }
 
     // sort seekrowids first (if e.g. u.id = 1 and u.age > 50, we want to seek on u.id = 1 first)
+    // since seekrowid replaces a loop, we need to evaluate it first.
+    // E.g.
+    // SELECT u.age FROM users WHERE u.id = 5 AND u.age > 50;
+    // We need to seek on u.id = 5 first, and then evaluate u.age > 50.
+    // If we evaluate u.age > 50 first, we haven't read the row yet.
     wc.terms.sort_by(|a, b| {
         if let WhereExpr::SeekRowid(_) = a.expr {
             std::cmp::Ordering::Less
