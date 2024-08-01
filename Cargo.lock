@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "anyhow",
  "clap 4.5.8",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "limbo-wasm"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "limbo_core",
  "wasm-bindgen",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_core"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "cfg_block",
  "chrono",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sim"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "limbo_core",
  "rand",
