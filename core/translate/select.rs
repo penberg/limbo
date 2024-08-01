@@ -650,6 +650,7 @@ fn translate_table_open_cursor(
 * if condition checks pass, it will eventually be set to true
 */
 fn left_join_match_flag_initialize(program: &mut ProgramBuilder, left_join: &LeftJoinBookkeeping) {
+    program.add_comment(program.offset(), "init LEFT JOIN match flag");
     program.emit_insn(Insn::Integer {
         value: 0,
         dest: left_join.match_flag_register,
@@ -664,6 +665,7 @@ fn left_join_match_flag_set_true(program: &mut ProgramBuilder, left_join: &LeftJ
         left_join.set_match_flag_true_label,
         program.offset() as usize,
     );
+    program.add_comment(program.offset(), "record LEFT JOIN hit");
     program.emit_insn(Insn::Integer {
         value: 1,
         dest: left_join.match_flag_register,

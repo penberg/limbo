@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 
@@ -21,6 +21,8 @@ pub struct ProgramBuilder {
     deferred_label_resolutions: Vec<(BranchOffset, InsnReference)>,
     // Bitmask of cursors that have emitted a SeekRowid instruction.
     seekrowid_emitted_bitmask: u64,
+    // map of instruction index to manual comment (used in EXPLAIN)
+    comments: HashMap<BranchOffset, &'static str>,
 }
 
 impl ProgramBuilder {
@@ -36,6 +38,7 @@ impl ProgramBuilder {
             constant_insns: Vec::new(),
             deferred_label_resolutions: Vec::new(),
             seekrowid_emitted_bitmask: 0,
+            comments: HashMap::new(),
         }
     }
 
@@ -88,6 +91,10 @@ impl ProgramBuilder {
             self.next_insn_label = None;
             self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
         }
+    }
+
+    pub fn add_comment(&mut self, insn_index: BranchOffset, comment: &'static str) {
+        self.comments.insert(insn_index, comment);
     }
 
     // Emit an instruction that will be put at the end of the program (after Transaction statement).
@@ -341,6 +348,7 @@ impl ProgramBuilder {
             insns: self.insns,
             cursor_ref: self.cursor_ref,
             database_header,
+            comments: self.comments,
         }
     }
 }

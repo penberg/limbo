@@ -34,7 +34,7 @@ use crate::Result;
 use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 pub type BranchOffset = i64;
@@ -389,6 +389,7 @@ pub struct Program {
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
+    pub comments: HashMap<BranchOffset, &'static str>,
 }
 
 impl Program {
@@ -1468,12 +1469,24 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
     }
     log::trace!(
         "{}",
-        explain::insn_to_str(program, addr, insn, String::new())
+        explain::insn_to_str(
+            program,
+            addr,
+            insn,
+            String::new(),
+            program.comments.get(&(addr as BranchOffset)).copied()
+        )
     );
 }
 
 fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: String) {
-    let s = explain::insn_to_str(program, addr, insn, indent);
+    let s = explain::insn_to_str(
+        program,
+        addr,
+        insn,
+        indent,
+        program.comments.get(&(addr as BranchOffset)).copied(),
+    );
     println!("{}", s);
 }
 
