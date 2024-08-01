@@ -1,7 +1,13 @@
 use super::{Insn, InsnReference, OwnedValue, Program};
 use std::rc::Rc;
 
-pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: String) -> String {
+pub fn insn_to_str(
+    program: &Program,
+    addr: InsnReference,
+    insn: &Insn,
+    indent: String,
+    manual_comment: Option<&'static str>,
+) -> String {
     let (opcode, p1, p2, p3, p4, p5, comment): (&str, i32, i32, i32, OwnedValue, u16, String) =
         match insn {
             Insn::Init { target_pc } => (
@@ -680,6 +686,6 @@ pub fn insn_to_str(program: &Program, addr: InsnReference, insn: &Insn, indent: 
         p3,
         p4.to_string(),
         p5,
-        comment
+        manual_comment.map_or(format!("{}", comment), |mc| format!("{}; {}", comment, mc))
     )
 }
