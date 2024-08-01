@@ -143,9 +143,7 @@ impl File for DarwinFile {
         if lock_result == -1 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError(format!(
-                    "Failed locking file. File is locked by another process"
-                )));
+                return Err(LimboError::LockingError("Failed locking file. File is locked by another process".to_string()));
             } else {
                 return Err(LimboError::LockingError(format!(
                     "Failed locking file, {}",
