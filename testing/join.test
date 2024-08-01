@@ -117,6 +117,11 @@ do_execsql_test left-join-self {
 } {Jamie|
 Cindy|Jamie}
 
+do_execsql_test left-join-self-2 {
+    select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u2.id = u1.id + 1 limit 2;
+} {Jamie|Cindy
+Cindy|Tommy}
+
 do_execsql_test left-join-self-with-where {
     select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u1.id = u2.id + 1 where u1.id = 5 limit 2;
 } {Edward|Jennifer}

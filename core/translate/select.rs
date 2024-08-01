@@ -4,6 +4,7 @@ use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::{analyze_columns, maybe_apply_affinity, translate_expr};
 use crate::translate::where_clause::{
     process_where, translate_processed_where, translate_tableless_where, ProcessedWhereClause,
+    SeekRowid, WhereExpr,
 };
 use crate::translate::{normalize_ident, Insn};
 use crate::types::{OwnedRecord, OwnedValue};
@@ -95,6 +96,12 @@ pub struct LeftJoinBookkeeping {
     pub on_match_jump_to_label: BranchOffset,
 }
 
+#[derive(Debug)]
+pub enum Plan {
+    Scan,
+    SeekRowid,
+}
+
 /// Represents a single loop in an ordered list of opened read table loops.
 ///
 /// The list is used to generate inner loops like this:
@@ -110,6 +117,8 @@ pub struct LeftJoinBookkeeping {
 pub struct LoopInfo {
     // The table or table alias that we are looping over
     pub identifier: String,
+    // The plan for this loop
+    pub plan: Plan,
     // Metadata about a left join, if any
     pub left_join_maybe: Option<LeftJoinBookkeeping>,
     // The label for the instruction that reads the next row for this table
@@ -532,7 +541,7 @@ fn translate_tables_begin(
             .src_tables
             .get(*idx)
             .expect("loop order out of bounds");
-        let loop_info = translate_table_open_cursor(program, join);
+        let loop_info = translate_table_open_cursor(program, join, &processed_where);
         loops.push(loop_info);
     }
 
@@ -556,6 +565,7 @@ fn translate_tables_begin(
         translate_table_open_loop(
             program,
             select,
+            &loops,
             loop_info,
             &processed_where,
             current_loop_early_terminate_label,
@@ -570,14 +580,17 @@ fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     for table_loop in loops.iter().rev() {
         let cursor_id = table_loop.open_cursor;
         program.resolve_label(table_loop.next_row_label, program.offset());
-        program.emit_insn(Insn::NextAsync { cursor_id });
-        program.emit_insn_with_label_dependency(
-            Insn::NextAwait {
-                cursor_id,
-                pc_if_next: table_loop.rewind_label,
-            },
-            table_loop.rewind_label,
-        );
+        if let Plan::Scan = table_loop.plan {
+            // If we're scanning a table, we need to emit a Next instruction to fetch the next row.
+            program.emit_insn(Insn::NextAsync { cursor_id });
+            program.emit_insn_with_label_dependency(
+                Insn::NextAwait {
+                    cursor_id,
+                    pc_if_next: table_loop.rewind_label,
+                },
+                table_loop.rewind_label,
+            );
+        }
 
         if let Some(left_join) = &table_loop.left_join_maybe {
             left_join_match_flag_check(program, left_join, cursor_id);
@@ -585,7 +598,11 @@ fn translate_tables_end(program: &mut ProgramBuilder, loops: &[LoopInfo]) {
     }
 }
 
-fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -> LoopInfo {
+fn translate_table_open_cursor(
+    program: &mut ProgramBuilder,
+    table: &SrcTable,
+    w: &ProcessedWhereClause,
+) -> LoopInfo {
     let cursor_id =
         program.alloc_cursor_id(Some(table.identifier.clone()), Some(table.table.clone()));
     let root_page = match &table.table {
@@ -597,8 +614,20 @@ fn translate_table_open_cursor(program: &mut ProgramBuilder, table: &SrcTable) -
         root_page,
     });
     program.emit_insn(Insn::OpenReadAwait);
+
+    let has_where_term_where_rowid_index_usable = w.terms.iter().any(|term| {
+        matches!(
+            term.expr,
+            WhereExpr::SeekRowid(SeekRowid { table: t, .. }) if *t == table.identifier
+        )
+    });
     LoopInfo {
         identifier: table.identifier.clone(),
+        plan: if has_where_term_where_rowid_index_usable {
+            Plan::SeekRowid
+        } else {
+            Plan::Scan
+        },
         left_join_maybe: if table.is_outer_join() {
             Some(LeftJoinBookkeeping {
                 match_flag_register: program.alloc_register(),
@@ -680,27 +709,50 @@ fn left_join_match_flag_check(
 fn translate_table_open_loop(
     program: &mut ProgramBuilder,
     select: &Select,
+    loops: &[LoopInfo],
     loop_info: &LoopInfo,
     w: &ProcessedWhereClause,
     early_terminate_label: BranchOffset,
 ) -> Result<()> {
     if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
+        // In a left join loop, initialize the left join match flag to false
+        // If the condition checks pass, it will eventually be set to true
+        // If not, NULLs will be emitted for the right table for this row in the outer table.
         left_join_match_flag_initialize(program, left_join);
     }
 
-    program.emit_insn(Insn::RewindAsync {
-        cursor_id: loop_info.open_cursor,
-    });
-    program.defer_label_resolution(loop_info.rewind_label, program.offset() as usize);
-    program.emit_insn_with_label_dependency(
-        Insn::RewindAwait {
+    if let Plan::Scan = loop_info.plan {
+        // If we're scanning, we need to rewind the cursor to the beginning of the table
+        // before we start processing the rows in the loop.
+        // Consider a nested loop query like:
+        // SELECT * FROM a JOIN b ON a.someprop = b.someprop;
+        // We need to rewind the cursor to the beginning of b for each row in a,
+        // so that we can iterate over all rows in b for each row in a.
+        //
+        // If we're not scanning, we're seeking by rowid, so we don't need to rewind the cursor,
+        // since we're only going to be reading one row.
+        program.emit_insn(Insn::RewindAsync {
             cursor_id: loop_info.open_cursor,
-            pc_if_empty: loop_info.rewind_on_empty_label,
-        },
-        loop_info.rewind_on_empty_label,
-    );
+        });
+        program.defer_label_resolution(loop_info.rewind_label, program.offset() as usize);
+        program.emit_insn_with_label_dependency(
+            Insn::RewindAwait {
+                cursor_id: loop_info.open_cursor,
+                pc_if_empty: loop_info.rewind_on_empty_label,
+            },
+            loop_info.rewind_on_empty_label,
+        );
+    }
 
-    translate_processed_where(program, select, loop_info, w, early_terminate_label, None)?;
+    translate_processed_where(
+        program,
+        select,
+        loops,
+        loop_info,
+        w,
+        early_terminate_label,
+        None,
+    )?;
 
     if let Some(left_join) = loop_info.left_join_maybe.as_ref() {
         left_join_match_flag_set_true(program, left_join);
