@@ -251,7 +251,7 @@ pub fn translate_processed_where<'a>(
                 let computed_rowid_reg = program.alloc_register();
                 let _ = translate_expr(
                     program,
-                    select,
+                    Some(select),
                     s.rowid_expr,
                     computed_rowid_reg,
                     cursor_hint,
