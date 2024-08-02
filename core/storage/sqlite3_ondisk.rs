@@ -648,8 +648,8 @@ impl TryFrom<u64> for SerialType {
             7 => Ok(Self::BEFloat64),
             8 => Ok(Self::ConstInt0),
             9 => Ok(Self::ConstInt1),
-            n if value > 12 && value % 2 == 0 => Ok(Self::Blob(((n - 12) / 2) as usize)),
-            n if value > 13 && value % 2 == 1 => Ok(Self::String(((n - 13) / 2) as usize)),
+            n if value >= 12 && value % 2 == 0 => Ok(Self::Blob(((n - 12) / 2) as usize)),
+            n if value >= 13 && value % 2 == 1 => Ok(Self::String(((n - 13) / 2) as usize)),
             _ => crate::bail_corrupt_error!("Invalid serial type: {}", value),
         }
     }
@@ -903,6 +903,8 @@ mod tests {
     #[case(7, SerialType::BEFloat64)]
     #[case(8, SerialType::ConstInt0)]
     #[case(9, SerialType::ConstInt1)]
+    #[case(12, SerialType::Blob(0))]
+    #[case(13, SerialType::String(0))]
     #[case(14, SerialType::Blob(1))]
     #[case(15, SerialType::String(1))]
     fn test_read_serial_type(#[case] input: u64, #[case] expected: SerialType) {
