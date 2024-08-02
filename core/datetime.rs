@@ -1,6 +1,5 @@
 use crate::types::OwnedValue;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
-use log::trace;
 use std::result::Result;
 use std::{error::Error, fmt::Display};
 
@@ -93,11 +92,9 @@ pub fn get_date_from_time_value(time_value: &OwnedValue) -> crate::Result<String
     } else {
         match dt.unwrap_err() {
             DateTimeError::InvalidArgument(_) => {
-                trace!("Invalid time value: {}", time_value);
                 Ok(String::new())
             }
             DateTimeError::Other(s) => {
-                trace!("Other date time error: {}", s);
                 Err(crate::error::LimboError::InvalidDate(s))
             }
         }
@@ -111,11 +108,9 @@ pub fn get_time_from_datetime_value(time_value: &OwnedValue) -> crate::Result<St
     } else {
         match dt.unwrap_err() {
             DateTimeError::InvalidArgument(_) => {
-                trace!("Invalid time value: {}", time_value);
                 Ok(String::new())
             }
             DateTimeError::Other(s) => {
-                trace!("Other date time error: {}", s);
                 Err(crate::error::LimboError::InvalidTime(s))
             }
         }
