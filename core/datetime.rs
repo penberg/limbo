@@ -259,6 +259,7 @@ fn get_time_from_naive_datetime(value: NaiveDateTime) -> String {
     value.format("%H:%M:%S").to_string()
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::rc::Rc;
