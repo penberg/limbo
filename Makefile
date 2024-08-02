@@ -1,12 +1,20 @@
 MINIMUM_RUST_VERSION := 1.73.0
 CURRENT_RUST_VERSION := $(shell rustc -V | sed -E 's/rustc ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
 RUSTUP := $(shell command -v rustup 2> /dev/null)
+UNAME_S := $(shell uname -s)
 
 # Executable used to execute the compatibility tests.
 SQLITE_EXEC ?= ./target/debug/limbo
 
 # Static library to use for SQLite C API compatibility tests.
-SQLITE_LIB ?= ./target/debug/liblimbo_sqlite3.a
+BASE_SQLITE_LIB = ./target/debug/liblimbo_sqlite3.a
+
+# On darwin link core foundation
+ifeq ($(UNAME_S),Darwin)
+    SQLITE_LIB ?= ../../$(BASE_SQLITE_LIB) -framework CoreFoundation
+else
+    SQLITE_LIB ?= ../../$(BASE_SQLITE_LIB)
+endif
 
 all: check-rust-version check-wasm-target limbo limbo-wasm
 .PHONY: all
@@ -52,5 +60,5 @@ test-compat:
 .PHONY: test-compat
 
 test-sqlite3:
-	LIBS=../../$(SQLITE_LIB) make -C sqlite3/tests test
+	LIBS="$(SQLITE_LIB)" make -C sqlite3/tests test
 .PHONY: test-sqlite3
