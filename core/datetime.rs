@@ -2,14 +2,6 @@ use crate::types::OwnedValue;
 use crate::Result;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 
-fn get_max_datetime_exclusive() -> NaiveDateTime {
-    // The maximum date in SQLite is 9999-12-31
-    NaiveDateTime::new(
-        NaiveDate::from_ymd_opt(10000, 01, 01).unwrap(),
-        NaiveTime::from_hms_milli_opt(00, 00, 00, 000).unwrap(),
-    )
-}
-
 pub fn get_date_from_time_value(time_value: &OwnedValue) -> Result<String> {
     let dt = parse_naive_date_time(time_value);
     match dt {
@@ -147,6 +139,14 @@ fn get_time_from_naive_datetime(value: NaiveDateTime) -> String {
         return String::new();
     }
     value.format("%H:%M:%S").to_string()
+}
+
+fn get_max_datetime_exclusive() -> NaiveDateTime {
+    // The maximum date in SQLite is 9999-12-31
+    NaiveDateTime::new(
+        NaiveDate::from_ymd_opt(10000, 01, 01).unwrap(),
+        NaiveTime::from_hms_milli_opt(00, 00, 00, 000).unwrap(),
+    )
 }
 
 #[cfg(test)]
