@@ -21,7 +21,8 @@ pub mod builder;
 pub mod explain;
 pub mod sorter;
 
-use crate::datetime::{get_date_from_time_value, get_time_from_datetime_value};
+mod datetime;
+
 use crate::error::LimboError;
 use crate::function::{AggFunc, ScalarFunc};
 use crate::pseudo::PseudoCursor;
@@ -30,6 +31,8 @@ use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 use crate::Result;
+
+use datetime::{exec_date, exec_time};
 
 use regex::Regex;
 use std::borrow::BorrowMut;
@@ -1277,13 +1280,12 @@ impl Program {
                     }
                     ScalarFunc::Date => {
                         if *start_reg == 0 {
-                            let date_str = get_date_from_time_value(&OwnedValue::Text(Rc::new(
-                                "now".to_string(),
-                            )))?;
+                            let date_str =
+                                exec_date(&OwnedValue::Text(Rc::new("now".to_string())))?;
                             state.registers[*dest] = OwnedValue::Text(Rc::new(date_str));
                         } else {
                             let time_value = &state.registers[*start_reg];
-                            let date_str = get_date_from_time_value(time_value);
+                            let date_str = exec_date(time_value);
                             match date_str {
                                 Ok(date) => {
                                     state.registers[*dest] = OwnedValue::Text(Rc::new(date))
@@ -1300,13 +1302,12 @@ impl Program {
                     }
                     ScalarFunc::Time => {
                         if *start_reg == 0 {
-                            let time_str = get_time_from_datetime_value(&OwnedValue::Text(
-                                Rc::new("now".to_string()),
-                            ))?;
+                            let time_str =
+                                exec_time(&OwnedValue::Text(Rc::new("now".to_string())))?;
                             state.registers[*dest] = OwnedValue::Text(Rc::new(time_str));
                         } else {
                             let datetime_value = &state.registers[*start_reg];
-                            let time_str = get_time_from_datetime_value(datetime_value);
+                            let time_str = exec_time(datetime_value);
                             match time_str {
                                 Ok(time) => {
                                     state.registers[*dest] = OwnedValue::Text(Rc::new(time))

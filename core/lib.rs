@@ -1,4 +1,3 @@
-mod datetime;
 mod error;
 mod function;
 mod io;
