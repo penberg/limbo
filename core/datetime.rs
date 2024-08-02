@@ -1,24 +1,6 @@
 use crate::types::OwnedValue;
+use crate::Result;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
-use std::result::Result;
-use std::{error::Error, fmt::Display};
-
-#[derive(Debug)]
-enum DateTimeError {
-    InvalidArgument(String),
-    Other(String),
-}
-
-impl Display for DateTimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DateTimeError::InvalidArgument(s) => write!(f, "Invalid argument: {}", s),
-            DateTimeError::Other(s) => write!(f, "Other error: {}", s),
-        }
-    }
-}
-
-impl Error for DateTimeError {}
 
 fn get_max_datetime_exclusive() -> NaiveDateTime {
     // The maximum date in SQLite is 9999-12-31
@@ -28,51 +10,32 @@ fn get_max_datetime_exclusive() -> NaiveDateTime {
     )
 }
 
-pub fn get_date_from_time_value(time_value: &OwnedValue) -> crate::Result<String> {
+pub fn get_date_from_time_value(time_value: &OwnedValue) -> Result<String> {
     let dt = parse_naive_date_time(time_value);
-    if dt.is_ok() {
-        return Ok(get_date_from_naive_datetime(dt.unwrap()));
-    } else {
-        match dt.unwrap_err() {
-            DateTimeError::InvalidArgument(_) => {
-                Ok(String::new())
-            }
-            DateTimeError::Other(s) => {
-                Err(crate::error::LimboError::InvalidDate(s))
-            }
-        }
+    match dt {
+        Some(dt) => Ok(get_date_from_naive_datetime(dt)),
+        None => Ok(String::new()),
     }
 }
 
-pub fn get_time_from_datetime_value(time_value: &OwnedValue) -> crate::Result<String> {
+pub fn get_time_from_datetime_value(time_value: &OwnedValue) -> Result<String> {
     let dt = parse_naive_date_time(time_value);
-    if dt.is_ok() {
-        return Ok(get_time_from_naive_datetime(dt.unwrap()));
-    } else {
-        match dt.unwrap_err() {
-            DateTimeError::InvalidArgument(_) => {
-                Ok(String::new())
-            }
-            DateTimeError::Other(s) => {
-                Err(crate::error::LimboError::InvalidTime(s))
-            }
-        }
+    match dt {
+        Some(dt) => Ok(get_time_from_naive_datetime(dt)),
+        None => Ok(String::new()),
     }
 }
 
-fn parse_naive_date_time(time_value: &OwnedValue) -> Result<NaiveDateTime, DateTimeError> {
+fn parse_naive_date_time(time_value: &OwnedValue) -> Option<NaiveDateTime> {
     match time_value {
         OwnedValue::Text(s) => get_date_time_from_time_value_string(s),
         OwnedValue::Integer(i) => get_date_time_from_time_value_integer(*i),
         OwnedValue::Float(f) => get_date_time_from_time_value_float(*f),
-        _ => Err(DateTimeError::InvalidArgument(format!(
-            "Invalid time value: {}",
-            time_value
-        ))),
+        _ => None,
     }
 }
 
-fn get_date_time_from_time_value_string(value: &str) -> Result<NaiveDateTime, DateTimeError> {
+fn get_date_time_from_time_value_string(value: &str) -> Option<NaiveDateTime> {
     // Time-value formats:
     // 1-7. YYYY-MM-DD[THH:MM[:SS[.SSS]]]
     // 8-10. HH:MM[:SS[.SSS]]
@@ -83,7 +46,7 @@ fn get_date_time_from_time_value_string(value: &str) -> Result<NaiveDateTime, Da
 
     // Check for 'now'
     if value.trim().eq_ignore_ascii_case("now") {
-        return Ok(chrono::Local::now().to_utc().naive_utc());
+        return Some(chrono::Local::now().to_utc().naive_utc());
     }
 
     // Check for Julian day number (integer or float)
@@ -107,11 +70,11 @@ fn get_date_time_from_time_value_string(value: &str) -> Result<NaiveDateTime, Da
 
     // First, try to parse as date-only format
     if let Ok(date) = NaiveDate::parse_from_str(value, date_only_format) {
-        return Ok(date.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()));
+        return Some(date.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()));
     }
 
     for format in &datetime_formats {
-        if let Ok(dt) = if format.starts_with("%H") {
+        if let Some(dt) = if format.starts_with("%H") {
             // For time-only formats, assume date 2000-01-01
             // Ref: https://sqlite.org/lang_datefunc.html#tmval
             parse_datetime_with_optional_tz(
@@ -121,24 +84,17 @@ fn get_date_time_from_time_value_string(value: &str) -> Result<NaiveDateTime, Da
         } else {
             parse_datetime_with_optional_tz(value, format)
         } {
-            return Ok(dt);
+            return Some(dt);
         }
     }
-
-    return Err(DateTimeError::InvalidArgument(format!(
-        "Invalid time value: {}",
-        value
-    )));
+    None
 }
 
-fn parse_datetime_with_optional_tz(
-    value: &str,
-    format: &str,
-) -> Result<NaiveDateTime, DateTimeError> {
+fn parse_datetime_with_optional_tz(value: &str, format: &str) -> Option<NaiveDateTime> {
     // Try parsing with timezone
     let with_tz_format = format.to_owned() + "%:z";
     if let Ok(dt) = DateTime::parse_from_str(value, &with_tz_format) {
-        return Ok(dt.with_timezone(&Utc).naive_utc());
+        return Some(dt.with_timezone(&Utc).naive_utc());
     }
 
     let mut value_without_tz = value;
@@ -147,36 +103,27 @@ fn parse_datetime_with_optional_tz(
     }
 
     // Parse without timezone
-    NaiveDateTime::parse_from_str(value_without_tz, format)
-        .map_err(|_| DateTimeError::InvalidArgument(format!("Invalid time value: {}", value)))
+    if let Ok(dt) = NaiveDateTime::parse_from_str(value_without_tz, format) {
+        return Some(dt);
+    }
+    None
 }
 
-fn get_date_time_from_time_value_integer(value: i64) -> Result<NaiveDateTime, DateTimeError> {
+fn get_date_time_from_time_value_integer(value: i64) -> Option<NaiveDateTime> {
     i32::try_from(value).map_or_else(
-        |_| {
-            Err(DateTimeError::InvalidArgument(format!(
-                "Invalid julian day: {}",
-                value
-            )))
-        },
+        |_| None,
         |value| get_date_time_from_time_value_float(value as f64),
     )
 }
 
-fn get_date_time_from_time_value_float(value: f64) -> Result<NaiveDateTime, DateTimeError> {
-    if value.is_infinite()
-        || value.is_nan()
-        || value < 0.0
-        || value >= 5373484.5
-    {
-        return Err(DateTimeError::InvalidArgument(format!(
-            "Invalid julian day: {}",
-            value
-        )));
+fn get_date_time_from_time_value_float(value: f64) -> Option<NaiveDateTime> {
+    if value.is_infinite() || value.is_nan() || value < 0.0 || value >= 5373484.5 {
+        return None;
     }
-    let dt = julian_day_converter::julian_day_to_datetime(value)
-        .map_err(|_| DateTimeError::Other("Failed parsing the julian date".to_string()))?;
-    Ok(dt)
+    match julian_day_converter::julian_day_to_datetime(value) {
+        Ok(dt) => Some(dt),
+        Err(_) => None,
+    }
 }
 
 fn is_leap_second(dt: &NaiveDateTime) -> bool {
