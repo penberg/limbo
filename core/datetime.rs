@@ -11,7 +11,8 @@ pub fn exec_date(time_value: &OwnedValue) -> Result<String> {
     }
 }
 
-pub fn get_time_from_datetime_value(time_value: &OwnedValue) -> Result<String> {
+/// Implementation of the time() SQL function.
+pub fn exec_time(time_value: &OwnedValue) -> Result<String> {
     let dt = parse_naive_date_time(time_value);
     match dt {
         Some(dt) => Ok(get_time_from_naive_datetime(dt)),
@@ -590,7 +591,7 @@ mod tests {
 
         for (input, expected) in test_cases {
             assert_eq!(
-                get_time_from_datetime_value(&input).unwrap(),
+                exec_time(&input).unwrap(),
                 expected,
                 "Failed for input: {:?}",
                 input
@@ -629,7 +630,7 @@ mod tests {
         ];
 
         for case in invalid_cases.iter() {
-            let result = get_time_from_datetime_value(case);
+            let result = exec_time(case);
             assert!(
                 result.is_ok(),
                 "Error encountered while parsing time value {}: {}",

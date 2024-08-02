@@ -21,7 +21,7 @@ pub mod builder;
 pub mod explain;
 pub mod sorter;
 
-use crate::datetime::{exec_date, get_time_from_datetime_value};
+use crate::datetime::{exec_date, exec_time};
 use crate::error::LimboError;
 use crate::function::{AggFunc, ScalarFunc};
 use crate::pseudo::PseudoCursor;
@@ -1300,13 +1300,13 @@ impl Program {
                     }
                     ScalarFunc::Time => {
                         if *start_reg == 0 {
-                            let time_str = get_time_from_datetime_value(&OwnedValue::Text(
+                            let time_str = exec_time(&OwnedValue::Text(
                                 Rc::new("now".to_string()),
                             ))?;
                             state.registers[*dest] = OwnedValue::Text(Rc::new(time_str));
                         } else {
                             let datetime_value = &state.registers[*start_reg];
-                            let time_str = get_time_from_datetime_value(datetime_value);
+                            let time_str = exec_time(datetime_value);
                             match time_str {
                                 Ok(time) => {
                                     state.registers[*dest] = OwnedValue::Text(Rc::new(time))
