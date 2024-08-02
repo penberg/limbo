@@ -2,7 +2,8 @@ use crate::types::OwnedValue;
 use crate::Result;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 
-pub fn get_date_from_time_value(time_value: &OwnedValue) -> Result<String> {
+/// Implementation of the date() SQL function.
+pub fn exec_date(time_value: &OwnedValue) -> Result<String> {
     let dt = parse_naive_date_time(time_value);
     match dt {
         Some(dt) => Ok(get_date_from_naive_datetime(dt)),
@@ -363,7 +364,7 @@ mod tests {
 
         for (input, expected) in test_cases {
             assert_eq!(
-                get_date_from_time_value(&input).unwrap(),
+                exec_date(&input).unwrap(),
                 expected,
                 "Failed for input: {:?}",
                 input
@@ -402,7 +403,7 @@ mod tests {
         ];
 
         for case in invalid_cases.iter() {
-            let result = get_date_from_time_value(case);
+            let result = exec_date(case);
             assert!(
                 result.is_ok(),
                 "Error encountered while parsing time value {}: {}",
