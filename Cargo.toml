@@ -36,6 +36,8 @@ install-path = "~/.limbo"
 install-updater = true
 # Whether to consider the binaries in a package for distribution (defaults true)
 dist = false
+# Whether to enable GitHub Attestations
+github-attestations = true
 
 [profile.dist]
 inherits = "release"
