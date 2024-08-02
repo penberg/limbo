@@ -20,63 +20,6 @@ impl Display for DateTimeError {
 
 impl Error for DateTimeError {}
 
-#[derive(Debug, Clone, Copy)]
-pub enum TimeUnit {
-    Second,
-    Minute,
-    Hour,
-    Day,
-    Month,
-    Year,
-}
-
-/*
-** The following table defines various date transformations of the form
-**
-**            'NNN days'
-**
-** Where NNN is an arbitrary floating-point number and "days" can be one
-** of several units of time.
-*/
-impl TimeUnit {
-    pub fn name(&self) -> &'static str {
-        match self {
-            TimeUnit::Second => "second",
-            TimeUnit::Minute => "minute",
-            TimeUnit::Hour => "hour",
-            TimeUnit::Day => "day",
-            TimeUnit::Month => "month",
-            TimeUnit::Year => "year",
-        }
-    }
-
-    // Maximum value for each unit in Julian calendar
-    // Each corresponds to ~14713 years in the Julian calendar, which equals
-    // 10000 years in the Gregorian calendar
-    pub fn max_value_julian(&self) -> f64 {
-        match self {
-            TimeUnit::Second => 4.6427e14,
-            TimeUnit::Minute => 7.7379e12,
-            TimeUnit::Hour => 1.2897e11,
-            TimeUnit::Day => 5373485.0,
-            TimeUnit::Month => 176546.0,
-            TimeUnit::Year => 14713.0,
-        }
-    }
-
-    // Conversion factor from the unit to seconds
-    pub fn seconds_conversion(&self) -> f64 {
-        match self {
-            TimeUnit::Second => 1.0,
-            TimeUnit::Minute => 60.0,
-            TimeUnit::Hour => 3600.0,
-            TimeUnit::Day => 86400.0,
-            TimeUnit::Month => 2592000.0,
-            TimeUnit::Year => 31536000.0,
-        }
-    }
-}
-
 fn get_max_datetime_exclusive() -> NaiveDateTime {
     // The maximum date in SQLite is 9999-12-31
     NaiveDateTime::new(
@@ -224,7 +167,7 @@ fn get_date_time_from_time_value_float(value: f64) -> Result<NaiveDateTime, Date
     if value.is_infinite()
         || value.is_nan()
         || value < 0.0
-        || value >= TimeUnit::Day.max_value_julian()
+        || value >= 5373484.5
     {
         return Err(DateTimeError::InvalidArgument(format!(
             "Invalid julian day: {}",
