@@ -44,9 +44,10 @@
 use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
 use crate::storage::buffer_pool::BufferPool;
+use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
-use crate::{File, PageSource, Result};
+use crate::{File, Result};
 use log::trace;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -108,7 +109,9 @@ pub struct WalFrameHeader {
     checksum_2: u32,
 }
 
-pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
+pub fn begin_read_database_header(
+    page_io: Rc<dyn DatabaseStorage>,
+) -> Result<Rc<RefCell<DatabaseHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let result = Rc::new(RefCell::new(DatabaseHeader::default()));
@@ -118,7 +121,7 @@ pub fn begin_read_database_header(page_source: &PageSource) -> Result<Rc<RefCell
         finish_read_database_header(buf, header).unwrap();
     });
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_source.get(1, c.clone())?;
+    page_io.read_page(1, c.clone())?;
     Ok(result)
 }
 
@@ -160,7 +163,7 @@ fn finish_read_database_header(
 
 pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Result<()> {
     let header = Rc::new(header.clone());
-    let page_source = Rc::new(pager.page_source.clone());
+    let page_source = pager.page_io.clone();
 
     let drop_fn = Rc::new(|_buf| {});
     let buffer_to_copy = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
@@ -185,7 +188,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf.clone(), complete)));
-    page_source.get(1, c.clone())?;
+    page_source.read_page(1, c.clone())?;
     // run get header block
     pager.io.run_once()?;
 
@@ -199,7 +202,9 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
         // finish_read_database_header(buf, header).unwrap();
     });
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
-    page_source.write(0, buffer_to_copy.clone(), c).unwrap();
+    page_source
+        .write_page(0, buffer_to_copy.clone(), c)
+        .unwrap();
 
     Ok(())
 }
@@ -440,7 +445,7 @@ impl PageContent {
 }
 
 pub fn begin_read_page(
-    page_source: &PageSource,
+    page_io: Rc<dyn DatabaseStorage>,
     buffer_pool: Rc<BufferPool>,
     page: Rc<RefCell<Page>>,
     page_idx: usize,
@@ -459,7 +464,7 @@ pub fn begin_read_page(
         }
     });
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_source.get(page_idx, c.clone())?;
+    page_io.read_page(page_idx, c.clone())?;
     Ok(())
 }
 
@@ -488,7 +493,7 @@ fn finish_read_page(
 }
 
 pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result<()> {
-    let page_source = &pager.page_source;
+    let page_source = &pager.page_io;
     let page_finish = page.clone();
     let page = page.borrow();
 
@@ -507,7 +512,7 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
         })
     };
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
-    page_source.write(page.id, buffer.clone(), c)?;
+    page_source.write_page(page.id, buffer.clone(), c)?;
     Ok(())
 }
 
