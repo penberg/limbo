@@ -50,10 +50,8 @@ impl SrcTable<'_> {
         {
             if *join_type == JoinType::LEFT | JoinType::OUTER {
                 true
-            } else if *join_type == JoinType::RIGHT | JoinType::OUTER {
-                true
             } else {
-                false
+                *join_type == JoinType::RIGHT | JoinType::OUTER
             }
         } else {
             false

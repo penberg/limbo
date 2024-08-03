@@ -376,7 +376,7 @@ impl BTreeCursor {
         let buf: &mut [u8] = buf_ref.as_mut_slice();
 
         // copy data
-        buf[pc as usize..pc as usize + payload.len()].copy_from_slice(&payload);
+        buf[pc as usize..pc as usize + payload.len()].copy_from_slice(payload);
         //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
         let (pointer_area_pc_by_idx, _) = page.cell_get_raw_pointer_region();
         let pointer_area_pc_by_idx = pointer_area_pc_by_idx + (2 * cell_idx);
@@ -575,9 +575,8 @@ impl BTreeCursor {
     fn read_page_sync(&mut self, page_idx: usize) -> Rc<RefCell<Page>> {
         loop {
             let page_ref = self.pager.read_page(page_idx);
-            match page_ref {
-                Ok(p) => return p,
-                Err(_) => {}
+            if let Ok(p) = page_ref {
+                return p;
             }
         }
     }
@@ -646,7 +645,7 @@ impl BTreeCursor {
 
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
         assert!(top + amount <= usable_space);
-        return top as u16;
+        top as u16
     }
 
     fn defragment_page(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) {
@@ -795,8 +794,8 @@ impl BTreeCursor {
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
         // don't count header and cell pointers?
-        nfree = nfree - first_cell as usize;
-        return nfree as u16;
+        nfree -= first_cell as usize;
+        nfree as u16
     }
 }
 
@@ -809,7 +808,7 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
     let buf = buf_ref.as_slice();
 
     let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
-    let maxpc = (usable_space - amount);
+    let maxpc = usable_space - amount;
     let mut found = false;
     while pc <= maxpc {
         let next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap());

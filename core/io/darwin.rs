@@ -67,7 +67,7 @@ impl IO for DarwinIO {
                     match cf {
                         CompletionCallback::Read(ref file, ref c, pos) => {
                             let mut file = file.borrow_mut();
-                            let c: &Completion = &c;
+                            let c: &Completion = c;
                             let r = match c {
                                 Completion::Read(r) => r,
                                 Completion::Write(_) => unreachable!(),

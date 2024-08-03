@@ -111,7 +111,7 @@ fn get_date_time_from_time_value_integer(value: i64) -> Option<NaiveDateTime> {
 }
 
 fn get_date_time_from_time_value_float(value: f64) -> Option<NaiveDateTime> {
-    if value.is_infinite() || value.is_nan() || value < 0.0 || value >= 5373484.5 {
+    if value.is_infinite() || value.is_nan() || !(0.0..5373484.5).contains(&value) {
         return None;
     }
     match julian_day_converter::julian_day_to_datetime(value) {

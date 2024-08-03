@@ -686,6 +686,6 @@ pub fn insn_to_str(
         p3,
         p4.to_string(),
         p5,
-        manual_comment.map_or(format!("{}", comment), |mc| format!("{}; {}", comment, mc))
+        manual_comment.map_or(comment.to_string(), |mc| format!("{}; {}", comment, mc))
     )
 }
