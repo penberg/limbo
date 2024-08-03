@@ -265,7 +265,7 @@ pub struct Pager {
     /// Source of the database pages.
     pub page_io: Rc<dyn DatabaseStorage>,
     /// The write-ahead log (WAL) for the database.
-    wal: Option<Wal>,
+    wal: Rc<dyn Wal>,
     /// A page cache for the database.
     page_cache: RefCell<DumbLruPageCache>,
     /// Buffer pool for temporary data storage.
@@ -286,6 +286,7 @@ impl Pager {
     pub fn finish_open(
         db_header_ref: Rc<RefCell<DatabaseHeader>>,
         page_io: Rc<dyn DatabaseStorage>,
+        wal: Rc<dyn Wal>,
         io: Arc<dyn crate::io::IO>,
     ) -> Result<Self> {
         let db_header = RefCell::borrow(&db_header_ref);
@@ -294,7 +295,7 @@ impl Pager {
         let page_cache = RefCell::new(DumbLruPageCache::new(10));
         Ok(Self {
             page_io,
-            wal: None,
+            wal,
             buffer_pool,
             page_cache,
             io,
@@ -304,16 +305,12 @@ impl Pager {
     }
 
     pub fn begin_read_tx(&self) -> Result<()> {
-        if let Some(wal) = &self.wal {
-            wal.begin_read_tx()?;
-        }
+        self.wal.begin_read_tx()?;
         Ok(())
     }
 
     pub fn end_read_tx(&self) -> Result<()> {
-        if let Some(wal) = &self.wal {
-            wal.end_read_tx()?;
-        }
+        self.wal.end_read_tx()?;
         Ok(())
     }
 
@@ -326,16 +323,14 @@ impl Pager {
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         RefCell::borrow(&page).set_locked();
-        if let Some(wal) = &self.wal {
-            if let Some(frame_id) = wal.find_frame(page_idx as u64)? {
-                wal.read_frame(frame_id, page.clone())?;
-                {
-                    let page = page.borrow_mut();
-                    page.set_uptodate();
-                }
-                page_cache.insert(page_idx, page.clone());
-                return Ok(page);
+        if let Some(frame_id) = self.wal.find_frame(page_idx as u64)? {
+            self.wal.read_frame(frame_id, page.clone())?;
+            {
+                let page = page.borrow_mut();
+                page.set_uptodate();
             }
+            page_cache.insert(page_idx, page.clone());
+            return Ok(page);
         }
         sqlite3_ondisk::begin_read_page(
             self.page_io.clone(),

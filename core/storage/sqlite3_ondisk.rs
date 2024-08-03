@@ -830,7 +830,7 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     return n;
 }
 
-pub fn begin_read_wal_header(io: &Box<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
+pub fn begin_read_wal_header(io: Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
     let result = Rc::new(RefCell::new(WalHeader::default()));
