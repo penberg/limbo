@@ -23,6 +23,8 @@ use std::{cell::RefCell, rc::Rc};
 use storage::database::FileStorage;
 use storage::pager::Pager;
 use storage::sqlite3_ondisk::DatabaseHeader;
+#[cfg(feature = "fs")]
+use storage::wal::WalFile;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
@@ -31,6 +33,8 @@ pub type Result<T> = std::result::Result<T, error::LimboError>;
 pub use io::PlatformIO;
 pub use io::{Buffer, Completion, File, WriteCompletion, IO};
 pub use storage::database::DatabaseStorage;
+pub use storage::pager::Page;
+pub use storage::wal::Wal;
 pub use types::Value;
 
 pub struct Database {
@@ -44,13 +48,23 @@ impl Database {
     pub fn open_file(io: Arc<dyn crate::io::IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let page_io = Rc::new(FileStorage::new(file));
-        Self::open(io, page_io)
+        let wal = Rc::new(WalFile::new());
+        Self::open(io, page_io, wal)
     }
 
-    pub fn open(io: Arc<dyn crate::io::IO>, page_io: Rc<dyn DatabaseStorage>) -> Result<Database> {
+    pub fn open(
+        io: Arc<dyn crate::io::IO>,
+        page_io: Rc<dyn DatabaseStorage>,
+        wal: Rc<dyn Wal>,
+    ) -> Result<Database> {
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
-        let pager = Rc::new(Pager::finish_open(db_header.clone(), page_io, io.clone())?);
+        let pager = Rc::new(Pager::finish_open(
+            db_header.clone(),
+            page_io,
+            wal,
+            io.clone(),
+        )?);
         let bootstrap_schema = Rc::new(Schema::new());
         let conn = Connection {
             pager: pager.clone(),
