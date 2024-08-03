@@ -48,7 +48,8 @@ impl Database {
     pub fn open_file(io: Arc<dyn crate::io::IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let page_io = Rc::new(FileStorage::new(file));
-        let wal = Rc::new(WalFile::new());
+        let wal_path = format!("{}-wal", path);
+        let wal = Rc::new(WalFile::new(io.clone(), wal_path));
         Self::open(io, page_io, wal)
     }
 
