@@ -107,6 +107,8 @@ fn rusqlite_bench(criterion: &mut Criterion) {
 
     let conn = rusqlite::Connection::open("../testing/testing.db").unwrap();
 
+    conn.pragma_update(None, "locking_mode", &"EXCLUSIVE")
+        .unwrap();
     group.bench_function("Prepare statement: 'SELECT 1'", |b| {
         b.iter(|| {
             conn.prepare("SELECT 1").unwrap();
