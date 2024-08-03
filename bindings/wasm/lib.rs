@@ -13,7 +13,7 @@ impl Database {
     #[wasm_bindgen(constructor)]
     pub fn new(_path: &str) -> Database {
         let io = Arc::new(IO {});
-        let page_io = Rc::new(PageIO {});
+        let page_io = Rc::new(DatabaseStorage {});
         let inner = limbo_core::Database::open(io, page_io).unwrap();
         Database { _inner: inner }
     }
@@ -34,9 +34,9 @@ impl limbo_core::IO for IO {
     }
 }
 
-pub struct PageIO {}
+pub struct DatabaseStorage {}
 
-impl limbo_core::PageIO for PageIO {
+impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn get(&self, _page_idx: usize, _c: Rc<limbo_core::Completion>) -> Result<()> {
         todo!();
     }

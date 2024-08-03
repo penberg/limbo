@@ -7,7 +7,7 @@ pub(crate) mod wal;
 use crate::{error::LimboError, io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
 
-pub trait PageIO {
+pub trait DatabaseStorage {
     fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
     fn write(&self, page_idx: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
 }
@@ -18,7 +18,7 @@ pub struct FileStorage {
 }
 
 #[cfg(feature = "fs")]
-impl PageIO for FileStorage {
+impl DatabaseStorage for FileStorage {
     fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         let r = match &(*c) {
             Completion::Read(r) => r,

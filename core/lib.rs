@@ -30,7 +30,7 @@ pub type Result<T> = std::result::Result<T, error::LimboError>;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
 pub use io::{Buffer, Completion, File, WriteCompletion, IO};
-pub use storage::PageIO;
+pub use storage::DatabaseStorage;
 pub use types::Value;
 
 pub struct Database {
@@ -47,7 +47,7 @@ impl Database {
         Self::open(io, page_io)
     }
 
-    pub fn open(io: Arc<dyn crate::io::IO>, page_io: Rc<dyn PageIO>) -> Result<Database> {
+    pub fn open(io: Arc<dyn crate::io::IO>, page_io: Rc<dyn DatabaseStorage>) -> Result<Database> {
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
         let pager = Rc::new(Pager::finish_open(db_header.clone(), page_io, io.clone())?);

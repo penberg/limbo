@@ -12,7 +12,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
-use super::PageIO;
+use super::DatabaseStorage;
 
 pub struct Page {
     pub flags: AtomicUsize,
@@ -264,7 +264,7 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
 /// transaction management.
 pub struct Pager {
     /// Source of the database pages.
-    pub page_io: Rc<dyn PageIO>,
+    pub page_io: Rc<dyn DatabaseStorage>,
     /// The write-ahead log (WAL) for the database.
     wal: Option<Wal>,
     /// A page cache for the database.
@@ -279,14 +279,14 @@ pub struct Pager {
 
 impl Pager {
     /// Begins opening a database by reading the database header.
-    pub fn begin_open(page_io: Rc<dyn PageIO>) -> Result<Rc<RefCell<DatabaseHeader>>> {
+    pub fn begin_open(page_io: Rc<dyn DatabaseStorage>) -> Result<Rc<RefCell<DatabaseHeader>>> {
         sqlite3_ondisk::begin_read_database_header(page_io)
     }
 
     /// Completes opening a database by initializing the Pager with the database header.
     pub fn finish_open(
         db_header_ref: Rc<RefCell<DatabaseHeader>>,
-        page_io: Rc<dyn PageIO>,
+        page_io: Rc<dyn DatabaseStorage>,
         io: Arc<dyn crate::io::IO>,
     ) -> Result<Self> {
         let db_header = RefCell::borrow(&db_header_ref);

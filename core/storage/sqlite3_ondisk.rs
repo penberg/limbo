@@ -51,7 +51,7 @@ use log::trace;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::PageIO;
+use super::DatabaseStorage;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -110,7 +110,9 @@ pub struct WalFrameHeader {
     checksum_2: u32,
 }
 
-pub fn begin_read_database_header(page_io: Rc<dyn PageIO>) -> Result<Rc<RefCell<DatabaseHeader>>> {
+pub fn begin_read_database_header(
+    page_io: Rc<dyn DatabaseStorage>,
+) -> Result<Rc<RefCell<DatabaseHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let result = Rc::new(RefCell::new(DatabaseHeader::default()));
@@ -442,7 +444,7 @@ impl PageContent {
 }
 
 pub fn begin_read_page(
-    page_io: Rc<dyn PageIO>,
+    page_io: Rc<dyn DatabaseStorage>,
     buffer_pool: Rc<BufferPool>,
     page: Rc<RefCell<Page>>,
     page_idx: usize,
