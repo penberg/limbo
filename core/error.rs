@@ -39,13 +39,13 @@ pub enum LimboError {
 #[macro_export]
 macro_rules! bail_parse_error {
     ($($arg:tt)*) => {
-        return Err(crate::error::LimboError::ParseError(format!($($arg)*)))
+        return Err($crate::error::LimboError::ParseError(format!($($arg)*)))
     };
 }
 
 #[macro_export]
 macro_rules! bail_corrupt_error {
     ($($arg:tt)*) => {
-        return Err(crate::error::LimboError::Corrupt(format!($($arg)*)))
+        return Err($crate::error::LimboError::Corrupt(format!($($arg)*)))
     };
 }

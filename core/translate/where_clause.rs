@@ -374,14 +374,12 @@ fn translate_condition_expr(
             let lhs_reg = program.alloc_register();
             let rhs_reg = program.alloc_register();
             let _ = translate_expr(program, Some(select), lhs, lhs_reg, cursor_hint);
-            match lhs.as_ref() {
-                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                _ => {}
+            if let ast::Expr::Literal(_) = lhs.as_ref() {
+                program.mark_last_insn_constant()
             }
             let _ = translate_expr(program, Some(select), rhs, rhs_reg, cursor_hint);
-            match rhs.as_ref() {
-                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                _ => {}
+            if let ast::Expr::Literal(_) = rhs.as_ref() {
+                program.mark_last_insn_constant()
             }
             match op {
                 ast::Operator::Greater => {
@@ -757,26 +755,24 @@ fn translate_condition_expr(
                         condition_metadata.jump_target_when_false,
                     );
                 }
+            } else if condition_metadata.jump_if_condition_is_true {
+                program.emit_insn_with_label_dependency(
+                    Insn::IfNot {
+                        reg: cur_reg,
+                        target_pc: condition_metadata.jump_target_when_true,
+                        null_reg: cur_reg,
+                    },
+                    condition_metadata.jump_target_when_true,
+                );
             } else {
-                if condition_metadata.jump_if_condition_is_true {
-                    program.emit_insn_with_label_dependency(
-                        Insn::IfNot {
-                            reg: cur_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                            null_reg: cur_reg,
-                        },
-                        condition_metadata.jump_target_when_true,
-                    );
-                } else {
-                    program.emit_insn_with_label_dependency(
-                        Insn::If {
-                            reg: cur_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                            null_reg: cur_reg,
-                        },
-                        condition_metadata.jump_target_when_false,
-                    );
-                }
+                program.emit_insn_with_label_dependency(
+                    Insn::If {
+                        reg: cur_reg,
+                        target_pc: condition_metadata.jump_target_when_false,
+                        null_reg: cur_reg,
+                    },
+                    condition_metadata.jump_target_when_false,
+                );
             }
         }
         _ => todo!("op {:?} not implemented", expr),

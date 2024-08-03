@@ -115,7 +115,7 @@ struct DumbLruPageCache {
 impl DumbLruPageCache {
     pub fn new(capacity: usize) -> Self {
         Self {
-            capacity: capacity,
+            capacity,
             map: RefCell::new(HashMap::new()),
             head: RefCell::new(None),
             tail: RefCell::new(None),
@@ -125,7 +125,7 @@ impl DumbLruPageCache {
     pub fn insert(&mut self, key: usize, value: Rc<RefCell<Page>>) {
         self.delete(key);
         let mut entry = Box::new(PageCacheEntry {
-            key: key,
+            key,
             next: None,
             prev: None,
             page: value,
@@ -156,22 +156,17 @@ impl DumbLruPageCache {
     fn get_ptr(&mut self, key: usize) -> Option<NonNull<PageCacheEntry>> {
         let m = self.map.borrow_mut();
         let ptr = m.get(&key);
-        match ptr {
-            Some(v) => Some(*v),
-            None => None,
-        }
+        ptr.copied()
     }
 
     pub fn get(&mut self, key: &usize) -> Option<Rc<RefCell<Page>>> {
         let ptr = self.get_ptr(*key);
-        if ptr.is_none() {
-            return None;
-        }
+        ptr?;
         let ptr = unsafe { ptr.unwrap().as_mut() };
         let page = ptr.page.clone();
         self.detach(ptr);
         self.touch(ptr);
-        return Some(page);
+        Some(page)
     }
 
     pub fn resize(&mut self, capacity: usize) {
@@ -380,7 +375,7 @@ impl Pager {
     */
     pub fn allocate_page(&self) -> Result<Rc<RefCell<Page>>> {
         let header = &self.db_header;
-        let mut header = RefCell::borrow_mut(&header);
+        let mut header = RefCell::borrow_mut(header);
         header.database_size += 1;
         {
             // update database size

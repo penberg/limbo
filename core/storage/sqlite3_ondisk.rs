@@ -827,7 +827,7 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     for i in 0..n {
         buf[i] = encoded[n - 1 - i];
     }
-    return n;
+    n
 }
 
 pub fn begin_read_wal_header(io: Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {

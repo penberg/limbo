@@ -195,9 +195,8 @@ pub fn translate_expr(
                             for arg in args {
                                 let reg = program.alloc_register();
                                 let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
-                                match arg {
-                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                    _ => {}
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
                                 }
                             }
                             program.emit_insn(Insn::Function {
@@ -269,7 +268,7 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
-                                start_reg: start_reg,
+                                start_reg,
                                 dest: target_register,
                                 func: ScalarFunc::Date,
                             });
@@ -293,7 +292,7 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
-                                start_reg: start_reg,
+                                start_reg,
                                 dest: target_register,
                                 func: ScalarFunc::Time,
                             });
@@ -334,7 +333,7 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Min => {
                             let args = if let Some(args) = args {
-                                if args.len() < 1 {
+                                if args.is_empty() {
                                     crate::bail_parse_error!(
                                         "min function with less than one argument"
                                     );
@@ -346,9 +345,8 @@ pub fn translate_expr(
                             for arg in args {
                                 let reg = program.alloc_register();
                                 let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
-                                match arg {
-                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                    _ => {}
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
                                 }
                             }
 
@@ -361,7 +359,7 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Max => {
                             let args = if let Some(args) = args {
-                                if args.len() < 1 {
+                                if args.is_empty() {
                                     crate::bail_parse_error!(
                                         "max function with less than one argument"
                                     );
@@ -373,9 +371,8 @@ pub fn translate_expr(
                             for arg in args {
                                 let reg = program.alloc_register();
                                 let _ = translate_expr(program, select, arg, reg, cursor_hint)?;
-                                match arg {
-                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                    _ => {}
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
                                 }
                             }
 
