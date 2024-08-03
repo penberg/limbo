@@ -7,6 +7,11 @@ pub(crate) mod wal;
 use crate::{error::LimboError, io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
 
+/// DatabaseStorage is an interface a database file that consists of pages.
+///
+/// The purpose of this trait is to abstract the upper layers of Limbo from
+/// the storage medium. A database can either be a file on disk, like in SQLite,
+/// or something like a remote page server service.
 pub trait DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
     fn write_page(
