@@ -4,48 +4,8 @@ pub(crate) mod pager;
 pub(crate) mod sqlite3_ondisk;
 pub(crate) mod wal;
 
-#[cfg(feature = "fs")]
-use crate::io::File;
 use crate::{error::LimboError, io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
-
-pub struct PageSource {
-    io: Rc<dyn PageIO>,
-}
-
-impl Clone for PageSource {
-    fn clone(&self) -> Self {
-        Self {
-            io: self.io.clone(),
-        }
-    }
-}
-
-impl PageSource {
-    pub fn from_io(io: Rc<dyn PageIO>) -> Self {
-        Self { io }
-    }
-
-    #[cfg(feature = "fs")]
-    pub fn from_file(file: Rc<dyn File>) -> Self {
-        Self {
-            io: Rc::new(FileStorage::new(file)),
-        }
-    }
-
-    pub fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
-        self.io.get(page_idx, c)
-    }
-
-    pub fn write(
-        &self,
-        page_idx: usize,
-        buffer: Rc<RefCell<Buffer>>,
-        c: Rc<Completion>,
-    ) -> Result<()> {
-        self.io.write(page_idx, buffer, c)
-    }
-}
 
 pub trait PageIO {
     fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
@@ -53,7 +13,7 @@ pub trait PageIO {
 }
 
 #[cfg(feature = "fs")]
-struct FileStorage {
+pub struct FileStorage {
     file: Rc<dyn crate::io::File>,
 }
 

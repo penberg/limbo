@@ -1,7 +1,7 @@
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::Wal;
-use crate::{Buffer, PageSource, Result};
+use crate::{Buffer, Result};
 use log::trace;
 use sieve_cache::SieveCache;
 use std::cell::RefCell;
@@ -11,6 +11,8 @@ use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
+
+use super::PageIO;
 
 pub struct Page {
     pub flags: AtomicUsize,
@@ -262,7 +264,7 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
 /// transaction management.
 pub struct Pager {
     /// Source of the database pages.
-    pub page_source: PageSource,
+    pub page_io: Rc<dyn PageIO>,
     /// The write-ahead log (WAL) for the database.
     wal: Option<Wal>,
     /// A page cache for the database.
@@ -277,14 +279,14 @@ pub struct Pager {
 
 impl Pager {
     /// Begins opening a database by reading the database header.
-    pub fn begin_open(page_source: &PageSource) -> Result<Rc<RefCell<DatabaseHeader>>> {
-        sqlite3_ondisk::begin_read_database_header(page_source)
+    pub fn begin_open(page_io: Rc<dyn PageIO>) -> Result<Rc<RefCell<DatabaseHeader>>> {
+        sqlite3_ondisk::begin_read_database_header(page_io)
     }
 
     /// Completes opening a database by initializing the Pager with the database header.
     pub fn finish_open(
         db_header_ref: Rc<RefCell<DatabaseHeader>>,
-        page_source: PageSource,
+        page_io: Rc<dyn PageIO>,
         io: Arc<dyn crate::io::IO>,
     ) -> Result<Self> {
         let db_header = RefCell::borrow(&db_header_ref);
@@ -292,7 +294,7 @@ impl Pager {
         let buffer_pool = Rc::new(BufferPool::new(page_size));
         let page_cache = RefCell::new(DumbLruPageCache::new(10));
         Ok(Self {
-            page_source,
+            page_io,
             wal: None,
             buffer_pool,
             page_cache,
@@ -337,7 +339,7 @@ impl Pager {
             }
         }
         sqlite3_ondisk::begin_read_page(
-            &self.page_source,
+            self.page_io.clone(),
             self.buffer_pool.clone(),
             page.clone(),
             page_idx,
