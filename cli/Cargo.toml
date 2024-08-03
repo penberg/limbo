@@ -17,6 +17,7 @@ dist = true
 name = "limbo"
 path = "main.rs"
 
+
 [dependencies]
 anyhow = "1.0.75"
 clap = { version = "4.4.0", features = ["derive"] }
@@ -25,3 +26,4 @@ dirs = "5.0.1"
 env_logger = "0.10.1"
 limbo_core = { path = "../core" }
 rustyline = "12.0.0"
+ctrlc = "3.4.4"
