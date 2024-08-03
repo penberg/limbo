@@ -1,4 +1,5 @@
 use crate::storage::buffer_pool::BufferPool;
+use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::Wal;
 use crate::{Buffer, Result};
@@ -11,8 +12,6 @@ use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
-
-use super::DatabaseStorage;
 
 pub struct Page {
     pub flags: AtomicUsize,

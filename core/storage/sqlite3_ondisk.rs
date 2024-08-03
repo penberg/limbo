@@ -44,14 +44,13 @@
 use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
 use crate::storage::buffer_pool::BufferPool;
+use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
 use log::trace;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use super::DatabaseStorage;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;

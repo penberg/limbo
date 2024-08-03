@@ -19,10 +19,10 @@ use schema::Schema;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
+#[cfg(feature = "fs")]
+use storage::database::FileStorage;
 use storage::pager::Pager;
 use storage::sqlite3_ondisk::DatabaseHeader;
-#[cfg(feature = "fs")]
-use storage::FileStorage;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
@@ -30,7 +30,7 @@ pub type Result<T> = std::result::Result<T, error::LimboError>;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
 pub use io::{Buffer, Completion, File, WriteCompletion, IO};
-pub use storage::DatabaseStorage;
+pub use storage::database::DatabaseStorage;
 pub use types::Value;
 
 pub struct Database {
