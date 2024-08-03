@@ -8,8 +8,13 @@ use crate::{error::LimboError, io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
 
 pub trait DatabaseStorage {
-    fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
-    fn write(&self, page_idx: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
+    fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
+    fn write_page(
+        &self,
+        page_idx: usize,
+        buffer: Rc<RefCell<Buffer>>,
+        c: Rc<Completion>,
+    ) -> Result<()>;
 }
 
 #[cfg(feature = "fs")]
@@ -19,7 +24,7 @@ pub struct FileStorage {
 
 #[cfg(feature = "fs")]
 impl DatabaseStorage for FileStorage {
-    fn get(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
+    fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         let r = match &(*c) {
             Completion::Read(r) => r,
             Completion::Write(_) => unreachable!(),
@@ -34,7 +39,12 @@ impl DatabaseStorage for FileStorage {
         Ok(())
     }
 
-    fn write(&self, page_idx: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()> {
+    fn write_page(
+        &self,
+        page_idx: usize,
+        buffer: Rc<RefCell<Buffer>>,
+        c: Rc<Completion>,
+    ) -> Result<()> {
         let buffer_size = buffer.borrow().len();
         assert!(buffer_size >= 512);
         assert!(buffer_size <= 65536);

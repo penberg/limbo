@@ -37,11 +37,11 @@ impl limbo_core::IO for IO {
 pub struct DatabaseStorage {}
 
 impl limbo_core::DatabaseStorage for DatabaseStorage {
-    fn get(&self, _page_idx: usize, _c: Rc<limbo_core::Completion>) -> Result<()> {
+    fn read_page(&self, _page_idx: usize, _c: Rc<limbo_core::Completion>) -> Result<()> {
         todo!();
     }
 
-    fn write(
+    fn write_page(
         &self,
         _page_idx: usize,
         _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,

@@ -122,7 +122,7 @@ pub fn begin_read_database_header(
         finish_read_database_header(buf, header).unwrap();
     });
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_io.get(1, c.clone())?;
+    page_io.read_page(1, c.clone())?;
     Ok(result)
 }
 
@@ -189,7 +189,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf.clone(), complete)));
-    page_source.get(1, c.clone())?;
+    page_source.read_page(1, c.clone())?;
     // run get header block
     pager.io.run_once()?;
 
@@ -203,7 +203,9 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
         // finish_read_database_header(buf, header).unwrap();
     });
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
-    page_source.write(0, buffer_to_copy.clone(), c).unwrap();
+    page_source
+        .write_page(0, buffer_to_copy.clone(), c)
+        .unwrap();
 
     Ok(())
 }
@@ -463,7 +465,7 @@ pub fn begin_read_page(
         }
     });
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_io.get(page_idx, c.clone())?;
+    page_io.read_page(page_idx, c.clone())?;
     Ok(())
 }
 
@@ -511,7 +513,7 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
         })
     };
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
-    page_source.write(page.id, buffer.clone(), c)?;
+    page_source.write_page(page.id, buffer.clone(), c)?;
     Ok(())
 }
 
