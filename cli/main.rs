@@ -6,6 +6,7 @@ use limbo_core::{Database, RowResult, Value};
 use opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
@@ -39,11 +40,24 @@ fn main() -> anyhow::Result<()> {
     let io = Arc::new(limbo_core::PlatformIO::new()?);
     let db = Database::open_file(io.clone(), path)?;
     let conn = db.connect();
+
+    let interrupt_count = Arc::new(AtomicUsize::new(0));
+
+    {
+        let interrupt_count = Arc::clone(&interrupt_count);
+
+        ctrlc::set_handler(move || {
+            // Increment the interrupt count on Ctrl-C
+            interrupt_count.fetch_add(1, Ordering::SeqCst);
+        })
+        .expect("Error setting Ctrl-C handler");
+    }
+
     if let Some(sql) = opts.sql {
         if sql.trim().starts_with('.') {
             handle_dot_command(io.clone(), &conn, &sql)?;
         } else {
-            query(io.clone(), &conn, &sql, &opts.output_mode)?;
+            query(io.clone(), &conn, &sql, &opts.output_mode, &interrupt_count)?;
         }
         return Ok(());
     }
@@ -60,14 +74,27 @@ fn main() -> anyhow::Result<()> {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.to_owned())?;
+                interrupt_count.store(0, Ordering::SeqCst);
                 if line.trim().starts_with('.') {
                     handle_dot_command(io.clone(), &conn, &line)?;
                 } else {
-                    query(io.clone(), &conn, &line, &opts.output_mode)?;
+                    query(
+                        io.clone(),
+                        &conn,
+                        &line,
+                        &opts.output_mode,
+                        &interrupt_count,
+                    )?;
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                break;
+                // At prompt, increment interrupt count
+                if interrupt_count.fetch_add(1, Ordering::SeqCst) >= 1 {
+                    eprintln!("Interrupted. Exiting...");
+                    break;
+                }
+                println!("Use .quit to exit or press Ctrl-C again to force quit.");
+                continue;
             }
             Err(ReadlineError::Eof) => {
                 break;
@@ -91,16 +118,20 @@ In addition to standard SQL commands, the following special commands are availab
 
 Special Commands:
 -----------------
+.quit                      Stop interpreting input stream and exit.
 .schema <table_name>       Show the schema of the specified table.
 .opcodes                   Display all the opcodes defined by the virtual machine
 .help                      Display this help message.
 
 Usage Examples:
 ---------------
-1. To view the schema of a table named 'employees':
+1. To quit the Limbo SQL Shell:
+   .quit
+
+2. To view the schema of a table named 'employees':
    .schema employees
 
-2. To list all available SQL opcodes:
+3. To list all available SQL opcodes:
    .opcodes
 
 Note:
@@ -125,6 +156,10 @@ fn handle_dot_command(
     }
 
     match args[0] {
+        ".quit" => {
+            println!("Exiting Limbo SQL Shell.");
+            std::process::exit(0)
+        }
         ".schema" => {
             let table_name = args.get(1).copied();
             display_schema(io, conn, table_name)?;
@@ -218,10 +253,16 @@ fn query(
     conn: &limbo_core::Connection,
     sql: &str,
     output_mode: &OutputMode,
+    interrupt_count: &Arc<AtomicUsize>,
 ) -> anyhow::Result<()> {
     match conn.query(sql) {
         Ok(Some(ref mut rows)) => match output_mode {
             OutputMode::Raw => loop {
+                if interrupt_count.load(Ordering::SeqCst) > 0 {
+                    println!("Query interrupted.");
+                    return Ok(());
+                }
+
                 match rows.next_row()? {
                     RowResult::Row(row) => {
                         for (i, value) in row.values.iter().enumerate() {
@@ -241,10 +282,16 @@ fn query(
                     RowResult::IO => {
                         io.run_once()?;
                     }
-                    RowResult::Done => break,
+                    RowResult::Done => {
+                        break;
+                    }
                 }
             },
             OutputMode::Pretty => {
+                if interrupt_count.load(Ordering::SeqCst) > 0 {
+                    println!("Query interrupted.");
+                    return Ok(());
+                }
                 let mut table_rows: Vec<Vec<_>> = vec![];
                 loop {
                     match rows.next_row()? {
