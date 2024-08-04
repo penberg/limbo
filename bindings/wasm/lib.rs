@@ -75,3 +75,8 @@ impl limbo_core::Wal for Wal {
         todo!()
     }
 }
+
+#[wasm_bindgen(start)]
+pub fn init() {
+    console_error_panic_hook::set_once();
+}
