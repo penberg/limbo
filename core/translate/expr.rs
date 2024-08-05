@@ -941,7 +941,15 @@ pub fn translate_expr(
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Substring),
                             });
-
+                            Ok(target_register)
+                        }
+                        ScalarFunc::UnixEpoch => {
+                            let start_reg = program.alloc_register();
+                            program.emit_insn(Insn::Function {
+                                start_reg,
+                                dest: target_register,
+                                func: crate::vdbe::Func::Scalar(srf),
+                            });
                             Ok(target_register)
                         }
                         ScalarFunc::Time => {

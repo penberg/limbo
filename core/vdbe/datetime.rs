@@ -94,6 +94,10 @@ fn apply_modifier(dt: &mut NaiveDateTime, modifier: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn exec_unixepoch() -> Result<String> {
+    Ok((Utc::now().timestamp()).to_string())
+}
+
 fn parse_naive_date_time(time_value: &OwnedValue) -> Option<NaiveDateTime> {
     match time_value {
         OwnedValue::Text(s) => get_date_time_from_time_value_string(s),

@@ -33,7 +33,7 @@ use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 use crate::Result;
 
-use datetime::{exec_date, exec_time};
+use datetime::{exec_date, exec_time, exec_unixepoch};
 
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
@@ -1365,7 +1365,12 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    Func::Scalar(ScalarFunc::Unicode) => {
+                    Func::UnixEpoch => {
+                        let unixepoch: String = exec_unixepoch()?;
+                        state.registers[*dest] = OwnedValue::Text(Rc::new(unixepoch));
+                        state.pc += 1
+                    }
+                    Func::Unicode => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         state.registers[*dest] = exec_unicode(reg_value);
                         state.pc += 1;
