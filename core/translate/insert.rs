@@ -128,15 +128,17 @@ pub fn translate_insert(
     );
 
     if table.has_rowid() {
-        let key_reg = column_registers_start + 1;
         let row_id_reg = column_registers_start;
-        // copy key to rowid
-        program.emit_insn(Insn::Copy {
-            src_reg: key_reg,
-            dst_reg: row_id_reg,
-            amount: 0,
-        });
-        program.emit_insn(Insn::SoftNull { reg: key_reg });
+        if let Some(rowid_alias_column) = table.get_rowid_alias_column() {
+            let key_reg = column_registers_start + 1 + rowid_alias_column.0;
+            // copy key to rowid
+            program.emit_insn(Insn::Copy {
+                src_reg: key_reg,
+                dst_reg: row_id_reg,
+                amount: 0,
+            });
+            program.emit_insn(Insn::SoftNull { reg: key_reg });
+        }
 
         let notnull_label = program.allocate_label();
         program.emit_insn_with_label_dependency(
