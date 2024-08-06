@@ -403,6 +403,106 @@ do_execsql_test date-with-invalid-timezone {
   SELECT date('2023-05-18 15:30:45+25:00');
 } {{}}
 
+do_execsql_test time-no-arg {
+  SELECT length(time()) = 8;
+} {1}
+
+do_execsql_test time-current-time {
+  SELECT length(time('now')) = 8;
+} {1}
+
+do_execsql_test time-specific-time {
+  SELECT time('04:02:00');
+} {04:02:00}
+
+do_execsql_test time-of-datetime {
+  SELECT time('2023-05-18 15:30:45');
+} {15:30:45}
+
+do_execsql_test time-iso8601 {
+  SELECT time('2023-05-18T15:30:45');
+} {15:30:45}
+
+do_execsql_test time-with-milliseconds {
+  SELECT time('2023-05-18 15:30:45.123');
+} {15:30:45}
+
+do_execsql_test time-julian-day-integer {
+  SELECT time(2460082);
+} {12:00:00}
+
+do_execsql_test time-julian-day-float {
+  SELECT time(2460082.2);
+} {16:48:00}
+
+do_execsql_test time-invalid-input {
+  SELECT time('not a time');
+} {{}}
+
+do_execsql_test time-null-input {
+  SELECT time(NULL);
+} {{}}
+
+do_execsql_test time-out-of-range {
+  SELECT time('25:05:01');
+} {{}}
+
+do_execsql_test time-date-only {
+  SELECT time('2024-02-02');
+} {00:00:00}
+
+do_execsql_test time-with-timezone-utc {
+  SELECT time('2023-05-18 15:30:45Z');
+} {15:30:45}
+
+do_execsql_test time-with-timezone-positive {
+  SELECT time('2023-05-18 23:30:45+07:00');
+} {16:30:45}
+
+do_execsql_test time-with-timezone-negative {
+  SELECT time('2023-05-19 01:30:45-05:00');
+} {06:30:45}
+
+do_execsql_test time-with-timezone-day-change-positive {
+  SELECT time('2023-05-18 23:30:45-03:00');
+} {02:30:45}
+
+do_execsql_test time-with-timezone-day-change-negative {
+  SELECT time('2023-05-19 01:30:45+03:00');
+} {22:30:45}
+
+do_execsql_test time-with-timezone-iso8601 {
+  SELECT time('2023-05-18T15:30:45+02:00');
+} {13:30:45}
+
+do_execsql_test time-with-timezone-and-milliseconds {
+  SELECT time('2023-05-18 15:30:45.123+02:00');
+} {13:30:45}
+
+do_execsql_test time-with-invalid-timezone {
+  SELECT time('2023-05-18 15:30:45+25:00');
+} {{}}
+
+do_execsql_test unixepoch-at-start {
+  SELECT unixepoch('1970-01-01');
+} {0}
+
+do_execsql_test unixepoch-at-1-second-before-epochtime {
+  SELECT unixepoch('1969-12-31 23:59:59');
+} {-1}
+
+do_execsql_test unixepoch-at-future {
+  SELECT unixepoch('9999-12-31 23:59:59');
+} {253402300799}
+
+do_execsql_test unixepoch-at-start-of-time {
+  SELECT unixepoch('0000-01-01 00:00:00');
+} {-62167219200}
+
+do_execsql_test unixepoch-at-millisecond-precision-input-produces-seconds-precision-output {
+  SELECT unixepoch('2022-01-27 12:59:28.052');
+} {1643288368}
+
 do_execsql_test unicode-a {
   SELECT unicode('a');
 } {97}
