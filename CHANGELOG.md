@@ -1,5 +1,11 @@
 # Changelog
 
+### Unreleased
+
+### Added
+
+- Partial support for `json()` function (Jean Arhancet)
+
 ## 0.0.3 - 2024-08-01
 
 ### Added

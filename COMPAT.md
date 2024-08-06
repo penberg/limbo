@@ -151,7 +151,7 @@ This document describes the SQLite compatibility status of Limbo:
 
 | Function                           | Status  | Comment |
 |------------------------------------|---------|---------|
-| json(json)                         |         |         |
+| json(json)                         | Partial |         |
 | jsonb(json)                        |         |         |
 | json_array(value1,value2,...)      |         |         |
 | jsonb_array(value1,value2,...)     |         |         |
