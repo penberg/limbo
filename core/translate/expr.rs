@@ -419,9 +419,9 @@ pub fn translate_expr(
         ast::Expr::FunctionCallStar { .. } => todo!(),
         ast::Expr::Id(ident) => {
             // let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
-            let (idx, col_type, cursor_id, is_primary_key) =
+            let (idx, col_type, cursor_id, is_rowid_alias) =
                 resolve_ident_table(program, &ident.0, select, cursor_hint)?;
-            if is_primary_key {
+            if is_rowid_alias {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
                     dest: target_register,
@@ -674,12 +674,12 @@ pub fn resolve_ident_table(
                     .iter()
                     .enumerate()
                     .find(|(_, col)| col.name == *ident)
-                    .map(|(idx, col)| (idx, col.ty, col.primary_key));
+                    .map(|(idx, col)| (idx, col.ty, table.column_is_rowid_alias(col)));
                 let mut idx;
                 let mut col_type;
-                let mut is_primary_key;
+                let mut is_rowid_alias;
                 if res.is_some() {
-                    (idx, col_type, is_primary_key) = res.unwrap();
+                    (idx, col_type, is_rowid_alias) = res.unwrap();
                     // overwrite if cursor hint is provided
                     if let Some(cursor_hint) = cursor_hint {
                         let cols = &program.cursor_ref[cursor_hint].1;
@@ -691,11 +691,11 @@ pub fn resolve_ident_table(
                         }) {
                             idx = res.0;
                             col_type = res.1.ty;
-                            is_primary_key = res.1.primary_key;
+                            is_rowid_alias = table.column_is_rowid_alias(res.1);
                         }
                     }
                     let cursor_id = program.resolve_cursor_id(&join.identifier, cursor_hint);
-                    found.push((idx, col_type, cursor_id, is_primary_key));
+                    found.push((idx, col_type, cursor_id, is_rowid_alias));
                 }
             }
             Table::Pseudo(_) => todo!(),

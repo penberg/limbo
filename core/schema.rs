@@ -43,6 +43,13 @@ impl Table {
         matches!(self, Table::Pseudo(_))
     }
 
+    pub fn get_rowid_alias_column(&self) -> Option<(usize, &Column)> {
+        match self {
+            Table::BTree(table) => table.get_rowid_alias_column(),
+            Table::Pseudo(_) => None,
+        }
+    }
+
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
         match self {
             Table::BTree(table) => table.column_is_rowid_alias(col),
@@ -112,6 +119,16 @@ pub struct BTreeTable {
 }
 
 impl BTreeTable {
+    pub fn get_rowid_alias_column(&self) -> Option<(usize, &Column)> {
+        if self.primary_key_column_names.len() == 1 {
+            let (idx, col) = self.get_column(&self.primary_key_column_names[0]).unwrap();
+            if self.column_is_rowid_alias(col) {
+                return Some((idx, col));
+            }
+        }
+        None
+    }
+
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
         col.primary_key
             && col.ty == Type::Integer
@@ -230,7 +247,7 @@ fn create_table(
                 let name = col_name.0.to_string();
                 let ty = match col_def.col_type {
                     Some(data_type) => {
-                        let type_name = data_type.name.as_str();
+                        let type_name = data_type.name.as_str().to_uppercase();
                         if type_name.contains("INTEGER") {
                             Type::Integer
                         } else if type_name.contains("CHAR")
