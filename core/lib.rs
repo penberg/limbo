@@ -1,6 +1,7 @@
 mod error;
 mod function;
 mod io;
+mod json;
 mod pseudo;
 mod schema;
 mod storage;

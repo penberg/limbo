@@ -12,3 +12,4 @@ source $testdir/where.test
 source $testdir/like.test
 source $testdir/scalar-functions.test
 source $testdir/orderby.test
+source $testdir/json.test

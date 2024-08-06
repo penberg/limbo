@@ -2,7 +2,7 @@ use crate::{
     function::ScalarFunc,
     translate::{expr::translate_expr, select::Select},
     util::normalize_ident,
-    vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
+    vdbe::{builder::ProgramBuilder, BranchOffset, Func, Insn},
     Result,
 };
 
@@ -726,7 +726,7 @@ fn translate_condition_expr(
                     program.mark_last_insn_constant();
                     let _ = translate_expr(program, Some(select), lhs, column_reg, cursor_hint)?;
                     program.emit_insn(Insn::Function {
-                        func: ScalarFunc::Like,
+                        func: Func::Scalar(ScalarFunc::Like),
                         start_reg: pattern_reg,
                         dest: cur_reg,
                     });

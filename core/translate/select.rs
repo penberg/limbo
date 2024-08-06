@@ -860,7 +860,7 @@ fn translate_aggregation(
     let empty_args = &Vec::<ast::Expr>::new();
     let args = info.args.as_ref().unwrap_or(empty_args);
     let dest = match func {
-        Func::Scalar(_) => {
+        Func::Scalar(_) | Func::Json(_) => {
             crate::bail_parse_error!("single row function in aggregation")
         }
         Func::Agg(agg_func) => match agg_func {

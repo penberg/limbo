@@ -1,0 +1,57 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test json5-ecma-script-1 {
+    select json('{a:5,b:6}') ;
+} {{{"a":5,"b":6}}}
+
+do_execsql_test json5-ecma-script-2 {
+   SELECT json('{ MNO_123$xyz : 789 }');
+} {{{"MNO_123$xyz":789}}}
+
+do_execsql_test json5-with-single-trailing-comma-valid {
+    select json('{"a":5, "b":6, }');
+} {{{"a":5,"b":6}}}
+
+do_execsql_test json5-single-quoted {
+    SELECT json('{"a": ''abcd''}');
+} {{{"a":"abcd"}}}
+
+do_execsql_test json5-hexadecimal-1 {
+   SELECT json('{a: 0x0}')
+} {{{"a":0}}}
+
+do_execsql_test json5-hexadecimal-2 {
+   SELECT json('{a: 0xabcdef}')
+} {{{"a":11259375}}}
+
+do_execsql_test json5-hexadecimal-2 {
+   SELECT json('{a: -0xabcdef}')
+} {{{"a":-11259375}}}
+
+do_execsql_test json5-number-1 {
+   SELECT json('{x: 4.}')
+} {{{"x":4.0}}}
+
+do_execsql_test json5-number-2 {
+   SELECT json('{x: +4.}')
+} {{{"x":4.0}}}
+
+do_execsql_test json5-number-3 {
+   SELECT json('{x: -4.}')
+} {{{"x":-4.0}}}
+
+do_execsql_test json5-number-5 {
+   SELECT json('{x: Infinity}')
+} {{{"x":9e999}}}
+
+do_execsql_test json5-number-6 {
+   SELECT json('{x: -Infinity}')
+} {{{"x":-9e999}}}
+
+do_execsql_test json5-multi-comment {
+   SELECT json(' /* abc */ { /*def*/ aaa /* xyz */ : // to the end of line
+          123 /* xyz */ , /* 123 */ }')
+} {{{"aaa":123}}}

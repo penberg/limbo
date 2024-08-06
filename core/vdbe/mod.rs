@@ -24,7 +24,8 @@ pub mod sorter;
 mod datetime;
 
 use crate::error::LimboError;
-use crate::function::{AggFunc, ScalarFunc};
+use crate::function::{AggFunc, JsonFunc, ScalarFunc};
+use crate::json::get_json;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -45,6 +46,21 @@ pub type BranchOffset = i64;
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
+
+#[derive(Debug)]
+pub enum Func {
+    Scalar(ScalarFunc),
+    Json(JsonFunc),
+}
+
+impl ToString for Func {
+    fn to_string(&self) -> String {
+        match self {
+            Func::Scalar(scalar_func) => scalar_func.to_string(),
+            Func::Json(json_func) => json_func.to_string(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum Insn {
@@ -287,7 +303,7 @@ pub enum Insn {
         // constant_mask: i32, // P1, not used for now
         start_reg: usize, // P2, start of argument registers
         dest: usize,      // P3
-        func: ScalarFunc, // P4
+        func: Func,       // P4
     },
 
     InitCoroutine {
@@ -1156,8 +1172,17 @@ impl Program {
                     start_reg,
                     dest,
                 } => match func {
-                    ScalarFunc::Coalesce => {}
-                    ScalarFunc::Like => {
+                    Func::Json(JsonFunc::JSON) => {
+                        let json_value = &state.registers[*start_reg];
+                        let json_str = get_json(json_value);
+                        match json_str {
+                            Ok(json) => state.registers[*dest] = json,
+                            Err(e) => return Err(e),
+                        }
+                        state.pc += 1;
+                    }
+                    Func::Scalar(ScalarFunc::Coalesce) => {}
+                    Func::Scalar(ScalarFunc::Like) => {
                         let start_reg = *start_reg;
                         assert!(
                             start_reg + 2 <= state.registers.len(),
@@ -1178,7 +1203,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    ScalarFunc::Abs => {
+                    Func::Scalar(ScalarFunc::Abs) => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         if let Some(value) = exec_abs(reg_value) {
                             state.registers[*dest] = value;
@@ -1187,7 +1212,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Upper => {
+                    Func::Scalar(ScalarFunc::Upper) => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         if let Some(value) = exec_upper(reg_value) {
                             state.registers[*dest] = value;
@@ -1196,7 +1221,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Lower => {
+                    Func::Scalar(ScalarFunc::Lower) => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         if let Some(value) = exec_lower(reg_value) {
                             state.registers[*dest] = value;
@@ -1205,16 +1230,16 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Length => {
+                    Func::Scalar(ScalarFunc::Length) => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         state.registers[*dest] = exec_length(reg_value);
                         state.pc += 1;
                     }
-                    ScalarFunc::Random => {
+                    Func::Scalar(ScalarFunc::Random) => {
                         state.registers[*dest] = exec_random();
                         state.pc += 1;
                     }
-                    ScalarFunc::Trim => {
+                    Func::Scalar(ScalarFunc::Trim) => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
                         let pattern_value = state.registers.get(start_reg + 1).cloned();
@@ -1224,7 +1249,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    ScalarFunc::LTrim => {
+                    Func::Scalar(ScalarFunc::LTrim) => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
                         let pattern_value = state.registers.get(start_reg + 1).cloned();
@@ -1234,7 +1259,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    ScalarFunc::RTrim => {
+                    Func::Scalar(ScalarFunc::RTrim) => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
                         let pattern_value = state.registers.get(start_reg + 1).cloned();
@@ -1244,7 +1269,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    ScalarFunc::Round => {
+                    Func::Scalar(ScalarFunc::Round) => {
                         let start_reg = *start_reg;
                         let reg_value = state.registers[start_reg].clone();
                         let precision_value = state.registers.get(start_reg + 1).cloned();
@@ -1252,7 +1277,7 @@ impl Program {
                         state.registers[*dest] = result;
                         state.pc += 1;
                     }
-                    ScalarFunc::Min => {
+                    Func::Scalar(ScalarFunc::Min) => {
                         let start_reg = *start_reg;
                         let reg_values = state.registers[start_reg..state.registers.len()]
                             .iter()
@@ -1265,7 +1290,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Max => {
+                    Func::Scalar(ScalarFunc::Max) => {
                         let start_reg = *start_reg;
                         let reg_values = state.registers[start_reg..state.registers.len()]
                             .iter()
@@ -1278,7 +1303,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Date => {
+                    Func::Scalar(ScalarFunc::Date) => {
                         if *start_reg == 0 {
                             let date_str =
                                 exec_date(&OwnedValue::Text(Rc::new("now".to_string())))?;
@@ -1300,7 +1325,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Time => {
+                    Func::Scalar(ScalarFunc::Time) => {
                         if *start_reg == 0 {
                             let time_str =
                                 exec_time(&OwnedValue::Text(Rc::new("now".to_string())))?;
@@ -1322,7 +1347,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    ScalarFunc::Unicode => {
+                    Func::Scalar(ScalarFunc::Unicode) => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
                         state.registers[*dest] = exec_unicode(reg_value);
                         state.pc += 1;
