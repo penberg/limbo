@@ -56,6 +56,7 @@ pub enum ScalarFunc {
     Date,
     Time,
     Unicode,
+    UnixEpoch,
 }
 
 impl ToString for ScalarFunc {
@@ -77,6 +78,7 @@ impl ToString for ScalarFunc {
             ScalarFunc::Date => "date".to_string(),
             ScalarFunc::Time => "time".to_string(),
             ScalarFunc::Unicode => "unicode".to_string(),
+            ScalarFunc::UnixEpoch => "unixepoch".to_string(),
         }
     }
 }
@@ -116,6 +118,7 @@ impl Func {
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "json" => Ok(Func::Json((JsonFunc::JSON))),
+            "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),
             _ => Err(()),
         }
     }

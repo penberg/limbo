@@ -33,7 +33,7 @@ use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
 use crate::Result;
 
-use datetime::{exec_date, exec_time};
+use datetime::{exec_date, exec_time, exec_unixepoch};
 
 use regex::Regex;
 use std::borrow::BorrowMut;
@@ -1346,6 +1346,28 @@ impl Program {
                             }
                         }
                         state.pc += 1;
+                    }
+                    Func::Scalar(ScalarFunc::UnixEpoch) => {
+                        if *start_reg == 0 {
+                            let unixepoch: String =
+                                exec_unixepoch(&OwnedValue::Text(Rc::new("now".to_string())))?;
+                            state.registers[*dest] = OwnedValue::Text(Rc::new(unixepoch));
+                        } else {
+                            let datetime_value = &state.registers[*start_reg];
+                            let unixepoch = exec_unixepoch(datetime_value);
+                            match unixepoch {
+                                Ok(time) => {
+                                    state.registers[*dest] = OwnedValue::Text(Rc::new(time))
+                                }
+                                Err(e) => {
+                                    return Err(LimboError::ParseError(format!(
+                                        "Error encountered while parsing datetime value: {}",
+                                        e
+                                    )));
+                                }
+                            }
+                        }
+                        state.pc += 1
                     }
                     Func::Scalar(ScalarFunc::Unicode) => {
                         let reg_value = state.registers[*start_reg].borrow_mut();
