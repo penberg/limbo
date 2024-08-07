@@ -79,6 +79,10 @@ impl Cursor for Sorter {
         unimplemented!();
     }
 
+    fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
+        unimplemented!();
+    }
+
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
         Ok(self.current.borrow())
     }

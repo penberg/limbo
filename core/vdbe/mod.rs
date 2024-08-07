@@ -333,7 +333,9 @@ pub enum Insn {
     },
 
     NewRowid {
-        reg: usize,
+        cursor: CursorID, // P1
+        rowid_reg: usize, // P2  Destination register to store the new rowid
+        prev_largest_reg: usize // P3 Previous largest rowid in the table (Not used for now)
     },
 
     MustBeInt {
@@ -1412,7 +1414,16 @@ impl Program {
                     cursor.wait_for_completion()?;
                     state.pc += 1;
                 }
-                Insn::NewRowid { reg: _ } => todo!(),
+                Insn::NewRowid { cursor, rowid_reg, .. } => {
+                    let cursor = cursors.get_mut(cursor).unwrap();
+                    cursor.seek_to_last()?;
+                    if let Some(rowid) = cursor.rowid()? {
+                        state.registers[*rowid_reg] = OwnedValue::Integer((rowid+1) as i64);
+                    } else {
+                        state.registers[*rowid_reg] = OwnedValue::Integer(1);
+                    }
+                    state.pc += 1;
+                },
                 Insn::MustBeInt { reg } => {
                     match state.registers[*reg] {
                         OwnedValue::Integer(_) => {}

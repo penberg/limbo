@@ -72,6 +72,18 @@ impl BTreeCursor {
         }
     }
 
+    fn is_empty_table(&mut self) -> Result<CursorResult<bool>> {
+        let page = self.pager.read_page(self.root_page)?;
+        let page = RefCell::borrow(&page);
+        if page.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+
+        let page = page.contents.read().unwrap();
+        let page = page.as_ref().unwrap();
+        Ok(CursorResult::Ok(page.cell_count() == 0))
+    }
+
     fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
             let mem_page = {
@@ -182,6 +194,42 @@ impl BTreeCursor {
     fn move_to_root(&mut self) {
         self.page
             .replace(Some(Rc::new(MemPage::new(None, self.root_page, 0))));
+    }
+
+    fn move_to_rightmost(&mut self) -> Result<CursorResult<()>> {
+        self.move_to_root();
+
+        loop {
+            let mem_page = self.page.borrow().as_ref().unwrap().clone();
+            let page_idx = mem_page.page_idx;
+            let page = self.pager.read_page(page_idx)?;
+            let page = RefCell::borrow(&page);
+            if page.is_locked() {
+                return Ok(CursorResult::IO);
+            }
+            let page = page.contents.read().unwrap();
+            let page = page.as_ref().unwrap();
+            if page.is_leaf() {
+                if page.cell_count() > 0 {
+                    mem_page.cell_idx.replace(page.cell_count()-1);
+                }
+                return Ok(CursorResult::Ok(()));
+            }
+
+            match page.rightmost_pointer() {
+                Some(right_most_pointer) => {
+                    mem_page.cell_idx.replace(page.cell_count());
+                    let mem_page =
+                        MemPage::new(Some(mem_page.clone()), right_most_pointer as usize, 0);
+                    self.page.replace(Some(Rc::new(mem_page)));
+                    continue;
+                }, 
+
+                None => {
+                    unreachable!("interior page should have a rightmost pointer");
+                }
+            }
+        }
     }
 
     pub fn move_to(&mut self, key: u64) -> Result<CursorResult<()>> {
@@ -827,6 +875,26 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
 }
 
 impl Cursor for BTreeCursor {
+    fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
+        self.move_to_rightmost()?;
+        match self.get_next_record()? {
+            CursorResult::Ok((rowid, next)) => {
+                if rowid.is_none() {
+                    match self.is_empty_table()? {
+                        CursorResult::Ok(is_empty) => {
+                            assert!(is_empty)
+                        },
+                        CursorResult::IO => (),
+                    }
+                }
+                self.rowid.replace(rowid);
+                self.record.replace(next);
+                Ok(CursorResult::Ok(()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
     fn is_empty(&self) -> bool {
         self.record.borrow().is_none()
     }
