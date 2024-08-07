@@ -34,6 +34,8 @@ pub enum LimboError {
     InvalidDate(String),
     #[error("Parse error: {0}")]
     InvalidTime(String),
+    #[error("Modifier parsing error: {0}")]
+    InvalidModifier(String),
 }
 
 #[macro_export]
