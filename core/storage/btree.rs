@@ -211,7 +211,7 @@ impl BTreeCursor {
             let page = page.as_ref().unwrap();
             if page.is_leaf() {
                 if page.cell_count() > 0 {
-                    mem_page.cell_idx.replace(page.cell_count()-1);
+                    mem_page.cell_idx.replace(page.cell_count() - 1);
                 }
                 return Ok(CursorResult::Ok(()));
             }
@@ -223,7 +223,7 @@ impl BTreeCursor {
                         MemPage::new(Some(mem_page.clone()), right_most_pointer as usize, 0);
                     self.page.replace(Some(Rc::new(mem_page)));
                     continue;
-                }, 
+                }
 
                 None => {
                     unreachable!("interior page should have a rightmost pointer");
@@ -883,7 +883,7 @@ impl Cursor for BTreeCursor {
                     match self.is_empty_table()? {
                         CursorResult::Ok(is_empty) => {
                             assert!(is_empty)
-                        },
+                        }
                         CursorResult::IO => (),
                     }
                 }

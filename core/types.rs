@@ -358,6 +358,7 @@ impl OwnedRecord {
     }
 }
 
+#[derive(PartialEq, Debug)]
 pub enum CursorResult<T> {
     Ok(T),
     IO,

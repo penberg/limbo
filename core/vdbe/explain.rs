@@ -602,7 +602,11 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
-            Insn::NewRowid { cursor, rowid_reg, prev_largest_reg } => (
+            Insn::NewRowid {
+                cursor,
+                rowid_reg,
+                prev_largest_reg,
+            } => (
                 "NewRowId",
                 *cursor as i32,
                 *rowid_reg as i32,

@@ -35,6 +35,8 @@ use crate::Result;
 
 use datetime::{exec_date, exec_time};
 
+use rand::distributions::{Distribution, Uniform};
+use rand::{thread_rng, Rng};
 use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
@@ -333,9 +335,9 @@ pub enum Insn {
     },
 
     NewRowid {
-        cursor: CursorID, // P1
-        rowid_reg: usize, // P2  Destination register to store the new rowid
-        prev_largest_reg: usize // P3 Previous largest rowid in the table (Not used for now)
+        cursor: CursorID,        // P1
+        rowid_reg: usize,        // P2  Destination register to store the new rowid
+        prev_largest_reg: usize, // P3 Previous largest rowid in the table (Not used for now)
     },
 
     MustBeInt {
@@ -1414,16 +1416,19 @@ impl Program {
                     cursor.wait_for_completion()?;
                     state.pc += 1;
                 }
-                Insn::NewRowid { cursor, rowid_reg, .. } => {
+                Insn::NewRowid {
+                    cursor, rowid_reg, ..
+                } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
-                    cursor.seek_to_last()?;
-                    if let Some(rowid) = cursor.rowid()? {
-                        state.registers[*rowid_reg] = OwnedValue::Integer((rowid+1) as i64);
-                    } else {
-                        state.registers[*rowid_reg] = OwnedValue::Integer(1);
+                    let rowid = get_new_rowid(cursor, thread_rng())?;
+                    match rowid {
+                        CursorResult::Ok(rowid) => {
+                            state.registers[*rowid_reg] = OwnedValue::Integer(rowid);
+                        }
+                        CursorResult::IO => return Ok(StepResult::IO),
                     }
                     state.pc += 1;
-                },
+                }
                 Insn::MustBeInt { reg } => {
                     match state.registers[*reg] {
                         OwnedValue::Integer(_) => {}
@@ -1482,6 +1487,32 @@ impl Program {
             }
         }
     }
+}
+
+fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<CursorResult<i64>> {
+    cursor.seek_to_last()?;
+    let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
+    if rowid > std::i64::MAX.try_into().unwrap() {
+        let distribution = Uniform::from(1..=std::i64::MAX);
+        let max_attempts = 100;
+        for count in 0..max_attempts {
+            rowid = distribution.sample(&mut rng).try_into().unwrap();
+            match cursor.seek_rowid(rowid)? {
+                CursorResult::Ok(false) => break, // Found a non-existing rowid
+                CursorResult::Ok(true) => {
+                    if count == max_attempts - 1 {
+                        return Err(LimboError::InternalError(
+                            "Failed to generate a new rowid".to_string(),
+                        ));
+                    } else {
+                        continue; // Try next random rowid
+                    }
+                }
+                CursorResult::IO => return Ok(CursorResult::IO),
+            }
+        }
+    }
+    Ok(CursorResult::Ok(rowid.try_into().unwrap()))
 }
 
 fn make_record<'a>(registers: &'a [OwnedValue], start_reg: &usize, count: &usize) -> Record<'a> {
@@ -1719,9 +1750,150 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::{
         exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
-        exec_random, exec_round, exec_rtrim, exec_trim, exec_unicode, exec_upper, OwnedValue,
+        exec_random, exec_round, exec_rtrim, exec_trim, exec_unicode, exec_upper, get_new_rowid,
+        Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
-    use std::rc::Rc;
+    use mockall::{mock, predicate, predicate::*};
+    use rand::{rngs::mock::StepRng, thread_rng};
+    use std::{cell::Ref, rc::Rc};
+
+    mock! {
+        Cursor {
+            fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
+            fn rowid(&self) -> Result<Option<u64>>;
+            fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
+        }
+    }
+
+    impl Cursor for MockCursor {
+        fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
+            return self.seek_to_last();
+        }
+
+        fn rowid(&self) -> Result<Option<u64>> {
+            return self.rowid();
+        }
+
+        fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
+            return self.seek_rowid(rowid);
+        }
+
+        fn rewind(&mut self) -> Result<CursorResult<()>> {
+            unimplemented!()
+        }
+
+        fn next(&mut self) -> Result<CursorResult<()>> {
+            unimplemented!()
+        }
+
+        fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
+            unimplemented!()
+        }
+
+        fn is_empty(&self) -> bool {
+            unimplemented!()
+        }
+
+        fn set_null_flag(&mut self, _flag: bool) {
+            unimplemented!()
+        }
+
+        fn get_null_flag(&self) -> bool {
+            unimplemented!()
+        }
+
+        fn insert(
+            &mut self,
+            _key: &OwnedValue,
+            _record: &OwnedRecord,
+            _is_leaf: bool,
+        ) -> Result<CursorResult<()>> {
+            unimplemented!()
+        }
+
+        fn wait_for_completion(&mut self) -> Result<()> {
+            unimplemented!()
+        }
+
+        fn exists(&mut self, _key: &OwnedValue) -> Result<CursorResult<bool>> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn test_get_new_rowid() -> Result<()> {
+        // Test case 0: Empty table
+        let mut mock = MockCursor::new();
+        mock.expect_seek_to_last()
+            .return_once(|| Ok(CursorResult::Ok(())));
+        mock.expect_rowid().return_once(|| Ok(None));
+
+        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng())?;
+        assert_eq!(
+            result,
+            CursorResult::Ok(1),
+            "For an empty table, rowid should be 1"
+        );
+
+        // Test case 1: Normal case, rowid within i64::MAX
+        let mut mock = MockCursor::new();
+        mock.expect_seek_to_last()
+            .return_once(|| Ok(CursorResult::Ok(())));
+        mock.expect_rowid().return_once(|| Ok(Some(100)));
+
+        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng())?;
+        assert_eq!(result, CursorResult::Ok(101));
+
+        // Test case 2: Rowid exceeds i64::MAX, need to generate random rowid
+        let mut mock = MockCursor::new();
+        mock.expect_seek_to_last()
+            .return_once(|| Ok(CursorResult::Ok(())));
+        mock.expect_rowid()
+            .return_once(|| Ok(Some(std::i64::MAX as u64)));
+        mock.expect_seek_rowid()
+            .with(predicate::always())
+            .returning(|rowid| {
+                if rowid == 50 {
+                    Ok(CursorResult::Ok(false))
+                } else {
+                    Ok(CursorResult::Ok(true))
+                }
+            });
+
+        // Mock the random number generation
+        let new_rowid =
+            get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1))?;
+        assert_eq!(new_rowid, CursorResult::Ok(50));
+
+        // Test case 3: IO error
+        let mut mock = MockCursor::new();
+        mock.expect_seek_to_last()
+            .return_once(|| Ok(CursorResult::Ok(())));
+        mock.expect_rowid()
+            .return_once(|| Ok(Some(std::i64::MAX as u64)));
+        mock.expect_seek_rowid()
+            .with(predicate::always())
+            .return_once(|_| Ok(CursorResult::IO));
+
+        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng());
+        assert!(matches!(result, Ok(CursorResult::IO)));
+
+        // Test case 4: Failure to generate new rowid
+        let mut mock = MockCursor::new();
+        mock.expect_seek_to_last()
+            .return_once(|| Ok(CursorResult::Ok(())));
+        mock.expect_rowid()
+            .return_once(|| Ok(Some(std::i64::MAX as u64)));
+        mock.expect_seek_rowid()
+            .with(predicate::always())
+            .returning(|_| Ok(CursorResult::Ok(true)));
+
+        // Mock the random number generation
+        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1));
+        assert!(matches!(result, Err(LimboError::InternalError(_))));
+
+        Ok(())
+    }
 
     #[test]
     fn test_length() {

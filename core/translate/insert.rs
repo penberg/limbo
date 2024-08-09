@@ -148,7 +148,11 @@ pub fn translate_insert(
             },
             notnull_label,
         );
-        program.emit_insn(Insn::NewRowid { cursor: cursor_id, rowid_reg: row_id_reg, prev_largest_reg: 0 });
+        program.emit_insn(Insn::NewRowid {
+            cursor: cursor_id,
+            rowid_reg: row_id_reg,
+            prev_largest_reg: 0,
+        });
 
         program.resolve_label(notnull_label, program.offset());
         program.emit_insn(Insn::MustBeInt { reg: row_id_reg });
