@@ -358,6 +358,7 @@ impl OwnedRecord {
     }
 }
 
+#[derive(PartialEq, Debug)]
 pub enum CursorResult<T> {
     Ok(T),
     IO,
@@ -370,6 +371,7 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Option<u64>>;
     fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
+    fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
     fn insert(
         &mut self,

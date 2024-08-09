@@ -45,6 +45,8 @@ indexmap = { version="2.2.6", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 pest = "2.0"
 pest_derive = "2.0"
+mockall = "0.13.0"
+rand = "0.8.5"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
