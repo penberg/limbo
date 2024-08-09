@@ -1,2 +1,20 @@
 /target
 /.idea
+
+*.so
+*.ipynb
+
+# Python
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv*/
+__pycache__/
+.coverage
+venv
+env
+.env
+.venv
+
+# OS
+.DS_Store
