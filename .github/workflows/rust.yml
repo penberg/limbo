@@ -16,6 +16,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: Check formatting
       run: cargo fmt --check
+
   build-native:
     strategy:
       matrix:
@@ -24,6 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+    - uses: Swatinem/rust-cache@v2
     - uses: actions/checkout@v3
     - name: Build
       run: cargo build --verbose
