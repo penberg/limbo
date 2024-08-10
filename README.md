@@ -57,7 +57,7 @@ pipenv run ./testing/gen-database.py
 You can then start the Limbo shell with:
 
 ```console
-$ cargo run database.db
+$ limbo database.db
 Welcome to Limbo SQL shell!
 > SELECT * FROM users LIMIT 1;
 |1|Cody|Miller|mhurst@example.org|525.595.7319x21268|33667 Shaw Extension Suite 104|West Robert|VA|45161|`
