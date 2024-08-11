@@ -742,12 +742,12 @@ impl Emitter for Operator {
 
                 Ok(true)
             }
-            node => {
+            operator => {
                 let start_reg =
-                    node.result_columns(program, referenced_tables, m, cursor_override)?;
+                    operator.result_columns(program, referenced_tables, m, cursor_override)?;
                 program.emit_insn(Insn::ResultRow {
                     start_reg,
-                    count: node.column_count(referenced_tables),
+                    count: operator.column_count(referenced_tables),
                 });
                 Ok(true)
             }
@@ -780,16 +780,16 @@ pub fn emit_program(
     };
 
     select_plan
-        .root_node
+        .root_operator
         .start(&mut program, &mut metadata, &select_plan.referenced_tables)?;
-    select_plan.root_node.emit(
+    select_plan.root_operator.emit(
         &mut program,
         &mut metadata,
         &select_plan.referenced_tables,
         true,
     )?;
     select_plan
-        .root_node
+        .root_operator
         .end(&mut program, &mut metadata, &select_plan.referenced_tables)?;
 
     program.resolve_label(halt_label, program.offset());

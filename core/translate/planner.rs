@@ -8,11 +8,11 @@ use crate::{
 use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
 use std::rc::Rc;
 
-pub struct NodeIdCounter {
+pub struct OperatorIdCounter {
     id: usize,
 }
 
-impl NodeIdCounter {
+impl OperatorIdCounter {
     pub fn new() -> Self {
         Self { id: 0 }
     }
@@ -36,19 +36,20 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 crate::bail_parse_error!("SELECT without columns is not allowed");
             }
 
-            let mut node_id_counter = NodeIdCounter::new();
+            let mut operator_id_counter = OperatorIdCounter::new();
 
             // Parse the FROM clause
-            let (mut node, referenced_tables) = parse_from(schema, from, &mut node_id_counter)?;
+            let (mut operator, referenced_tables) =
+                parse_from(schema, from, &mut operator_id_counter)?;
 
             // Parse the WHERE clause
             if let Some(w) = where_clause {
                 let mut predicates = vec![];
                 break_predicate_at_and_boundaries(w, &mut predicates);
-                node = Operator::Filter {
-                    source: Box::new(node),
+                operator = Operator::Filter {
+                    source: Box::new(operator),
                     predicates,
-                    id: node_id_counter.get_next_id(),
+                    id: operator_id_counter.get_next_id(),
                 };
             }
 
@@ -58,7 +59,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             // columns is not allowed.
             //
             // If there are no aggregate functions, we can simply project the columns.
-            // For a simple SELECT *, the projection node is skipped.
+            // For a simple SELECT *, the projection operator is skipped.
             let is_select_star = col_count == 1 && matches!(columns[0], ast::ResultColumn::Star);
             if !is_select_star {
                 let mut aggregate_expressions = Vec::new();
@@ -151,16 +152,16 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     );
                 }
                 if !aggregate_expressions.is_empty() {
-                    node = Operator::Aggregate {
-                        source: Box::new(node),
+                    operator = Operator::Aggregate {
+                        source: Box::new(operator),
                         aggregates: aggregate_expressions,
-                        id: node_id_counter.get_next_id(),
+                        id: operator_id_counter.get_next_id(),
                     }
                 } else if !scalar_expressions.is_empty() {
-                    node = Operator::Projection {
-                        source: Box::new(node),
+                    operator = Operator::Projection {
+                        source: Box::new(operator),
                         expressions: scalar_expressions,
-                        id: node_id_counter.get_next_id(),
+                        id: operator_id_counter.get_next_id(),
                     };
                 }
             }
@@ -195,25 +196,25 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         }),
                     ));
                 }
-                node = Operator::Order {
-                    source: Box::new(node),
+                operator = Operator::Order {
+                    source: Box::new(operator),
                     key,
-                    id: node_id_counter.get_next_id(),
+                    id: operator_id_counter.get_next_id(),
                 };
             }
 
             // Parse the LIMIT clause
             if let Some(limit) = &select.limit {
-                node = match &limit.expr {
+                operator = match &limit.expr {
                     ast::Expr::Literal(ast::Literal::Numeric(n)) => {
                         let l = n.parse()?;
                         if l == 0 {
                             Operator::Nothing
                         } else {
                             Operator::Limit {
-                                source: Box::new(node),
+                                source: Box::new(operator),
                                 limit: l,
-                                id: node_id_counter.get_next_id(),
+                                id: operator_id_counter.get_next_id(),
                             }
                         }
                     }
@@ -223,7 +224,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
 
             // Return the unoptimized query plan
             return Ok(Plan {
-                root_node: node,
+                root_operator: operator,
                 referenced_tables,
             });
         }
@@ -234,7 +235,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
 fn parse_from(
     schema: &Schema,
     from: Option<FromClause>,
-    node_id_counter: &mut NodeIdCounter,
+    operator_id_counter: &mut OperatorIdCounter,
 ) -> Result<(Operator, Vec<(Rc<BTreeTable>, String)>)> {
     if from.as_ref().and_then(|f| f.select.as_ref()).is_none() {
         return Ok((Operator::Nothing, vec![]));
@@ -259,33 +260,34 @@ fn parse_from(
         _ => todo!(),
     };
 
-    let mut node = Operator::Scan {
+    let mut operator = Operator::Scan {
         table: first_table.0.clone(),
         predicates: None,
         table_identifier: first_table.1.clone(),
-        id: node_id_counter.get_next_id(),
+        id: operator_id_counter.get_next_id(),
     };
 
     let mut tables = vec![first_table];
 
     for join in from.joins.unwrap_or_default().into_iter() {
-        let (right, outer, predicates) = parse_join(schema, join, node_id_counter, &mut tables)?;
-        node = Operator::Join {
-            left: Box::new(node),
+        let (right, outer, predicates) =
+            parse_join(schema, join, operator_id_counter, &mut tables)?;
+        operator = Operator::Join {
+            left: Box::new(operator),
             right: Box::new(right),
             predicates,
             outer,
-            id: node_id_counter.get_next_id(),
+            id: operator_id_counter.get_next_id(),
         }
     }
 
-    return Ok((node, tables));
+    return Ok((operator, tables));
 }
 
 fn parse_join(
     schema: &Schema,
     join: ast::JoinedSelectTable,
-    node_id_counter: &mut NodeIdCounter,
+    operator_id_counter: &mut OperatorIdCounter,
     tables: &mut Vec<(Rc<BTreeTable>, String)>,
 ) -> Result<(Operator, bool, Option<Vec<ast::Expr>>)> {
     let ast::JoinedSelectTable {
@@ -340,7 +342,7 @@ fn parse_join(
             table: table.0.clone(),
             predicates: None,
             table_identifier: table.1.clone(),
-            id: node_id_counter.get_next_id(),
+            id: operator_id_counter.get_next_id(),
         },
         outer,
         predicates,

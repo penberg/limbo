@@ -9,13 +9,13 @@ use sqlite3_parser::ast;
 use crate::{function::AggFunc, schema::BTreeTable, util::normalize_ident, Result};
 
 pub struct Plan {
-    pub root_node: Operator,
+    pub root_operator: Operator,
     pub referenced_tables: Vec<(Rc<BTreeTable>, String)>,
 }
 
 impl Display for Plan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.root_node)
+        write!(f, "{}", self.root_operator)
     }
 }
 
@@ -243,9 +243,9 @@ impl Display for Aggregate {
 // For EXPLAIN QUERY PLAN
 impl Display for Operator {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        fn fmt_node(node: &Operator, f: &mut Formatter, level: usize) -> fmt::Result {
+        fn fmt_operator(operator: &Operator, f: &mut Formatter, level: usize) -> fmt::Result {
             let indent = "    ".repeat(level);
-            match node {
+            match operator {
                 Operator::Aggregate {
                     source, aggregates, ..
                 } => {
@@ -256,7 +256,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(", ");
                     writeln!(f, "{}AGGREGATE {}", indent, aggregates_display_string)?;
-                    fmt_node(source, f, level + 1)
+                    fmt_operator(source, f, level + 1)
                 }
                 Operator::Filter {
                     source, predicates, ..
@@ -267,7 +267,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(" AND ");
                     writeln!(f, "{}FILTER {}", indent, predicates_string)?;
-                    fmt_node(source, f, level + 1)
+                    fmt_operator(source, f, level + 1)
                 }
                 Operator::SeekRowid {
                     table,
@@ -299,7 +299,7 @@ impl Display for Operator {
                 }
                 Operator::Limit { source, limit, .. } => {
                     writeln!(f, "{}TAKE {}", indent, limit)?;
-                    fmt_node(source, f, level + 1)
+                    fmt_operator(source, f, level + 1)
                 }
                 Operator::Join {
                     left,
@@ -323,8 +323,8 @@ impl Display for Operator {
                         }
                         None => writeln!(f, "{}{}", indent, join_name)?,
                     }
-                    fmt_node(left, f, level + 1)?;
-                    fmt_node(right, f, level + 1)
+                    fmt_operator(left, f, level + 1)?;
+                    fmt_operator(right, f, level + 1)
                 }
                 Operator::Order { source, key, .. } => {
                     let sort_keys_string = key
@@ -333,7 +333,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(", ");
                     writeln!(f, "{}SORT {}", indent, sort_keys_string)?;
-                    fmt_node(source, f, level + 1)
+                    fmt_operator(source, f, level + 1)
                 }
                 Operator::Projection {
                     source,
@@ -350,7 +350,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(", ");
                     writeln!(f, "{}PROJECT {}", indent, expressions)?;
-                    fmt_node(source, f, level + 1)
+                    fmt_operator(source, f, level + 1)
                 }
                 Operator::Scan {
                     table,
@@ -376,7 +376,7 @@ impl Display for Operator {
                 Operator::Nothing => Ok(()),
             }
         }
-        fmt_node(self, f, 0)
+        fmt_operator(self, f, 0)
     }
 }
 
@@ -388,19 +388,19 @@ impl Display for Operator {
     and the Operator is a join between table2 and table3,
     then the return value will be (in bits): 110
 */
-pub fn get_table_ref_bitmask_for_query_plan_node<'a>(
+pub fn get_table_ref_bitmask_for_operator<'a>(
     tables: &'a Vec<(Rc<BTreeTable>, String)>,
-    node: &'a Operator,
+    operator: &'a Operator,
 ) -> Result<usize> {
     let mut table_refs_mask = 0;
-    match node {
+    match operator {
         Operator::Aggregate { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, source)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
         }
         Operator::Filter {
             source, predicates, ..
         } => {
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, source)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
             for predicate in predicates {
                 table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, predicate)?;
             }
@@ -413,17 +413,17 @@ pub fn get_table_ref_bitmask_for_query_plan_node<'a>(
                     .unwrap();
         }
         Operator::Limit { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, source)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
         }
         Operator::Join { left, right, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, left)?;
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, right)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, left)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, right)?;
         }
         Operator::Order { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, source)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
         }
         Operator::Projection { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_query_plan_node(tables, source)?;
+            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
         }
         Operator::Scan { table, .. } => {
             table_refs_mask |= 1

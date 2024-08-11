@@ -5,24 +5,33 @@ use sqlite3_parser::ast;
 use crate::{schema::BTreeTable, util::normalize_ident, Result};
 
 use super::plan::{
-    get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_query_plan_node, Operator, Plan,
+    get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Operator, Plan,
 };
 
 /**
  * Make a few passes over the plan to optimize it.
  */
 pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
-    push_predicates(&mut select_plan.root_node, &select_plan.referenced_tables)?;
-    eliminate_constants(&mut select_plan.root_node)?;
-    use_indexes(&mut select_plan.root_node, &select_plan.referenced_tables)?;
+    push_predicates(
+        &mut select_plan.root_operator,
+        &select_plan.referenced_tables,
+    )?;
+    eliminate_constants(&mut select_plan.root_operator)?;
+    use_indexes(
+        &mut select_plan.root_operator,
+        &select_plan.referenced_tables,
+    )?;
     Ok(select_plan)
 }
 
 /**
  * Use indexes where possible (currently just primary key lookups)
  */
-fn use_indexes(node: &mut Operator, referenced_tables: &[(Rc<BTreeTable>, String)]) -> Result<()> {
-    match node {
+fn use_indexes(
+    operator: &mut Operator,
+    referenced_tables: &[(Rc<BTreeTable>, String)],
+) -> Result<()> {
+    match operator {
         Operator::Scan {
             table,
             predicates: filter,
@@ -60,7 +69,7 @@ fn use_indexes(node: &mut Operator, referenced_tables: &[(Rc<BTreeTable>, String
                 } else {
                     Some(fs.drain(..).collect())
                 };
-                *node = Operator::SeekRowid {
+                *operator = Operator::SeekRowid {
                     table: table.clone(),
                     table_identifier: table_identifier.clone(),
                     rowid_predicate,
@@ -107,8 +116,8 @@ fn use_indexes(node: &mut Operator, referenced_tables: &[(Rc<BTreeTable>, String
 
 // removes predicates that are always true
 // returns false if there is an impossible predicate that is always false
-fn eliminate_constants(node: &mut Operator) -> Result<bool> {
-    match node {
+fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
+    match operator {
         Operator::Filter {
             source, predicates, ..
         } => {
@@ -125,8 +134,8 @@ fn eliminate_constants(node: &mut Operator) -> Result<bool> {
             }
 
             if predicates.is_empty() {
-                *node = source.take_ownership();
-                eliminate_constants(node)?;
+                *operator = source.take_ownership();
+                eliminate_constants(operator)?;
             } else {
                 eliminate_constants(source)?;
             }
@@ -202,21 +211,21 @@ fn eliminate_constants(node: &mut Operator) -> Result<bool> {
         Operator::Limit { source, .. } => {
             let ok = eliminate_constants(source)?;
             if !ok {
-                *node = Operator::Nothing;
+                *operator = Operator::Nothing;
             }
             return Ok(ok);
         }
         Operator::Order { source, .. } => {
             let ok = eliminate_constants(source)?;
             if !ok {
-                *node = Operator::Nothing;
+                *operator = Operator::Nothing;
             }
             return Ok(true);
         }
         Operator::Projection { source, .. } => {
             let ok = eliminate_constants(source)?;
             if !ok {
-                *node = Operator::Nothing;
+                *operator = Operator::Nothing;
             }
             return Ok(ok);
         }
@@ -248,10 +257,10 @@ fn eliminate_constants(node: &mut Operator) -> Result<bool> {
   Recursively pushes predicates down the tree, as far as possible.
 */
 fn push_predicates(
-    node: &mut Operator,
+    operator: &mut Operator,
     referenced_tables: &Vec<(Rc<BTreeTable>, String)>,
 ) -> Result<()> {
-    match node {
+    match operator {
         Operator::Filter {
             source, predicates, ..
         } => {
@@ -270,7 +279,7 @@ fn push_predicates(
             }
 
             if predicates.is_empty() {
-                *node = source.take_ownership();
+                *operator = source.take_ownership();
             }
 
             return Ok(());
@@ -355,11 +364,11 @@ fn push_predicates(
   Returns Ok(None) if the predicate was pushed, otherwise returns itself as Ok(Some(predicate))
 */
 fn push_predicate(
-    node: &mut Operator,
+    operator: &mut Operator,
     predicate: ast::Expr,
     referenced_tables: &Vec<(Rc<BTreeTable>, String)>,
 ) -> Result<Option<ast::Expr>> {
-    match node {
+    match operator {
         Operator::Scan {
             predicates,
             table_identifier,
@@ -430,9 +439,8 @@ fn push_predicate(
 
             let table_refs_bitmask = get_table_ref_bitmask_for_ast_expr(referenced_tables, &pred)?;
 
-            let left_bitmask = get_table_ref_bitmask_for_query_plan_node(referenced_tables, left)?;
-            let right_bitmask =
-                get_table_ref_bitmask_for_query_plan_node(referenced_tables, right)?;
+            let left_bitmask = get_table_ref_bitmask_for_operator(referenced_tables, left)?;
+            let right_bitmask = get_table_ref_bitmask_for_operator(referenced_tables, right)?;
 
             if table_refs_bitmask & left_bitmask == 0 || table_refs_bitmask & right_bitmask == 0 {
                 return Ok(Some(pred));
