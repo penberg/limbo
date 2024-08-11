@@ -26,3 +26,11 @@ do_execsql_test select-add {
 do_execsql_test case-insensitive-columns {
     select u.aGe + 1 from USERS u where U.AGe = 91 limit 1;
 } {92}
+
+do_execsql_test table-star {
+    select p.*, p.name from products p limit 1;
+} {1|hat|79.0|hat}
+
+do_execsql_test table-star-2 {
+    select p.*, u.age from users u join products p limit 1;
+} {1|hat|79.0|94}

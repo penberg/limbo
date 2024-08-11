@@ -17,6 +17,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use fallible_iterator::FallibleIterator;
 use log::trace;
 use schema::Schema;
+use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::sync::Arc;
 use std::{cell::RefCell, rc::Rc};
@@ -26,6 +27,9 @@ use storage::pager::Pager;
 use storage::sqlite3_ondisk::DatabaseHeader;
 #[cfg(feature = "fs")]
 use storage::wal::WalFile;
+
+use translate::optimizer::optimize_plan;
+use translate::planner::prepare_select_plan;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
@@ -173,7 +177,17 @@ impl Connection {
                     program.explain();
                     Ok(None)
                 }
-                Cmd::ExplainQueryPlan(_stmt) => Ok(None),
+                Cmd::ExplainQueryPlan(stmt) => {
+                    match stmt {
+                        ast::Stmt::Select(select) => {
+                            let plan = prepare_select_plan(&self.schema, select)?;
+                            let plan = optimize_plan(plan)?;
+                            println!("{}", plan);
+                        }
+                        _ => todo!(),
+                    }
+                    Ok(None)
+                }
             }
         } else {
             Ok(None)
