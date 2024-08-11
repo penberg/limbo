@@ -817,9 +817,9 @@ fn table_columns(
     let mut cur_reg = start_reg;
     let cursor_id = cursor_override.unwrap_or(program.resolve_cursor_id(table_identifier, None));
     for i in 0..table.columns.len() {
-        let is_primary_key = table.columns[i].primary_key;
+        let is_rowid = table.column_is_rowid_alias(&table.columns[i]);
         let col_type = &table.columns[i].ty;
-        if is_primary_key {
+        if is_rowid {
             program.emit_insn(Insn::RowId {
                 cursor_id,
                 dest: cur_reg,
