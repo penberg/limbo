@@ -385,8 +385,8 @@ impl Display for Operator {
   If a table is referenced in the given Operator, the corresponding bit is set to 1.
   Example:
     if tables = [(table1, "t1"), (table2, "t2"), (table3, "t3")],
-    and the Operator is a join between table1 and table3,
-    then the return value will be (in bits): 101
+    and the Operator is a join between table2 and table3,
+    then the return value will be (in bits): 110
 */
 pub fn get_table_ref_bitmask_for_query_plan_node<'a>(
     tables: &'a Vec<(Rc<BTreeTable>, String)>,
@@ -443,7 +443,7 @@ pub fn get_table_ref_bitmask_for_query_plan_node<'a>(
   Example:
     if tables = [(table1, "t1"), (table2, "t2"), (table3, "t3")],
     and predicate = "t1.a = t2.b"
-    then the return value will be (in bits): 110
+    then the return value will be (in bits): 011
 */
 pub fn get_table_ref_bitmask_for_ast_expr<'a>(
     tables: &'a Vec<(Rc<BTreeTable>, String)>,
