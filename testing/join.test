@@ -141,7 +141,7 @@ do_execsql_test left-join-no-join-conditions-but-multiple-where {
 } {Jamie|hat
 Cindy|cap}
 
- do_execsql_test left-join-order-by-qualified {
+do_execsql_test left-join-order-by-qualified {
     select users.first_name, products.name from users left join products on users.id = products.id where users.first_name like 'Jam%' order by null limit 2;
 } {Jamie|hat
 James|}
