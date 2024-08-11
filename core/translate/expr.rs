@@ -1,3 +1,5 @@
+use core::panic;
+
 use crate::{function::JsonFunc, Result};
 use sqlite3_parser::ast::{self, Expr, UnaryOperator};
 
@@ -582,7 +584,21 @@ pub fn analyze_expr<'a>(expr: &'a Expr, column_info_out: &mut ColumnInfo<'a>) {
                 column_info_out.args = args;
             }
         }
-        ast::Expr::FunctionCallStar { .. } => todo!(),
+        ast::Expr::FunctionCallStar {
+            name,
+            filter_over: _,
+        } => {
+            let func_type =
+                match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), 1) {
+                    Ok(func) => Some(func),
+                    Err(_) => None,
+                };
+            if func_type.is_none() {
+                panic!("Function not found");
+            } else {
+                column_info_out.func = func_type;
+            }
+        }
         _ => {}
     }
 }

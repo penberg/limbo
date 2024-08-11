@@ -35,6 +35,10 @@ do_execsql_test select-count {
   SELECT count(id) FROM users;
 } {10000}
 
+do_execsql_test select-count {
+  SELECT count(*) FROM users;
+} {10000}
+
 do_execsql_test select-max {
   SELECT max(age) FROM users;
 } {100}
