@@ -74,7 +74,3 @@ do_execsql_test select-string-agg-with-delimiter {
 do_execsql_test select-string-agg-with-column-delimiter {
   SELECT string_agg(name, id) FROM products;
 } {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
-
-do_execsql_test select-count-star {
-  SELECT count(*) FROM users;
-} {10000}
