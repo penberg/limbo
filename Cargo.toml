@@ -22,9 +22,13 @@ repository = "https://github.com/penberg/limbo"
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.19.1"
+cargo-dist-version = "0.20.0"
 # CI backends to support
 ci = "github"
+# Which kinds of built libraries to include in the final archives
+package-libraries = "cstaticlib"
+# Which kinds of packaged libraries to install
+install-libraries = "cstaticlib"
 # The installers to generate for each app
 installers = ["shell", "powershell"]
 # Target platforms to build apps for (Rust target-triple syntax)
