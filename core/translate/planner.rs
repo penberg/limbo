@@ -43,9 +43,11 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
 
             // Parse the WHERE clause
             if let Some(w) = where_clause {
+                let mut predicates = vec![];
+                break_predicate_at_and_boundaries(w, &mut predicates);
                 node = Operator::Filter {
                     source: Box::new(node),
-                    predicates: break_predicate_at_and_boundaries(w, vec![]),
+                    predicates,
                     id: node_id_counter.get_next_id(),
                 };
             }
@@ -325,7 +327,11 @@ fn parse_join(
     };
 
     let predicates = constraint.map(|c| match c {
-        ast::JoinConstraint::On(expr) => break_predicate_at_and_boundaries(expr, vec![]),
+        ast::JoinConstraint::On(expr) => {
+            let mut predicates = vec![];
+            break_predicate_at_and_boundaries(expr, &mut predicates);
+            predicates
+        }
         ast::JoinConstraint::Using(_) => todo!("USING joins not supported yet"),
     });
 
@@ -341,19 +347,14 @@ fn parse_join(
     ))
 }
 
-fn break_predicate_at_and_boundaries(
-    predicate: ast::Expr,
-    mut predicates: Vec<ast::Expr>,
-) -> Vec<ast::Expr> {
+fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {
     match predicate {
         ast::Expr::Binary(left, ast::Operator::And, right) => {
-            let ps = break_predicate_at_and_boundaries(*left, predicates);
-            let ps = break_predicate_at_and_boundaries(*right, ps);
-            ps
+            break_predicate_at_and_boundaries(*left, out_predicates);
+            break_predicate_at_and_boundaries(*right, out_predicates);
         }
         _ => {
-            predicates.push(predicate);
-            predicates
+            out_predicates.push(predicate);
         }
     }
 }
