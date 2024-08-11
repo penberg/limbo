@@ -30,16 +30,32 @@ impl Display for Plan {
 */
 #[derive(Clone, Debug)]
 pub enum Operator {
+    // Aggregate operator
+    // This operator is used to compute aggregate functions like SUM, AVG, COUNT, etc.
+    // It takes a source operator and a list of aggregate functions to compute.
+    // GROUP BY is not supported yet.
     Aggregate {
         id: usize,
         source: Box<Operator>,
         aggregates: Vec<Aggregate>,
     },
+    // Filter operator
+    // This operator is used to filter rows from the source operator.
+    // It takes a source operator and a list of predicates to evaluate.
+    // Only rows for which all predicates evaluate to true are passed to the next operator.
+    // Generally filter operators will only exist in unoptimized plans,
+    // as the optimizer will try to push filters down to the lowest possible level,
+    // e.g. a table scan.
     Filter {
         id: usize,
         source: Box<Operator>,
         predicates: Vec<ast::Expr>,
     },
+    // SeekRowid operator
+    // This operator is used to retrieve a single row from a table by its rowid.
+    // rowid_predicate is an expression that produces the comparison value for the rowid.
+    // e.g. rowid = 5, or rowid = other_table.foo
+    // predicates is an optional list of additional predicates to evaluate.
     SeekRowid {
         id: usize,
         table: Rc<BTreeTable>,
@@ -47,11 +63,17 @@ pub enum Operator {
         rowid_predicate: ast::Expr,
         predicates: Option<Vec<ast::Expr>>,
     },
+    // Limit operator
+    // This operator is used to limit the number of rows returned by the source operator.
     Limit {
         id: usize,
         source: Box<Operator>,
         limit: usize,
     },
+    // Join operator
+    // This operator is used to join two source operators.
+    // It takes a left and right source operator, a list of predicates to evaluate,
+    // and a boolean indicating whether it is an outer join.
     Join {
         id: usize,
         left: Box<Operator>,
@@ -59,22 +81,38 @@ pub enum Operator {
         predicates: Option<Vec<ast::Expr>>,
         outer: bool,
     },
+    // Order operator
+    // This operator is used to sort the rows returned by the source operator.
     Order {
         id: usize,
         source: Box<Operator>,
         key: Vec<(ast::Expr, Direction)>,
     },
+    // Projection operator
+    // This operator is used to project columns from the source operator.
+    // It takes a source operator and a list of expressions to evaluate.
+    // e.g. SELECT foo, bar FROM t1
+    // In this example, the expressions would be [foo, bar]
+    // and the source operator would be a Scan operator for table t1.
     Projection {
         id: usize,
         source: Box<Operator>,
         expressions: Vec<ProjectionColumn>,
     },
+    // Scan operator
+    // This operator is used to scan a table.
+    // It takes a table to scan and an optional list of predicates to evaluate.
+    // The predicates are used to filter rows from the table.
+    // e.g. SELECT * FROM t1 WHERE t1.foo = 5
     Scan {
         id: usize,
         table: Rc<BTreeTable>,
         table_identifier: String,
         predicates: Option<Vec<ast::Expr>>,
     },
+    // Nothing operator
+    // This operator is used to represent an empty query.
+    // e.g. SELECT * from foo WHERE 0 will eventually be optimized to Nothing.
     Nothing,
 }
 
