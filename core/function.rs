@@ -118,7 +118,7 @@ impl Func {
             "date" => Ok(Func::Scalar(ScalarFunc::Date)),
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
-            "json" => Ok(Func::Json((JsonFunc::JSON))),
+            "json" => Ok(Func::Json(JsonFunc::JSON)),
             _ => Err(()),
         }
     }
