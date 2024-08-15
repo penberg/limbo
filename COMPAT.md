@@ -106,7 +106,7 @@ This document describes the SQLite compatibility status of Limbo:
 | sqlite_version()             | No     |         |
 | substr(X,Y,Z)                | No     |         |
 | substr(X,Y)                  | No     |         |
-| substring(X,Y,Z)             | No     |         |
+| substring(X,Y,Z)             | Yes    |         |
 | substring(X,Y)               | No     |         |
 | total_changes()              | No     |         |
 | trim(X)                      | Yes    |         |
