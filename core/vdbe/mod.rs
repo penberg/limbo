@@ -151,7 +151,7 @@ pub enum Insn {
         root_page: PageIdx,
     },
 
-    // Await for the competion of open cursor.
+    // Await for the completion of open cursor.
     OpenReadAwait,
 
     // Open a cursor for a pseudo-table that contains a single row.
