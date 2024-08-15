@@ -1824,8 +1824,6 @@ mod tests {
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
-    use rusqlite::types::ToSqlOutput::Owned;
-    use rustix::path::Arg;
     use std::{cell::Ref, rc::Rc};
 
     mock! {
