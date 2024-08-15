@@ -243,7 +243,7 @@ const char *sqlite3_libversion(void);
 int sqlite3_libversion_number(void);
 
 #ifdef __cplusplus
-} // extern "C"
-#endif // __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
 
-#endif /* LIMBO_SQLITE3_H */
+#endif  /* LIMBO_SQLITE3_H */
