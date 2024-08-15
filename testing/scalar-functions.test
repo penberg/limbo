@@ -239,6 +239,22 @@ do_execsql_test max-null {
   select max(null,null)
 } {}
 
+do_execsql_test substr-3-args {
+  SELECT substr('limbo', 1, 3);
+} {lim}
+
+do_execsql_test substr-3-args-exceed-length {
+  SELECT substr('limbo', 1, 10);
+} {limbo}
+
+do_execsql_test substr-3-args-start-exceed-length {
+  SELECT substr('limbo', 10, 3);
+} {}
+
+do_execsql_test substr-2-args {
+  SELECT substr('limbo', 3);
+} {mbo}
+
 do_execsql_test substring-3-args {
   SELECT substring('limbo', 1, 3);
 } {lim}

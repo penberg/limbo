@@ -1307,7 +1307,7 @@ impl Program {
                         }
                         state.pc += 1;
                     }
-                    Func::Scalar(ScalarFunc::Substring) => {
+                    Func::Scalar(ScalarFunc::Substr) | Func::Scalar(ScalarFunc::Substring) => {
                         let start_reg = *start_reg;
                         let str_value = &state.registers[start_reg];
                         let start_value = &state.registers[start_reg + 1];
