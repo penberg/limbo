@@ -304,9 +304,9 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Substring => {
                             let args = if let Some(args) = args {
-                                if args.len() != 3  {
+                                if !(args.len() == 2 || args.len() == 3)  {
                                     crate::bail_parse_error!(
-                                        "{} function with not exactly 3 arguments",
+                                        "{} function with wrong number of arguments",
                                         srf.to_string()
                                     )
                                 }
@@ -324,7 +324,9 @@ pub fn translate_expr(
 
                             translate_expr(program, select, &args[0], str_reg, cursor_hint)?;
                             translate_expr(program, select, &args[1], start_reg, cursor_hint)?;
-                            translate_expr(program, select, &args[2], length_reg, cursor_hint)?;
+                            if args.len() == 3 {
+                                translate_expr(program, select, &args[2], length_reg, cursor_hint)?;
+                            }
 
                             program.emit_insn(Insn::Function {
                                 start_reg: str_reg,

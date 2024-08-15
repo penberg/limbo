@@ -1650,20 +1650,31 @@ fn exec_minmax<'a>(
 }
 
 fn exec_substring(str_value: &OwnedValue, start_value: &OwnedValue, length_value: &OwnedValue) -> OwnedValue {
-    match (str_value, start_value, length_value) {
-        (OwnedValue::Text(str), OwnedValue::Integer(start), OwnedValue::Integer(length)) => {
-            let start = *start as usize;
-            if (start as usize) > str.len() {
-                OwnedValue::Text(Rc::new("".to_string()))
-            } else {
-                let length = *length as usize;
-                let start_idx = start - 1;
-                let end = start_idx + length;
-                let substring = &str[start_idx..end.min(str.len())];
-                OwnedValue::Text(Rc::new(substring.to_string()))
-            }
+    if let (OwnedValue::Text(str), OwnedValue::Integer(start), OwnedValue::Integer(length)) = (str_value, start_value, length_value) {
+        let start = *start as usize;
+        if start > str.len() {
+            return OwnedValue::Text(Rc::new("".to_string()));
         }
-        _ => OwnedValue::Null,
+
+        let start_idx = start - 1;
+        let str_len = str.len();
+        let end = if *length != -1 { start_idx + *length as usize } else { str_len };
+        let substring = &str[start_idx..end.min(str_len)];
+
+        OwnedValue::Text(Rc::new(substring.to_string()))
+    } else if let (OwnedValue::Text(str), OwnedValue::Integer(start)) = (str_value, start_value) {
+        let start = *start as usize;
+        if start > str.len() {
+            return OwnedValue::Text(Rc::new("".to_string()));
+        }
+
+        let start_idx = start - 1;
+        let str_len = str.len();
+        let substring = &str[start_idx..str_len];
+
+        OwnedValue::Text(Rc::new(substring.to_string()))
+    } else {
+        OwnedValue::Null
     }
 }
 
@@ -2190,5 +2201,17 @@ mod tests {
         let length_value = OwnedValue::Integer(3);
         let expected_val = OwnedValue::Text(Rc::new(String::from("")));
         assert_eq!(exec_substring(&str_value, &start_value, &length_value), expected_val);
+
+        let str_value = OwnedValue::Text(Rc::new("limbo".to_string()));
+        let start_value = OwnedValue::Integer(3);
+        let length_value = OwnedValue::Null;
+        let expected_val = OwnedValue::Text(Rc::new(String::from("mbo")));
+        assert_eq!(exec_substring(&str_value, &start_value, &length_value), expected_val);
+
+        let str_value = OwnedValue::Text(Rc::new("limbo".to_string()));
+        let start_value = OwnedValue::Integer(10);
+        let length_value = OwnedValue::Null;
+        let expected_val = OwnedValue::Text(Rc::new(String::from("")));
+
     }
 }
