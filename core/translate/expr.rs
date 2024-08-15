@@ -302,6 +302,40 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::Substring => {
+                            let args = if let Some(args) = args {
+                                if !(args.len() == 2 || args.len() == 3) {
+                                    crate::bail_parse_error!(
+                                        "{} function with wrong number of arguments",
+                                        srf.to_string()
+                                    )
+                                }
+                                args
+                            } else {
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
+                                    srf.to_string()
+                                );
+                            };
+
+                            let str_reg = program.alloc_register();
+                            let start_reg = program.alloc_register();
+                            let length_reg = program.alloc_register();
+
+                            translate_expr(program, select, &args[0], str_reg, cursor_hint)?;
+                            translate_expr(program, select, &args[1], start_reg, cursor_hint)?;
+                            if args.len() == 3 {
+                                translate_expr(program, select, &args[2], length_reg, cursor_hint)?;
+                            }
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: str_reg,
+                                dest: target_register,
+                                func: crate::vdbe::Func::Scalar(ScalarFunc::Substring),
+                            });
+
+                            Ok(target_register)
+                        }
                         ScalarFunc::Time => {
                             let mut start_reg = 0;
                             if let Some(args) = args {

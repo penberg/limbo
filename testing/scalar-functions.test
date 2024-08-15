@@ -239,6 +239,26 @@ do_execsql_test max-null {
   select max(null,null)
 } {}
 
+do_execsql_test substring-3-args {
+  SELECT substring('limbo', 1, 3);
+} {lim}
+
+do_execsql_test substring-3-args-exceed-length {
+  SELECT substring('limbo', 1, 10);
+} {limbo}
+
+do_execsql_test substring-3-args-start-exceed-length {
+  SELECT substring('limbo', 10, 3);
+} {}
+
+do_execsql_test substring-2-args {
+  SELECT substring('limbo', 3);
+} {mbo}
+
+do_execsql_test substring-2-args-exceed-length {
+  SELECT substring('limbo', 10);
+} {}
+
 do_execsql_test date-current-date {
   SELECT length(date('now')) = 10;
 } {1}
@@ -418,3 +438,4 @@ do_execsql_test unicode-float {
 do_execsql_test unicode-null {
   SELECT unicode(NULL);
 } {}
+

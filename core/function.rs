@@ -53,6 +53,7 @@ pub enum ScalarFunc {
     Length,
     Min,
     Max,
+    Substring,
     Date,
     Time,
     Unicode,
@@ -74,6 +75,7 @@ impl ToString for ScalarFunc {
             ScalarFunc::Length => "length".to_string(),
             ScalarFunc::Min => "min".to_string(),
             ScalarFunc::Max => "max".to_string(),
+            ScalarFunc::Substring => "substring".to_string(),
             ScalarFunc::Date => "date".to_string(),
             ScalarFunc::Time => "time".to_string(),
             ScalarFunc::Unicode => "unicode".to_string(),
@@ -112,10 +114,11 @@ impl Func {
             "rtrim" => Ok(Func::Scalar(ScalarFunc::RTrim)),
             "round" => Ok(Func::Scalar(ScalarFunc::Round)),
             "length" => Ok(Func::Scalar(ScalarFunc::Length)),
+            "substring" => Ok(Func::Scalar(ScalarFunc::Substring)),
             "date" => Ok(Func::Scalar(ScalarFunc::Date)),
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
-            "json" => Ok(Func::Json((JsonFunc::JSON))),
+            "json" => Ok(Func::Json(JsonFunc::JSON)),
             _ => Err(()),
         }
     }
