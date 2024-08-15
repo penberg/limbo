@@ -304,7 +304,7 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Substring => {
                             let args = if let Some(args) = args {
-                                if !(args.len() == 2 || args.len() == 3)  {
+                                if !(args.len() == 2 || args.len() == 3) {
                                     crate::bail_parse_error!(
                                         "{} function with wrong number of arguments",
                                         srf.to_string()

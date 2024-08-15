@@ -1649,8 +1649,14 @@ fn exec_minmax<'a>(
     regs.into_iter().reduce(|a, b| op(a, b)).cloned()
 }
 
-fn exec_substring(str_value: &OwnedValue, start_value: &OwnedValue, length_value: &OwnedValue) -> OwnedValue {
-    if let (OwnedValue::Text(str), OwnedValue::Integer(start), OwnedValue::Integer(length)) = (str_value, start_value, length_value) {
+fn exec_substring(
+    str_value: &OwnedValue,
+    start_value: &OwnedValue,
+    length_value: &OwnedValue,
+) -> OwnedValue {
+    if let (OwnedValue::Text(str), OwnedValue::Integer(start), OwnedValue::Integer(length)) =
+        (str_value, start_value, length_value)
+    {
         let start = *start as usize;
         if start > str.len() {
             return OwnedValue::Text(Rc::new("".to_string()));
@@ -1658,7 +1664,11 @@ fn exec_substring(str_value: &OwnedValue, start_value: &OwnedValue, length_value
 
         let start_idx = start - 1;
         let str_len = str.len();
-        let end = if *length != -1 { start_idx + *length as usize } else { str_len };
+        let end = if *length != -1 {
+            start_idx + *length as usize
+        } else {
+            str_len
+        };
         let substring = &str[start_idx..end.min(str_len)];
 
         OwnedValue::Text(Rc::new(substring.to_string()))
@@ -1787,7 +1797,11 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result};
+    use super::{
+        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
+        exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode, exec_upper,
+        get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+    };
     use mockall::{mock, predicate, predicate::*};
     use rand::{rngs::mock::StepRng, thread_rng};
     use std::{cell::Ref, rc::Rc};
@@ -2188,30 +2202,41 @@ mod tests {
         let start_value = OwnedValue::Integer(1);
         let length_value = OwnedValue::Integer(3);
         let expected_val = OwnedValue::Text(Rc::new(String::from("lim")));
-        assert_eq!(exec_substring(&str_value, &start_value, &length_value), expected_val);
+        assert_eq!(
+            exec_substring(&str_value, &start_value, &length_value),
+            expected_val
+        );
 
         let str_value = OwnedValue::Text(Rc::new("limbo".to_string()));
         let start_value = OwnedValue::Integer(1);
         let length_value = OwnedValue::Integer(10);
         let expected_val = OwnedValue::Text(Rc::new(String::from("limbo")));
-        assert_eq!(exec_substring(&str_value, &start_value, &length_value), expected_val);
+        assert_eq!(
+            exec_substring(&str_value, &start_value, &length_value),
+            expected_val
+        );
 
         let str_value = OwnedValue::Text(Rc::new("limbo".to_string()));
         let start_value = OwnedValue::Integer(10);
         let length_value = OwnedValue::Integer(3);
         let expected_val = OwnedValue::Text(Rc::new(String::from("")));
-        assert_eq!(exec_substring(&str_value, &start_value, &length_value), expected_val);
+        assert_eq!(
+            exec_substring(&str_value, &start_value, &length_value),
+            expected_val
+        );
 
         let str_value = OwnedValue::Text(Rc::new("limbo".to_string()));
         let start_value = OwnedValue::Integer(3);
         let length_value = OwnedValue::Null;
         let expected_val = OwnedValue::Text(Rc::new(String::from("mbo")));
-        assert_eq!(exec_substring(&str_value, &start_value, &length_value), expected_val);
+        assert_eq!(
+            exec_substring(&str_value, &start_value, &length_value),
+            expected_val
+        );
 
         let str_value = OwnedValue::Text(Rc::new("limbo".to_string()));
         let start_value = OwnedValue::Integer(10);
         let length_value = OwnedValue::Null;
         let expected_val = OwnedValue::Text(Rc::new(String::from("")));
-
     }
 }
