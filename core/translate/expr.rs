@@ -165,14 +165,7 @@ pub fn translate_expr(
                 Some(Func::Scalar(srf)) => {
                     match srf {
                         ScalarFunc::Char => {
-                            let args = if let Some(args) = args {
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = args.clone().unwrap_or_else(Vec::new);
 
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
