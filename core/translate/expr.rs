@@ -220,6 +220,26 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
+                        ScalarFunc::Concat => {
+                            let args = if let Some(args) = args {
+                                args
+                            } else {
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
+                                    srf.to_string()
+                                );
+                            };
+                            for arg in args.iter() {
+                                let reg = program.alloc_register();
+                                translate_expr(program, select, arg, reg, cursor_hint)?;
+                            }
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register,
+                                dest: target_register,
+                                func: crate::vdbe::Func::Scalar(srf),
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::IfNull => {
                             let args = match args {
                                 Some(args) if args.len() == 2 => args,

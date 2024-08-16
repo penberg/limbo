@@ -3,6 +3,22 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+do_execsql_test concat-1 {
+  select concat('l', 'i');
+} {li}
+
+do_execsql_test concat-2 {
+  select concat('l', 1);
+} {l1}
+
+do_execsql_test concat-3 {
+  select concat('l', 1.5);
+} {l1.5}
+
+do_execsql_test concat-4 {
+  select concat('l', null, 'i');
+} {li}
+
 do_execsql_test char {
   select char(108, 105)
 } {li}
