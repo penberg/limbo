@@ -53,7 +53,7 @@ pub fn insn_to_str(
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}] -> {}", reg, target_pc),
+                format!("r[{}]!=NULL -> goto {}", reg, target_pc),
             ),
             Insn::IfPos {
                 reg,
@@ -678,7 +678,7 @@ pub fn insn_to_str(
                 *amount as i32,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                "".to_string(),
+                format!("r[{}]=r[{}]", dst_reg, src_reg),
             ),
         };
     format!(

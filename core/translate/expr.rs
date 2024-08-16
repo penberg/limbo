@@ -220,6 +220,35 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
+                        ScalarFunc::IfNull => {
+                            let args = match args {
+                                Some(args) if args.len() == 2 => args,
+                                Some(_) => crate::bail_parse_error!(
+                                    "{} function requires exactly 2 arguments",
+                                    srf.to_string()
+                                ),
+                                None => crate::bail_parse_error!(
+                                    "{} function requires arguments",
+                                    srf.to_string()
+                                ),
+                            };
+
+                            let temp_reg = program.alloc_register();
+                            translate_expr(program, select, &args[0], temp_reg, cursor_hint)?;
+                            program.emit_insn(Insn::NotNull {
+                                reg: temp_reg,
+                                target_pc: program.offset() + 2,
+                            });
+
+                            translate_expr(program, select, &args[1], temp_reg, cursor_hint)?;
+                            program.emit_insn(Insn::Copy {
+                                src_reg: temp_reg,
+                                dst_reg: target_register,
+                                amount: 0,
+                            });
+
+                            Ok(target_register)
+                        }
                         ScalarFunc::Like => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {

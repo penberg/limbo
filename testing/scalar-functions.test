@@ -35,6 +35,14 @@ do_execsql_test abs-null {
     select abs(null);
 } {}
 
+do_execsql_test ifnull-1 {
+  select ifnull(1, 2);
+} {1}
+
+do_execsql_test ifnull-2 {
+  select ifnull(null, 2);
+} {2}
+
 do_execsql_test upper {
   select upper('Limbo')
 } {LIMBO}

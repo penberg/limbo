@@ -1192,6 +1192,7 @@ impl Program {
                         state.pc += 1;
                     }
                     Func::Scalar(ScalarFunc::Coalesce) => {}
+                    Func::Scalar(ScalarFunc::IfNull) => {}
                     Func::Scalar(ScalarFunc::Like) => {
                         let start_reg = *start_reg;
                         assert!(
