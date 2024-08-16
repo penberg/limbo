@@ -669,7 +669,7 @@ pub fn translate_expr(
 
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(program, select, arg, reg, cursor_hint)?;
+                                translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
                             }
 
                             program.emit_insn(Insn::Function {
@@ -731,7 +731,7 @@ pub fn translate_expr(
                             };
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(program, select, arg, reg, cursor_hint)?;
+                                translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
                             }
                             program.emit_insn(Insn::Function {
                                 start_reg: target_register,
@@ -754,13 +754,25 @@ pub fn translate_expr(
                             };
 
                             let temp_reg = program.alloc_register();
-                            translate_expr(program, select, &args[0], temp_reg, cursor_hint)?;
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                temp_reg,
+                                cursor_hint,
+                            )?;
                             program.emit_insn(Insn::NotNull {
                                 reg: temp_reg,
                                 target_pc: program.offset() + 2,
                             });
 
-                            translate_expr(program, select, &args[1], temp_reg, cursor_hint)?;
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[1],
+                                temp_reg,
+                                cursor_hint,
+                            )?;
                             program.emit_insn(Insn::Copy {
                                 src_reg: temp_reg,
                                 dst_reg: target_register,
@@ -899,10 +911,28 @@ pub fn translate_expr(
                             let start_reg = program.alloc_register();
                             let length_reg = program.alloc_register();
 
-                            translate_expr(program, select, &args[0], str_reg, cursor_hint)?;
-                            translate_expr(program, select, &args[1], start_reg, cursor_hint)?;
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                str_reg,
+                                cursor_hint,
+                            )?;
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[1],
+                                start_reg,
+                                cursor_hint,
+                            )?;
                             if args.len() == 3 {
-                                translate_expr(program, select, &args[2], length_reg, cursor_hint)?;
+                                translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    &args[2],
+                                    length_reg,
+                                    cursor_hint,
+                                )?;
                             }
 
                             program.emit_insn(Insn::Function {
