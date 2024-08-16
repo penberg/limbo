@@ -19,8 +19,6 @@ do_execsql_test abs-null {
     select abs(null);
 } {}
 
-db null {}
-
 do_execsql_test ifnull-1 {
   select ifnull(1, 2);
 } {1}
