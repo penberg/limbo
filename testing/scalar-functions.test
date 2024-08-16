@@ -3,6 +3,22 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+do_execsql_test char {
+  select char(108, 105)
+} {li}
+
+do_execsql_test char-empty {
+  select char()
+} {}
+
+do_execsql_test char-null {
+  select char(null)
+} {}
+
+do_execsql_test char-non-integer {
+  select char('a')
+} {}
+
 do_execsql_test abs {
     select abs(1);
 } {1}

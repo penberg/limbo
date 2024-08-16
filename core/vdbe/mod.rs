@@ -1185,6 +1185,12 @@ impl Program {
                         }
                         state.pc += 1;
                     }
+                    Func::Scalar(ScalarFunc::Char) => {
+                        let start_reg = *start_reg;
+                        let reg_values = state.registers[start_reg..state.registers.len()].to_vec();
+                        state.registers[*dest] = exec_char(reg_values);
+                        state.pc += 1;
+                    }
                     Func::Scalar(ScalarFunc::Coalesce) => {}
                     Func::Scalar(ScalarFunc::Like) => {
                         let start_reg = *start_reg;
@@ -1636,6 +1642,20 @@ fn exec_random() -> OwnedValue {
     OwnedValue::Integer(random_number)
 }
 
+fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
+    let result: String = values
+        .iter()
+        .filter_map(|x| {
+            if let OwnedValue::Integer(i) = x {
+                Some(*i as u8 as char)
+            } else {
+                None
+            }
+        })
+        .collect();
+    OwnedValue::Text(Rc::new(result))
+}
+
 // Implements LIKE pattern matching.
 fn exec_like(pattern: &str, text: &str) -> bool {
     let re = Regex::new(&pattern.replace('%', ".*").replace('_', ".").to_string()).unwrap();
@@ -1798,11 +1818,11 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        exec_abs, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
+        exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
         exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode, exec_upper,
         get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
-    use mockall::{mock, predicate, predicate::*};
+    use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
     use std::{cell::Ref, rc::Rc};
 
@@ -2118,6 +2138,24 @@ mod tests {
         );
         assert_eq!(exec_abs(&OwnedValue::Null).unwrap(), OwnedValue::Null);
     }
+
+    #[test]
+    fn test_char() {
+        assert_eq!(
+            exec_char(vec![OwnedValue::Integer(108), OwnedValue::Integer(105)]),
+            OwnedValue::Text(Rc::new("li".to_string()))
+        );
+        assert_eq!(exec_char(vec![]), OwnedValue::Text(Rc::new("".to_string())));
+        assert_eq!(
+            exec_char(vec![OwnedValue::Null]),
+            OwnedValue::Text(Rc::new("".to_string()))
+        );
+        assert_eq!(
+            exec_char(vec![OwnedValue::Text(Rc::new("a".to_string()))]),
+            OwnedValue::Text(Rc::new("".to_string()))
+        );
+    }
+
     #[test]
     fn test_like() {
         assert!(exec_like("a%", "aaaa"));

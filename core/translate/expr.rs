@@ -164,6 +164,21 @@ pub fn translate_expr(
                 },
                 Some(Func::Scalar(srf)) => {
                     match srf {
+                        ScalarFunc::Char => {
+                            let args = args.clone().unwrap_or_else(Vec::new);
+
+                            for arg in args.iter() {
+                                let reg = program.alloc_register();
+                                translate_expr(program, select, arg, reg, cursor_hint)?;
+                            }
+
+                            program.emit_insn(Insn::Function {
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: crate::vdbe::Func::Scalar(srf),
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::Coalesce => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
