@@ -2,6 +2,10 @@
 
 ### Unreleased
 
+- Initial pass on Python bindings (Jean Arhancet)
+
+- Improve scalar function support (Kim Seon Woo)
+
 ### Added
 
 - Partial support for `json()` function (Jean Arhancet)
