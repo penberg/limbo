@@ -38,7 +38,7 @@ pub trait Emitter {
         pb: &mut ProgramBuilder,
         m: &mut Metadata,
         referenced_tables: &[(Rc<BTreeTable>, String)],
-        can_emit_row: bool,
+        is_root: bool,
     ) -> Result<bool>;
     fn end(
         &mut self,
@@ -209,7 +209,7 @@ impl Emitter for Operator {
         program: &mut ProgramBuilder,
         m: &mut Metadata,
         referenced_tables: &[(Rc<BTreeTable>, String)],
-        can_emit_row: bool,
+        is_root: bool,
     ) -> Result<bool> {
         match self {
             Operator::Aggregate {
@@ -339,7 +339,7 @@ impl Emitter for Operator {
                     });
                 }
 
-                if can_emit_row {
+                if is_root {
                     return self.result_row(program, referenced_tables, m, None);
                 }
                 Ok(true)
@@ -369,7 +369,7 @@ impl Emitter for Operator {
                 });
                 sort_metadata.sort_register = start_reg;
 
-                if can_emit_row {
+                if is_root {
                     return self.result_row(program, referenced_tables, m, None);
                 }
 
@@ -377,7 +377,7 @@ impl Emitter for Operator {
             }
             Operator::Projection { source, .. } => {
                 source.emit(program, m, referenced_tables, false)?;
-                if can_emit_row {
+                if is_root {
                     return self.result_row(program, referenced_tables, m, None);
                 }
 
@@ -423,7 +423,7 @@ impl Emitter for Operator {
                     }
                 }
 
-                if can_emit_row {
+                if is_root {
                     return self.result_row(program, referenced_tables, m, None);
                 }
 
