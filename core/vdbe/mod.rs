@@ -1192,6 +1192,12 @@ impl Program {
                         state.pc += 1;
                     }
                     Func::Scalar(ScalarFunc::Coalesce) => {}
+                    Func::Scalar(ScalarFunc::Concat) => {
+                        let start_reg = *start_reg;
+                        let result = exec_concat(&state.registers[start_reg..]);
+                        state.registers[*dest] = result;
+                        state.pc += 1;
+                    }
                     Func::Scalar(ScalarFunc::IfNull) => {}
                     Func::Scalar(ScalarFunc::Like) => {
                         let start_reg = *start_reg;
@@ -1613,6 +1619,19 @@ fn exec_upper(reg: &OwnedValue) -> Option<OwnedValue> {
         OwnedValue::Text(t) => Some(OwnedValue::Text(Rc::new(t.to_uppercase()))),
         t => Some(t.to_owned()),
     }
+}
+
+fn exec_concat(registers: &[OwnedValue]) -> OwnedValue {
+    let mut result = String::new();
+    for reg in registers {
+        match reg {
+            OwnedValue::Text(text) => result.push_str(text),
+            OwnedValue::Integer(i) => result.push_str(&i.to_string()),
+            OwnedValue::Float(f) => result.push_str(&f.to_string()),
+            _ => continue,
+        }
+    }
+    OwnedValue::Text(Rc::new(result))
 }
 
 fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {

@@ -65,7 +65,7 @@ This document describes the SQLite compatibility status of Limbo:
 | changes()                    | No     |         |
 | char(X1,X2,...,XN)           | Yes    |         |
 | coalesce(X,Y,...)            | Yes    |         |
-| concat(X,...)                | No     |         |
+| concat(X,...)                | Yes    |         |
 | concat_ws(SEP,X,...)         | No     |         |
 | format(FORMAT,...)           | No     |         |
 | glob(X,Y)                    | No     |         |
@@ -165,7 +165,7 @@ This document describes the SQLite compatibility status of Limbo:
 | json_insert(json,path,value,...)   |         |         |
 | jsonb_insert(json,path,value,...)  |         |         |
 | json_object(label1,value1,...)     |         |         |
-| jsonb_object(label1,value1,...)    |         |         |
+| jsonb_object(label1,value1,...)    |         |         |
 | json_patch(json1,json2)            |         |         |
 | jsonb_patch(json1,json2)           |         |         |
 | json_pretty(json)                  |         |         |

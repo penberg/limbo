@@ -42,6 +42,7 @@ impl AggFunc {
 pub enum ScalarFunc {
     Char,
     Coalesce,
+    Concat,
     IfNull,
     Like,
     Abs,
@@ -67,6 +68,7 @@ impl ToString for ScalarFunc {
         match self {
             ScalarFunc::Char => "char".to_string(),
             ScalarFunc::Coalesce => "coalesce".to_string(),
+            ScalarFunc::Concat => "concat".to_string(),
             ScalarFunc::IfNull => "ifnull".to_string(),
             ScalarFunc::Like => "like(2)".to_string(),
             ScalarFunc::Abs => "abs".to_string(),
@@ -111,6 +113,7 @@ impl Func {
             "total" => Ok(Func::Agg(AggFunc::Total)),
             "char" => Ok(Func::Scalar(ScalarFunc::Char)),
             "coalesce" => Ok(Func::Scalar(ScalarFunc::Coalesce)),
+            "concat" => Ok(Func::Scalar(ScalarFunc::Concat)),
             "ifnull" => Ok(Func::Scalar(ScalarFunc::IfNull)),
             "like" => Ok(Func::Scalar(ScalarFunc::Like)),
             "abs" => Ok(Func::Scalar(ScalarFunc::Abs)),
