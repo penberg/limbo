@@ -104,8 +104,8 @@ This document describes the SQLite compatibility status of Limbo:
 | sqlite_offset(X)             | No     |         |
 | sqlite_source_id()           | No     |         |
 | sqlite_version()             | No     |         |
-| substr(X,Y,Z)                | No     |         |
-| substr(X,Y)                  | No     |         |
+| substr(X,Y,Z)                | Yes    |         |
+| substr(X,Y)                  | Yes    |         |
 | substring(X,Y,Z)             | Yes    |         |
 | substring(X,Y)               | Yes    |         |
 | total_changes()              | No     |         |
