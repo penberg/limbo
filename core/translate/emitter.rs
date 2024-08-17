@@ -10,9 +10,9 @@ use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{BranchOffset, Insn, Program};
 use crate::Result;
 
-use super::expr::maybe_apply_affinity;
 use super::expr::{
-    translate_aggregation, translate_condition_expr, translate_expr, ConditionMetadata,
+    translate_aggregation, translate_condition_expr, translate_expr, translate_table_columns,
+    ConditionMetadata,
 };
 use super::plan::Plan;
 use super::plan::{Operator, ProjectionColumn};
@@ -647,7 +647,13 @@ impl Emitter for Operator {
                 ..
             } => {
                 let start_reg = program.alloc_registers(col_count);
-                table_columns(program, table, table_identifier, cursor_override, start_reg);
+                translate_table_columns(
+                    program,
+                    table,
+                    table_identifier,
+                    cursor_override,
+                    start_reg,
+                );
 
                 Ok(start_reg)
             }
@@ -677,7 +683,13 @@ impl Emitter for Operator {
                 ..
             } => {
                 let start_reg = program.alloc_registers(col_count);
-                table_columns(program, table, table_identifier, cursor_override, start_reg);
+                translate_table_columns(
+                    program,
+                    table,
+                    table_identifier,
+                    cursor_override,
+                    start_reg,
+                );
 
                 Ok(start_reg)
             }
@@ -726,7 +738,7 @@ impl Emitter for Operator {
                         }
                         ProjectionColumn::Star => {
                             for (table, table_identifier) in referenced_tables.iter() {
-                                cur_reg = table_columns(
+                                cur_reg = translate_table_columns(
                                     program,
                                     table,
                                     table_identifier,
@@ -740,7 +752,7 @@ impl Emitter for Operator {
                                 .iter()
                                 .find(|(_, id)| id == table_identifier)
                                 .unwrap();
-                            cur_reg = table_columns(
+                            cur_reg = translate_table_columns(
                                 program,
                                 table,
                                 table_identifier,
@@ -909,34 +921,4 @@ impl BytecodeGenerator {
 pub fn emit_program(database_header: Rc<RefCell<DatabaseHeader>>, plan: Plan) -> Result<Program> {
     let generator = BytecodeGenerator::new(plan, database_header);
     generator.generate()
-}
-
-fn table_columns(
-    program: &mut ProgramBuilder,
-    table: &Rc<BTreeTable>,
-    table_identifier: &str,
-    cursor_override: Option<usize>,
-    start_reg: usize,
-) -> usize {
-    let mut cur_reg = start_reg;
-    let cursor_id = cursor_override.unwrap_or(program.resolve_cursor_id(table_identifier, None));
-    for i in 0..table.columns.len() {
-        let is_rowid = table.column_is_rowid_alias(&table.columns[i]);
-        let col_type = &table.columns[i].ty;
-        if is_rowid {
-            program.emit_insn(Insn::RowId {
-                cursor_id,
-                dest: cur_reg,
-            });
-        } else {
-            program.emit_insn(Insn::Column {
-                cursor_id,
-                column: i,
-                dest: cur_reg,
-            });
-        }
-        maybe_apply_affinity(*col_type, cur_reg, program);
-        cur_reg += 1;
-    }
-    cur_reg
 }

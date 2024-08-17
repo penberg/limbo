@@ -1306,6 +1306,36 @@ pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mu
     }
 }
 
+pub fn translate_table_columns(
+    program: &mut ProgramBuilder,
+    table: &Rc<BTreeTable>,
+    table_identifier: &str,
+    cursor_override: Option<usize>,
+    start_reg: usize,
+) -> usize {
+    let mut cur_reg = start_reg;
+    let cursor_id = cursor_override.unwrap_or(program.resolve_cursor_id(table_identifier, None));
+    for i in 0..table.columns.len() {
+        let is_rowid = table.column_is_rowid_alias(&table.columns[i]);
+        let col_type = &table.columns[i].ty;
+        if is_rowid {
+            program.emit_insn(Insn::RowId {
+                cursor_id,
+                dest: cur_reg,
+            });
+        } else {
+            program.emit_insn(Insn::Column {
+                cursor_id,
+                column: i,
+                dest: cur_reg,
+            });
+        }
+        maybe_apply_affinity(*col_type, cur_reg, program);
+        cur_reg += 1;
+    }
+    cur_reg
+}
+
 pub fn translate_aggregation(
     program: &mut ProgramBuilder,
     referenced_tables: &[(Rc<BTreeTable>, String)],
