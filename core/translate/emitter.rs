@@ -606,18 +606,12 @@ impl Emitter for Operator {
             }
             Operator::Filter { .. } => unreachable!("predicates have been pushed down"),
             Operator::SeekRowid {
-                table_identifier, ..
+                table_identifier,
+                table,
+                ..
             } => {
-                let cursor_id =
-                    cursor_override.unwrap_or(program.resolve_cursor_id(table_identifier, None));
                 let start_reg = program.alloc_registers(col_count);
-                for i in 0..col_count {
-                    program.emit_insn(Insn::Column {
-                        cursor_id,
-                        column: i,
-                        dest: start_reg + i,
-                    });
-                }
+                table_columns(program, table, table_identifier, cursor_override, start_reg);
 
                 Ok(start_reg)
             }
