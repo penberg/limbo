@@ -495,3 +495,18 @@ do_execsql_test unicode-null {
   SELECT unicode(NULL);
 } {}
 
+do_execsql_test quote-string-embedded-nul {
+  SELECT quote(concat('abc', char(0), 'def'))
+} {'abc'}
+
+do_execsql_test quote-string {
+  SELECT quote('limbo')
+} {'limbo'}
+
+do_execsql_test quote-null {
+  SELECT quote(null)
+} {NULL}
+
+do_execsql_test quote-integer {
+  SELECT quote(123)
+} {123}

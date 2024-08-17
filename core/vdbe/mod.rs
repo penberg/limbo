@@ -1379,6 +1379,11 @@ impl Program {
                         state.registers[*dest] = exec_unicode(reg_value);
                         state.pc += 1;
                     }
+                    Func::Scalar(ScalarFunc::Quote) => {
+                        let reg_value = state.registers[*start_reg].borrow_mut();
+                        state.registers[*dest] = exec_quote(reg_value);
+                        state.pc += 1;
+                    }
                 },
                 Insn::InitCoroutine {
                     yield_reg,
@@ -1662,6 +1667,28 @@ fn exec_random() -> OwnedValue {
     OwnedValue::Integer(random_number)
 }
 
+fn exec_quote(value: &OwnedValue) -> OwnedValue {
+    match value {
+        OwnedValue::Null => OwnedValue::Text(OwnedValue::Null.to_string().into()),
+        OwnedValue::Integer(_) | OwnedValue::Float(_) => value.to_owned(),
+        OwnedValue::Blob(_) => todo!(),
+        OwnedValue::Text(s) => {
+            let mut quoted = String::with_capacity(s.len() + 2);
+            quoted.push('\'');
+            for c in s.chars() {
+                if c == '\0' {
+                    break;
+                } else {
+                    quoted.push(c);
+                }
+            }
+            quoted.push('\'');
+            OwnedValue::Text(Rc::new(quoted))
+        }
+        _ => OwnedValue::Null, // For unsupported types, return NULL
+    }
+}
+
 fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
     let result: String = values
         .iter()
@@ -1839,8 +1866,9 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::{
         exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
-        exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode, exec_upper,
-        get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_quote, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode,
+        exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue,
+        Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2001,6 +2029,21 @@ mod tests {
         let expected_blob = OwnedValue::Blob(Rc::new("example".as_bytes().to_vec()));
         let expected_len = OwnedValue::Integer(7);
         assert_eq!(exec_length(&expected_blob), expected_len);
+    }
+
+    #[test]
+    fn test_quote() {
+        let input = OwnedValue::Text(Rc::new(String::from("abc\0edf")));
+        let expected = OwnedValue::Text(Rc::new(String::from("'abc'")));
+        assert_eq!(exec_quote(&input), expected);
+
+        let input = OwnedValue::Integer(123);
+        let expected = OwnedValue::Integer(123);
+        assert_eq!(exec_quote(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("hello''world")));
+        let expected = OwnedValue::Text(Rc::new(String::from("'hello''world'")));
+        assert_eq!(exec_quote(&input), expected);
     }
 
     #[test]
