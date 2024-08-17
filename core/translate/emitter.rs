@@ -60,23 +60,50 @@ pub struct LeftJoinMetadata {
 
 #[derive(Debug)]
 pub struct SortMetadata {
+    // cursor id for the Sorter table where the sorted rows are stored
     pub sort_cursor: usize,
+    // cursor id for the Pseudo table where rows are temporarily inserted from the Sorter table
     pub pseudo_table_cursor: usize,
-    pub sort_register: usize,
-    pub next_row_label: BranchOffset,
+    // label where the SorterData instruction is emitted; SorterNext will jump here if there is more data to read
+    pub sorter_data_label: BranchOffset,
+    // label for the instruction immediately following SorterNext; SorterSort will jump here in case there is no data
     pub done_label: BranchOffset,
 }
 
 #[derive(Debug)]
 pub struct Metadata {
+    // labels for the instructions that terminate the execution when a conditional check evaluates to false. typically jumps to Halt, but can also jump to AggFinal if a parent in the tree is an aggregation
     termination_labels: Vec<BranchOffset>,
+    // labels for the instructions that jump to the next row in the current operator.
+    // for example, in a join with two nested scans, the inner loop will jump to its Next instruction when the join condition is false;
+    // in a join with a scan and a seek, the seek will jump to the scan's Next instruction when the join condition is false.
     next_row_labels: HashMap<usize, BranchOffset>,
+    // labels for the Rewind instructions.
     rewind_labels: Vec<BranchOffset>,
-    aggregations: HashMap<usize, usize>,
+    // mapping between Aggregation operator id and the register that holds the start of the aggregation result
+    aggregation_start_registers: HashMap<usize, usize>,
+    // mapping between Order operator id and associated metadata
     sorts: HashMap<usize, SortMetadata>,
+    // mapping between Join operator id and associated metadata (for left joins only)
     left_joins: HashMap<usize, LeftJoinMetadata>,
 }
 
+/**
+*  Emitters return one of three possible results from the step() method:
+*  - Continue: the operator is not yet ready to emit a result row
+*  - ReadyToEmit: the operator is ready to emit a result row
+*  - Done: the operator has completed execution
+*  For example, a Scan operator will return Continue until it has opened a cursor, rewound it and applied any predicates.
+*  At that point, it will return ReadyToEmit.
+*  Finally, when the Scan operator has emitted a Next instruction, it will return Done.
+*
+*  Parent operators are free to make decisions based on the result a child operator's step() method.
+*
+*  When the root operator of a Plan returns ReadyToEmit, a ResultRow will always be emitted.
+*  When the root operator returns Done, the bytecode plan is complete.
+*
+
+*/
 #[derive(Debug, PartialEq)]
 pub enum OpStepResult {
     Continue,
@@ -392,7 +419,7 @@ impl Emitter for Operator {
                         m.termination_labels.push(agg_final_label);
                         let num_aggs = aggregates.len();
                         let start_reg = program.alloc_registers(num_aggs);
-                        m.aggregations.insert(*id, start_reg);
+                        m.aggregation_start_registers.insert(*id, start_reg);
 
                         Ok(OpStepResult::Continue)
                     }
@@ -400,7 +427,7 @@ impl Emitter for Operator {
                         match source.step(program, m, referenced_tables)? {
                             OpStepResult::Continue => {}
                             OpStepResult::ReadyToEmit => {
-                                let start_reg = m.aggregations.get(id).unwrap();
+                                let start_reg = m.aggregation_start_registers.get(id).unwrap();
                                 for (i, agg) in aggregates.iter().enumerate() {
                                     let agg_result_reg = start_reg + i;
                                     translate_aggregation(
@@ -452,8 +479,7 @@ impl Emitter for Operator {
                             SortMetadata {
                                 sort_cursor,
                                 pseudo_table_cursor: usize::MAX, // will be set later
-                                sort_register: usize::MAX,       // will be set later
-                                next_row_label: program.allocate_label(),
+                                sorter_data_label: program.allocate_label(),
                                 done_label: program.allocate_label(),
                             },
                         );
@@ -501,7 +527,6 @@ impl Emitter for Operator {
                             cursor_id: sort_metadata.sort_cursor,
                             record_reg: dest,
                         });
-                        sort_metadata.sort_register = start_reg;
 
                         Ok(OpStepResult::Continue)
                     }
@@ -548,7 +573,7 @@ impl Emitter for Operator {
                         );
 
                         program.defer_label_resolution(
-                            sort_metadata.next_row_label,
+                            sort_metadata.sorter_data_label,
                             program.offset() as usize,
                         );
                         program.emit_insn(Insn::SorterData {
@@ -568,9 +593,9 @@ impl Emitter for Operator {
                         program.emit_insn_with_label_dependency(
                             Insn::SorterNext {
                                 cursor_id: sort_metadata.sort_cursor,
-                                pc_if_next: sort_metadata.next_row_label,
+                                pc_if_next: sort_metadata.sorter_data_label,
                             },
-                            sort_metadata.next_row_label,
+                            sort_metadata.sorter_data_label,
                         );
 
                         program.resolve_label(sort_metadata.done_label, program.offset());
@@ -634,7 +659,7 @@ impl Emitter for Operator {
                 Ok(left_start_reg)
             }
             Operator::Aggregate { id, aggregates, .. } => {
-                let start_reg = m.aggregations.get(id).unwrap();
+                let start_reg = m.aggregation_start_registers.get(id).unwrap();
                 for (i, agg) in aggregates.iter().enumerate() {
                     let agg_result_reg = *start_reg + i;
                     program.emit_insn(Insn::AggFinal {
@@ -801,7 +826,7 @@ pub fn emit_program(
         termination_labels: vec![halt_label],
         next_row_labels: HashMap::new(),
         rewind_labels: Vec::new(),
-        aggregations: HashMap::new(),
+        aggregation_start_registers: HashMap::new(),
         sorts: HashMap::new(),
         left_joins: HashMap::new(),
     };
