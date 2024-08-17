@@ -276,6 +276,11 @@ impl Emitter for Operator {
                         program.resolve_label(jump_target_when_true, program.offset());
                     }
                 }
+
+                if is_root {
+                    return self.result_row(program, referenced_tables, m, None);
+                }
+
                 Ok(true)
             }
             Operator::Limit { source, .. } => {

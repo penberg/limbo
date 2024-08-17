@@ -34,3 +34,7 @@ do_execsql_test table-star {
 do_execsql_test table-star-2 {
     select p.*, u.age from users u join products p limit 1;
 } {1|hat|79.0|94}
+
+do_execsql_test seekrowid {
+    select * from users u where u.id = 5;
+} {"5|Edward|Miller|christiankramer@example.com|725-281-1033|08522 English Plain|Lake Keith|ID|23283|15"}
