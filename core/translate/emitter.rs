@@ -907,14 +907,11 @@ impl BytecodeGenerator {
                     )?;
                 }
                 OpStepResult::Done => {
-                    break;
+                    self.epilogue(init_label, halt_label, start_offset)?;
+                    return self.build();
                 }
             }
         }
-
-        self.epilogue(init_label, halt_label, start_offset)?;
-
-        self.build()
     }
 }
 
