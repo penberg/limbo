@@ -70,7 +70,7 @@ pub struct SortMetadata {
     pub done_label: BranchOffset,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Metadata {
     // labels for the instructions that terminate the execution when a conditional check evaluates to false. typically jumps to Halt, but can also jump to AggFinal if a parent in the tree is an aggregation
     termination_labels: Vec<BranchOffset>,
@@ -819,103 +819,80 @@ impl Emitter for Operator {
     }
 }
 
-pub struct BytecodeGenerator {
-    program: ProgramBuilder,
-    database_header: Rc<RefCell<DatabaseHeader>>,
-    metadata: Metadata,
-    plan: Plan,
+fn prologue() -> Result<(
+    ProgramBuilder,
+    Metadata,
+    BranchOffset,
+    BranchOffset,
+    BranchOffset,
+)> {
+    let mut program = ProgramBuilder::new();
+    let init_label = program.allocate_label();
+    let halt_label = program.allocate_label();
+
+    program.emit_insn_with_label_dependency(
+        Insn::Init {
+            target_pc: init_label,
+        },
+        init_label,
+    );
+
+    let start_offset = program.offset();
+
+    let metadata = Metadata {
+        termination_labels: vec![halt_label],
+        ..Default::default()
+    };
+
+    Ok((program, metadata, init_label, halt_label, start_offset))
 }
 
-impl BytecodeGenerator {
-    pub fn new(plan: Plan, database_header: Rc<RefCell<DatabaseHeader>>) -> Self {
-        Self {
-            program: ProgramBuilder::new(),
-            database_header,
-            metadata: Metadata {
-                termination_labels: Vec::new(),
-                next_row_labels: HashMap::new(),
-                rewind_labels: Vec::new(),
-                aggregation_start_registers: HashMap::new(),
-                sorts: HashMap::new(),
-                left_joins: HashMap::new(),
-            },
-            plan,
-        }
-    }
+fn epilogue(
+    program: &mut ProgramBuilder,
+    init_label: BranchOffset,
+    halt_label: BranchOffset,
+    start_offset: BranchOffset,
+) -> Result<()> {
+    program.resolve_label(halt_label, program.offset());
+    program.emit_insn(Insn::Halt);
 
-    fn prologue(&mut self) -> Result<(BranchOffset, BranchOffset, BranchOffset)> {
-        let init_label = self.program.allocate_label();
-        let halt_label = self.program.allocate_label();
-        self.metadata.termination_labels.push(halt_label);
+    program.resolve_label(init_label, program.offset());
+    program.emit_insn(Insn::Transaction);
 
-        self.program.emit_insn_with_label_dependency(
-            Insn::Init {
-                target_pc: init_label,
-            },
-            init_label,
-        );
+    program.emit_constant_insns();
+    program.emit_insn(Insn::Goto {
+        target_pc: start_offset,
+    });
 
-        let start_offset = self.program.offset();
+    program.resolve_deferred_labels();
 
-        Ok((init_label, halt_label, start_offset))
-    }
+    Ok(())
+}
 
-    fn epilogue(
-        &mut self,
-        init_label: BranchOffset,
-        halt_label: BranchOffset,
-        start_offset: BranchOffset,
-    ) -> Result<()> {
-        self.program
-            .resolve_label(halt_label, self.program.offset());
-        self.program.emit_insn(Insn::Halt);
+pub fn emit_program(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: Plan,
+) -> Result<Program> {
+    let (mut program, mut metadata, init_label, halt_label, start_offset) = prologue()?;
 
-        self.program
-            .resolve_label(init_label, self.program.offset());
-        self.program.emit_insn(Insn::Transaction);
-
-        self.program.emit_constant_insns();
-        self.program.emit_insn(Insn::Goto {
-            target_pc: start_offset,
-        });
-
-        self.program.resolve_deferred_labels();
-
-        Ok(())
-    }
-
-    fn build(self) -> Result<Program> {
-        Ok(self.program.build(self.database_header))
-    }
-
-    pub fn generate(mut self) -> Result<Program> {
-        let (init_label, halt_label, start_offset) = self.prologue()?;
-
-        loop {
-            match self.plan.root_operator.step(
-                &mut self.program,
-                &mut self.metadata,
-                &self.plan.referenced_tables,
-            )? {
-                OpStepResult::Continue => {}
-                OpStepResult::ReadyToEmit => {
-                    self.plan.root_operator.result_row(
-                        &mut self.program,
-                        &self.plan.referenced_tables,
-                        &mut self.metadata,
-                        None,
-                    )?;
-                }
-                OpStepResult::Done => {
-                    self.epilogue(init_label, halt_label, start_offset)?;
-                    return self.build();
-                }
+    loop {
+        match plan
+            .root_operator
+            .step(&mut program, &mut metadata, &plan.referenced_tables)?
+        {
+            OpStepResult::Continue => {}
+            OpStepResult::ReadyToEmit => {
+                plan.root_operator.result_row(
+                    &mut program,
+                    &plan.referenced_tables,
+                    &mut metadata,
+                    None,
+                )?;
+            }
+            OpStepResult::Done => {
+                epilogue(&mut program, init_label, halt_label, start_offset)?;
+                return Ok(program.build(database_header));
             }
         }
     }
-}
-
-pub fn emit_program(database_header: Rc<RefCell<DatabaseHeader>>, plan: Plan) -> Result<Program> {
-    let generator = BytecodeGenerator::new(plan, database_header);
-    generator.generate()
 }
