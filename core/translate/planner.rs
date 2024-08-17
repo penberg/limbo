@@ -156,12 +156,14 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         source: Box::new(operator),
                         aggregates: aggregate_expressions,
                         id: operator_id_counter.get_next_id(),
+                        step: 0,
                     }
                 } else if !scalar_expressions.is_empty() {
                     operator = Operator::Projection {
                         source: Box::new(operator),
                         expressions: scalar_expressions,
                         id: operator_id_counter.get_next_id(),
+                        step: 0,
                     };
                 }
             }
@@ -200,6 +202,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     source: Box::new(operator),
                     key,
                     id: operator_id_counter.get_next_id(),
+                    step: 0,
                 };
             }
 
@@ -215,6 +218,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                 source: Box::new(operator),
                                 limit: l,
                                 id: operator_id_counter.get_next_id(),
+                                step: 0,
                             }
                         }
                     }
@@ -265,6 +269,7 @@ fn parse_from(
         predicates: None,
         table_identifier: first_table.1.clone(),
         id: operator_id_counter.get_next_id(),
+        step: 0,
     };
 
     let mut tables = vec![first_table];
@@ -278,6 +283,7 @@ fn parse_from(
             predicates,
             outer,
             id: operator_id_counter.get_next_id(),
+            step: 0,
         }
     }
 
@@ -343,6 +349,7 @@ fn parse_join(
             predicates: None,
             table_identifier: table.1.clone(),
             id: operator_id_counter.get_next_id(),
+            step: 0,
         },
         outer,
         predicates,

@@ -106,7 +106,7 @@ impl Cursor for Sorter {
     }
 
     fn get_null_flag(&self) -> bool {
-        todo!();
+        false
     }
 
     fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>> {

@@ -37,6 +37,7 @@ fn use_indexes(
             predicates: filter,
             table_identifier,
             id,
+            ..
         } => {
             if filter.is_none() {
                 return Ok(());
@@ -75,6 +76,7 @@ fn use_indexes(
                     rowid_predicate,
                     predicates: predicates_owned,
                     id: *id,
+                    step: 0,
                 }
             }
 

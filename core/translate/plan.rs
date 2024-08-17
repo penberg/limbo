@@ -27,6 +27,10 @@ impl Display for Plan {
       Order
         Project
           Scan
+
+  Operators also have a unique ID, which is used to identify them in the query plan and attach metadata.
+  They also have a step counter, which is used to track the current step in the operator's execution.
+  TODO: perhaps 'step' shouldn't be in this struct, since it's an execution time concept, not a plan time concept.
 */
 #[derive(Clone, Debug)]
 pub enum Operator {
@@ -38,6 +42,7 @@ pub enum Operator {
         id: usize,
         source: Box<Operator>,
         aggregates: Vec<Aggregate>,
+        step: usize,
     },
     // Filter operator
     // This operator is used to filter rows from the source operator.
@@ -62,6 +67,7 @@ pub enum Operator {
         table_identifier: String,
         rowid_predicate: ast::Expr,
         predicates: Option<Vec<ast::Expr>>,
+        step: usize,
     },
     // Limit operator
     // This operator is used to limit the number of rows returned by the source operator.
@@ -69,6 +75,7 @@ pub enum Operator {
         id: usize,
         source: Box<Operator>,
         limit: usize,
+        step: usize,
     },
     // Join operator
     // This operator is used to join two source operators.
@@ -80,6 +87,7 @@ pub enum Operator {
         right: Box<Operator>,
         predicates: Option<Vec<ast::Expr>>,
         outer: bool,
+        step: usize,
     },
     // Order operator
     // This operator is used to sort the rows returned by the source operator.
@@ -87,6 +95,7 @@ pub enum Operator {
         id: usize,
         source: Box<Operator>,
         key: Vec<(ast::Expr, Direction)>,
+        step: usize,
     },
     // Projection operator
     // This operator is used to project columns from the source operator.
@@ -98,6 +107,7 @@ pub enum Operator {
         id: usize,
         source: Box<Operator>,
         expressions: Vec<ProjectionColumn>,
+        step: usize,
     },
     // Scan operator
     // This operator is used to scan a table.
@@ -109,6 +119,7 @@ pub enum Operator {
         table: Rc<BTreeTable>,
         table_identifier: String,
         predicates: Option<Vec<ast::Expr>>,
+        step: usize,
     },
     // Nothing operator
     // This operator is used to represent an empty query.
@@ -484,7 +495,7 @@ pub fn get_table_ref_bitmask_for_ast_expr<'a>(
             let matching_table = tables
                 .iter()
                 .enumerate()
-                .find(|(_, (table, t_id))| *t_id == tbl);
+                .find(|(_, (_, t_id))| *t_id == tbl);
 
             if matching_table.is_none() {
                 crate::bail_parse_error!("introspect: table not found: {}", &tbl)
