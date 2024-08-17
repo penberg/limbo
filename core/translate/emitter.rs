@@ -656,13 +656,11 @@ impl Emitter for Operator {
                                 .iter()
                                 .find(|(_, id)| id == table_identifier)
                                 .unwrap();
-                            let cursor_id = cursor_override
-                                .unwrap_or(program.resolve_cursor_id(table_identifier, None));
                             cur_reg = table_columns(
                                 program,
                                 table,
                                 table_identifier,
-                                Some(cursor_id),
+                                cursor_override,
                                 cur_reg,
                             );
                         }
