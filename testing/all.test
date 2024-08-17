@@ -6,10 +6,12 @@ source $testdir/cmdlineshell.test
 source $testdir/agg-functions.test
 source $testdir/coalesce.test
 source $testdir/join.test
+source $testdir/insert.test
+source $testdir/join.test
+source $testdir/json.test
+source $testdir/like.test
+source $testdir/orderby.test
 source $testdir/pragma.test
+source $testdir/scalar-functions.test
 source $testdir/select.test
 source $testdir/where.test
-source $testdir/like.test
-source $testdir/scalar-functions.test
-source $testdir/orderby.test
-source $testdir/json.test
