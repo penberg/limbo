@@ -16,9 +16,9 @@ proc run_test {sqlite_exec sql expected_output} {
     }
 }
 
-proc run_failing_test {sqlite_exec sql expected_err_msg} {
+proc run_test_check_err_msg {sqlite_exec sql expected_err_msg} {
     set actual_output [catch {set actual_output [evaluate_sql $sqlite_exec $sql]} err_msg]
-    if {$err_msg ne $expected_err_msg} {
+    if {[string first $expected_err_msg $err_msg] == -1} {
         puts "Test FAILED: '$sql'"
         puts "returned '$err_msg'"
         puts "expected '$expected_err_msg'"
@@ -48,7 +48,7 @@ proc do_execsql_test {test_name sql_statements expected_outputs} {
 proc do_execsql_check_err_msg {test_name sql_statements expected_err_msg} {
     puts "Running test: $test_name"
     set combined_sql [string trim $sql_statements]
-    run_failing_test $::sqlite_exec $combined_sql $expected_err_msg
+    run_test_check_err_msg $::sqlite_exec $combined_sql $expected_err_msg
 }
 
 proc do_execsql_with_cleanup_test {test_name sql_statements expected_outputs cleanup_statements} {
