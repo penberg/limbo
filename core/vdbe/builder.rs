@@ -70,18 +70,7 @@ impl ProgramBuilder {
         cursor
     }
 
-    pub fn has_cursor_emitted_seekrowid(&self, cursor_id: CursorID) -> bool {
-        (self.seekrowid_emitted_bitmask & (1 << cursor_id)) != 0
-    }
-
-    fn set_cursor_emitted_seekrowid(&mut self, cursor_id: CursorID) {
-        self.seekrowid_emitted_bitmask |= 1 << cursor_id;
-    }
-
     fn _emit_insn(&mut self, insn: Insn) {
-        if let Insn::SeekRowid { cursor_id, .. } = insn {
-            self.set_cursor_emitted_seekrowid(cursor_id);
-        }
         self.insns.push(insn);
     }
 

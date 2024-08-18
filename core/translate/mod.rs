@@ -7,10 +7,13 @@
 //! a SELECT statement will be translated into a sequence of instructions that
 //! will read rows from the database and filter them according to a WHERE clause.
 
+pub(crate) mod emitter;
 pub(crate) mod expr;
 pub(crate) mod insert;
+pub(crate) mod optimizer;
+pub(crate) mod plan;
+pub(crate) mod planner;
 pub(crate) mod select;
-pub(crate) mod where_clause;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,11 +21,10 @@ use std::rc::Rc;
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
-use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
 use crate::{bail_parse_error, Result};
 use insert::translate_insert;
-use select::{prepare_select, translate_select};
+use select::translate_select;
 use sqlite3_parser::ast;
 
 /// Translate SQL statement into bytecode program.
@@ -56,10 +58,7 @@ pub fn translate(
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
         ast::Stmt::Rollback { .. } => bail_parse_error!("ROLLBACK not supported yet"),
         ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
-        ast::Stmt::Select(select) => {
-            let select = prepare_select(schema, &select)?;
-            translate_select(select, database_header)
-        }
+        ast::Stmt::Select(select) => translate_select(schema, select, database_header),
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
         ast::Stmt::Insert {

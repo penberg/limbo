@@ -1120,7 +1120,8 @@ impl Program {
                     let record = match *cursor.record()? {
                         Some(ref record) => record.clone(),
                         None => {
-                            todo!();
+                            state.pc += 1;
+                            continue;
                         }
                     };
                     state.registers[*dest_reg] = OwnedValue::Record(record.clone());
