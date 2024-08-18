@@ -2,6 +2,8 @@
 
 ### Unreleased
 
+- Query planner rewrite (Jussi Saurio)
+
 - Initial pass on Python bindings (Jean Arhancet)
 
 - Improve scalar function support (Kim Seon Woo and Jean Arhancet)
