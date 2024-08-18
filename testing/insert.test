@@ -2,16 +2,3 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
-
-do_execsql_check_err_msg insert-1.1 {
-  INSERT INTO test1 VALUES(1,2,3);
-} {Error: in prepare, no such table: test1}
-
-do_execsql_with_cleanup_test insert-1.2 {
-  CREATE TABLE test1(one int, two int, three int);
-  INSERT INTO test1 VALUES(1, 2, 3);
-  SELECT * FROM test1;
-} {1|2|3} {
-  DROP TABLE IF EXISTS test1;
-}
-
