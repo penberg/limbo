@@ -254,8 +254,22 @@ impl Display for Aggregate {
 // For EXPLAIN QUERY PLAN
 impl Display for Operator {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        fn fmt_operator(operator: &Operator, f: &mut Formatter, level: usize) -> fmt::Result {
-            let indent = "    ".repeat(level);
+        fn fmt_operator(
+            operator: &Operator,
+            f: &mut Formatter,
+            level: usize,
+            last: bool,
+        ) -> fmt::Result {
+            let indent = if level == 0 {
+                if last { "`--" } else { "|--" }.to_string()
+            } else {
+                format!(
+                    "   {}{}",
+                    "|  ".repeat(level - 1),
+                    if last { "`--" } else { "|--" }
+                )
+            };
+
             match operator {
                 Operator::Aggregate {
                     source, aggregates, ..
@@ -267,7 +281,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(", ");
                     writeln!(f, "{}AGGREGATE {}", indent, aggregates_display_string)?;
-                    fmt_operator(source, f, level + 1)
+                    fmt_operator(source, f, level + 1, true)
                 }
                 Operator::Filter {
                     source, predicates, ..
@@ -278,7 +292,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(" AND ");
                     writeln!(f, "{}FILTER {}", indent, predicates_string)?;
-                    fmt_operator(source, f, level + 1)
+                    fmt_operator(source, f, level + 1, true)
                 }
                 Operator::SeekRowid {
                     table,
@@ -305,12 +319,11 @@ impl Display for Operator {
                             indent, &table.name, rowid_predicate
                         )?,
                     }
-
                     Ok(())
                 }
                 Operator::Limit { source, limit, .. } => {
                     writeln!(f, "{}TAKE {}", indent, limit)?;
-                    fmt_operator(source, f, level + 1)
+                    fmt_operator(source, f, level + 1, true)
                 }
                 Operator::Join {
                     left,
@@ -334,8 +347,8 @@ impl Display for Operator {
                         }
                         None => writeln!(f, "{}{}", indent, join_name)?,
                     }
-                    fmt_operator(left, f, level + 1)?;
-                    fmt_operator(right, f, level + 1)
+                    fmt_operator(left, f, level + 1, false)?;
+                    fmt_operator(right, f, level + 1, true)
                 }
                 Operator::Order { source, key, .. } => {
                     let sort_keys_string = key
@@ -344,7 +357,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(", ");
                     writeln!(f, "{}SORT {}", indent, sort_keys_string)?;
-                    fmt_operator(source, f, level + 1)
+                    fmt_operator(source, f, level + 1, true)
                 }
                 Operator::Projection {
                     source,
@@ -361,7 +374,7 @@ impl Display for Operator {
                         .collect::<Vec<String>>()
                         .join(", ");
                     writeln!(f, "{}PROJECT {}", indent, expressions)?;
-                    fmt_operator(source, f, level + 1)
+                    fmt_operator(source, f, level + 1, true)
                 }
                 Operator::Scan {
                     table,
@@ -369,7 +382,11 @@ impl Display for Operator {
                     table_identifier,
                     ..
                 } => {
-                    let table_name = format!("{} AS {}", &table.name, &table_identifier);
+                    let table_name = if table.name == *table_identifier {
+                        table.name.clone()
+                    } else {
+                        format!("{} AS {}", &table.name, &table_identifier)
+                    };
                     let filter_string = filter.as_ref().map(|f| {
                         let filters_string = f
                             .iter()
@@ -387,7 +404,8 @@ impl Display for Operator {
                 Operator::Nothing => Ok(()),
             }
         }
-        fmt_operator(self, f, 0)
+        writeln!(f, "QUERY PLAN")?;
+        fmt_operator(self, f, 0, true)
     }
 }
 
