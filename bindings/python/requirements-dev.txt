@@ -14,8 +14,6 @@ iniconfig==2.0.0
     # via pytest
 isort==5.13.2
     # via limbo (pyproject.toml)
-maturin==1.7.0
-    # via limbo (pyproject.toml)
 mypy==1.11.0
     # via limbo (pyproject.toml)
 mypy-extensions==1.0.0

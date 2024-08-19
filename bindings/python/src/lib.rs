@@ -119,22 +119,23 @@ impl Cursor {
             let mut smt_lock = smt.lock().map_err(|_| {
                 PyErr::new::<OperationalError, _>("Failed to acquire statement lock")
             })?;
-
-            match smt_lock
-                .step()
-                .map_err(|e| PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e)))?
-            {
-                limbo_core::RowResult::Row(row) => {
-                    let py_row = row_to_py(py, &row);
-                    Ok(Some(py_row))
+            loop {
+                match smt_lock.step().map_err(|e| {
+                    PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
+                })? {
+                    limbo_core::RowResult::Row(row) => {
+                        let py_row = row_to_py(py, &row);
+                        return Ok(Some(py_row));
+                    }
+                    limbo_core::RowResult::IO => {
+                        self.conn.io.run_once().map_err(|e| {
+                            PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
+                        })?;
+                    }
+                    limbo_core::RowResult::Done => {
+                        return Ok(None);
+                    }
                 }
-                limbo_core::RowResult::IO => {
-                    self.conn.io.run_once().map_err(|e| {
-                        PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
-                    })?;
-                    Ok(None)
-                }
-                limbo_core::RowResult::Done => Ok(None),
             }
         } else {
             Err(PyErr::new::<ProgrammingError, _>("No statement prepared for execution").into())
@@ -143,10 +144,33 @@ impl Cursor {
 
     pub fn fetchall(&mut self, py: Python) -> Result<Vec<PyObject>> {
         let mut results = Vec::new();
-        while let Some(row) = self.fetchone(py)? {
-            results.push(row);
+
+        if let Some(smt) = &self.smt {
+            let mut smt_lock = smt.lock().map_err(|_| {
+                PyErr::new::<OperationalError, _>("Failed to acquire statement lock")
+            })?;
+
+            loop {
+                match smt_lock.step().map_err(|e| {
+                    PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
+                })? {
+                    limbo_core::RowResult::Row(row) => {
+                        let py_row = row_to_py(py, &row);
+                        results.push(py_row);
+                    }
+                    limbo_core::RowResult::IO => {
+                        self.conn.io.run_once().map_err(|e| {
+                            PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
+                        })?;
+                    }
+                    limbo_core::RowResult::Done => {
+                        return Ok(results);
+                    }
+                }
+            }
+        } else {
+            Err(PyErr::new::<ProgrammingError, _>("No statement prepared for execution").into())
         }
-        Ok(results)
     }
 
     pub fn close(&self) -> Result<()> {

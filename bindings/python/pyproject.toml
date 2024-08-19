@@ -35,7 +35,6 @@ dynamic = [
 
 [project.optional-dependencies]
 dev = [
-    "maturin==1.7.0",
     "black==24.4.2",
     "isort==5.13.2",
     "mypy==1.11.0",
@@ -50,6 +49,8 @@ Source = "https://github.com/penberg/limbo"
 
 [tool.maturin]
 bindings = 'pyo3'
+module-name = "limbo._limbo"
+features = ["pyo3/extension-module"]
 
 [tool.ruff]
 line-length = 120
@@ -69,7 +70,6 @@ quote-style = 'single'
 [tool.pytest.ini_options]
 testpaths = 'tests'
 log_format = '%(name)s %(levelname)s: %(message)s'
-
 
 [tool.coverage.run]
 source = ['limbo']
