@@ -74,7 +74,7 @@ This document describes the SQLite compatibility status of Limbo:
 | iif(X,Y,Z)                   | No     |         |
 | instr(X,Y)                   | No     |         |
 | last_insert_rowid()          | No     |         |
-| length(X)                    | No     |         |
+| length(X)                    | Yes    |         |
 | like(X,Y)                    | No     |         |
 | like(X,Y,Z)                  | No     |         |
 | likelihood(X,Y)              | No     |         |
@@ -86,7 +86,7 @@ This document describes the SQLite compatibility status of Limbo:
 | ltrim(X,Y)                   | Yes    |         |
 | max(X,Y,...)                 | Yes    |         |
 | min(X,Y,...)                 | Yes    |         |
-| nullif(X,Y)                  | No     |         |
+| nullif(X,Y)                  | Yes    |         |
 | octet_length(X)              | No     |         |
 | printf(FORMAT,...)           | No     |         |
 | quote(X)                     | Yes     |         |
