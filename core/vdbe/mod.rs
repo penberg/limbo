@@ -1724,10 +1724,7 @@ fn exec_minmax<'a>(
     regs.into_iter().reduce(|a, b| op(a, b)).cloned()
 }
 
-fn exec_nullif(
-    first_value: &OwnedValue,
-    second_value: &OwnedValue,
-) -> OwnedValue {
+fn exec_nullif(first_value: &OwnedValue, second_value: &OwnedValue) -> OwnedValue {
     if first_value != second_value {
         first_value.clone()
     } else {
@@ -1883,7 +1880,12 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result};
+    use super::{
+        exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
+        exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim,
+        exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord,
+        OwnedValue, Result,
+    };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
     use std::{cell::Ref, rc::Rc};
@@ -2313,13 +2315,37 @@ mod tests {
 
     #[test]
     fn test_nullif() {
-        assert_eq!(exec_nullif(&OwnedValue::Integer(1), &OwnedValue::Integer(1)), OwnedValue::Null);
-        assert_eq!(exec_nullif(&OwnedValue::Float(1.1), &OwnedValue::Float(1.1)), OwnedValue::Null);
-        assert_eq!(exec_nullif(&OwnedValue::Text(Rc::new("limbo".to_string())), &OwnedValue::Text(Rc::new("limbo".to_string()))), OwnedValue::Null);
+        assert_eq!(
+            exec_nullif(&OwnedValue::Integer(1), &OwnedValue::Integer(1)),
+            OwnedValue::Null
+        );
+        assert_eq!(
+            exec_nullif(&OwnedValue::Float(1.1), &OwnedValue::Float(1.1)),
+            OwnedValue::Null
+        );
+        assert_eq!(
+            exec_nullif(
+                &OwnedValue::Text(Rc::new("limbo".to_string())),
+                &OwnedValue::Text(Rc::new("limbo".to_string()))
+            ),
+            OwnedValue::Null
+        );
 
-        assert_eq!(exec_nullif(&OwnedValue::Integer(1), &OwnedValue::Integer(2)), OwnedValue::Integer(1));
-        assert_eq!(exec_nullif(&OwnedValue::Float(1.1), &OwnedValue::Float(1.2)), OwnedValue::Float(1.1));
-        assert_eq!(exec_nullif(&OwnedValue::Text(Rc::new("limbo".to_string())), &OwnedValue::Text(Rc::new("limb".to_string()))), OwnedValue::Text(Rc::new("limbo".to_string())));
+        assert_eq!(
+            exec_nullif(&OwnedValue::Integer(1), &OwnedValue::Integer(2)),
+            OwnedValue::Integer(1)
+        );
+        assert_eq!(
+            exec_nullif(&OwnedValue::Float(1.1), &OwnedValue::Float(1.2)),
+            OwnedValue::Float(1.1)
+        );
+        assert_eq!(
+            exec_nullif(
+                &OwnedValue::Text(Rc::new("limbo".to_string())),
+                &OwnedValue::Text(Rc::new("limb".to_string()))
+            ),
+            OwnedValue::Text(Rc::new("limbo".to_string()))
+        );
     }
 
     #[test]
