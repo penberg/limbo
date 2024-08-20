@@ -1321,6 +1321,13 @@ impl Program {
                         }
                         state.pc += 1;
                     }
+                    Func::Scalar(ScalarFunc::Nullif) => {
+                        let start_reg = *start_reg;
+                        let first_value = &state.registers[start_reg + 1];
+                        let second_value = &state.registers[start_reg + 2];
+                        state.registers[*dest] = exec_nullif(first_value, second_value);
+                        state.pc += 1;
+                    }
                     Func::Scalar(ScalarFunc::Substr) | Func::Scalar(ScalarFunc::Substring) => {
                         let start_reg = *start_reg;
                         let str_value = &state.registers[start_reg];
@@ -1717,6 +1724,14 @@ fn exec_minmax<'a>(
     regs.into_iter().reduce(|a, b| op(a, b)).cloned()
 }
 
+fn exec_nullif(first_value: &OwnedValue, second_value: &OwnedValue) -> OwnedValue {
+    if first_value != second_value {
+        first_value.clone()
+    } else {
+        OwnedValue::Null
+    }
+}
+
 fn exec_substring(
     str_value: &OwnedValue,
     start_value: &OwnedValue,
@@ -1867,9 +1882,9 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::{
         exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
-        exec_quote, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim, exec_unicode,
-        exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue,
-        Result,
+        exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim,
+        exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord,
+        OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2296,6 +2311,41 @@ mod tests {
         let null_reg = OwnedValue::Null;
         assert!(!exec_if(&reg, &null_reg, false));
         assert!(!exec_if(&reg, &null_reg, true));
+    }
+
+    #[test]
+    fn test_nullif() {
+        assert_eq!(
+            exec_nullif(&OwnedValue::Integer(1), &OwnedValue::Integer(1)),
+            OwnedValue::Null
+        );
+        assert_eq!(
+            exec_nullif(&OwnedValue::Float(1.1), &OwnedValue::Float(1.1)),
+            OwnedValue::Null
+        );
+        assert_eq!(
+            exec_nullif(
+                &OwnedValue::Text(Rc::new("limbo".to_string())),
+                &OwnedValue::Text(Rc::new("limbo".to_string()))
+            ),
+            OwnedValue::Null
+        );
+
+        assert_eq!(
+            exec_nullif(&OwnedValue::Integer(1), &OwnedValue::Integer(2)),
+            OwnedValue::Integer(1)
+        );
+        assert_eq!(
+            exec_nullif(&OwnedValue::Float(1.1), &OwnedValue::Float(1.2)),
+            OwnedValue::Float(1.1)
+        );
+        assert_eq!(
+            exec_nullif(
+                &OwnedValue::Text(Rc::new("limbo".to_string())),
+                &OwnedValue::Text(Rc::new("limb".to_string()))
+            ),
+            OwnedValue::Text(Rc::new("limbo".to_string()))
+        );
     }
 
     #[test]

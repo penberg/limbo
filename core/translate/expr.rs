@@ -1067,6 +1067,43 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::Nullif => {
+                            let args = if let Some(args) = args {
+                                if args.len() != 2 {
+                                    crate::bail_parse_error!(
+                                        "nullif function must have two argument"
+                                    );
+                                }
+                                args
+                            } else {
+                                crate::bail_parse_error!("nullif function with no arguments");
+                            };
+
+                            let func_reg = program.alloc_register();
+                            let first_reg = program.alloc_register();
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                first_reg,
+                                cursor_hint,
+                            )?;
+                            let second_reg = program.alloc_register();
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[1],
+                                second_reg,
+                                cursor_hint,
+                            )?;
+                            program.emit_insn(Insn::Function {
+                                start_reg: func_reg,
+                                dest: target_register,
+                                func: crate::vdbe::Func::Scalar(srf),
+                            });
+
+                            Ok(target_register)
+                        }
                     }
                 }
                 None => {
