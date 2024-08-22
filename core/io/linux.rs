@@ -105,6 +105,12 @@ impl IO for LinuxIO {
         }
         Ok(())
     }
+
+    fn generate_random_number(&self) -> i64 {
+        let mut buf = [0u8; 8];
+        getrandom::getrandom(&mut buf).unwrap();
+        i64::from_ne_bytes(buf)
+    }
 }
 
 pub struct LinuxFile {

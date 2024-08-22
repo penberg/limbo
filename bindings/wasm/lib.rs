@@ -87,6 +87,16 @@ impl limbo_core::IO for PlatformIO {
     fn run_once(&self) -> Result<()> {
         Ok(())
     }
+
+    fn generate_random_number(&self) -> i64 {
+        let random_f64 = Math_random();
+        (random_f64 * i64::MAX as f64) as i64
+    }
+}
+
+#[wasm_bindgen]
+extern "C" {
+    fn Math_random() -> f64;
 }
 
 pub struct DatabaseStorage {

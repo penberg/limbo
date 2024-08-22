@@ -12,7 +12,7 @@ fn main() {
     };
     println!("Seed: {}", seed);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
-    let io = Arc::new(SimulatorIO::new().unwrap());
+    let io = Arc::new(SimulatorIO::new(seed).unwrap());
     let db = match Database::open_file(io.clone(), "./testing/testing.db") {
         Ok(db) => db,
         Err(_) => todo!(),
@@ -56,17 +56,20 @@ struct SimulatorIO {
     inner: Box<dyn IO>,
     fault: RefCell<bool>,
     files: RefCell<Vec<Rc<SimulatorFile>>>,
+    rng: RefCell<ChaCha8Rng>,
 }
 
 impl SimulatorIO {
-    fn new() -> Result<Self> {
+    fn new(seed: u64) -> Result<Self> {
         let inner = Box::new(PlatformIO::new()?);
         let fault = RefCell::new(false);
         let files = RefCell::new(Vec::new());
+        let rng = RefCell::new(ChaCha8Rng::seed_from_u64(seed));
         Ok(Self {
             inner,
             fault,
             files,
+            rng,
         })
     }
 
@@ -105,6 +108,10 @@ impl IO for SimulatorIO {
         }
         self.inner.run_once().unwrap();
         Ok(())
+    }
+
+    fn generate_random_number(&self) -> i64 {
+        self.rng.borrow_mut().next_u64() as i64
     }
 }
 
