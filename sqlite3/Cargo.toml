@@ -8,6 +8,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+lfs = []
+
 [package.metadata.dist]
 dist = true
 
