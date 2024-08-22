@@ -1,6 +1,6 @@
 # Changelog
 
-### Unreleased
+### 0.0.4 - 2024-08-22
 
 - Query planner rewrite (Jussi Saurio)
 

@@ -13,7 +13,7 @@ members = [
 exclude = ["perf/latency/limbo"]
 
 [workspace.package]
-version = "0.0.3"
+version = "0.0.4"
 authors = ["the Limbo authors"]
 edition = "2021"
 license = "MIT"

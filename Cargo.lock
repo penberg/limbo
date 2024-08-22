@@ -1070,7 +1070,7 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -1084,7 +1084,7 @@ dependencies = [
 
 [[package]]
 name = "limbo-wasm"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "console_error_panic_hook",
  "limbo_core",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_core"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "cfg_block",
  "chrono",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sim"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "limbo_core",
  "rand",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sqlite3"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "cbindgen",
  "env_logger 0.11.3",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "py-limbo"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "limbo_core",
