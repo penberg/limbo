@@ -734,7 +734,7 @@ pub fn translate_expr(
                                 translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
                             }
                             program.emit_insn(Insn::Function {
-                                start_reg: target_register,
+                                start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
                             });
