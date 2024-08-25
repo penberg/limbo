@@ -16,8 +16,9 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
         &mut select_plan.root_operator,
         &select_plan.referenced_tables,
     )?;
-    let viable_plan = eliminate_constants(&mut select_plan.root_operator)?;
-    if !viable_plan {
+    if eliminate_constants(&mut select_plan.root_operator)?
+        == ConstantConditionEliminationResult::ImpossibleCondition
+    {
         return Ok(Plan {
             root_operator: Operator::Nothing,
             referenced_tables: vec![],
@@ -122,9 +123,15 @@ fn use_indexes(
     }
 }
 
+#[derive(Debug, PartialEq, Clone)]
+enum ConstantConditionEliminationResult {
+    Continue,
+    ImpossibleCondition,
+}
+
 // removes predicates that are always true
-// returns false if there is an impossible predicate that is always false
-fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
+// returns a ConstantEliminationResult indicating whether any predicates are always false
+fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionEliminationResult> {
     match operator {
         Operator::Filter {
             source, predicates, ..
@@ -135,7 +142,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
                 if predicate.is_always_true()? {
                     predicates.remove(i);
                 } else if predicate.is_always_false()? {
-                    return Ok(false);
+                    return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
                 } else {
                     i += 1;
                 }
@@ -148,7 +155,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
                 eliminate_constants(source)?;
             }
 
-            return Ok(true);
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
         Operator::Join {
             left,
@@ -157,15 +164,19 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
             outer,
             ..
         } => {
-            if !eliminate_constants(left)? {
-                return Ok(false);
+            if eliminate_constants(left)? == ConstantConditionEliminationResult::ImpossibleCondition
+            {
+                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
-            if !eliminate_constants(right)? && !*outer {
-                return Ok(false);
+            if eliminate_constants(right)?
+                == ConstantConditionEliminationResult::ImpossibleCondition
+                && !*outer
+            {
+                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
 
             if predicates.is_none() {
-                return Ok(true);
+                return Ok(ConstantConditionEliminationResult::Continue);
             }
 
             let predicates = predicates.as_mut().unwrap();
@@ -176,20 +187,22 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
                 if predicate.is_always_true()? {
                     predicates.remove(i);
                 } else if predicate.is_always_false()? && !*outer {
-                    return Ok(false);
+                    return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
                 } else {
                     i += 1;
                 }
             }
 
-            return Ok(true);
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
         Operator::Aggregate { source, .. } => {
-            let ok = eliminate_constants(source)?;
-            if !ok {
+            if eliminate_constants(source)?
+                == ConstantConditionEliminationResult::ImpossibleCondition
+            {
                 *source = Box::new(Operator::Nothing);
             }
-            return Ok(ok);
+            // Aggregation operator can return a row even if the source is empty e.g. count(1) from users where 0
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
         Operator::SeekRowid {
             rowid_predicate,
@@ -203,7 +216,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
                     if predicate.is_always_true()? {
                         predicates.remove(i);
                     } else if predicate.is_always_false()? {
-                        return Ok(false);
+                        return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
                     } else {
                         i += 1;
                     }
@@ -211,31 +224,38 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
             }
 
             if rowid_predicate.is_always_false()? {
-                return Ok(false);
+                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
 
-            return Ok(true);
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
         Operator::Limit { source, .. } => {
-            let ok = eliminate_constants(source)?;
-            if !ok {
+            let constant_elimination_result = eliminate_constants(source)?;
+            if constant_elimination_result
+                == ConstantConditionEliminationResult::ImpossibleCondition
+            {
                 *operator = Operator::Nothing;
             }
-            return Ok(ok);
+            return Ok(constant_elimination_result);
         }
         Operator::Order { source, .. } => {
-            let ok = eliminate_constants(source)?;
-            if !ok {
+            if eliminate_constants(source)?
+                == ConstantConditionEliminationResult::ImpossibleCondition
+            {
                 *operator = Operator::Nothing;
+                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
-            return Ok(true);
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
         Operator::Projection { source, .. } => {
-            let ok = eliminate_constants(source)?;
-            if !ok {
+            if eliminate_constants(source)?
+                == ConstantConditionEliminationResult::ImpossibleCondition
+            {
                 *operator = Operator::Nothing;
+                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
-            return Ok(ok);
+
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
         Operator::Scan { predicates, .. } => {
             if let Some(ps) = predicates {
@@ -245,7 +265,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
                     if predicate.is_always_true()? {
                         ps.remove(i);
                     } else if predicate.is_always_false()? {
-                        return Ok(false);
+                        return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
                     } else {
                         i += 1;
                     }
@@ -255,9 +275,9 @@ fn eliminate_constants(operator: &mut Operator) -> Result<bool> {
                     *predicates = None;
                 }
             }
-            return Ok(true);
+            return Ok(ConstantConditionEliminationResult::Continue);
         }
-        Operator::Nothing => return Ok(true),
+        Operator::Nothing => return Ok(ConstantConditionEliminationResult::Continue),
     }
 }
 

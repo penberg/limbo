@@ -8,6 +8,7 @@ use sqlite3_parser::ast;
 
 use crate::{function::AggFunc, schema::BTreeTable, util::normalize_ident, Result};
 
+#[derive(Debug)]
 pub struct Plan {
     pub root_operator: Operator,
     pub referenced_tables: Vec<(Rc<BTreeTable>, String)>,
