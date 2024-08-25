@@ -100,7 +100,6 @@ pub fn exec_unixepoch(time_value: &OwnedValue) -> Result<String> {
         Some(dt) => Ok(get_unixepoch_from_naive_datetime(dt)),
         None => Ok(String::new()),
     }
-    // Ok((Utc::now().timestamp()).to_string())
 }
 
 fn get_unixepoch_from_naive_datetime(value: NaiveDateTime) -> String {
