@@ -16,7 +16,13 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
         &mut select_plan.root_operator,
         &select_plan.referenced_tables,
     )?;
-    eliminate_constants(&mut select_plan.root_operator)?;
+    let viable_plan = eliminate_constants(&mut select_plan.root_operator)?;
+    if !viable_plan {
+        return Ok(Plan {
+            root_operator: Operator::Nothing,
+            referenced_tables: vec![],
+        });
+    }
     use_indexes(
         &mut select_plan.root_operator,
         &select_plan.referenced_tables,
