@@ -89,7 +89,7 @@ This document describes the SQLite compatibility status of Limbo:
 | nullif(X,Y)                  | Yes    |         |
 | octet_length(X)              | No     |         |
 | printf(FORMAT,...)           | No     |         |
-| quote(X)                     | Yes     |         |
+| quote(X)                     | Yes    |         |
 | random()                     | Yes    |         |
 | randomblob(N)                | No     |         |
 | replace(X,Y,Z)               | No     |         |
@@ -137,15 +137,15 @@ This document describes the SQLite compatibility status of Limbo:
 
 ### Date and time functions
 
-| Function                     | Status  | Comment                |
-|------------------------------|---------|------------------------|
-| date()                       | Partial |                        |
-| time()                       | Partial | not supported modifier |
-| datetime()                   | No      |                        |
-| julianday()                  | No      |                        |
-| unixepoch()                  | No      |                        |
-| strftime()                   | No      |                        |
-| timediff()                   | No      |                        |
+| Function                     | Status  | Comment                      |
+|------------------------------|---------|------------------------------|
+| date()                       | Partial |                              |
+| time()                       | Partial | partially supports modifiers |
+| datetime()                   | No      |                              |
+| julianday()                  | No      |                              |
+| unixepoch()                  | No      |                              |
+| strftime()                   | No      |                              |
+| timediff()                   | No      |                              |
 
 ### JSON functions
 

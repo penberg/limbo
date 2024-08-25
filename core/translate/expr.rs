@@ -945,24 +945,21 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::Time => {
-                            let mut start_reg = 0;
                             if let Some(args) = args {
-                                if args.len() > 1 {
-                                    crate::bail_parse_error!("date function with > 1 arguments. Modifiers are not yet supported.");
-                                } else if args.len() == 1 {
-                                    let arg_reg = program.alloc_register();
-                                    let _ = translate_expr(
+                                for arg in args.iter() {
+                                    // register containing result of each argument expression
+                                    let target_reg = program.alloc_register();
+                                    _ = translate_expr(
                                         program,
                                         referenced_tables,
-                                        &args[0],
-                                        arg_reg,
+                                        arg,
+                                        target_reg,
                                         cursor_hint,
                                     )?;
-                                    start_reg = arg_reg;
                                 }
                             }
                             program.emit_insn(Insn::Function {
-                                start_reg: start_reg,
+                                start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Time),
                             });
