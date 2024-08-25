@@ -280,58 +280,48 @@ impl PageContent {
         self.read_u8(self.offset).try_into().unwrap()
     }
 
-    fn read_u8(&self, pos: usize) -> u8 {
-        // unsafe trick to borrow twice
+    pub fn as_ptr(&self) -> &mut [u8] {
         unsafe {
+            // unsafe trick to borrow twice
             let buf_pointer = &self.buffer.as_ptr();
-            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
-            buf[pos]
+            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
+            buf
         }
+    }
+
+    fn read_u8(&self, pos: usize) -> u8 {
+        let buf = self.as_ptr();
+        buf[pos]
     }
 
     fn read_u16(&self, pos: usize) -> u16 {
-        unsafe {
-            let buf_pointer = &self.buffer.as_ptr();
-            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
-            u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
-        }
+        let buf = self.as_ptr();
+        u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
     }
 
     fn read_u32(&self, pos: usize) -> u32 {
-        unsafe {
-            let buf_pointer = &self.buffer.as_ptr();
-            let buf = (*buf_pointer).as_ref().unwrap().as_slice();
-            u32::from_be_bytes([
-                buf[self.offset + pos],
-                buf[self.offset + pos + 1],
-                buf[self.offset + pos + 2],
-                buf[self.offset + pos + 3],
-            ])
-        }
+        let buf = self.as_ptr();
+        u32::from_be_bytes([
+            buf[self.offset + pos],
+            buf[self.offset + pos + 1],
+            buf[self.offset + pos + 2],
+            buf[self.offset + pos + 3],
+        ])
     }
 
     pub fn write_u8(&self, pos: usize, value: u8) {
-        unsafe {
-            let buf_pointer = &self.buffer.as_ptr();
-            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
-            buf[self.offset + pos] = value;
-        }
+        let buf = self.as_ptr();
+        buf[self.offset + pos] = value;
     }
 
     pub fn write_u16(&self, pos: usize, value: u16) {
-        unsafe {
-            let buf_pointer = &self.buffer.as_ptr();
-            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
-            buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
-        }
+        let buf = self.as_ptr();
+        buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_u32(&self, pos: usize, value: u32) {
-        unsafe {
-            let buf_pointer = &self.buffer.as_ptr();
-            let buf = (*buf_pointer).as_mut().unwrap().as_mut_slice();
-            buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
-        }
+        let buf = self.as_ptr();
+        buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
     }
 
     pub fn first_freeblock(&self) -> u16 {
@@ -360,8 +350,7 @@ impl PageContent {
     }
 
     pub fn cell_get(&self, idx: usize) -> Result<BTreeCell> {
-        let buf = self.buffer.borrow();
-        let buf = buf.as_slice();
+        let buf = self.as_ptr();
 
         let ncells = self.cell_count();
         let cell_start = match self.page_type() {
@@ -388,12 +377,7 @@ impl PageContent {
     }
 
     pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {
-        let mut buf = self.buffer.borrow_mut();
-        let buf = buf.as_mut_slice();
-        self.cell_get_raw_region_borrowed(idx, buf)
-    }
-
-    pub fn cell_get_raw_region_borrowed(&self, idx: usize, buf: &mut [u8]) -> (usize, usize) {
+        let buf = self.as_ptr();
         let ncells = self.cell_count();
         let cell_start = match self.page_type() {
             PageType::IndexInterior => 12,
@@ -438,8 +422,7 @@ impl PageContent {
     }
 
     pub fn write_database_header(&self, header: &DatabaseHeader) {
-        let mut buf = self.buffer.borrow_mut();
-        let buf = buf.as_mut_slice();
+        let buf = self.as_ptr();
         write_header_to_buf(buf, header);
     }
 }

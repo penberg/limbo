@@ -420,8 +420,7 @@ impl BTreeCursor {
     fn insert_into_cell(&mut self, page: &mut PageContent, payload: &Vec<u8>, cell_idx: usize) {
         // TODO: insert into cell payload in internal page
         let pc = self.allocate_cell_space(page, payload.len() as u16);
-        let mut buf_ref = RefCell::borrow_mut(&page.buffer);
-        let buf: &mut [u8] = buf_ref.as_mut_slice();
+        let buf = page.as_ptr();
 
         // copy data
         buf[pc as usize..pc as usize + payload.len()].copy_from_slice(payload);
@@ -499,10 +498,8 @@ impl BTreeCursor {
                 {
                     // move data from one buffer to another
                     // done in a separate block to satisfy borrow checker
-                    let mut left_buf = RefCell::borrow_mut(&page.buffer);
-                    let left_buf: &mut [u8] = left_buf.as_mut_slice();
-                    let mut right_buf = RefCell::borrow_mut(&right_page.buffer);
-                    let right_buf: &mut [u8] = right_buf.as_mut_slice();
+                    let left_buf: &mut [u8] = page.as_ptr();
+                    let right_buf: &mut [u8] = right_page.as_ptr();
 
                     let mut rbrk = right_page.cell_content_area() as usize;
 
@@ -510,7 +507,7 @@ impl BTreeCursor {
                     let (mut cell_pointer_idx, _) = page.cell_get_raw_pointer_region();
                     // move half of cells to right page
                     for cell_idx in cells_to_move..page.cell_count() {
-                        let (start, len) = page.cell_get_raw_region_borrowed(cell_idx, left_buf);
+                        let (start, len) = page.cell_get_raw_region(cell_idx);
                         // copy data
                         rbrk -= len;
                         right_buf[rbrk..rbrk + len].copy_from_slice(&left_buf[start..start + len]);
@@ -677,8 +674,7 @@ impl BTreeCursor {
         if gap + 2 + amount > top {
             // defragment
             self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
-            let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
-            let buf = buf_ref.as_mut_slice();
+            let buf = page_ref.as_ptr();
             top = u16::from_be_bytes([buf[5], buf[6]]) as usize;
         }
 
@@ -686,8 +682,7 @@ impl BTreeCursor {
         top -= amount;
 
         {
-            let mut buf_ref = RefCell::borrow_mut(&page_ref.buffer);
-            let buf = buf_ref.as_mut_slice();
+            let buf = page_ref.as_ptr();
             buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
         }
 
@@ -711,16 +706,14 @@ impl BTreeCursor {
 
         if cloned_page.cell_count() > 0 {
             let page_type = page.page_type();
-            let buf = RefCell::borrow(&cloned_page.buffer);
-            let buf = buf.as_slice();
-            let mut write_buf = RefCell::borrow_mut(&page.buffer);
-            let write_buf = write_buf.as_mut_slice();
+            let read_buf = cloned_page.as_ptr();
+            let write_buf = page.as_ptr();
 
             for i in 0..cloned_page.cell_count() {
                 let cell_offset = page.offset + 8;
                 let cell_idx = cell_offset + i * 2;
 
-                let pc = u16::from_be_bytes([buf[cell_idx], buf[cell_idx + 1]]) as u64;
+                let pc = u16::from_be_bytes([read_buf[cell_idx], read_buf[cell_idx + 1]]) as u64;
                 if pc > last_cell {
                     unimplemented!("corrupted page");
                 }
@@ -729,7 +722,7 @@ impl BTreeCursor {
 
                 let size = match page_type {
                     PageType::TableInterior => {
-                        let (_, nr_key) = match read_varint(&buf[pc as usize ..]) {
+                        let (_, nr_key) = match read_varint(&read_buf[pc as usize ..]) {
                             Ok(v) => v,
                             Err(_) => todo!(
                                 "error while parsing varint from cell, probably treat this as corruption?"
@@ -738,13 +731,13 @@ impl BTreeCursor {
                         4 + nr_key as u64
                     }
                     PageType::TableLeaf => {
-                        let (payload_size, nr_payload) = match read_varint(&buf[pc as usize..]) {
+                        let (payload_size, nr_payload) = match read_varint(&read_buf[pc as usize..]) {
                             Ok(v) => v,
                             Err(_) => todo!(
                                 "error while parsing varint from cell, probably treat this as corruption?"
                             ),
                         };
-                        let (_, nr_key) = match read_varint(&buf[pc as usize + nr_payload..]) {
+                        let (_, nr_key) = match read_varint(&read_buf[pc as usize + nr_payload..]) {
                             Ok(v) => v,
                             Err(_) => todo!(
                                 "error while parsing varint from cell, probably treat this as corruption?"
@@ -765,7 +758,7 @@ impl BTreeCursor {
                 write_buf[cell_idx..cell_idx + 2].copy_from_slice(&(cbrk as u16).to_be_bytes());
                 // copy payload
                 write_buf[cbrk as usize..cbrk as usize + size as usize]
-                    .copy_from_slice(&buf[pc as usize..pc as usize + size as usize]);
+                    .copy_from_slice(&read_buf[pc as usize..pc as usize + size as usize]);
             }
         }
 
@@ -774,8 +767,7 @@ impl BTreeCursor {
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
         assert!(cbrk >= first_cell as u64);
-        let mut write_buf = RefCell::borrow_mut(&page.buffer);
-        let write_buf = write_buf.as_mut_slice();
+        let write_buf = page.as_ptr();
 
         // set new first byte of cell content
         write_buf[5..7].copy_from_slice(&(cbrk as u16).to_be_bytes());
@@ -791,8 +783,7 @@ impl BTreeCursor {
     // Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
     // and end of cell pointer area.
     fn compute_free_space(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) -> u16 {
-        let buffer = RefCell::borrow(&page.buffer);
-        let buf = buffer.as_slice();
+        let buf = page.as_ptr();
 
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
         let mut first_byte_in_cell_content = page.cell_content_area();
@@ -852,8 +843,7 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
     // unuse_space is reserved bytes at the end of page, therefore we must substract from maxpc
     let mut pc = page_ref.first_freeblock() as usize;
 
-    let buf_ref = RefCell::borrow(&page_ref.buffer);
-    let buf = buf_ref.as_slice();
+    let buf = page_ref.as_ptr();
 
     let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
     let maxpc = usable_space - amount;
