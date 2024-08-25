@@ -22,6 +22,8 @@ pub trait IO {
     fn run_once(&self) -> Result<()>;
 
     fn generate_random_number(&self) -> i64;
+
+    fn get_current_time(&self) -> String;
 }
 
 pub type Complete = dyn Fn(Rc<RefCell<Buffer>>);

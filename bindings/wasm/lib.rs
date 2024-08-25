@@ -92,11 +92,27 @@ impl limbo_core::IO for PlatformIO {
         let random_f64 = Math_random();
         (random_f64 * i64::MAX as f64) as i64
     }
+
+    fn get_current_time(&self) -> String {
+        let date = Date::new();
+        date.toISOString()
+    }
 }
 
 #[wasm_bindgen]
 extern "C" {
     fn Math_random() -> f64;
+}
+
+#[wasm_bindgen]
+extern "C" {
+    type Date;
+
+    #[wasm_bindgen(constructor)]
+    fn new() -> Date;
+
+    #[wasm_bindgen(method, getter)]
+    fn toISOString(this: &Date) -> String;
 }
 
 pub struct DatabaseStorage {
