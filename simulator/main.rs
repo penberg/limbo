@@ -113,6 +113,10 @@ impl IO for SimulatorIO {
     fn generate_random_number(&self) -> i64 {
         self.rng.borrow_mut().next_u64() as i64
     }
+
+    fn get_current_time(&self) -> String {
+        "2024-01-01 00:00:00".to_string()
+    }
 }
 
 struct SimulatorFile {

@@ -110,6 +110,10 @@ impl IO for DarwinIO {
         getrandom::getrandom(&mut buf).unwrap();
         i64::from_ne_bytes(buf)
     }
+
+    fn get_current_time(&self) -> String {
+        chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+    }
 }
 
 enum CompletionCallback {
