@@ -123,3 +123,23 @@ do_execsql_test time-with-invalid-modifier {
   SELECT time('2023-05-18 15:30:45', '+1 hour', 'invalid modifier');
 } {{}}
 
+
+do_execsql_test unixepoch-at-start {
+  SELECT unixepoch('1970-01-01');
+} {0}
+
+do_execsql_test unixepoch-at-1-second-before-epochtime {
+  SELECT unixepoch('1969-12-31 23:59:59');
+} {-1}
+
+do_execsql_test unixepoch-at-future {
+  SELECT unixepoch('9999-12-31 23:59:59');
+} {253402300799}
+
+do_execsql_test unixepoch-at-start-of-time {
+  SELECT unixepoch('0000-01-01 00:00:00');
+} {-62167219200}
+
+do_execsql_test unixepoch-at-millisecond-precision-input-produces-seconds-precision-output {
+  SELECT unixepoch('2022-01-27 12:59:28.052');
+} {1643288368}
