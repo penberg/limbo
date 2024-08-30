@@ -1,4 +1,4 @@
-from _limbo import (
+from ._limbo import (
     Connection,
     Cursor,
     DatabaseError,
@@ -14,16 +14,16 @@ from _limbo import (
 )
 
 __all__ = [
-    "__version__",
-    "Connection",
-    "Cursor",
-    "InterfaceError",
-    "DatabaseError",
-    "DataError",
-    "OperationalError",
-    "IntegrityError",
-    "InternalError",
-    "ProgrammingError",
-    "NotSupportedError",
-    "connect",
+    '__version__',
+    'Connection',
+    'Cursor',
+    'InterfaceError',
+    'DatabaseError',
+    'DataError',
+    'OperationalError',
+    'IntegrityError',
+    'InternalError',
+    'ProgrammingError',
+    'NotSupportedError',
+    'connect',
 ]
