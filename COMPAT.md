@@ -143,7 +143,7 @@ This document describes the SQLite compatibility status of Limbo:
 | time()                       | Partial | partially supports modifiers |
 | datetime()                   | No      |                              |
 | julianday()                  | No      |                              |
-| unixepoch()                  | No      |                              |
+| unixepoch()                  | Partial | does not support modifiers   |
 | strftime()                   | No      |                              |
 | timediff()                   | No      |                              |
 
