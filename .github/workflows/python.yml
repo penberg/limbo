@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+env:
+  working-directory: bindings/python
+  PIP_DISABLE_PIP_VERSION_CHECK: "true"
+
 jobs:
   test:
     strategy:
@@ -23,9 +27,6 @@ jobs:
           - "3.11"
           - "3.12"
     runs-on: ${{ matrix.os }}
-    env:
-      working-directory: ./bindings/python
-      PIP_DISABLE_PIP_VERSION_CHECK: "true"
 
     defaults:
       run:
@@ -77,8 +78,30 @@ jobs:
       - name: Run Ruff format check
         run: ruff format --diff
 
-      - name: Install Limbo
-        run: pip install -e .
+  check-requirements:
+    runs-on: ubuntu-latest
 
-      - name: Run Pytest
-        run: pytest tests
+    defaults:
+      run:
+        working-directory: ${{ env.working-directory }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-tools
+        run: pip install pip-tools
+
+      - name: Check requirements files
+        run: |
+          mkdir .tmp
+          pip-compile --quiet --output-file .tmp/requirements.txt
+          pip-compile --quiet --extra=dev --output-file .tmp/requirements-dev.txt
+          diff -u requirements.txt .tmp/requirements.txt || (echo "requirements.txt doesn't match pyproject.toml" && exit 1)
+          diff -u requirements-dev.txt .tmp/requirements-dev.txt || (echo "requirements-dev.txt doesn't match pyproject.toml" && exit 1)
+          echo "Requirements files match pyproject.toml"

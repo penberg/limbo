@@ -48,6 +48,11 @@ bindings = 'pyo3'
 module-name = "limbo._limbo"
 features = ["pyo3/extension-module"]
 
+[tool.pip-tools]
+strip-extras = true
+header = false
+upgrade = false
+
 [tool.ruff]
 line-length = 120
 
