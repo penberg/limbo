@@ -14,6 +14,11 @@
   <a href="https://github.com/penberg/limbo/blob/main/LICENSE.md">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" title="MIT License" />
   </a>
+  <a href="https://discord.gg/jgjmyYgHwB">
+    <img src="https://img.shields.io/discord/1258658826257961020" alt="Discord" title="Discord" />
+  </a>
+  
+
 </p>
 
 ---
