@@ -52,16 +52,14 @@ features = ["pyo3/extension-module"]
 line-length = 120
 
 [tool.ruff.lint]
-extend-select = ['Q', 'RUF100', 'C90', 'I']
-extend-ignore = [
-    'E721', # using type() instead of isinstance() - we use this in tests
+extend-select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warings
+    "F",   # pyflakes
+    'Q',   # flake8-quotes
+    'C90', # mccabe
+    'I',   # isort
 ]
-flake8-quotes = { inline-quotes = 'single', multiline-quotes = 'double' }
-mccabe = { max-complexity = 13 }
-isort = { known-first-party = ['pydantic_core', 'tests'] }
-
-[tool.ruff.format]
-quote-style = 'single'
 
 [tool.pytest.ini_options]
 testpaths = 'tests'
