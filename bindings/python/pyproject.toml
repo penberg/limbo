@@ -16,7 +16,6 @@ classifiers = [
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
     'Programming Language :: Python :: 3.12',
-    'Programming Language :: Python :: 3.13',
     'Programming Language :: Rust',
     'License :: OSI Approved :: MIT License',
     'Operating System :: POSIX :: Linux',
@@ -28,10 +27,7 @@ classifiers = [
     'Topic :: Database :: Database Engines/Servers',
 ]
 dependencies = ['typing-extensions >=4.6.0,!=4.7.0']
-dynamic = [
-    'readme',
-    'version'
-]
+dynamic = ['readme', 'version']
 
 [project.optional-dependencies]
 dev = [
@@ -40,7 +36,7 @@ dev = [
     "mypy==1.11.0",
     "pytest==8.3.1",
     "pytest-cov==5.0.0",
-    "ruff==0.5.4"
+    "ruff==0.5.4",
 ]
 
 [project.urls]

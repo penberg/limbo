@@ -12,36 +12,45 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.12']
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        python-version:
+          - "3.8"
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
     runs-on: ${{ matrix.os }}
     env:
       working-directory: ./bindings/python
+      PIP_DISABLE_PIP_VERSION_CHECK: "true"
 
     defaults:
       run:
         working-directory: ${{ env.working-directory }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: install rust stable
-      uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install dependencies
-      run: pip install -r requirements.txt && pip install -r requirements-dev.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt && pip install -r requirements-dev.txt
 
-    - name: Run Ruff check
-      run: ruff check limbo tests
-    
-    - name: Install limbo 
-      run: pip install -e .
-    
-    - name: Run Pytest 
-      run: pytest tests
+      - name: Run Ruff check
+        run: ruff check limbo tests
+
+      - name: Install Limbo
+        run: pip install -e .
+
+      - name: Run Pytest
+        run: pytest tests
