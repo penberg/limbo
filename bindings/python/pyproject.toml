@@ -30,14 +30,7 @@ dependencies = ['typing-extensions >=4.6.0,!=4.7.0']
 dynamic = ['readme', 'version']
 
 [project.optional-dependencies]
-dev = [
-    "black==24.4.2",
-    "isort==5.13.2",
-    "mypy==1.11.0",
-    "pytest==8.3.1",
-    "pytest-cov==5.0.0",
-    "ruff==0.5.4",
-]
+dev = ["mypy==1.11.0", "pytest==8.3.1", "pytest-cov==5.0.0", "ruff==0.5.4"]
 
 [project.urls]
 Homepage = "https://github.com/penberg/limbo"

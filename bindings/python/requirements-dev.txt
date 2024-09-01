@@ -1,27 +1,13 @@
-black==24.4.2
-    # via limbo (pyproject.toml)
-click==8.1.7
-    # via black
 coverage==7.6.1
     # via pytest-cov
 iniconfig==2.0.0
     # via pytest
-isort==5.13.2
-    # via limbo (pyproject.toml)
 mypy==1.11.0
     # via limbo (pyproject.toml)
 mypy-extensions==1.0.0
-    # via
-    #   black
-    #   mypy
+    # via mypy
 packaging==24.1
-    # via
-    #   black
-    #   pytest
-pathspec==0.12.1
-    # via black
-platformdirs==4.2.2
-    # via black
+    # via pytest
 pluggy==1.5.0
     # via pytest
 pytest==8.3.1
