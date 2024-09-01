@@ -84,7 +84,7 @@ impl Database {
                 match rows.next_row()? {
                     RowResult::Row(row) => {
                         let ty = row.get::<&str>(0)?;
-                        if ty != "table" && ty != "index"{
+                        if ty != "table" && ty != "index" {
                             continue;
                         }
                         match ty {
@@ -100,7 +100,7 @@ impl Database {
                                 let index = schema::Index::from_sql(sql, root_page as usize)?;
                                 schema.add_index(Rc::new(index));
                             }
-                            _ => continue
+                            _ => continue,
                         }
                     }
                     RowResult::IO => {
