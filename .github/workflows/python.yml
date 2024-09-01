@@ -72,11 +72,8 @@ jobs:
       - name: Install dev dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run Ruff check
-        run: ruff check
-
-      - name: Run Ruff format check
-        run: ruff format --diff
+      - name: Run lint
+        run: make lint
 
   check-requirements:
     runs-on: ubuntu-latest
@@ -98,10 +95,4 @@ jobs:
         run: pip install pip-tools
 
       - name: Check requirements files
-        run: |
-          mkdir .tmp
-          pip-compile --quiet --output-file .tmp/requirements.txt
-          pip-compile --quiet --extra=dev --output-file .tmp/requirements-dev.txt
-          diff -u requirements.txt .tmp/requirements.txt || (echo "requirements.txt doesn't match pyproject.toml" && exit 1)
-          diff -u requirements-dev.txt .tmp/requirements-dev.txt || (echo "requirements-dev.txt doesn't match pyproject.toml" && exit 1)
-          echo "Requirements files match pyproject.toml"
+        run: make check-requirements
