@@ -1,5 +1,9 @@
 # Changelog
 
+### Unreleased
+
+- Improvements to Python bindings (Jean Arhancet and Lauri Virtanen)
+
 ### 0.0.4 - 2024-08-22
 
 - Query planner rewrite (Jussi Saurio)
