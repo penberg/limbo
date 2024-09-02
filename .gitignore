@@ -16,6 +16,7 @@ env
 .env
 .venv
 dist/
+.tmp/
 
 # OS
 .DS_Store

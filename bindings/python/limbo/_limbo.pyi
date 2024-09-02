@@ -51,9 +51,7 @@ class Cursor:
     ]
     rowcount: int
 
-    def execute(
-        self, sql: str, parameters: Optional[Tuple[Any, ...]] = None
-    ) -> "Cursor":
+    def execute(self, sql: str, parameters: Optional[Tuple[Any, ...]] = None) -> "Cursor":
         """
         Prepares and executes a SQL statement using the connection.
 
@@ -65,9 +63,7 @@ class Cursor:
         """
         ...
 
-    def executemany(
-        self, sql: str, parameters: Optional[List[Tuple[Any, ...]]] = None
-    ) -> None:
+    def executemany(self, sql: str, parameters: Optional[List[Tuple[Any, ...]]] = None) -> None:
         """
         Executes a SQL command against all parameter sequences or mappings found in the sequence `parameters`.
 
@@ -136,12 +132,17 @@ class DatabaseError(Error):
     ...
 
 class DataError(DatabaseError):
-    """Exception raised for errors due to problems with the processed data like division by zero, numeric value out of range, etc."""
+    """
+    Exception raised for errors due to problems with the processed data like division by zero, numeric value out of
+    range, etc.
+    """
 
     ...
 
 class OperationalError(DatabaseError):
-    """Exception raised for errors related to the database’s operation, not necessarily under the programmer's control."""
+    """
+    Exception raised for errors related to the database’s operation, not necessarily under the programmer's control.
+    """
 
     ...
 
@@ -151,12 +152,18 @@ class IntegrityError(DatabaseError):
     ...
 
 class InternalError(DatabaseError):
-    """Exception raised when the database encounters an internal error, e.g., cursor is not valid anymore, transaction out of sync."""
+    """
+    Exception raised when the database encounters an internal error, e.g., cursor is not valid anymore, transaction out
+    of sync.
+    """
 
     ...
 
 class ProgrammingError(DatabaseError):
-    """Exception raised for programming errors, e.g., table not found, syntax error in SQL, wrong number of parameters specified."""
+    """
+    Exception raised for programming errors, e.g., table not found, syntax error in SQL, wrong number of parameters
+    specified.
+    """
 
     ...
 
