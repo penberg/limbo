@@ -96,9 +96,15 @@ impl Database {
                             }
                             "index" => {
                                 let root_page: i64 = row.get::<i64>(3)?;
-                                let sql: &str = row.get::<&str>(4)?;
-                                let index = schema::Index::from_sql(sql, root_page as usize)?;
-                                schema.add_index(Rc::new(index));
+                                match row.get::<&str>(4) {
+                                    Ok(sql) => {
+                                        let index =
+                                            schema::Index::from_sql(sql, root_page as usize)?;
+                                        schema.add_index(Rc::new(index));
+                                    }
+                                    _ => continue,
+                                    // TODO parse auto index structures
+                                }
                             }
                             _ => continue,
                         }
