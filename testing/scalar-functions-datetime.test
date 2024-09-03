@@ -3,6 +3,98 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+do_execsql_test date-current-date {
+  SELECT length(date('now')) = 10;
+} {1}
+
+do_execsql_test date-specific-date {
+  SELECT date('2023-05-18');
+} {2023-05-18}
+
+do_execsql_test date-with-time {
+  SELECT date('2023-05-18 15:30:45');
+} {2023-05-18}
+
+do_execsql_test date-iso8601 {
+  SELECT date('2023-05-18T15:30:45');
+} {2023-05-18}
+
+do_execsql_test date-with-milliseconds {
+  SELECT date('2023-05-18 15:30:45.123');
+} {2023-05-18}
+
+do_execsql_test date-julian-day-integer {
+  SELECT date(2460082);
+} {2023-05-17}
+
+do_execsql_test date-julian-day-float {
+  SELECT date(2460082.5);
+} {2023-05-18}
+
+do_execsql_test date-invalid-input {
+  SELECT date('not a date');
+} {{}}
+
+do_execsql_test date-null-input {
+  SELECT date(NULL);
+} {{}}
+
+do_execsql_test date-out-of-range {
+  SELECT date('10001-01-01');
+} {{}}
+
+do_execsql_test date-time-only {
+  SELECT date('15:30:45');
+} {2000-01-01}
+
+do_execsql_test date-with-timezone-utc {
+  SELECT date('2023-05-18 15:30:45Z');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-positive {
+  SELECT date('2023-05-18 23:30:45+02:00');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-negative {
+  SELECT date('2023-05-19 01:30:45-05:00');
+} {2023-05-19}
+
+do_execsql_test date-with-timezone-day-change-positive {
+  SELECT date('2023-05-18 23:30:45-03:00');
+} {2023-05-19}
+
+do_execsql_test date-with-timezone-day-change-negative {
+  SELECT date('2023-05-19 01:30:45+03:00');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-iso8601 {
+  SELECT date('2023-05-18T15:30:45+02:00');
+} {2023-05-18}
+
+do_execsql_test date-with-timezone-and-milliseconds {
+  SELECT date('2023-05-18 15:30:45.123+02:00');
+} {2023-05-18}
+
+do_execsql_test date-with-invalid-timezone {
+  SELECT date('2023-05-18 15:30:45+25:00');
+} {{}}
+
+do_execsql_test date-with-modifier-add-days {
+  SELECT date('2023-05-18', '+10 days');
+} {2023-05-28}
+
+do_execsql_test date-with-modifier-subtract-days {
+  SELECT date('2023-05-18', '-10 days');
+} {2023-05-08}
+
+do_execsql_test date-with-multiple-modifiers {
+  SELECT date('2023-05-18', '+1 days', '-1 days', '+10 days');
+} {2023-05-28}
+
+do_execsql_test date-with-invalid-modifier {
+  SELECT date('2023-05-18', 'invalid modifier');
+} {{}}
+
 do_execsql_test time-no-arg {
   SELECT length(time()) = 8;
 } {1}
@@ -122,7 +214,6 @@ do_execsql_test time-with-invalid-modifier {
 do_execsql_test time-with-invalid-modifier {
   SELECT time('2023-05-18 15:30:45', '+1 hour', 'invalid modifier');
 } {{}}
-
 
 do_execsql_test unixepoch-at-start {
   SELECT unixepoch('1970-01-01');

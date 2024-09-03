@@ -137,15 +137,15 @@ This document describes the SQLite compatibility status of Limbo:
 
 ### Date and time functions
 
-| Function                     | Status  | Comment                      |
-|------------------------------|---------|------------------------------|
-| date()                       | Partial |                              |
-| time()                       | Partial | partially supports modifiers |
-| datetime()                   | No      |                              |
-| julianday()                  | No      |                              |
-| unixepoch()                  | Partial | does not support modifiers   |
-| strftime()                   | No      |                              |
-| timediff()                   | No      |                              |
+| Function    | Status  | Comment                      |
+|-------------|---------|------------------------------|
+| date()      | Yes     | partially supports modifiers |
+| time()      | Yes     | partially supports modifiers |
+| datetime()  | No      |                              |
+| julianday() | No      |                              |
+| unixepoch() | Partial | does not support modifiers   |
+| strftime()  | No      |                              |
+| timediff()  | No      |                              |
 
 ### JSON functions
 
