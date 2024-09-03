@@ -8,12 +8,29 @@ use crate::LimboError::InvalidModifier;
 use crate::Result;
 
 /// Implementation of the date() SQL function.
-pub fn exec_date(time_value: &OwnedValue) -> Result<String> {
-    let dt = parse_naive_date_time(time_value);
-    match dt {
-        Some(dt) => Ok(get_date_from_naive_datetime(dt)),
-        None => Ok(String::new()),
+pub fn exec_date(values: &[OwnedValue]) -> OwnedValue {
+    let maybe_dt = match values.first() {
+        None => parse_naive_date_time(&OwnedValue::Text(Rc::new("now".to_string()))),
+        Some(value) => parse_naive_date_time(value),
+    };
+    // early return, no need to look at modifiers if result invalid
+    if maybe_dt.is_none() {
+        return OwnedValue::Text(Rc::new(String::new()));
     }
+
+    // apply modifiers if result is valid
+    let mut dt = maybe_dt.unwrap();
+    for modifier in values.iter().skip(1) {
+        if let OwnedValue::Text(modifier_str) = modifier {
+            if apply_modifier(&mut dt, modifier_str).is_err() {
+                return OwnedValue::Text(Rc::new(String::new()));
+            }
+        } else {
+            return OwnedValue::Text(Rc::new(String::new()));
+        }
+    }
+
+    OwnedValue::Text(Rc::new(get_date_from_naive_datetime(dt)))
 }
 
 /// Implementation of the time() SQL function.
@@ -395,7 +412,7 @@ mod tests {
         let test_date_str = "2024-07-21";
         let next_date_str = "2024-07-22";
 
-        let test_cases = [
+        let test_cases = vec![
             // Format 1: YYYY-MM-DD (no timezone applicable)
             (
                 OwnedValue::Text(Rc::new("2024-07-21".to_string())),
@@ -595,9 +612,10 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
+            let result = exec_date(&[input.clone()]);
             assert_eq!(
-                exec_date(&input).unwrap(),
-                expected,
+                result,
+                OwnedValue::Text(Rc::new(expected.to_string())),
                 "Failed for input: {:?}",
                 input
             );
@@ -606,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_invalid_get_date_from_time_value() {
-        let invalid_cases = [
+        let invalid_cases = vec![
             OwnedValue::Text(Rc::new("2024-07-21 25:00".to_string())), // Invalid hour
             OwnedValue::Text(Rc::new("2024-07-21 24:00:00".to_string())), // Invalid hour
             OwnedValue::Text(Rc::new("2024-07-21 23:60:00".to_string())), // Invalid minute
@@ -635,20 +653,14 @@ mod tests {
         ];
 
         for case in invalid_cases.iter() {
-            let result = exec_date(case);
-            assert!(
-                result.is_ok(),
-                "Error encountered while parsing time value {}: {}",
-                case,
-                result.unwrap_err()
-            );
-            let result_str = result.unwrap();
-            assert!(
-                result_str.is_empty(),
-                "Expected empty string for input: {:?}, but got: {:?}",
-                case,
-                result_str
-            );
+            let result = exec_date(&[case.clone()]);
+            match result {
+                OwnedValue::Text(ref result_str) if result_str.is_empty() => (),
+                _ => panic!(
+                    "Expected empty string for input: {:?}, but got: {:?}",
+                    case, result
+                ),
+            }
         }
     }
 

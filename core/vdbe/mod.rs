@@ -1339,25 +1339,8 @@ impl Program {
                         state.pc += 1;
                     }
                     Func::Scalar(ScalarFunc::Date) => {
-                        if *start_reg == 0 {
-                            let date_str =
-                                exec_date(&OwnedValue::Text(Rc::new("now".to_string())))?;
-                            state.registers[*dest] = OwnedValue::Text(Rc::new(date_str));
-                        } else {
-                            let time_value = &state.registers[*start_reg];
-                            let date_str = exec_date(time_value);
-                            match date_str {
-                                Ok(date) => {
-                                    state.registers[*dest] = OwnedValue::Text(Rc::new(date))
-                                }
-                                Err(e) => {
-                                    return Err(LimboError::ParseError(format!(
-                                        "Error encountered while parsing time value: {}",
-                                        e
-                                    )));
-                                }
-                            }
-                        }
+                        let result = exec_date(&state.registers[*start_reg..]);
+                        state.registers[*dest] = result;
                         state.pc += 1;
                     }
                     Func::Scalar(ScalarFunc::Time) => {
