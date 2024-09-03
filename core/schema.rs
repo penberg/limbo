@@ -12,13 +12,16 @@ use std::rc::Rc;
 
 pub struct Schema {
     pub tables: HashMap<String, Rc<BTreeTable>>,
+    // table_name to list of indexes for the table
+    pub indexes: HashMap<String, Vec<Rc<Index>>>,
 }
 
 impl Schema {
     pub fn new() -> Self {
         let mut tables: HashMap<String, Rc<BTreeTable>> = HashMap::new();
+        let indexes: HashMap<String, Vec<Rc<Index>>> = HashMap::new();
         tables.insert("sqlite_schema".to_string(), Rc::new(sqlite_schema_table()));
-        Self { tables }
+        Self { tables, indexes }
     }
 
     pub fn add_table(&mut self, table: Rc<BTreeTable>) {
@@ -29,6 +32,14 @@ impl Schema {
     pub fn get_table(&self, name: &str) -> Option<Rc<BTreeTable>> {
         let name = normalize_ident(name);
         self.tables.get(&name).cloned()
+    }
+
+    pub fn add_index(&mut self, index: Rc<Index>) {
+        let table_name = normalize_ident(&index.table_name);
+        self.indexes
+            .entry(table_name)
+            .or_insert_with(Vec::new)
+            .push(index.clone())
     }
 }
 
@@ -382,6 +393,64 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 primary_key: false,
             },
         ],
+    }
+}
+
+#[derive(Debug)]
+pub struct Index {
+    pub name: String,
+    pub table_name: String,
+    pub root_page: usize,
+    pub columns: Vec<IndexColumn>,
+    pub unique: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexColumn {
+    pub name: String,
+    pub order: Order,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Order {
+    Ascending,
+    Descending,
+}
+
+impl Index {
+    pub fn from_sql(sql: &str, root_page: usize) -> Result<Index> {
+        let mut parser = Parser::new(sql.as_bytes());
+        let cmd = parser.next()?;
+        match cmd {
+            Some(Cmd::Stmt(Stmt::CreateIndex {
+                idx_name,
+                tbl_name,
+                columns,
+                unique,
+                ..
+            })) => {
+                let index_name = normalize_ident(&idx_name.name.0);
+                let index_columns = columns
+                    .into_iter()
+                    .map(|col| IndexColumn {
+                        name: normalize_ident(&col.expr.to_string()),
+                        order: match col.order {
+                            Some(sqlite3_parser::ast::SortOrder::Asc) => Order::Ascending,
+                            Some(sqlite3_parser::ast::SortOrder::Desc) => Order::Descending,
+                            None => Order::Ascending,
+                        },
+                    })
+                    .collect();
+                Ok(Index {
+                    name: index_name,
+                    table_name: normalize_ident(&tbl_name.0),
+                    root_page: root_page,
+                    columns: index_columns,
+                    unique,
+                })
+            }
+            _ => todo!("Expected create index statement"),
+        }
     }
 }
 
