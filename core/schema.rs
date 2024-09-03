@@ -1,8 +1,8 @@
-use crate::{util::normalize_ident, LimboError, Result};
+use crate::{util::normalize_ident, Result};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
 use log::trace;
-use sqlite3_parser::ast::{Expr, IndexedColumn, Literal, TableOptions};
+use sqlite3_parser::ast::{Expr, Literal, TableOptions};
 use sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, ResultColumn, Stmt},
     lexer::sql::Parser,
@@ -19,7 +19,7 @@ pub struct Schema {
 impl Schema {
     pub fn new() -> Self {
         let mut tables: HashMap<String, Rc<BTreeTable>> = HashMap::new();
-        let mut indexes: HashMap<String, Vec<Rc<Index>>> = HashMap::new();
+        let indexes: HashMap<String, Vec<Rc<Index>>> = HashMap::new();
         tables.insert("sqlite_schema".to_string(), Rc::new(sqlite_schema_table()));
         Self { tables, indexes }
     }
