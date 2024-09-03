@@ -6,7 +6,7 @@ use crate::{Buffer, Result};
 use log::trace;
 use sieve_cache::SieveCache;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
@@ -267,7 +267,7 @@ pub struct Pager {
     buffer_pool: Rc<BufferPool>,
     /// I/O interface for input/output operations.
     pub io: Arc<dyn crate::io::IO>,
-    dirty_pages: Rc<RefCell<Vec<Rc<RefCell<Page>>>>>,
+    dirty_pages: Rc<RefCell<HashSet<usize>>>,
     db_header: Rc<RefCell<DatabaseHeader>>,
 }
 
@@ -294,7 +294,7 @@ impl Pager {
             buffer_pool,
             page_cache,
             io,
-            dirty_pages: Rc::new(RefCell::new(Vec::new())),
+            dirty_pages: Rc::new(RefCell::new(HashSet::new())),
             db_header: db_header_ref.clone(),
         })
     }
@@ -347,10 +347,10 @@ impl Pager {
         self.page_cache.borrow_mut().resize(capacity);
     }
 
-    pub fn add_dirty(&self, page: Rc<RefCell<Page>>) {
+    pub fn add_dirty(&self, page_id: usize) {
         // TODO: cehck duplicates?
         let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
-        dirty_pages.push(page);
+        dirty_pages.insert(page_id);
     }
 
     pub fn cacheflush(&self) -> Result<()> {
@@ -358,13 +358,12 @@ impl Pager {
         if dirty_pages.len() == 0 {
             return Ok(());
         }
-        loop {
-            if dirty_pages.len() == 0 {
-                break;
-            }
-            let page = dirty_pages.pop().unwrap();
+        for page_id in dirty_pages.iter() {
+            let mut cache = self.page_cache.borrow_mut();
+            let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
             sqlite3_ondisk::begin_write_btree_page(self, &page)?;
         }
+        dirty_pages.clear();
         self.io.run_once()?;
         Ok(())
     }
@@ -382,7 +381,7 @@ impl Pager {
             let first_page_ref = self.read_page(1).unwrap();
             let first_page = RefCell::borrow_mut(&first_page_ref);
             first_page.set_dirty();
-            self.add_dirty(first_page_ref.clone());
+            self.add_dirty(1);
 
             let contents = first_page.contents.write().unwrap();
             let contents = contents.as_ref().unwrap();
@@ -392,20 +391,29 @@ impl Pager {
         let page_ref = Rc::new(RefCell::new(Page::new(0)));
         {
             // setup page and add to cache
-            self.add_dirty(page_ref.clone());
             let mut page = RefCell::borrow_mut(&page_ref);
-            page.set_dirty();
             page.id = header.database_size as usize;
+            page.set_dirty();
+            self.add_dirty(page.id);
             let buffer = self.buffer_pool.get();
             let bp = self.buffer_pool.clone();
             let drop_fn = Rc::new(move |buf| {
                 bp.put(buf);
             });
             let buffer = Rc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
-            page.contents = RwLock::new(Some(PageContent { offset: 0, buffer }));
+            page.contents = RwLock::new(Some(PageContent {
+                offset: 0,
+                buffer,
+                overflow_cells: Vec::new(),
+            }));
             let mut cache = RefCell::borrow_mut(&self.page_cache);
             cache.insert(page.id, page_ref.clone());
         }
         Ok(page_ref)
+    }
+
+    pub fn put_page(&self, id: usize, page: Rc<RefCell<Page>>) {
+        let mut cache = RefCell::borrow_mut(&self.page_cache);
+        cache.insert(id, page);
     }
 }
