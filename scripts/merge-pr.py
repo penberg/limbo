@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 #
-# A script to merge Limbo pull requests with a nice merge commit.
+# Copyright 2024 the Limbo authors. All rights reserved. MIT license.
+#
+# A script to merge a pull requests with a nice merge commit.
 #
 # Requirements:
 #
@@ -14,22 +16,57 @@ import os
 import subprocess
 import tempfile
 
+
 def run_command(command):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     output, error = process.communicate()
     return output.decode('utf-8').strip(), error.decode('utf-8').strip(), process.returncode
 
-def get_pr_info(repo, pr_number):
+
+def get_user_email(g, username):
+    try:
+        user = g.get_user(username)
+        if user.email:
+            return user.email
+        # If public email is not available, try to get from events
+        events = user.get_events()
+        for event in events:
+            if event.type == "PushEvent" and event.payload.get("commits"):
+                for commit in event.payload["commits"]:
+                    if commit.get("author") and commit["author"].get("email"):
+                        return commit["author"]["email"]
+    except Exception as e:
+        print(f"Error fetching email for user {username}: {str(e)}")
+
+    # If we couldn't find an email, return a noreply address
+    return f"{username}@users.noreply.github.com"
+
+
+def get_pr_info(g, repo, pr_number):
     pr = repo.get_pull(int(pr_number))
     author = pr.user
     author_name = author.name if author.name else author.login
+
+    # Get the list of users who reviewed the PR
+    reviewed_by = []
+    reviews = pr.get_reviews()
+    for review in reviews:
+        if review.state == 'APPROVED':
+            reviewer = review.user
+            reviewer_name = reviewer.name if reviewer.name else reviewer.login
+            reviewer_email = get_user_email(g, reviewer.login)
+            reviewed_by.append(f"{reviewer_name} <{reviewer_email}>")
+
     return {
         'number': pr.number,
         'title': pr.title,
         'author': author_name,
         'head': pr.head.ref,
-        'body': pr.body.strip() if pr.body else ''
+        'body': pr.body.strip() if pr.body else '',
+        'reviewed_by': reviewed_by
     }
+
 
 def merge_pr(pr_number):
     # GitHub authentication
@@ -44,10 +81,17 @@ def merge_pr(pr_number):
     repo = g.get_repo(repo_name)
 
     # Get PR information
-    pr_info = get_pr_info(repo, pr_number)
+    pr_info = get_pr_info(g, repo, pr_number)
 
     # Format commit message
-    commit_message = f"Merge '{pr_info['title']}' from {pr_info['author']}\n\n{pr_info['body']}\n\nCloses #{pr_info['number']}"
+    commit_message = f"Merge '{pr_info['title']}' from {pr_info['author']}\n\n{pr_info['body']}\n"
+
+    # Add Reviewed-by lines
+    for approver in pr_info['reviewed_by']:
+        commit_message += f"\nReviewed-by: {approver}"
+
+    # Add Closes line
+    commit_message += f"\n\nCloses #{pr_info['number']}"
 
     # Create a temporary file for the commit message
     with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_file:
@@ -83,6 +127,7 @@ def merge_pr(pr_number):
 
     print("Pull request merged successfully!")
     print(f"Merge commit message:\n{commit_message}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
