@@ -3,12 +3,13 @@
 [workspace]
 resolver = "2"
 members = [
-  "bindings/python",
-  "bindings/wasm",
-  "cli",
-  "sqlite3",
-  "core",
-  "simulator",
+    "bindings/python",
+    "bindings/wasm",
+    "cli",
+    "sqlite3",
+    "core",
+    "simulator",
+    "core_tester",
 ]
 exclude = ["perf/latency/limbo"]
 
@@ -28,7 +29,12 @@ ci = "github"
 # The installers to generate for each app
 installers = ["shell", "powershell"]
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
 # Which actions to run on pull requests
 pr-run-mode = "plan"
 # Path that installers should place binaries in
