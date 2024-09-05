@@ -15,6 +15,7 @@ from github import Github
 import os
 import subprocess
 import tempfile
+import textwrap
 
 
 def run_command(command):
@@ -68,6 +69,10 @@ def get_pr_info(g, repo, pr_number):
     }
 
 
+def wrap_text(text, width=72):
+    return '\n'.join(textwrap.wrap(text, width=width))
+
+
 def merge_pr(pr_number):
     # GitHub authentication
     token = os.getenv('GITHUB_TOKEN')
@@ -84,7 +89,10 @@ def merge_pr(pr_number):
     pr_info = get_pr_info(g, repo, pr_number)
 
     # Format commit message
-    commit_message = f"Merge '{pr_info['title']}' from {pr_info['author']}\n\n{pr_info['body']}\n"
+    commit_title = f"Merge '{pr_info['title']}' from {pr_info['author']}"
+    commit_body = wrap_text(pr_info['body'])
+
+    commit_message = f"{commit_title}\n\n{commit_body}\n"
 
     # Add Reviewed-by lines
     for approver in pr_info['reviewed_by']:
