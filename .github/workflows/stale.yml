@@ -1,0 +1,20 @@
+name: Close stale pull requests
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs every day at midnight UTC
+
+permissions:
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close stale pull requests
+        uses: actions/stale@v6
+        with:
+          stale-pr-message: 'This pull request has been marked as stale due to inactivity. It will be closed in 7 days if no further activity occurs.'
+          close-pr-message: 'This pull request has been closed due to inactivity. Please feel free to reopen it if you have further updates.'
+          days-before-stale: 30
+          days-before-close: 7
