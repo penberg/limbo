@@ -1,4 +1,4 @@
-name: Close stale pull requests
+name: Stale
 
 on:
   schedule:
