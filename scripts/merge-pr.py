@@ -70,7 +70,18 @@ def get_pr_info(g, repo, pr_number):
 
 
 def wrap_text(text, width=72):
-    return '\n'.join(textwrap.wrap(text, width=width))
+    lines = text.split('\n')
+    wrapped_lines = []
+    in_code_block = False
+    for line in lines:
+        if line.strip().startswith('```'):
+            in_code_block = not in_code_block
+            wrapped_lines.append(line)
+        elif in_code_block:
+            wrapped_lines.append(line)
+        else:
+            wrapped_lines.extend(textwrap.wrap(line, width=width))
+    return '\n'.join(wrapped_lines)
 
 
 def merge_pr(pr_number):
