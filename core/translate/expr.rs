@@ -454,7 +454,8 @@ pub fn translate_condition_expr(
                         cursor_hint,
                     )?;
                     program.emit_insn(Insn::Function {
-                        // Currently only constant values for the first arg are supported
+                        // Only constant patterns for LIKE are supported currently, so this
+                        // is always 1
                         constant_mask: 1,
                         func: crate::vdbe::Func::Scalar(ScalarFunc::Like),
                         start_reg: pattern_reg,
