@@ -533,12 +533,13 @@ pub fn insn_to_str(
                 "".to_string(),
             ),
             Insn::Function {
+                constant_mask,
                 start_reg,
                 dest,
                 func,
             } => (
                 "Function",
-                1,
+                *constant_mask,
                 *start_reg as i32,
                 *dest as i32,
                 OwnedValue::Text(Rc::new(func.to_string())),

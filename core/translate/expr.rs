@@ -454,6 +454,7 @@ pub fn translate_condition_expr(
                         cursor_hint,
                     )?;
                     program.emit_insn(Insn::Function {
+                        constant_mask: 0,
                         func: crate::vdbe::Func::Scalar(ScalarFunc::Like),
                         start_reg: pattern_reg,
                         dest: cur_reg,
@@ -655,6 +656,7 @@ pub fn translate_expr(
                         let regs = program.alloc_register();
                         translate_expr(program, referenced_tables, &args[0], regs, cursor_hint)?;
                         program.emit_insn(Insn::Function {
+                            constant_mask: 0,
                             start_reg: regs,
                             dest: target_register,
                             func: crate::vdbe::Func::Json(j),
@@ -673,6 +675,7 @@ pub fn translate_expr(
                             }
 
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -734,6 +737,7 @@ pub fn translate_expr(
                                 translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
                             }
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -811,6 +815,8 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
+                                // Currently only constant values for the first arg are supported
+                                constant_mask: 1,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -847,6 +853,7 @@ pub fn translate_expr(
                                 cursor_hint,
                             )?;
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: regs,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -862,6 +869,7 @@ pub fn translate_expr(
                             }
                             let regs = program.alloc_register();
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: regs,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -883,6 +891,7 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Date),
@@ -934,6 +943,7 @@ pub fn translate_expr(
                             }
 
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: str_reg,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Substring),
@@ -958,6 +968,7 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -979,6 +990,7 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Time),
@@ -1012,6 +1024,7 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
@@ -1045,6 +1058,7 @@ pub fn translate_expr(
                             }
 
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Min),
@@ -1078,6 +1092,7 @@ pub fn translate_expr(
                             }
 
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(ScalarFunc::Max),
@@ -1114,6 +1129,7 @@ pub fn translate_expr(
                                 cursor_hint,
                             )?;
                             program.emit_insn(Insn::Function {
+                                constant_mask: 0,
                                 start_reg: func_reg,
                                 dest: target_register,
                                 func: crate::vdbe::Func::Scalar(srf),
