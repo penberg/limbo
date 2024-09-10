@@ -454,7 +454,8 @@ pub fn translate_condition_expr(
                         cursor_hint,
                     )?;
                     program.emit_insn(Insn::Function {
-                        constant_mask: 0,
+                        // Currently only constant values for the first arg are supported
+                        constant_mask: 1,
                         func: crate::vdbe::Func::Scalar(ScalarFunc::Like),
                         start_reg: pattern_reg,
                         dest: cur_reg,
@@ -815,7 +816,6 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
-                                // Currently only constant values for the first arg are supported
                                 constant_mask: 1,
                                 start_reg: target_register + 1,
                                 dest: target_register,
