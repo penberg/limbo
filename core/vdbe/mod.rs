@@ -1724,7 +1724,8 @@ fn exec_like(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, te
             }
         }
     } else {
-        construct_like_regex(pattern).is_match(text)
+        let re = construct_like_regex(pattern);
+        re.is_match(text)
     }
 }
 
