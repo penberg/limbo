@@ -2378,5 +2378,9 @@ mod tests {
         let start_value = OwnedValue::Integer(10);
         let length_value = OwnedValue::Null;
         let expected_val = OwnedValue::Text(Rc::new(String::from("")));
+        assert_eq!(
+            exec_substring(&str_value, &start_value, &length_value),
+            expected_val
+        );
     }
 }
