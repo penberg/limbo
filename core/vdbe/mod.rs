@@ -1208,11 +1208,11 @@ impl Program {
                             start_reg,
                             state.registers.len()
                         );
-                        let pattern = state.registers[start_reg].clone();
-                        let text = state.registers[start_reg + 1].clone();
+                        let pattern = &state.registers[start_reg];
+                        let text = &state.registers[start_reg + 1];
                         let result = match (pattern, text) {
                             (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
-                                OwnedValue::Integer(exec_like(&pattern, &text) as i64)
+                                OwnedValue::Integer(exec_like(pattern, text) as i64)
                             }
                             _ => {
                                 unreachable!("Like on non-text registers");
