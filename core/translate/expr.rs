@@ -816,6 +816,8 @@ pub fn translate_expr(
                                 }
                             }
                             program.emit_insn(Insn::Function {
+                                // Only constant patterns for LIKE are supported currently, so this
+                                // is always 1
                                 constant_mask: 1,
                                 start_reg: target_register + 1,
                                 dest: target_register,
