@@ -16,7 +16,7 @@ import os
 import subprocess
 import tempfile
 import textwrap
-
+import json
 
 def run_command(command):
     process = subprocess.Popen(
@@ -24,25 +24,35 @@ def run_command(command):
     output, error = process.communicate()
     return output.decode('utf-8').strip(), error.decode('utf-8').strip(), process.returncode
 
+def load_user_mapping(file_path='.github.json'):
+    if os.path.exists(file_path):
+        with open(file_path, 'r') as f:
+            return json.load(f)
+    return {}
+
+user_mapping = load_user_mapping()
 
 def get_user_email(g, username):
+    if username in user_mapping:
+        return f"{user_mapping[username]['name']} <{user_mapping[username]['email']}>"
+
     try:
         user = g.get_user(username)
+        name = user.name if user.name else username
         if user.email:
-            return user.email
+            return f"{name} <{user.email}>"
         # If public email is not available, try to get from events
         events = user.get_events()
         for event in events:
             if event.type == "PushEvent" and event.payload.get("commits"):
                 for commit in event.payload["commits"]:
                     if commit.get("author") and commit["author"].get("email"):
-                        return commit["author"]["email"]
+                        return f"{name} <{commit['author']['email']}>"
     except Exception as e:
         print(f"Error fetching email for user {username}: {str(e)}")
 
     # If we couldn't find an email, return a noreply address
-    return f"{username}@users.noreply.github.com"
-
+    return f"{username} <{username}@users.noreply.github.com>"
 
 def get_pr_info(g, repo, pr_number):
     pr = repo.get_pull(int(pr_number))
@@ -55,9 +65,7 @@ def get_pr_info(g, repo, pr_number):
     for review in reviews:
         if review.state == 'APPROVED':
             reviewer = review.user
-            reviewer_name = reviewer.name if reviewer.name else reviewer.login
-            reviewer_email = get_user_email(g, reviewer.login)
-            reviewed_by.append(f"{reviewer_name} <{reviewer_email}>")
+            reviewed_by.append(get_user_email(g, reviewer.login))
 
     return {
         'number': pr.number,
@@ -67,7 +75,6 @@ def get_pr_info(g, repo, pr_number):
         'body': pr.body.strip() if pr.body else '',
         'reviewed_by': reviewed_by
     }
-
 
 def wrap_text(text, width=72):
     lines = text.split('\n')
@@ -82,7 +89,6 @@ def wrap_text(text, width=72):
         else:
             wrapped_lines.extend(textwrap.wrap(line, width=width))
     return '\n'.join(wrapped_lines)
-
 
 def merge_pr(pr_number):
     # GitHub authentication
@@ -146,7 +152,6 @@ def merge_pr(pr_number):
 
     print("Pull request merged successfully!")
     print(f"Merge commit message:\n{commit_message}")
-
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
