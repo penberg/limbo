@@ -74,12 +74,12 @@ pub fn translate_condition_expr(
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = program.alloc_register();
-            let rhs_reg = program.alloc_register();
             let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, cursor_hint);
             match lhs.as_ref() {
                 ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                 _ => {}
             }
+            let rhs_reg = program.alloc_register();
             let _ = translate_expr(program, Some(referenced_tables), rhs, rhs_reg, cursor_hint);
             match rhs.as_ref() {
                 ast::Expr::Literal(_) => program.mark_last_insn_constant(),
