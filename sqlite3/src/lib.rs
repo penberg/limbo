@@ -883,7 +883,7 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
         "datatype mismatch",                    // SQLITE_MISMATCH
         "bad parameter or other API misuse",    // SQLITE_MISUSE
         #[cfg(feature = "lfs")]
-        "",      // SQLITE_NOLFS
+        "",     // SQLITE_NOLFS
         #[cfg(not(feature = "lfs"))]
         "large file support is disabled", // SQLITE_NOLFS
         "authorization denied",                 // SQLITE_AUTH

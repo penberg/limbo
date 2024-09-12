@@ -302,10 +302,10 @@ pub enum Insn {
 
     // Function
     Function {
-        // constant_mask: i32, // P1, not used for now
-        start_reg: usize, // P2, start of argument registers
-        dest: usize,      // P3
-        func: Func,       // P4
+        constant_mask: i32, // P1
+        start_reg: usize,   // P2, start of argument registers
+        dest: usize,        // P3
+        func: Func,         // P4
     },
 
     InitCoroutine {
@@ -383,6 +383,7 @@ pub struct ProgramState {
     cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
     ended_coroutine: bool, // flag to notify yield coroutine finished
+    regex_cache: HashMap<String, Regex>,
 }
 
 impl ProgramState {
@@ -395,6 +396,7 @@ impl ProgramState {
             cursors,
             registers,
             ended_coroutine: false,
+            regex_cache: HashMap::new(),
         }
     }
 
@@ -1173,6 +1175,7 @@ impl Program {
                     }
                 }
                 Insn::Function {
+                    constant_mask,
                     func,
                     start_reg,
                     dest,
@@ -1208,11 +1211,16 @@ impl Program {
                             start_reg,
                             state.registers.len()
                         );
-                        let pattern = state.registers[start_reg].clone();
-                        let text = state.registers[start_reg + 1].clone();
+                        let pattern = &state.registers[start_reg];
+                        let text = &state.registers[start_reg + 1];
                         let result = match (pattern, text) {
                             (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
-                                OwnedValue::Integer(exec_like(&pattern, &text) as i64)
+                                let cache = if *constant_mask > 0 {
+                                    Some(&mut state.regex_cache)
+                                } else {
+                                    None
+                                };
+                                OwnedValue::Integer(exec_like(cache, pattern, text) as i64)
                             }
                             _ => {
                                 unreachable!("Like on non-text registers");
@@ -1699,10 +1707,26 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
     OwnedValue::Text(Rc::new(result))
 }
 
-// Implements LIKE pattern matching.
-fn exec_like(pattern: &str, text: &str) -> bool {
-    let re = Regex::new(&pattern.replace('%', ".*").replace('_', ".").to_string()).unwrap();
-    re.is_match(text)
+fn construct_like_regex(pattern: &str) -> Regex {
+    Regex::new(&pattern.replace('%', ".*").replace('_', ".").to_string()).unwrap()
+}
+
+// Implements LIKE pattern matching. Caches the constructed regex if a cache is provided
+fn exec_like(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, text: &str) -> bool {
+    if let Some(cache) = regex_cache {
+        match cache.get(pattern) {
+            Some(re) => re.is_match(text),
+            None => {
+                let re = construct_like_regex(pattern);
+                let res = re.is_match(text);
+                cache.insert(pattern.to_string(), re);
+                res
+            }
+        }
+    } else {
+        let re = construct_like_regex(pattern);
+        re.is_match(text)
+    }
 }
 
 fn exec_minmax<'a>(
@@ -1876,7 +1900,7 @@ mod tests {
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
-    use std::{cell::Ref, rc::Rc};
+    use std::{cell::Ref, collections::HashMap, rc::Rc};
 
     mock! {
         Cursor {
@@ -2224,12 +2248,29 @@ mod tests {
     }
 
     #[test]
-    fn test_like() {
-        assert!(exec_like("a%", "aaaa"));
-        assert!(exec_like("%a%a", "aaaa"));
-        assert!(exec_like("%a.a", "aaaa"));
-        assert!(exec_like("a.a%", "aaaa"));
-        assert!(!exec_like("%a.ab", "aaaa"));
+    fn test_like_no_cache() {
+        assert!(exec_like(None, "a%", "aaaa"));
+        assert!(exec_like(None, "%a%a", "aaaa"));
+        assert!(exec_like(None, "%a.a", "aaaa"));
+        assert!(exec_like(None, "a.a%", "aaaa"));
+        assert!(!exec_like(None, "%a.ab", "aaaa"));
+    }
+
+    #[test]
+    fn test_like_with_cache() {
+        let mut cache = HashMap::new();
+        assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
+        assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
+        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
+
+        // again after values have been cached
+        assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
+        assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
+        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
     }
 
     #[test]
