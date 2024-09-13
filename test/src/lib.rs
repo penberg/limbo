@@ -1,31 +1,9 @@
-use clap::{Parser, ValueEnum};
-use limbo_core::{Database, RowResult, Value};
-use rustyline::{error::ReadlineError, DefaultEditor};
-use std::borrow::Borrow;
-use std::fmt::format;
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-
-#[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
-enum OutputMode {
-    Raw,
-    Pretty,
-}
-
-impl std::fmt::Display for OutputMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use limbo_core::{Database, RowResult, Value};
+    use rusqlite::Connection;
+    use std::env::current_dir;
+    use std::sync::Arc;
     #[test]
     fn test_sequential_write() -> anyhow::Result<()> {
         env_logger::init();
@@ -33,17 +11,17 @@ mod tests {
 
         let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new()?);
         dbg!(path);
+        let mut path = current_dir()?;
+        path.push("test.db");
+        {
+            if path.exists() {
+                std::fs::remove_file(&path)?;
+            }
+            let connection = Connection::open(&path)?;
+            connection.execute("CREATE TABLE test (x INTEGER PRIMARY KEY);", ())?;
+        }
 
-        // run reset command
-        let result = Command::new("./reset.sh")
-            .output()
-            .expect("failed to execute process");
-        println!("finished creating db {:?}", result.stdout);
-        println!(
-            "finished creating db {:?}",
-            String::from_utf8(result.stderr)
-        );
-        let db = Database::open_file(io.clone(), path)?;
+        let db = Database::open_file(io.clone(), path.to_str().unwrap())?;
         let conn = db.connect();
 
         let list_query = "SELECT * FROM test";
