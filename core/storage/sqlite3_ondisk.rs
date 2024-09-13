@@ -357,7 +357,7 @@ impl PageContent {
         }
     }
 
-    pub fn cell_get(&self, idx: usize) -> Result<BTreeCell> {
+    pub fn cell_get(&self, idx: usize, pager: Rc<Pager>) -> Result<BTreeCell> {
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
@@ -371,7 +371,7 @@ impl PageContent {
         let cell_pointer = cell_start + (idx * 2);
         let cell_pointer = self.read_u16(cell_pointer) as usize;
 
-        read_btree_cell(buf, &self.page_type(), cell_pointer)
+        read_btree_cell(buf, &self.page_type(), cell_pointer, pager)
     }
 
     pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
@@ -548,7 +548,12 @@ pub struct IndexLeafCell {
     pub first_overflow_page: Option<u32>,
 }
 
-pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<BTreeCell> {
+pub fn read_btree_cell(
+    page: &[u8],
+    page_type: &PageType,
+    pos: usize,
+    pager: Rc<Pager>,
+) -> Result<BTreeCell> {
     match page_type {
         PageType::IndexInterior => {
             let mut pos = pos;
@@ -557,7 +562,8 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             pos += 4;
             let (payload_size, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+            let (payload, first_overflow_page) =
+                read_payload(&page[pos..], payload_size as usize, pager);
             Ok(BTreeCell::IndexInteriorCell(IndexInteriorCell {
                 left_child_page,
                 payload,
@@ -579,7 +585,8 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             let mut pos = pos;
             let (payload_size, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+            let (payload, first_overflow_page) =
+                read_payload(&page[pos..], payload_size as usize, pager);
             Ok(BTreeCell::IndexLeafCell(IndexLeafCell {
                 payload,
                 first_overflow_page,
@@ -591,7 +598,8 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             pos += nr;
             let (rowid, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+            let (payload, first_overflow_page) =
+                read_payload(&page[pos..], payload_size as usize, pager);
             Ok(BTreeCell::TableLeafCell(TableLeafCell {
                 _rowid: rowid,
                 _payload: payload,
@@ -603,20 +611,47 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
 
 /// read_payload takes in the unread bytearray with the payload size
 /// and returns the payload on the page, and optionally the first overflow page number.
-fn read_payload(unread: &[u8], payload_size: usize) -> (Vec<u8>, Option<u32>) {
-    let page_len = unread.len();
-    if payload_size <= page_len {
+fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8>, Option<u32>) {
+    let cell_len = unread.len();
+    if payload_size <= cell_len {
         // fit within 1 page
         (unread[..payload_size].to_vec(), None)
     } else {
         // overflow
         let first_overflow_page = u32::from_be_bytes([
-            unread[page_len - 4],
-            unread[page_len - 3],
-            unread[page_len - 2],
-            unread[page_len - 1],
+            unread[cell_len - 4],
+            unread[cell_len - 3],
+            unread[cell_len - 2],
+            unread[cell_len - 1],
         ]);
-        (unread[..page_len - 4].to_vec(), Some(first_overflow_page))
+        let usable_size = pager.usable_size();
+        let mut next_overflow = first_overflow_page;
+        let mut payload = unread[..cell_len - 4].to_vec();
+        let mut left_to_read = payload_size - (cell_len - 4); // minus four because last for bytes of a payload cell are the overflow pointer
+        while next_overflow != 0 {
+            assert!(left_to_read > 0);
+            let page;
+            loop {
+                let page_ref = pager.read_page(next_overflow as usize);
+                if let Ok(p) = page_ref {
+                    page = p;
+                    break;
+                }
+            }
+            let page = page.borrow();
+            let contents = page.contents.write().unwrap();
+            let contents = contents.as_ref().unwrap();
+
+            let to_read = left_to_read.min(usable_size - 4);
+            let buf = contents.as_ptr();
+            payload.extend_from_slice(&buf[4..4 + to_read]);
+
+            next_overflow = contents.read_u32(0);
+            left_to_read -= to_read;
+        }
+        assert_eq!(left_to_read, 0);
+
+        (payload, Some(first_overflow_page))
     }
 }
 
@@ -761,7 +796,11 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::String(n) => {
             if buf.len() < n {
-                crate::bail_corrupt_error!("Invalid String value");
+                crate::bail_corrupt_error!(
+                    "Invalid String value, length {} < expected length {}",
+                    buf.len(),
+                    n
+                );
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
