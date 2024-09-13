@@ -9,10 +9,9 @@ use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
 use crate::Result;
 
 use std::cell::{Ref, RefCell};
-use std::mem::swap;
 use std::rc::Rc;
 
-use super::sqlite3_ondisk::OverflowCell;
+use super::sqlite3_ondisk::{write_varint_to_vec, OverflowCell};
 
 /*
     These are offsets of fields in the header of a b-tree page.
@@ -323,7 +322,7 @@ impl BTreeCursor {
     fn insert_to_page(
         &mut self,
         key: &OwnedValue,
-        _record: &OwnedRecord,
+        record: &OwnedRecord,
     ) -> Result<CursorResult<()>> {
         let page_ref = self.get_page()?;
         let int_key = match key {
@@ -331,7 +330,7 @@ impl BTreeCursor {
             _ => unreachable!("btree tables are indexed by integers!"),
         };
 
-        let cell_idx = {
+        let (cell_idx, page_type) = {
             let page = RefCell::borrow(&page_ref);
             if page.is_locked() {
                 return Ok(CursorResult::IO);
@@ -345,50 +344,15 @@ impl BTreeCursor {
             assert!(matches!(page.page_type(), PageType::TableLeaf));
 
             // find cell
-            find_cell(page, int_key)
+            (find_cell(page, int_key), page.page_type())
         };
 
         // TODO: if overwrite drop cell
 
         // insert cell
+
         let mut cell_payload: Vec<u8> = Vec::new();
-
-        {
-            // Data len will be prepended later
-            // Key
-            let mut key_varint: Vec<u8> = Vec::new();
-            key_varint.extend(std::iter::repeat(0).take(9));
-            let n = write_varint(&mut key_varint.as_mut_slice()[0..9], int_key);
-            write_varint(&mut key_varint, int_key);
-            key_varint.truncate(n);
-            cell_payload.extend_from_slice(&key_varint);
-        }
-
-        // Data payload
-        let payload_size_before_record = cell_payload.len();
-        _record.serialize(&mut cell_payload);
-        let header_size = cell_payload.len() - payload_size_before_record;
-
-        {
-            // Data len
-            let mut data_len_varint: Vec<u8> = Vec::new();
-            data_len_varint.extend(std::iter::repeat(0).take(9));
-            let n = write_varint(
-                &mut data_len_varint.as_mut_slice()[0..9],
-                header_size as u64,
-            );
-            data_len_varint.truncate(n);
-            cell_payload.splice(0..0, data_len_varint.iter().cloned());
-        }
-
-        let usable_space = {
-            let db_header = RefCell::borrow(&self.database_header);
-            (db_header.page_size - db_header.unused_space as u16) as usize
-        };
-        assert!(
-            cell_payload.len() <= usable_space - 100, /* 100 bytes minus for precaution to remember */
-            "need to implemented overflow pages, too big to even add to a an empty page"
-        );
+        self.fill_cell_payload(page_type, Some(int_key), &mut cell_payload, record);
 
         // insert
         let overflow = {
@@ -1019,6 +983,51 @@ impl BTreeCursor {
         let mem_page = self.page.borrow();
         let mem_page = mem_page.as_ref().unwrap();
         mem_page.clone()
+    }
+
+    fn fill_cell_payload(
+        &self,
+        page_type: PageType,
+        int_key: Option<u64>,
+        cell_payload: &mut Vec<u8>,
+        record: &OwnedRecord,
+    ) {
+        assert!(matches!(
+            page_type,
+            PageType::TableLeaf | PageType::IndexLeaf
+        ));
+        // TODO: make record raw from start, having to serialize is not good
+        let mut record_buf = Vec::new();
+        record.serialize(&mut record_buf);
+
+        // fill in header
+        if matches!(page_type, PageType::TableLeaf) {
+            let int_key = int_key.unwrap();
+            write_varint_to_vec(record_buf.len() as u64, cell_payload);
+            write_varint_to_vec(int_key, cell_payload);
+        } else {
+            write_varint_to_vec(record_buf.len() as u64, cell_payload);
+        }
+
+        if record_buf.len() <= self.max_local(page_type) {
+            // enough allowed space to fit inside a btree page
+            cell_payload.extend_from_slice(record_buf.as_slice());
+            return;
+        }
+        todo!("implement overflow page");
+    }
+
+    fn max_local(&self, page_type: PageType) -> usize {
+        let usable_space = {
+            let db_header = RefCell::borrow(&self.database_header);
+            (db_header.page_size - db_header.unused_space as u16) as usize
+        };
+        match page_type {
+            PageType::IndexInterior | PageType::TableInterior => {
+                (usable_space - 12) * 64 / 255 - 23
+            }
+            PageType::IndexLeaf | PageType::TableLeaf => usable_space - 35,
+        }
     }
 }
 

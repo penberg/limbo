@@ -828,6 +828,15 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     n
 }
 
+pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
+    let mut varint: Vec<u8> = Vec::new();
+    varint.extend(std::iter::repeat(0).take(9));
+    let n = write_varint(&mut varint.as_mut_slice()[0..9], value);
+    write_varint(&mut varint, value);
+    varint.truncate(n);
+    payload.extend_from_slice(&varint);
+}
+
 pub fn begin_read_wal_header(io: Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
