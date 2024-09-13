@@ -389,6 +389,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 
 [[package]]
+name = "core_tester"
+version = "0.0.4"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs",
+ "env_logger 0.10.2",
+ "limbo_core",
+ "rstest",
+ "rusqlite",
+ "rustyline",
+]
+
+[[package]]
 name = "cpp_demangle"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

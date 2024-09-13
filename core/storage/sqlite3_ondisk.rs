@@ -260,10 +260,17 @@ impl TryFrom<u8> for PageType {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct OverflowCell {
+    pub index: usize,
+    pub payload: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub struct PageContent {
     pub offset: usize,
     pub buffer: Rc<RefCell<Buffer>>,
+    pub overflow_cells: Vec<OverflowCell>,
 }
 
 impl Clone for PageContent {
@@ -271,6 +278,7 @@ impl Clone for PageContent {
         Self {
             offset: self.offset,
             buffer: Rc::new(RefCell::new((*self.buffer.borrow()).clone())),
+            overflow_cells: self.overflow_cells.clone(),
         }
     }
 }
@@ -294,7 +302,7 @@ impl PageContent {
         buf[pos]
     }
 
-    fn read_u16(&self, pos: usize) -> u16 {
+    pub fn read_u16(&self, pos: usize) -> u16 {
         let buf = self.as_ptr();
         u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
     }
@@ -376,6 +384,7 @@ impl PageContent {
         (self.offset + cell_start, self.cell_count() * 2)
     }
 
+    /* Get region of a cell's payload */
     pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {
         let buf = self.as_ptr();
         let ncells = self.cell_count();
@@ -465,6 +474,7 @@ fn finish_read_page(
     let inner = PageContent {
         offset: pos,
         buffer: buffer_ref.clone(),
+        overflow_cells: Vec::new(),
     };
     {
         let page = page.borrow_mut();
