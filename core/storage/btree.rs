@@ -118,7 +118,13 @@ impl BTreeCursor {
                     },
                 }
             }
-            let cell = page.cell_get(mem_page.cell_idx(), self.pager.clone())?;
+            let cell = page.cell_get(
+                mem_page.cell_idx(),
+                self.pager.clone(),
+                self.max_local(page.page_type()),
+                self.min_local(page.page_type()),
+                self.usable_space(),
+            )?;
             match &cell {
                 BTreeCell::TableInteriorCell(TableInteriorCell {
                     _left_child_page,
@@ -167,7 +173,13 @@ impl BTreeCursor {
         let page = page.as_ref().unwrap();
 
         for cell_idx in 0..page.cell_count() {
-            match &page.cell_get(cell_idx, self.pager.clone())? {
+            match &page.cell_get(
+                cell_idx,
+                self.pager.clone(),
+                self.max_local(page.page_type()),
+                self.min_local(page.page_type()),
+                self.usable_space(),
+            )? {
                 BTreeCell::TableLeafCell(TableLeafCell {
                     _rowid: cell_rowid,
                     _payload: p,
@@ -271,7 +283,13 @@ impl BTreeCursor {
 
             let mut found_cell = false;
             for cell_idx in 0..page.cell_count() {
-                match &page.cell_get(cell_idx, self.pager.clone())? {
+                match &page.cell_get(
+                    cell_idx,
+                    self.pager.clone(),
+                    self.max_local(page.page_type()),
+                    self.min_local(page.page_type()),
+                    self.usable_space(),
+                )? {
                     BTreeCell::TableInteriorCell(TableInteriorCell {
                         _left_child_page,
                         _rowid,
@@ -471,7 +489,12 @@ impl BTreeCursor {
     }
 
     fn drop_cell(&mut self, page: &mut PageContent, cell_idx: usize) {
-        let (cell_start, cell_len) = page.cell_get_raw_region(cell_idx);
+        let (cell_start, cell_len) = page.cell_get_raw_region(
+            cell_idx,
+            self.max_local(page.page_type()),
+            self.min_local(page.page_type()),
+            self.usable_space(),
+        );
         self.free_cell_range(page, cell_start as u16, cell_len as u16);
         page.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, page.cell_count() as u16 - 1);
     }
@@ -535,7 +558,12 @@ impl BTreeCursor {
                 let mut scratch_cells: Vec<&[u8]> = Vec::new();
 
                 for cell_idx in 0..page_copy.cell_count() {
-                    let (start, len) = page_copy.cell_get_raw_region(cell_idx);
+                    let (start, len) = page_copy.cell_get_raw_region(
+                        cell_idx,
+                        self.max_local(page_copy.page_type()),
+                        self.min_local(page_copy.page_type()),
+                        self.usable_space(),
+                    );
                     let buf = page_copy.as_ptr();
                     scratch_cells.push(&buf[start..start + len]);
                 }
@@ -565,6 +593,7 @@ impl BTreeCursor {
                 let right_page = right_page.as_mut().unwrap();
                 {
                     let is_leaf = page.is_leaf();
+                    let page_type = page.page_type();
                     let mut new_pages = vec![page, right_page];
                     let new_pages_ids = vec![mem_page.page_idx, right_page_id];
                     trace!(
@@ -593,7 +622,15 @@ impl BTreeCursor {
                     // Right page pointer is u32 in right most pointer, and in cell is u32 too, so we can use a *u32 to hold where we want to change this value
                     let mut right_pointer = BTREE_HEADER_OFFSET_RIGHTMOST;
                     for cell_idx in 0..parent.cell_count() {
-                        let cell = parent.cell_get(cell_idx, self.pager.clone()).unwrap();
+                        let cell = parent
+                            .cell_get(
+                                cell_idx,
+                                self.pager.clone(),
+                                self.max_local(page_type.clone()),
+                                self.min_local(page_type.clone()),
+                                self.usable_space(),
+                            )
+                            .unwrap();
                         let found = match cell {
                             BTreeCell::TableInteriorCell(interior) => {
                                 interior._left_child_page as usize == mem_page.page_idx
@@ -601,7 +638,12 @@ impl BTreeCursor {
                             _ => unreachable!("Parent should always be a "),
                         };
                         if found {
-                            let (start, len) = parent.cell_get_raw_region(cell_idx);
+                            let (start, len) = parent.cell_get_raw_region(
+                                cell_idx,
+                                self.max_local(page_type.clone()),
+                                self.min_local(page_type.clone()),
+                                self.usable_space(),
+                            );
                             right_pointer = start;
                             break;
                         }
@@ -651,7 +693,13 @@ impl BTreeCursor {
                         for page in new_pages.iter_mut().take(new_pages_len - 1) {
                             assert!(page.cell_count() == 1);
                             let last_cell = page
-                                .cell_get(page.cell_count() - 1, self.pager.clone())
+                                .cell_get(
+                                    page.cell_count() - 1,
+                                    self.pager.clone(),
+                                    self.max_local(page.page_type()),
+                                    self.min_local(page.page_type()),
+                                    self.usable_space(),
+                                )
                                 .unwrap();
                             let last_cell_pointer = match last_cell {
                                 BTreeCell::TableInteriorCell(interior) => interior._left_child_page,
@@ -674,9 +722,17 @@ impl BTreeCursor {
                         assert!(page.cell_count() > 1);
                         let divider_cell_index = divider_cells_index[page_id_index];
                         let cell_payload = scratch_cells[divider_cell_index];
-                        let cell =
-                            read_btree_cell(cell_payload, &page.page_type(), 0, self.pager.clone())
-                                .unwrap();
+                        let cell = read_btree_cell(
+                            cell_payload,
+                            &page.page_type(),
+                            0,
+                            self.pager.clone(),
+                            self.max_local(page.page_type()),
+                            self.min_local(page.page_type()),
+                            self.usable_space(),
+                        )
+                        .unwrap();
+
                         if is_leaf {
                             // create a new divider cell and push
                             let key = match cell {
@@ -1116,7 +1172,16 @@ impl BTreeCursor {
         let mut cell_idx = 0;
         let cell_count = page.cell_count();
         while cell_idx < cell_count {
-            match page.cell_get(cell_idx, self.pager.clone()).unwrap() {
+            match page
+                .cell_get(
+                    cell_idx,
+                    self.pager.clone(),
+                    self.max_local(page.page_type()),
+                    self.min_local(page.page_type()),
+                    self.usable_space(),
+                )
+                .unwrap()
+            {
                 BTreeCell::TableLeafCell(cell) => {
                     if int_key <= cell._rowid {
                         break;
@@ -1292,7 +1357,13 @@ impl Cursor for BTreeCursor {
         if cell_idx >= page.cell_count() {
             Ok(CursorResult::Ok(false))
         } else {
-            let equals = match &page.cell_get(cell_idx, self.pager.clone())? {
+            let equals = match &page.cell_get(
+                cell_idx,
+                self.pager.clone(),
+                self.max_local(page.page_type()),
+                self.min_local(page.page_type()),
+                self.usable_space(),
+            )? {
                 BTreeCell::TableLeafCell(l) => l._rowid == int_key,
                 _ => unreachable!(),
             };
