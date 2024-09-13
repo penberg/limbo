@@ -36,8 +36,7 @@ impl TempDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use limbo_core::{Database, RowResult, Value};
-    use std::sync::Arc;
+    use limbo_core::{RowResult, Value};
 
     #[test]
     fn test_sequential_write() -> anyhow::Result<()> {
@@ -130,6 +129,9 @@ mod tests {
             }
         };
 
+        // this flush helped to review hex of test.db
+        conn.cacheflush()?;
+
         match conn.query(list_query) {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
@@ -146,7 +148,7 @@ mod tests {
                             _ => unreachable!(),
                         };
                         assert_eq!(1, id);
-                        assert_eq!(*text, huge_text);
+                        compare_string(&huge_text, text);
                     }
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
@@ -161,5 +163,22 @@ mod tests {
         }
         conn.cacheflush()?;
         Ok(())
+    }
+
+    fn compare_string(a: &String, b: &String) {
+        assert_eq!(a.len(), b.len(), "Strings are not equal in size!");
+        let a = a.as_bytes();
+        let b = b.as_bytes();
+
+        let len = a.len();
+        for i in 0..len {
+            if a[i] != b[i] {
+                println!(
+                    "Bytes differ \n\t at index: dec -> {} hex -> {:#02x} \n\t values dec -> {}!={} hex -> {:#02x}!={:#02x}",
+                    i, i, a[i], b[i], a[i], b[i]
+                );
+                break;
+            }
+        }
     }
 }
