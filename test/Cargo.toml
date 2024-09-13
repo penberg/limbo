@@ -7,9 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "Internal tester of write path"
 
-[[bin]]
-name = "core_tester"
-path = "src/main.rs"
+[lib]
+name = "test"
+path = "src/lib.rs"
 
 
 [dependencies]

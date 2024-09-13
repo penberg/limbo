@@ -39,7 +39,10 @@ mod tests {
             .output()
             .expect("failed to execute process");
         println!("finished creating db {:?}", result.stdout);
-        println!("finished creating db {:?}", result.stderr);
+        println!(
+            "finished creating db {:?}",
+            String::from_utf8(result.stderr)
+        );
         let db = Database::open_file(io.clone(), path)?;
         let conn = db.connect();
 
@@ -96,13 +99,4 @@ mod tests {
         }
         Ok(())
     }
-
-    #[test]
-    fn simple_test() {
-        assert_eq!(2 + 2, 4);
-    }
-}
-
-fn main() -> anyhow::Result<()> {
-    Ok(())
 }
