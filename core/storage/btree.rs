@@ -1,3 +1,5 @@
+use log::trace;
+
 use crate::storage::pager::{Page, Pager};
 use crate::storage::sqlite3_ondisk::{
     read_btree_cell, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
@@ -88,11 +90,7 @@ impl BTreeCursor {
 
     fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
-            let mem_page = {
-                let mem_page = self.page.borrow();
-                let mem_page = mem_page.as_ref().unwrap();
-                mem_page.clone()
-            };
+            let mem_page = self.get_mem_page();
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
             let page = RefCell::borrow(&page);
@@ -158,11 +156,7 @@ impl BTreeCursor {
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         self.move_to(rowid)?;
 
-        let mem_page = {
-            let mem_page = self.page.borrow();
-            let mem_page = mem_page.as_ref().unwrap();
-            mem_page.clone()
-        };
+        let mem_page = self.get_mem_page();
 
         let page_idx = mem_page.page_idx;
         let page = self.pager.read_page(page_idx)?;
@@ -262,11 +256,7 @@ impl BTreeCursor {
         self.move_to_root();
 
         loop {
-            let mem_page = {
-                let mem_page = self.page.borrow();
-                let mem_page = mem_page.as_ref().unwrap();
-                mem_page.clone()
-            };
+            let mem_page = self.get_mem_page();
             let page_idx = mem_page.page_idx;
             let page = self.pager.read_page(page_idx)?;
             let page = RefCell::borrow(&page);
@@ -559,7 +549,7 @@ impl BTreeCursor {
                 }
             }
 
-            println!("Balancing leaf. leaf={}", mem_page.page_idx);
+            trace!("Balancing leaf. leaf={}", mem_page.page_idx);
             if mem_page.parent.is_none() {
                 self.balance_root();
                 continue;
@@ -596,7 +586,6 @@ impl BTreeCursor {
                 // split procedure
                 let mut page = page_rc.contents.write().unwrap();
                 let page = page.as_mut().unwrap();
-                let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
                 assert!(
                     matches!(
                         page.page_type(),
@@ -614,9 +603,10 @@ impl BTreeCursor {
                     let is_leaf = page.is_leaf();
                     let mut new_pages = vec![page, right_page];
                     let new_pages_ids = vec![mem_page.page_idx, right_page_id];
-                    println!(
+                    trace!(
                         "splitting left={} right={}",
-                        new_pages_ids[0], new_pages_ids[1]
+                        new_pages_ids[0],
+                        new_pages_ids[1]
                     );
 
                     // drop divider cells and find right pointer
@@ -793,16 +783,13 @@ impl BTreeCursor {
                 self.pager.add_dirty(page_rc.id);
                 (new_root_page.id, page_rc.id)
             };
-            {
-                let page_rc = RefCell::borrow_mut(&page_ref);
-            }
 
             let root = new_root_page_ref.clone();
             let child = page_ref.clone();
 
             let parent = Some(Rc::new(MemPage::new(None, root_id, 0)));
             self.page = RefCell::new(Some(Rc::new(MemPage::new(parent, child_id, 0))));
-            println!("Balancing root. root={}, rightmost={}", root_id, child_id);
+            trace!("Balancing root. root={}, rightmost={}", root_id, child_id);
             self.pager.put_page(root_id, root);
             self.pager.put_page(child_id, child);
         }
@@ -1026,6 +1013,12 @@ impl BTreeCursor {
         // don't count header and cell pointers?
         nfree -= first_cell as usize;
         nfree as u16
+    }
+
+    fn get_mem_page(&self) -> Rc<MemPage> {
+        let mem_page = self.page.borrow();
+        let mem_page = mem_page.as_ref().unwrap();
+        mem_page.clone()
     }
 }
 
