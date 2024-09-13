@@ -165,6 +165,79 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_sequential_overflow_page() -> anyhow::Result<()> {
+        env_logger::init();
+        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
+        let conn = tmp_db.connect_limbo();
+        let iterations = 10 as usize;
+
+        let mut huge_texts = Vec::new();
+        for i in 0..iterations {
+            let mut huge_text = String::new();
+            for j in 0..8192 {
+                huge_text.push(('A' as u8 + i as u8) as char);
+            }
+            huge_texts.push(huge_text);
+        }
+
+        for i in 0..iterations {
+            let huge_text = &huge_texts[i];
+            let insert_query = format!("INSERT INTO test VALUES ({}, '{}')", i, huge_text.as_str());
+            match conn.query(insert_query) {
+                Ok(Some(ref mut rows)) => loop {
+                    match rows.next_row()? {
+                        RowResult::IO => {
+                            tmp_db.io.run_once()?;
+                        }
+                        RowResult::Done => break,
+                        _ => unreachable!(),
+                    }
+                },
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("{}", err);
+                }
+            };
+        }
+
+        let list_query = "SELECT * FROM test LIMIT 1";
+        let mut current_index = 0;
+        match conn.query(list_query) {
+            Ok(Some(ref mut rows)) => loop {
+                match rows.next_row()? {
+                    RowResult::Row(row) => {
+                        let first_value = &row.values[0];
+                        let text = &row.values[1];
+                        let id = match first_value {
+                            Value::Integer(i) => *i as i32,
+                            Value::Float(f) => *f as i32,
+                            _ => unreachable!(),
+                        };
+                        let text = match text {
+                            Value::Text(t) => *t,
+                            _ => unreachable!(),
+                        };
+                        let huge_text = &huge_texts[current_index];
+                        assert_eq!(current_index, id as usize);
+                        compare_string(&huge_text, text);
+                        current_index += 1;
+                    }
+                    RowResult::IO => {
+                        tmp_db.io.run_once()?;
+                    }
+                    RowResult::Done => break,
+                }
+            },
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("{}", err);
+            }
+        }
+        conn.cacheflush()?;
+        Ok(())
+    }
+
     fn compare_string(a: &String, b: &String) {
         assert_eq!(a.len(), b.len(), "Strings are not equal in size!");
         let a = a.as_bytes();
