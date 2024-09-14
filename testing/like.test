@@ -43,3 +43,13 @@ do_execsql_test where-like-or {
 5|sweatshirt|74.0
 8|sneakers|82.0
 11|accessories|81.0}
+
+do_execsql_test where-like-another-column {
+    select first_name, last_name from users where last_name like first_name;
+} {James|James
+Daniel|Daniel
+Taylor|Taylor}
+
+do_execsql_test where-like-impossible {
+    select * from products where 'foobar' like 'fooba';
+} {}

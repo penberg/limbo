@@ -451,10 +451,6 @@ pub fn translate_condition_expr(
             escape: _,
         } => {
             let cur_reg = program.alloc_register();
-            assert!(match rhs.as_ref() {
-                ast::Expr::Literal(_) => true,
-                _ => false,
-            });
             match op {
                 ast::LikeOperator::Like => {
                     let pattern_reg = program.alloc_register();
@@ -468,7 +464,9 @@ pub fn translate_condition_expr(
                         cursor_hint,
                         None,
                     )?;
-                    program.mark_last_insn_constant();
+                    if let ast::Expr::Literal(_) = rhs.as_ref() {
+                        program.mark_last_insn_constant();
+                    }
                     let _ = translate_expr(
                         program,
                         Some(referenced_tables),
