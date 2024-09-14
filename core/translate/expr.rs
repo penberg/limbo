@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use super::optimizer::CachedResult;
 use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
-use crate::schema::{Table, Type};
+use crate::schema::{PseudoTable, Table, Type};
 use crate::util::normalize_ident;
 use crate::{
     schema::BTreeTable,
@@ -1538,6 +1538,19 @@ pub fn resolve_ident_table(
     }
 
     crate::bail_parse_error!("ambiguous column name {}", ident.as_str());
+}
+
+pub fn resolve_ident_pseudo_table(ident: &String, pseudo_table: &PseudoTable) -> Result<usize> {
+    let res = pseudo_table
+        .columns
+        .iter()
+        .enumerate()
+        .find(|(_, col)| col.name == *ident);
+    if res.is_some() {
+        let (idx, _) = res.unwrap();
+        return Ok(idx);
+    }
+    crate::bail_parse_error!("column with name {} not found", ident.as_str());
 }
 
 pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mut ProgramBuilder) {

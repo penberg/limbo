@@ -105,3 +105,25 @@ Abigail|906
 Adam|1675
 Adrian|447
 Adriana|84}
+
+do_execsql_test group_by_function_expression {
+  select length(phone_number), count(1) from users group by length(phone_number) order by count(1);
+} {15|392
+22|416
+13|762
+20|791
+10|793
+19|816
+21|821
+17|1184
+18|1211
+16|1231
+12|1583}
+
+do_execsql_test group_by_function_expression_ridiculous {
+  select upper(substr(phone_number, 1,3)), count(1) from users group by upper(substr(phone_number, 1,3)) order by -1 * count(1) limit 5;
+} {001|1677
++1-|1606
+(97|36
+(20|35
+(31|35}
