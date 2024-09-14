@@ -19,6 +19,22 @@ do_execsql_test concat-4 {
   select concat('l', null, 'i');
 } {li}
 
+do_execsql_test concat_ws-1 {
+  select concat_ws(',', 1, 2);
+} {1,2}
+
+do_execsql_test concat_ws-2 {
+  select concat_ws(',', 1);
+} {1}
+
+do_execsql_test concat_ws-3 {
+  select concat_ws(0, 1, 2);
+} {102}
+
+do_execsql_test concat_ws-4 {
+  select concat_ws(null, 1, 2);
+} {}
+
 do_execsql_test char {
   select char(108, 105)
 } {li}

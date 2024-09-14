@@ -1434,6 +1434,11 @@ impl Program {
                                 );
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::ConcatWs => {
+                                let start_reg = *start_reg;
+                                let result = exec_concat_ws(&state.registers[start_reg..]);
+                                state.registers[*dest] = result;
+                            }
                             ScalarFunc::IfNull => {}
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
@@ -1825,6 +1830,34 @@ fn exec_concat(registers: &[OwnedValue]) -> OwnedValue {
             _ => continue,
         }
     }
+    OwnedValue::Text(Rc::new(result))
+}
+
+fn exec_concat_ws(registers: &[OwnedValue]) -> OwnedValue {
+    if registers.is_empty() {
+        return OwnedValue::Null;
+    }
+
+    let separator = match &registers[0] {
+        OwnedValue::Text(text) => text.clone(),
+        OwnedValue::Integer(i) => Rc::new(i.to_string()),
+        OwnedValue::Float(f) => Rc::new(f.to_string()),
+        _ => return OwnedValue::Null,
+    };
+
+    let mut result = String::new();
+    for (i, reg) in registers.iter().enumerate().skip(1) {
+        if i > 1 {
+            result.push_str(&separator);
+        }
+        match reg {
+            OwnedValue::Text(text) => result.push_str(text),
+            OwnedValue::Integer(i) => result.push_str(&i.to_string()),
+            OwnedValue::Float(f) => result.push_str(&f.to_string()),
+            _ => continue,
+        }
+    }
+
     OwnedValue::Text(Rc::new(result))
 }
 
