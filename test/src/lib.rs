@@ -1,4 +1,3 @@
-use limbo_core::Connection;
 use limbo_core::Database;
 use std::env;
 use std::fs;
@@ -40,7 +39,7 @@ mod tests {
 
     #[test]
     fn test_sequential_write() -> anyhow::Result<()> {
-        env_logger::init();
+        let _ = env_logger::try_init();
 
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
         let conn = tmp_db.connect_limbo();
@@ -101,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_simple_overflow_page() -> anyhow::Result<()> {
-        env_logger::init();
+        let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
         let conn = tmp_db.connect_limbo();
 
@@ -167,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_sequential_overflow_page() -> anyhow::Result<()> {
-        env_logger::init();
+        let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
         let conn = tmp_db.connect_limbo();
         let iterations = 10 as usize;
