@@ -455,7 +455,17 @@ pub fn translate_condition_expr(
                 ast::LikeOperator::Like => {
                     let pattern_reg = program.alloc_register();
                     let column_reg = program.alloc_register();
-                    // LIKE(pattern, column). We should translate the pattern first before the column
+                    let _ = translate_expr(
+                        program,
+                        Some(referenced_tables),
+                        lhs,
+                        column_reg,
+                        cursor_hint,
+                        None,
+                    )?;
+                    if let ast::Expr::Literal(_) = lhs.as_ref() {
+                        program.mark_last_insn_constant();
+                    }
                     let _ = translate_expr(
                         program,
                         Some(referenced_tables),
@@ -467,14 +477,6 @@ pub fn translate_condition_expr(
                     if let ast::Expr::Literal(_) = rhs.as_ref() {
                         program.mark_last_insn_constant();
                     }
-                    let _ = translate_expr(
-                        program,
-                        Some(referenced_tables),
-                        lhs,
-                        column_reg,
-                        cursor_hint,
-                        None,
-                    )?;
                     program.emit_insn(Insn::Function {
                         // Only constant patterns for LIKE are supported currently, so this
                         // is always 1
@@ -839,8 +841,11 @@ pub fn translate_expr(
                                     srf.to_string()
                                 );
                             };
+                            let mut start_reg = None;
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
+                                start_reg = Some(start_reg.unwrap_or(reg));
+
                                 translate_expr(
                                     program,
                                     referenced_tables,
@@ -852,7 +857,7 @@ pub fn translate_expr(
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg: start_reg.unwrap(),
                                 dest: target_register,
                                 func: func_ctx,
                             });

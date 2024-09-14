@@ -50,6 +50,17 @@ do_execsql_test where-like-another-column {
 Daniel|Daniel
 Taylor|Taylor}
 
+do_execsql_test where-like-another-column-prefix {
+    select first_name, last_name from users where last_name like concat(first_name, '%');
+} {James|James
+Daniel|Daniel
+William|Williams
+John|Johnson
+Taylor|Taylor
+John|Johnson
+Stephen|Stephens
+Robert|Roberts}
+
 do_execsql_test where-like-impossible {
     select * from products where 'foobar' like 'fooba';
 } {}
