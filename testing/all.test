@@ -11,6 +11,7 @@ source $testdir/join.test
 source $testdir/json.test
 source $testdir/like.test
 source $testdir/orderby.test
+source $testdir/groupby.test
 source $testdir/pragma.test
 source $testdir/scalar-functions.test
 source $testdir/scalar-functions-datetime.test

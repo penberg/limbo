@@ -97,7 +97,7 @@ impl Cursor for Sorter {
         let _ = moved_before;
         let key_fields = self.order.len();
         let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
-        self.insert(key, OwnedRecord::new(record.values[key_fields..].to_vec()));
+        self.insert(key, OwnedRecord::new(record.values.to_vec()));
         Ok(CursorResult::Ok(()))
     }
 

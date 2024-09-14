@@ -41,7 +41,9 @@ impl Cursor for PseudoCursor {
             .as_ref()
             .map(|record| match record.values[0] {
                 OwnedValue::Integer(rowid) => rowid as u64,
-                _ => panic!("Expected integer value"),
+                ref ov => {
+                    panic!("Expected integer value, got {:?}", ov);
+                }
             });
         Ok(x)
     }

@@ -2,8 +2,9 @@ use crate::{function::JsonFunc, Result};
 use sqlite3_parser::ast::{self, UnaryOperator};
 use std::rc::Rc;
 
+use super::optimizer::CachedResult;
 use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
-use crate::schema::Type;
+use crate::schema::{Table, Type};
 use crate::util::normalize_ident;
 use crate::{
     schema::BTreeTable,
@@ -74,13 +75,27 @@ pub fn translate_condition_expr(
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, cursor_hint);
+            let _ = translate_expr(
+                program,
+                Some(referenced_tables),
+                lhs,
+                lhs_reg,
+                cursor_hint,
+                None,
+            );
             match lhs.as_ref() {
                 ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                 _ => {}
             }
             let rhs_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), rhs, rhs_reg, cursor_hint);
+            let _ = translate_expr(
+                program,
+                Some(referenced_tables),
+                rhs,
+                rhs_reg,
+                cursor_hint,
+                None,
+            );
             match rhs.as_ref() {
                 ast::Expr::Literal(_) => program.mark_last_insn_constant(),
                 _ => {}
@@ -323,7 +338,14 @@ pub fn translate_condition_expr(
 
             // The left hand side only needs to be evaluated once we have a list of values to compare against.
             let lhs_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, cursor_hint)?;
+            let _ = translate_expr(
+                program,
+                Some(referenced_tables),
+                lhs,
+                lhs_reg,
+                cursor_hint,
+                None,
+            )?;
 
             let rhs = rhs.as_ref().unwrap();
 
@@ -352,6 +374,7 @@ pub fn translate_condition_expr(
                         expr,
                         rhs_reg,
                         cursor_hint,
+                        None,
                     )?;
                     // If this is not the last condition, we need to jump to the 'jump_target_when_true' label if the condition is true.
                     if !last_condition {
@@ -395,6 +418,7 @@ pub fn translate_condition_expr(
                         expr,
                         rhs_reg,
                         cursor_hint,
+                        None,
                     )?;
                     program.emit_insn_with_label_dependency(
                         Insn::Eq {
@@ -444,6 +468,7 @@ pub fn translate_condition_expr(
                         rhs,
                         pattern_reg,
                         cursor_hint,
+                        None,
                     )?;
                     program.mark_last_insn_constant();
                     let _ = translate_expr(
@@ -452,6 +477,7 @@ pub fn translate_condition_expr(
                         lhs,
                         column_reg,
                         cursor_hint,
+                        None,
                     )?;
                     program.emit_insn(Insn::Function {
                         // Only constant patterns for LIKE are supported currently, so this
@@ -516,20 +542,72 @@ pub fn translate_condition_expr(
     Ok(())
 }
 
+pub fn get_cached_or_translate(
+    program: &mut ProgramBuilder,
+    referenced_tables: Option<&[(Rc<BTreeTable>, String)]>,
+    expr: &ast::Expr,
+    cursor_hint: Option<usize>,
+    cached_results: Option<&Vec<&CachedResult>>,
+) -> Result<usize> {
+    if let Some(cached_results) = cached_results {
+        if let Some(cached_result) = cached_results
+            .iter()
+            .find(|cached_result| cached_result.source_expr == *expr)
+        {
+            return Ok(cached_result.register_idx);
+        }
+    }
+    let reg = program.alloc_register();
+    translate_expr(
+        program,
+        referenced_tables,
+        expr,
+        reg,
+        cursor_hint,
+        cached_results,
+    )?;
+    Ok(reg)
+}
+
 pub fn translate_expr(
     program: &mut ProgramBuilder,
     referenced_tables: Option<&[(Rc<BTreeTable>, String)]>,
     expr: &ast::Expr,
     target_register: usize,
     cursor_hint: Option<usize>,
+    cached_results: Option<&Vec<&CachedResult>>,
 ) -> Result<usize> {
+    if let Some(cached_results) = &cached_results {
+        if let Some(cached_result) = cached_results
+            .iter()
+            .find(|cached_result| cached_result.source_expr == *expr)
+        {
+            program.emit_insn(Insn::Copy {
+                src_reg: cached_result.register_idx,
+                dst_reg: target_register,
+                amount: 0,
+            });
+            return Ok(target_register);
+        }
+    }
+
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
-            let e1_reg = program.alloc_register();
-            let _ = translate_expr(program, referenced_tables, e1, e1_reg, cursor_hint)?;
-            let e2_reg = program.alloc_register();
-            let _ = translate_expr(program, referenced_tables, e2, e2_reg, cursor_hint)?;
+            let e1_reg = get_cached_or_translate(
+                program,
+                referenced_tables,
+                e1,
+                cursor_hint,
+                cached_results,
+            )?;
+            let e2_reg = get_cached_or_translate(
+                program,
+                referenced_tables,
+                e2,
+                cursor_hint,
+                cached_results,
+            )?;
 
             match op {
                 ast::Operator::NotEquals => {
@@ -617,6 +695,13 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::Multiply => {
+                    program.emit_insn(Insn::Multiply {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 other_unimplemented => todo!("{:?}", other_unimplemented),
             }
             Ok(target_register)
@@ -667,7 +752,14 @@ pub fn translate_expr(
                             );
                         };
                         let regs = program.alloc_register();
-                        translate_expr(program, referenced_tables, &args[0], regs, cursor_hint)?;
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            regs,
+                            cursor_hint,
+                            cached_results,
+                        )?;
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
                             start_reg: regs,
@@ -684,7 +776,14 @@ pub fn translate_expr(
 
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
+                                translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    reg,
+                                    cursor_hint,
+                                    cached_results,
+                                )?;
                             }
 
                             program.emit_insn(Insn::Function {
@@ -721,6 +820,7 @@ pub fn translate_expr(
                                     arg,
                                     target_register,
                                     cursor_hint,
+                                    cached_results,
                                 )?;
                                 if index < args.len() - 1 {
                                     program.emit_insn_with_label_dependency(
@@ -747,7 +847,14 @@ pub fn translate_expr(
                             };
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
+                                translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    reg,
+                                    cursor_hint,
+                                    cached_results,
+                                )?;
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -777,6 +884,7 @@ pub fn translate_expr(
                                 &args[0],
                                 temp_reg,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             program.emit_insn(Insn::NotNull {
                                 reg: temp_reg,
@@ -789,6 +897,7 @@ pub fn translate_expr(
                                 &args[1],
                                 temp_reg,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             program.emit_insn(Insn::Copy {
                                 src_reg: temp_reg,
@@ -821,6 +930,7 @@ pub fn translate_expr(
                                     arg,
                                     reg,
                                     cursor_hint,
+                                    cached_results,
                                 )?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
@@ -865,6 +975,7 @@ pub fn translate_expr(
                                 &args[0],
                                 regs,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -901,6 +1012,7 @@ pub fn translate_expr(
                                         arg,
                                         target_reg,
                                         cursor_hint,
+                                        cached_results,
                                     )?;
                                 }
                             }
@@ -938,6 +1050,7 @@ pub fn translate_expr(
                                 &args[0],
                                 str_reg,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             translate_expr(
                                 program,
@@ -945,6 +1058,7 @@ pub fn translate_expr(
                                 &args[1],
                                 start_reg,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             if args.len() == 3 {
                                 translate_expr(
@@ -953,6 +1067,7 @@ pub fn translate_expr(
                                     &args[2],
                                     length_reg,
                                     cursor_hint,
+                                    cached_results,
                                 )?;
                             }
 
@@ -977,6 +1092,7 @@ pub fn translate_expr(
                                         &args[0],
                                         arg_reg,
                                         cursor_hint,
+                                        cached_results,
                                     )?;
                                     start_reg = arg_reg;
                                 }
@@ -1000,6 +1116,7 @@ pub fn translate_expr(
                                         arg,
                                         target_reg,
                                         cursor_hint,
+                                        cached_results,
                                     )?;
                                 }
                             }
@@ -1032,7 +1149,14 @@ pub fn translate_expr(
 
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(program, referenced_tables, arg, reg, cursor_hint)?;
+                                translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    reg,
+                                    cursor_hint,
+                                    cached_results,
+                                )?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant();
                                 }
@@ -1064,6 +1188,7 @@ pub fn translate_expr(
                                     arg,
                                     reg,
                                     cursor_hint,
+                                    cached_results,
                                 )?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
@@ -1098,6 +1223,7 @@ pub fn translate_expr(
                                     arg,
                                     reg,
                                     cursor_hint,
+                                    cached_results,
                                 )?;
                                 match arg {
                                     ast::Expr::Literal(_) => program.mark_last_insn_constant(),
@@ -1132,6 +1258,7 @@ pub fn translate_expr(
                                 &args[0],
                                 first_reg,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             let second_reg = program.alloc_register();
                             translate_expr(
@@ -1140,6 +1267,7 @@ pub fn translate_expr(
                                 &args[1],
                                 second_reg,
                                 cursor_hint,
+                                cached_results,
                             )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1208,6 +1336,7 @@ pub fn translate_expr(
             ast::Literal::Null => {
                 program.emit_insn(Insn::Null {
                     dest: target_register,
+                    dest_end: None,
                 });
                 Ok(target_register)
             }
@@ -1389,16 +1518,15 @@ pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mu
 
 pub fn translate_table_columns(
     program: &mut ProgramBuilder,
-    table: &Rc<BTreeTable>,
-    table_identifier: &str,
-    cursor_override: Option<usize>,
+    cursor_id: usize,
+    table: &Table,
+    start_column_offset: usize,
     start_reg: usize,
 ) -> usize {
     let mut cur_reg = start_reg;
-    let cursor_id = cursor_override.unwrap_or(program.resolve_cursor_id(table_identifier, None));
-    for i in 0..table.columns.len() {
-        let is_rowid = table.column_is_rowid_alias(&table.columns[i]);
-        let col_type = &table.columns[i].ty;
+    for i in start_column_offset..table.columns().len() {
+        let is_rowid = table.column_is_rowid_alias(&table.get_column_at(i));
+        let col_type = &table.get_column_at(i).ty;
         if is_rowid {
             program.emit_insn(Insn::RowId {
                 cursor_id,
@@ -1437,6 +1565,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
@@ -1458,6 +1587,7 @@ pub fn translate_aggregation(
                     expr,
                     expr_reg,
                     cursor_hint,
+                    None,
                 );
                 expr_reg
             };
@@ -1505,6 +1635,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             translate_expr(
                 program,
@@ -1512,6 +1643,7 @@ pub fn translate_aggregation(
                 &delimiter_expr,
                 delimiter_reg,
                 cursor_hint,
+                None,
             )?;
 
             program.emit_insn(Insn::AggStep {
@@ -1535,6 +1667,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
@@ -1556,6 +1689,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
@@ -1596,6 +1730,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             translate_expr(
                 program,
@@ -1603,6 +1738,7 @@ pub fn translate_aggregation(
                 &delimiter_expr,
                 delimiter_reg,
                 cursor_hint,
+                None,
             )?;
 
             program.emit_insn(Insn::AggStep {
@@ -1626,6 +1762,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
@@ -1647,6 +1784,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
+                None,
             )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,

@@ -45,7 +45,7 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... WHERE ... LIKE    | Yes     |         |
 | SELECT ... LIMIT             | Yes     |         |
 | SELECT ... ORDER BY          | Partial |         |
-| SELECT ... GROUP BY          | No      |         |
+| SELECT ... GROUP BY          | Partial |         |
 | SELECT ... JOIN              | Partial |         |
 | SELECT ... CROSS JOIN        | Partial |         |
 | SELECT ... INNER JOIN        | Partial |         |

@@ -14,12 +14,53 @@ pub struct OperatorIdCounter {
 
 impl OperatorIdCounter {
     pub fn new() -> Self {
-        Self { id: 0 }
+        Self { id: 1 }
     }
     pub fn get_next_id(&mut self) -> usize {
         let id = self.id;
         self.id += 1;
         id
+    }
+}
+
+fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
+    match expr {
+        ast::Expr::FunctionCall { name, args, .. } => {
+            let args_count = if let Some(args) = &args {
+                args.len()
+            } else {
+                0
+            };
+            match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), args_count) {
+                Ok(Func::Agg(f)) => aggs.push(Aggregate {
+                    func: f,
+                    args: args.clone().unwrap_or_default(),
+                    original_expr: expr.clone(),
+                }),
+                _ => {
+                    if let Some(args) = args {
+                        for arg in args.iter() {
+                            resolve_aggregates(&arg, aggs);
+                        }
+                    }
+                }
+            }
+        }
+        ast::Expr::FunctionCallStar { name, .. } => {
+            match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), 0) {
+                Ok(Func::Agg(f)) => aggs.push(Aggregate {
+                    func: f,
+                    args: vec![],
+                    original_expr: expr.clone(),
+                }),
+                _ => {}
+            }
+        }
+        ast::Expr::Binary(lhs, _, rhs) => {
+            resolve_aggregates(lhs, aggs);
+            resolve_aggregates(rhs, aggs);
+        }
+        _ => {}
     }
 }
 
@@ -29,6 +70,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             columns,
             from,
             where_clause,
+            group_by,
             ..
         } => {
             let col_count = columns.len();
@@ -53,21 +95,17 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 };
             }
 
-            // Parse the SELECT clause to either a projection or an aggregation
-            // depending on the presence of aggregate functions.
-            // Since GROUP BY is not supported yet, mixing aggregate and non-aggregate
-            // columns is not allowed.
-            //
+            // If there are aggregate functions, we aggregate + project the columns.
             // If there are no aggregate functions, we can simply project the columns.
-            // For a simple SELECT *, the projection operator is skipped.
+            // For a simple SELECT *, the projection operator is skipped as well.
             let is_select_star = col_count == 1 && matches!(columns[0], ast::ResultColumn::Star);
             if !is_select_star {
                 let mut aggregate_expressions = Vec::new();
-                let mut scalar_expressions = Vec::with_capacity(col_count);
+                let mut projection_expressions = Vec::with_capacity(col_count);
                 for column in columns.clone() {
                     match column {
                         ast::ResultColumn::Star => {
-                            scalar_expressions.push(ProjectionColumn::Star);
+                            projection_expressions.push(ProjectionColumn::Star);
                         }
                         ast::ResultColumn::TableStar(name) => {
                             let name_normalized = normalize_ident(name.0.as_str());
@@ -79,89 +117,98 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                 crate::bail_parse_error!("Table {} not found", name.0);
                             }
                             let (table, identifier) = referenced_table.unwrap();
-                            scalar_expressions.push(ProjectionColumn::TableStar(
+                            projection_expressions.push(ProjectionColumn::TableStar(
                                 table.clone(),
                                 identifier.clone(),
                             ));
                         }
-                        ast::ResultColumn::Expr(expr, _) => match expr {
-                            ast::Expr::FunctionCall {
-                                name,
-                                distinctness,
-                                args,
-                                filter_over,
-                                order_by,
-                            } => {
-                                let args_count = if let Some(args) = &args {
-                                    args.len()
-                                } else {
-                                    0
-                                };
-                                match Func::resolve_function(
-                                    normalize_ident(name.0.as_str()).as_str(),
-                                    args_count,
-                                ) {
-                                    Ok(Func::Agg(f)) => aggregate_expressions.push(Aggregate {
-                                        func: f,
-                                        args: args.unwrap(),
-                                    }),
-                                    Ok(_) => {
-                                        scalar_expressions.push(ProjectionColumn::Column(
-                                            ast::Expr::FunctionCall {
-                                                name,
-                                                distinctness,
-                                                args,
-                                                filter_over,
-                                                order_by,
-                                            },
-                                        ));
+                        ast::ResultColumn::Expr(expr, _) => {
+                            projection_expressions.push(ProjectionColumn::Column(expr.clone()));
+                            match expr.clone() {
+                                ast::Expr::FunctionCall {
+                                    name,
+                                    distinctness,
+                                    args,
+                                    filter_over,
+                                    order_by,
+                                } => {
+                                    let args_count = if let Some(args) = &args {
+                                        args.len()
+                                    } else {
+                                        0
+                                    };
+                                    match Func::resolve_function(
+                                        normalize_ident(name.0.as_str()).as_str(),
+                                        args_count,
+                                    ) {
+                                        Ok(Func::Agg(f)) => {
+                                            aggregate_expressions.push(Aggregate {
+                                                func: f,
+                                                args: args.unwrap(),
+                                                original_expr: expr.clone(),
+                                            });
+                                        }
+                                        Ok(_) => {
+                                            resolve_aggregates(&expr, &mut aggregate_expressions);
+                                        }
+                                        _ => {}
                                     }
-                                    _ => {}
                                 }
-                            }
-                            ast::Expr::FunctionCallStar { name, filter_over } => {
-                                match Func::resolve_function(
-                                    normalize_ident(name.0.as_str()).as_str(),
-                                    0,
-                                ) {
-                                    Ok(Func::Agg(f)) => aggregate_expressions.push(Aggregate {
-                                        func: f,
-                                        args: vec![],
-                                    }),
-                                    Ok(Func::Scalar(_)) => {
-                                        scalar_expressions.push(ProjectionColumn::Column(
-                                            ast::Expr::FunctionCallStar { name, filter_over },
-                                        ));
+                                ast::Expr::FunctionCallStar { name, filter_over } => {
+                                    match Func::resolve_function(
+                                        normalize_ident(name.0.as_str()).as_str(),
+                                        0,
+                                    ) {
+                                        Ok(Func::Agg(f)) => {
+                                            aggregate_expressions.push(Aggregate {
+                                                func: f,
+                                                args: vec![],
+                                                original_expr: expr.clone(),
+                                            });
+                                        }
+                                        _ => {}
                                     }
-                                    _ => {}
                                 }
+                                ast::Expr::Binary(lhs, _, rhs) => {
+                                    resolve_aggregates(&lhs, &mut aggregate_expressions);
+                                    resolve_aggregates(&rhs, &mut aggregate_expressions);
+                                }
+                                _ => {}
                             }
-                            _ => {
-                                scalar_expressions.push(ProjectionColumn::Column(expr));
-                            }
-                        },
+                        }
                     }
                 }
-
-                let mixing_aggregate_and_non_aggregate_columns =
-                    !aggregate_expressions.is_empty() && aggregate_expressions.len() != col_count;
-
-                if mixing_aggregate_and_non_aggregate_columns {
-                    crate::bail_parse_error!(
-                        "mixing aggregate and non-aggregate columns is not allowed (GROUP BY is not supported)"
-                    );
+                if let Some(group_by) = group_by.as_ref() {
+                    if aggregate_expressions.is_empty() {
+                        crate::bail_parse_error!(
+                            "GROUP BY clause without aggregate functions is not allowed"
+                        );
+                    }
+                    for scalar in projection_expressions.iter() {
+                        match scalar {
+                            ProjectionColumn::Column(_) => {}
+                            _ => {
+                                crate::bail_parse_error!(
+                                    "Only column references are allowed in the SELECT clause when using GROUP BY"
+                                );
+                            }
+                        }
+                    }
                 }
                 if !aggregate_expressions.is_empty() {
                     operator = Operator::Aggregate {
                         source: Box::new(operator),
                         aggregates: aggregate_expressions,
+                        group_by: group_by.map(|g| g.exprs), // TODO: support HAVING
                         id: operator_id_counter.get_next_id(),
                         step: 0,
                     }
-                } else if !scalar_expressions.is_empty() {
+                }
+
+                if !projection_expressions.is_empty() {
                     operator = Operator::Projection {
                         source: Box::new(operator),
-                        expressions: scalar_expressions,
+                        expressions: projection_expressions,
                         id: operator_id_counter.get_next_id(),
                         step: 0,
                     };
@@ -171,17 +218,18 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             // Parse the ORDER BY clause
             if let Some(order_by) = select.order_by {
                 let mut key = Vec::new();
+
                 for o in order_by {
                     // if the ORDER BY expression is a number, interpret it as an 1-indexed column number
                     // otherwise, interpret it normally as an expression
-                    let expr = if let ast::Expr::Literal(ast::Literal::Numeric(num)) = o.expr {
+                    let expr = if let ast::Expr::Literal(ast::Literal::Numeric(num)) = &o.expr {
                         let column_number = num.parse::<usize>()?;
                         if column_number == 0 {
                             crate::bail_parse_error!("invalid column index: {}", column_number);
                         }
                         let maybe_result_column = columns.get(column_number - 1);
                         match maybe_result_column {
-                            Some(ResultColumn::Expr(expr, _)) => expr.clone(),
+                            Some(ResultColumn::Expr(e, _)) => e.clone(),
                             None => {
                                 crate::bail_parse_error!("invalid column index: {}", column_number)
                             }
@@ -190,6 +238,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     } else {
                         o.expr
                     };
+
                     key.push((
                         expr,
                         o.order.map_or(Direction::Ascending, |o| match o {
