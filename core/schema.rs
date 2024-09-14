@@ -95,6 +95,13 @@ impl Table {
         }
     }
 
+    pub fn get_column_at(&self, index: usize) -> &Column {
+        match self {
+            Table::BTree(table) => table.columns.get(index).unwrap(),
+            Table::Pseudo(table) => table.columns.get(index).unwrap(),
+        }
+    }
+
     pub fn columns(&self) -> &Vec<Column> {
         match self {
             Table::BTree(table) => &table.columns,

@@ -69,6 +69,21 @@ pub enum AggContext {
     GroupConcat(OwnedValue),
 }
 
+const NULL: OwnedValue = OwnedValue::Null;
+
+impl AggContext {
+    pub fn final_value(&self) -> &OwnedValue {
+        match self {
+            AggContext::Avg(acc, _count) => acc,
+            AggContext::Sum(acc) => acc,
+            AggContext::Count(count) => count,
+            AggContext::Max(max) => max.as_ref().unwrap_or(&NULL),
+            AggContext::Min(min) => min.as_ref().unwrap_or(&NULL),
+            AggContext::GroupConcat(s) => s,
+        }
+    }
+}
+
 impl std::cmp::PartialOrd<OwnedValue> for OwnedValue {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
@@ -93,6 +108,21 @@ impl std::cmp::PartialOrd<OwnedValue> for OwnedValue {
             (OwnedValue::Null, OwnedValue::Null) => Some(std::cmp::Ordering::Equal),
             (OwnedValue::Null, _) => Some(std::cmp::Ordering::Less),
             (_, OwnedValue::Null) => Some(std::cmp::Ordering::Greater),
+            (OwnedValue::Agg(a), OwnedValue::Agg(b)) => a.partial_cmp(b),
+            _ => None,
+        }
+    }
+}
+
+impl std::cmp::PartialOrd<AggContext> for AggContext {
+    fn partial_cmp(&self, other: &AggContext) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (AggContext::Avg(a, _), AggContext::Avg(b, _)) => a.partial_cmp(b),
+            (AggContext::Sum(a), AggContext::Sum(b)) => a.partial_cmp(b),
+            (AggContext::Count(a), AggContext::Count(b)) => a.partial_cmp(b),
+            (AggContext::Max(a), AggContext::Max(b)) => a.partial_cmp(b),
+            (AggContext::Min(a), AggContext::Min(b)) => a.partial_cmp(b),
+            (AggContext::GroupConcat(a), AggContext::GroupConcat(b)) => a.partial_cmp(b),
             _ => None,
         }
     }

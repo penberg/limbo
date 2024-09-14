@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use sqlite3_parser::ast;
 
@@ -6,12 +6,14 @@ use crate::{schema::BTreeTable, util::normalize_ident, Result};
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Operator, Plan,
+    ProjectionColumn,
 };
 
 /**
  * Make a few passes over the plan to optimize it.
  */
-pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
+pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCache)> {
+    let mut expr_result_cache = ExpressionResultCache::new();
     push_predicates(
         &mut select_plan.root_operator,
         &select_plan.referenced_tables,
@@ -19,16 +21,20 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
     if eliminate_constants(&mut select_plan.root_operator)?
         == ConstantConditionEliminationResult::ImpossibleCondition
     {
-        return Ok(Plan {
-            root_operator: Operator::Nothing,
-            referenced_tables: vec![],
-        });
+        return Ok((
+            Plan {
+                root_operator: Operator::Nothing,
+                referenced_tables: vec![],
+            },
+            expr_result_cache,
+        ));
     }
     use_indexes(
         &mut select_plan.root_operator,
         &select_plan.referenced_tables,
     )?;
-    Ok(select_plan)
+    find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(&select_plan.root_operator, &mut expr_result_cache);
+    Ok((select_plan, expr_result_cache))
 }
 
 /**
@@ -523,6 +529,383 @@ fn push_predicate(
     }
 }
 
+#[derive(Debug)]
+pub struct ExpressionResultCache {
+    resultmap: HashMap<usize, CachedResult>,
+    keymap: HashMap<usize, Vec<usize>>,
+}
+
+#[derive(Debug)]
+pub struct CachedResult {
+    pub register_idx: usize,
+    pub source_expr: ast::Expr,
+}
+
+const OPERATOR_ID_MULTIPLIER: usize = 10000;
+
+/**
+  ExpressionResultCache is a cache for the results of expressions that are computed in the query plan,
+  or more precisely, the VM registers that hold the results of these expressions.
+
+  Right now the cache is mainly used to avoid recomputing e.g. the result of an aggregation expression
+  e.g. SELECT t.a, SUM(t.b) FROM t GROUP BY t.a ORDER BY SUM(t.b)
+*/
+impl ExpressionResultCache {
+    pub fn new() -> Self {
+        ExpressionResultCache {
+            resultmap: HashMap::new(),
+            keymap: HashMap::new(),
+        }
+    }
+
+    /**
+        Store the result of an expression that is computed in the query plan.
+        The result is stored in a VM register. A copy of the expression AST node is
+        stored as well, so that parent operators can use it to compare their own expressions
+        with the one that was computed in a child operator.
+
+        This is a weakness of our current reliance on a 3rd party AST library, as we can't
+        e.g. modify the AST to add identifiers to nodes or replace nodes with some kind of
+        reference to a register, etc.
+    */
+    pub fn cache_result_register(
+        &mut self,
+        operator_id: usize,
+        result_column_idx: usize,
+        register_idx: usize,
+        expr: ast::Expr,
+    ) {
+        let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
+        self.resultmap.insert(
+            key,
+            CachedResult {
+                register_idx,
+                source_expr: expr,
+            },
+        );
+    }
+
+    /**
+      Set a mapping from a parent operator to a child operator, so that the parent operator
+      can look up the register of a result that was computed in the child operator.
+      E.g. "Parent operator's result column 3 is computed in child operator 5, result column 2"
+    */
+    pub fn set_precomputation_key(
+        &mut self,
+        operator_id: usize,
+        result_column_idx: usize,
+        child_operator_id: usize,
+        child_operator_result_column_idx_mask: usize,
+    ) -> () {
+        let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
+
+        let mut values = Vec::new();
+        for i in 0..64 {
+            if (child_operator_result_column_idx_mask >> i) & 1 == 1 {
+                values.push(child_operator_id * OPERATOR_ID_MULTIPLIER + i);
+            }
+        }
+        self.keymap.insert(key, values);
+    }
+
+    /**
+      Get the cache entries for a given operator and result column index.
+      There may be multiple cached entries, e.g. a binary operator's both
+      arms may have been cached.
+    */
+    pub fn get_cached_result_registers(
+        &self,
+        operator_id: usize,
+        result_column_idx: usize,
+    ) -> Option<Vec<&CachedResult>> {
+        let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
+        self.keymap.get(&key).and_then(|keys| {
+            let mut results = Vec::new();
+            for key in keys {
+                if let Some(result) = self.resultmap.get(key) {
+                    results.push(result);
+                }
+            }
+            if results.is_empty() {
+                None
+            } else {
+                Some(results)
+            }
+        })
+    }
+}
+
+type ResultColumnIndexBitmask = usize;
+
+/**
+  Find all result columns in an operator that match an expression, either fully or partially.
+  This is used to find the result columns that are computed in an operator and that are used
+  in a parent operator, so that the parent operator can look up the register that holds the result
+  of the child operator's expression.
+
+  The result is returned as a bitmask due to performance neuroticism. A limitation of this is that
+  we can only handle 64 result columns per operator.
+*/
+fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+    expr: &ast::Expr,
+    operator: &Operator,
+) -> ResultColumnIndexBitmask {
+    let exact_match = match operator {
+        Operator::Aggregate {
+            aggregates,
+            group_by,
+            ..
+        } => {
+            let mut idx = 0;
+            let mut mask = 0;
+            for agg in aggregates.iter() {
+                if agg.original_expr == *expr {
+                    mask |= 1 << idx;
+                }
+                idx += 1;
+            }
+
+            if let Some(group_by) = group_by {
+                for g in group_by.iter() {
+                    if g == expr {
+                        mask |= 1 << idx;
+                    }
+                    idx += 1
+                }
+            }
+
+            mask
+        }
+        Operator::Filter { .. } => 0,
+        Operator::SeekRowid { .. } => 0,
+        Operator::Limit { .. } => 0,
+        Operator::Join { .. } => 0,
+        Operator::Order { .. } => 0,
+        Operator::Projection { expressions, .. } => {
+            let mut idx = 0;
+            let mut mask = 0;
+            for e in expressions.iter() {
+                match e {
+                    super::plan::ProjectionColumn::Column(c) => {
+                        if c == expr {
+                            mask |= 1 << idx;
+                        }
+                    }
+                    super::plan::ProjectionColumn::Star => {}
+                    super::plan::ProjectionColumn::TableStar(_, _) => {}
+                }
+                idx += 1;
+            }
+
+            mask
+        }
+        Operator::Scan { .. } => 0,
+        Operator::Nothing => 0,
+    };
+
+    if exact_match != 0 {
+        return exact_match;
+    }
+
+    match expr {
+        ast::Expr::Between {
+            lhs,
+            not,
+            start,
+            end,
+        } => {
+            let mut mask = 0;
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(start, operator);
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(end, operator);
+            mask
+        }
+        ast::Expr::Binary(lhs, op, rhs) => {
+            let mut mask = 0;
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(rhs, operator);
+            mask
+        }
+        ast::Expr::Case {
+            base,
+            when_then_pairs,
+            else_expr,
+        } => {
+            let mut mask = 0;
+            if let Some(base) = base {
+                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(base, operator);
+            }
+            for (w, t) in when_then_pairs.iter() {
+                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(w, operator);
+                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(t, operator);
+            }
+            if let Some(e) = else_expr {
+                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(e, operator);
+            }
+            mask
+        }
+        ast::Expr::Cast { expr, type_name } => {
+            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+                expr, operator,
+            )
+        }
+        ast::Expr::Collate(expr, collation) => {
+            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+                expr, operator,
+            )
+        }
+        ast::Expr::DoublyQualified(schema, tbl, ident) => 0,
+        ast::Expr::Exists(_) => 0,
+        ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args,
+            order_by,
+            filter_over,
+        } => {
+            let mut mask = 0;
+            if let Some(args) = args {
+                for a in args.iter() {
+                    mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(a, operator);
+                }
+            }
+            mask
+        }
+        ast::Expr::FunctionCallStar { name, filter_over } => 0,
+        ast::Expr::Id(_) => 0,
+        ast::Expr::InList { lhs, not, rhs } => {
+            let mut mask = 0;
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
+            if let Some(rhs) = rhs {
+                for r in rhs.iter() {
+                    mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(r, operator);
+                }
+            }
+            mask
+        }
+        ast::Expr::InSelect { lhs, not, rhs } => {
+            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+                lhs, operator,
+            )
+        }
+        ast::Expr::InTable {
+            lhs,
+            not,
+            rhs,
+            args,
+        } => 0,
+        ast::Expr::IsNull(expr) => {
+            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+                expr, operator,
+            )
+        }
+        ast::Expr::Like {
+            lhs,
+            not,
+            op,
+            rhs,
+            escape,
+        } => {
+            let mut mask = 0;
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
+            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(rhs, operator);
+            mask
+        }
+        ast::Expr::Literal(_) => 0,
+        ast::Expr::Name(_) => 0,
+        ast::Expr::NotNull(expr) => {
+            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+                expr, operator,
+            )
+        }
+        ast::Expr::Parenthesized(expr) => {
+            let mut mask = 0;
+            for e in expr.iter() {
+                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(e, operator);
+            }
+            mask
+        }
+        ast::Expr::Qualified(_, _) => 0,
+        ast::Expr::Raise(_, _) => 0,
+        ast::Expr::Subquery(_) => 0,
+        ast::Expr::Unary(op, expr) => {
+            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
+                expr, operator,
+            )
+        }
+        ast::Expr::Variable(_) => 0,
+    }
+}
+
+/**
+ * This function is used to find all the expressions that are shared between the parent operator and the child operators.
+ * If an expression is shared between the parent and child operators, then the parent operator should not recompute the expression.
+ * Instead, it should use the result of the expression that was computed by the child operator.
+*/
+fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(
+    operator: &Operator,
+    expr_result_cache: &mut ExpressionResultCache,
+) {
+    match operator {
+        Operator::Aggregate {
+            source,
+            aggregates,
+            group_by,
+            ..
+        } => {
+            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(
+                source, expr_result_cache,
+            )
+        }
+        Operator::Filter { .. } => unreachable!(),
+        Operator::SeekRowid { .. } => {}
+        Operator::Limit { source, .. } => {
+            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
+        }
+        Operator::Join { .. } => {}
+        Operator::Order { source, key, .. } => {
+            let mut idx = 0;
+
+            for (expr, _) in key.iter() {
+                let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(&expr, source);
+                if result != 0 {
+                    expr_result_cache.set_precomputation_key(
+                        operator.id(),
+                        idx,
+                        source.id(),
+                        result,
+                    );
+                }
+                idx += 1;
+            }
+            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
+        }
+        Operator::Projection { source, expressions, .. } => {
+            let mut idx = 0;
+            for expr in expressions.iter() {
+                match expr {
+                    ProjectionColumn::Column(expr) => {
+                        let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(&expr, source);
+                        if result != 0 {
+                            expr_result_cache.set_precomputation_key(
+                                operator.id(),
+                                idx,
+                                source.id(),
+                                result,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+                idx += 1;
+            }
+            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
+        }
+        Operator::Scan { .. } => {}
+        Operator::Nothing => {}
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstantPredicate {
     AlwaysTrue,
@@ -761,8 +1144,4 @@ impl TakeOwnership for Operator {
     fn take_ownership(&mut self) -> Self {
         std::mem::replace(self, Operator::Nothing)
     }
-}
-
-fn replace_with<T: TakeOwnership>(expr: &mut T, mut replacement: T) {
-    *expr = replacement.take_ownership();
 }

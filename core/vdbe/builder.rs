@@ -288,6 +288,16 @@ impl ProgramBuilder {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
+                Insn::Gosub { target_pc, .. } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
+                Insn::Jump { target_pc_eq, .. } => {
+                    // FIXME: this current implementation doesnt scale for insns that
+                    // have potentially multiple label dependencies.
+                    assert!(*target_pc_eq < 0);
+                    *target_pc_eq = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }
@@ -313,6 +323,10 @@ impl ProgramBuilder {
                     .is_some_and(|ident| ident == table_identifier)
             })
             .unwrap()
+    }
+
+    pub fn resolve_cursor_to_table(&self, cursor_id: CursorID) -> Option<Table> {
+        self.cursor_ref[cursor_id].1.clone()
     }
 
     pub fn resolve_deferred_labels(&mut self) {

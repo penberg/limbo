@@ -198,7 +198,7 @@ impl Connection {
                     match stmt {
                         ast::Stmt::Select(select) => {
                             let plan = prepare_select_plan(&self.schema, select)?;
-                            let plan = optimize_plan(plan)?;
+                            let (plan, _) = optimize_plan(plan)?;
                             println!("{}", plan);
                         }
                         _ => todo!(),

@@ -70,9 +70,10 @@ pub enum Insn {
     Init {
         target_pc: BranchOffset,
     },
-    // Set NULL in the given register.
+    // Write a NULL into register dest. If dest_end is Some, then also write NULL into register dest_end and every register in between dest and dest_end. If dest_end is not set, then only register dest is set to NULL.
     Null {
         dest: usize,
+        dest_end: Option<usize>,
     },
     // Move the cursor P1 to a null row. Any Column operations that occur while the cursor is on the null row will always write a NULL.
     NullRow {
@@ -83,6 +84,30 @@ pub enum Insn {
         lhs: usize,
         rhs: usize,
         dest: usize,
+    },
+    // Multiply two registers and store the result in a third register.
+    Multiply {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    // Compare two vectors of registers in reg(P1)..reg(P1+P3-1) (call this vector "A") and in reg(P2)..reg(P2+P3-1) ("B"). Save the result of the comparison for use by the next Jump instruct.
+    Compare {
+        start_reg_a: usize,
+        start_reg_b: usize,
+        count: usize,
+    },
+    // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
+    Jump {
+        target_pc_lt: BranchOffset,
+        target_pc_eq: BranchOffset,
+        target_pc_gt: BranchOffset,
+    },
+    // Move the P3 values in register P1..P1+P3-1 over into registers P2..P2+P3-1. Registers P1..P1+P3-1 are left holding a NULL. It is an error for register ranges P1..P1+P3-1 and P2..P2+P3-1 to overlap. It is an error for P3 to be less than 1.
+    Move {
+        source_reg: usize,
+        dest_reg: usize,
+        count: usize,
     },
     // If the given register is a positive integer, decrement it by decrement_by and jump to the given PC.
     IfPos {
@@ -212,6 +237,17 @@ pub enum Insn {
     // Branch to the given PC.
     Goto {
         target_pc: BranchOffset,
+    },
+
+    // Stores the current program counter into register 'return_reg' then jumps to address target_pc.
+    Gosub {
+        target_pc: BranchOffset,
+        return_reg: usize,
+    },
+
+    // Returns to the program counter stored in register 'return_reg'.
+    Return {
+        return_reg: usize,
     },
 
     // Write an integer value into a register.
@@ -382,6 +418,7 @@ pub struct ProgramState {
     pub pc: BranchOffset,
     cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
+    last_compare: Option<std::cmp::Ordering>,
     ended_coroutine: bool, // flag to notify yield coroutine finished
     regex_cache: HashMap<String, Regex>,
 }
@@ -395,6 +432,7 @@ impl ProgramState {
             pc: 0,
             cursors,
             registers,
+            last_compare: None,
             ended_coroutine: false,
             regex_cache: HashMap::new(),
         }
@@ -464,19 +502,190 @@ impl Program {
                         (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
                             state.registers[dest] = OwnedValue::Null;
                         }
+                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
+                            match other {
+                                OwnedValue::Null => {
+                                    state.registers[dest] = OwnedValue::Null;
+                                }
+                                OwnedValue::Integer(i) => match aggctx.final_value() {
+                                    OwnedValue::Float(acc) => {
+                                        state.registers[dest] = OwnedValue::Float(acc + *i as f64);
+                                    }
+                                    OwnedValue::Integer(acc) => {
+                                        state.registers[dest] = OwnedValue::Integer(acc + i);
+                                    }
+                                    _ => {
+                                        todo!("{:?}", aggctx);
+                                    }
+                                },
+                                OwnedValue::Float(f) => match aggctx.final_value() {
+                                    OwnedValue::Float(acc) => {
+                                        state.registers[dest] = OwnedValue::Float(acc + f);
+                                    }
+                                    OwnedValue::Integer(acc) => {
+                                        state.registers[dest] = OwnedValue::Float(*acc as f64 + f);
+                                    }
+                                    _ => {
+                                        todo!("{:?}", aggctx);
+                                    }
+                                },
+                                OwnedValue::Agg(aggctx2) => {
+                                    let acc = aggctx.final_value();
+                                    let acc2 = aggctx2.final_value();
+                                    match (acc, acc2) {
+                                        (OwnedValue::Integer(acc), OwnedValue::Integer(acc2)) => {
+                                            state.registers[dest] = OwnedValue::Integer(acc + acc2);
+                                        }
+                                        (OwnedValue::Float(acc), OwnedValue::Float(acc2)) => {
+                                            state.registers[dest] = OwnedValue::Float(acc + acc2);
+                                        }
+                                        (OwnedValue::Integer(acc), OwnedValue::Float(acc2)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Float(*acc as f64 + acc2);
+                                        }
+                                        (OwnedValue::Float(acc), OwnedValue::Integer(acc2)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Float(acc + *acc2 as f64);
+                                        }
+                                        _ => {
+                                            todo!("{:?} {:?}", acc, acc2);
+                                        }
+                                    }
+                                }
+                                rest => unimplemented!("{:?}", rest),
+                            }
+                        }
                         _ => {
                             todo!();
                         }
                     }
                     state.pc += 1;
                 }
-                Insn::Null { dest } => {
-                    state.registers[*dest] = OwnedValue::Null;
+                Insn::Multiply { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            state.registers[dest] = OwnedValue::Integer(lhs * rhs);
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            state.registers[dest] = OwnedValue::Float(lhs * rhs);
+                        }
+                        (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
+                            match other {
+                                OwnedValue::Null => {
+                                    state.registers[dest] = OwnedValue::Null;
+                                }
+                                OwnedValue::Integer(i) => match aggctx.final_value() {
+                                    OwnedValue::Float(acc) => {
+                                        state.registers[dest] = OwnedValue::Float(acc * *i as f64);
+                                    }
+                                    OwnedValue::Integer(acc) => {
+                                        state.registers[dest] = OwnedValue::Integer(acc * i);
+                                    }
+                                    _ => {
+                                        todo!("{:?}", aggctx);
+                                    }
+                                },
+                                OwnedValue::Float(f) => match aggctx.final_value() {
+                                    OwnedValue::Float(acc) => {
+                                        state.registers[dest] = OwnedValue::Float(acc * f);
+                                    }
+                                    OwnedValue::Integer(acc) => {
+                                        state.registers[dest] = OwnedValue::Float(*acc as f64 * f);
+                                    }
+                                    _ => {
+                                        todo!("{:?}", aggctx);
+                                    }
+                                },
+                                rest => unimplemented!("{:?}", rest),
+                            }
+                        }
+                        others => {
+                            todo!("{:?}", others);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::Null { dest, dest_end } => {
+                    if let Some(dest_end) = dest_end {
+                        for i in *dest..=*dest_end {
+                            state.registers[i] = OwnedValue::Null;
+                        }
+                    } else {
+                        state.registers[*dest] = OwnedValue::Null;
+                    }
                     state.pc += 1;
                 }
                 Insn::NullRow { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.set_null_flag(true);
+                    state.pc += 1;
+                }
+                Insn::Compare {
+                    start_reg_a,
+                    start_reg_b,
+                    count,
+                } => {
+                    let start_reg_a = *start_reg_a;
+                    let start_reg_b = *start_reg_b;
+                    let count = *count;
+
+                    if start_reg_a + count > start_reg_b {
+                        return Err(LimboError::InternalError(
+                            "Compare registers overlap".to_string(),
+                        ));
+                    }
+
+                    let mut cmp = None;
+                    for i in 0..count {
+                        let a = &state.registers[start_reg_a + i];
+                        let b = &state.registers[start_reg_b + i];
+                        cmp = Some(a.cmp(b));
+                        if cmp != Some(std::cmp::Ordering::Equal) {
+                            break;
+                        }
+                    }
+                    state.last_compare = cmp;
+                    state.pc += 1;
+                }
+                Insn::Jump {
+                    target_pc_lt,
+                    target_pc_eq,
+                    target_pc_gt,
+                } => {
+                    let cmp = state.last_compare.take();
+                    if cmp.is_none() {
+                        return Err(LimboError::InternalError(
+                            "Jump without compare".to_string(),
+                        ));
+                    }
+                    let target_pc = match cmp.unwrap() {
+                        std::cmp::Ordering::Less => *target_pc_lt,
+                        std::cmp::Ordering::Equal => *target_pc_eq,
+                        std::cmp::Ordering::Greater => *target_pc_gt,
+                    };
+                    assert!(target_pc >= 0);
+                    state.pc = target_pc;
+                }
+                Insn::Move {
+                    source_reg,
+                    dest_reg,
+                    count,
+                } => {
+                    let source_reg = *source_reg;
+                    let dest_reg = *dest_reg;
+                    let count = *count;
+                    for i in 0..count {
+                        state.registers[dest_reg + i] = std::mem::replace(
+                            &mut state.registers[source_reg + i],
+                            OwnedValue::Null,
+                        );
+                    }
                     state.pc += 1;
                 }
                 Insn::IfPos {
@@ -787,6 +996,28 @@ impl Program {
                 Insn::Goto { target_pc } => {
                     assert!(*target_pc >= 0);
                     state.pc = *target_pc;
+                }
+                Insn::Gosub {
+                    target_pc,
+                    return_reg,
+                } => {
+                    assert!(*target_pc >= 0);
+                    state.registers[*return_reg] = OwnedValue::Integer(state.pc as i64 + 1);
+                    state.pc = *target_pc;
+                }
+                Insn::Return { return_reg } => {
+                    if let OwnedValue::Integer(pc) = state.registers[*return_reg] {
+                        if pc < 0 {
+                            return Err(LimboError::InternalError(
+                                "Return register is negative".to_string(),
+                            ));
+                        }
+                        state.pc = pc;
+                    } else {
+                        return Err(LimboError::InternalError(
+                            "Return register is not an integer".to_string(),
+                        ));
+                    }
                 }
                 Insn::Integer { value, dest } => {
                     state.registers[*dest] = OwnedValue::Integer(*value);
@@ -1572,6 +1803,7 @@ fn exec_length(reg: &OwnedValue) -> OwnedValue {
             OwnedValue::Integer(reg.to_string().len() as i64)
         }
         OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
+        OwnedValue::Agg(aggctx) => exec_length(&aggctx.final_value()),
         _ => reg.to_owned(),
     }
 }

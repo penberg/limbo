@@ -43,6 +43,7 @@ pub enum Operator {
         id: usize,
         source: Box<Operator>,
         aggregates: Vec<Aggregate>,
+        group_by: Option<Vec<ast::Expr>>,
         step: usize,
     },
     // Filter operator
@@ -154,7 +155,11 @@ impl ProjectionColumn {
 impl Operator {
     pub fn column_count(&self, referenced_tables: &[(Rc<BTreeTable>, String)]) -> usize {
         match self {
-            Operator::Aggregate { aggregates, .. } => aggregates.len(),
+            Operator::Aggregate {
+                group_by,
+                aggregates,
+                ..
+            } => aggregates.len() + group_by.as_ref().map_or(0, |g| g.len()),
             Operator::Filter { source, .. } => source.column_count(referenced_tables),
             Operator::SeekRowid { table, .. } => table.columns.len(),
             Operator::Limit { source, .. } => source.column_count(referenced_tables),
@@ -173,8 +178,29 @@ impl Operator {
 
     pub fn column_names(&self) -> Vec<String> {
         match self {
-            Operator::Aggregate { .. } => {
-                todo!();
+            Operator::Aggregate {
+                aggregates,
+                group_by,
+                ..
+            } => {
+                let mut names = vec![];
+                for agg in aggregates.iter() {
+                    names.push(agg.func.to_string().to_string());
+                }
+
+                if let Some(group_by) = group_by {
+                    for expr in group_by.iter() {
+                        match expr {
+                            ast::Expr::Id(ident) => names.push(ident.0.clone()),
+                            ast::Expr::Qualified(tbl, ident) => {
+                                names.push(format!("{}.{}", tbl.0, ident.0))
+                            }
+                            e => names.push(e.to_string()),
+                        }
+                    }
+                }
+
+                names
             }
             Operator::Filter { source, .. } => source.column_names(),
             Operator::SeekRowid { table, .. } => {
@@ -238,6 +264,7 @@ impl Display for Direction {
 pub struct Aggregate {
     pub func: AggFunc,
     pub args: Vec<ast::Expr>,
+    pub original_expr: ast::Expr,
 }
 
 impl Display for Aggregate {

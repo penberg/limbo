@@ -28,14 +28,25 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=r[{}]+r[{}]", dest, lhs, rhs),
             ),
-            Insn::Null { dest } => (
-                "Null",
+            Insn::Multiply { lhs, rhs, dest } => (
+                "Multiply",
+                *lhs as i32,
+                *rhs as i32,
                 *dest as i32,
-                0,
-                0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
-                format!("r[{}]=NULL", dest),
+                format!("r[{}]=r[{}]*r[{}]", dest, lhs, rhs),
+            ),
+            Insn::Null { dest, dest_end } => (
+                "Null",
+                0,
+                *dest as i32,
+                dest_end.map_or(0, |end| end as i32),
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                dest_end.map_or(format!("r[{}]=NULL", dest), |end| {
+                    format!("r[{}..{}]=NULL", dest, end)
+                }),
             ),
             Insn::NullRow { cursor_id } => (
                 "NullRow",
@@ -54,6 +65,57 @@ pub fn insn_to_str(
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,
                 format!("r[{}]!=NULL -> goto {}", reg, target_pc),
+            ),
+            Insn::Compare {
+                start_reg_a,
+                start_reg_b,
+                count,
+            } => (
+                "Compare",
+                *start_reg_a as i32,
+                *start_reg_b as i32,
+                *count as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "r[{}..{}]==r[{}..{}]",
+                    start_reg_a,
+                    start_reg_a + (count - 1),
+                    start_reg_b,
+                    start_reg_b + (count - 1)
+                ),
+            ),
+            Insn::Jump {
+                target_pc_lt,
+                target_pc_eq,
+                target_pc_gt,
+            } => (
+                "Jump",
+                *target_pc_lt as i32,
+                *target_pc_eq as i32,
+                *target_pc_gt as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Move {
+                source_reg,
+                dest_reg,
+                count,
+            } => (
+                "Move",
+                *source_reg as i32,
+                *dest_reg as i32,
+                *count as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "r[{}..{}]=r[{}..{}]",
+                    dest_reg,
+                    dest_reg + (count - 1),
+                    source_reg,
+                    source_reg + (count - 1)
+                ),
             ),
             Insn::IfPos {
                 reg,
@@ -348,6 +410,27 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::Gosub {
+                target_pc,
+                return_reg,
+            } => (
+                "Gosub",
+                *return_reg as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::Return { return_reg } => (
+                "Return",
+                *return_reg as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
             Insn::Integer { value, dest } => (
                 "Integer",
                 *value as i32,
@@ -478,7 +561,11 @@ pub fn insn_to_str(
                     *cursor_id as i32,
                     *columns as i32,
                     0,
-                    OwnedValue::Text(Rc::new(format!("k({},{})", columns, to_print.join(",")))),
+                    OwnedValue::Text(Rc::new(format!(
+                        "k({},{})",
+                        order.values.len(),
+                        to_print.join(",")
+                    ))),
                     0,
                     format!("cursor={}", cursor_id),
                 )
