@@ -120,7 +120,7 @@ pub fn exec_unixepoch(time_value: &OwnedValue) -> Result<String> {
 }
 
 fn get_unixepoch_from_naive_datetime(value: NaiveDateTime) -> String {
-    return value.and_utc().timestamp().to_string();
+    value.and_utc().timestamp().to_string()
 }
 
 fn parse_naive_date_time(time_value: &OwnedValue) -> Option<NaiveDateTime> {

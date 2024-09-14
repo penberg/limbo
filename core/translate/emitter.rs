@@ -292,7 +292,7 @@ impl Emitter for Operator {
                         let jump_label = m
                             .next_row_labels
                             .get(id)
-                            .unwrap_or(&m.termination_label_stack.last().unwrap());
+                            .unwrap_or(m.termination_label_stack.last().unwrap());
                         program.emit_insn_with_label_dependency(
                             Insn::SeekRowid {
                                 cursor_id,
@@ -361,7 +361,7 @@ impl Emitter for Operator {
                             .next_row_labels
                             .get(&right.id())
                             .or(m.next_row_labels.get(&left.id()))
-                            .unwrap_or(&m.termination_label_stack.last().unwrap());
+                            .unwrap_or(m.termination_label_stack.last().unwrap());
 
                         if *outer {
                             let lj_meta = m.left_joins.get(id).unwrap();
@@ -497,7 +497,7 @@ impl Emitter for Operator {
                             let mut order = Vec::new();
                             const ASCENDING: i64 = 0;
                             for _ in group_by.iter() {
-                                order.push(OwnedValue::Integer(ASCENDING as i64));
+                                order.push(OwnedValue::Integer(ASCENDING));
                             }
                             program.emit_insn(Insn::SorterOpen {
                                 cursor_id: sort_cursor,
@@ -1170,9 +1170,7 @@ impl Emitter for Operator {
                     },
                     PROJECTION_FINALIZE_SOURCE => {
                         match source.step(program, m, referenced_tables)? {
-                            OpStepResult::Done => {
-                                return Ok(OpStepResult::Done);
-                            }
+                            OpStepResult::Done => Ok(OpStepResult::Done),
                             _ => unreachable!(),
                         }
                     }

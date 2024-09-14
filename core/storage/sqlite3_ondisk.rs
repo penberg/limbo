@@ -439,7 +439,7 @@ impl PageContent {
                 let (overflows, to_read) =
                     payload_overflows(len_payload as usize, max_local, min_local, usable_size);
                 if overflows {
-                    to_read as usize + n_payload + 4
+                    to_read + n_payload + 4
                 } else {
                     len_payload as usize + n_payload + 4
                 }
@@ -1013,7 +1013,7 @@ pub fn payload_overflows(
     if space_left > max_local {
         space_left = min_local;
     }
-    return (true, space_left + 4);
+    (true, space_left + 4)
 }
 
 #[cfg(test)]

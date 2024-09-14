@@ -40,20 +40,21 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
                 _ => {
                     if let Some(args) = args {
                         for arg in args.iter() {
-                            resolve_aggregates(&arg, aggs);
+                            resolve_aggregates(arg, aggs);
                         }
                     }
                 }
             }
         }
         ast::Expr::FunctionCallStar { name, .. } => {
-            match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), 0) {
-                Ok(Func::Agg(f)) => aggs.push(Aggregate {
+            if let Ok(Func::Agg(f)) =
+                Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), 0)
+            {
+                aggs.push(Aggregate {
                     func: f,
                     args: vec![],
                     original_expr: expr.clone(),
-                }),
-                _ => {}
+                })
             }
         }
         ast::Expr::Binary(lhs, _, rhs) => {
@@ -155,18 +156,15 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     }
                                 }
                                 ast::Expr::FunctionCallStar { name, filter_over } => {
-                                    match Func::resolve_function(
+                                    if let Ok(Func::Agg(f)) = Func::resolve_function(
                                         normalize_ident(name.0.as_str()).as_str(),
                                         0,
                                     ) {
-                                        Ok(Func::Agg(f)) => {
-                                            aggregate_expressions.push(Aggregate {
-                                                func: f,
-                                                args: vec![],
-                                                original_expr: expr.clone(),
-                                            });
-                                        }
-                                        _ => {}
+                                        aggregate_expressions.push(Aggregate {
+                                            func: f,
+                                            args: vec![],
+                                            original_expr: expr.clone(),
+                                        });
                                     }
                                 }
                                 ast::Expr::Binary(lhs, _, rhs) => {
@@ -276,13 +274,13 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             }
 
             // Return the unoptimized query plan
-            return Ok(Plan {
+            Ok(Plan {
                 root_operator: operator,
                 referenced_tables,
-            });
+            })
         }
         _ => todo!(),
-    };
+    }
 }
 
 fn parse_from(
@@ -336,7 +334,7 @@ fn parse_from(
         }
     }
 
-    return Ok((operator, tables));
+    Ok((operator, tables))
 }
 
 fn parse_join(
@@ -374,10 +372,8 @@ fn parse_join(
         ast::JoinOperator::TypedJoin(Some(join_type)) => {
             if join_type == JoinType::LEFT | JoinType::OUTER {
                 true
-            } else if join_type == JoinType::RIGHT | JoinType::OUTER {
-                true
             } else {
-                false
+                join_type == JoinType::RIGHT | JoinType::OUTER
             }
         }
         _ => false,

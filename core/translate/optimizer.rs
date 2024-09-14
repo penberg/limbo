@@ -81,7 +81,7 @@ fn use_indexes(
                 let predicates_owned = if fs.is_empty() {
                     None
                 } else {
-                    Some(fs.drain(..).collect())
+                    Some(std::mem::take(fs))
                 };
                 *operator = Operator::SeekRowid {
                     table: table.clone(),
@@ -93,39 +93,35 @@ fn use_indexes(
                 }
             }
 
-            return Ok(());
+            Ok(())
         }
         Operator::Aggregate { source, .. } => {
             use_indexes(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
         Operator::Filter { source, .. } => {
             use_indexes(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
-        Operator::SeekRowid { .. } => {
-            return Ok(());
-        }
+        Operator::SeekRowid { .. } => Ok(()),
         Operator::Limit { source, .. } => {
             use_indexes(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
         Operator::Join { left, right, .. } => {
             use_indexes(left, referenced_tables)?;
             use_indexes(right, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
         Operator::Order { source, .. } => {
             use_indexes(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
         Operator::Projection { source, .. } => {
             use_indexes(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
-        Operator::Nothing => {
-            return Ok(());
-        }
+        Operator::Nothing => Ok(()),
     }
 }
 
@@ -161,7 +157,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                 eliminate_constants(source)?;
             }
 
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
         Operator::Join {
             left,
@@ -199,7 +195,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                 }
             }
 
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
         Operator::Aggregate { source, .. } => {
             if eliminate_constants(source)?
@@ -208,7 +204,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                 *source = Box::new(Operator::Nothing);
             }
             // Aggregation operator can return a row even if the source is empty e.g. count(1) from users where 0
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
         Operator::SeekRowid {
             rowid_predicate,
@@ -233,7 +229,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                 return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
 
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
         Operator::Limit { source, .. } => {
             let constant_elimination_result = eliminate_constants(source)?;
@@ -242,7 +238,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
             {
                 *operator = Operator::Nothing;
             }
-            return Ok(constant_elimination_result);
+            Ok(constant_elimination_result)
         }
         Operator::Order { source, .. } => {
             if eliminate_constants(source)?
@@ -251,7 +247,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                 *operator = Operator::Nothing;
                 return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
         Operator::Projection { source, .. } => {
             if eliminate_constants(source)?
@@ -261,7 +257,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                 return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
 
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
         Operator::Scan { predicates, .. } => {
             if let Some(ps) = predicates {
@@ -281,9 +277,9 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
                     *predicates = None;
                 }
             }
-            return Ok(ConstantConditionEliminationResult::Continue);
+            Ok(ConstantConditionEliminationResult::Continue)
         }
-        Operator::Nothing => return Ok(ConstantConditionEliminationResult::Continue),
+        Operator::Nothing => Ok(ConstantConditionEliminationResult::Continue),
     }
 }
 
@@ -316,7 +312,7 @@ fn push_predicates(
                 *operator = source.take_ownership();
             }
 
-            return Ok(());
+            Ok(())
         }
         Operator::Join {
             left,
@@ -362,34 +358,28 @@ fn push_predicates(
                 i += 1;
             }
 
-            return Ok(());
+            Ok(())
         }
         Operator::Aggregate { source, .. } => {
             push_predicates(source, referenced_tables)?;
 
-            return Ok(());
+            Ok(())
         }
-        Operator::SeekRowid { .. } => {
-            return Ok(());
-        }
+        Operator::SeekRowid { .. } => Ok(()),
         Operator::Limit { source, .. } => {
             push_predicates(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
         Operator::Order { source, .. } => {
             push_predicates(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
         Operator::Projection { source, .. } => {
             push_predicates(source, referenced_tables)?;
-            return Ok(());
+            Ok(())
         }
-        Operator::Scan { .. } => {
-            return Ok(());
-        }
-        Operator::Nothing => {
-            return Ok(());
-        }
+        Operator::Scan { .. } => Ok(()),
+        Operator::Nothing => Ok(()),
     }
 }
 
@@ -432,7 +422,7 @@ fn push_predicate(
                 predicates.as_mut().unwrap().push(predicate);
             }
 
-            return Ok(None);
+            Ok(None)
         }
         Operator::Filter {
             source,
@@ -446,7 +436,7 @@ fn push_predicate(
 
             ps.push(push_result.unwrap());
 
-            return Ok(None);
+            Ok(None)
         }
         Operator::Join {
             left,
@@ -486,7 +476,7 @@ fn push_predicate(
                 join_on_preds.as_mut().unwrap().push(pred);
             }
 
-            return Ok(None);
+            Ok(None)
         }
         Operator::Aggregate { source, .. } => {
             let push_result = push_predicate(source, predicate, referenced_tables)?;
@@ -494,18 +484,16 @@ fn push_predicate(
                 return Ok(None);
             }
 
-            return Ok(Some(push_result.unwrap()));
+            Ok(Some(push_result.unwrap()))
         }
-        Operator::SeekRowid { .. } => {
-            return Ok(Some(predicate));
-        }
+        Operator::SeekRowid { .. } => Ok(Some(predicate)),
         Operator::Limit { source, .. } => {
             let push_result = push_predicate(source, predicate, referenced_tables)?;
             if push_result.is_none() {
                 return Ok(None);
             }
 
-            return Ok(Some(push_result.unwrap()));
+            Ok(Some(push_result.unwrap()))
         }
         Operator::Order { source, .. } => {
             let push_result = push_predicate(source, predicate, referenced_tables)?;
@@ -513,7 +501,7 @@ fn push_predicate(
                 return Ok(None);
             }
 
-            return Ok(Some(push_result.unwrap()));
+            Ok(Some(push_result.unwrap()))
         }
         Operator::Projection { source, .. } => {
             let push_result = push_predicate(source, predicate, referenced_tables)?;
@@ -521,11 +509,9 @@ fn push_predicate(
                 return Ok(None);
             }
 
-            return Ok(Some(push_result.unwrap()));
+            Ok(Some(push_result.unwrap()))
         }
-        Operator::Nothing => {
-            return Ok(Some(predicate));
-        }
+        Operator::Nothing => Ok(Some(predicate)),
     }
 }
 
@@ -596,7 +582,7 @@ impl ExpressionResultCache {
         result_column_idx: usize,
         child_operator_id: usize,
         child_operator_result_column_idx_mask: usize,
-    ) -> () {
+    ) {
         let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
 
         let mut values = Vec::new();
@@ -849,8 +835,6 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
     match operator {
         Operator::Aggregate {
             source,
-            aggregates,
-            group_by,
             ..
         } => {
             find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(
@@ -867,7 +851,7 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
             let mut idx = 0;
 
             for (expr, _) in key.iter() {
-                let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(&expr, source);
+                let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(expr, source);
                 if result != 0 {
                     expr_result_cache.set_precomputation_key(
                         operator.id(),
@@ -883,19 +867,16 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
         Operator::Projection { source, expressions, .. } => {
             let mut idx = 0;
             for expr in expressions.iter() {
-                match expr {
-                    ProjectionColumn::Column(expr) => {
-                        let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(&expr, source);
-                        if result != 0 {
-                            expr_result_cache.set_precomputation_key(
-                                operator.id(),
-                                idx,
-                                source.id(),
-                                result,
-                            );
-                        }
+                if let ProjectionColumn::Column(expr) = expr {
+                    let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(expr, source);
+                    if result != 0 {
+                        expr_result_cache.set_precomputation_key(
+                            operator.id(),
+                            idx,
+                            source.id(),
+                            result,
+                        );
                     }
-                    _ => {}
                 }
                 idx += 1;
             }

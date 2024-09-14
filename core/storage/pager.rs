@@ -360,7 +360,7 @@ impl Pager {
         }
         for page_id in dirty_pages.iter() {
             let mut cache = self.page_cache.borrow_mut();
-            let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+            let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
             sqlite3_ondisk::begin_write_btree_page(self, &page)?;
         }
         dirty_pages.clear();

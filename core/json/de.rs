@@ -476,7 +476,7 @@ fn parse_hex(s: &str) -> Result<i32> {
 }
 
 fn is_hex_literal(s: &str) -> bool {
-    let trimmed = s.trim_start_matches(|c| c == '+' || c == '-');
+    let trimmed = s.trim_start_matches(['+', '-']);
     trimmed.len() > 2 && (&trimmed[..2] == "0x" || &trimmed[..2] == "0X")
 }
 

@@ -83,9 +83,8 @@ pub fn translate_condition_expr(
                 cursor_hint,
                 None,
             );
-            match lhs.as_ref() {
-                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                _ => {}
+            if let ast::Expr::Literal(_) = lhs.as_ref() {
+                program.mark_last_insn_constant()
             }
             let rhs_reg = program.alloc_register();
             let _ = translate_expr(
@@ -96,9 +95,8 @@ pub fn translate_condition_expr(
                 cursor_hint,
                 None,
             );
-            match rhs.as_ref() {
-                ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                _ => {}
+            if let ast::Expr::Literal(_) = rhs.as_ref() {
+                program.mark_last_insn_constant()
             }
             match op {
                 ast::Operator::Greater => {
@@ -515,26 +513,24 @@ pub fn translate_condition_expr(
                         condition_metadata.jump_target_when_false,
                     );
                 }
+            } else if condition_metadata.jump_if_condition_is_true {
+                program.emit_insn_with_label_dependency(
+                    Insn::IfNot {
+                        reg: cur_reg,
+                        target_pc: condition_metadata.jump_target_when_true,
+                        null_reg: cur_reg,
+                    },
+                    condition_metadata.jump_target_when_true,
+                );
             } else {
-                if condition_metadata.jump_if_condition_is_true {
-                    program.emit_insn_with_label_dependency(
-                        Insn::IfNot {
-                            reg: cur_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                            null_reg: cur_reg,
-                        },
-                        condition_metadata.jump_target_when_true,
-                    );
-                } else {
-                    program.emit_insn_with_label_dependency(
-                        Insn::If {
-                            reg: cur_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                            null_reg: cur_reg,
-                        },
-                        condition_metadata.jump_target_when_false,
-                    );
-                }
+                program.emit_insn_with_label_dependency(
+                    Insn::If {
+                        reg: cur_reg,
+                        target_pc: condition_metadata.jump_target_when_false,
+                        null_reg: cur_reg,
+                    },
+                    condition_metadata.jump_target_when_false,
+                );
             }
         }
         _ => todo!("op {:?} not implemented", expr),
@@ -971,9 +967,8 @@ pub fn translate_expr(
                                     cursor_hint,
                                     cached_results,
                                 )?;
-                                match arg {
-                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                    _ => {}
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
                                 }
                             }
                             program.emit_insn(Insn::Function {
@@ -1210,7 +1205,7 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Min => {
                             let args = if let Some(args) = args {
-                                if args.len() < 1 {
+                                if args.is_empty() {
                                     crate::bail_parse_error!(
                                         "min function with less than one argument"
                                     );
@@ -1229,9 +1224,8 @@ pub fn translate_expr(
                                     cursor_hint,
                                     cached_results,
                                 )?;
-                                match arg {
-                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                    _ => {}
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
                                 }
                             }
 
@@ -1245,7 +1239,7 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Max => {
                             let args = if let Some(args) = args {
-                                if args.len() < 1 {
+                                if args.is_empty() {
                                     crate::bail_parse_error!(
                                         "max function with less than one argument"
                                     );
@@ -1264,9 +1258,8 @@ pub fn translate_expr(
                                     cursor_hint,
                                     cached_results,
                                 )?;
-                                match arg {
-                                    ast::Expr::Literal(_) => program.mark_last_insn_constant(),
-                                    _ => {}
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
                                 }
                             }
 
@@ -1530,7 +1523,7 @@ pub fn resolve_ident_table(
                 }) {
                     idx = res.0;
                     col_type = res.1.ty;
-                    is_rowid_alias = catalog_table.column_is_rowid_alias(&res.1);
+                    is_rowid_alias = catalog_table.column_is_rowid_alias(res.1);
                 }
             }
             let cursor_id = program.resolve_cursor_id(identifier, cursor_hint);
@@ -1564,7 +1557,7 @@ pub fn translate_table_columns(
 ) -> usize {
     let mut cur_reg = start_reg;
     for i in start_column_offset..table.columns().len() {
-        let is_rowid = table.column_is_rowid_alias(&table.get_column_at(i));
+        let is_rowid = table.column_is_rowid_alias(table.get_column_at(i));
         let col_type = &table.get_column_at(i).ty;
         if is_rowid {
             program.emit_insn(Insn::RowId {

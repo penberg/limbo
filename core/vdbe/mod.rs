@@ -1002,7 +1002,7 @@ impl Program {
                     return_reg,
                 } => {
                     assert!(*target_pc >= 0);
-                    state.registers[*return_reg] = OwnedValue::Integer(state.pc as i64 + 1);
+                    state.registers[*return_reg] = OwnedValue::Integer(state.pc + 1);
                     state.pc = *target_pc;
                 }
                 Insn::Return { return_reg } => {
@@ -1809,7 +1809,7 @@ fn exec_length(reg: &OwnedValue) -> OwnedValue {
             OwnedValue::Integer(reg.to_string().len() as i64)
         }
         OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
-        OwnedValue::Agg(aggctx) => exec_length(&aggctx.final_value()),
+        OwnedValue::Agg(aggctx) => exec_length(aggctx.final_value()),
         _ => reg.to_owned(),
     }
 }
@@ -2131,15 +2131,15 @@ mod tests {
 
     impl Cursor for MockCursor {
         fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
-            return self.seek_to_last();
+            self.seek_to_last()
         }
 
         fn rowid(&self) -> Result<Option<u64>> {
-            return self.rowid();
+            self.rowid()
         }
 
         fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-            return self.seek_rowid(rowid);
+            self.seek_rowid(rowid)
         }
 
         fn rewind(&mut self) -> Result<CursorResult<()>> {

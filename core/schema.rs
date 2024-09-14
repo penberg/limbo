@@ -38,7 +38,7 @@ impl Schema {
         let table_name = normalize_ident(&index.table_name);
         self.indexes
             .entry(table_name)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(index.clone())
     }
 }
@@ -451,7 +451,7 @@ impl Index {
                 Ok(Index {
                     name: index_name,
                     table_name: normalize_ident(&tbl_name.0),
-                    root_page: root_page,
+                    root_page,
                     columns: index_columns,
                     unique,
                 })
