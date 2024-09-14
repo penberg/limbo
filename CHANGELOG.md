@@ -2,6 +2,10 @@
 
 ### Unreleased
 
+- `GROUP BY` support (Jussi Saurio)
+
+- Overflow page support (Pere Diaz Bou)
+
 - Improvements to Python bindings (Jean Arhancet and Lauri Virtanen)
 
 ### 0.0.4 - 2024-08-22
