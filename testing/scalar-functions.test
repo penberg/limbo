@@ -386,3 +386,47 @@ do_execsql_test quote-null {
 do_execsql_test quote-integer {
   SELECT quote(123)
 } {123}
+
+do_execsql_test sign-positive-integer {
+  SELECT sign(42);
+} {1}
+
+do_execsql_test sign-negative-integer {
+  SELECT sign(-42);
+} {-1}
+
+do_execsql_test sign-zero {
+  SELECT sign(0);
+} {0}
+
+do_execsql_test sign-positive-float {
+  SELECT sign(42.0);
+} {1}
+
+do_execsql_test sign-negative-float {
+  SELECT sign(-42.0);
+} {-1}
+
+do_execsql_test sign-zero-float {
+  SELECT sign(0.0);
+} {0}
+
+do_execsql_test sign-text-positive-integer {
+  SELECT sign('42');
+} {1}
+
+do_execsql_test sign-text-negative-integer {
+  SELECT sign('-42');
+} {-1}
+
+do_execsql_test sign-text-zero {
+  SELECT sign('0');
+} {0}
+
+do_execsql_test sign-text-non-numeric {
+  SELECT sign('abc');
+} {}
+
+do_execsql_test sign-null {
+  SELECT sign(NULL);
+} {}
