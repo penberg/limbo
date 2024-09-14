@@ -2,7 +2,7 @@ use crate::{function::JsonFunc, Result};
 use sqlite3_parser::ast::{self, UnaryOperator};
 use std::rc::Rc;
 
-use crate::function::{AggFunc, Func, ScalarFunc};
+use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
 use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::{
@@ -457,9 +457,12 @@ pub fn translate_condition_expr(
                         // Only constant patterns for LIKE are supported currently, so this
                         // is always 1
                         constant_mask: 1,
-                        func: crate::vdbe::Func::Scalar(ScalarFunc::Like),
                         start_reg: pattern_reg,
                         dest: cur_reg,
+                        func: FuncCtx {
+                            func: Func::Scalar(ScalarFunc::Like),
+                            arg_count: 2,
+                        },
                     });
                 }
                 ast::LikeOperator::Glob => todo!(),
@@ -524,8 +527,8 @@ pub fn translate_expr(
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
             let e1_reg = program.alloc_register();
-            let e2_reg = program.alloc_register();
             let _ = translate_expr(program, referenced_tables, e1, e1_reg, cursor_hint)?;
+            let e2_reg = program.alloc_register();
             let _ = translate_expr(program, referenced_tables, e2, e2_reg, cursor_hint)?;
 
             match op {
@@ -634,12 +637,20 @@ pub fn translate_expr(
             let func_type: Option<Func> =
                 Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), args_count).ok();
 
-            match func_type {
-                Some(Func::Agg(_)) => {
+            if func_type.is_none() {
+                crate::bail_parse_error!("unknown function {}", name.0);
+            }
+
+            let func_ctx = FuncCtx {
+                func: func_type.unwrap(),
+                arg_count: args_count,
+            };
+
+            match &func_ctx.func {
+                Func::Agg(_) => {
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
-
-                Some(Func::Json(j)) => match j {
+                Func::Json(j) => match j {
                     JsonFunc::JSON => {
                         let args = if let Some(args) = args {
                             if args.len() != 1 {
@@ -661,12 +672,12 @@ pub fn translate_expr(
                             constant_mask: 0,
                             start_reg: regs,
                             dest: target_register,
-                            func: crate::vdbe::Func::Json(j),
+                            func: func_ctx,
                         });
                         Ok(target_register)
                     }
                 },
-                Some(Func::Scalar(srf)) => {
+                Func::Scalar(srf) => {
                     match srf {
                         ScalarFunc::Char => {
                             let args = args.clone().unwrap_or_else(Vec::new);
@@ -680,7 +691,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -742,7 +753,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -822,7 +833,7 @@ pub fn translate_expr(
                                 constant_mask: 1,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -859,7 +870,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: regs,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -875,7 +886,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: regs,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -897,7 +908,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(ScalarFunc::Date),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -949,7 +960,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: str_reg,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(ScalarFunc::Substring),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -974,7 +985,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -996,7 +1007,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(ScalarFunc::Time),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -1030,7 +1041,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -1064,7 +1075,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(ScalarFunc::Min),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -1098,7 +1109,7 @@ pub fn translate_expr(
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(ScalarFunc::Max),
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }
@@ -1114,7 +1125,6 @@ pub fn translate_expr(
                                 crate::bail_parse_error!("nullif function with no arguments");
                             };
 
-                            let func_reg = program.alloc_register();
                             let first_reg = program.alloc_register();
                             translate_expr(
                                 program,
@@ -1133,17 +1143,14 @@ pub fn translate_expr(
                             )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: func_reg,
+                                start_reg: first_reg,
                                 dest: target_register,
-                                func: crate::vdbe::Func::Scalar(srf),
+                                func: func_ctx,
                             });
 
                             Ok(target_register)
                         }
                     }
-                }
-                None => {
-                    crate::bail_parse_error!("unknown function {}", name.0);
                 }
             }
         }
@@ -1528,7 +1535,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
-            );
+            )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -1549,7 +1556,7 @@ pub fn translate_aggregation(
                 expr,
                 expr_reg,
                 cursor_hint,
-            );
+            )?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,

@@ -24,7 +24,7 @@ pub mod sorter;
 mod datetime;
 
 use crate::error::LimboError;
-use crate::function::{AggFunc, JsonFunc, ScalarFunc};
+use crate::function::{AggFunc, FuncCtx, JsonFunc, ScalarFunc};
 use crate::json::get_json;
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
@@ -305,7 +305,7 @@ pub enum Insn {
         constant_mask: i32, // P1
         start_reg: usize,   // P2, start of argument registers
         dest: usize,        // P3
-        func: Func,         // P4
+        func: FuncCtx,      // P4
     },
 
     InitCoroutine {
@@ -1179,216 +1179,169 @@ impl Program {
                     func,
                     start_reg,
                     dest,
-                } => match func {
-                    Func::Json(JsonFunc::JSON) => {
-                        let json_value = &state.registers[*start_reg];
-                        let json_str = get_json(json_value);
-                        match json_str {
-                            Ok(json) => state.registers[*dest] = json,
-                            Err(e) => return Err(e),
+                } => {
+                    let arg_count = func.arg_count;
+                    match &func.func {
+                        crate::function::Func::Json(JsonFunc::JSON) => {
+                            let json_value = &state.registers[*start_reg];
+                            let json_str = get_json(json_value);
+                            match json_str {
+                                Ok(json) => state.registers[*dest] = json,
+                                Err(e) => return Err(e),
+                            }
                         }
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Char) => {
-                        let start_reg = *start_reg;
-                        let reg_values = state.registers[start_reg..state.registers.len()].to_vec();
-                        state.registers[*dest] = exec_char(reg_values);
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Coalesce) => {}
-                    Func::Scalar(ScalarFunc::Concat) => {
-                        let start_reg = *start_reg;
-                        let result = exec_concat(&state.registers[start_reg..]);
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::IfNull) => {}
-                    Func::Scalar(ScalarFunc::Like) => {
-                        let start_reg = *start_reg;
-                        assert!(
-                            start_reg + 2 <= state.registers.len(),
-                            "not enough registers {} < {}",
-                            start_reg,
-                            state.registers.len()
-                        );
-                        let pattern = &state.registers[start_reg];
-                        let text = &state.registers[start_reg + 1];
-                        let result = match (pattern, text) {
-                            (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
-                                let cache = if *constant_mask > 0 {
-                                    Some(&mut state.regex_cache)
-                                } else {
-                                    None
+                        crate::function::Func::Scalar(scalar_func) => match scalar_func {
+                            ScalarFunc::Char => {
+                                let reg_values =
+                                    state.registers[*start_reg..*start_reg + arg_count].to_vec();
+                                state.registers[*dest] = exec_char(reg_values);
+                            }
+                            ScalarFunc::Coalesce => {}
+                            ScalarFunc::Concat => {
+                                let result = exec_concat(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                );
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::IfNull => {}
+                            ScalarFunc::Like => {
+                                let pattern = &state.registers[*start_reg];
+                                let text = &state.registers[*start_reg + 1];
+                                let result = match (pattern, text) {
+                                    (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
+                                        let cache = if *constant_mask > 0 {
+                                            Some(&mut state.regex_cache)
+                                        } else {
+                                            None
+                                        };
+                                        OwnedValue::Integer(exec_like(cache, pattern, text) as i64)
+                                    }
+                                    _ => {
+                                        unreachable!("Like on non-text registers");
+                                    }
                                 };
-                                OwnedValue::Integer(exec_like(cache, pattern, text) as i64)
+                                state.registers[*dest] = result;
                             }
-                            _ => {
-                                unreachable!("Like on non-text registers");
+                            ScalarFunc::Abs
+                            | ScalarFunc::Lower
+                            | ScalarFunc::Upper
+                            | ScalarFunc::Length
+                            | ScalarFunc::Unicode
+                            | ScalarFunc::Quote => {
+                                let reg_value = state.registers[*start_reg].borrow_mut();
+                                let result = match scalar_func {
+                                    ScalarFunc::Abs => exec_abs(reg_value),
+                                    ScalarFunc::Lower => exec_lower(reg_value),
+                                    ScalarFunc::Upper => exec_upper(reg_value),
+                                    ScalarFunc::Length => Some(exec_length(reg_value)),
+                                    ScalarFunc::Unicode => Some(exec_unicode(reg_value)),
+                                    ScalarFunc::Quote => Some(exec_quote(reg_value)),
+                                    _ => unreachable!(),
+                                };
+                                state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
                             }
-                        };
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Abs) => {
-                        let reg_value = state.registers[*start_reg].borrow_mut();
-                        if let Some(value) = exec_abs(reg_value) {
-                            state.registers[*dest] = value;
-                        } else {
-                            state.registers[*dest] = OwnedValue::Null;
-                        }
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Upper) => {
-                        let reg_value = state.registers[*start_reg].borrow_mut();
-                        if let Some(value) = exec_upper(reg_value) {
-                            state.registers[*dest] = value;
-                        } else {
-                            state.registers[*dest] = OwnedValue::Null;
-                        }
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Lower) => {
-                        let reg_value = state.registers[*start_reg].borrow_mut();
-                        if let Some(value) = exec_lower(reg_value) {
-                            state.registers[*dest] = value;
-                        } else {
-                            state.registers[*dest] = OwnedValue::Null;
-                        }
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Length) => {
-                        let reg_value = state.registers[*start_reg].borrow_mut();
-                        state.registers[*dest] = exec_length(reg_value);
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Random) => {
-                        state.registers[*dest] = exec_random();
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Trim) => {
-                        let start_reg = *start_reg;
-                        let reg_value = state.registers[start_reg].clone();
-                        let pattern_value = state.registers.get(start_reg + 1).cloned();
-
-                        let result = exec_trim(&reg_value, pattern_value);
-
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::LTrim) => {
-                        let start_reg = *start_reg;
-                        let reg_value = state.registers[start_reg].clone();
-                        let pattern_value = state.registers.get(start_reg + 1).cloned();
-
-                        let result = exec_ltrim(&reg_value, pattern_value);
-
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::RTrim) => {
-                        let start_reg = *start_reg;
-                        let reg_value = state.registers[start_reg].clone();
-                        let pattern_value = state.registers.get(start_reg + 1).cloned();
-
-                        let result = exec_rtrim(&reg_value, pattern_value);
-
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Round) => {
-                        let start_reg = *start_reg;
-                        let reg_value = state.registers[start_reg].clone();
-                        let precision_value = state.registers.get(start_reg + 1).cloned();
-                        let result = exec_round(&reg_value, precision_value);
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Min) => {
-                        let start_reg = *start_reg;
-                        let reg_values = state.registers[start_reg..state.registers.len()]
-                            .iter()
-                            .collect();
-                        let min_fn = |a, b| if a < b { a } else { b };
-                        if let Some(value) = exec_minmax(reg_values, min_fn) {
-                            state.registers[*dest] = value;
-                        } else {
-                            state.registers[*dest] = OwnedValue::Null;
-                        }
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Max) => {
-                        let start_reg = *start_reg;
-                        let reg_values = state.registers[start_reg..state.registers.len()]
-                            .iter()
-                            .collect();
-                        let max_fn = |a, b| if a > b { a } else { b };
-                        if let Some(value) = exec_minmax(reg_values, max_fn) {
-                            state.registers[*dest] = value;
-                        } else {
-                            state.registers[*dest] = OwnedValue::Null;
-                        }
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Nullif) => {
-                        let start_reg = *start_reg;
-                        let first_value = &state.registers[start_reg + 1];
-                        let second_value = &state.registers[start_reg + 2];
-                        state.registers[*dest] = exec_nullif(first_value, second_value);
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Substr) | Func::Scalar(ScalarFunc::Substring) => {
-                        let start_reg = *start_reg;
-                        let str_value = &state.registers[start_reg];
-                        let start_value = &state.registers[start_reg + 1];
-                        let length_value = &state.registers[start_reg + 2];
-
-                        let result = exec_substring(str_value, start_value, length_value);
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Date) => {
-                        let result = exec_date(&state.registers[*start_reg..]);
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Time) => {
-                        let result = exec_time(&state.registers[*start_reg..]);
-                        state.registers[*dest] = result;
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::UnixEpoch) => {
-                        if *start_reg == 0 {
-                            let unixepoch: String =
-                                exec_unixepoch(&OwnedValue::Text(Rc::new("now".to_string())))?;
-                            state.registers[*dest] = OwnedValue::Text(Rc::new(unixepoch));
-                        } else {
-                            let datetime_value = &state.registers[*start_reg];
-                            let unixepoch = exec_unixepoch(datetime_value);
-                            match unixepoch {
-                                Ok(time) => {
-                                    state.registers[*dest] = OwnedValue::Text(Rc::new(time))
-                                }
-                                Err(e) => {
-                                    return Err(LimboError::ParseError(format!(
-                                        "Error encountered while parsing datetime value: {}",
-                                        e
-                                    )));
+                            ScalarFunc::Random => {
+                                state.registers[*dest] = exec_random();
+                            }
+                            ScalarFunc::Trim => {
+                                let reg_value = state.registers[*start_reg].clone();
+                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let result = exec_trim(&reg_value, pattern_value);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::LTrim => {
+                                let reg_value = state.registers[*start_reg].clone();
+                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let result = exec_ltrim(&reg_value, pattern_value);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::RTrim => {
+                                let reg_value = state.registers[*start_reg].clone();
+                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let result = exec_rtrim(&reg_value, pattern_value);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::Round => {
+                                let reg_value = state.registers[*start_reg].clone();
+                                let precision_value = state.registers.get(*start_reg + 1).cloned();
+                                let result = exec_round(&reg_value, precision_value);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::Min => {
+                                let reg_values = state.registers
+                                    [*start_reg..*start_reg + arg_count]
+                                    .iter()
+                                    .collect();
+                                let min_fn = |a, b| if a < b { a } else { b };
+                                if let Some(value) = exec_minmax(reg_values, min_fn) {
+                                    state.registers[*dest] = value;
+                                } else {
+                                    state.registers[*dest] = OwnedValue::Null;
                                 }
                             }
+                            ScalarFunc::Max => {
+                                let reg_values = state.registers
+                                    [*start_reg..*start_reg + arg_count]
+                                    .iter()
+                                    .collect();
+                                let max_fn = |a, b| if a > b { a } else { b };
+                                if let Some(value) = exec_minmax(reg_values, max_fn) {
+                                    state.registers[*dest] = value;
+                                } else {
+                                    state.registers[*dest] = OwnedValue::Null;
+                                }
+                            }
+                            ScalarFunc::Nullif => {
+                                let first_value = &state.registers[*start_reg];
+                                let second_value = &state.registers[*start_reg + 1];
+                                state.registers[*dest] = exec_nullif(first_value, second_value);
+                            }
+                            ScalarFunc::Substr | ScalarFunc::Substring => {
+                                let str_value = &state.registers[*start_reg];
+                                let start_value = &state.registers[*start_reg + 1];
+                                let length_value = &state.registers[*start_reg + 2];
+                                let result = exec_substring(str_value, start_value, length_value);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::Date => {
+                                let result =
+                                    exec_date(&state.registers[*start_reg..*start_reg + arg_count]);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::Time => {
+                                let result =
+                                    exec_time(&state.registers[*start_reg..*start_reg + arg_count]);
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::UnixEpoch => {
+                                if *start_reg == 0 {
+                                    let unixepoch: String = exec_unixepoch(&OwnedValue::Text(
+                                        Rc::new("now".to_string()),
+                                    ))?;
+                                    state.registers[*dest] = OwnedValue::Text(Rc::new(unixepoch));
+                                } else {
+                                    let datetime_value = &state.registers[*start_reg];
+                                    let unixepoch = exec_unixepoch(datetime_value);
+                                    match unixepoch {
+                                        Ok(time) => {
+                                            state.registers[*dest] = OwnedValue::Text(Rc::new(time))
+                                        }
+                                        Err(e) => {
+                                            return Err(LimboError::ParseError(format!(
+                                                "Error encountered while parsing datetime value: {}",
+                                                e
+                                            )));
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        crate::function::Func::Agg(_) => {
+                            unreachable!("Aggregate functions should not be handled here")
                         }
-                        state.pc += 1
                     }
-                    Func::Scalar(ScalarFunc::Unicode) => {
-                        let reg_value = state.registers[*start_reg].borrow_mut();
-                        state.registers[*dest] = exec_unicode(reg_value);
-                        state.pc += 1;
-                    }
-                    Func::Scalar(ScalarFunc::Quote) => {
-                        let reg_value = state.registers[*start_reg].borrow_mut();
-                        state.registers[*dest] = exec_quote(reg_value);
-                        state.pc += 1;
-                    }
-                },
+                    state.pc += 1;
+                }
                 Insn::InitCoroutine {
                     yield_reg,
                     jump_on_definition,

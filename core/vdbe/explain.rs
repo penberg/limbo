@@ -542,9 +542,14 @@ pub fn insn_to_str(
                 *constant_mask,
                 *start_reg as i32,
                 *dest as i32,
-                OwnedValue::Text(Rc::new(func.to_string())),
+                OwnedValue::Text(Rc::new(func.func.to_string())),
                 0,
-                format!("r[{}]=func(r[{}..])", dest, start_reg),
+                format!(
+                    "r[{}]=func(r[{}..{}])",
+                    dest,
+                    start_reg,
+                    start_reg + func.arg_count - 1
+                ),
             ),
             Insn::InitCoroutine {
                 yield_reg,

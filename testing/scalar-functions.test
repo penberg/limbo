@@ -255,6 +255,10 @@ do_execsql_test length-empty-text {
   SELECT length('');
 } {0}
 
+do_execsql_test length-date-binary-expr {
+  select length(date('now')) = 10;
+} {1}
+
 do_execsql_test min-number {
   select min(-10,2,3)
 } {-10}
