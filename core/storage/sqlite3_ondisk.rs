@@ -357,7 +357,14 @@ impl PageContent {
         }
     }
 
-    pub fn cell_get(&self, idx: usize) -> Result<BTreeCell> {
+    pub fn cell_get(
+        &self,
+        idx: usize,
+        pager: Rc<Pager>,
+        max_local: usize,
+        min_local: usize,
+        usable_size: usize,
+    ) -> Result<BTreeCell> {
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
@@ -371,7 +378,15 @@ impl PageContent {
         let cell_pointer = cell_start + (idx * 2);
         let cell_pointer = self.read_u16(cell_pointer) as usize;
 
-        read_btree_cell(buf, &self.page_type(), cell_pointer)
+        read_btree_cell(
+            buf,
+            &self.page_type(),
+            cell_pointer,
+            pager,
+            max_local,
+            min_local,
+            usable_size,
+        )
     }
 
     pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
@@ -385,7 +400,13 @@ impl PageContent {
     }
 
     /* Get region of a cell's payload */
-    pub fn cell_get_raw_region(&self, idx: usize) -> (usize, usize) {
+    pub fn cell_get_raw_region(
+        &self,
+        idx: usize,
+        max_local: usize,
+        min_local: usize,
+        usable_size: usize,
+    ) -> (usize, usize) {
         let buf = self.as_ptr();
         let ncells = self.cell_count();
         let cell_start = match self.page_type() {
@@ -401,7 +422,13 @@ impl PageContent {
         let len = match self.page_type() {
             PageType::IndexInterior => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer + 4..]).unwrap();
-                4 + len_payload as usize + n_payload + 4
+                let (overflows, to_read) =
+                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
+                if overflows {
+                    4 + to_read + n_payload + 4
+                } else {
+                    4 + len_payload as usize + n_payload + 4
+                }
             }
             PageType::TableInterior => {
                 let (_, n_rowid) = read_varint(&buf[cell_pointer + 4..]).unwrap();
@@ -409,13 +436,24 @@ impl PageContent {
             }
             PageType::IndexLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
-                len_payload as usize + n_payload + 4
+                let (overflows, to_read) =
+                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
+                if overflows {
+                    to_read as usize + n_payload + 4
+                } else {
+                    len_payload as usize + n_payload + 4
+                }
             }
             PageType::TableLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
                 let (_, n_rowid) = read_varint(&buf[cell_pointer + n_payload..]).unwrap();
-                // TODO: add overflow 4 bytes
-                len_payload as usize + n_payload + n_rowid
+                let (overflows, to_read) =
+                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
+                if overflows {
+                    to_read + n_payload + n_rowid
+                } else {
+                    len_payload as usize + n_payload + n_rowid
+                }
             }
         };
         (start, len)
@@ -548,7 +586,15 @@ pub struct IndexLeafCell {
     pub first_overflow_page: Option<u32>,
 }
 
-pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<BTreeCell> {
+pub fn read_btree_cell(
+    page: &[u8],
+    page_type: &PageType,
+    pos: usize,
+    pager: Rc<Pager>,
+    max_local: usize,
+    min_local: usize,
+    usable_size: usize,
+) -> Result<BTreeCell> {
     match page_type {
         PageType::IndexInterior => {
             let mut pos = pos;
@@ -557,7 +603,13 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             pos += 4;
             let (payload_size, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+
+            let (overflows, to_read) =
+                payload_overflows(payload_size as usize, max_local, min_local, usable_size);
+            let to_read = if overflows { to_read } else { page.len() - pos };
+
+            let (payload, first_overflow_page) =
+                read_payload(&page[pos..pos + to_read], payload_size as usize, pager);
             Ok(BTreeCell::IndexInteriorCell(IndexInteriorCell {
                 left_child_page,
                 payload,
@@ -579,7 +631,13 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             let mut pos = pos;
             let (payload_size, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+
+            let (overflows, to_read) =
+                payload_overflows(payload_size as usize, max_local, min_local, usable_size);
+            let to_read = if overflows { to_read } else { page.len() - pos };
+
+            let (payload, first_overflow_page) =
+                read_payload(&page[pos..pos + to_read], payload_size as usize, pager);
             Ok(BTreeCell::IndexLeafCell(IndexLeafCell {
                 payload,
                 first_overflow_page,
@@ -591,7 +649,13 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
             pos += nr;
             let (rowid, nr) = read_varint(&page[pos..])?;
             pos += nr;
-            let (payload, first_overflow_page) = read_payload(&page[pos..], payload_size as usize);
+
+            let (overflows, to_read) =
+                payload_overflows(payload_size as usize, max_local, min_local, usable_size);
+            let to_read = if overflows { to_read } else { page.len() - pos };
+
+            let (payload, first_overflow_page) =
+                read_payload(&page[pos..pos + to_read], payload_size as usize, pager);
             Ok(BTreeCell::TableLeafCell(TableLeafCell {
                 _rowid: rowid,
                 _payload: payload,
@@ -603,20 +667,47 @@ pub fn read_btree_cell(page: &[u8], page_type: &PageType, pos: usize) -> Result<
 
 /// read_payload takes in the unread bytearray with the payload size
 /// and returns the payload on the page, and optionally the first overflow page number.
-fn read_payload(unread: &[u8], payload_size: usize) -> (Vec<u8>, Option<u32>) {
-    let page_len = unread.len();
-    if payload_size <= page_len {
+fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8>, Option<u32>) {
+    let cell_len = unread.len();
+    if payload_size <= cell_len {
         // fit within 1 page
         (unread[..payload_size].to_vec(), None)
     } else {
         // overflow
         let first_overflow_page = u32::from_be_bytes([
-            unread[page_len - 4],
-            unread[page_len - 3],
-            unread[page_len - 2],
-            unread[page_len - 1],
+            unread[cell_len - 4],
+            unread[cell_len - 3],
+            unread[cell_len - 2],
+            unread[cell_len - 1],
         ]);
-        (unread[..page_len - 4].to_vec(), Some(first_overflow_page))
+        let usable_size = pager.usable_size();
+        let mut next_overflow = first_overflow_page;
+        let mut payload = unread[..cell_len - 4].to_vec();
+        let mut left_to_read = payload_size - (cell_len - 4); // minus four because last for bytes of a payload cell are the overflow pointer
+        while next_overflow != 0 {
+            assert!(left_to_read > 0);
+            let page;
+            loop {
+                let page_ref = pager.read_page(next_overflow as usize);
+                if let Ok(p) = page_ref {
+                    page = p;
+                    break;
+                }
+            }
+            let page = page.borrow();
+            let contents = page.contents.write().unwrap();
+            let contents = contents.as_ref().unwrap();
+
+            let to_read = left_to_read.min(usable_size - 4);
+            let buf = contents.as_ptr();
+            payload.extend_from_slice(&buf[4..4 + to_read]);
+
+            next_overflow = contents.read_u32(0);
+            left_to_read -= to_read;
+        }
+        assert_eq!(left_to_read, 0);
+
+        (payload, Some(first_overflow_page))
     }
 }
 
@@ -761,7 +852,11 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
         }
         SerialType::String(n) => {
             if buf.len() < n {
-                crate::bail_corrupt_error!("Invalid String value");
+                crate::bail_corrupt_error!(
+                    "Invalid String value, length {} < expected length {}",
+                    buf.len(),
+                    n
+                );
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
@@ -828,6 +923,15 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
     n
 }
 
+pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
+    let mut varint: Vec<u8> = Vec::new();
+    varint.extend(std::iter::repeat(0).take(9));
+    let n = write_varint(&mut varint.as_mut_slice()[0..9], value);
+    write_varint(&mut varint, value);
+    varint.truncate(n);
+    payload.extend_from_slice(&varint);
+}
+
 pub fn begin_read_wal_header(io: Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
@@ -888,6 +992,28 @@ fn finish_read_wal_frame_header(
     frame.checksum_1 = u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]);
     frame.checksum_2 = u32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]);
     Ok(())
+}
+
+/*
+    Checks if payload will overflow a cell based on max local and
+    it will return the min size that will be stored in that case,
+    including overflow pointer
+*/
+pub fn payload_overflows(
+    payload_size: usize,
+    max_local: usize,
+    min_local: usize,
+    usable_size: usize,
+) -> (bool, usize) {
+    if payload_size <= max_local {
+        return (false, 0);
+    }
+
+    let mut space_left = min_local + (payload_size - min_local) % (usable_size - 4);
+    if space_left > max_local {
+        space_left = min_local;
+    }
+    return (true, space_left + 4);
 }
 
 #[cfg(test)]
