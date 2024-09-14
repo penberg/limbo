@@ -105,6 +105,22 @@ pub enum Func {
 }
 
 impl Func {
+    pub fn to_string(&self) -> String {
+        match self {
+            Func::Agg(agg_func) => agg_func.to_string().to_string(),
+            Func::Scalar(scalar_func) => scalar_func.to_string(),
+            Func::Json(json_func) => json_func.to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FuncCtx {
+    pub func: Func,
+    pub arg_count: usize,
+}
+
+impl Func {
     pub fn resolve_function(name: &str, arg_count: usize) -> Result<Func, ()> {
         match name {
             "avg" => Ok(Func::Agg(AggFunc::Avg)),
