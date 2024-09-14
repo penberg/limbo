@@ -22,6 +22,11 @@ do_execsql_test where-like {
 } {4|sweater|25.0
 5|sweatshirt|74.0}
 
+do_execsql_test where-like-fn {
+    select * from products where like('sweat%', name)=1
+} {4|sweater|25.0
+5|sweatshirt|74.0}
+
 do_execsql_test where-not-like-and {
     select * from products where name not like 'sweat%' and price >= 70.0;
 } {1|hat|79.0
