@@ -638,7 +638,7 @@ impl BTreeCursor {
                             _ => unreachable!("Parent should always be a "),
                         };
                         if found {
-                            let (start, len) = parent.cell_get_raw_region(
+                            let (start, _len) = parent.cell_get_raw_region(
                                 cell_idx,
                                 self.max_local(page_type.clone()),
                                 self.min_local(page_type.clone()),
@@ -678,11 +678,11 @@ impl BTreeCursor {
                             cells_per_page
                         };
 
-                        let mut i = 0;
-                        for cell_idx in current_cell_index..current_cell_index + cells_to_copy {
+                        let cell_index_range =
+                            current_cell_index..current_cell_index + cells_to_copy;
+                        for (j, cell_idx) in cell_index_range.enumerate() {
                             let cell = scratch_cells[cell_idx];
-                            self.insert_into_cell(page, cell, i);
-                            i += 1;
+                            self.insert_into_cell(page, cell, j);
                         }
                         divider_cells_index.push(current_cell_index + cells_to_copy - 1);
                         current_cell_index += cells_to_copy;
@@ -999,6 +999,7 @@ impl BTreeCursor {
 
     // Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
     // and end of cell pointer area.
+    #[allow(unused_assignments)]
     fn compute_free_space(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) -> u16 {
         let buf = page.as_ptr();
 
@@ -1019,13 +1020,13 @@ impl BTreeCursor {
 
         let mut pc = free_block_pointer as usize;
         if pc > 0 {
-            let mut next = 0;
-            let mut size = 0;
             if pc < first_byte_in_cell_content as usize {
                 // corrupt
                 todo!("corrupted page");
             }
 
+            let mut next = 0;
+            let mut size = 0;
             loop {
                 // TODO: check corruption icellast
                 next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize;

@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::usize;
 
 use sqlite3_parser::ast;
 
@@ -25,7 +24,7 @@ use super::plan::{Operator, ProjectionColumn};
  * The Emitter trait is used to emit bytecode instructions for a given operator in the query plan.
  *
  * - step: perform a single step of the operator, emitting bytecode instructions as needed,
-    and returning a result indicating whether the operator is ready to emit a result row
+     and returning a result indicating whether the operator is ready to emit a result row
 */
 pub trait Emitter {
     fn step(
@@ -143,9 +142,9 @@ pub struct Metadata {
 /// - Continue: the operator is not yet ready to emit a result row
 /// - ReadyToEmit: the operator is ready to emit a result row
 /// - Done: the operator has completed execution
-/// For example, a Scan operator will return Continue until it has opened a cursor, rewound it and applied any predicates.
-/// At that point, it will return ReadyToEmit.
-/// Finally, when the Scan operator has emitted a Next instruction, it will return Done.
+///   For example, a Scan operator will return Continue until it has opened a cursor, rewound it and applied any predicates.
+///   At that point, it will return ReadyToEmit.
+///   Finally, when the Scan operator has emitted a Next instruction, it will return Done.
 ///
 /// Parent operators are free to make decisions based on the result a child operator's step() method.
 ///
@@ -614,6 +613,7 @@ impl Emitter for Operator {
 
                             return Ok(OpStepResult::Continue);
                         }
+                        #[allow(clippy::never_loop)]
                         GROUP_BY_SORT_AND_COMPARE => {
                             loop {
                                 match source.step(program, m, referenced_tables)? {
@@ -1065,6 +1065,7 @@ impl Emitter for Operator {
 
                         Ok(OpStepResult::Continue)
                     }
+                    #[allow(clippy::never_loop)]
                     ORDER_SORT_AND_OPEN_LOOP => {
                         loop {
                             match source.step(program, m, referenced_tables)? {

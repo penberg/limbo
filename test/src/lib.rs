@@ -4,11 +4,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[allow(dead_code)]
 struct TempDatabase {
     pub path: PathBuf,
     pub io: Arc<dyn limbo_core::IO>,
 }
 
+#[allow(dead_code, clippy::arc_with_non_send_sync)]
 impl TempDatabase {
     pub fn new(table_sql: &str) -> Self {
         let mut path = env::current_dir().unwrap();
@@ -174,7 +176,7 @@ mod tests {
         let mut huge_texts = Vec::new();
         for i in 0..iterations {
             let mut huge_text = String::new();
-            for j in 0..8192 {
+            for _j in 0..8192 {
                 huge_text.push((b'A' + i as u8) as char);
             }
             huge_texts.push(huge_text);

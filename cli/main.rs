@@ -33,6 +33,7 @@ struct Opts {
     output_mode: OutputMode,
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     let opts = Opts::parse();

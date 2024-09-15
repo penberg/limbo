@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+#[allow(clippy::arc_with_non_send_sync)]
 fn main() {
     let seed = match std::env::var("SEED") {
         Ok(seed) => seed.parse::<u64>().unwrap(),

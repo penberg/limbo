@@ -65,6 +65,7 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
     }
 }
 
+#[allow(clippy::extra_unused_lifetimes)]
 pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<Plan> {
     match select.body.select {
         ast::OneSelect::Select {
@@ -112,7 +113,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                             let name_normalized = normalize_ident(name.0.as_str());
                             let referenced_table = referenced_tables
                                 .iter()
-                                .find(|(t, t_id)| *t_id == name_normalized);
+                                .find(|(_t, t_id)| *t_id == name_normalized);
 
                             if referenced_table.is_none() {
                                 crate::bail_parse_error!("Table {} not found", name.0);
@@ -128,10 +129,10 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                             match expr.clone() {
                                 ast::Expr::FunctionCall {
                                     name,
-                                    distinctness,
+                                    distinctness: _,
                                     args,
-                                    filter_over,
-                                    order_by,
+                                    filter_over: _,
+                                    order_by: _,
                                 } => {
                                     let args_count = if let Some(args) = &args {
                                         args.len()
@@ -155,7 +156,10 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                         _ => {}
                                     }
                                 }
-                                ast::Expr::FunctionCallStar { name, filter_over } => {
+                                ast::Expr::FunctionCallStar {
+                                    name,
+                                    filter_over: _,
+                                } => {
                                     if let Ok(Func::Agg(f)) = Func::resolve_function(
                                         normalize_ident(name.0.as_str()).as_str(),
                                         0,
@@ -176,7 +180,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         }
                     }
                 }
-                if let Some(group_by) = group_by.as_ref() {
+                if let Some(_group_by) = group_by.as_ref() {
                     if aggregate_expressions.is_empty() {
                         crate::bail_parse_error!(
                             "GROUP BY clause without aggregate functions is not allowed"
@@ -283,6 +287,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_from(
     schema: &Schema,
     from: Option<FromClause>,

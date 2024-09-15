@@ -67,8 +67,8 @@ fn apply_modifier(dt: &mut NaiveDateTime, modifier: &str) -> Result<()> {
         Modifier::Hours(hours) => *dt += TimeDelta::hours(hours),
         Modifier::Minutes(minutes) => *dt += TimeDelta::minutes(minutes),
         Modifier::Seconds(seconds) => *dt += TimeDelta::seconds(seconds),
-        Modifier::Months(months) => todo!(),
-        Modifier::Years(years) => todo!(),
+        Modifier::Months(_months) => todo!(),
+        Modifier::Years(_years) => todo!(),
         Modifier::TimeOffset(offset) => *dt += offset,
         Modifier::DateOffset {
             years,
@@ -80,7 +80,7 @@ fn apply_modifier(dt: &mut NaiveDateTime, modifier: &str) -> Result<()> {
                 .ok_or_else(|| InvalidModifier("Invalid date offset".to_string()))?;
             *dt += TimeDelta::days(days as i64);
         }
-        Modifier::DateTimeOffset { date, time } => todo!(),
+        Modifier::DateTimeOffset { date: _, time: _ } => todo!(),
         Modifier::Ceiling => todo!(),
         Modifier::Floor => todo!(),
         Modifier::StartOfMonth => todo!(),
@@ -93,12 +93,12 @@ fn apply_modifier(dt: &mut NaiveDateTime, modifier: &str) -> Result<()> {
         Modifier::StartOfDay => {
             *dt = dt.date().and_hms_opt(0, 0, 0).unwrap();
         }
-        Modifier::Weekday(day) => todo!(),
+        Modifier::Weekday(_day) => todo!(),
         Modifier::UnixEpoch => todo!(),
         Modifier::JulianDay => todo!(),
         Modifier::Auto => todo!(),
         Modifier::Localtime => {
-            let utc_dt = DateTime::<Utc>::from_utc(*dt, Utc);
+            let utc_dt = DateTime::<Utc>::from_naive_utc_and_offset(*dt, Utc);
             *dt = utc_dt.with_timezone(&chrono::Local).naive_local();
         }
         Modifier::Utc => {
@@ -249,12 +249,13 @@ fn get_time_from_naive_datetime(value: NaiveDateTime) -> String {
 fn get_max_datetime_exclusive() -> NaiveDateTime {
     // The maximum date in SQLite is 9999-12-31
     NaiveDateTime::new(
-        NaiveDate::from_ymd_opt(10000, 01, 01).unwrap(),
+        NaiveDate::from_ymd_opt(10000, 1, 1).unwrap(),
         NaiveTime::from_hms_milli_opt(00, 00, 00, 000).unwrap(),
     )
 }
 
 /// Modifier doc https://www.sqlite.org/lang_datefunc.html#modifiers
+#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 enum Modifier {
     Days(i64),
@@ -340,23 +341,17 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                 1 => {
                     // first part can be either date ±YYYY-MM-DD or 3 types of time modifiers
                     let date = parse_modifier_date(parts[0]);
-                    if date.is_ok() {
-                        Ok(Modifier::DateTimeOffset {
-                            date: date.unwrap(),
-                            time: None,
-                        })
+                    if let Ok(date) = date {
+                        Ok(Modifier::DateTimeOffset { date, time: None })
                     } else {
                         // try to parse time if error parsing date
                         let time = parse_modifier_time(parts[0])?;
                         // TODO handle nanoseconds
-                        let time_delta;
-                        if s.starts_with('-') {
-                            time_delta =
-                                TimeDelta::seconds(-(time.num_seconds_from_midnight() as i64));
+                        let time_delta = if s.starts_with('-') {
+                            TimeDelta::seconds(-(time.num_seconds_from_midnight() as i64))
                         } else {
-                            time_delta =
-                                TimeDelta::seconds(time.num_seconds_from_midnight() as i64);
-                        }
+                            TimeDelta::seconds(time.num_seconds_from_midnight() as i64)
+                        };
                         Ok(Modifier::TimeOffset(time_delta))
                     }
                 }

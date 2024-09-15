@@ -8,6 +8,7 @@ pub struct Database {
     _inner: limbo_core::Database,
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 #[wasm_bindgen]
 impl Database {
     #[wasm_bindgen(constructor)]
@@ -29,6 +30,7 @@ pub struct File {
     fd: i32,
 }
 
+#[allow(dead_code)]
 impl File {
     fn new(vfs: VFS, fd: i32) -> Self {
         File { vfs, fd }

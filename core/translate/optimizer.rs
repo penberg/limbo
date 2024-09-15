@@ -668,19 +668,17 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
         Operator::Join { .. } => 0,
         Operator::Order { .. } => 0,
         Operator::Projection { expressions, .. } => {
-            let mut idx = 0;
             let mut mask = 0;
-            for e in expressions.iter() {
+            for (idx, e) in expressions.iter().enumerate() {
                 match e {
-                    super::plan::ProjectionColumn::Column(c) => {
+                    ProjectionColumn::Column(c) => {
                         if c == expr {
                             mask |= 1 << idx;
                         }
                     }
-                    super::plan::ProjectionColumn::Star => {}
-                    super::plan::ProjectionColumn::TableStar(_, _) => {}
+                    ProjectionColumn::Star => {}
+                    ProjectionColumn::TableStar(_, _) => {}
                 }
-                idx += 1;
             }
 
             mask
@@ -696,7 +694,7 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
     match expr {
         ast::Expr::Between {
             lhs,
-            not,
+            not: _,
             start,
             end,
         } => {
@@ -706,7 +704,7 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
             mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(end, operator);
             mask
         }
-        ast::Expr::Binary(lhs, op, rhs) => {
+        ast::Expr::Binary(lhs, _op, rhs) => {
             let mut mask = 0;
             mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
             mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(rhs, operator);
@@ -730,24 +728,24 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
             }
             mask
         }
-        ast::Expr::Cast { expr, type_name } => {
+        ast::Expr::Cast { expr, type_name: _ } => {
             find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
                 expr, operator,
             )
         }
-        ast::Expr::Collate(expr, collation) => {
+        ast::Expr::Collate(expr, _collation) => {
             find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
                 expr, operator,
             )
         }
-        ast::Expr::DoublyQualified(schema, tbl, ident) => 0,
+        ast::Expr::DoublyQualified(_schema, _tbl, _ident) => 0,
         ast::Expr::Exists(_) => 0,
         ast::Expr::FunctionCall {
-            name,
-            distinctness,
+            name: _,
+            distinctness: _,
             args,
-            order_by,
-            filter_over,
+            order_by: _,
+            filter_over: _,
         } => {
             let mut mask = 0;
             if let Some(args) = args {
@@ -757,9 +755,12 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
             }
             mask
         }
-        ast::Expr::FunctionCallStar { name, filter_over } => 0,
+        ast::Expr::FunctionCallStar {
+            name: _,
+            filter_over: _,
+        } => 0,
         ast::Expr::Id(_) => 0,
-        ast::Expr::InList { lhs, not, rhs } => {
+        ast::Expr::InList { lhs, not: _, rhs } => {
             let mut mask = 0;
             mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
             if let Some(rhs) = rhs {
@@ -769,16 +770,20 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
             }
             mask
         }
-        ast::Expr::InSelect { lhs, not, rhs } => {
+        ast::Expr::InSelect {
+            lhs,
+            not: _,
+            rhs: _,
+        } => {
             find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
                 lhs, operator,
             )
         }
         ast::Expr::InTable {
-            lhs,
-            not,
-            rhs,
-            args,
+            lhs: _,
+            not: _,
+            rhs: _,
+            args: _,
         } => 0,
         ast::Expr::IsNull(expr) => {
             find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
@@ -787,10 +792,10 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
         }
         ast::Expr::Like {
             lhs,
-            not,
-            op,
+            not: _,
+            op: _,
             rhs,
-            escape,
+            escape: _,
         } => {
             let mut mask = 0;
             mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
@@ -814,7 +819,7 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
         ast::Expr::Qualified(_, _) => 0,
         ast::Expr::Raise(_, _) => 0,
         ast::Expr::Subquery(_) => 0,
-        ast::Expr::Unary(op, expr) => {
+        ast::Expr::Unary(_op, expr) => {
             find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
                 expr, operator,
             )
@@ -848,9 +853,7 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
         }
         Operator::Join { .. } => {}
         Operator::Order { source, key, .. } => {
-            let mut idx = 0;
-
-            for (expr, _) in key.iter() {
+            for (idx, (expr, _)) in key.iter().enumerate() {
                 let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(expr, source);
                 if result != 0 {
                     expr_result_cache.set_precomputation_key(
@@ -860,13 +863,11 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
                         result,
                     );
                 }
-                idx += 1;
             }
             find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
         }
         Operator::Projection { source, expressions, .. } => {
-            let mut idx = 0;
-            for expr in expressions.iter() {
+            for (idx, expr) in expressions.iter().enumerate() {
                 if let ProjectionColumn::Column(expr) = expr {
                     let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(expr, source);
                     if result != 0 {
@@ -878,7 +879,6 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
                         );
                     }
                 }
-                idx += 1;
             }
             find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
         }

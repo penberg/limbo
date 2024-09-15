@@ -83,6 +83,7 @@ pub unsafe extern "C" fn sqlite3_shutdown() -> ffi::c_int {
 }
 
 #[no_mangle]
+#[allow(clippy::arc_with_non_send_sync)]
 pub unsafe extern "C" fn sqlite3_open(
     filename: *const ffi::c_char,
     db_out: *mut *mut sqlite3,
@@ -883,7 +884,7 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
         "datatype mismatch",                    // SQLITE_MISMATCH
         "bad parameter or other API misuse",    // SQLITE_MISUSE
         #[cfg(feature = "lfs")]
-        "",     // SQLITE_NOLFS
+        "",      // SQLITE_NOLFS
         #[cfg(not(feature = "lfs"))]
         "large file support is disabled", // SQLITE_NOLFS
         "authorization denied",                 // SQLITE_AUTH

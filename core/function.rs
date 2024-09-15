@@ -1,13 +1,20 @@
+use std::fmt;
+use std::fmt::Display;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonFunc {
-    JSON,
+    Json,
 }
 
-impl ToString for JsonFunc {
-    fn to_string(&self) -> String {
-        match self {
-            JsonFunc::JSON => "json".to_string(),
-        }
+impl Display for JsonFunc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                JsonFunc::Json => "json".to_string(),
+            }
+        )
     }
 }
 
@@ -67,9 +74,9 @@ pub enum ScalarFunc {
     UnixEpoch,
 }
 
-impl ToString for ScalarFunc {
-    fn to_string(&self) -> String {
-        match self {
+impl Display for ScalarFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
             ScalarFunc::Char => "char".to_string(),
             ScalarFunc::Coalesce => "coalesce".to_string(),
             ScalarFunc::Concat => "concat".to_string(),
@@ -95,7 +102,8 @@ impl ToString for ScalarFunc {
             ScalarFunc::Unicode => "unicode".to_string(),
             ScalarFunc::Quote => "quote".to_string(),
             ScalarFunc::UnixEpoch => "unixepoch".to_string(),
-        }
+        };
+        write!(f, "{}", str)
     }
 }
 
@@ -106,12 +114,12 @@ pub enum Func {
     Json(JsonFunc),
 }
 
-impl Func {
-    pub fn to_string(&self) -> String {
+impl Display for Func {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Func::Agg(agg_func) => agg_func.to_string().to_string(),
-            Func::Scalar(scalar_func) => scalar_func.to_string(),
-            Func::Json(json_func) => json_func.to_string(),
+            Func::Agg(agg_func) => write!(f, "{}", agg_func.to_string()),
+            Func::Scalar(scalar_func) => write!(f, "{}", scalar_func),
+            Func::Json(json_func) => write!(f, "{}", json_func),
         }
     }
 }
@@ -157,7 +165,7 @@ impl Func {
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
-            "json" => Ok(Func::Json(JsonFunc::JSON)),
+            "json" => Ok(Func::Json(JsonFunc::Json)),
             "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),
             _ => Err(()),
         }

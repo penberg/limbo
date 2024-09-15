@@ -451,10 +451,7 @@ pub fn translate_condition_expr(
             escape: _,
         } => {
             let cur_reg = program.alloc_register();
-            assert!(match rhs.as_ref() {
-                ast::Expr::Literal(_) => true,
-                _ => false,
-            });
+            assert!(matches!(rhs.as_ref(), ast::Expr::Literal(_)));
             match op {
                 ast::LikeOperator::Like => {
                     let pattern_reg = program.alloc_register();
@@ -732,7 +729,7 @@ pub fn translate_expr(
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
                 Func::Json(j) => match j {
-                    JsonFunc::JSON => {
+                    JsonFunc::Json => {
                         let args = if let Some(args) = args {
                             if args.len() != 1 {
                                 crate::bail_parse_error!(
@@ -1115,10 +1112,11 @@ pub fn translate_expr(
                         }
                         ScalarFunc::UnixEpoch => {
                             let mut start_reg = 0;
-                            if let Some(args) = args {
-                                if args.len() > 1 {
+                            match args {
+                                Some(args) if args.len() > 1 => {
                                     crate::bail_parse_error!("epoch function with > 1 arguments. Modifiers are not yet supported.");
-                                } else if args.len() == 1 {
+                                }
+                                Some(args) if args.len() == 1 => {
                                     let arg_reg = program.alloc_register();
                                     let _ = translate_expr(
                                         program,
@@ -1130,6 +1128,7 @@ pub fn translate_expr(
                                     )?;
                                     start_reg = arg_reg;
                                 }
+                                _ => {}
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1446,8 +1445,8 @@ fn wrap_eval_jump_expr(
 
 pub fn resolve_ident_qualified(
     program: &ProgramBuilder,
-    table_name: &String,
-    ident: &String,
+    table_name: &str,
+    ident: &str,
     referenced_tables: &[(Rc<BTreeTable>, String)],
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
@@ -1494,7 +1493,7 @@ pub fn resolve_ident_qualified(
 
 pub fn resolve_ident_table(
     program: &ProgramBuilder,
-    ident: &String,
+    ident: &str,
     referenced_tables: Option<&[(Rc<BTreeTable>, String)]>,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {

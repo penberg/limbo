@@ -12,6 +12,7 @@ use crate::{
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
     schema: &Schema,
     with: &Option<With>,

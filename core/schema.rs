@@ -403,6 +403,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Index {
     pub name: String,
@@ -412,6 +413,7 @@ pub struct Index {
     pub unique: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct IndexColumn {
     pub name: String,
