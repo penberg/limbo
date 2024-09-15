@@ -986,7 +986,8 @@ pub fn translate_expr(
                         | ScalarFunc::Upper
                         | ScalarFunc::Length
                         | ScalarFunc::Unicode
-                        | ScalarFunc::Quote => {
+                        | ScalarFunc::Quote
+                        | ScalarFunc::Sign => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     crate::bail_parse_error!(

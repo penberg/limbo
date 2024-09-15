@@ -1464,9 +1464,11 @@ impl Program {
                             | ScalarFunc::Upper
                             | ScalarFunc::Length
                             | ScalarFunc::Unicode
-                            | ScalarFunc::Quote => {
+                            | ScalarFunc::Quote
+                            | ScalarFunc::Sign => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
+                                    ScalarFunc::Sign => exec_sign(reg_value),
                                     ScalarFunc::Abs => exec_abs(reg_value),
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
@@ -1862,6 +1864,45 @@ fn exec_concat_ws(registers: &[OwnedValue]) -> OwnedValue {
     OwnedValue::Text(Rc::new(result))
 }
 
+fn exec_sign(reg: &OwnedValue) -> Option<OwnedValue> {
+    let num = match reg {
+        OwnedValue::Integer(i) => *i as f64,
+        OwnedValue::Float(f) => *f,
+        OwnedValue::Text(s) => {
+            if let Ok(i) = s.parse::<i64>() {
+                i as f64
+            } else if let Ok(f) = s.parse::<f64>() {
+                f
+            } else {
+                return Some(OwnedValue::Null);
+            }
+        }
+        OwnedValue::Blob(b) => match std::str::from_utf8(b) {
+            Ok(s) => {
+                if let Ok(i) = s.parse::<i64>() {
+                    i as f64
+                } else if let Ok(f) = s.parse::<f64>() {
+                    f
+                } else {
+                    return Some(OwnedValue::Null);
+                }
+            }
+            Err(_) => return Some(OwnedValue::Null),
+        },
+        _ => return Some(OwnedValue::Null),
+    };
+
+    let sign = if num > 0.0 {
+        1
+    } else if num < 0.0 {
+        -1
+    } else {
+        0
+    };
+
+    Some(OwnedValue::Integer(sign))
+}
+
 fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
@@ -2113,9 +2154,9 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
 mod tests {
     use super::{
         exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
-        exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_substring, exec_trim,
-        exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError, OwnedRecord,
-        OwnedValue, Result,
+        exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_sign, exec_substring,
+        exec_trim, exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError,
+        OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2642,5 +2683,72 @@ mod tests {
             exec_substring(&str_value, &start_value, &length_value),
             expected_val
         );
+    }
+
+    #[test]
+    fn test_exec_sign() {
+        let input = OwnedValue::Integer(42);
+        let expected = Some(OwnedValue::Integer(1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Integer(-42);
+        let expected = Some(OwnedValue::Integer(-1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Integer(0);
+        let expected = Some(OwnedValue::Integer(0));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Float(0.0);
+        let expected = Some(OwnedValue::Integer(0));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Float(0.1);
+        let expected = Some(OwnedValue::Integer(1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Float(42.0);
+        let expected = Some(OwnedValue::Integer(1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Float(-42.0);
+        let expected = Some(OwnedValue::Integer(-1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("abc".to_string()));
+        let expected = Some(OwnedValue::Null);
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("42".to_string()));
+        let expected = Some(OwnedValue::Integer(1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("-42".to_string()));
+        let expected = Some(OwnedValue::Integer(-1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("0".to_string()));
+        let expected = Some(OwnedValue::Integer(0));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Blob(Rc::new(b"abc".to_vec()));
+        let expected = Some(OwnedValue::Null);
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Blob(Rc::new(b"42".to_vec()));
+        let expected = Some(OwnedValue::Integer(1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Blob(Rc::new(b"-42".to_vec()));
+        let expected = Some(OwnedValue::Integer(-1));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Blob(Rc::new(b"0".to_vec()));
+        let expected = Some(OwnedValue::Integer(0));
+        assert_eq!(exec_sign(&input), expected);
+
+        let input = OwnedValue::Null;
+        let expected = Some(OwnedValue::Null);
+        assert_eq!(exec_sign(&input), expected);
     }
 }
