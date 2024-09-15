@@ -27,8 +27,8 @@ impl TempDatabase {
 
     pub fn connect_limbo(&self) -> limbo_core::Connection {
         let db = Database::open_file(self.io.clone(), self.path.to_str().unwrap()).unwrap();
-        let conn = db.connect();
-        conn
+
+        db.connect()
     }
 }
 
@@ -106,7 +106,7 @@ mod tests {
 
         let mut huge_text = String::new();
         for i in 0..8192 {
-            huge_text.push(('A' as u8 + (i % 24) as u8) as char);
+            huge_text.push((b'A' + (i % 24) as u8) as char);
         }
 
         let list_query = "SELECT * FROM test LIMIT 1";
@@ -169,13 +169,13 @@ mod tests {
         let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
         let conn = tmp_db.connect_limbo();
-        let iterations = 10 as usize;
+        let iterations = 10_usize;
 
         let mut huge_texts = Vec::new();
         for i in 0..iterations {
             let mut huge_text = String::new();
             for j in 0..8192 {
-                huge_text.push(('A' as u8 + i as u8) as char);
+                huge_text.push((b'A' + i as u8) as char);
             }
             huge_texts.push(huge_text);
         }
@@ -219,7 +219,7 @@ mod tests {
                         };
                         let huge_text = &huge_texts[current_index];
                         assert_eq!(current_index, id as usize);
-                        compare_string(&huge_text, text);
+                        compare_string(huge_text, text);
                         current_index += 1;
                     }
                     RowResult::IO => {

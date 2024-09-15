@@ -378,7 +378,7 @@ impl BTreeCursor {
 
             let mut page = page.contents.write().unwrap();
             let page = page.as_mut().unwrap();
-            self.insert_into_cell(page, &cell_payload.as_slice(), cell_idx);
+            self.insert_into_cell(page, cell_payload.as_slice(), cell_idx);
             page.overflow_cells.len()
         };
 
@@ -434,8 +434,8 @@ impl BTreeCursor {
         if page.first_freeblock() == 0 {
             // insert into empty list
             page.write_u16(offset as usize, 0);
-            page.write_u16(offset as usize + 2, len as u16);
-            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, offset as u16);
+            page.write_u16(offset as usize + 2, len);
+            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, offset);
             return;
         }
         let first_block = page.first_freeblock();
@@ -443,8 +443,8 @@ impl BTreeCursor {
         if offset < first_block {
             // insert into head of list
             page.write_u16(offset as usize, first_block);
-            page.write_u16(offset as usize + 2, len as u16);
-            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, offset as u16);
+            page.write_u16(offset as usize + 2, len);
+            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, offset);
             return;
         }
 
@@ -464,7 +464,7 @@ impl BTreeCursor {
         let mut pc = first_block;
         let mut prev = first_block;
 
-        while pc <= maxpc && pc < offset as u16 {
+        while pc <= maxpc && pc < offset {
             let next = page.read_u16(pc as usize);
             prev = pc;
             pc = next;
@@ -595,7 +595,7 @@ impl BTreeCursor {
                     let is_leaf = page.is_leaf();
                     let page_type = page.page_type();
                     let mut new_pages = vec![page, right_page];
-                    let new_pages_ids = vec![mem_page.page_idx, right_page_id];
+                    let new_pages_ids = [mem_page.page_idx, right_page_id];
                     trace!(
                         "splitting left={} right={}",
                         new_pages_ids[0],
@@ -681,7 +681,7 @@ impl BTreeCursor {
                         let mut i = 0;
                         for cell_idx in current_cell_index..current_cell_index + cells_to_copy {
                             let cell = scratch_cells[cell_idx];
-                            self.insert_into_cell(*page, cell, i);
+                            self.insert_into_cell(page, cell, i);
                             i += 1;
                         }
                         divider_cells_index.push(current_cell_index + cells_to_copy - 1);
@@ -705,7 +705,7 @@ impl BTreeCursor {
                                 BTreeCell::TableInteriorCell(interior) => interior._left_child_page,
                                 _ => unreachable!(),
                             };
-                            self.drop_cell(*page, page.cell_count() - 1);
+                            self.drop_cell(page, page.cell_count() - 1);
                             page.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, last_cell_pointer);
                         }
                         // last page right most pointer points to previous right most pointer before splitting
