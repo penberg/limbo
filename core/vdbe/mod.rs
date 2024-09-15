@@ -1435,8 +1435,9 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::ConcatWs => {
-                                let start_reg = *start_reg;
-                                let result = exec_concat_ws(&state.registers[start_reg..]);
+                                let result = exec_concat_ws(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                );
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}

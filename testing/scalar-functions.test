@@ -3,37 +3,37 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
-do_execsql_test concat-1 {
+do_execsql_test concat-chars {
   select concat('l', 'i');
 } {li}
 
-do_execsql_test concat-2 {
+do_execsql_test concat-char-and-number {
   select concat('l', 1);
 } {l1}
 
-do_execsql_test concat-3 {
+do_execsql_test concat-char-and-decimal {
   select concat('l', 1.5);
 } {l1.5}
 
-do_execsql_test concat-4 {
+do_execsql_test concat-char-null-char {
   select concat('l', null, 'i');
 } {li}
 
-do_execsql_test concat_ws-1 {
+do_execsql_test concat_ws-numbers {
   select concat_ws(',', 1, 2);
 } {1,2}
 
-do_execsql_test concat_ws-2 {
+do_execsql_test concat_ws-single-number {
   select concat_ws(',', 1);
 } {1}
 
-do_execsql_test concat_ws-3 {
-  select concat_ws(0, 1, 2);
-} {102}
-
-do_execsql_test concat_ws-4 {
+do_execsql_test concat_ws-null {
   select concat_ws(null, 1, 2);
 } {}
+
+do_execsql_test concat_ws-multiple {
+  select concat_ws(',', 1, 2), concat_ws(',', 3, 4)
+} {1,2|3,4}
 
 do_execsql_test char {
   select char(108, 105)
