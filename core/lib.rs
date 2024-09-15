@@ -50,7 +50,7 @@ pub struct Database {
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Arc<dyn crate::io::IO>, path: &str) -> Result<Database> {
+    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Database> {
         let file = io.open_file(path)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
