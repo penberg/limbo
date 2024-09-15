@@ -864,6 +864,45 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::ConcatWs => {
+                            let args = match args {
+                                Some(args) if args.len() >= 2 => args,
+                                Some(_) => crate::bail_parse_error!(
+                                    "{} function requires at least 2 arguments",
+                                    srf.to_string()
+                                ),
+                                None => crate::bail_parse_error!(
+                                    "{} function requires arguments",
+                                    srf.to_string()
+                                ),
+                            };
+
+                            let temp_register = program.alloc_register();
+                            for arg in args.iter() {
+                                let reg = program.alloc_register();
+                                translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    reg,
+                                    cursor_hint,
+                                    cached_results,
+                                )?;
+                            }
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: temp_register + 1,
+                                dest: temp_register,
+                                func: func_ctx,
+                            });
+
+                            program.emit_insn(Insn::Copy {
+                                src_reg: temp_register,
+                                dst_reg: target_register,
+                                amount: 1,
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::IfNull => {
                             let args = match args {
                                 Some(args) if args.len() == 2 => args,

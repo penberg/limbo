@@ -66,7 +66,7 @@ This document describes the SQLite compatibility status of Limbo:
 | char(X1,X2,...,XN)           | Yes    |         |
 | coalesce(X,Y,...)            | Yes    |         |
 | concat(X,...)                | Yes    |         |
-| concat_ws(SEP,X,...)         | No     |         |
+| concat_ws(SEP,X,...)         | Yes    |         |
 | format(FORMAT,...)           | No     |         |
 | glob(X,Y)                    | No     |         |
 | hex(X)                       | No     |         |
