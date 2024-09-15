@@ -400,6 +400,7 @@ dependencies = [
  "rstest",
  "rusqlite",
  "rustyline",
+ "tempfile",
 ]
 
 [[package]]

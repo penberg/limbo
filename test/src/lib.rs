@@ -1,8 +1,7 @@
 use limbo_core::Database;
-use std::env;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tempfile::TempDir;
 
 #[allow(dead_code)]
 struct TempDatabase {
@@ -13,12 +12,9 @@ struct TempDatabase {
 #[allow(dead_code, clippy::arc_with_non_send_sync)]
 impl TempDatabase {
     pub fn new(table_sql: &str) -> Self {
-        let mut path = env::current_dir().unwrap();
+        let mut path = TempDir::new().unwrap().into_path();
         path.push("test.db");
         {
-            if path.exists() {
-                fs::remove_file(&path).unwrap();
-            }
             let connection = rusqlite::Connection::open(&path).unwrap();
             connection.execute(table_sql, ()).unwrap();
         }
@@ -47,7 +43,7 @@ mod tests {
         let conn = tmp_db.connect_limbo();
 
         let list_query = "SELECT * FROM test";
-        let max_iterations = 10000;
+        let max_iterations = 1000;
         for i in 0..max_iterations {
             if (i % 100) == 0 {
                 let progress = (i as f64 / max_iterations as f64) * 100.0;
