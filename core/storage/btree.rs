@@ -536,11 +536,11 @@ impl BTreeCursor {
                 }
             }
 
-            trace!("Balancing leaf. leaf={}", mem_page.page_idx);
             if mem_page.parent.is_none() {
                 self.balance_root();
                 continue;
             }
+            trace!("Balancing leaf. leaf={}", mem_page.page_idx);
 
             let page_ref = self.read_page_sync(mem_page.page_idx);
             let page_rc = RefCell::borrow(&page_ref);
