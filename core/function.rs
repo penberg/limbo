@@ -144,6 +144,7 @@ impl Func {
             "coalesce" => Ok(Func::Scalar(ScalarFunc::Coalesce)),
             "concat" => Ok(Func::Scalar(ScalarFunc::Concat)),
             "concat_ws" => Ok(Func::Scalar(ScalarFunc::ConcatWs)),
+            "glob" => Ok(Func::Scalar(ScalarFunc::Glob)),
             "ifnull" => Ok(Func::Scalar(ScalarFunc::IfNull)),
             "like" => Ok(Func::Scalar(ScalarFunc::Like)),
             "abs" => Ok(Func::Scalar(ScalarFunc::Abs)),

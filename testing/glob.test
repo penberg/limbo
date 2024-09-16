@@ -22,6 +22,10 @@ do_execsql_test where-glob {
 } {4|sweater|25.0
 5|sweatshirt|74.0}
 
+do_execsql_test where-glob-question-mark {
+    select * from products where name glob 'sweat?r';
+} {4|sweater|25.0}
+
 do_execsql_test where-glob-fn {
     select * from products where glob('sweat*', name)=1
 } {4|sweater|25.0
