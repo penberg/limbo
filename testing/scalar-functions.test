@@ -430,7 +430,3 @@ do_execsql_test sign-text-non-numeric {
 do_execsql_test sign-null {
   SELECT sign(NULL);
 } {}
-
-do_execsql_test sqlite_version {
-  SELECT sqlite_version();
-} {3.46.1}

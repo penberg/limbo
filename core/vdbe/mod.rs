@@ -31,7 +31,7 @@ use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
-use crate::{Result, DATABASE_VERSION};
+use crate::Result;
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
@@ -1574,12 +1574,6 @@ impl Program {
                                     }
                                 }
                             }
-                            ScalarFunc::SqliteVersion => {
-                                let version_integer: i64 =
-                                    DATABASE_VERSION.get().unwrap().parse()?;
-                                let version = execute_sqlite_version(version_integer);
-                                state.registers[*dest] = OwnedValue::Text(Rc::new(version));
-                            }
                         },
                         crate::function::Func::Agg(_) => {
                             unreachable!("Aggregate functions should not be handled here")
@@ -2159,21 +2153,13 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
     }
 }
 
-fn execute_sqlite_version(version_integer: i64) -> String {
-    let major = version_integer / 1_000_000;
-    let minor = (version_integer % 1_000_000) / 1_000;
-    let release = version_integer % 1_000;
-
-    format!("{}.{}.{}", major, minor, release)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
         exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_sign, exec_substring,
-        exec_trim, exec_unicode, exec_upper, execute_sqlite_version, get_new_rowid, Cursor,
-        CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_trim, exec_unicode, exec_upper, get_new_rowid, Cursor, CursorResult, LimboError,
+        OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2767,12 +2753,5 @@ mod tests {
         let input = OwnedValue::Null;
         let expected = Some(OwnedValue::Null);
         assert_eq!(exec_sign(&input), expected);
-    }
-
-    #[test]
-    fn test_execute_sqlite_version() {
-        let version_integer = 3046001;
-        let expected = "3.46.1";
-        assert_eq!(execute_sqlite_version(version_integer), expected);
     }
 }

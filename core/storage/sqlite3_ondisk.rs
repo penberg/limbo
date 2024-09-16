@@ -84,7 +84,7 @@ pub struct DatabaseHeader {
     application_id: u32,
     reserved: [u8; 20],
     version_valid_for: u32,
-    pub version_number: u32,
+    version_number: u32,
 }
 
 #[derive(Debug, Default)]
