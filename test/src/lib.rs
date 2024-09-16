@@ -1,9 +1,6 @@
 use limbo_core::Database;
-use log::{LevelFilter, Record};
-use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Once;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 #[allow(dead_code)]
@@ -47,7 +44,7 @@ mod tests {
         let conn = tmp_db.connect_limbo();
 
         let list_query = "SELECT * FROM test";
-        let max_iterations = 1000;
+        let max_iterations = 10000;
         for i in 0..max_iterations {
             if (i % 100) == 0 {
                 let progress = (i as f64 / max_iterations as f64) * 100.0;
@@ -97,64 +94,6 @@ mod tests {
             }
             conn.cacheflush()?;
         }
-        Ok(())
-    }
-
-    #[ignore]
-    #[test]
-    fn test_btree_splitting() -> anyhow::Result<()> {
-        static INIT: Once = Once::new();
-        let log_buffer = Arc::new(Mutex::new(Vec::new()));
-        let log_buffer_clone = Arc::clone(&log_buffer);
-
-        INIT.call_once(|| {
-            env_logger::builder()
-                .format(move |buf, record: &Record| {
-                    let mut log_buffer = log_buffer_clone.lock().unwrap();
-                    writeln!(log_buffer, "{}", record.args()).unwrap();
-                    writeln!(buf, "{}", record.args())?;
-                    Ok(())
-                })
-                .filter_level(LevelFilter::Trace)
-                .init();
-        });
-
-        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
-        let conn = tmp_db.connect_limbo();
-
-        let max_iterations = 10000;
-        let mut page_split_log_found = false;
-        for i in 0..max_iterations {
-            let insert_query = format!("INSERT INTO test VALUES ({})", i);
-            match conn.query(insert_query) {
-                Ok(Some(ref mut rows)) => loop {
-                    match rows.next_row()? {
-                        RowResult::IO => {
-                            tmp_db.io.run_once()?;
-                        }
-                        RowResult::Done => break,
-                        _ => unreachable!(),
-                    }
-                },
-                Ok(None) => {}
-                Err(err) => {
-                    eprintln!("{}", err);
-                }
-            };
-            conn.cacheflush()?;
-
-            let logs = log_buffer.lock().unwrap();
-            let logs_str = String::from_utf8_lossy(&logs);
-            if logs_str.contains("Balancing root") && logs_str.contains("Balancing leaf") {
-                page_split_log_found = true;
-                break;
-            }
-        }
-
-        assert!(
-            page_split_log_found,
-            "Expected root page split but not executed"
-        );
         Ok(())
     }
 
