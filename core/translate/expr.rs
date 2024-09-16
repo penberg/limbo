@@ -1,5 +1,5 @@
 use crate::{function::JsonFunc, Result};
-use sqlite3_parser::ast::{self, LikeOperator, UnaryOperator};
+use sqlite3_parser::ast::{self, UnaryOperator};
 use std::rc::Rc;
 
 use super::optimizer::CachedResult;
@@ -906,40 +906,6 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Glob => {
-                            let args = match args {
-                                Some(args) if args.len() == 2 => args,
-                                Some(_) | None => crate::bail_parse_error!(
-                                    "{} function requires exactly 2 arguments",
-                                    srf.to_string()
-                                ),
-                            };
-                            let mut constant_mask = 0;
-                            for (idx, arg) in args.iter().enumerate() {
-                                let reg = program.alloc_register();
-                                let _ = translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    cursor_hint,
-                                    cached_results,
-                                )?;
-                                if let ast::Expr::Literal(_) = arg {
-                                    program.mark_last_insn_constant();
-                                    if idx == 0 {
-                                        constant_mask = 1;
-                                    }
-                                }
-                            }
-                            program.emit_insn(Insn::Function {
-                                constant_mask,
-                                start_reg: target_register + 1,
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
                         ScalarFunc::IfNull => {
                             let args = match args {
                                 Some(args) if args.len() == 2 => args,
@@ -983,7 +949,7 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
-                        ScalarFunc::Like => {
+                        ScalarFunc::Glob | ScalarFunc::Like => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
                                     crate::bail_parse_error!(
