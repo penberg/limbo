@@ -1,5 +1,5 @@
 use crate::{function::JsonFunc, Result};
-use sqlite3_parser::ast::{self, UnaryOperator};
+use sqlite3_parser::ast::{self, LikeOperator, UnaryOperator};
 use std::rc::Rc;
 
 use super::optimizer::CachedResult;
@@ -452,9 +452,10 @@ pub fn translate_condition_expr(
         } => {
             let cur_reg = program.alloc_register();
             match op {
-                ast::LikeOperator::Like => {
+                ast::LikeOperator::Like | ast::LikeOperator::Glob => {
                     let pattern_reg = program.alloc_register();
                     let column_reg = program.alloc_register();
+                    let mut constant_mask = 0;
                     let _ = translate_expr(
                         program,
                         Some(referenced_tables),
@@ -476,20 +477,23 @@ pub fn translate_condition_expr(
                     )?;
                     if let ast::Expr::Literal(_) = rhs.as_ref() {
                         program.mark_last_insn_constant();
+                        constant_mask = 1;
                     }
+                    let func = match op {
+                        ast::LikeOperator::Like => ScalarFunc::Like,
+                        ast::LikeOperator::Glob => ScalarFunc::Glob,
+                        _ => unreachable!(),
+                    };
                     program.emit_insn(Insn::Function {
-                        // Only constant patterns for LIKE are supported currently, so this
-                        // is always 1
-                        constant_mask: 1,
+                        constant_mask,
                         start_reg: pattern_reg,
                         dest: cur_reg,
                         func: FuncCtx {
-                            func: Func::Scalar(ScalarFunc::Like),
+                            func: Func::Scalar(func),
                             arg_count: 2,
                         },
                     });
                 }
-                ast::LikeOperator::Glob => todo!(),
                 ast::LikeOperator::Match => todo!(),
                 ast::LikeOperator::Regexp => todo!(),
             }
@@ -899,6 +903,40 @@ pub fn translate_expr(
                                 src_reg: temp_register,
                                 dst_reg: target_register,
                                 amount: 1,
+                            });
+                            Ok(target_register)
+                        }
+                        ScalarFunc::Glob => {
+                            let args = match args {
+                                Some(args) if args.len() == 2 => args,
+                                Some(_) | None => crate::bail_parse_error!(
+                                    "{} function requires exactly 2 arguments",
+                                    srf.to_string()
+                                ),
+                            };
+                            let mut constant_mask = 0;
+                            for (idx, arg) in args.iter().enumerate() {
+                                let reg = program.alloc_register();
+                                let _ = translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    reg,
+                                    cursor_hint,
+                                    cached_results,
+                                )?;
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant();
+                                    if idx == 0 {
+                                        constant_mask = 1;
+                                    }
+                                }
+                            }
+                            program.emit_insn(Insn::Function {
+                                constant_mask,
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: func_ctx,
                             });
                             Ok(target_register)
                         }

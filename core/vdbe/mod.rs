@@ -1440,6 +1440,9 @@ impl Program {
                                 );
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::Glob => {
+                                todo!()
+                            }
                             ScalarFunc::IfNull => {}
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
