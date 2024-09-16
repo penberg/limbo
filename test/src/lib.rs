@@ -151,7 +151,10 @@ mod tests {
             }
         }
 
-        assert!(page_split_log_found, "Expected root page split but not executed");
+        assert!(
+            page_split_log_found,
+            "Expected root page split but not executed"
+        );
         Ok(())
     }
 
