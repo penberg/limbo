@@ -420,7 +420,7 @@ pub struct ProgramState {
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
     ended_coroutine: bool, // flag to notify yield coroutine finished
-    regex_cache: HashMap<String, Regex>,
+    regex_cache: HashMap<String, Regex>, // TODO: Make multiple caches for LIKE and GLOB
 }
 
 impl ProgramState {
@@ -1441,7 +1441,22 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::Glob => {
-                                todo!()
+                                let pattern = &state.registers[*start_reg];
+                                let text = &state.registers[*start_reg + 1];
+                                let result = match (pattern, text) {
+                                    (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
+                                        let cache = if *constant_mask > 0 {
+                                            Some(&mut state.regex_cache)
+                                        } else {
+                                            None
+                                        };
+                                        OwnedValue::Integer(exec_glob(cache, pattern, text) as i64)
+                                    }
+                                    _ => {
+                                        unreachable!("Like on non-text registers");
+                                    }
+                                };
+                                state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}
                             ScalarFunc::Like => {
@@ -1991,6 +2006,31 @@ fn exec_like(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, te
         }
     } else {
         let re = construct_like_regex(pattern);
+        re.is_match(text)
+    }
+}
+
+fn construct_glob_regex(pattern: &str) -> Regex {
+    let mut regex_pattern = String::from("^");
+    regex_pattern.push_str(&pattern.replace('*', ".*").replace("?", "."));
+    regex_pattern.push('$');
+    Regex::new(&regex_pattern).unwrap()
+}
+
+// Implements GLOB pattern matching. Caches the constructed regex if a cache is provided
+fn exec_glob(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, text: &str) -> bool {
+    if let Some(cache) = regex_cache {
+        match cache.get(pattern) {
+            Some(re) => re.is_match(text),
+            None => {
+                let re = construct_glob_regex(pattern);
+                let res = re.is_match(text);
+                cache.insert(pattern.to_string(), re);
+                res
+            }
+        }
+    } else {
+        let re = construct_glob_regex(pattern);
         re.is_match(text)
     }
 }
