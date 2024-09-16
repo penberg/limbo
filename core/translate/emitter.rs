@@ -2,12 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use sqlite3_parser::ast;
-
 use crate::schema::{BTreeTable, Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
+use crate::translate::expr::resolve_ident_pseudo_table;
 use crate::types::{OwnedRecord, OwnedValue};
-use crate::util::normalize_ident;
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{BranchOffset, Insn, Program};
 use crate::Result;
@@ -648,21 +646,11 @@ impl Emitter for Operator {
                                 .chain(aggregates.iter().map(|agg| &agg.args[0]))
                             // FIXME: just blindly taking the first arg is a hack
                             {
-                                // FIXME: reading from pseudo tables made during sort operations
-                                // now relies on them having the same column names as the original
-                                // table. This is not very robust IMO and we should refactor how these
-                                // are handled.
-                                column_names.push(match expr {
-                                    ast::Expr::Id(ident) => normalize_ident(&ident.0),
-                                    ast::Expr::Qualified(tbl, ident) => {
-                                        format!(
-                                            "{}.{}",
-                                            normalize_ident(&tbl.0),
-                                            normalize_ident(&ident.0)
-                                        )
-                                    }
-                                    _ => "expr".to_string(),
-                                });
+                                // Sorter column names for group by are now just determined by stringifying the expression, since the group by
+                                // columns and aggregations can be practically anything.
+                                // FIXME: either come up with something more robust, or make this something like expr.to_canonical_string() so that we can handle
+                                // things like `count(1)` and `COUNT(1)` the same way
+                                column_names.push(expr.to_string());
                             }
                             let pseudo_columns = column_names
                                 .iter()
@@ -673,12 +661,12 @@ impl Emitter for Operator {
                                 })
                                 .collect::<Vec<_>>();
 
-                            let pseudo_cursor = program.alloc_cursor_id(
-                                None,
-                                Some(Table::Pseudo(Rc::new(PseudoTable {
-                                    columns: pseudo_columns,
-                                }))),
-                            );
+                            let pseudo_table = Rc::new(PseudoTable {
+                                columns: pseudo_columns,
+                            });
+
+                            let pseudo_cursor = program
+                                .alloc_cursor_id(None, Some(Table::Pseudo(pseudo_table.clone())));
 
                             program.emit_insn(Insn::OpenPseudo {
                                 cursor_id: pseudo_cursor,
@@ -707,15 +695,14 @@ impl Emitter for Operator {
 
                             let groups_start_reg = program.alloc_registers(group_by.len());
                             for (i, expr) in group_by.iter().enumerate() {
+                                let sorter_column_index =
+                                    resolve_ident_pseudo_table(&expr.to_string(), &pseudo_table)?;
                                 let group_reg = groups_start_reg + i;
-                                translate_expr(
-                                    program,
-                                    Some(referenced_tables),
-                                    expr,
-                                    group_reg,
-                                    Some(pseudo_cursor),
-                                    None,
-                                )?;
+                                program.emit_insn(Insn::Column {
+                                    cursor_id: pseudo_cursor,
+                                    column: sorter_column_index,
+                                    dest: group_reg,
+                                });
                             }
 
                             program.emit_insn(Insn::Compare {
@@ -806,14 +793,13 @@ impl Emitter for Operator {
 
                             for (i, expr) in group_by.iter().enumerate() {
                                 let key_reg = group_exprs_start_register + i;
-                                translate_expr(
-                                    program,
-                                    Some(referenced_tables),
-                                    expr,
-                                    key_reg,
-                                    Some(pseudo_cursor),
-                                    None,
-                                )?;
+                                let sorter_column_index =
+                                    resolve_ident_pseudo_table(&expr.to_string(), &pseudo_table)?;
+                                program.emit_insn(Insn::Column {
+                                    cursor_id: pseudo_cursor,
+                                    column: sorter_column_index,
+                                    dest: key_reg,
+                                });
                             }
 
                             program.resolve_label(

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use super::optimizer::CachedResult;
 use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
-use crate::schema::{Table, Type};
+use crate::schema::{PseudoTable, Table, Type};
 use crate::util::normalize_ident;
 use crate::{
     schema::BTreeTable,
@@ -451,21 +451,10 @@ pub fn translate_condition_expr(
             escape: _,
         } => {
             let cur_reg = program.alloc_register();
-            assert!(matches!(rhs.as_ref(), ast::Expr::Literal(_)));
             match op {
                 ast::LikeOperator::Like => {
                     let pattern_reg = program.alloc_register();
                     let column_reg = program.alloc_register();
-                    // LIKE(pattern, column). We should translate the pattern first before the column
-                    let _ = translate_expr(
-                        program,
-                        Some(referenced_tables),
-                        rhs,
-                        pattern_reg,
-                        cursor_hint,
-                        None,
-                    )?;
-                    program.mark_last_insn_constant();
                     let _ = translate_expr(
                         program,
                         Some(referenced_tables),
@@ -474,6 +463,20 @@ pub fn translate_condition_expr(
                         cursor_hint,
                         None,
                     )?;
+                    if let ast::Expr::Literal(_) = lhs.as_ref() {
+                        program.mark_last_insn_constant();
+                    }
+                    let _ = translate_expr(
+                        program,
+                        Some(referenced_tables),
+                        rhs,
+                        pattern_reg,
+                        cursor_hint,
+                        None,
+                    )?;
+                    if let ast::Expr::Literal(_) = rhs.as_ref() {
+                        program.mark_last_insn_constant();
+                    }
                     program.emit_insn(Insn::Function {
                         // Only constant patterns for LIKE are supported currently, so this
                         // is always 1
@@ -838,8 +841,11 @@ pub fn translate_expr(
                                     srf.to_string()
                                 );
                             };
+                            let mut start_reg = None;
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
+                                start_reg = Some(start_reg.unwrap_or(reg));
+
                                 translate_expr(
                                     program,
                                     referenced_tables,
@@ -851,7 +857,7 @@ pub fn translate_expr(
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg: start_reg.unwrap(),
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -983,7 +989,8 @@ pub fn translate_expr(
                         | ScalarFunc::Upper
                         | ScalarFunc::Length
                         | ScalarFunc::Unicode
-                        | ScalarFunc::Quote => {
+                        | ScalarFunc::Quote
+                        | ScalarFunc::Sign => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     crate::bail_parse_error!(
@@ -1537,6 +1544,19 @@ pub fn resolve_ident_table(
     }
 
     crate::bail_parse_error!("ambiguous column name {}", ident.as_str());
+}
+
+pub fn resolve_ident_pseudo_table(ident: &String, pseudo_table: &PseudoTable) -> Result<usize> {
+    let res = pseudo_table
+        .columns
+        .iter()
+        .enumerate()
+        .find(|(_, col)| col.name == *ident);
+    if res.is_some() {
+        let (idx, _) = res.unwrap();
+        return Ok(idx);
+    }
+    crate::bail_parse_error!("column with name {} not found", ident.as_str());
 }
 
 pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mut ProgramBuilder) {
