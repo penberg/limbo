@@ -1968,7 +1968,10 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
 }
 
 fn construct_like_regex(pattern: &str) -> Regex {
-    Regex::new(&pattern.replace('%', ".*").replace('_', ".").to_string()).unwrap()
+    let mut regex_pattern = String::from("^");
+    regex_pattern.push_str(&pattern.replace('%', ".*").replace('_', "."));
+    regex_pattern.push('$');
+    Regex::new(&regex_pattern).unwrap()
 }
 
 // Implements LIKE pattern matching. Caches the constructed regex if a cache is provided
