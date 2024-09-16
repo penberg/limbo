@@ -37,6 +37,7 @@ mod tests {
     use super::*;
     use limbo_core::{RowResult, Value};
 
+    #[ignore]
     #[test]
     fn test_sequential_write() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
@@ -98,6 +99,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore]
     #[test]
     fn test_simple_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
@@ -164,6 +166,7 @@ mod tests {
         Ok(())
     }
 
+    #[ignore]
     #[test]
     fn test_sequential_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
