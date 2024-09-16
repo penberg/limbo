@@ -19,7 +19,7 @@ dirs = "5.0.1"
 env_logger = "0.10.1"
 limbo_core = { path = "../core" }
 rustyline = "12.0.0"
-rusqlite = "0.29.0"
+rusqlite = { version = "0.29", features = ["bundled"] }
 
 [dev-dependencies]
 rstest = "0.18.2"
