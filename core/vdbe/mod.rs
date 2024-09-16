@@ -413,6 +413,19 @@ pub enum StepResult<'a> {
     Row(Record<'a>),
 }
 
+struct RegexCache {
+    like: HashMap<String, Regex>,
+    glob: HashMap<String, Regex>,
+}
+impl RegexCache {
+    fn new() -> Self {
+        RegexCache {
+            like: HashMap::new(),
+            glob: HashMap::new(),
+        }
+    }
+}
+
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: BranchOffset,
@@ -420,7 +433,7 @@ pub struct ProgramState {
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
     ended_coroutine: bool, // flag to notify yield coroutine finished
-    regex_cache: HashMap<String, Regex>, // TODO: Make multiple caches for LIKE and GLOB
+    regex_cache: RegexCache,
 }
 
 impl ProgramState {
@@ -434,7 +447,7 @@ impl ProgramState {
             registers,
             last_compare: None,
             ended_coroutine: false,
-            regex_cache: HashMap::new(),
+            regex_cache: RegexCache::new(),
         }
     }
 
@@ -1446,7 +1459,7 @@ impl Program {
                                 let result = match (pattern, text) {
                                     (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
                                         let cache = if *constant_mask > 0 {
-                                            Some(&mut state.regex_cache)
+                                            Some(&mut state.regex_cache.glob)
                                         } else {
                                             None
                                         };
@@ -1465,7 +1478,7 @@ impl Program {
                                 let result = match (pattern, text) {
                                     (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
                                         let cache = if *constant_mask > 0 {
-                                            Some(&mut state.regex_cache)
+                                            Some(&mut state.regex_cache.like)
                                         } else {
                                             None
                                         };
