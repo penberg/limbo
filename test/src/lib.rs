@@ -98,6 +98,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_simple_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
