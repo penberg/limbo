@@ -73,6 +73,7 @@ pub enum ScalarFunc {
     Time,
     Unicode,
     Quote,
+    SqliteVersion,
     UnixEpoch,
 }
 
@@ -105,6 +106,7 @@ impl Display for ScalarFunc {
             ScalarFunc::Time => "time".to_string(),
             ScalarFunc::Unicode => "unicode".to_string(),
             ScalarFunc::Quote => "quote".to_string(),
+            ScalarFunc::SqliteVersion => "sqlite_version".to_string(),
             ScalarFunc::UnixEpoch => "unixepoch".to_string(),
         };
         write!(f, "{}", str)
@@ -171,6 +173,7 @@ impl Func {
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
+            "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),
             "json" => Ok(Func::Json(JsonFunc::Json)),
             "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),
             _ => Err(()),

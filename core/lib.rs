@@ -19,7 +19,7 @@ use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
@@ -42,6 +42,8 @@ pub use storage::pager::Page;
 pub use storage::wal::Wal;
 pub use types::Value;
 
+pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
+
 pub struct Database {
     pager: Rc<Pager>,
     schema: Rc<Schema>,
@@ -59,11 +61,15 @@ impl Database {
     }
 
     pub fn open(
-        io: Arc<dyn crate::io::IO>,
+        io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<dyn Wal>,
     ) -> Result<Database> {
         let db_header = Pager::begin_open(page_io.clone())?;
+        DATABASE_VERSION.get_or_init(|| {
+            let version = db_header.borrow().version_number.clone();
+            version.to_string()
+        });
         io.run_once()?;
         let pager = Rc::new(Pager::finish_open(
             db_header.clone(),

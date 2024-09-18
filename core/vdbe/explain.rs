@@ -631,12 +631,18 @@ pub fn insn_to_str(
                 *dest as i32,
                 OwnedValue::Text(Rc::new(func.func.to_string())),
                 0,
-                format!(
-                    "r[{}]=func(r[{}..{}])",
-                    dest,
-                    start_reg,
-                    start_reg + func.arg_count - 1
-                ),
+                if func.arg_count == 0 {
+                    format!("r[{}]=func()", dest)
+                } else if *start_reg == *start_reg + func.arg_count - 1 {
+                    format!("r[{}]=func(r[{}])", dest, start_reg)
+                } else {
+                    format!(
+                        "r[{}]=func(r[{}..{}])",
+                        dest,
+                        start_reg,
+                        start_reg + func.arg_count - 1
+                    )
+                },
             ),
             Insn::InitCoroutine {
                 yield_reg,
