@@ -41,6 +41,7 @@ use regex::Regex;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Display;
 use std::rc::Rc;
 
 pub type BranchOffset = i64;
@@ -49,18 +50,20 @@ pub type CursorID = usize;
 
 pub type PageIdx = usize;
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum Func {
     Scalar(ScalarFunc),
     Json(JsonFunc),
 }
 
-impl ToString for Func {
-    fn to_string(&self) -> String {
-        match self {
+impl Display for Func {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
             Func::Scalar(scalar_func) => scalar_func.to_string(),
             Func::Json(json_func) => json_func.to_string(),
-        }
+        };
+        write!(f, "{}", str)
     }
 }
 
@@ -752,7 +755,7 @@ impl Program {
                             state.pc = target_pc;
                         }
                         _ => {
-                            if &state.registers[lhs] == &state.registers[rhs] {
+                            if state.registers[lhs] == state.registers[rhs] {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
@@ -774,7 +777,7 @@ impl Program {
                             state.pc = target_pc;
                         }
                         _ => {
-                            if &state.registers[lhs] != &state.registers[rhs] {
+                            if state.registers[lhs] != state.registers[rhs] {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
@@ -796,7 +799,7 @@ impl Program {
                             state.pc = target_pc;
                         }
                         _ => {
-                            if &state.registers[lhs] < &state.registers[rhs] {
+                            if state.registers[lhs] < state.registers[rhs] {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
@@ -818,7 +821,7 @@ impl Program {
                             state.pc = target_pc;
                         }
                         _ => {
-                            if &state.registers[lhs] <= &state.registers[rhs] {
+                            if state.registers[lhs] <= state.registers[rhs] {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
@@ -840,7 +843,7 @@ impl Program {
                             state.pc = target_pc;
                         }
                         _ => {
-                            if &state.registers[lhs] > &state.registers[rhs] {
+                            if state.registers[lhs] > state.registers[rhs] {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
@@ -862,7 +865,7 @@ impl Program {
                             state.pc = target_pc;
                         }
                         _ => {
-                            if &state.registers[lhs] >= &state.registers[rhs] {
+                            if state.registers[lhs] >= state.registers[rhs] {
                                 state.pc = target_pc;
                             } else {
                                 state.pc += 1;
@@ -1426,7 +1429,7 @@ impl Program {
                 } => {
                     let arg_count = func.arg_count;
                     match &func.func {
-                        crate::function::Func::Json(JsonFunc::JSON) => {
+                        crate::function::Func::Json(JsonFunc::Json) => {
                             let json_value = &state.registers[*start_reg];
                             let json_str = get_json(json_value);
                             match json_str {
@@ -1747,8 +1750,8 @@ impl Program {
 fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<CursorResult<i64>> {
     cursor.seek_to_last()?;
     let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
-    if rowid > std::i64::MAX.try_into().unwrap() {
-        let distribution = Uniform::from(1..=std::i64::MAX);
+    if rowid > i64::MAX.try_into().unwrap() {
+        let distribution = Uniform::from(1..=i64::MAX);
         let max_attempts = 100;
         for count in 0..max_attempts {
             rowid = distribution.sample(&mut rng).try_into().unwrap();

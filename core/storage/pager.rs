@@ -92,6 +92,7 @@ impl Page {
     }
 }
 
+#[allow(dead_code)]
 struct PageCacheEntry {
     key: usize,
     page: Rc<RefCell<Page>>,
@@ -100,7 +101,7 @@ struct PageCacheEntry {
 }
 
 impl PageCacheEntry {
-    fn into_non_null(&mut self) -> NonNull<PageCacheEntry> {
+    fn as_non_null(&mut self) -> NonNull<PageCacheEntry> {
         NonNull::new(&mut *self).unwrap()
     }
 }
@@ -175,7 +176,7 @@ impl DumbLruPageCache {
     }
 
     fn detach(&mut self, entry: &mut PageCacheEntry) {
-        let mut current = entry.into_non_null();
+        let mut current = entry.as_non_null();
 
         let (next, prev) = unsafe {
             let c = current.as_mut();
@@ -203,7 +204,7 @@ impl DumbLruPageCache {
     }
 
     fn touch(&mut self, entry: &mut PageCacheEntry) {
-        let mut current = entry.into_non_null();
+        let mut current = entry.as_non_null();
         unsafe {
             let c = current.as_mut();
             c.next = *self.head.borrow();
@@ -231,10 +232,12 @@ impl DumbLruPageCache {
     }
 }
 
+#[allow(dead_code)]
 pub struct PageCache<K: Eq + Hash + Clone, V> {
     cache: SieveCache<K, V>,
 }
 
+#[allow(dead_code)]
 impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
     pub fn new(cache: SieveCache<K, V>) -> Self {
         Self { cache }
@@ -372,6 +375,7 @@ impl Pager {
         Get's a new page that increasing the size of the page or uses a free page.
         Currently free list pages are not yet supported.
     */
+    #[allow(clippy::readonly_write_lock)]
     pub fn allocate_page(&self) -> Result<Rc<RefCell<Page>>> {
         let header = &self.db_header;
         let mut header = RefCell::borrow_mut(header);

@@ -4,6 +4,7 @@ use crate::storage::sqlite3_ondisk::DatabaseHeader;
 
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program, Table};
 
+#[allow(dead_code)]
 pub struct ProgramBuilder {
     next_free_register: usize,
     next_free_label: BranchOffset,

@@ -397,9 +397,11 @@ dependencies = [
  "dirs",
  "env_logger 0.10.2",
  "limbo_core",
+ "log",
  "rstest",
  "rusqlite",
  "rustyline",
+ "tempfile",
 ]
 
 [[package]]

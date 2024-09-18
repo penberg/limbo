@@ -1,22 +1,20 @@
 use limbo_core::Database;
-use std::env;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tempfile::TempDir;
 
+#[allow(dead_code)]
 struct TempDatabase {
     pub path: PathBuf,
     pub io: Arc<dyn limbo_core::IO>,
 }
 
+#[allow(dead_code, clippy::arc_with_non_send_sync)]
 impl TempDatabase {
     pub fn new(table_sql: &str) -> Self {
-        let mut path = env::current_dir().unwrap();
+        let mut path = TempDir::new().unwrap().into_path();
         path.push("test.db");
         {
-            if path.exists() {
-                fs::remove_file(&path).unwrap();
-            }
             let connection = rusqlite::Connection::open(&path).unwrap();
             connection.execute(table_sql, ()).unwrap();
         }
@@ -99,8 +97,8 @@ mod tests {
         Ok(())
     }
 
-    #[ignore]
     #[test]
+    #[ignore]
     fn test_simple_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
@@ -177,7 +175,7 @@ mod tests {
         let mut huge_texts = Vec::new();
         for i in 0..iterations {
             let mut huge_text = String::new();
-            for j in 0..8192 {
+            for _j in 0..8192 {
                 huge_text.push((b'A' + i as u8) as char);
             }
             huge_texts.push(huge_text);

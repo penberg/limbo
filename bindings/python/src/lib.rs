@@ -83,6 +83,7 @@ pub struct Cursor {
 // SAFETY: The limbo_core crate guarantees that `Cursor` is thread-safe.
 unsafe impl Send for Cursor {}
 
+#[allow(unused_variables, clippy::arc_with_non_send_sync)]
 #[pymethods]
 impl Cursor {
     #[pyo3(signature = (sql, parameters=None))]
@@ -229,6 +230,7 @@ impl Connection {
     }
 }
 
+#[allow(clippy::arc_with_non_send_sync)]
 #[pyfunction]
 pub fn connect(path: &str) -> Result<Connection> {
     let io = Arc::new(limbo_core::PlatformIO::new().map_err(|e| {

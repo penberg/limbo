@@ -84,7 +84,8 @@ impl AggContext {
     }
 }
 
-impl std::cmp::PartialOrd<OwnedValue> for OwnedValue {
+#[allow(clippy::non_canonical_partial_ord_impl)]
+impl PartialOrd<OwnedValue> for OwnedValue {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
             (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {

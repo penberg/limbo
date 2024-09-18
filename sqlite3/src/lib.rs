@@ -83,6 +83,7 @@ pub unsafe extern "C" fn sqlite3_shutdown() -> ffi::c_int {
 }
 
 #[no_mangle]
+#[allow(clippy::arc_with_non_send_sync)]
 pub unsafe extern "C" fn sqlite3_open(
     filename: *const ffi::c_char,
     db_out: *mut *mut sqlite3,

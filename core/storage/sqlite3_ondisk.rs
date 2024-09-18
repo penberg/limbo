@@ -99,6 +99,7 @@ pub struct WalHeader {
     checksum_2: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct WalFrameHeader {
     page_number: u32,
@@ -288,6 +289,7 @@ impl PageContent {
         self.read_u8(self.offset).try_into().unwrap()
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn as_ptr(&self) -> &mut [u8] {
         unsafe {
             // unsafe trick to borrow twice
@@ -552,6 +554,7 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
     Ok(())
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone)]
 pub enum BTreeCell {
     TableInteriorCell(TableInteriorCell),
@@ -667,6 +670,7 @@ pub fn read_btree_cell(
 
 /// read_payload takes in the unread bytearray with the payload size
 /// and returns the payload on the page, and optionally the first overflow page number.
+#[allow(clippy::readonly_write_lock)]
 fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8>, Option<u32>) {
     let cell_len = unread.len();
     if payload_size <= cell_len {
@@ -924,8 +928,7 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
 }
 
 pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
-    let mut varint: Vec<u8> = Vec::new();
-    varint.extend(std::iter::repeat(0).take(9));
+    let mut varint: Vec<u8> = vec![0; 9];
     let n = write_varint(&mut varint.as_mut_slice()[0..9], value);
     write_varint(&mut varint, value);
     varint.truncate(n);
@@ -961,8 +964,9 @@ fn finish_read_wal_header(buf: Rc<RefCell<Buffer>>, header: Rc<RefCell<WalHeader
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn begin_read_wal_frame_header(
-    io: &Box<dyn File>,
+    io: &dyn File,
     offset: usize,
 ) -> Result<Rc<RefCell<WalFrameHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
@@ -978,6 +982,7 @@ pub fn begin_read_wal_frame_header(
     Ok(result)
 }
 
+#[allow(dead_code)]
 fn finish_read_wal_frame_header(
     buf: Rc<RefCell<Buffer>>,
     frame: Rc<RefCell<WalFrameHeader>>,
