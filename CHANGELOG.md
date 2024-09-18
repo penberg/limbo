@@ -2,7 +2,7 @@
 
 ### Unreleased
 
-- Fix `LIKE` to be case insensitive (RJ Barman)
+### Added
 
 - `GROUP BY` support (Jussi Saurio)
 
@@ -10,7 +10,11 @@
 
 - Improvements to Python bindings (Jean Arhancet and Lauri Virtanen)
 
-### 0.0.4 - 2024-08-22
+### Fixed
+
+- Fix `LIKE` to be case insensitive (RJ Barman)
+
+## 0.0.4 - 2024-08-22
 
 - Query planner rewrite (Jussi Saurio)
 
