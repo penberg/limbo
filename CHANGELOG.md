@@ -2,6 +2,8 @@
 
 ### Unreleased
 
+- Fix `LIKE` to be case insensitive (RJ Barman)
+
 - `GROUP BY` support (Jussi Saurio)
 
 - Overflow page support (Pere Diaz Bou)
