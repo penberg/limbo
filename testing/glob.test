@@ -1,0 +1,70 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test glob-fn {
+    select name, glob('sweat*', name) from products;
+} {hat|0
+cap|0
+shirt|0
+sweater|1
+sweatshirt|1
+shorts|0
+jeans|0
+sneakers|0
+boots|0
+coat|0
+accessories|0}
+
+do_execsql_test where-glob {
+    select * from products where name glob 'sweat*';
+} {4|sweater|25.0
+5|sweatshirt|74.0}
+
+do_execsql_test where-glob-question-mark {
+    select * from products where name glob 'sweat?r';
+} {4|sweater|25.0}
+
+do_execsql_test where-glob-fn {
+    select * from products where glob('sweat*', name)=1
+} {4|sweater|25.0
+5|sweatshirt|74.0}
+
+do_execsql_test where-not-glob-and {
+    select * from products where name not glob 'sweat*' and price >= 70.0;
+} {1|hat|79.0
+2|cap|82.0
+6|shorts|70.0
+7|jeans|78.0
+8|sneakers|82.0
+11|accessories|81.0}
+
+do_execsql_test where-glob-or {
+    select * from products where name glob 'sweat*' or price >= 80.0;
+} {2|cap|82.0
+4|sweater|25.0
+5|sweatshirt|74.0
+8|sneakers|82.0
+11|accessories|81.0}
+
+do_execsql_test where-glob-another-column {
+    select first_name, last_name from users where last_name glob first_name;
+} {James|James
+Daniel|Daniel
+Taylor|Taylor}
+
+do_execsql_test where-glob-another-column-prefix {
+    select first_name, last_name from users where last_name glob concat(first_name, '*');
+} {James|James
+Daniel|Daniel
+William|Williams
+John|Johnson
+Taylor|Taylor
+John|Johnson
+Stephen|Stephens
+Robert|Roberts}
+
+do_execsql_test where-glob-impossible {
+    select * from products where 'foobar' glob 'fooba';
+} {}

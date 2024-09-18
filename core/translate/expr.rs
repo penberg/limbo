@@ -452,9 +452,10 @@ pub fn translate_condition_expr(
         } => {
             let cur_reg = program.alloc_register();
             match op {
-                ast::LikeOperator::Like => {
+                ast::LikeOperator::Like | ast::LikeOperator::Glob => {
                     let pattern_reg = program.alloc_register();
                     let column_reg = program.alloc_register();
+                    let mut constant_mask = 0;
                     let _ = translate_expr(
                         program,
                         Some(referenced_tables),
@@ -476,20 +477,23 @@ pub fn translate_condition_expr(
                     )?;
                     if let ast::Expr::Literal(_) = rhs.as_ref() {
                         program.mark_last_insn_constant();
+                        constant_mask = 1;
                     }
+                    let func = match op {
+                        ast::LikeOperator::Like => ScalarFunc::Like,
+                        ast::LikeOperator::Glob => ScalarFunc::Glob,
+                        _ => unreachable!(),
+                    };
                     program.emit_insn(Insn::Function {
-                        // Only constant patterns for LIKE are supported currently, so this
-                        // is always 1
-                        constant_mask: 1,
+                        constant_mask,
                         start_reg: pattern_reg,
                         dest: cur_reg,
                         func: FuncCtx {
-                            func: Func::Scalar(ScalarFunc::Like),
+                            func: Func::Scalar(func),
                             arg_count: 2,
                         },
                     });
                 }
-                ast::LikeOperator::Glob => todo!(),
                 ast::LikeOperator::Match => todo!(),
                 ast::LikeOperator::Regexp => todo!(),
             }
@@ -945,7 +949,7 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
-                        ScalarFunc::Like => {
+                        ScalarFunc::Glob | ScalarFunc::Like => {
                             let args = if let Some(args) = args {
                                 if args.len() < 2 {
                                     crate::bail_parse_error!(
