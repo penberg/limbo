@@ -22,6 +22,19 @@ do_execsql_test where-like {
 } {4|sweater|25.0
 5|sweatshirt|74.0}
 
+do_execsql_test where-like-case-insensitive {
+    select * from products where name like 'SWEAT%';
+} {4|sweater|25.0
+5|sweatshirt|74.0}
+
+do_execsql_test where-like-underscore {
+    select * from products where name like 'sweat_r';
+} {4|sweater|25.0}
+
+do_execsql_test where-like-underscore-case-insensitive {
+    select * from products where name like 'SwEaT_R';
+} {4|sweater|25.0}
+
 do_execsql_test where-like-fn {
     select * from products where like('sweat%', name)=1
 } {4|sweater|25.0

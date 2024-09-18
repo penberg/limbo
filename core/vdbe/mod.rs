@@ -1968,7 +1968,7 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
 }
 
 fn construct_like_regex(pattern: &str) -> Regex {
-    let mut regex_pattern = String::from("^");
+    let mut regex_pattern = String::from("(?i)^");
     regex_pattern.push_str(&pattern.replace('%', ".*").replace('_', "."));
     regex_pattern.push('$');
     Regex::new(&regex_pattern).unwrap()
