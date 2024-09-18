@@ -103,7 +103,7 @@ This document describes the SQLite compatibility status of Limbo:
 | sqlite_compileoption_used(X) | No     |         |
 | sqlite_offset(X)             | No     |         |
 | sqlite_source_id()           | No     |         |
-| sqlite_version()             | No     |         |
+| sqlite_version()             | Yes    |         |
 | substr(X,Y,Z)                | Yes    |         |
 | substr(X,Y)                  | Yes    |         |
 | substring(X,Y,Z)             | Yes    |         |
