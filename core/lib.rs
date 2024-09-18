@@ -67,7 +67,7 @@ impl Database {
     ) -> Result<Database> {
         let db_header = Pager::begin_open(page_io.clone())?;
         DATABASE_VERSION.get_or_init(|| {
-            let version = db_header.borrow().version_number.clone();
+            let version = db_header.borrow().version_number;
             version.to_string()
         });
         io.run_once()?;
