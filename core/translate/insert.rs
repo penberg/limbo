@@ -4,6 +4,7 @@ use sqlite3_parser::ast::{
     DistinctNames, InsertBody, QualifiedName, ResolveType, ResultColumn, With,
 };
 
+use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::Result;
 use crate::{
     schema::{Schema, Table},
@@ -166,7 +167,15 @@ pub fn translate_insert(
             },
             make_record_label,
         );
-        program.emit_insn(Insn::Halt); // Add error code 1555 and rollback
+        // TODO: rollback
+        program.emit_insn(Insn::Halt {
+            err_code: SQLITE_CONSTRAINT_PRIMARYKEY,
+            description: format!(
+                "{}.{}",
+                table.get_name(),
+                table.column_index_to_name(0).unwrap()
+            ),
+        });
         program.resolve_label(make_record_label, program.offset());
         program.emit_insn(Insn::MakeRecord {
             start_reg: column_registers_start + 1,
@@ -187,7 +196,10 @@ pub fn translate_insert(
     });
 
     program.resolve_label(halt_label, program.offset());
-    program.emit_insn(Insn::Halt);
+    program.emit_insn(Insn::Halt {
+        err_code: 0,
+        description: String::new(),
+    });
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
     program.emit_constant_insns();

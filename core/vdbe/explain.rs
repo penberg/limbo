@@ -383,9 +383,12 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
-            Insn::Halt => (
+            Insn::Halt {
+                err_code,
+                description: _,
+            } => (
                 "Halt",
-                0,
+                *err_code as i32,
                 0,
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
