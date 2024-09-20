@@ -135,7 +135,10 @@ fn translate_pragma(
             todo!()
         }
     };
-    program.emit_insn(Insn::Halt);
+    program.emit_insn(Insn::Halt {
+        err_code: 0,
+        description: String::new(),
+    });
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);
     program.emit_constant_insns();

@@ -36,6 +36,8 @@ pub enum LimboError {
     InvalidTime(String),
     #[error("Modifier parsing error: {0}")]
     InvalidModifier(String),
+    #[error("Runtime error: {0}")]
+    Constraint(String),
 }
 
 #[macro_export]
@@ -51,3 +53,6 @@ macro_rules! bail_corrupt_error {
         return Err($crate::error::LimboError::Corrupt(format!($($arg)*)))
     };
 }
+
+pub const SQLITE_CONSTRAINT: usize = 19;
+pub const SQLITE_CONSTRAINT_PRIMARYKEY: usize = SQLITE_CONSTRAINT | (6 << 8);

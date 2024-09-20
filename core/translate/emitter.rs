@@ -1453,7 +1453,10 @@ fn epilogue(
     start_offset: BranchOffset,
 ) -> Result<()> {
     program.resolve_label(halt_label, program.offset());
-    program.emit_insn(Insn::Halt);
+    program.emit_insn(Insn::Halt {
+        err_code: 0,
+        description: String::new(),
+    });
 
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction);

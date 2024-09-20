@@ -23,7 +23,7 @@ pub mod sorter;
 
 mod datetime;
 
-use crate::error::LimboError;
+use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::function::{AggFunc, FuncCtx, JsonFunc, ScalarFunc};
 use crate::json::get_json;
 use crate::pseudo::PseudoCursor;
@@ -232,7 +232,10 @@ pub enum Insn {
     },
 
     // Halt the program.
-    Halt,
+    Halt {
+        err_code: usize,
+        description: String,
+    },
 
     // Start a transaction.
     Transaction,
@@ -1001,7 +1004,25 @@ impl Program {
                         state.pc += 1;
                     }
                 }
-                Insn::Halt => {
+                Insn::Halt {
+                    err_code,
+                    description,
+                } => {
+                    match *err_code {
+                        0 => {}
+                        SQLITE_CONSTRAINT_PRIMARYKEY => {
+                            return Err(LimboError::Constraint(format!(
+                                "UNIQUE constraint failed: {} (19)",
+                                description
+                            )));
+                        }
+                        _ => {
+                            return Err(LimboError::Constraint(format!(
+                                "undocumented halt error code {}",
+                                description
+                            )));
+                        }
+                    }
                     pager.end_read_tx()?;
                     return Ok(StepResult::Done);
                 }
