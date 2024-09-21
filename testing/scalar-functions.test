@@ -347,6 +347,51 @@ do_execsql_test substring-2-args-exceed-length {
   SELECT substring('limbo', 10);
 } {}
 
+do_execsql_test typeof-null {
+  SELECT typeof(null);
+} {null}
+
+do_execsql_test typeof-null-case {
+  SELECT typeof(nuLL);
+} {null}
+
+do_execsql_test typeof-text {
+  SELECT typeof('hello');
+} {text}
+
+do_execsql_test typeof-text-empty {
+  SELECT typeof('');
+} {text}
+
+do_execsql_test typeof-integer {
+  SELECT typeof(123);
+} {integer}
+
+do_execsql_test typeof-real {
+  SELECT typeof(1.0);
+} {real}
+
+# TODO: Uncomment when blobs are better supported
+# do_execsql_test typeof-blob {
+#   SELECT typeof(x'61');
+# } {blob}
+#
+# do_execsql_test typeof-blob-empty {
+#   SELECT typeof(x'');
+# } {blob}
+
+do_execsql_test typeof-sum-integer {
+  SELECT typeof(sum(age)) from users;
+} {integer}
+
+do_execsql_test typeof-sum-real {
+  SELECT typeof(sum(price)) from products;
+} {real}
+
+do_execsql_test typeof-group_concat {
+  SELECT typeof(group_concat(name)) from products;
+} {text}
+
 do_execsql_test unicode-a {
   SELECT unicode('a');
 } {97}

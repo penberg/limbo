@@ -111,7 +111,7 @@ This document describes the SQLite compatibility status of Limbo:
 | total_changes()              | No     |         |
 | trim(X)                      | Yes    |         |
 | trim(X,Y)                    | Yes    |         |
-| typeof(X)                    | No     |         |
+| typeof(X)                    | Yes    |         |
 | unhex(X)                     | No     |         |
 | unhex(X,Y)                   | No     |         |
 | unicode(X)                   | Yes    |         |
