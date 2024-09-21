@@ -92,7 +92,7 @@ impl PartialOrd<OwnedValue> for OwnedValue {
                 int_left.partial_cmp(int_right)
             }
             (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
-                float_right.partial_cmp(&(*int_left as f64))
+                (*int_left as f64).partial_cmp(float_right)
             }
             (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
                 float_left.partial_cmp(&(*int_right as f64))
