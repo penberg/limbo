@@ -537,6 +537,17 @@ pub fn translate_condition_expr(
                 );
             }
         }
+        ast::Expr::Parenthesized(exprs) => {
+            for expr in exprs {
+                let _ = translate_condition_expr(
+                    program,
+                    referenced_tables,
+                    expr,
+                    cursor_hint,
+                    condition_metadata,
+                );
+            }
+        }
         _ => todo!("op {:?} not implemented", expr),
     }
     Ok(())
