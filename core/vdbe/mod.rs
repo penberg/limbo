@@ -1518,6 +1518,7 @@ impl Program {
                             | ScalarFunc::Lower
                             | ScalarFunc::Upper
                             | ScalarFunc::Length
+                            | ScalarFunc::Typeof
                             | ScalarFunc::Unicode
                             | ScalarFunc::Quote
                             | ScalarFunc::Sign => {
@@ -1528,6 +1529,7 @@ impl Program {
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
                                     ScalarFunc::Length => Some(exec_length(reg_value)),
+                                    ScalarFunc::Typeof => Some(exec_typeof(reg_value)),
                                     ScalarFunc::Unicode => Some(exec_unicode(reg_value)),
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
                                     _ => unreachable!(),
@@ -2132,6 +2134,18 @@ fn exec_substring(
     }
 }
 
+fn exec_typeof(reg: &OwnedValue) -> OwnedValue {
+    match reg {
+        OwnedValue::Null => OwnedValue::Text(Rc::new("null".to_string())),
+        OwnedValue::Integer(_) => OwnedValue::Text(Rc::new("integer".to_string())),
+        OwnedValue::Float(_) => OwnedValue::Text(Rc::new("real".to_string())),
+        OwnedValue::Text(_) => OwnedValue::Text(Rc::new("text".to_string())),
+        OwnedValue::Blob(_) => OwnedValue::Text(Rc::new("blob".to_string())),
+        OwnedValue::Agg(ctx) => exec_typeof(ctx.final_value()),
+        OwnedValue::Record(_) => unimplemented!(),
+    }
+}
+
 fn exec_unicode(reg: &OwnedValue) -> OwnedValue {
     match reg {
         OwnedValue::Text(_)
@@ -2249,11 +2263,12 @@ fn execute_sqlite_version(version_integer: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+
     use super::{
         exec_abs, exec_char, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
         exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_sign, exec_substring,
-        exec_trim, exec_unicode, exec_upper, execute_sqlite_version, get_new_rowid, Cursor,
-        CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_trim, exec_typeof, exec_unicode, exec_upper, execute_sqlite_version, get_new_rowid,
+        AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2429,6 +2444,33 @@ mod tests {
         let input = OwnedValue::Text(Rc::new(String::from("hello''world")));
         let expected = OwnedValue::Text(Rc::new(String::from("'hello''world'")));
         assert_eq!(exec_quote(&input), expected);
+    }
+
+    #[test]
+    fn test_typeof() {
+        let input = OwnedValue::Null;
+        let expected: OwnedValue = OwnedValue::Text(Rc::new("null".to_string()));
+        assert_eq!(exec_typeof(&input), expected);
+
+        let input = OwnedValue::Integer(123);
+        let expected: OwnedValue = OwnedValue::Text(Rc::new("integer".to_string()));
+        assert_eq!(exec_typeof(&input), expected);
+
+        let input = OwnedValue::Float(123.456);
+        let expected: OwnedValue = OwnedValue::Text(Rc::new("real".to_string()));
+        assert_eq!(exec_typeof(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("hello".to_string()));
+        let expected: OwnedValue = OwnedValue::Text(Rc::new("text".to_string()));
+        assert_eq!(exec_typeof(&input), expected);
+
+        let input = OwnedValue::Blob(Rc::new("limbo".as_bytes().to_vec()));
+        let expected: OwnedValue = OwnedValue::Text(Rc::new("blob".to_string()));
+        assert_eq!(exec_typeof(&input), expected);
+
+        let input = OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Integer(123))));
+        let expected = OwnedValue::Text(Rc::new("integer".to_string()));
+        assert_eq!(exec_typeof(&input), expected);
     }
 
     #[test]

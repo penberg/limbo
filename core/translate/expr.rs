@@ -1003,6 +1003,7 @@ pub fn translate_expr(
                         | ScalarFunc::Lower
                         | ScalarFunc::Upper
                         | ScalarFunc::Length
+                        | ScalarFunc::Typeof
                         | ScalarFunc::Unicode
                         | ScalarFunc::Quote
                         | ScalarFunc::Sign => {
