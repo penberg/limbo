@@ -14,6 +14,8 @@ jobs:
       - name: Close stale pull requests
         uses: actions/stale@v6
         with:
+          operations-per-run: 1000
+          ascending: true
           stale-pr-message: 'This pull request has been marked as stale due to inactivity. It will be closed in 7 days if no further activity occurs.'
           close-pr-message: 'This pull request has been closed due to inactivity. Please feel free to reopen it if you have further updates.'
           days-before-stale: 30
