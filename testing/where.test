@@ -253,3 +253,17 @@ do_execsql_test where_multiple {
 do_execsql_test where_multiple_flipped {
     select id, first_name, age from users where age < 50 and id = 5;
 } {5|Edward|15}
+
+do_execsql_test where-parentheses-and {
+    select id, name from products where (id = 5 and name = 'sweatshirt') and (id = 5 and name = 'sweatshirt') ORDER BY id;
+} {5|sweatshirt}
+
+do_execsql_test where-nested-parentheses {
+    select id, name from products where ((id = 5 and name = 'sweatshirt') or (id = 1 and name = 'hat')) ORDER BY id;
+} {1|hat
+5|sweatshirt}
+
+do_execsql_test where-complex-parentheses {
+    select id, name from products where ((id = 5 and name = 'sweatshirt') or (id = 1 and name = 'hat')) and (name = 'sweatshirt' or name = 'hat') ORDER BY id;
+} {1|hat
+5|sweatshirt}

@@ -248,7 +248,7 @@ pub enum PageType {
 }
 
 impl TryFrom<u8> for PageType {
-    type Error = crate::error::LimboError;
+    type Error = LimboError;
 
     fn try_from(value: u8) -> Result<Self> {
         match value {
