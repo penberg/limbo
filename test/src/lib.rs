@@ -1,5 +1,6 @@
 use limbo_core::Database;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -23,7 +24,7 @@ impl TempDatabase {
         Self { path, io }
     }
 
-    pub fn connect_limbo(&self) -> limbo_core::Connection {
+    pub fn connect_limbo(&self) -> Rc<limbo_core::Connection> {
         let db = Database::open_file(self.io.clone(), self.path.to_str().unwrap()).unwrap();
 
         db.connect()

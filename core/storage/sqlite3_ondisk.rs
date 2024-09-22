@@ -87,11 +87,14 @@ pub struct DatabaseHeader {
     pub version_number: u32,
 }
 
+pub const WAL_HEADER_SIZE: usize = 32;
+pub const WAL_FRAME_HEADER_SIZE: usize = 24;
+
 #[derive(Debug, Default)]
 pub struct WalHeader {
     magic: [u8; 4],
     file_format: u32,
-    page_size: u32,
+    pub page_size: u32,
     checkpoint_seq: u32,
     salt_1: u32,
     salt_2: u32,
@@ -937,7 +940,7 @@ pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
 
 pub fn begin_read_wal_header(io: Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
+    let buf = Rc::new(RefCell::new(Buffer::allocate(WAL_HEADER_SIZE, drop_fn)));
     let result = Rc::new(RefCell::new(WalHeader::default()));
     let header = result.clone();
     let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
@@ -964,26 +967,86 @@ fn finish_read_wal_header(buf: Rc<RefCell<Buffer>>, header: Rc<RefCell<WalHeader
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn begin_read_wal_frame_header(
-    io: &dyn File,
+pub fn begin_read_wal_frame(
+    io: &Rc<dyn File>,
     offset: usize,
-) -> Result<Rc<RefCell<WalFrameHeader>>> {
-    let drop_fn = Rc::new(|_buf| {});
-    let buf = Rc::new(RefCell::new(Buffer::allocate(32, drop_fn)));
-    let result = Rc::new(RefCell::new(WalFrameHeader::default()));
-    let frame = result.clone();
+    buffer_pool: Rc<BufferPool>,
+    page: Rc<RefCell<Page>>,
+) -> Result<()> {
+    let buf = buffer_pool.get();
+    let drop_fn = Rc::new(move |buf| {
+        let buffer_pool = buffer_pool.clone();
+        buffer_pool.put(buf);
+    });
+    let buf = Rc::new(RefCell::new(Buffer::new(buf, drop_fn)));
+    let frame = page.clone();
     let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let frame = frame.clone();
-        finish_read_wal_frame_header(buf, frame).unwrap();
+        finish_read_page(2, buf, frame).unwrap();
     });
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
     io.pread(offset, c)?;
-    Ok(result)
+    Ok(())
 }
 
-#[allow(dead_code)]
-fn finish_read_wal_frame_header(
+pub fn begin_write_wal_frame(
+    io: &Rc<dyn File>,
+    offset: usize,
+    page: &Rc<RefCell<Page>>,
+    db_size: u32,
+) -> Result<()> {
+    let page_finish = page.clone();
+    let page_id = page.borrow().id;
+
+    let header = WalFrameHeader {
+        page_number: page_id as u32,
+        db_size,
+        salt_1: 0,
+        salt_2: 0,
+        checksum_1: 0,
+        checksum_2: 0,
+    };
+    let buffer = {
+        let page = page.borrow();
+        let contents = page.contents.read().unwrap();
+        let drop_fn = Rc::new(|_buf| {});
+        let contents = contents.as_ref().unwrap();
+
+        let mut buffer = Buffer::allocate(
+            contents.buffer.borrow().len() + WAL_FRAME_HEADER_SIZE,
+            drop_fn,
+        );
+        let buf = buffer.as_mut_slice();
+
+        buf[0..4].copy_from_slice(&header.page_number.to_ne_bytes());
+        buf[4..8].copy_from_slice(&header.db_size.to_ne_bytes());
+        buf[8..12].copy_from_slice(&header.salt_1.to_ne_bytes());
+        buf[12..16].copy_from_slice(&header.salt_2.to_ne_bytes());
+        buf[16..20].copy_from_slice(&header.checksum_1.to_ne_bytes());
+        buf[20..24].copy_from_slice(&header.checksum_2.to_ne_bytes());
+        buf[WAL_FRAME_HEADER_SIZE..].copy_from_slice(&contents.as_ptr());
+
+        Rc::new(RefCell::new(buffer))
+    };
+
+    let write_complete = {
+        let buf_copy = buffer.clone();
+        Box::new(move |bytes_written: i32| {
+            let buf_copy = buf_copy.clone();
+            let buf_len = buf_copy.borrow().len();
+
+            page_finish.borrow_mut().clear_dirty();
+            if bytes_written < buf_len as i32 {
+                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+            }
+        })
+    };
+    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    io.pwrite(offset, buffer.clone(), c)?;
+    Ok(())
+}
+
+fn finish_read_wal_frame(
     buf: Rc<RefCell<Buffer>>,
     frame: Rc<RefCell<WalFrameHeader>>,
 ) -> Result<()> {

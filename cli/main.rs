@@ -6,6 +6,7 @@ use limbo_core::{Database, RowResult, Value};
 use opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -147,7 +148,7 @@ Note:
 
 fn handle_dot_command(
     io: Arc<dyn limbo_core::IO>,
-    conn: &limbo_core::Connection,
+    conn: &Rc<limbo_core::Connection>,
     line: &str,
 ) -> anyhow::Result<()> {
     let args: Vec<&str> = line.split_whitespace().collect();
@@ -196,7 +197,7 @@ fn handle_dot_command(
 
 fn display_schema(
     io: Arc<dyn limbo_core::IO>,
-    conn: &limbo_core::Connection,
+    conn: &Rc<limbo_core::Connection>,
     table: Option<&str>,
 ) -> anyhow::Result<()> {
     let sql = match table {
@@ -251,7 +252,7 @@ fn display_schema(
 
 fn query(
     io: Arc<dyn limbo_core::IO>,
-    conn: &limbo_core::Connection,
+    conn: &Rc<limbo_core::Connection>,
     sql: &str,
     output_mode: &OutputMode,
     interrupt_count: &Arc<AtomicUsize>,
@@ -264,8 +265,8 @@ fn query(
                     return Ok(());
                 }
 
-                match rows.next_row()? {
-                    RowResult::Row(row) => {
+                match rows.next_row() {
+                    Ok(RowResult::Row(row)) => {
                         for (i, value) in row.values.iter().enumerate() {
                             if i > 0 {
                                 print!("|");
@@ -282,10 +283,14 @@ fn query(
                         }
                         println!();
                     }
-                    RowResult::IO => {
+                    Ok(RowResult::IO) => {
                         io.run_once()?;
                     }
-                    RowResult::Done => {
+                    Ok(RowResult::Done) => {
+                        break;
+                    }
+                    Err(err) => {
+                        eprintln!("{}", err);
                         break;
                     }
                 }
@@ -297,8 +302,8 @@ fn query(
                 }
                 let mut table_rows: Vec<Vec<_>> = vec![];
                 loop {
-                    match rows.next_row()? {
-                        RowResult::Row(row) => {
+                    match rows.next_row() {
+                        Ok(RowResult::Row(row)) => {
                             table_rows.push(
                                 row.values
                                     .iter()
@@ -314,10 +319,14 @@ fn query(
                                     .collect(),
                             );
                         }
-                        RowResult::IO => {
+                        Ok(RowResult::IO) => {
                             io.run_once()?;
                         }
-                        RowResult::Done => break,
+                        Ok(RowResult::Done) => break,
+                        Err(err) => {
+                            eprintln!("{}", err);
+                            break;
+                        }
                     }
                 }
                 let table = table_rows.table();

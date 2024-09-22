@@ -127,6 +127,8 @@ impl DatabaseStorage {
     }
 }
 
+struct BufferPool {}
+
 impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         let r = match &(*c) {
@@ -168,10 +170,27 @@ impl limbo_core::Wal for Wal {
         Ok(None)
     }
 
+    fn begin_write_tx(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn end_write_tx(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn append_frame(
+        &self,
+        _page: Rc<std::cell::RefCell<limbo_core::Page>>,
+        _db_size: u32,
+    ) -> Result<()> {
+        todo!()
+    }
+
     fn read_frame(
         &self,
         _frame_id: u64,
         _page: Rc<std::cell::RefCell<limbo_core::Page>>,
+        _buffer_pool: Rc<BufferPool>,
     ) -> Result<()> {
         todo!()
     }
