@@ -19,6 +19,8 @@ use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
+use std::rc::Weak;
+use std::sync::Arc;
 use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
 #[cfg(feature = "fs")]
@@ -44,15 +46,23 @@ pub use types::Value;
 
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
+#[derive(Clone)]
+enum TransactionState {
+    Write,
+    Read,
+    None,
+}
+
 pub struct Database {
     pager: Rc<Pager>,
     schema: Rc<Schema>,
     header: Rc<RefCell<DatabaseHeader>>,
+    transaction_state: RefCell<TransactionState>,
 }
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Database> {
+    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
         let file = io.open_file(path)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
@@ -64,7 +74,7 @@ impl Database {
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<dyn Wal>,
-    ) -> Result<Database> {
+    ) -> Result<Rc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         DATABASE_VERSION.get_or_init(|| {
             let version = db_header.borrow().version_number;
@@ -78,11 +88,12 @@ impl Database {
             io.clone(),
         )?);
         let bootstrap_schema = Rc::new(Schema::new());
-        let conn = Connection {
+        let conn = Rc::new(Connection {
             pager: pager.clone(),
             schema: bootstrap_schema.clone(),
             header: db_header.clone(),
-        };
+            db: Weak::new(),
+        });
         let mut schema = Schema::new();
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
         if let Some(mut rows) = rows {
@@ -126,19 +137,21 @@ impl Database {
         }
         let schema = Rc::new(schema);
         let header = db_header;
-        Ok(Database {
+        Ok(Rc::new(Database {
             pager,
             schema,
             header,
-        })
+            transaction_state: RefCell::new(TransactionState::None),
+        }))
     }
 
-    pub fn connect(&self) -> Connection {
-        Connection {
+    pub fn connect(self: &Rc<Database>) -> Rc<Connection> {
+        Rc::new(Connection {
             pager: self.pager.clone(),
             schema: self.schema.clone(),
             header: self.header.clone(),
-        }
+            db: Rc::downgrade(self),
+        })
     }
 }
 
@@ -146,10 +159,11 @@ pub struct Connection {
     pager: Rc<Pager>,
     schema: Rc<Schema>,
     header: Rc<RefCell<DatabaseHeader>>,
+    db: Weak<Database>, // backpointer to the database holding this connection
 }
 
 impl Connection {
-    pub fn prepare(&self, sql: impl Into<String>) -> Result<Statement> {
+    pub fn prepare(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Statement> {
         let sql = sql.into();
         trace!("Preparing: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
@@ -162,6 +176,7 @@ impl Connection {
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
+                        Rc::downgrade(self),
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -173,7 +188,7 @@ impl Connection {
         }
     }
 
-    pub fn query(&self, sql: impl Into<String>) -> Result<Option<Rows>> {
+    pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Rows>> {
         let sql = sql.into();
         trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
@@ -186,6 +201,7 @@ impl Connection {
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
+                        Rc::downgrade(&self),
                     )?);
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
@@ -196,6 +212,7 @@ impl Connection {
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
+                        Rc::downgrade(self),
                     )?;
                     program.explain();
                     Ok(None)
@@ -217,7 +234,7 @@ impl Connection {
         }
     }
 
-    pub fn execute(&self, sql: impl Into<String>) -> Result<()> {
+    pub fn execute(self: &Rc<Connection>, sql: impl Into<String>) -> Result<()> {
         let sql = sql.into();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -229,6 +246,7 @@ impl Connection {
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
+                        Rc::downgrade(self),
                     )?;
                     program.explain();
                 }
@@ -239,6 +257,7 @@ impl Connection {
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
+                        Rc::downgrade(self),
                     )?;
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;

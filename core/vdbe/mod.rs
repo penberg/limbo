@@ -33,7 +33,8 @@ use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{
     AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
 };
-use crate::{Result, DATABASE_VERSION};
+use crate::DATABASE_VERSION;
+use crate::{Connection, Result, TransactionState};
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
@@ -44,7 +45,7 @@ use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 pub type BranchOffset = i64;
 
@@ -240,7 +241,9 @@ pub enum Insn {
     },
 
     // Start a transaction.
-    Transaction,
+    Transaction {
+        write: bool,
+    },
 
     // Branch to the given PC.
     Goto {
@@ -529,6 +532,8 @@ pub struct Program {
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<BranchOffset, &'static str>,
+    pub connection: Weak<Connection>,
+    pub auto_commit: bool,
 }
 
 impl Program {
@@ -555,6 +560,7 @@ impl Program {
         state: &'a mut ProgramState,
         pager: Rc<Pager>,
     ) -> Result<StepResult<'a>> {
+        dbg!(&self.connection.upgrade().is_none());
         loop {
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
@@ -1093,11 +1099,36 @@ impl Program {
                             )));
                         }
                     }
-                    pager.end_read_tx()?;
+                    if self.auto_commit {
+                        pager.end_tx()?;
+                    }
                     return Ok(StepResult::Done);
                 }
-                Insn::Transaction => {
-                    pager.begin_read_tx()?;
+                Insn::Transaction { write } => {
+                    let connection = self.connection.upgrade().unwrap();
+                    if let Some(db) = connection.db.upgrade() {
+                        // TODO(pere): are backpointers good ?? this looks ugly af
+                        // upgrade transaction if needed
+                        let new_transaction_state =
+                            match (db.transaction_state.borrow().clone(), write) {
+                                (crate::TransactionState::Write, true) => TransactionState::Write,
+                                (crate::TransactionState::Write, false) => TransactionState::Write,
+                                (crate::TransactionState::Read, true) => TransactionState::Write,
+                                (crate::TransactionState::Read, false) => TransactionState::Read,
+                                (crate::TransactionState::None, true) => TransactionState::Read,
+                                (crate::TransactionState::None, false) => TransactionState::Read,
+                            };
+                        // TODO(Pere):
+                        //  1. lock wal
+                        //  2. lock shared
+                        //  3. lock write db if write
+                        db.transaction_state.replace(new_transaction_state.clone());
+                        if matches!(new_transaction_state, TransactionState::Write) {
+                            pager.begin_read_tx()?;
+                        } else {
+                            pager.begin_write_tx()?;
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::Goto { target_pc } => {

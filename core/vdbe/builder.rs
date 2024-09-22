@@ -1,6 +1,10 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::{Rc, Weak},
+};
 
-use crate::storage::sqlite3_ondisk::DatabaseHeader;
+use crate::{storage::sqlite3_ondisk::DatabaseHeader, Connection};
 
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program, Table};
 
@@ -354,7 +358,11 @@ impl ProgramBuilder {
         self.deferred_label_resolutions.clear();
     }
 
-    pub fn build(self, database_header: Rc<RefCell<DatabaseHeader>>) -> Program {
+    pub fn build(
+        self,
+        database_header: Rc<RefCell<DatabaseHeader>>,
+        connection: Weak<Connection>,
+    ) -> Program {
         assert!(
             self.deferred_label_resolutions.is_empty(),
             "deferred_label_resolutions is not empty when build() is called, did you forget to call resolve_deferred_labels()?"
@@ -369,6 +377,8 @@ impl ProgramBuilder {
             cursor_ref: self.cursor_ref,
             database_header,
             comments: self.comments,
+            connection,
+            auto_commit: true,
         }
     }
 }

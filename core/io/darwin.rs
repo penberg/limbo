@@ -153,7 +153,9 @@ impl File for DarwinFile {
         if lock_result == -1 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError("Failed locking file. File is locked by another process".to_string()));
+                return Err(LimboError::LockingError(
+                    "Failed locking file. File is locked by another process".to_string(),
+                ));
             } else {
                 return Err(LimboError::LockingError(format!(
                     "Failed locking file, {}",
@@ -184,8 +186,8 @@ impl File for DarwinFile {
         Ok(())
     }
 
-     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-       let file = self.file.borrow();
+    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
+        let file = self.file.borrow();
         let result = {
             let r = match &(*c) {
                 Completion::Read(r) => r,

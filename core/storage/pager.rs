@@ -307,7 +307,12 @@ impl Pager {
         Ok(())
     }
 
-    pub fn end_read_tx(&self) -> Result<()> {
+    pub fn begin_write_tx(&self) -> Result<()> {
+        self.wal.begin_read_tx()?;
+        Ok(())
+    }
+
+    pub fn end_tx(&self) -> Result<()> {
         self.wal.end_read_tx()?;
         Ok(())
     }
@@ -322,7 +327,9 @@ impl Pager {
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         RefCell::borrow(&page).set_locked();
         if let Some(frame_id) = self.wal.find_frame(page_idx as u64)? {
-            self.wal.read_frame(frame_id, page.clone())?;
+            dbg!(frame_id);
+            self.wal
+                .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
             {
                 let page = page.borrow_mut();
                 page.set_uptodate();
@@ -361,10 +368,11 @@ impl Pager {
         if dirty_pages.len() == 0 {
             return Ok(());
         }
+        let db_size = self.db_header.borrow().database_size;
         for page_id in dirty_pages.iter() {
             let mut cache = self.page_cache.borrow_mut();
-            let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
-            sqlite3_ondisk::begin_write_btree_page(self, &page)?;
+            let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+            self.wal.append_frame(page.clone(), db_size, self)?;
         }
         dirty_pages.clear();
         self.io.run_once()?;
