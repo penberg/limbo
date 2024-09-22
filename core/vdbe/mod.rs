@@ -279,6 +279,12 @@ pub enum Insn {
         dest: usize,
     },
 
+    // Write a blob value into a register.
+    Blob {
+        value: Vec<u8>,
+        dest: usize,
+    },
+
     // Read the rowid of the current row.
     RowId {
         cursor_id: CursorID,
@@ -1072,6 +1078,10 @@ impl Program {
                 }
                 Insn::String8 { value, dest } => {
                     state.registers[*dest] = OwnedValue::Text(Rc::new(value.into()));
+                    state.pc += 1;
+                }
+                Insn::Blob { value, dest } => {
+                    state.registers[*dest] = OwnedValue::Blob(Rc::new(value.clone()));
                     state.pc += 1;
                 }
                 Insn::RowId { cursor_id, dest } => {

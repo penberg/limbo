@@ -395,14 +395,13 @@ do_execsql_test typeof-real {
   SELECT typeof(1.0);
 } {real}
 
-# TODO: Uncomment when blobs are better supported
-# do_execsql_test typeof-blob {
-#   SELECT typeof(x'61');
-# } {blob}
-#
-# do_execsql_test typeof-blob-empty {
-#   SELECT typeof(x'');
-# } {blob}
+do_execsql_test typeof-blob {
+  SELECT typeof(x'61');
+} {blob}
+
+do_execsql_test typeof-blob-empty {
+  SELECT typeof(x'');
+} {blob}
 
 do_execsql_test typeof-sum-integer {
   SELECT typeof(sum(age)) from users;
