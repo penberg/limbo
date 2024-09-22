@@ -2283,10 +2283,11 @@ fn execute_sqlite_version(version_integer: i64) -> String {
 mod tests {
 
     use super::{
-        exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim, exec_minmax,
-        exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_sign, exec_substring,
-        exec_trim, exec_typeof, exec_unicode, exec_upper, execute_sqlite_version, get_new_rowid,
-        AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
+        exec_minmax, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_sign,
+        exec_substring, exec_trim, exec_typeof, exec_unicode, exec_upper, execute_sqlite_version,
+        get_new_rowid, AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue,
+        Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
