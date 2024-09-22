@@ -107,6 +107,18 @@ do_execsql_test lower-null {
   select lower(null)
 } {}
 
+do_execsql_test hex {
+  select hex('limbo')
+} {6C696D626F}
+
+do_execsql_test hex-number {
+  select hex(100)
+} {313030}
+
+do_execsql_test hex-null {
+  select hex(null)
+} {}
+
 do_execsql_test trim {
   SELECT trim('   Limbo    ');
 } {Limbo}
