@@ -275,7 +275,9 @@ fn query(
                                 Value::Integer(i) => print!("{}", i),
                                 Value::Float(f) => print!("{:?}", f),
                                 Value::Text(s) => print!("{}", s),
-                                Value::Blob(b) => print!("{:?}", b),
+                                Value::Blob(b) => {
+                                    print!("{}", String::from_utf8_lossy(b))
+                                }
                             }
                         }
                         println!();
@@ -305,7 +307,9 @@ fn query(
                                         Value::Integer(i) => i.to_string().cell(),
                                         Value::Float(f) => f.to_string().cell(),
                                         Value::Text(s) => s.cell(),
-                                        Value::Blob(b) => format!("{:?}", b).cell(),
+                                        Value::Blob(b) => {
+                                            format!("{}", String::from_utf8_lossy(b)).cell()
+                                        }
                                     })
                                     .collect(),
                             );

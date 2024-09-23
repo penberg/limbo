@@ -216,7 +216,7 @@ This document describes the SQLite compatibility status of Limbo:
 | BitAnd          | No     |
 | BitNot          | No     |
 | BitOr           | No     |
-| Blob            | No     |
+| Blob            | Yes    |
 | Checkpoint      | No     |
 | Clear           | No     |
 | Close           | No     |

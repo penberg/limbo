@@ -470,6 +470,20 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]='{}'", dest, value),
             ),
+            Insn::Blob { value, dest } => (
+                "Blob",
+                0,
+                *dest as i32,
+                0,
+                OwnedValue::Blob(Rc::new(value.clone())),
+                0,
+                format!(
+                    "r[{}]={} (len={})",
+                    dest,
+                    String::from_utf8_lossy(value),
+                    value.len()
+                ),
+            ),
             Insn::RowId { cursor_id, dest } => (
                 "RowId",
                 *cursor_id as i32,

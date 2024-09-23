@@ -11,6 +11,18 @@ do_execsql_test select-const-2 {
   SELECT 2
 } {2}
 
+do_execsql_test select-blob-empty {
+  SELECT x'';
+} {}
+
+do_execsql_test select-blob-ascii {
+  SELECT x'6C696D626f';
+} {limbo}
+
+do_execsql_test select-blob-emoji {
+  SELECT x'F09FA680';
+} {🦀}
+
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
 } {}
