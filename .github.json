@@ -1,6 +1,10 @@
 {
-  "penberg": {
-    "name": "Pekka Enberg",
-    "email": "penberg@ki.fi"
-  }
+    "penberg": {
+        "name": "Pekka Enberg",
+        "email": "penberg@ki.fi"
+    },
+    "pereman2": {
+        "name": "Pere Diaz Bou",
+        "email": "pere-altea@homail.com"
+    }
 }
