@@ -100,9 +100,23 @@ impl PartialOrd<OwnedValue> for OwnedValue {
             (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
                 float_left.partial_cmp(float_right)
             }
+            // Numeric vs Text/Blob
+            (
+                OwnedValue::Integer(_) | OwnedValue::Float(_),
+                OwnedValue::Text(_) | OwnedValue::Blob(_),
+            ) => Some(std::cmp::Ordering::Less),
+            (
+                OwnedValue::Text(_) | OwnedValue::Blob(_),
+                OwnedValue::Integer(_) | OwnedValue::Float(_),
+            ) => Some(std::cmp::Ordering::Greater),
+
             (OwnedValue::Text(text_left), OwnedValue::Text(text_right)) => {
                 text_left.partial_cmp(text_right)
             }
+            // Text vs Blob
+            (OwnedValue::Text(_), OwnedValue::Blob(_)) => Some(std::cmp::Ordering::Less),
+            (OwnedValue::Blob(_), OwnedValue::Text(_)) => Some(std::cmp::Ordering::Greater),
+
             (OwnedValue::Blob(blob_left), OwnedValue::Blob(blob_right)) => {
                 blob_left.partial_cmp(blob_right)
             }
