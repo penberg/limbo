@@ -1583,24 +1583,14 @@ impl Program {
                                     [*start_reg..*start_reg + arg_count]
                                     .iter()
                                     .collect();
-                                let min_fn = |a, b| if a < b { a } else { b };
-                                if let Some(value) = exec_minmax(reg_values, min_fn) {
-                                    state.registers[*dest] = value;
-                                } else {
-                                    state.registers[*dest] = OwnedValue::Null;
-                                }
+                                state.registers[*dest] = exec_min(reg_values);
                             }
                             ScalarFunc::Max => {
                                 let reg_values = state.registers
                                     [*start_reg..*start_reg + arg_count]
                                     .iter()
                                     .collect();
-                                let max_fn = |a, b| if a > b { a } else { b };
-                                if let Some(value) = exec_minmax(reg_values, max_fn) {
-                                    state.registers[*dest] = value;
-                                } else {
-                                    state.registers[*dest] = OwnedValue::Null;
-                                }
+                                state.registers[*dest] = exec_max(reg_values);
                             }
                             ScalarFunc::Nullif => {
                                 let first_value = &state.registers[*start_reg];
@@ -2095,11 +2085,18 @@ fn exec_glob(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, te
     }
 }
 
-fn exec_minmax<'a>(
-    regs: Vec<&'a OwnedValue>,
-    op: fn(&'a OwnedValue, &'a OwnedValue) -> &'a OwnedValue,
-) -> Option<OwnedValue> {
-    regs.into_iter().reduce(|a, b| op(a, b)).cloned()
+fn exec_min(regs: Vec<&OwnedValue>) -> OwnedValue {
+    regs.iter()
+        .min()
+        .map(|&v| v.to_owned())
+        .unwrap_or(OwnedValue::Null)
+}
+
+fn exec_max(regs: Vec<&OwnedValue>) -> OwnedValue {
+    regs.iter()
+        .max()
+        .map(|&v| v.to_owned())
+        .unwrap_or(OwnedValue::Null)
 }
 
 fn exec_nullif(first_value: &OwnedValue, second_value: &OwnedValue) -> OwnedValue {
@@ -2294,10 +2291,10 @@ mod tests {
 
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
-        exec_minmax, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim, exec_sign,
-        exec_substring, exec_trim, exec_typeof, exec_unicode, exec_upper, execute_sqlite_version,
-        get_new_rowid, AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue,
-        Result,
+        exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim,
+        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unicode, exec_upper,
+        execute_sqlite_version, get_new_rowid, AggContext, Cursor, CursorResult, LimboError,
+        OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2540,39 +2537,32 @@ mod tests {
     }
 
     #[test]
-    fn test_minmax() {
-        let min_fn = |a, b| if a < b { a } else { b };
-        let max_fn = |a, b| if a > b { a } else { b };
+    fn test_min_max() {
         let input_int_vec = vec![&OwnedValue::Integer(-1), &OwnedValue::Integer(10)];
-        assert_eq!(
-            exec_minmax(input_int_vec.clone(), min_fn),
-            Some(OwnedValue::Integer(-1))
-        );
-        assert_eq!(
-            exec_minmax(input_int_vec.clone(), max_fn),
-            Some(OwnedValue::Integer(10))
-        );
+        assert_eq!(exec_min(input_int_vec.clone()), OwnedValue::Integer(-1));
+        assert_eq!(exec_max(input_int_vec.clone()), OwnedValue::Integer(10));
 
         let str1 = OwnedValue::Text(Rc::new(String::from("A")));
         let str2 = OwnedValue::Text(Rc::new(String::from("z")));
         let input_str_vec = vec![&str2, &str1];
         assert_eq!(
-            exec_minmax(input_str_vec.clone(), min_fn),
-            Some(OwnedValue::Text(Rc::new(String::from("A"))))
+            exec_min(input_str_vec.clone()),
+            OwnedValue::Text(Rc::new(String::from("A")))
         );
         assert_eq!(
-            exec_minmax(input_str_vec.clone(), max_fn),
-            Some(OwnedValue::Text(Rc::new(String::from("z"))))
+            exec_max(input_str_vec.clone()),
+            OwnedValue::Text(Rc::new(String::from("z")))
         );
 
         let input_null_vec = vec![&OwnedValue::Null, &OwnedValue::Null];
+        assert_eq!(exec_min(input_null_vec.clone()), OwnedValue::Null);
+        assert_eq!(exec_max(input_null_vec.clone()), OwnedValue::Null);
+
+        let input_mixed_vec = vec![&OwnedValue::Integer(10), &str1];
+        assert_eq!(exec_min(input_mixed_vec.clone()), OwnedValue::Integer(10));
         assert_eq!(
-            exec_minmax(input_null_vec.clone(), min_fn),
-            Some(OwnedValue::Null)
-        );
-        assert_eq!(
-            exec_minmax(input_null_vec.clone(), max_fn),
-            Some(OwnedValue::Null)
+            exec_max(input_mixed_vec.clone()),
+            OwnedValue::Text(Rc::new(String::from("A")))
         );
     }
 
