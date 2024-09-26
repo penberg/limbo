@@ -19,15 +19,10 @@ fn main() {
         Err(_) => todo!(),
     };
     for _ in 0..100 {
-        io.inject_fault(rng.gen_bool(0.5));
-        match io.run_once() {
-            Ok(_) => {}
-            Err(_) => continue,
-        }
         let conn = db.connect();
         let mut stmt = conn.prepare("SELECT * FROM users").unwrap();
         let mut rows = stmt.query().unwrap();
-        loop {
+        'rows_loop: loop {
             io.inject_fault(rng.gen_bool(0.5));
             match rows.next_row() {
                 Ok(result) => {
@@ -36,7 +31,10 @@ fn main() {
                             // TODO: assert that data is correct
                         }
                         limbo_core::RowResult::IO => {
-                            todo!();
+                            io.inject_fault(rng.gen_bool(0.01));
+                            if io.run_once().is_err() {
+                                break 'rows_loop;
+                            }
                         }
                         limbo_core::RowResult::Done => {
                             break;
@@ -58,6 +56,7 @@ struct SimulatorIO {
     fault: RefCell<bool>,
     files: RefCell<Vec<Rc<SimulatorFile>>>,
     rng: RefCell<ChaCha8Rng>,
+    nr_run_once_faults: RefCell<usize>,
 }
 
 impl SimulatorIO {
@@ -66,11 +65,13 @@ impl SimulatorIO {
         let fault = RefCell::new(false);
         let files = RefCell::new(Vec::new());
         let rng = RefCell::new(ChaCha8Rng::seed_from_u64(seed));
+        let nr_run_once_faults = RefCell::new(0);
         Ok(Self {
             inner,
             fault,
             files,
             rng,
+            nr_run_once_faults,
         })
     }
 
@@ -82,6 +83,7 @@ impl SimulatorIO {
     }
 
     fn print_fault_stats(&self) {
+        println!("run_once faults: {}", self.nr_run_once_faults.borrow());
         for file in self.files.borrow().iter() {
             file.print_fault_stats();
         }
@@ -103,6 +105,7 @@ impl IO for SimulatorIO {
 
     fn run_once(&self) -> Result<()> {
         if *self.fault.borrow() {
+            *self.nr_run_once_faults.borrow_mut() += 1;
             return Err(limbo_core::LimboError::InternalError(
                 "Injected fault".into(),
             ));
