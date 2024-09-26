@@ -295,6 +295,22 @@ do_execsql_test min-str {
   select min('b','a','z')
 } {a}
 
+do_execsql_test min-str-number {
+  select min('42',100)
+} {100}
+
+do_execsql_test min-blob-number {
+  select min(3.14,x'616263')
+} {3.14}
+
+do_execsql_test max-str-number {
+  select max('42',100)
+} {42}
+
+do_execsql_test max-blob-number {
+  select max(3.14,x'616263')
+} {abc}
+
 do_execsql_test min-null {
   select min(null,null)
 } {}
