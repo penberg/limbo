@@ -3,7 +3,7 @@ use crate::{LimboError, Result};
 use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::fmt;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
@@ -37,6 +37,7 @@ pub struct InnerLinuxIO {
     ring: io_uring::IoUring,
     iovecs: [iovec; MAX_IOVECS],
     next_iovec: usize,
+    pending_ops: usize,
 }
 
 impl LinuxIO {
@@ -49,6 +50,7 @@ impl LinuxIO {
                 iov_len: 0,
             }; MAX_IOVECS],
             next_iovec: 0,
+            pending_ops: 0,
         };
         Ok(Self {
             inner: Rc::new(RefCell::new(inner)),
@@ -89,10 +91,15 @@ impl IO for LinuxIO {
 
     fn run_once(&self) -> Result<()> {
         trace!("run_once()");
-        let mut inner = self.inner.borrow_mut();
-        let ring = &mut inner.ring;
+        let inner = self.inner.borrow_mut();
+        let (mut pending_ops, mut ring) = RefMut::map_split(inner, |inner_ref: &mut InnerLinuxIO| (&mut inner_ref.pending_ops, &mut inner_ref.ring));
+        if *pending_ops == 0 {
+            return Ok(());
+        }
+
         ring.submit_and_wait(1)?;
         while let Some(cqe) = ring.completion().next() {
+            *pending_ops -= 1;
             let result = cqe.result();
             if result < 0 {
                 return Err(LimboError::LinuxIOError(format!(
@@ -198,6 +205,7 @@ impl File for LinuxFile {
                 .push(&read_e)
                 .expect("submission queue is full");
         }
+        io.pending_ops += 1;
         Ok(())
     }
 
@@ -224,6 +232,7 @@ impl File for LinuxFile {
                 .push(&write)
                 .expect("submission queue is full");
         }
+        io.pending_ops += 1;
         Ok(())
     }
 }
