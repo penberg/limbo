@@ -82,4 +82,10 @@ impl File for WindowsFile {
         file.write_all(buf)?;
         Ok(())
     }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let mut file = self.file.borrow_mut();
+        file.sync_all()?;
+        Ok(())
+    }
 }

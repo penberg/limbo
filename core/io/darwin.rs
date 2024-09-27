@@ -71,7 +71,7 @@ impl IO for DarwinIO {
                             let c: &Completion = c;
                             let r = match c {
                                 Completion::Read(r) => r,
-                                Completion::Write(_) => unreachable!(),
+                                _ => unreachable!(),
                             };
                             let mut buf = r.buf_mut();
                             file.seek(std::io::SeekFrom::Start(pos as u64))?;
@@ -192,7 +192,7 @@ impl File for DarwinFile {
         let result = {
             let r = match &(*c) {
                 Completion::Read(r) => r,
-                Completion::Write(_) => unreachable!(),
+                _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
@@ -254,6 +254,19 @@ impl File for DarwinFile {
                     fd as usize,
                     CompletionCallback::Write(self.file.clone(), c.clone(), buffer.clone(), pos),
                 );
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let file = self.file.borrow();
+        let result = rustix::fs::fsync(file.as_fd());
+        match result {
+            std::result::Result::Ok(()) => {
+                trace!("fsync");
+                c.complete(0);
                 Ok(())
             }
             Err(e) => Err(e.into()),

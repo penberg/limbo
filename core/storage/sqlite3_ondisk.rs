@@ -528,7 +528,11 @@ fn finish_read_page(
     Ok(())
 }
 
-pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result<()> {
+pub fn begin_write_btree_page(
+    pager: &Pager,
+    page: &Rc<RefCell<Page>>,
+    write_counter: Rc<RefCell<usize>>,
+) -> Result<()> {
     let page_source = &pager.page_io;
     let page_finish = page.clone();
 
@@ -540,11 +544,13 @@ pub fn begin_write_btree_page(pager: &Pager, page: &Rc<RefCell<Page>>) -> Result
         contents.buffer.clone()
     };
 
+    *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
+            *write_counter.borrow_mut() -= 1;
 
             page_finish.borrow_mut().clear_dirty();
             if bytes_written < buf_len as i32 {
@@ -994,6 +1000,7 @@ pub fn begin_write_wal_frame(
     offset: usize,
     page: &Rc<RefCell<Page>>,
     db_size: u32,
+    write_counter: Rc<RefCell<usize>>,
 ) -> Result<()> {
     let page_finish = page.clone();
     let page_id = page.borrow().id;
@@ -1029,11 +1036,13 @@ pub fn begin_write_wal_frame(
         Rc::new(RefCell::new(buffer))
     };
 
+    *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
+            *write_counter.borrow_mut() -= 1;
 
             page_finish.borrow_mut().clear_dirty();
             if bytes_written < buf_len as i32 {

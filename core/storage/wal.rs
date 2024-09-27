@@ -1,16 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-use crate::io::{File, IO};
+use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
     begin_read_page, begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE,
     WAL_HEADER_SIZE,
 };
+use crate::Completion;
 use crate::{storage::pager::Page, Result};
 
 use super::buffer_pool::BufferPool;
 use super::pager::Pager;
-use super::sqlite3_ondisk;
+use super::sqlite3_ondisk::{self, begin_write_btree_page};
 
 /// Write-ahead log (WAL).
 pub trait Wal {
@@ -38,10 +39,21 @@ pub trait Wal {
     ) -> Result<()>;
 
     /// Write a frame to the WAL.
-    fn append_frame(&mut self, page: Rc<RefCell<Page>>, db_size: u32, pager: &Pager) -> Result<()>;
+    fn append_frame(
+        &mut self,
+        page: Rc<RefCell<Page>>,
+        db_size: u32,
+        pager: &Pager,
+        write_counter: Rc<RefCell<usize>>,
+    ) -> Result<()>;
 
     fn should_checkpoint(&self) -> bool;
-    fn checkpoint(&mut self, pager: &Pager) -> Result<CheckpointStatus>;
+    fn checkpoint(
+        &mut self,
+        pager: &Pager,
+        write_counter: Rc<RefCell<usize>>,
+    ) -> Result<CheckpointStatus>;
+    fn sync(&mut self) -> Result<CheckpointStatus>;
 }
 
 #[cfg(feature = "fs")]
@@ -57,6 +69,8 @@ pub struct WalFile {
     frame_cache: RefCell<HashMap<u64, Vec<u64>>>, // FIXME: for now let's use a simple hashmap instead of a shm file
     checkpoint_threshold: usize,
     ongoing_checkpoint: HashSet<usize>,
+
+    syncing: Rc<RefCell<bool>>,
 }
 
 pub enum CheckpointStatus {
@@ -112,12 +126,24 @@ impl Wal for WalFile {
     }
 
     /// Write a frame to the WAL.
-    fn append_frame(&mut self, page: Rc<RefCell<Page>>, db_size: u32, pager: &Pager) -> Result<()> {
+    fn append_frame(
+        &mut self,
+        page: Rc<RefCell<Page>>,
+        db_size: u32,
+        pager: &Pager,
+        write_counter: Rc<RefCell<usize>>,
+    ) -> Result<()> {
         self.ensure_init()?;
         let page_id = page.borrow().id;
         let frame_id = *self.max_frame.borrow();
         let offset = self.frame_offset(frame_id);
-        begin_write_wal_frame(self.file.borrow().as_ref().unwrap(), offset, &page, db_size)?;
+        begin_write_wal_frame(
+            self.file.borrow().as_ref().unwrap(),
+            offset,
+            &page,
+            db_size,
+            write_counter,
+        )?;
         self.max_frame.replace(frame_id + 1);
         {
             let mut frame_cache = self.frame_cache.borrow_mut();
@@ -151,22 +177,53 @@ impl Wal for WalFile {
         }
     }
 
-    fn checkpoint(&mut self, pager: &Pager) -> Result<CheckpointStatus> {
+    fn checkpoint(
+        &mut self,
+        pager: &Pager,
+        write_counter: Rc<RefCell<usize>>,
+    ) -> Result<CheckpointStatus> {
         for (page_id, _frames) in self.frame_cache.borrow().iter() {
             // move page from WAL to database file
             // TODO(Pere): use splice syscall in linux to do zero-copy file page movements to improve perf
             let page_id = *page_id as usize;
+            if self.ongoing_checkpoint.contains(&page_id) {
+                continue;
+            }
+
             let page = pager.read_page(page_id)?;
             if page.borrow().is_locked() {
                 return Ok(CheckpointStatus::IO);
             }
-            pager.put_page(page_id, page);
+
+            begin_write_btree_page(pager, &page, write_counter.clone());
             self.ongoing_checkpoint.insert(page_id);
         }
+
         self.frame_cache.borrow_mut().clear();
         *self.max_frame.borrow_mut() = 0;
         self.ongoing_checkpoint.clear();
         Ok(CheckpointStatus::Done)
+    }
+
+    fn sync(&mut self) -> Result<CheckpointStatus> {
+        self.ensure_init()?;
+        let file = self.file.borrow();
+        let file = file.as_ref().unwrap();
+        {
+            let syncing = self.syncing.clone();
+            let completion = Completion::Sync(SyncCompletion {
+                complete: Box::new(move |_| {
+                    *syncing.borrow_mut() = false;
+                }),
+            });
+            file.sync(Rc::new(completion))?;
+        }
+
+        if *self.syncing.borrow() {
+            return Ok(CheckpointStatus::IO);
+        } else {
+            return Ok(CheckpointStatus::Done);
+        }
     }
 }
 
@@ -184,6 +241,7 @@ impl WalFile {
             nbackfills: RefCell::new(0),
             checkpoint_threshold: 1000,
             ongoing_checkpoint: HashSet::new(),
+            syncing: Rc::new(RefCell::new(false)),
         }
     }
 

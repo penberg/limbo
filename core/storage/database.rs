@@ -26,7 +26,7 @@ impl DatabaseStorage for FileStorage {
     fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
         let r = match &(*c) {
             Completion::Read(r) => r,
-            Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         let size = r.buf().len();
         assert!(page_idx > 0);
