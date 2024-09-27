@@ -13,6 +13,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use super::wal::CheckpointStatus;
+
 pub struct Page {
     pub flags: AtomicUsize,
     pub contents: RwLock<Option<PageContent>>,
@@ -230,6 +232,13 @@ impl DumbLruPageCache {
         }
         self.detach(tail);
     }
+
+    fn clear(&mut self) {
+        let to_remove: Vec<usize> = self.map.borrow().iter().map(|v| *v.0).collect();
+        for key in to_remove {
+            self.delete(key);
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -263,7 +272,7 @@ pub struct Pager {
     /// Source of the database pages.
     pub page_io: Rc<dyn DatabaseStorage>,
     /// The write-ahead log (WAL) for the database.
-    wal: Rc<dyn Wal>,
+    wal: Rc<RefCell<dyn Wal>>,
     /// A page cache for the database.
     page_cache: RefCell<DumbLruPageCache>,
     /// Buffer pool for temporary data storage.
@@ -284,7 +293,7 @@ impl Pager {
     pub fn finish_open(
         db_header_ref: Rc<RefCell<DatabaseHeader>>,
         page_io: Rc<dyn DatabaseStorage>,
-        wal: Rc<dyn Wal>,
+        wal: Rc<RefCell<dyn Wal>>,
         io: Arc<dyn crate::io::IO>,
     ) -> Result<Self> {
         let db_header = RefCell::borrow(&db_header_ref);
@@ -303,18 +312,19 @@ impl Pager {
     }
 
     pub fn begin_read_tx(&self) -> Result<()> {
-        self.wal.begin_read_tx()?;
+        self.wal.borrow().begin_read_tx()?;
         Ok(())
     }
 
     pub fn begin_write_tx(&self) -> Result<()> {
-        self.wal.begin_read_tx()?;
+        self.wal.borrow().begin_read_tx()?;
         Ok(())
     }
 
-    pub fn end_tx(&self) -> Result<()> {
-        self.wal.end_read_tx()?;
-        Ok(())
+    pub fn end_tx(&self) -> Result<CheckpointStatus> {
+        self.cacheflush()?;
+        self.wal.borrow().end_read_tx()?;
+        Ok(CheckpointStatus::Done)
     }
 
     /// Reads a page from the database.
@@ -326,9 +336,10 @@ impl Pager {
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         RefCell::borrow(&page).set_locked();
-        if let Some(frame_id) = self.wal.find_frame(page_idx as u64)? {
+        if let Some(frame_id) = self.wal.borrow().find_frame(page_idx as u64)? {
             dbg!(frame_id);
             self.wal
+                .borrow()
                 .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
             {
                 let page = page.borrow_mut();
@@ -363,20 +374,37 @@ impl Pager {
         dirty_pages.insert(page_id);
     }
 
-    pub fn cacheflush(&self) -> Result<()> {
-        let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
-        if dirty_pages.len() == 0 {
-            return Ok(());
-        }
+    pub fn cacheflush(&self) -> Result<CheckpointStatus> {
         let db_size = self.db_header.borrow().database_size;
-        for page_id in dirty_pages.iter() {
+        for page_id in self.dirty_pages.borrow().iter() {
             let mut cache = self.page_cache.borrow_mut();
             let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
-            self.wal.append_frame(page.clone(), db_size, self)?;
+            self.wal
+                .borrow_mut()
+                .append_frame(page.clone(), db_size, self)?;
         }
-        dirty_pages.clear();
-        self.io.run_once()?;
-        Ok(())
+        // remove before checkpoint so we can retry cacheflush if needed
+        self.dirty_pages.borrow_mut().clear();
+
+        let should_checkpoint = self.wal.borrow().should_checkpoint();
+        if should_checkpoint {
+            self.wal.borrow_mut().checkpoint(self)?;
+        }
+        Ok(CheckpointStatus::Done)
+    }
+
+    // WARN: used for testing purposes
+    pub fn clear_page_cache(&self) {
+        loop {
+            match self.wal.borrow_mut().checkpoint(self) {
+                Ok(CheckpointStatus::IO) => {}
+                Ok(CheckpointStatus::Done) => {
+                    break;
+                }
+                Err(err) => panic!("error while clearing cache {}", err),
+            }
+        }
+        self.page_cache.borrow_mut().clear();
     }
 
     /*

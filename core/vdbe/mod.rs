@@ -560,7 +560,6 @@ impl Program {
         state: &'a mut ProgramState,
         pager: Rc<Pager>,
     ) -> Result<StepResult<'a>> {
-        dbg!(&self.connection.upgrade().is_none());
         loop {
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
@@ -1100,9 +1099,14 @@ impl Program {
                         }
                     }
                     if self.auto_commit {
-                        pager.end_tx()?;
+                        return match pager.end_tx() {
+                            Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
+                            Ok(crate::storage::wal::CheckpointStatus::Done) => Ok(StepResult::Done),
+                            Err(e) => Err(e),
+                        };
+                    } else {
+                        return Ok(StepResult::Done);
                     }
-                    return Ok(StepResult::Done);
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();

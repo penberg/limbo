@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::io::{File, IO};
@@ -38,14 +38,10 @@ pub trait Wal {
     ) -> Result<()>;
 
     /// Write a frame to the WAL.
-    fn append_frame(
-        &self,
-        page: Rc<RefCell<Page>>,
-        db_size: u32,
-        pager: &Pager,
-    ) -> Result<CheckpointStatus>;
+    fn append_frame(&mut self, page: Rc<RefCell<Page>>, db_size: u32, pager: &Pager) -> Result<()>;
 
-    fn checkpoint(&self, pager: &Pager) -> Result<CheckpointStatus>;
+    fn should_checkpoint(&self) -> bool;
+    fn checkpoint(&mut self, pager: &Pager) -> Result<CheckpointStatus>;
 }
 
 #[cfg(feature = "fs")]
@@ -60,9 +56,10 @@ pub struct WalFile {
     // Maps pgno to frame id and offset in wal file
     frame_cache: RefCell<HashMap<u64, Vec<u64>>>, // FIXME: for now let's use a simple hashmap instead of a shm file
     checkpoint_threshold: usize,
+    ongoing_checkpoint: HashSet<usize>,
 }
 
-enum CheckpointStatus {
+pub enum CheckpointStatus {
     Done,
     IO,
 }
@@ -83,9 +80,7 @@ impl Wal for WalFile {
     /// Find the latest frame containing a page.
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>> {
         let frame_cache = self.frame_cache.borrow();
-        dbg!(&frame_cache);
         let frames = frame_cache.get(&page_id);
-        dbg!(&frames);
         if frames.is_none() {
             return Ok(None);
         }
@@ -106,7 +101,6 @@ impl Wal for WalFile {
         page: Rc<RefCell<Page>>,
         buffer_pool: Rc<BufferPool>,
     ) -> Result<()> {
-        println!("read frame {}", frame_id);
         let offset = self.frame_offset(frame_id);
         begin_read_wal_frame(
             self.file.borrow().as_ref().unwrap(),
@@ -118,25 +112,22 @@ impl Wal for WalFile {
     }
 
     /// Write a frame to the WAL.
-    fn append_frame(&self, page: Rc<RefCell<Page>>, db_size: u32, pager: &Pager) -> Result<()> {
+    fn append_frame(&mut self, page: Rc<RefCell<Page>>, db_size: u32, pager: &Pager) -> Result<()> {
         self.ensure_init()?;
         let page_id = page.borrow().id;
         let frame_id = *self.max_frame.borrow();
         let offset = self.frame_offset(frame_id);
-        println!("appending {} at {}", frame_id, offset);
         begin_write_wal_frame(self.file.borrow().as_ref().unwrap(), offset, &page, db_size)?;
         self.max_frame.replace(frame_id + 1);
-        let mut frame_cache = self.frame_cache.borrow_mut();
-        let frames = frame_cache.get_mut(&(page_id as u64));
-        match frames {
-            Some(frames) => frames.push(frame_id),
-            None => {
-                frame_cache.insert(page_id as u64, vec![frame_id]);
+        {
+            let mut frame_cache = self.frame_cache.borrow_mut();
+            let frames = frame_cache.get_mut(&(page_id as u64));
+            match frames {
+                Some(frames) => frames.push(frame_id),
+                None => {
+                    frame_cache.insert(page_id as u64, vec![frame_id]);
+                }
             }
-        }
-        dbg!(&frame_cache);
-        if (frame_id + 1) as usize >= self.checkpoint_threshold {
-            self.checkpoint(pager);
         }
         Ok(())
     }
@@ -151,16 +142,31 @@ impl Wal for WalFile {
         Ok(())
     }
 
-    fn checkpoint(&self, pager: &Pager) -> Result<CheckpointStatus> {
-        for (page_id, frames) in self.frame_cache.borrow().iter() {
+    fn should_checkpoint(&self) -> bool {
+        let frame_id = *self.max_frame.borrow() as usize;
+        if frame_id < self.checkpoint_threshold {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn checkpoint(&mut self, pager: &Pager) -> Result<CheckpointStatus> {
+        for (page_id, _frames) in self.frame_cache.borrow().iter() {
             // move page from WAL to database file
             // TODO(Pere): use splice syscall in linux to do zero-copy file page movements to improve perf
-            let page = pager.read_page(*page_id as usize)?;
+            let page_id = *page_id as usize;
+            let page = pager.read_page(page_id)?;
             if page.borrow().is_locked() {
                 return Ok(CheckpointStatus::IO);
             }
+            pager.put_page(page_id, page);
+            self.ongoing_checkpoint.insert(page_id);
         }
-        Ok(())
+        self.frame_cache.borrow_mut().clear();
+        *self.max_frame.borrow_mut() = 0;
+        self.ongoing_checkpoint.clear();
+        Ok(CheckpointStatus::Done)
     }
 }
 
@@ -177,14 +183,16 @@ impl WalFile {
             max_frame: RefCell::new(0),
             nbackfills: RefCell::new(0),
             checkpoint_threshold: 1000,
+            ongoing_checkpoint: HashSet::new(),
         }
     }
 
     fn ensure_init(&self) -> Result<()> {
-        println!("ensure");
         if self.file.borrow().is_none() {
-            println!("inside ensure");
-            match self.io.open_file(&self.wal_path) {
+            match self
+                .io
+                .open_file(&self.wal_path, crate::io::OpenFlags::Create)
+            {
                 Ok(file) => {
                     *self.file.borrow_mut() = Some(file.clone());
                     let wal_header = match sqlite3_ondisk::begin_read_wal_header(file) {
@@ -194,9 +202,8 @@ impl WalFile {
                     // TODO: Return a completion instead.
                     self.io.run_once()?;
                     self.wal_header.replace(Some(wal_header));
-                    dbg!(&self.wal_header);
                 }
-                Err(err) => panic!("{:?}", err),
+                Err(err) => panic!("{:?} {}", err, &self.wal_path),
             };
         }
         Ok(())

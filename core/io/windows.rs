@@ -1,4 +1,4 @@
-use crate::{Completion, File, Result, WriteCompletion, IO};
+use crate::{Completion, File, OpenFlags, Result, WriteCompletion, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
@@ -13,9 +13,13 @@ impl WindowsIO {
 }
 
 impl IO for WindowsIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::open(path)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(matches!(flags, OpenFlags::Create))
+            .open(path)?;
         Ok(Rc::new(WindowsFile {
             file: RefCell::new(file),
         }))
