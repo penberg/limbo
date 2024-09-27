@@ -24,7 +24,6 @@ use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
-use storage::pager::Pager;
 use storage::sqlite3_ondisk::DatabaseHeader;
 #[cfg(feature = "fs")]
 use storage::wal::WalFile;
@@ -39,8 +38,11 @@ pub use io::OpenFlags;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
 pub use io::{Buffer, Completion, File, WriteCompletion, IO};
+pub use storage::buffer_pool::BufferPool;
 pub use storage::database::DatabaseStorage;
 pub use storage::pager::Page;
+pub use storage::pager::Pager;
+pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
 pub use types::Value;
 
