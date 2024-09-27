@@ -20,7 +20,6 @@ use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::rc::Weak;
-use std::sync::Arc;
 use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
 #[cfg(feature = "fs")]
@@ -36,6 +35,7 @@ use translate::planner::prepare_select_plan;
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
 
+pub use io::OpenFlags;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
 pub use io::{Buffer, Completion, File, WriteCompletion, IO};
@@ -63,17 +63,17 @@ pub struct Database {
 impl Database {
     #[cfg(feature = "fs")]
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
-        let file = io.open_file(path)?;
+        let file = io.open_file(path, io::OpenFlags::None)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
-        let wal = Rc::new(WalFile::new(io.clone(), wal_path));
+        let wal = Rc::new(RefCell::new(WalFile::new(io.clone(), wal_path)));
         Self::open(io, page_io, wal)
     }
 
     pub fn open(
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
-        wal: Rc<dyn Wal>,
+        wal: Rc<RefCell<dyn Wal>>,
     ) -> Result<Rc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         DATABASE_VERSION.get_or_init(|| {
@@ -269,6 +269,11 @@ impl Connection {
 
     pub fn cacheflush(&self) -> Result<()> {
         self.pager.cacheflush()?;
+        Ok(())
+    }
+
+    pub fn clear_page_cache(&self) -> Result<()> {
+        self.pager.clear_page_cache();
         Ok(())
     }
 }

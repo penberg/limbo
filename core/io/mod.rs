@@ -16,8 +16,13 @@ pub trait File {
     fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
 }
 
+pub enum OpenFlags {
+    None,
+    Create,
+}
+
 pub trait IO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>>;
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>>;
 
     fn run_once(&self) -> Result<()>;
 

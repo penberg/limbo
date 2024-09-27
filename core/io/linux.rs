@@ -1,4 +1,4 @@
-use super::{common, Completion, File, IO};
+use super::{common, Completion, File, OpenFlags, IO};
 use crate::{LimboError, Result};
 use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
@@ -102,9 +102,13 @@ impl WrappedIOUring {
 }
 
 impl IO for LinuxIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::options().read(true).write(true).open(path)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(matches!(flags, OpenFlags::Create))
+            .open(path)?;
         // Let's attempt to enable direct I/O. Not all filesystems support it
         // so ignore any errors.
         let fd = file.as_raw_fd();

@@ -2,7 +2,7 @@ use crate::error::LimboError;
 use crate::io::common;
 use crate::Result;
 
-use super::{Completion, File, IO};
+use super::{Completion, File, OpenFlags, IO};
 use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
@@ -31,12 +31,13 @@ impl DarwinIO {
 }
 
 impl IO for DarwinIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
             .write(true)
+            .create(matches!(flags, OpenFlags::Create))
             .open(path)?;
 
         let darwin_file = Rc::new(DarwinFile {
