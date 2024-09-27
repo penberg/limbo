@@ -260,6 +260,22 @@ impl File for LinuxFile {
         io.ring.submit_entry(&write);
         Ok(())
     }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let mut io = self.io.borrow_mut();
+        let fd = io_uring::types::Fd(self.file.as_raw_fd());
+        let ptr = Rc::into_raw(c.clone());
+        let sync = io_uring::opcode::Fsync::new(fd)
+            .build()
+            .user_data(ptr as u64);
+        let ring = &mut io.ring;
+        unsafe {
+            ring.submission()
+                .push(&sync)
+                .expect("submission queue is full");
+        }
+        Ok(())
+    }
 }
 
 impl Drop for LinuxFile {

@@ -265,6 +265,21 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
     }
 }
 
+#[derive(Clone)]
+enum FlushState {
+    Start,
+    FramesDone,
+    CheckpointDone,
+    Syncing,
+}
+
+/// This will keep track of the state of current cache flush in order to not repeat work
+struct FlushInfo {
+    state: FlushState,
+    /// Number of writes taking place. When in_flight gets to 0 we can schedule a fsync.
+    in_flight_writes: Rc<RefCell<usize>>,
+}
+
 /// The pager interface implements the persistence layer by providing access
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
@@ -281,6 +296,8 @@ pub struct Pager {
     pub io: Arc<dyn crate::io::IO>,
     dirty_pages: Rc<RefCell<HashSet<usize>>>,
     db_header: Rc<RefCell<DatabaseHeader>>,
+
+    flush_info: RefCell<FlushInfo>,
 }
 
 impl Pager {
@@ -308,6 +325,10 @@ impl Pager {
             io,
             dirty_pages: Rc::new(RefCell::new(HashSet::new())),
             db_header: db_header_ref.clone(),
+            flush_info: RefCell::new(FlushInfo {
+                state: FlushState::Start,
+                in_flight_writes: Rc::new(RefCell::new(0)),
+            }),
         })
     }
 
@@ -375,20 +396,59 @@ impl Pager {
     }
 
     pub fn cacheflush(&self) -> Result<CheckpointStatus> {
-        let db_size = self.db_header.borrow().database_size;
-        for page_id in self.dirty_pages.borrow().iter() {
-            let mut cache = self.page_cache.borrow_mut();
-            let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
-            self.wal
-                .borrow_mut()
-                .append_frame(page.clone(), db_size, self)?;
+        if matches!(self.flush_info.borrow().state.clone(), FlushState::Start) {
+            let db_size = self.db_header.borrow().database_size;
+            for page_id in self.dirty_pages.borrow().iter() {
+                let mut cache = self.page_cache.borrow_mut();
+                let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+                self.wal.borrow_mut().append_frame(
+                    page.clone(),
+                    db_size,
+                    self,
+                    self.flush_info.borrow().in_flight_writes.clone(),
+                )?;
+            }
+            self.dirty_pages.borrow_mut().clear();
+            self.flush_info.borrow_mut().state = FlushState::FramesDone;
         }
-        // remove before checkpoint so we can retry cacheflush if needed
-        self.dirty_pages.borrow_mut().clear();
 
-        let should_checkpoint = self.wal.borrow().should_checkpoint();
-        if should_checkpoint {
-            self.wal.borrow_mut().checkpoint(self)?;
+        if matches!(
+            self.flush_info.borrow().state.clone(),
+            FlushState::FramesDone
+        ) {
+            let should_checkpoint = self.wal.borrow().should_checkpoint();
+            if should_checkpoint {
+                match self
+                    .wal
+                    .borrow_mut()
+                    .checkpoint(self, self.flush_info.borrow().in_flight_writes.clone())
+                {
+                    Ok(CheckpointStatus::IO) => return Ok(CheckpointStatus::IO),
+                    Ok(CheckpointStatus::Done) => {}
+                    Err(e) => return Err(e),
+                };
+            }
+            self.flush_info.borrow_mut().state = FlushState::CheckpointDone;
+        }
+
+        if matches!(
+            self.flush_info.borrow().state.clone(),
+            FlushState::CheckpointDone
+        ) {
+            let in_flight = *self.flush_info.borrow().in_flight_writes.borrow();
+            if in_flight == 0 {
+                self.flush_info.borrow_mut().state = FlushState::Syncing;
+            }
+        }
+
+        if matches!(self.flush_info.borrow().state.clone(), FlushState::Syncing) {
+            println!("syncing");
+            match self.wal.borrow_mut().sync() {
+                Ok(CheckpointStatus::IO) => return Ok(CheckpointStatus::IO),
+                Ok(CheckpointStatus::Done) => {}
+                Err(e) => return Err(e),
+            }
+            self.flush_info.borrow_mut().state = FlushState::Start;
         }
         Ok(CheckpointStatus::Done)
     }
@@ -396,7 +456,11 @@ impl Pager {
     // WARN: used for testing purposes
     pub fn clear_page_cache(&self) {
         loop {
-            match self.wal.borrow_mut().checkpoint(self) {
+            match self
+                .wal
+                .borrow_mut()
+                .checkpoint(self, Rc::new(RefCell::new(0)))
+            {
                 Ok(CheckpointStatus::IO) => {}
                 Ok(CheckpointStatus::Done) => {
                     break;
