@@ -1,11 +1,12 @@
-use limbo_core::{OpenFlags, Result, IO};
+use limbo_core::{OpenFlags, Page, Result, IO};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Database {
-    _inner: limbo_core::Database,
+    _inner: Rc<limbo_core::Database>,
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -16,7 +17,7 @@ impl Database {
         let io = Arc::new(PlatformIO { vfs: VFS::new() });
         let file = io.open_file(path, limbo_core::OpenFlags::None).unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
-        let wal = Rc::new(Wal {});
+        let wal = Rc::new(RefCell::new(Wal {}));
         let inner = limbo_core::Database::open(io, page_io, wal).unwrap();
         Database { _inner: inner }
     }
@@ -78,7 +79,7 @@ pub struct PlatformIO {
 }
 
 impl limbo_core::IO for PlatformIO {
-    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
+    fn open_file(&self, path: &str, _flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
         let fd = self.vfs.open(path);
         Ok(Rc::new(File {
             vfs: VFS::new(),
@@ -179,9 +180,10 @@ impl limbo_core::Wal for Wal {
     }
 
     fn append_frame(
-        &self,
-        _page: Rc<std::cell::RefCell<limbo_core::Page>>,
+        &mut self,
+        _page: Rc<RefCell<Page>>,
         _db_size: u32,
+        _pager: &limbo_core::Pager,
     ) -> Result<()> {
         todo!()
     }
@@ -190,8 +192,16 @@ impl limbo_core::Wal for Wal {
         &self,
         _frame_id: u64,
         _page: Rc<std::cell::RefCell<limbo_core::Page>>,
-        _buffer_pool: Rc<BufferPool>,
+        _buffer_pool: Rc<limbo_core::BufferPool>,
     ) -> Result<()> {
+        todo!()
+    }
+
+    fn should_checkpoint(&self) -> bool {
+        todo!()
+    }
+
+    fn checkpoint(&mut self, _pager: &limbo_core::Pager) -> Result<limbo_core::CheckpointStatus> {
         todo!()
     }
 }
