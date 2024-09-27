@@ -17,6 +17,9 @@ impl TempDatabase {
         path.push("test.db");
         {
             let connection = rusqlite::Connection::open(&path).unwrap();
+            connection
+                .pragma_update(None, "journal_mode", "wal")
+                .unwrap();
             connection.execute(table_sql, ()).unwrap();
         }
         let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new().unwrap());
@@ -222,6 +225,67 @@ mod tests {
                         let huge_text = &huge_texts[current_index];
                         assert_eq!(current_index, id as usize);
                         compare_string(huge_text, text);
+                        current_index += 1;
+                    }
+                    RowResult::IO => {
+                        tmp_db.io.run_once()?;
+                    }
+                    RowResult::Done => break,
+                }
+            },
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("{}", err);
+            }
+        }
+        conn.cacheflush()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_wal_checkpoint() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
+        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+        // threshold is 1000 by default
+        let iterations = 1001_usize;
+        let conn = tmp_db.connect_limbo();
+
+        for i in 0..iterations {
+            let insert_query = format!("INSERT INTO test VALUES ({})", i);
+            conn.cacheflush().unwrap();
+            conn.clear_page_cache().unwrap();
+            match conn.query(insert_query) {
+                Ok(Some(ref mut rows)) => loop {
+                    match rows.next_row()? {
+                        RowResult::IO => {
+                            tmp_db.io.run_once()?;
+                        }
+                        RowResult::Done => break,
+                        _ => unreachable!(),
+                    }
+                },
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("{}", err);
+                }
+            };
+        }
+
+        conn.cacheflush().unwrap();
+        conn.clear_page_cache().unwrap();
+        let list_query = "SELECT * FROM test LIMIT 1";
+        let mut current_index = 0;
+        match conn.query(list_query) {
+            Ok(Some(ref mut rows)) => loop {
+                match rows.next_row()? {
+                    RowResult::Row(row) => {
+                        let first_value = &row.values[0];
+                        let id = match first_value {
+                            Value::Integer(i) => *i as i32,
+                            Value::Float(f) => *f as i32,
+                            _ => unreachable!(),
+                        };
+                        assert_eq!(current_index, id as usize);
                         current_index += 1;
                     }
                     RowResult::IO => {
