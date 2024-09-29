@@ -48,7 +48,10 @@ impl LinuxIO {
     pub fn new() -> Result<Self> {
         let ring = io_uring::IoUring::new(MAX_IOVECS as u32)?;
         let inner = InnerLinuxIO {
-            ring: WrappedIOUring{ring, pending_ops: 0},
+            ring: WrappedIOUring {
+                ring,
+                pending_ops: 0,
+            },
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
                 iov_len: 0,
@@ -74,7 +77,8 @@ impl InnerLinuxIO {
 impl WrappedIOUring {
     fn submit_entry(&mut self, entry: &io_uring::squeue::Entry) {
         unsafe {
-            self.ring.submission()
+            self.ring
+                .submission()
                 .push(entry)
                 .expect("submission queue is full");
         }
@@ -132,7 +136,7 @@ impl IO for LinuxIO {
         let ring = &mut inner.ring;
 
         if ring.empty() {
-            return Ok(())
+            return Ok(());
         }
 
         ring.wait_for_completion()?;
@@ -268,12 +272,8 @@ impl File for LinuxFile {
         let sync = io_uring::opcode::Fsync::new(fd)
             .build()
             .user_data(ptr as u64);
-        let ring = &mut io.ring;
-        unsafe {
-            ring.submission()
-                .push(&sync)
-                .expect("submission queue is full");
-        }
+        let mut io = self.io.borrow_mut();
+        io.ring.submit_entry(&sync);
         Ok(())
     }
 }
