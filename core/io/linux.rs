@@ -266,7 +266,6 @@ impl File for LinuxFile {
     }
 
     fn sync(&self, c: Rc<Completion>) -> Result<()> {
-        let mut io = self.io.borrow_mut();
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let ptr = Rc::into_raw(c.clone());
         let sync = io_uring::opcode::Fsync::new(fd)
