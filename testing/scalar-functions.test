@@ -514,3 +514,23 @@ do_execsql_test sign-text-non-numeric {
 do_execsql_test sign-null {
   SELECT sign(NULL);
 } {}
+
+do_execsql_test zeroblob-int-0 {
+  SELECT zeroblob(0) = x'';
+} {1}
+
+do_execsql_test zeroblob-int-1 {
+  SELECT zeroblob(1) = x'00';
+} {1}
+
+do_execsql_test zeroblob-str-3 {
+  SELECT zeroblob('3') = x'000000';
+} {1}
+
+do_execsql_test zeroblob-str-a {
+  SELECT zeroblob('a') = x'';
+} {1}
+
+do_execsql_test zeroblob-blob {
+  SELECT zeroblob(x'01') = x'';
+} {1}
