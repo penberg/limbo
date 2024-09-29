@@ -52,7 +52,7 @@ impl limbo_core::File for File {
     fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         let r = match &*c {
             limbo_core::Completion::Read(r) => r,
-            limbo_core::Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         {
             let mut buf = r.buf_mut();
@@ -70,6 +70,10 @@ impl limbo_core::File for File {
         _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
         _c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
+        todo!()
+    }
+
+    fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
         todo!()
     }
 }
@@ -134,7 +138,7 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         let r = match &(*c) {
             limbo_core::Completion::Read(r) => r,
-            limbo_core::Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         let size = r.buf().len();
         assert!(page_idx > 0);
@@ -179,15 +183,6 @@ impl limbo_core::Wal for Wal {
         todo!()
     }
 
-    fn append_frame(
-        &mut self,
-        _page: Rc<RefCell<Page>>,
-        _db_size: u32,
-        _pager: &limbo_core::Pager,
-    ) -> Result<()> {
-        todo!()
-    }
-
     fn read_frame(
         &self,
         _frame_id: u64,
@@ -201,7 +196,25 @@ impl limbo_core::Wal for Wal {
         todo!()
     }
 
-    fn checkpoint(&mut self, _pager: &limbo_core::Pager) -> Result<limbo_core::CheckpointStatus> {
+    fn append_frame(
+        &mut self,
+        _page: Rc<RefCell<Page>>,
+        _db_size: u32,
+        _pager: &limbo_core::Pager,
+        _write_counter: Rc<RefCell<usize>>,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    fn checkpoint(
+        &mut self,
+        _pager: &limbo_core::Pager,
+        _write_counter: Rc<RefCell<usize>>,
+    ) -> Result<limbo_core::CheckpointStatus> {
+        todo!()
+    }
+
+    fn sync(&mut self) -> Result<limbo_core::CheckpointStatus> {
         todo!()
     }
 }
