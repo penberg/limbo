@@ -119,6 +119,30 @@ do_execsql_test hex-null {
   select hex(null)
 } {}
 
+do_execsql_test unhex-str-ab {
+  SELECT unhex('6162');
+} {ab}
+
+do_execsql_test unhex-int-ab {
+  SELECT unhex(6162);
+} {ab}
+
+do_execsql_test unhex-dot-uppercase {
+  SELECT unhex('2E');
+} {.}
+
+do_execsql_test unhex-dot-lowercase {
+  SELECT unhex('2e');
+} {.}
+
+do_execsql_test unhex-no-hex {
+  SELECT unhex('x');
+} {}
+
+do_execsql_test unhex-null {
+  SELECT unhex(NULL);
+} {}
+
 do_execsql_test trim {
   SELECT trim('   Limbo    ');
 } {Limbo}

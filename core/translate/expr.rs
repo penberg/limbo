@@ -1215,7 +1215,8 @@ pub fn translate_expr(
                         ScalarFunc::Trim
                         | ScalarFunc::LTrim
                         | ScalarFunc::RTrim
-                        | ScalarFunc::Round => {
+                        | ScalarFunc::Round
+                        | ScalarFunc::Unhex => {
                             let args = if let Some(args) = args {
                                 if args.len() > 2 {
                                     crate::bail_parse_error!(
