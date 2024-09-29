@@ -442,7 +442,6 @@ impl Pager {
         }
 
         if matches!(self.flush_info.borrow().state.clone(), FlushState::Syncing) {
-            println!("syncing");
             match self.wal.borrow_mut().sync() {
                 Ok(CheckpointStatus::IO) => return Ok(CheckpointStatus::IO),
                 Ok(CheckpointStatus::Done) => {}

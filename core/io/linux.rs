@@ -220,7 +220,7 @@ impl File for LinuxFile {
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let r = match &(*c) {
             Completion::Read(r) => r,
-            Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
