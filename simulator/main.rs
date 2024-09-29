@@ -187,6 +187,10 @@ impl limbo_core::File for SimulatorFile {
         }
         self.inner.pwrite(pos, buffer, c)
     }
+
+    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
+        todo!()
+    }
 }
 
 impl Drop for SimulatorFile {
