@@ -57,7 +57,7 @@ impl File for GenericFile {
         {
             let r = match &(*c) {
                 Completion::Read(r) => r,
-                Completion::Write(_) => unreachable!(),
+                _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
             let buf = buf.as_mut_slice();
