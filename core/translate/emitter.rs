@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use sqlite3_parser::ast;
+
 use crate::schema::{BTreeTable, Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::resolve_ident_pseudo_table;
@@ -239,6 +241,165 @@ impl Emitter for Operator {
                             .resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
                         program.emit_insn(Insn::NextAsync { cursor_id });
                         let jump_label = m.scan_loop_body_labels.pop().unwrap();
+                        program.emit_insn_with_label_dependency(
+                            Insn::NextAwait {
+                                cursor_id,
+                                pc_if_next: jump_label,
+                            },
+                            jump_label,
+                        );
+                        Ok(OpStepResult::Done)
+                    }
+                    _ => Ok(OpStepResult::Done),
+                }
+            }
+            Operator::IndexScan {
+                table,
+                table_identifier,
+                index,
+                seek_cmp,
+                seek_expr,
+                predicates,
+                step,
+                id,
+                ..
+            } => {
+                *step += 1;
+                const INDEX_SCAN_OPEN_AND_SEEK: usize = 1;
+                const INDEX_SCAN_NEXT: usize = 2;
+                match *step {
+                    INDEX_SCAN_OPEN_AND_SEEK => {
+                        let table_cursor_id = program.alloc_cursor_id(
+                            Some(table_identifier.clone()),
+                            Some(Table::BTree(table.clone())),
+                        );
+                        let index_cursor_id = program.alloc_cursor_id(
+                            Some(index.name.clone()),
+                            Some(Table::Index(index.clone())),
+                        );
+                        let next_row_label = program.allocate_label();
+                        m.next_row_labels.insert(*id, next_row_label);
+                        let rewind_label = program.allocate_label();
+                        m.rewind_labels.push(rewind_label);
+                        program.emit_insn(Insn::OpenReadAsync {
+                            cursor_id: table_cursor_id,
+                            root_page: table.root_page,
+                        });
+                        program.emit_insn(Insn::OpenReadAwait);
+                        program.emit_insn(Insn::OpenReadAsync {
+                            cursor_id: index_cursor_id,
+                            root_page: index.root_page,
+                        });
+                        program.emit_insn(Insn::OpenReadAwait);
+
+                        let cmp_reg = program.alloc_register();
+                        // TODO this only handles ascending indexes
+                        match seek_cmp {
+                            ast::Operator::Equals
+                            | ast::Operator::Greater
+                            | ast::Operator::GreaterEquals => {
+                                translate_expr(
+                                    program,
+                                    Some(referenced_tables),
+                                    seek_expr,
+                                    cmp_reg,
+                                    None,
+                                    None,
+                                )?;
+                            }
+                            ast::Operator::Less | ast::Operator::LessEquals => {
+                                program.emit_insn(Insn::Null {
+                                    dest: cmp_reg,
+                                    dest_end: None,
+                                });
+                            }
+                            _ => unreachable!(),
+                        }
+                        program.emit_insn_with_label_dependency(
+                            match seek_cmp {
+                                ast::Operator::Equals | ast::Operator::GreaterEquals => {
+                                    Insn::SeekGE {
+                                        cursor_id: index_cursor_id,
+                                        start_reg: cmp_reg,
+                                        num_regs: 1,
+                                        target_pc: *m.termination_label_stack.last().unwrap(),
+                                    }
+                                }
+                                ast::Operator::Greater
+                                | ast::Operator::Less
+                                | ast::Operator::LessEquals => Insn::SeekGT {
+                                    cursor_id: index_cursor_id,
+                                    start_reg: cmp_reg,
+                                    num_regs: 1,
+                                    target_pc: *m.termination_label_stack.last().unwrap(),
+                                },
+                                _ => unreachable!(),
+                            },
+                            *m.termination_label_stack.last().unwrap(),
+                        );
+                        if *seek_cmp == ast::Operator::Less
+                            || *seek_cmp == ast::Operator::LessEquals
+                        {
+                            translate_expr(
+                                program,
+                                Some(referenced_tables),
+                                seek_expr,
+                                cmp_reg,
+                                None,
+                                None,
+                            )?;
+                        }
+
+                        program.defer_label_resolution(rewind_label, program.offset() as usize);
+
+                        // We are currently only handling ascending indexes.
+                        // For conditions like index_key > 10, we have already seeked to the first key greater than 10, and can just scan forward.
+                        // For conditions like index_key < 10, we are at the beginning of the index, and will scan forward and emit IdxGE(10) with a conditional jump to the end.
+                        // For conditions like index_key = 10, we have already seeked to the first key greater than or equal to 10, and can just scan forward and emit IdxGT(10) with a conditional jump to the end.
+                        // For conditions like index_key >= 10, we have already seeked to the first key greater than or equal to 10, and can just scan forward.
+                        // For conditions like index_key <= 10, we are at the beginning of the index, and will scan forward and emit IdxGT(10) with a conditional jump to the end.
+                        // For conditions like index_key != 10, TODO. probably the optimal way is not to use an index at all.
+
+                        let abort_jump_target = *m.termination_label_stack.last().unwrap();
+                        match seek_cmp {
+                            ast::Operator::Equals | ast::Operator::LessEquals => {
+                                program.emit_insn_with_label_dependency(
+                                    Insn::IdxGT {
+                                        cursor_id: index_cursor_id,
+                                        start_reg: cmp_reg,
+                                        num_regs: 1,
+                                        target_pc: abort_jump_target,
+                                    },
+                                    abort_jump_target,
+                                );
+                            }
+                            ast::Operator::Less => {
+                                program.emit_insn_with_label_dependency(
+                                    Insn::IdxGE {
+                                        cursor_id: index_cursor_id,
+                                        start_reg: cmp_reg,
+                                        num_regs: 1,
+                                        target_pc: abort_jump_target,
+                                    },
+                                    abort_jump_target,
+                                );
+                            }
+                            _ => {}
+                        }
+
+                        program.emit_insn(Insn::DeferredSeek {
+                            index_cursor_id,
+                            table_cursor_id,
+                        });
+
+                        Ok(OpStepResult::ReadyToEmit)
+                    }
+                    INDEX_SCAN_NEXT => {
+                        let cursor_id = program.resolve_cursor_id(&index.name, None);
+                        program
+                            .resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
+                        program.emit_insn(Insn::NextAsync { cursor_id });
+                        let jump_label = m.rewind_labels.pop().unwrap();
                         program.emit_insn_with_label_dependency(
                             Insn::NextAwait {
                                 cursor_id,
@@ -1196,6 +1357,23 @@ impl Emitter for Operator {
 
                 Ok(start_reg)
             }
+            Operator::IndexScan {
+                table,
+                table_identifier,
+                ..
+            } => {
+                let start_reg = program.alloc_registers(col_count);
+                let table = cursor_override
+                    .map(|c| c.pseudo_table.clone())
+                    .unwrap_or_else(|| Table::BTree(table.clone()));
+                let cursor_id = cursor_override
+                    .map(|c| c.cursor_id)
+                    .unwrap_or_else(|| program.resolve_cursor_id(table_identifier, None));
+                let start_column_offset = cursor_override.map(|c| c.sort_key_len).unwrap_or(0);
+                translate_table_columns(program, cursor_id, &table, start_column_offset, start_reg);
+
+                Ok(start_reg)
+            }
             Operator::Join { left, right, .. } => {
                 let left_start_reg =
                     left.result_columns(program, referenced_tables, m, cursor_override)?;
@@ -1415,13 +1593,7 @@ impl Emitter for Operator {
 
 fn prologue(
     cache: ExpressionResultCache,
-) -> Result<(
-    ProgramBuilder,
-    Metadata,
-    BranchOffset,
-    BranchOffset,
-    BranchOffset,
-)> {
+) -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
     let halt_label = program.allocate_label();
@@ -1446,16 +1618,19 @@ fn prologue(
         sorts: HashMap::new(),
     };
 
-    Ok((program, metadata, init_label, halt_label, start_offset))
+    Ok((program, metadata, init_label, start_offset))
 }
 
 fn epilogue(
     program: &mut ProgramBuilder,
+    metadata: &mut Metadata,
     init_label: BranchOffset,
-    halt_label: BranchOffset,
     start_offset: BranchOffset,
 ) -> Result<()> {
-    program.resolve_label(halt_label, program.offset());
+    program.resolve_label(
+        metadata.termination_label_stack.pop().unwrap(),
+        program.offset(),
+    );
     program.emit_insn(Insn::Halt {
         err_code: 0,
         description: String::new(),
@@ -1479,7 +1654,7 @@ pub fn emit_program(
     mut plan: Plan,
     cache: ExpressionResultCache,
 ) -> Result<Program> {
-    let (mut program, mut metadata, init_label, halt_label, start_offset) = prologue(cache)?;
+    let (mut program, mut metadata, init_label, start_offset) = prologue(cache)?;
     loop {
         match plan
             .root_operator
@@ -1495,7 +1670,7 @@ pub fn emit_program(
                 )?;
             }
             OpStepResult::Done => {
-                epilogue(&mut program, init_label, halt_label, start_offset)?;
+                epilogue(&mut program, &mut metadata, init_label, start_offset)?;
                 return Ok(program.build(database_header));
             }
         }

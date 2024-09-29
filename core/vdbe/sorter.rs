@@ -79,6 +79,14 @@ impl Cursor for Sorter {
         unimplemented!();
     }
 
+    fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
+    fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
     fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
         unimplemented!();
     }

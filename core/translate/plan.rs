@@ -6,12 +6,18 @@ use std::{
 
 use sqlite3_parser::ast;
 
-use crate::{function::AggFunc, schema::BTreeTable, util::normalize_ident, Result};
+use crate::{
+    function::AggFunc,
+    schema::{BTreeTable, Index},
+    util::normalize_ident,
+    Result,
+};
 
 #[derive(Debug)]
 pub struct Plan {
     pub root_operator: Operator,
     pub referenced_tables: Vec<(Rc<BTreeTable>, String)>,
+    pub available_indexes: Vec<Rc<Index>>,
 }
 
 impl Display for Plan {
@@ -123,6 +129,17 @@ pub enum Operator {
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
     },
+    IndexScan {
+        id: usize,
+        index: Rc<Index>,
+        seek_cmp: ast::Operator,
+        seek_expr: ast::Expr,
+        index_predicate: ast::Expr,
+        table: Rc<BTreeTable>,
+        table_identifier: String,
+        predicates: Option<Vec<ast::Expr>>,
+        step: usize,
+    },
     // Nothing operator
     // This operator is used to represent an empty query.
     // e.g. SELECT * from foo WHERE 0 will eventually be optimized to Nothing.
@@ -172,6 +189,7 @@ impl Operator {
                 .map(|e| e.column_count(referenced_tables))
                 .sum(),
             Operator::Scan { table, .. } => table.columns.len(),
+            Operator::IndexScan { table, .. } => table.columns.len(),
             Operator::Nothing => 0,
         }
     }
@@ -226,6 +244,9 @@ impl Operator {
                 })
                 .collect(),
             Operator::Scan { table, .. } => table.columns.iter().map(|c| c.name.clone()).collect(),
+            Operator::IndexScan { table, .. } => {
+                table.columns.iter().map(|c| c.name.clone()).collect()
+            }
             Operator::Nothing => vec![],
         }
     }
@@ -240,6 +261,7 @@ impl Operator {
             Operator::Order { id, .. } => *id,
             Operator::Projection { id, .. } => *id,
             Operator::Scan { id, .. } => *id,
+            Operator::IndexScan { id, .. } => *id,
             Operator::Nothing => unreachable!(),
         }
     }
@@ -429,6 +451,10 @@ impl Display for Operator {
                     }?;
                     Ok(())
                 }
+                Operator::IndexScan { table, .. } => {
+                    writeln!(f, "{}INDEX SCAN {}", indent, table.name)?;
+                    Ok(())
+                }
                 Operator::Nothing => Ok(()),
             }
         }
@@ -483,6 +509,13 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
             table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
         }
         Operator::Scan { table, .. } => {
+            table_refs_mask |= 1
+                << tables
+                    .iter()
+                    .position(|(t, _)| Rc::ptr_eq(t, table))
+                    .unwrap();
+        }
+        Operator::IndexScan { table, .. } => {
             table_refs_mask |= 1
                 << tables
                     .iter()

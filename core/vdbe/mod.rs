@@ -298,6 +298,47 @@ pub enum Insn {
         target_pc: BranchOffset,
     },
 
+    // P1 is an open index cursor and P3 is a cursor on the corresponding table. This opcode does a deferred seek of the P3 table cursor to the row that corresponds to the current row of P1.
+    // This is a deferred seek. Nothing actually happens until the cursor is used to read a record. That way, if no reads occur, no unnecessary I/O happens.
+    DeferredSeek {
+        index_cursor_id: CursorID,
+        table_cursor_id: CursorID,
+    },
+
+    // Seek to the first index entry that is greater than or equal to the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
+    SeekGE {
+        cursor_id: CursorID,
+        start_reg: usize,
+        num_regs: usize,
+        target_pc: BranchOffset,
+    },
+
+    // Seek to the first index entry that is greater than the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
+    SeekGT {
+        cursor_id: CursorID,
+        start_reg: usize,
+        num_regs: usize,
+        target_pc: BranchOffset,
+    },
+
+    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
+    // If the P1 index entry is greater or equal than the key value then jump to P2. Otherwise fall through to the next instruction.
+    IdxGE {
+        cursor_id: CursorID,
+        start_reg: usize,
+        num_regs: usize,
+        target_pc: BranchOffset,
+    },
+
+    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
+    // If the P1 index entry is greater than the key value then jump to P2. Otherwise fall through to the next instruction.
+    IdxGT {
+        cursor_id: CursorID,
+        start_reg: usize,
+        num_regs: usize,
+        target_pc: BranchOffset,
+    },
+
     // Decrement the given register and jump to the given PC if the result is zero.
     DecrJumpZero {
         reg: usize,
@@ -444,6 +485,7 @@ pub struct ProgramState {
     cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
+    deferred_seek: Option<(CursorID, CursorID)>,
     ended_coroutine: bool, // flag to notify yield coroutine finished
     regex_cache: RegexCache,
 }
@@ -458,6 +500,7 @@ impl ProgramState {
             cursors,
             registers,
             last_compare: None,
+            deferred_seek: None,
             ended_coroutine: false,
             regex_cache: RegexCache::new(),
         }
@@ -958,6 +1001,13 @@ impl Program {
                     column,
                     dest,
                 } => {
+                    if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
+                        let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
+                        let rowid = index_cursor.rowid()?;
+                        let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
+                        table_cursor.seek_rowid(rowid.unwrap())?;
+                    }
+
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref record) = *cursor.record()? {
                         let null_flag = cursor.get_null_flag();
@@ -1085,6 +1135,13 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::RowId { cursor_id, dest } => {
+                    if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
+                        let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
+                        let rowid = index_cursor.rowid()?;
+                        let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
+                        table_cursor.seek_rowid(rowid.unwrap())?;
+                    }
+
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref rowid) = cursor.rowid()? {
                         state.registers[*dest] = OwnedValue::Integer(*rowid as i64);
@@ -1119,6 +1176,104 @@ impl Program {
                             // If there is I/O, the instruction is restarted.
                             return Ok(StepResult::IO);
                         }
+                    }
+                }
+                Insn::DeferredSeek {
+                    index_cursor_id,
+                    table_cursor_id,
+                } => {
+                    state.deferred_seek = Some((*index_cursor_id, *table_cursor_id));
+                    state.pc += 1;
+                }
+                Insn::SeekGE {
+                    cursor_id,
+                    start_reg,
+                    num_regs,
+                    target_pc,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let record_from_regs: OwnedRecord =
+                        make_owned_record(&state.registers, start_reg, num_regs);
+                    match cursor.seek_ge(&record_from_regs)? {
+                        CursorResult::Ok(found) => {
+                            if !found {
+                                state.pc = *target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
+                }
+                Insn::SeekGT {
+                    cursor_id,
+                    start_reg,
+                    num_regs,
+                    target_pc,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let record_from_regs: OwnedRecord =
+                        make_owned_record(&state.registers, start_reg, num_regs);
+                    match cursor.seek_gt(&record_from_regs)? {
+                        CursorResult::Ok(found) => {
+                            if !found {
+                                state.pc = *target_pc;
+                            } else {
+                                state.pc += 1;
+                            }
+                        }
+                        CursorResult::IO => {
+                            // If there is I/O, the instruction is restarted.
+                            return Ok(StepResult::IO);
+                        }
+                    }
+                }
+                Insn::IdxGE {
+                    cursor_id,
+                    start_reg,
+                    num_regs,
+                    target_pc,
+                } => {
+                    assert!(*target_pc >= 0);
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let record_from_regs: OwnedRecord =
+                        make_owned_record(&state.registers, start_reg, num_regs);
+                    if let Some(ref idx_record) = *cursor.record()? {
+                        // omit the rowid from the idx_record, which is the last value
+                        if idx_record.values[..idx_record.values.len() - 1]
+                            >= *record_from_regs.values
+                        {
+                            state.pc = *target_pc;
+                        } else {
+                            state.pc += 1;
+                        }
+                    } else {
+                        state.pc = *target_pc;
+                    }
+                }
+                Insn::IdxGT {
+                    cursor_id,
+                    start_reg,
+                    num_regs,
+                    target_pc,
+                } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let record_from_regs: OwnedRecord =
+                        make_owned_record(&state.registers, start_reg, num_regs);
+                    if let Some(ref idx_record) = *cursor.record()? {
+                        // omit the rowid from the idx_record, which is the last value
+                        if idx_record.values[..idx_record.values.len() - 1]
+                            > *record_from_regs.values
+                        {
+                            state.pc = *target_pc;
+                        } else {
+                            state.pc += 1;
+                        }
+                    } else {
+                        state.pc = *target_pc;
                     }
                 }
                 Insn::DecrJumpZero { reg, target_pc } => {
@@ -1863,7 +2018,10 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
 fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&Insn>) -> usize {
     let indent_count = if let Some(insn) = prev_insn {
         match insn {
-            Insn::RewindAwait { .. } | Insn::SorterSort { .. } => indent_count + 1,
+            Insn::RewindAwait { .. }
+            | Insn::SorterSort { .. }
+            | Insn::SeekGE { .. }
+            | Insn::SeekGT { .. } => indent_count + 1,
             _ => indent_count,
         }
     } else {
@@ -2367,6 +2525,14 @@ mod tests {
 
         fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
             self.seek_rowid(rowid)
+        }
+
+        fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+            unimplemented!();
+        }
+
+        fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+            unimplemented!();
         }
 
         fn rewind(&mut self) -> Result<CursorResult<()>> {

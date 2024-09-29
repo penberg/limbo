@@ -277,10 +277,19 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 }
             }
 
+            println!("{:?}", schema.indexes);
+
             // Return the unoptimized query plan
             Ok(Plan {
                 root_operator: operator,
                 referenced_tables,
+                available_indexes: schema
+                    .indexes
+                    .clone()
+                    .into_iter()
+                    .map(|(_, v)| v)
+                    .flatten()
+                    .collect(),
             })
         }
         _ => todo!(),

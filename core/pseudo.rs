@@ -52,6 +52,14 @@ impl Cursor for PseudoCursor {
         unimplemented!();
     }
 
+    fn seek_ge(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
+    fn seek_gt(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
     fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
         unimplemented!();
     }

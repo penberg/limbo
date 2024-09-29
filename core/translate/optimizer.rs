@@ -2,7 +2,12 @@ use std::{collections::HashMap, rc::Rc};
 
 use sqlite3_parser::ast;
 
-use crate::{schema::BTreeTable, util::normalize_ident, Result};
+use crate::{
+    schema::{BTreeTable, Index},
+    types::OwnedValue,
+    util::normalize_ident,
+    Result,
+};
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Operator, Plan,
@@ -25,6 +30,7 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCac
             Plan {
                 root_operator: Operator::Nothing,
                 referenced_tables: vec![],
+                available_indexes: vec![],
             },
             expr_result_cache,
         ));
@@ -32,6 +38,7 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCac
     use_indexes(
         &mut select_plan.root_operator,
         &select_plan.referenced_tables,
+        &select_plan.available_indexes,
     )?;
     find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(&select_plan.root_operator, &mut expr_result_cache);
     Ok((select_plan, expr_result_cache))
@@ -43,8 +50,10 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCac
 fn use_indexes(
     operator: &mut Operator,
     referenced_tables: &[(Rc<BTreeTable>, String)],
+    available_indexes: &[Rc<Index>],
 ) -> Result<()> {
     match operator {
+        Operator::IndexScan { .. } => Ok(()),
         Operator::Scan {
             table,
             predicates: filter,
@@ -90,35 +99,72 @@ fn use_indexes(
                     predicates: predicates_owned,
                     id: *id,
                     step: 0,
+                };
+                return Ok(());
+            }
+
+            let mut maybe_index_predicate = None;
+            let mut maybe_index_idx = None;
+            let fs = filter.as_mut().unwrap();
+            for i in 0..fs.len() {
+                let mut f = fs[i].take_ownership();
+                let index_idx = f.check_index_scan(available_indexes)?;
+                if index_idx.is_some() {
+                    maybe_index_predicate = Some(f);
+                    maybe_index_idx = index_idx;
+                    fs.remove(i);
+                    break;
+                }
+            }
+
+            if let Some(index_idx) = maybe_index_idx {
+                let index_predicate = maybe_index_predicate.unwrap();
+                match index_predicate {
+                    ast::Expr::Binary(lhs, op, rhs) => {
+                        *operator = Operator::IndexScan {
+                            table: table.clone(),
+                            index: available_indexes[index_idx].clone(),
+                            index_predicate: ast::Expr::Binary(lhs, op, rhs.clone()),
+                            predicates: Some(std::mem::take(fs)),
+                            seek_cmp: op,
+                            seek_expr: *rhs,
+                            table_identifier: table_identifier.clone(),
+                            id: *id,
+                            step: 0,
+                        };
+                    }
+                    _ => {
+                        crate::bail_parse_error!("Unsupported index predicate");
+                    }
                 }
             }
 
             Ok(())
         }
         Operator::Aggregate { source, .. } => {
-            use_indexes(source, referenced_tables)?;
+            use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
         }
         Operator::Filter { source, .. } => {
-            use_indexes(source, referenced_tables)?;
+            use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
         }
         Operator::SeekRowid { .. } => Ok(()),
         Operator::Limit { source, .. } => {
-            use_indexes(source, referenced_tables)?;
+            use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
         }
         Operator::Join { left, right, .. } => {
-            use_indexes(left, referenced_tables)?;
-            use_indexes(right, referenced_tables)?;
+            use_indexes(left, referenced_tables, available_indexes)?;
+            use_indexes(right, referenced_tables, available_indexes)?;
             Ok(())
         }
         Operator::Order { source, .. } => {
-            use_indexes(source, referenced_tables)?;
+            use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
         }
         Operator::Projection { source, .. } => {
-            use_indexes(source, referenced_tables)?;
+            use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
         }
         Operator::Nothing => Ok(()),
@@ -279,6 +325,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
             }
             Ok(ConstantConditionEliminationResult::Continue)
         }
+        Operator::IndexScan { .. } => Ok(ConstantConditionEliminationResult::Continue),
         Operator::Nothing => Ok(ConstantConditionEliminationResult::Continue),
     }
 }
@@ -379,6 +426,7 @@ fn push_predicates(
             Ok(())
         }
         Operator::Scan { .. } => Ok(()),
+        Operator::IndexScan { .. } => Ok(()),
         Operator::Nothing => Ok(()),
     }
 }
@@ -424,6 +472,7 @@ fn push_predicate(
 
             Ok(None)
         }
+        Operator::IndexScan { .. } => Ok(Some(predicate)),
         Operator::Filter {
             source,
             predicates: ps,
@@ -684,6 +733,7 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
             mask
         }
         Operator::Scan { .. } => 0,
+        Operator::IndexScan { .. } => 0,
         Operator::Nothing => 0,
     };
 
@@ -883,6 +933,7 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
             find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
         }
         Operator::Scan { .. } => {}
+        Operator::IndexScan { .. } => {}
         Operator::Nothing => {}
     }
 }
@@ -915,6 +966,7 @@ pub trait Optimizable {
         &self,
         referenced_tables: &[(Rc<BTreeTable>, String)],
     ) -> Result<Option<usize>>;
+    fn check_index_scan(&mut self, available_indexes: &[Rc<Index>]) -> Result<Option<usize>>;
 }
 
 impl Optimizable for ast::Expr {
@@ -963,6 +1015,54 @@ impl Optimizable for ast::Expr {
                 let table = table.unwrap();
 
                 Ok(Some(table.0))
+            }
+            _ => Ok(None),
+        }
+    }
+    fn check_index_scan(&mut self, available_indexes: &[Rc<Index>]) -> Result<Option<usize>> {
+        match self {
+            ast::Expr::Id(ident) => {
+                let ident = normalize_ident(&ident.0);
+                let indexes = available_indexes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, i)| i.columns.iter().any(|c| c.name == ident))
+                    .collect::<Vec<_>>();
+                if indexes.is_empty() {
+                    return Ok(None);
+                }
+                if indexes.len() > 1 {
+                    crate::bail_parse_error!("ambiguous column name {}", ident)
+                }
+                Ok(Some(indexes.first().unwrap().0))
+            }
+            ast::Expr::Qualified(tbl, ident) => {
+                let tbl = normalize_ident(&tbl.0);
+                let ident = normalize_ident(&ident.0);
+                let index = available_indexes.iter().enumerate().find(|(_, i)| {
+                    let normalized_tbl = normalize_ident(&i.table_name);
+                    normalized_tbl == tbl
+                        && i.columns.iter().any(|c| normalize_ident(&c.name) == ident)
+                });
+                if index.is_none() {
+                    return Ok(None);
+                }
+                Ok(Some(index.unwrap().0))
+            }
+            ast::Expr::Binary(lhs, op, rhs) => {
+                let lhs_index = lhs.check_index_scan(available_indexes)?;
+                if lhs_index.is_some() {
+                    return Ok(lhs_index);
+                }
+                let rhs_index = rhs.check_index_scan(available_indexes)?;
+                if rhs_index.is_some() {
+                    // swap lhs and rhs
+                    let lhs_new = rhs.take_ownership();
+                    let rhs_new = lhs.take_ownership();
+                    *self = ast::Expr::Binary(Box::new(lhs_new), *op, Box::new(rhs_new));
+                    return Ok(rhs_index);
+                }
+                Ok(None)
             }
             _ => Ok(None),
         }

@@ -11,7 +11,7 @@ use crate::Result;
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
-use super::sqlite3_ondisk::{write_varint_to_vec, OverflowCell};
+use super::sqlite3_ondisk::{write_varint_to_vec, IndexInteriorCell, IndexLeafCell, OverflowCell};
 
 /*
     These are offsets of fields in the header of a b-tree page.
@@ -22,6 +22,12 @@ const BTREE_HEADER_OFFSET_CELL_COUNT: usize = 3; /* number of cells in the page 
 const BTREE_HEADER_OFFSET_CELL_CONTENT: usize = 5; /* pointer to first byte of cell allocated content from top -> u16 */
 const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -> u8 */
 const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
+
+#[derive(Clone)]
+pub enum IndexSeekOp {
+    GT,
+    GE,
+}
 
 pub struct MemPage {
     parent: Option<Rc<MemPage>>,
@@ -145,14 +151,75 @@ impl BTreeCursor {
                     let record = crate::storage::sqlite3_ondisk::read_record(_payload)?;
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
-                BTreeCell::IndexInteriorCell(_) => {
-                    unimplemented!();
+                BTreeCell::IndexInteriorCell(IndexInteriorCell {
+                    left_child_page, ..
+                }) => {
+                    mem_page.advance();
+                    let mem_page =
+                        MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
+                    self.page.replace(Some(Rc::new(mem_page)));
+                    continue;
                 }
-                BTreeCell::IndexLeafCell(_) => {
-                    unimplemented!();
+                BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
+                    mem_page.advance();
+                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                    let rowid = match record.values[1] {
+                        OwnedValue::Integer(rowid) => rowid as u64,
+                        _ => unreachable!("index cells should have an integer rowid"),
+                    };
+                    return Ok(CursorResult::Ok((Some(rowid), Some(record))));
                 }
             }
         }
+    }
+
+    fn btree_index_seek(
+        &mut self,
+        key: &OwnedRecord,
+        op: IndexSeekOp,
+    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+        self.move_to_index_leaf(key, op.clone())?;
+
+        let mem_page = self.get_mem_page();
+        let page_idx = mem_page.page_idx;
+        let page = self.pager.read_page(page_idx)?;
+        let page = RefCell::borrow(&page);
+        if page.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+
+        let page = page.contents.read().unwrap();
+        let page = page.as_ref().unwrap();
+
+        for cell_idx in 0..page.cell_count() {
+            match &page.cell_get(
+                cell_idx,
+                self.pager.clone(),
+                self.max_local(page.page_type()),
+                self.min_local(page.page_type()),
+                self.usable_space(),
+            )? {
+                BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
+                    mem_page.advance();
+                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                    let comparison = match op {
+                        IndexSeekOp::GT => record > *key,
+                        IndexSeekOp::GE => record >= *key,
+                    };
+                    if comparison {
+                        let rowid = match record.values.get(1) {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
+                    }
+                }
+                cell_type => {
+                    unreachable!("unexpected cell type: {:?}", cell_type);
+                }
+            }
+        }
+        Ok(CursorResult::Ok((None, None)))
     }
 
     fn btree_seek_rowid(
@@ -317,6 +384,81 @@ impl BTreeCursor {
                     }
                     BTreeCell::IndexLeafCell(_) => {
                         unimplemented!();
+                    }
+                }
+            }
+
+            if !found_cell {
+                let parent = mem_page.clone();
+                match page.rightmost_pointer() {
+                    Some(right_most_pointer) => {
+                        let mem_page = MemPage::new(Some(parent), right_most_pointer as usize, 0);
+                        self.page.replace(Some(Rc::new(mem_page)));
+                        continue;
+                    }
+                    None => {
+                        unreachable!("we shall not go back up! The only way is down the slope");
+                    }
+                }
+            }
+        }
+    }
+
+    fn move_to_index_leaf(
+        &mut self,
+        key: &OwnedRecord,
+        cmp: IndexSeekOp,
+    ) -> Result<CursorResult<()>> {
+        self.move_to_root();
+        loop {
+            let mem_page = self.get_mem_page();
+            let page_idx = mem_page.page_idx;
+            let page = self.pager.read_page(page_idx)?;
+            let page = RefCell::borrow(&page);
+            if page.is_locked() {
+                return Ok(CursorResult::IO);
+            }
+
+            let page = page.contents.read().unwrap();
+            let page = page.as_ref().unwrap();
+            if page.is_leaf() {
+                return Ok(CursorResult::Ok(()));
+            }
+
+            let mut found_cell = false;
+            for cell_idx in 0..page.cell_count() {
+                match &page.cell_get(
+                    cell_idx,
+                    self.pager.clone(),
+                    self.max_local(page.page_type()),
+                    self.min_local(page.page_type()),
+                    self.usable_space(),
+                )? {
+                    BTreeCell::IndexInteriorCell(IndexInteriorCell {
+                        left_child_page,
+                        payload,
+                        ..
+                    }) => {
+                        // get the logic for this from btree_index_seek
+
+                        let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                        let comparison = match cmp {
+                            IndexSeekOp::GT => record > *key,
+                            IndexSeekOp::GE => record >= *key,
+                        };
+                        if comparison {
+                            mem_page.advance();
+                            let mem_page =
+                                MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
+                            self.page.replace(Some(Rc::new(mem_page)));
+                            found_cell = true;
+                            break;
+                        }
+                    }
+                    _ => {
+                        unreachable!(
+                            "we don't iterate leaf cells while trying to move to a leaf cell"
+                        );
                     }
                 }
             }
@@ -1289,6 +1431,30 @@ impl Cursor for BTreeCursor {
         match self.btree_seek_rowid(rowid)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        match self.btree_index_seek(key, IndexSeekOp::GE)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                println!("seek_ge: {:?}", record);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        match self.btree_index_seek(key, IndexSeekOp::GT)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                println!("seek_gt: {:?}", record);
                 self.record.replace(record);
                 Ok(CursorResult::Ok(rowid.is_some()))
             }

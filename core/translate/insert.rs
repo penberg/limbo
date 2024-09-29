@@ -50,6 +50,7 @@ pub fn translate_insert(
     );
     let root_page = match table.as_ref() {
         Table::BTree(btree) => btree.root_page,
+        Table::Index(index) => index.root_page,
         Table::Pseudo(_) => todo!(),
     };
 
