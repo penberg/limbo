@@ -1006,6 +1006,7 @@ pub fn translate_expr(
                         | ScalarFunc::Typeof
                         | ScalarFunc::Unicode
                         | ScalarFunc::Quote
+                        | ScalarFunc::RandomBlob
                         | ScalarFunc::Sign
                         | ScalarFunc::ZeroBlob => {
                             let args = if let Some(args) = args {

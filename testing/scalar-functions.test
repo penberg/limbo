@@ -539,6 +539,22 @@ do_execsql_test sign-null {
   SELECT sign(NULL);
 } {}
 
+do_execsql_test randomblob-int-2 {
+  SELECT length(randomblob(2));
+} {2}
+
+do_execsql_test randomblob-int-0 {
+  SELECT length(randomblob(0));
+} {1}
+
+do_execsql_test randomblob-int-negative {
+  SELECT length(randomblob(-2));
+} {1}
+
+do_execsql_test randomblob-str-2 {
+  SELECT length(randomblob('2'));
+} {2}
+
 do_execsql_test zeroblob-int-0 {
   SELECT zeroblob(0) = x'';
 } {1}
