@@ -124,7 +124,7 @@ pub struct Metadata {
     // in a join with a scan and a seek, the seek will jump to the scan's Next instruction when the join condition is false.
     next_row_labels: HashMap<usize, BranchOffset>,
     // labels for the Rewind instructions.
-    rewind_labels: Vec<BranchOffset>,
+    scan_loop_body_labels: Vec<BranchOffset>,
     // mapping between Aggregation operator id and the register that holds the start of the aggregation result
     aggregation_start_registers: HashMap<usize, usize>,
     // mapping between Aggregation operator id and associated metadata (if the aggregation has a group by clause)
@@ -196,16 +196,19 @@ impl Emitter for Operator {
                     SCAN_REWIND_AND_CONDITIONS => {
                         let cursor_id = program.resolve_cursor_id(table_identifier, None);
                         program.emit_insn(Insn::RewindAsync { cursor_id });
-                        let rewind_label = program.allocate_label();
+                        let scan_loop_body_label = program.allocate_label();
                         let halt_label = m.termination_label_stack.last().unwrap();
-                        m.rewind_labels.push(rewind_label);
-                        program.defer_label_resolution(rewind_label, program.offset() as usize);
                         program.emit_insn_with_label_dependency(
                             Insn::RewindAwait {
                                 cursor_id,
                                 pc_if_empty: *halt_label,
                             },
                             *halt_label,
+                        );
+                        m.scan_loop_body_labels.push(scan_loop_body_label);
+                        program.defer_label_resolution(
+                            scan_loop_body_label,
+                            program.offset() as usize,
                         );
 
                         let jump_label = m.next_row_labels.get(id).unwrap_or(halt_label);
@@ -235,7 +238,7 @@ impl Emitter for Operator {
                         program
                             .resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
                         program.emit_insn(Insn::NextAsync { cursor_id });
-                        let jump_label = m.rewind_labels.pop().unwrap();
+                        let jump_label = m.scan_loop_body_labels.pop().unwrap();
                         program.emit_insn_with_label_dependency(
                             Insn::NextAwait {
                                 cursor_id,
@@ -1439,7 +1442,7 @@ fn prologue(
         group_bys: HashMap::new(),
         left_joins: HashMap::new(),
         next_row_labels: HashMap::new(),
-        rewind_labels: vec![],
+        scan_loop_body_labels: vec![],
         sorts: HashMap::new(),
     };
 
