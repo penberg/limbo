@@ -117,7 +117,7 @@ This document describes the SQLite compatibility status of Limbo:
 | unicode(X)                   | Yes    |         |
 | unlikely(X)                  | No     |         |
 | upper(X)                     | Yes    |         |
-| zeroblob(N)                  | No     |         |
+| zeroblob(N)                  | Yes    |         |
 
 ### Aggregate functions
 

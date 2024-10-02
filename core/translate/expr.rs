@@ -1006,7 +1006,8 @@ pub fn translate_expr(
                         | ScalarFunc::Typeof
                         | ScalarFunc::Unicode
                         | ScalarFunc::Quote
-                        | ScalarFunc::Sign => {
+                        | ScalarFunc::Sign
+                        | ScalarFunc::ZeroBlob => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     crate::bail_parse_error!(

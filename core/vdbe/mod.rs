@@ -1531,7 +1531,8 @@ impl Program {
                             | ScalarFunc::Typeof
                             | ScalarFunc::Unicode
                             | ScalarFunc::Quote
-                            | ScalarFunc::Sign => {
+                            | ScalarFunc::Sign
+                            | ScalarFunc::ZeroBlob => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
                                     ScalarFunc::Sign => exec_sign(reg_value),
@@ -1542,6 +1543,7 @@ impl Program {
                                     ScalarFunc::Typeof => Some(exec_typeof(reg_value)),
                                     ScalarFunc::Unicode => Some(exec_unicode(reg_value)),
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
+                                    ScalarFunc::ZeroBlob => Some(exec_zeroblob(reg_value)),
                                     _ => unreachable!(),
                                 };
                                 state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
@@ -2264,6 +2266,16 @@ fn exec_rtrim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
     }
 }
 
+fn exec_zeroblob(req: &OwnedValue) -> OwnedValue {
+    let length: i64 = match req {
+        OwnedValue::Integer(i) => *i,
+        OwnedValue::Float(f) => *f as i64,
+        OwnedValue::Text(s) => s.parse().unwrap_or(0),
+        _ => 0,
+    };
+    OwnedValue::Blob(Rc::new(vec![0; length.max(0) as usize]))
+}
+
 // exec_if returns whether you should jump
 fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
     match reg {
@@ -2292,7 +2304,7 @@ mod tests {
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
         exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim,
-        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unicode, exec_upper,
+        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unicode, exec_upper, exec_zeroblob,
         execute_sqlite_version, get_new_rowid, AggContext, Cursor, CursorResult, LimboError,
         OwnedRecord, OwnedValue, Result,
     };
@@ -2923,6 +2935,45 @@ mod tests {
         let input = OwnedValue::Null;
         let expected = Some(OwnedValue::Null);
         assert_eq!(exec_sign(&input), expected);
+    }
+
+    #[test]
+    fn test_exec_zeroblob() {
+        let input = OwnedValue::Integer(0);
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Null;
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Integer(4);
+        let expected = OwnedValue::Blob(Rc::new(vec![0; 4]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Integer(-1);
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("5".to_string()));
+        let expected = OwnedValue::Blob(Rc::new(vec![0; 5]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("-5".to_string()));
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Text(Rc::new("text".to_string()));
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Float(2.6);
+        let expected = OwnedValue::Blob(Rc::new(vec![0; 2]));
+        assert_eq!(exec_zeroblob(&input), expected);
+
+        let input = OwnedValue::Blob(Rc::new(vec![1]));
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_zeroblob(&input), expected);
     }
 
     #[test]
