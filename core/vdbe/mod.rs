@@ -1553,6 +1553,12 @@ impl Program {
                                 let result = exec_hex(reg_value);
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::Unhex => {
+                                let reg_value = state.registers[*start_reg].clone();
+                                let ignored_chars = state.registers.get(*start_reg + 1);
+                                let result = exec_unhex(&reg_value, ignored_chars);
+                                state.registers[*dest] = result;
+                            }
                             ScalarFunc::Random => {
                                 state.registers[*dest] = exec_random();
                             }
@@ -2173,6 +2179,20 @@ fn exec_hex(reg: &OwnedValue) -> OwnedValue {
     }
 }
 
+fn exec_unhex(reg: &OwnedValue, ignored_chars: Option<&OwnedValue>) -> OwnedValue {
+    if ignored_chars.is_some() {
+        unimplemented!("unhex(X,Y) is not implemented");
+    }
+
+    match reg {
+        OwnedValue::Null => OwnedValue::Null,
+        _ => match hex::decode(reg.to_string()) {
+            Ok(bytes) => OwnedValue::Blob(Rc::new(bytes)),
+            Err(_) => OwnedValue::Null,
+        },
+    }
+}
+
 fn exec_unicode(reg: &OwnedValue) -> OwnedValue {
     match reg {
         OwnedValue::Text(_)
@@ -2304,7 +2324,7 @@ mod tests {
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
         exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim,
-        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unicode, exec_upper, exec_zeroblob,
+        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex, exec_unicode, exec_upper, exec_zeroblob,
         execute_sqlite_version, get_new_rowid, AggContext, Cursor, CursorResult, LimboError,
         OwnedRecord, OwnedValue, Result,
     };
@@ -2654,6 +2674,33 @@ mod tests {
         let input_float = OwnedValue::Float(12.34);
         let expected_val = OwnedValue::Text(Rc::new(String::from("31322E3334")));
         assert_eq!(exec_hex(&input_float), expected_val);
+    }
+
+    #[test]
+    fn test_unhex() {
+        let input = OwnedValue::Text(Rc::new(String::from("6F")));
+        let expected = OwnedValue::Blob(Rc::new(vec![0x6f]));
+        assert_eq!(exec_unhex(&input, None), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("6f")));
+        let expected = OwnedValue::Blob(Rc::new(vec![0x6f]));
+        assert_eq!(exec_unhex(&input, None), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("611")));
+        let expected = OwnedValue::Null;
+        assert_eq!(exec_unhex(&input, None), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("")));
+        let expected = OwnedValue::Blob(Rc::new(vec![]));
+        assert_eq!(exec_unhex(&input, None), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("61x")));
+        let expected = OwnedValue::Null;
+        assert_eq!(exec_unhex(&input, None), expected);
+
+        let input = OwnedValue::Null;
+        let expected = OwnedValue::Null;
+        assert_eq!(exec_unhex(&input, None), expected);
     }
 
     #[test]
