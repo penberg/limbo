@@ -2324,9 +2324,9 @@ mod tests {
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
         exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim,
-        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex, exec_unicode, exec_upper, exec_zeroblob,
-        execute_sqlite_version, get_new_rowid, AggContext, Cursor, CursorResult, LimboError,
-        OwnedRecord, OwnedValue, Result,
+        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex, exec_unicode, exec_upper,
+        exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext, Cursor, CursorResult,
+        LimboError, OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
