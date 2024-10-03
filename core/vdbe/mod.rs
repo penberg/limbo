@@ -1531,6 +1531,7 @@ impl Program {
                             | ScalarFunc::Typeof
                             | ScalarFunc::Unicode
                             | ScalarFunc::Quote
+                            | ScalarFunc::RandomBlob
                             | ScalarFunc::Sign
                             | ScalarFunc::ZeroBlob => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
@@ -1543,6 +1544,7 @@ impl Program {
                                     ScalarFunc::Typeof => Some(exec_typeof(reg_value)),
                                     ScalarFunc::Unicode => Some(exec_unicode(reg_value)),
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
+                                    ScalarFunc::RandomBlob => Some(exec_randomblob(reg_value)),
                                     ScalarFunc::ZeroBlob => Some(exec_zeroblob(reg_value)),
                                     _ => unreachable!(),
                                 };
@@ -2007,6 +2009,20 @@ fn exec_random() -> OwnedValue {
     OwnedValue::Integer(random_number)
 }
 
+fn exec_randomblob(reg: &OwnedValue) -> OwnedValue {
+    let length = match reg {
+        OwnedValue::Integer(i) => *i,
+        OwnedValue::Float(f) => *f as i64,
+        OwnedValue::Text(t) => t.parse().unwrap_or(1),
+        _ => 1,
+    }
+    .max(1) as usize;
+
+    let mut blob: Vec<u8> = vec![0; length];
+    getrandom::getrandom(&mut blob).expect("Failed to generate random blob");
+    OwnedValue::Blob(Rc::new(blob))
+}
+
 fn exec_quote(value: &OwnedValue) -> OwnedValue {
     match value {
         OwnedValue::Null => OwnedValue::Text(OwnedValue::Null.to_string().into()),
@@ -2323,10 +2339,10 @@ mod tests {
 
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
-        exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_round, exec_rtrim,
-        exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex, exec_unicode, exec_upper,
-        exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext, Cursor, CursorResult,
-        LimboError, OwnedRecord, OwnedValue, Result,
+        exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob, exec_round,
+        exec_rtrim, exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex, exec_unicode,
+        exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext, Cursor,
+        CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2776,6 +2792,67 @@ mod tests {
                 );
             }
             _ => panic!("exec_random did not return an Integer variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_randomblob() {
+        struct TestCase {
+            input: OwnedValue,
+            expected_len: usize,
+        }
+
+        let test_cases = vec![
+            TestCase {
+                input: OwnedValue::Integer(5),
+                expected_len: 5,
+            },
+            TestCase {
+                input: OwnedValue::Integer(0),
+                expected_len: 1,
+            },
+            TestCase {
+                input: OwnedValue::Integer(-1),
+                expected_len: 1,
+            },
+            TestCase {
+                input: OwnedValue::Text(Rc::new(String::from(""))),
+                expected_len: 1,
+            },
+            TestCase {
+                input: OwnedValue::Text(Rc::new(String::from("5"))),
+                expected_len: 5,
+            },
+            TestCase {
+                input: OwnedValue::Text(Rc::new(String::from("0"))),
+                expected_len: 1,
+            },
+            TestCase {
+                input: OwnedValue::Text(Rc::new(String::from("-1"))),
+                expected_len: 1,
+            },
+            TestCase {
+                input: OwnedValue::Float(2.9),
+                expected_len: 2,
+            },
+            TestCase {
+                input: OwnedValue::Float(-3.14),
+                expected_len: 1,
+            },
+            TestCase {
+                input: OwnedValue::Null,
+                expected_len: 1,
+            },
+        ];
+
+        for test_case in &test_cases {
+            let result = exec_randomblob(&test_case.input);
+            match result {
+                OwnedValue::Blob(blob) => {
+                    assert_eq!(blob.len(), test_case.expected_len);
+                }
+                _ => panic!("exec_randomblob did not return a Blob variant"),
+            }
         }
     }
 
