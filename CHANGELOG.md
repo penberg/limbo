@@ -10,6 +10,8 @@
 
 - Improvements to Python bindings (Jean Arhancet and Lauri Virtanen)
 
+- Improve scalar function support (Lauri Virtanen)
+
 ### Fixed
 
 - Fix `LIKE` to be case insensitive (RJ Barman)
