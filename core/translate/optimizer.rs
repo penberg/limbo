@@ -951,7 +951,6 @@ pub trait Optimizable {
             .check_constant()?
             .map_or(false, |c| c == ConstantPredicate::AlwaysFalse))
     }
-    // if the expression is the primary key of a table, returns the index of the table
     fn is_primary_key_of(&self, table: &(Rc<BTreeTable>, String)) -> bool;
     fn check_index_scan(
         &mut self,
