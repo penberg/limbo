@@ -268,3 +268,21 @@ do_execsql_test where-complex-parentheses {
     select id, name from products where ((id = 5 and name = 'sweatshirt') or (id = 1 and name = 'hat')) and (name = 'sweatshirt' or name = 'hat') ORDER BY id;
 } {1|hat
 5|sweatshirt}
+
+# regression test for primary key index behavior
+do_execsql_test where_id_index_seek_test {
+    select id from users where id > 9995;
+} {9996
+9997
+9998
+9999
+10000}
+
+# regression test for secondary index (users.age) behavior
+do_execsql_test where_id_index_seek_test {
+    select id,age from users where age >= 100 limit 5;
+} {186|100
+198|100
+301|100
+364|100
+460|100}

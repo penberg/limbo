@@ -328,7 +328,7 @@ impl BTreeCursor {
         Ok(CursorResult::Ok((None, None)))
     }
 
-    fn move_to_table_leaf(&mut self, rowid: u64, cmp: SeekOp) -> Result<CursorResult<()>> {
+    fn move_to_table_leaf(&mut self, key: u64, cmp: SeekOp) -> Result<CursorResult<()>> {
         self.move_to_root();
 
         loop {
@@ -362,8 +362,8 @@ impl BTreeCursor {
                     }) => {
                         mem_page.advance();
                         let comparison = match cmp {
-                            SeekOp::GT => *_rowid > rowid,
-                            SeekOp::GE => *_rowid >= rowid,
+                            SeekOp::GT => key <= *_rowid,
+                            SeekOp::GE => key < *_rowid,
                         };
                         if comparison {
                             let mem_page =
@@ -388,10 +388,10 @@ impl BTreeCursor {
             }
 
             if !found_cell {
-                let parent = mem_page.clone();
+                let parent = mem_page.parent.clone();
                 match page.rightmost_pointer() {
                     Some(right_most_pointer) => {
-                        let mem_page = MemPage::new(Some(parent), right_most_pointer as usize, 0);
+                        let mem_page = MemPage::new(parent, right_most_pointer as usize, 0);
                         self.page.replace(Some(Rc::new(mem_page)));
                         continue;
                     }
@@ -597,10 +597,10 @@ impl BTreeCursor {
             }
 
             if !found_cell {
-                let parent = mem_page.clone();
+                let parent = mem_page.parent.clone();
                 match page.rightmost_pointer() {
                     Some(right_most_pointer) => {
-                        let mem_page = MemPage::new(Some(parent), right_most_pointer as usize, 0);
+                        let mem_page = MemPage::new(parent, right_most_pointer as usize, 0);
                         self.page.replace(Some(Rc::new(mem_page)));
                         continue;
                     }
