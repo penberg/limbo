@@ -180,7 +180,10 @@ impl BTreeCursor {
         key: &OwnedRecord,
         op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        self.move_to_index_leaf(key, op.clone())?;
+        match self.move_to_index_leaf(key, op.clone())? {
+            CursorResult::Ok(_) => {}
+            CursorResult::IO => return Ok(CursorResult::IO),
+        };
 
         let mem_page = self.get_mem_page();
         let page_idx = mem_page.page_idx;
@@ -229,7 +232,10 @@ impl BTreeCursor {
         rowid: u64,
         op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        self.move_to_table_leaf(rowid, op.clone())?;
+        match self.move_to_table_leaf(rowid, op.clone())? {
+            CursorResult::Ok(_) => {}
+            CursorResult::IO => return Ok(CursorResult::IO),
+        };
 
         let mem_page = self.get_mem_page();
         let page_idx = mem_page.page_idx;
@@ -1536,21 +1542,6 @@ impl Cursor for BTreeCursor {
     fn next(&mut self) -> Result<CursorResult<()>> {
         match self.get_next_record()? {
             CursorResult::Ok((rowid, next)) => {
-                {
-                    let curr_rowid = self.rowid.borrow();
-                    if curr_rowid.is_some()
-                        && curr_rowid.unwrap() >= 8000
-                        && rowid.is_some()
-                        && rowid.unwrap() < 8000
-                    {
-                        println!(
-                            "curr_rowid: {:?}, rowid: {:?}, next: {:?}",
-                            curr_rowid.unwrap(),
-                            rowid.unwrap(),
-                            next
-                        );
-                    }
-                }
                 self.rowid.replace(rowid);
                 self.record.replace(next);
                 Ok(CursorResult::Ok(()))
