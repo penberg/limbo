@@ -1386,28 +1386,6 @@ impl Cursor for BTreeCursor {
         }
     }
 
-    fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::IndexKey(key), SeekOp::GE)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::IndexKey(key), SeekOp::GT)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
     fn seek_ge_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
         match self.seek(SeekKey::TableRowId(rowid), SeekOp::GE)? {
             CursorResult::Ok((rowid, record)) => {
@@ -1421,6 +1399,28 @@ impl Cursor for BTreeCursor {
 
     fn seek_gt_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
         match self.seek(SeekKey::TableRowId(rowid), SeekOp::GT)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        match self.seek(SeekKey::IndexKey(key), SeekOp::GE)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        match self.seek(SeekKey::IndexKey(key), SeekOp::GT)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
