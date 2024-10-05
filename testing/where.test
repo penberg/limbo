@@ -92,24 +92,25 @@ do_execsql_test where-clause-no-table-constant-condition-false-7 {
     select 1 where 'hamburger';
 } {}
 
+# this test functions as an assertion that the index on users.age is being used, since the results are ordered by age without an order by.
 do_execsql_test select-where-and {
     select first_name, age from users where first_name = 'Jamie' and age > 80
-} {Jamie|94
+} {Jamie|87
 Jamie|88
-Jamie|99
+Jamie|88
 Jamie|92
-Jamie|87
-Jamie|88
+Jamie|94
+Jamie|99
 }
 
 do_execsql_test select-where-or {
     select first_name, age from users where first_name = 'Jamie' and age > 80
-} {Jamie|94
+} {Jamie|87
 Jamie|88
-Jamie|99
+Jamie|88
 Jamie|92
-Jamie|87
-Jamie|88
+Jamie|94
+Jamie|99
 }
 
 do_execsql_test select-where-and-or {

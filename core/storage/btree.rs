@@ -29,6 +29,7 @@ pub enum SeekOp {
     GE,
 }
 
+#[derive(Debug)]
 pub struct MemPage {
     parent: Option<Rc<MemPage>>,
     page_idx: usize,
@@ -249,17 +250,18 @@ impl BTreeCursor {
         let page = page.as_ref().unwrap();
 
         for cell_idx in 0..page.cell_count() {
-            match &page.cell_get(
+            let cell = page.cell_get(
                 cell_idx,
                 self.pager.clone(),
                 self.max_local(page.page_type()),
                 self.min_local(page.page_type()),
                 self.usable_space(),
-            )? {
+            )?;
+            match &cell {
                 BTreeCell::TableLeafCell(TableLeafCell {
                     _rowid: cell_rowid,
                     _payload: payload,
-                    first_overflow_page: _,
+                    first_overflow_page: fop,
                 }) => {
                     mem_page.advance();
                     let comparison = match op {
@@ -346,23 +348,24 @@ impl BTreeCursor {
 
             let mut found_cell = false;
             for cell_idx in 0..page.cell_count() {
-                match &page.cell_get(
+                let cell = page.cell_get(
                     cell_idx,
                     self.pager.clone(),
                     self.max_local(page.page_type()),
                     self.min_local(page.page_type()),
                     self.usable_space(),
-                )? {
+                )?;
+                match &cell {
                     BTreeCell::TableInteriorCell(TableInteriorCell {
                         _left_child_page,
                         _rowid,
                     }) => {
+                        mem_page.advance();
                         let comparison = match cmp {
                             SeekOp::GT => *_rowid > rowid,
                             SeekOp::GE => *_rowid >= rowid,
                         };
                         if comparison {
-                            mem_page.advance();
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
@@ -571,15 +574,13 @@ impl BTreeCursor {
                         payload,
                         ..
                     }) => {
-                        // get the logic for this from btree_index_seek
-
+                        mem_page.advance();
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let comparison = match cmp {
                             SeekOp::GT => record > *key,
                             SeekOp::GE => record >= *key,
                         };
                         if comparison {
-                            mem_page.advance();
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
