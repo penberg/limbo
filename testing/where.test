@@ -270,7 +270,7 @@ do_execsql_test where-complex-parentheses {
 5|sweatshirt}
 
 # regression test for primary key index behavior
-do_execsql_test where_id_index_seek_test {
+do_execsql_test where-id-index-seek-test {
     select id from users where id > 9995;
 } {9996
 9997
@@ -279,7 +279,7 @@ do_execsql_test where_id_index_seek_test {
 10000}
 
 # regression test for secondary index (users.age) behavior
-do_execsql_test where_id_index_seek_test {
+do_execsql_test where-id-index-seek-test-2 {
     select id,age from users where age >= 100 limit 5;
 } {186|100
 198|100
