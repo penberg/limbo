@@ -1151,7 +1151,13 @@ impl Program {
                         let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
                         let rowid = index_cursor.rowid()?;
                         let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
-                        table_cursor.seek_rowid(rowid.unwrap())?;
+                        match table_cursor.seek_rowid(rowid.unwrap())? {
+                            CursorResult::Ok(_) => {}
+                            CursorResult::IO => {
+                                state.deferred_seek = Some((index_cursor_id, table_cursor_id));
+                                return Ok(StepResult::IO);
+                            }
+                        }
                     }
 
                     let cursor = cursors.get_mut(cursor_id).unwrap();
