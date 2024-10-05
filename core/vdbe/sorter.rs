@@ -79,11 +79,19 @@ impl Cursor for Sorter {
         unimplemented!();
     }
 
-    fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+    fn seek_ge_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
         unimplemented!();
     }
 
-    fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+    fn seek_gt_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
+    fn seek_ge_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
+        unimplemented!();
+    }
+
+    fn seek_gt_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
         unimplemented!();
     }
 

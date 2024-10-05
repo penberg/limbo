@@ -24,7 +24,7 @@ const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -
 const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
 
 #[derive(Clone)]
-pub enum IndexSeekOp {
+pub enum SeekOp {
     GT,
     GE,
 }
@@ -152,6 +152,7 @@ impl BTreeCursor {
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
                 BTreeCell::IndexInteriorCell(IndexInteriorCell {
+                    payload,
                     left_child_page, ..
                 }) => {
                     mem_page.advance();
@@ -176,7 +177,7 @@ impl BTreeCursor {
     fn btree_index_seek(
         &mut self,
         key: &OwnedRecord,
-        op: IndexSeekOp,
+        op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         self.move_to_index_leaf(key, op.clone())?;
 
@@ -203,8 +204,8 @@ impl BTreeCursor {
                     mem_page.advance();
                     let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                     let comparison = match op {
-                        IndexSeekOp::GT => record > *key,
-                        IndexSeekOp::GE => record >= *key,
+                        SeekOp::GT => record > *key,
+                        SeekOp::GE => record >= *key,
                     };
                     if comparison {
                         let rowid = match record.values.get(1) {
@@ -222,11 +223,63 @@ impl BTreeCursor {
         Ok(CursorResult::Ok((None, None)))
     }
 
+    fn btree_table_seek(
+        &mut self,
+        rowid: u64,
+        op: SeekOp,
+    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+        self.move_to_table_leaf(rowid, op.clone())?;
+
+        let mem_page = self.get_mem_page();
+        let page_idx = mem_page.page_idx;
+        let page = self.pager.read_page(page_idx)?;
+        let page = RefCell::borrow(&page);
+        if page.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+
+        let page = page.contents.read().unwrap();
+        let page = page.as_ref().unwrap();
+
+        for cell_idx in 0..page.cell_count() {
+            match &page.cell_get(
+                cell_idx,
+                self.pager.clone(),
+                self.max_local(page.page_type()),
+                self.min_local(page.page_type()),
+                self.usable_space(),
+            )? {
+                BTreeCell::TableLeafCell(TableLeafCell {
+                    _rowid: cell_rowid,
+                    _payload: payload,
+                    first_overflow_page: _,
+                }) => {
+                    mem_page.advance();
+                    let comparison = match op {
+                        SeekOp::GT => *cell_rowid > rowid,
+                        SeekOp::GE => *cell_rowid >= rowid,
+                    };
+                    if comparison {
+                        let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                        return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
+                    }
+                }
+                cell_type => {
+                    unreachable!("unexpected cell type: {:?}", cell_type);
+                }
+            }
+        }
+        Ok(CursorResult::Ok((None, None)))
+    }
+
     fn btree_seek_rowid(
         &mut self,
         rowid: u64,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        self.move_to(rowid)?;
+        match self.move_to(rowid)? {
+            CursorResult::Ok(_) => {}
+            CursorResult::IO => return Ok(CursorResult::IO),
+        };
 
         let mem_page = self.get_mem_page();
 
@@ -264,6 +317,80 @@ impl BTreeCursor {
         }
 
         Ok(CursorResult::Ok((None, None)))
+    }
+
+    fn move_to_table_leaf(&mut self, rowid: u64, cmp: SeekOp) -> Result<CursorResult<()>> {
+        self.move_to_root();
+
+        loop {
+            let mem_page = self.get_mem_page();
+            let page_idx = mem_page.page_idx;
+            let page = self.pager.read_page(page_idx)?;
+            let page = RefCell::borrow(&page);
+            if page.is_locked() {
+                return Ok(CursorResult::IO);
+            }
+
+            let page = page.contents.read().unwrap();
+            let page = page.as_ref().unwrap();
+            if page.is_leaf() {
+                return Ok(CursorResult::Ok(()));
+            }
+
+            let mut found_cell = false;
+            for cell_idx in 0..page.cell_count() {
+                match &page.cell_get(
+                    cell_idx,
+                    self.pager.clone(),
+                    self.max_local(page.page_type()),
+                    self.min_local(page.page_type()),
+                    self.usable_space(),
+                )? {
+                    BTreeCell::TableInteriorCell(TableInteriorCell {
+                        _left_child_page,
+                        _rowid,
+                    }) => {
+                        let comparison = match cmp {
+                            SeekOp::GT => *_rowid > rowid,
+                            SeekOp::GE => *_rowid >= rowid,
+                        };
+                        if comparison {
+                            mem_page.advance();
+                            let mem_page =
+                                MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
+                            self.page.replace(Some(Rc::new(mem_page)));
+                            found_cell = true;
+                            break;
+                        }
+                    }
+                    BTreeCell::TableLeafCell(_) => {
+                        unreachable!("we don't iterate leaf cells while trying to move to a leaf cell");
+                    }
+                    BTreeCell::IndexInteriorCell(_) => {
+                        unimplemented!();
+                    }
+                    BTreeCell::IndexLeafCell(_) => {
+                        unimplemented!();
+                    }
+                }
+            }
+
+            if !found_cell {
+                let parent = mem_page.clone();
+                match page.rightmost_pointer() {
+                    Some(right_most_pointer) => {
+                        let mem_page = MemPage::new(Some(parent), right_most_pointer as usize, 0);
+                        self.page.replace(Some(Rc::new(mem_page)));
+                        continue;
+                    }
+                    None => {
+                        unreachable!("we shall not go back up! The only way is down the slope");
+                    }
+                }
+            }
+
+            return Ok(CursorResult::Ok(()));
+        }
     }
 
     fn move_to_root(&mut self) {
@@ -407,7 +534,7 @@ impl BTreeCursor {
     fn move_to_index_leaf(
         &mut self,
         key: &OwnedRecord,
-        cmp: IndexSeekOp,
+        cmp: SeekOp,
     ) -> Result<CursorResult<()>> {
         self.move_to_root();
         loop {
@@ -443,8 +570,8 @@ impl BTreeCursor {
 
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let comparison = match cmp {
-                            IndexSeekOp::GT => record > *key,
-                            IndexSeekOp::GE => record >= *key,
+                            SeekOp::GT => record > *key,
+                            SeekOp::GE => record >= *key,
                         };
                         if comparison {
                             mem_page.advance();
@@ -1410,6 +1537,12 @@ impl Cursor for BTreeCursor {
     fn next(&mut self) -> Result<CursorResult<()>> {
         match self.get_next_record()? {
             CursorResult::Ok((rowid, next)) => {
+                {
+                    let curr_rowid = self.rowid.borrow();
+                    if curr_rowid.is_some() && curr_rowid.unwrap() >= 8000 && rowid.is_some() && rowid.unwrap() < 8000 {
+                        println!("curr_rowid: {:?}, rowid: {:?}, next: {:?}", curr_rowid.unwrap(), rowid.unwrap(), next);
+                    }
+                }
                 self.rowid.replace(rowid);
                 self.record.replace(next);
                 Ok(CursorResult::Ok(()))
@@ -1438,11 +1571,10 @@ impl Cursor for BTreeCursor {
         }
     }
 
-    fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.btree_index_seek(key, IndexSeekOp::GE)? {
+    fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        match self.btree_index_seek(key, SeekOp::GE)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
-                println!("seek_ge: {:?}", record);
                 self.record.replace(record);
                 Ok(CursorResult::Ok(rowid.is_some()))
             }
@@ -1450,11 +1582,32 @@ impl Cursor for BTreeCursor {
         }
     }
 
-    fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.btree_index_seek(key, IndexSeekOp::GT)? {
+    fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        match self.btree_index_seek(key, SeekOp::GT)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
-                println!("seek_gt: {:?}", record);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn seek_ge_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
+        match self.btree_table_seek(rowid, SeekOp::GE)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(record);
+                Ok(CursorResult::Ok(rowid.is_some()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn seek_gt_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
+        match self.btree_table_seek(rowid, SeekOp::GT)? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
                 self.record.replace(record);
                 Ok(CursorResult::Ok(rowid.is_some()))
             }

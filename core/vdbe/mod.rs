@@ -305,16 +305,22 @@ pub enum Insn {
         table_cursor_id: CursorID,
     },
 
+    // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
+    // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
     // Seek to the first index entry that is greater than or equal to the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
     SeekGE {
+        is_index: bool,
         cursor_id: CursorID,
         start_reg: usize,
         num_regs: usize,
         target_pc: BranchOffset,
     },
 
+    // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
+    // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
     // Seek to the first index entry that is greater than the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
     SeekGT {
+        is_index: bool,
         cursor_id: CursorID,
         start_reg: usize,
         num_regs: usize,
@@ -1190,21 +1196,59 @@ impl Program {
                     start_reg,
                     num_regs,
                     target_pc,
+                    is_index,
                 } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
-                    let record_from_regs: OwnedRecord =
-                        make_owned_record(&state.registers, start_reg, num_regs);
-                    match cursor.seek_ge(&record_from_regs)? {
-                        CursorResult::Ok(found) => {
-                            if !found {
-                                state.pc = *target_pc;
-                            } else {
-                                state.pc += 1;
+                    if *is_index {
+                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let record_from_regs: OwnedRecord =
+                            make_owned_record(&state.registers, start_reg, num_regs);
+                        match cursor.seek_ge_index(&record_from_regs)? {
+                            CursorResult::Ok(found) => {
+                                if !found {
+                                    state.pc = *target_pc;
+                                } else {
+                                    state.pc += 1;
+                                }
+                            }
+                            CursorResult::IO => {
+                                // If there is I/O, the instruction is restarted.
+                                return Ok(StepResult::IO);
                             }
                         }
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
+                    } else {
+                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let rowid = match &state.registers[*start_reg] {
+                            OwnedValue::Null => {
+                                // All integer values are greater than null so we just rewind the cursor
+                                match cursor.rewind()? {
+                                    CursorResult::Ok(()) => {}
+                                    CursorResult::IO => {
+                                        // If there is I/O, the instruction is restarted.
+                                        return Ok(StepResult::IO);
+                                    }
+                                }
+                                state.pc += 1;
+                                continue;
+                            }
+                            OwnedValue::Integer(rowid) => *rowid as u64,
+                            _ => {
+                                return Err(LimboError::InternalError(
+                                    "SeekRowid: the value in the register is not an integer".into(),
+                                ));
+                            }
+                        };
+                        match cursor.seek_ge_rowid(rowid)? {
+                            CursorResult::Ok(found) => {
+                                if !found {
+                                    state.pc = *target_pc;
+                                } else {
+                                    state.pc += 1;
+                                }
+                            }
+                            CursorResult::IO => {
+                                // If there is I/O, the instruction is restarted.
+                                return Ok(StepResult::IO);
+                            }
                         }
                     }
                 }
@@ -1213,21 +1257,59 @@ impl Program {
                     start_reg,
                     num_regs,
                     target_pc,
+                    is_index,
                 } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
-                    let record_from_regs: OwnedRecord =
-                        make_owned_record(&state.registers, start_reg, num_regs);
-                    match cursor.seek_gt(&record_from_regs)? {
-                        CursorResult::Ok(found) => {
-                            if !found {
-                                state.pc = *target_pc;
-                            } else {
-                                state.pc += 1;
+                    if *is_index {
+                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let record_from_regs: OwnedRecord =
+                            make_owned_record(&state.registers, start_reg, num_regs);
+                        match cursor.seek_gt_index(&record_from_regs)? {
+                            CursorResult::Ok(found) => {
+                                if !found {
+                                    state.pc = *target_pc;
+                                } else {
+                                    state.pc += 1;
+                                }
+                            }
+                            CursorResult::IO => {
+                                // If there is I/O, the instruction is restarted.
+                                return Ok(StepResult::IO);
                             }
                         }
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
+                    } else {
+                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let rowid = match &state.registers[*start_reg] {
+                            OwnedValue::Null => {
+                                // All integer values are greater than null so we just rewind the cursor
+                                match cursor.rewind()? {
+                                    CursorResult::Ok(()) => {}
+                                    CursorResult::IO => {
+                                        // If there is I/O, the instruction is restarted.
+                                        return Ok(StepResult::IO);
+                                    }
+                                }
+                                state.pc += 1;
+                                continue;
+                            }
+                            OwnedValue::Integer(rowid) => *rowid as u64,
+                            _ => {
+                                return Err(LimboError::InternalError(
+                                    "SeekRowid: the value in the register is not an integer".into(),
+                                ));
+                            }
+                        };
+                        match cursor.seek_gt_rowid(rowid)? {
+                            CursorResult::Ok(found) => {
+                                if !found {
+                                    state.pc = *target_pc;
+                                } else {
+                                    state.pc += 1;
+                                }
+                            }
+                            CursorResult::IO => {
+                                // If there is I/O, the instruction is restarted.
+                                return Ok(StepResult::IO);
+                            }
                         }
                     }
                 }

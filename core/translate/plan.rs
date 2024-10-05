@@ -129,12 +129,11 @@ pub enum Operator {
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
     },
-    IndexScan {
+    Search {
         id: usize,
-        index: Rc<Index>,
+        index: Option<Rc<Index>>,
         seek_cmp: ast::Operator,
         seek_expr: ast::Expr,
-        index_predicate: ast::Expr,
         table: Rc<BTreeTable>,
         table_identifier: String,
         predicates: Option<Vec<ast::Expr>>,
@@ -189,7 +188,7 @@ impl Operator {
                 .map(|e| e.column_count(referenced_tables))
                 .sum(),
             Operator::Scan { table, .. } => table.columns.len(),
-            Operator::IndexScan { table, .. } => table.columns.len(),
+            Operator::Search { table, .. } => table.columns.len(),
             Operator::Nothing => 0,
         }
     }
@@ -244,7 +243,7 @@ impl Operator {
                 })
                 .collect(),
             Operator::Scan { table, .. } => table.columns.iter().map(|c| c.name.clone()).collect(),
-            Operator::IndexScan { table, .. } => {
+            Operator::Search { table, .. } => {
                 table.columns.iter().map(|c| c.name.clone()).collect()
             }
             Operator::Nothing => vec![],
@@ -261,7 +260,7 @@ impl Operator {
             Operator::Order { id, .. } => *id,
             Operator::Projection { id, .. } => *id,
             Operator::Scan { id, .. } => *id,
-            Operator::IndexScan { id, .. } => *id,
+            Operator::Search { id, .. } => *id,
             Operator::Nothing => unreachable!(),
         }
     }
@@ -451,7 +450,7 @@ impl Display for Operator {
                     }?;
                     Ok(())
                 }
-                Operator::IndexScan { table, .. } => {
+                Operator::Search { table, .. } => {
                     writeln!(f, "{}INDEX SCAN {}", indent, table.name)?;
                     Ok(())
                 }
@@ -515,7 +514,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
                     .position(|(t, _)| Rc::ptr_eq(t, table))
                     .unwrap();
         }
-        Operator::IndexScan { table, .. } => {
+        Operator::Search { table, .. } => {
             table_refs_mask |= 1
                 << tables
                     .iter()

@@ -534,6 +534,7 @@ pub fn insn_to_str(
                 "".to_string(),
             ),
             Insn::SeekGT {
+                is_index,
                 cursor_id,
                 start_reg,
                 num_regs,
@@ -548,6 +549,7 @@ pub fn insn_to_str(
                 "".to_string(),
             ),
             Insn::SeekGE {
+                is_index,
                 cursor_id,
                 start_reg,
                 num_regs,

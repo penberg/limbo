@@ -416,8 +416,10 @@ pub trait Cursor {
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Option<u64>>;
     fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
-    fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>>;
-    fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>>;
+    fn seek_ge_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
+    fn seek_gt_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
+    fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>>;
+    fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>>;
     fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
     fn insert(

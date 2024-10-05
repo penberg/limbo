@@ -277,8 +277,6 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 }
             }
 
-            println!("{:?}", schema.indexes);
-
             // Return the unoptimized query plan
             Ok(Plan {
                 root_operator: operator,

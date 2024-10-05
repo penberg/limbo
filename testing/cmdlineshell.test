@@ -21,7 +21,8 @@ CREATE TABLE products (
         id INTEGER PRIMARY KEY,
         name TEXT,
         price REAL
-    );}}
+    );}
+"CREATE INDEX age_idx on users (age);"}
 
 do_execsql_test schema-1 {
   .schema users
