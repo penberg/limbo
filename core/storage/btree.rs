@@ -544,6 +544,8 @@ impl BTreeCursor {
         }
     }
 
+    // TODO: there is a lot of code duplication here between move_to, move_to_index_leaf and move_to_table_leaf.
+    // I wanted to get this working first, but this should really be refactored. - Jussi
     fn move_to_index_leaf(&mut self, key: &OwnedRecord, cmp: SeekOp) -> Result<CursorResult<()>> {
         self.move_to_root();
         loop {
