@@ -1164,9 +1164,13 @@ impl Program {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     let rowid = match &state.registers[*src_reg] {
                         OwnedValue::Integer(rowid) => *rowid as u64,
-                        _ => {
+                        OwnedValue::Null => {
+                            state.pc = *target_pc;
+                            continue;
+                        }
+                        other => {
                             return Err(LimboError::InternalError(
-                                "SeekRowid: the value in the register is not an integer".into(),
+                                format!("SeekRowid: the value in the register is not an integer or NULL: {}", other)
                             ));
                         }
                     };
@@ -1233,7 +1237,7 @@ impl Program {
                             OwnedValue::Integer(rowid) => *rowid as u64,
                             _ => {
                                 return Err(LimboError::InternalError(
-                                    "SeekRowid: the value in the register is not an integer".into(),
+                                    "SeekGE: the value in the register is not an integer".into(),
                                 ));
                             }
                         };
@@ -1294,7 +1298,7 @@ impl Program {
                             OwnedValue::Integer(rowid) => *rowid as u64,
                             _ => {
                                 return Err(LimboError::InternalError(
-                                    "SeekRowid: the value in the register is not an integer".into(),
+                                    "SeekGT: the value in the register is not an integer".into(),
                                 ));
                             }
                         };
@@ -2609,11 +2613,19 @@ mod tests {
             self.seek_rowid(rowid)
         }
 
-        fn seek_ge(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        fn seek_ge_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
             unimplemented!();
         }
 
-        fn seek_gt(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
+        fn seek_gt_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
+            unimplemented!();
+        }
+
+        fn seek_ge_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
+            unimplemented!();
+        }
+
+        fn seek_gt_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
             unimplemented!();
         }
 

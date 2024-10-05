@@ -314,6 +314,7 @@ impl BTreeCursor {
                     _payload: p,
                     first_overflow_page: _,
                 }) => {
+                    mem_page.advance();
                     if *cell_rowid == rowid {
                         let record = crate::storage::sqlite3_ondisk::read_record(p)?;
                         return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));

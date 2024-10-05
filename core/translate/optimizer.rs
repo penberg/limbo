@@ -1006,11 +1006,10 @@ impl Optimizable for ast::Expr {
                 }
                 Ok(Some(indexes.first().unwrap().0))
             }
-            ast::Expr::Qualified(tbl, ident) => {
-                let tbl = normalize_ident(&tbl.0);
+            ast::Expr::Qualified(_, ident) => {
                 let ident = normalize_ident(&ident.0);
                 let index = available_indexes.iter().enumerate().find(|(_, i)| {
-                    if i.table_name != tbl {
+                    if i.table_name != table.0.name {
                         return false;
                     }
                     i.columns.iter().any(|c| normalize_ident(&c.name) == ident)
