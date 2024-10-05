@@ -286,8 +286,8 @@ impl Emitter for Operator {
 
                         let next_row_label = program.allocate_label();
                         m.next_row_labels.insert(*id, next_row_label);
-                        let rewind_label = program.allocate_label();
-                        m.rewind_labels.push(rewind_label);
+                        let scan_loop_body_label = program.allocate_label();
+                        m.scan_loop_body_labels.push(scan_loop_body_label);
                         program.emit_insn(Insn::OpenReadAsync {
                             cursor_id: table_cursor_id,
                             root_page: table.root_page,
@@ -310,7 +310,7 @@ impl Emitter for Operator {
                         } else {
                             table_cursor_id
                         };
-                        let rewind_label = *m.rewind_labels.last().unwrap();
+                        let scan_loop_body_label = *m.scan_loop_body_labels.last().unwrap();
                         let cmp_reg = program.alloc_register();
                         // TODO this only handles ascending indexes
                         match seek_cmp {
@@ -371,7 +371,10 @@ impl Emitter for Operator {
                             )?;
                         }
 
-                        program.defer_label_resolution(rewind_label, program.offset() as usize);
+                        program.defer_label_resolution(
+                            scan_loop_body_label,
+                            program.offset() as usize,
+                        );
 
                         // TODO: We are currently only handling ascending indexes.
                         // For conditions like index_key > 10, we have already seeked to the first key greater than 10, and can just scan forward.
@@ -486,7 +489,7 @@ impl Emitter for Operator {
                         program
                             .resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
                         program.emit_insn(Insn::NextAsync { cursor_id });
-                        let jump_label = m.rewind_labels.pop().unwrap();
+                        let jump_label = m.scan_loop_body_labels.pop().unwrap();
                         program.emit_insn_with_label_dependency(
                             Insn::NextAwait {
                                 cursor_id,
