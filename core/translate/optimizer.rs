@@ -4,14 +4,13 @@ use sqlite3_parser::ast;
 
 use crate::{
     schema::{BTreeTable, Index},
-    types::OwnedValue,
     util::normalize_ident,
     Result,
 };
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Operator, Plan,
-    ProjectionColumn,
+    ProjectionColumn, Search,
 };
 
 /**
@@ -72,60 +71,23 @@ fn use_indexes(
                     .iter()
                     .find(|(t, t_id)| Rc::ptr_eq(t, table) && t_id == table_identifier)
                     .unwrap();
-                match try_extract_expr_that_utilizes_index(f, table, available_indexes)? {
+                match try_extract_index_search_expression(f, table, available_indexes)? {
                     Either::Left(non_index_using_expr) => {
                         fs[i] = non_index_using_expr;
                     }
-                    Either::Right(index_using_expr) => match index_using_expr {
-                        SearchableExpr::IndexSearch {
-                            index,
-                            cmp_op,
-                            cmp_expr,
-                        } => {
-                            fs.remove(i);
-                            *operator = Operator::Search {
-                                table: table.0.clone(),
-                                index: Some(index.clone()),
-                                predicates: Some(std::mem::take(fs)),
-                                seek_cmp: cmp_op,
-                                seek_expr: cmp_expr,
-                                table_identifier: table_identifier.clone(),
-                                id: *id,
-                                step: 0,
-                            };
-                            return Ok(());
-                        }
-                        SearchableExpr::PrimaryKeySearch {
-                            table,
-                            cmp_op,
-                            cmp_expr,
-                        } => {
-                            fs.remove(i);
-                            *operator = Operator::Search {
-                                table,
-                                index: None,
-                                predicates: Some(std::mem::take(fs)),
-                                seek_cmp: cmp_op,
-                                seek_expr: cmp_expr,
-                                table_identifier: table_identifier.clone(),
-                                id: *id,
-                                step: 0,
-                            };
-                            return Ok(());
-                        }
-                        SearchableExpr::PrimaryKeyEq { cmp_expr, table } => {
-                            fs.remove(i);
-                            *operator = Operator::SeekRowid {
-                                table,
-                                table_identifier: table_identifier.clone(),
-                                rowid_predicate: cmp_expr,
-                                predicates: Some(std::mem::take(fs)),
-                                id: *id,
-                                step: 0,
-                            };
-                            return Ok(());
-                        }
-                    },
+                    Either::Right(index_search) => {
+                        fs.remove(i);
+                        *operator = Operator::Search {
+                            id: *id,
+                            table: table.0.clone(),
+                            table_identifier: table.1.clone(),
+                            predicates: Some(fs.clone()),
+                            search: index_search,
+                            step: 0,
+                        };
+
+                        return Ok(());
+                    }
                 }
             }
 
@@ -139,7 +101,6 @@ fn use_indexes(
             use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
         }
-        Operator::SeekRowid { .. } => Ok(()),
         Operator::Limit { source, .. } => {
             use_indexes(source, referenced_tables, available_indexes)?;
             Ok(())
@@ -242,31 +203,6 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
             // Aggregation operator can return a row even if the source is empty e.g. count(1) from users where 0
             Ok(ConstantConditionEliminationResult::Continue)
         }
-        Operator::SeekRowid {
-            rowid_predicate,
-            predicates,
-            ..
-        } => {
-            if let Some(predicates) = predicates {
-                let mut i = 0;
-                while i < predicates.len() {
-                    let predicate = &predicates[i];
-                    if predicate.is_always_true()? {
-                        predicates.remove(i);
-                    } else if predicate.is_always_false()? {
-                        return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
-                    } else {
-                        i += 1;
-                    }
-                }
-            }
-
-            if rowid_predicate.is_always_false()? {
-                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
-            }
-
-            Ok(ConstantConditionEliminationResult::Continue)
-        }
         Operator::Limit { source, .. } => {
             let constant_elimination_result = eliminate_constants(source)?;
             if constant_elimination_result
@@ -315,7 +251,23 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
             }
             Ok(ConstantConditionEliminationResult::Continue)
         }
-        Operator::Search { .. } => Ok(ConstantConditionEliminationResult::Continue),
+        Operator::Search { predicates, .. } => {
+            if let Some(predicates) = predicates {
+                let mut i = 0;
+                while i < predicates.len() {
+                    let predicate = &predicates[i];
+                    if predicate.is_always_true()? {
+                        predicates.remove(i);
+                    } else if predicate.is_always_false()? {
+                        return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+
+            Ok(ConstantConditionEliminationResult::Continue)
+        }
         Operator::Nothing => Ok(ConstantConditionEliminationResult::Continue),
     }
 }
@@ -402,7 +354,6 @@ fn push_predicates(
 
             Ok(())
         }
-        Operator::SeekRowid { .. } => Ok(()),
         Operator::Limit { source, .. } => {
             push_predicates(source, referenced_tables)?;
             Ok(())
@@ -525,7 +476,6 @@ fn push_predicate(
 
             Ok(Some(push_result.unwrap()))
         }
-        Operator::SeekRowid { .. } => Ok(Some(predicate)),
         Operator::Limit { source, .. } => {
             let push_result = push_predicate(source, predicate, referenced_tables)?;
             if push_result.is_none() {
@@ -702,7 +652,6 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
             mask
         }
         Operator::Filter { .. } => 0,
-        Operator::SeekRowid { .. } => 0,
         Operator::Limit { .. } => 0,
         Operator::Join { .. } => 0,
         Operator::Order { .. } => 0,
@@ -887,7 +836,6 @@ fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_o
             )
         }
         Operator::Filter { .. } => unreachable!(),
-        Operator::SeekRowid { .. } => {}
         Operator::Limit { source, .. } => {
             find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
         }
@@ -1160,51 +1108,23 @@ pub enum Either<T, U> {
     Right(U),
 }
 
-/// An expression that can be used to search for a row in a table using an index
-/// (i.e. a primary key or a secondary index)
-///
-pub enum SearchableExpr {
-    /// A primary key equality search. This is a special case of the primary key search
-    /// that uses the SeekRowid operator and bytecode instruction.
-    PrimaryKeyEq {
-        table: Rc<BTreeTable>,
-        cmp_expr: ast::Expr,
-    },
-    /// A primary key search. This uses the Search operator and uses bytecode instructions like SeekGT, SeekGE etc.
-    PrimaryKeySearch {
-        table: Rc<BTreeTable>,
-        cmp_op: ast::Operator,
-        cmp_expr: ast::Expr,
-    },
-    /// A secondary index search. This uses the Search operator and uses bytecode instructions like SeekGE, SeekGT etc.
-    IndexSearch {
-        index: Rc<Index>,
-        cmp_op: ast::Operator,
-        cmp_expr: ast::Expr,
-    },
-}
-
-pub fn try_extract_expr_that_utilizes_index(
+pub fn try_extract_index_search_expression(
     expr: ast::Expr,
     table: &(Rc<BTreeTable>, String),
     available_indexes: &[Rc<Index>],
-) -> Result<Either<ast::Expr, SearchableExpr>> {
+) -> Result<Either<ast::Expr, Search>> {
     match expr {
         ast::Expr::Binary(mut lhs, operator, mut rhs) => {
             if lhs.is_primary_key_of(table) {
                 match operator {
                     ast::Operator::Equals => {
-                        return Ok(Either::Right(SearchableExpr::PrimaryKeyEq {
-                            table: table.0.clone(),
-                            cmp_expr: *rhs,
-                        }));
+                        return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *rhs }));
                     }
                     ast::Operator::Greater
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(SearchableExpr::PrimaryKeySearch {
-                            table: table.0.clone(),
+                        return Ok(Either::Right(Search::PrimaryKeySearch {
                             cmp_op: operator,
                             cmp_expr: *rhs,
                         }));
@@ -1216,17 +1136,13 @@ pub fn try_extract_expr_that_utilizes_index(
             if rhs.is_primary_key_of(table) {
                 match operator {
                     ast::Operator::Equals => {
-                        return Ok(Either::Right(SearchableExpr::PrimaryKeyEq {
-                            table: table.0.clone(),
-                            cmp_expr: *lhs,
-                        }));
+                        return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *lhs }));
                     }
                     ast::Operator::Greater
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(SearchableExpr::PrimaryKeySearch {
-                            table: table.0.clone(),
+                        return Ok(Either::Right(Search::PrimaryKeySearch {
                             cmp_op: operator,
                             cmp_expr: *lhs,
                         }));
@@ -1242,7 +1158,7 @@ pub fn try_extract_expr_that_utilizes_index(
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(SearchableExpr::IndexSearch {
+                        return Ok(Either::Right(Search::IndexSearch {
                             index: available_indexes[index_index].clone(),
                             cmp_op: operator,
                             cmp_expr: *rhs,
@@ -1259,7 +1175,7 @@ pub fn try_extract_expr_that_utilizes_index(
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(SearchableExpr::IndexSearch {
+                        return Ok(Either::Right(Search::IndexSearch {
                             index: available_indexes[index_index].clone(),
                             cmp_op: operator,
                             cmp_expr: *lhs,

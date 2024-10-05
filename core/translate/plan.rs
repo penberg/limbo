@@ -64,19 +64,6 @@ pub enum Operator {
         source: Box<Operator>,
         predicates: Vec<ast::Expr>,
     },
-    // SeekRowid operator
-    // This operator is used to retrieve a single row from a table by its rowid.
-    // rowid_predicate is an expression that produces the comparison value for the rowid.
-    // e.g. rowid = 5, or rowid = other_table.foo
-    // predicates is an optional list of additional predicates to evaluate.
-    SeekRowid {
-        id: usize,
-        table: Rc<BTreeTable>,
-        table_identifier: String,
-        rowid_predicate: ast::Expr,
-        predicates: Option<Vec<ast::Expr>>,
-        step: usize,
-    },
     // Limit operator
     // This operator is used to limit the number of rows returned by the source operator.
     Limit {
@@ -129,13 +116,14 @@ pub enum Operator {
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
     },
+    // Search operator
+    // This operator is used to search for a row in a table using an index
+    // (i.e. a primary key or a secondary index)
     Search {
         id: usize,
-        index: Option<Rc<Index>>,
-        seek_cmp: ast::Operator,
-        seek_expr: ast::Expr,
         table: Rc<BTreeTable>,
         table_identifier: String,
+        search: Search,
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
     },
@@ -143,6 +131,26 @@ pub enum Operator {
     // This operator is used to represent an empty query.
     // e.g. SELECT * from foo WHERE 0 will eventually be optimized to Nothing.
     Nothing,
+}
+
+/// An enum that represents a search operation that can be used to search for a row in a table using an index
+/// (i.e. a primary key or a secondary index)
+#[derive(Clone, Debug)]
+pub enum Search {
+    /// A primary key equality search. This is a special case of the primary key search
+    /// that uses the SeekRowid bytecode instruction.
+    PrimaryKeyEq { cmp_expr: ast::Expr },
+    /// A primary key search. Uses bytecode instructions like SeekGT, SeekGE etc.
+    PrimaryKeySearch {
+        cmp_op: ast::Operator,
+        cmp_expr: ast::Expr,
+    },
+    /// A secondary index search. Uses bytecode instructions like SeekGE, SeekGT etc.
+    IndexSearch {
+        index: Rc<Index>,
+        cmp_op: ast::Operator,
+        cmp_expr: ast::Expr,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -177,7 +185,6 @@ impl Operator {
                 ..
             } => aggregates.len() + group_by.as_ref().map_or(0, |g| g.len()),
             Operator::Filter { source, .. } => source.column_count(referenced_tables),
-            Operator::SeekRowid { table, .. } => table.columns.len(),
             Operator::Limit { source, .. } => source.column_count(referenced_tables),
             Operator::Join { left, right, .. } => {
                 left.column_count(referenced_tables) + right.column_count(referenced_tables)
@@ -220,9 +227,6 @@ impl Operator {
                 names
             }
             Operator::Filter { source, .. } => source.column_names(),
-            Operator::SeekRowid { table, .. } => {
-                table.columns.iter().map(|c| c.name.clone()).collect()
-            }
             Operator::Limit { source, .. } => source.column_names(),
             Operator::Join { left, right, .. } => {
                 let mut names = left.column_names();
@@ -254,7 +258,6 @@ impl Operator {
         match self {
             Operator::Aggregate { id, .. } => *id,
             Operator::Filter { id, .. } => *id,
-            Operator::SeekRowid { id, .. } => *id,
             Operator::Limit { id, .. } => *id,
             Operator::Join { id, .. } => *id,
             Operator::Order { id, .. } => *id,
@@ -342,33 +345,6 @@ impl Display for Operator {
                         .join(" AND ");
                     writeln!(f, "{}FILTER {}", indent, predicates_string)?;
                     fmt_operator(source, f, level + 1, true)
-                }
-                Operator::SeekRowid {
-                    table,
-                    rowid_predicate,
-                    predicates,
-                    ..
-                } => {
-                    match predicates {
-                        Some(ps) => {
-                            let predicates_string = ps
-                                .iter()
-                                .map(|p| p.to_string())
-                                .collect::<Vec<String>>()
-                                .join(" AND ");
-                            writeln!(
-                                f,
-                                "{}SEEK {}.rowid ON rowid={} FILTER {}",
-                                indent, &table.name, rowid_predicate, predicates_string
-                            )?;
-                        }
-                        None => writeln!(
-                            f,
-                            "{}SEEK {}.rowid ON rowid={}",
-                            indent, &table.name, rowid_predicate
-                        )?,
-                    }
-                    Ok(())
                 }
                 Operator::Limit { source, limit, .. } => {
                     writeln!(f, "{}TAKE {}", indent, limit)?;
@@ -486,13 +462,6 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
             for predicate in predicates {
                 table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, predicate)?;
             }
-        }
-        Operator::SeekRowid { table, .. } => {
-            table_refs_mask |= 1
-                << tables
-                    .iter()
-                    .position(|(t, _)| Rc::ptr_eq(t, table))
-                    .unwrap();
         }
         Operator::Limit { source, .. } => {
             table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
