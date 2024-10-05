@@ -166,8 +166,8 @@ impl BTreeCursor {
                 BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
                     mem_page.advance();
                     let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
-                    let rowid = match record.values[1] {
-                        OwnedValue::Integer(rowid) => rowid as u64,
+                    let rowid = match record.values.last() {
+                        Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                         _ => unreachable!("index cells should have an integer rowid"),
                     };
                     return Ok(CursorResult::Ok((Some(rowid), Some(record))));
