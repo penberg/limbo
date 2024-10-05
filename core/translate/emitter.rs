@@ -297,7 +297,7 @@ impl Emitter for Operator {
                         if let Some(index) = index {
                             program.emit_insn(Insn::OpenReadAsync {
                                 cursor_id: index_cursor_id,
-                            root_page: index.root_page,
+                                root_page: index.root_page,
                             });
                             program.emit_insn(Insn::OpenReadAwait);
                         }
@@ -383,7 +383,10 @@ impl Emitter for Operator {
                         //
                         // For primary key searches we emit RowId and then compare it to the seek value.
 
-                        let abort_jump_target = *m.next_row_labels.get(id).unwrap_or(m.termination_label_stack.last().unwrap());
+                        let abort_jump_target = *m
+                            .next_row_labels
+                            .get(id)
+                            .unwrap_or(m.termination_label_stack.last().unwrap());
                         match seek_cmp {
                             ast::Operator::Equals | ast::Operator::LessEquals => {
                                 if index.is_some() {
@@ -394,7 +397,7 @@ impl Emitter for Operator {
                                             num_regs: 1,
                                             target_pc: abort_jump_target,
                                         },
-                                            abort_jump_target,
+                                        abort_jump_target,
                                     );
                                 } else {
                                     let rowid_reg = program.alloc_register();
@@ -414,12 +417,12 @@ impl Emitter for Operator {
                             }
                             ast::Operator::Less => {
                                 if index.is_some() {
-                                program.emit_insn_with_label_dependency(
-                                    Insn::IdxGE {
-                                        cursor_id: index_cursor_id,
-                                        start_reg: cmp_reg,
-                                        num_regs: 1,
-                                        target_pc: abort_jump_target,
+                                    program.emit_insn_with_label_dependency(
+                                        Insn::IdxGE {
+                                            cursor_id: index_cursor_id,
+                                            start_reg: cmp_reg,
+                                            num_regs: 1,
+                                            target_pc: abort_jump_target,
                                         },
                                         abort_jump_target,
                                     );
@@ -448,7 +451,7 @@ impl Emitter for Operator {
                                 table_cursor_id,
                             });
                         }
-                    
+
                         let jump_label = m
                             .next_row_labels
                             .get(id)

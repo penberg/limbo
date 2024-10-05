@@ -153,7 +153,8 @@ impl BTreeCursor {
                 }
                 BTreeCell::IndexInteriorCell(IndexInteriorCell {
                     payload,
-                    left_child_page, ..
+                    left_child_page,
+                    ..
                 }) => {
                     mem_page.advance();
                     let mem_page =
@@ -364,7 +365,9 @@ impl BTreeCursor {
                         }
                     }
                     BTreeCell::TableLeafCell(_) => {
-                        unreachable!("we don't iterate leaf cells while trying to move to a leaf cell");
+                        unreachable!(
+                            "we don't iterate leaf cells while trying to move to a leaf cell"
+                        );
                     }
                     BTreeCell::IndexInteriorCell(_) => {
                         unimplemented!();
@@ -531,11 +534,7 @@ impl BTreeCursor {
         }
     }
 
-    fn move_to_index_leaf(
-        &mut self,
-        key: &OwnedRecord,
-        cmp: SeekOp,
-    ) -> Result<CursorResult<()>> {
+    fn move_to_index_leaf(&mut self, key: &OwnedRecord, cmp: SeekOp) -> Result<CursorResult<()>> {
         self.move_to_root();
         loop {
             let mem_page = self.get_mem_page();
@@ -1539,8 +1538,17 @@ impl Cursor for BTreeCursor {
             CursorResult::Ok((rowid, next)) => {
                 {
                     let curr_rowid = self.rowid.borrow();
-                    if curr_rowid.is_some() && curr_rowid.unwrap() >= 8000 && rowid.is_some() && rowid.unwrap() < 8000 {
-                        println!("curr_rowid: {:?}, rowid: {:?}, next: {:?}", curr_rowid.unwrap(), rowid.unwrap(), next);
+                    if curr_rowid.is_some()
+                        && curr_rowid.unwrap() >= 8000
+                        && rowid.is_some()
+                        && rowid.unwrap() < 8000
+                    {
+                        println!(
+                            "curr_rowid: {:?}, rowid: {:?}, next: {:?}",
+                            curr_rowid.unwrap(),
+                            rowid.unwrap(),
+                            next
+                        );
                     }
                 }
                 self.rowid.replace(rowid);
