@@ -30,6 +30,7 @@ pub enum SeekOp {
     GE,
 }
 
+#[derive(Clone)]
 pub enum SeekKey<'a> {
     TableRowId(u64),
     IndexKey(&'a OwnedRecord),
@@ -182,65 +183,12 @@ impl BTreeCursor {
         }
     }
 
-    fn btree_index_seek(
+    fn seek<'a>(
         &mut self,
-        key: &OwnedRecord,
+        key: SeekKey<'a>,
         op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        match self.move_to(SeekKey::IndexKey(key), op.clone())? {
-            CursorResult::Ok(_) => {}
-            CursorResult::IO => return Ok(CursorResult::IO),
-        };
-
-        let mem_page = self.get_mem_page();
-        let page_idx = mem_page.page_idx;
-        let page = self.pager.read_page(page_idx)?;
-        let page = RefCell::borrow(&page);
-        if page.is_locked() {
-            return Ok(CursorResult::IO);
-        }
-
-        let page = page.contents.read().unwrap();
-        let page = page.as_ref().unwrap();
-
-        for cell_idx in 0..page.cell_count() {
-            match &page.cell_get(
-                cell_idx,
-                self.pager.clone(),
-                self.max_local(page.page_type()),
-                self.min_local(page.page_type()),
-                self.usable_space(),
-            )? {
-                BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
-                    mem_page.advance();
-                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
-                    let comparison = match op {
-                        SeekOp::GT => record > *key,
-                        SeekOp::GE => record >= *key,
-                        SeekOp::EQ => record == *key,
-                    };
-                    if comparison {
-                        let rowid = match record.values.get(1) {
-                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
-                            _ => unreachable!("index cells should have an integer rowid"),
-                        };
-                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
-                    }
-                }
-                cell_type => {
-                    unreachable!("unexpected cell type: {:?}", cell_type);
-                }
-            }
-        }
-        Ok(CursorResult::Ok((None, None)))
-    }
-
-    fn btree_table_seek(
-        &mut self,
-        rowid: u64,
-        op: SeekOp,
-    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        match self.move_to(SeekKey::TableRowId(rowid), op.clone())? {
+        match self.move_to(key.clone(), op.clone())? {
             CursorResult::Ok(_) => {}
             CursorResult::IO => return Ok(CursorResult::IO),
         };
@@ -268,17 +216,39 @@ impl BTreeCursor {
                 BTreeCell::TableLeafCell(TableLeafCell {
                     _rowid: cell_rowid,
                     _payload: payload,
-                    first_overflow_page: fop,
+                    first_overflow_page: _,
                 }) => {
+                    let SeekKey::TableRowId(rowid_key) = key else {
+                        unreachable!("table seek key should be a rowid");
+                    };
                     mem_page.advance();
                     let comparison = match op {
-                        SeekOp::GT => *cell_rowid > rowid,
-                        SeekOp::GE => *cell_rowid >= rowid,
-                        SeekOp::EQ => *cell_rowid == rowid,
+                        SeekOp::GT => *cell_rowid > rowid_key,
+                        SeekOp::GE => *cell_rowid >= rowid_key,
+                        SeekOp::EQ => *cell_rowid == rowid_key,
                     };
                     if comparison {
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
+                    }
+                }
+                BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
+                    let SeekKey::IndexKey(index_key) = key else {
+                        unreachable!("index seek key should be a record");
+                    };
+                    mem_page.advance();
+                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                    let comparison = match op {
+                        SeekOp::GT => record > *index_key,
+                        SeekOp::GE => record >= *index_key,
+                        SeekOp::EQ => record == *index_key,
+                    };
+                    if comparison {
+                        let rowid = match record.values.get(1) {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
                     }
                 }
                 cell_type => {
@@ -434,7 +404,9 @@ impl BTreeCursor {
                         }
                     }
                     BTreeCell::IndexLeafCell(_) => {
-                        unreachable!("we don't iterate leaf cells while trying to move to a leaf cell");
+                        unreachable!(
+                            "we don't iterate leaf cells while trying to move to a leaf cell"
+                        );
                     }
                 }
             }
@@ -1404,7 +1376,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.btree_table_seek(rowid, SeekOp::EQ)? {
+        match self.seek(SeekKey::TableRowId(rowid), SeekOp::EQ)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
@@ -1415,7 +1387,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.btree_index_seek(key, SeekOp::GE)? {
+        match self.seek(SeekKey::IndexKey(key), SeekOp::GE)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
@@ -1426,7 +1398,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.btree_index_seek(key, SeekOp::GT)? {
+        match self.seek(SeekKey::IndexKey(key), SeekOp::GT)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
@@ -1437,7 +1409,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek_ge_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.btree_table_seek(rowid, SeekOp::GE)? {
+        match self.seek(SeekKey::TableRowId(rowid), SeekOp::GE)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
@@ -1448,7 +1420,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek_gt_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.btree_table_seek(rowid, SeekOp::GT)? {
+        match self.seek(SeekKey::TableRowId(rowid), SeekOp::GT)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
