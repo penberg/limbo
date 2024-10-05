@@ -426,8 +426,15 @@ impl Display for Operator {
                     }?;
                     Ok(())
                 }
-                Operator::Search { table, .. } => {
-                    writeln!(f, "{}INDEX SCAN {}", indent, table.name)?;
+                Operator::Search { table_identifier, search, .. } => {
+                    match search {
+                        Search::PrimaryKeyEq { .. } | Search::PrimaryKeySearch { .. } => {
+                            writeln!(f, "{}SEARCH {} USING INTEGER PRIMARY KEY (rowid=?)", indent, table_identifier)?;
+                        }
+                        Search::IndexSearch { index, .. } => {
+                            writeln!(f, "{}SEARCH {} USING INDEX {}", indent, table_identifier, index.name)?;
+                        }
+                    }
                     Ok(())
                 }
                 Operator::Nothing => Ok(()),
