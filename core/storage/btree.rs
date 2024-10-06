@@ -346,9 +346,9 @@ impl BTreeCursor {
                         };
                         mem_page.advance();
                         let comparison = match cmp {
-                            SeekOp::GT => rowid_key <= *_rowid,
-                            SeekOp::GE => rowid_key < *_rowid,
-                            SeekOp::EQ => rowid_key < *_rowid,
+                            SeekOp::GT => rowid_key < *_rowid,
+                            SeekOp::GE => rowid_key <= *_rowid,
+                            SeekOp::EQ => rowid_key <= *_rowid,
                         };
                         if comparison {
                             let mem_page =
@@ -378,9 +378,9 @@ impl BTreeCursor {
                         mem_page.advance();
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let comparison = match cmp {
-                            SeekOp::GT => index_key <= &record,
-                            SeekOp::GE => index_key < &record,
-                            SeekOp::EQ => index_key < &record,
+                            SeekOp::GT => index_key < &record,
+                            SeekOp::GE => index_key <= &record,
+                            SeekOp::EQ => index_key <= &record,
                         };
                         if comparison {
                             let mem_page =
