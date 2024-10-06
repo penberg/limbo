@@ -1506,6 +1506,12 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}
+                            ScalarFunc::Instr => {
+                                let reg_value = &state.registers[*start_reg];
+                                let pattern_value = &state.registers[*start_reg + 1];
+                                let result = exec_instr(reg_value, pattern_value);
+                                state.registers[*dest] = result;
+                            }
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
                                 let text = &state.registers[*start_reg + 1];
@@ -2170,6 +2176,43 @@ fn exec_substring(
     }
 }
 
+fn exec_instr(reg: &OwnedValue, pattern: &OwnedValue) -> OwnedValue {
+    if reg == &OwnedValue::Null || pattern == &OwnedValue::Null {
+        return OwnedValue::Null;
+    }
+
+    if let (OwnedValue::Blob(reg), OwnedValue::Blob(pattern)) = (reg, pattern) {
+        let result = reg
+            .windows(pattern.len())
+            .position(|window| window == **pattern)
+            .map_or(0, |i| i + 1);
+        return OwnedValue::Integer(result as i64);
+    }
+
+    let reg_str;
+    let reg = match reg {
+        OwnedValue::Text(s) => s.as_str(),
+        _ => {
+            reg_str = reg.to_string();
+            reg_str.as_str()
+        }
+    };
+
+    let pattern_str;
+    let pattern = match pattern {
+        OwnedValue::Text(s) => s.as_str(),
+        _ => {
+            pattern_str = pattern.to_string();
+            pattern_str.as_str()
+        }
+    };
+
+    match reg.find(pattern) {
+        Some(position) => OwnedValue::Integer(position as i64 + 1),
+        None => OwnedValue::Integer(0),
+    }
+}
+
 fn exec_typeof(reg: &OwnedValue) -> OwnedValue {
     match reg {
         OwnedValue::Null => OwnedValue::Text(Rc::new("null".to_string())),
@@ -2338,11 +2381,11 @@ fn execute_sqlite_version(version_integer: i64) -> String {
 mod tests {
 
     use super::{
-        exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
-        exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob, exec_round,
-        exec_rtrim, exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex, exec_unicode,
-        exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext, Cursor,
-        CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_abs, exec_char, exec_hex, exec_if, exec_instr, exec_length, exec_like, exec_lower,
+        exec_ltrim, exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob,
+        exec_round, exec_rtrim, exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex,
+        exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext,
+        Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -2992,6 +3035,109 @@ mod tests {
             exec_substring(&str_value, &start_value, &length_value),
             expected_val
         );
+    }
+
+    #[test]
+    fn test_exec_instr() {
+        let input = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("im")));
+        let expected = OwnedValue::Integer(2);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let expected = OwnedValue::Integer(1);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("o")));
+        let expected = OwnedValue::Integer(5);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("liiiiimbo")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("ii")));
+        let expected = OwnedValue::Integer(2);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("limboX")));
+        let expected = OwnedValue::Integer(0);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("")));
+        let expected = OwnedValue::Integer(1);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let expected = OwnedValue::Integer(0);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("")));
+        let pattern = OwnedValue::Text(Rc::new(String::from("")));
+        let expected = OwnedValue::Integer(1);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Null;
+        let pattern = OwnedValue::Null;
+        let expected = OwnedValue::Null;
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let pattern = OwnedValue::Null;
+        let expected = OwnedValue::Null;
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Null;
+        let pattern = OwnedValue::Text(Rc::new(String::from("limbo")));
+        let expected = OwnedValue::Null;
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Integer(123);
+        let pattern = OwnedValue::Integer(2);
+        let expected = OwnedValue::Integer(2);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Integer(123);
+        let pattern = OwnedValue::Integer(5);
+        let expected = OwnedValue::Integer(0);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Float(12.34);
+        let pattern = OwnedValue::Float(2.3);
+        let expected = OwnedValue::Integer(2);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Float(12.34);
+        let pattern = OwnedValue::Float(5.6);
+        let expected = OwnedValue::Integer(0);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Float(12.34);
+        let pattern = OwnedValue::Text(Rc::new(String::from(".")));
+        let expected = OwnedValue::Integer(3);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Blob(Rc::new(vec![1, 2, 3, 4, 5]));
+        let pattern = OwnedValue::Blob(Rc::new(vec![3, 4]));
+        let expected = OwnedValue::Integer(3);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Blob(Rc::new(vec![1, 2, 3, 4, 5]));
+        let pattern = OwnedValue::Blob(Rc::new(vec![3, 2]));
+        let expected = OwnedValue::Integer(0);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Blob(Rc::new(vec![0x61, 0x62, 0x63, 0x64, 0x65]));
+        let pattern = OwnedValue::Text(Rc::new(String::from("cd")));
+        let expected = OwnedValue::Integer(3);
+        assert_eq!(exec_instr(&input, &pattern), expected);
+
+        let input = OwnedValue::Text(Rc::new(String::from("abcde")));
+        let pattern = OwnedValue::Blob(Rc::new(vec![0x63, 0x64]));
+        let expected = OwnedValue::Integer(3);
+        assert_eq!(exec_instr(&input, &pattern), expected);
     }
 
     #[test]
