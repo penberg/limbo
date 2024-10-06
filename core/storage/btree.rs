@@ -5,7 +5,7 @@ use crate::storage::sqlite3_ondisk::{
     read_btree_cell, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
     TableInteriorCell, TableLeafCell,
 };
-use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
+use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp};
 use crate::Result;
 
 use std::cell::{Ref, RefCell};
@@ -22,19 +22,6 @@ const BTREE_HEADER_OFFSET_CELL_COUNT: usize = 3; /* number of cells in the page 
 const BTREE_HEADER_OFFSET_CELL_CONTENT: usize = 5; /* pointer to first byte of cell allocated content from top -> u16 */
 const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -> u8 */
 const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
-
-#[derive(Clone)]
-pub enum SeekOp {
-    EQ,
-    GT,
-    GE,
-}
-
-#[derive(Clone)]
-pub enum SeekKey<'a> {
-    TableRowId(u64),
-    IndexKey(&'a OwnedRecord),
-}
 
 #[derive(Debug)]
 pub struct MemPage {
@@ -1375,52 +1362,8 @@ impl Cursor for BTreeCursor {
         Ok(*self.rowid.borrow())
     }
 
-    fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::TableRowId(rowid), SeekOp::EQ)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    fn seek_ge_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::TableRowId(rowid), SeekOp::GE)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    fn seek_gt_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::TableRowId(rowid), SeekOp::GT)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::IndexKey(key), SeekOp::GE)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
-    }
-
-    fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>> {
-        match self.seek(SeekKey::IndexKey(key), SeekOp::GT)? {
+    fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<CursorResult<bool>> {
+        match self.seek(key, op)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);

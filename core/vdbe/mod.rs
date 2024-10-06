@@ -30,7 +30,9 @@ use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
-use crate::types::{AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record};
+use crate::types::{
+    AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
+};
 use crate::{Result, DATABASE_VERSION};
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
@@ -1011,7 +1013,7 @@ impl Program {
                         let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
                         let rowid = index_cursor.rowid()?;
                         let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
-                        match table_cursor.seek_rowid(rowid.unwrap())? {
+                        match table_cursor.seek(SeekKey::TableRowId(rowid.unwrap()), SeekOp::EQ)? {
                             CursorResult::Ok(_) => {}
                             CursorResult::IO => {
                                 state.deferred_seek = Some((index_cursor_id, table_cursor_id));
@@ -1151,7 +1153,7 @@ impl Program {
                         let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
                         let rowid = index_cursor.rowid()?;
                         let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
-                        match table_cursor.seek_rowid(rowid.unwrap())? {
+                        match table_cursor.seek(SeekKey::TableRowId(rowid.unwrap()), SeekOp::EQ)? {
                             CursorResult::Ok(_) => {}
                             CursorResult::IO => {
                                 state.deferred_seek = Some((index_cursor_id, table_cursor_id));
@@ -1186,7 +1188,7 @@ impl Program {
                             ));
                         }
                     };
-                    match cursor.seek_rowid(rowid)? {
+                    match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ)? {
                         CursorResult::Ok(found) => {
                             if !found {
                                 state.pc = *target_pc;
@@ -1218,7 +1220,7 @@ impl Program {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
-                        match cursor.seek_ge_index(&record_from_regs)? {
+                        match cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GE)? {
                             CursorResult::Ok(found) => {
                                 if !found {
                                     state.pc = *target_pc;
@@ -1253,7 +1255,7 @@ impl Program {
                                 ));
                             }
                         };
-                        match cursor.seek_ge_rowid(rowid)? {
+                        match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE)? {
                             CursorResult::Ok(found) => {
                                 if !found {
                                     state.pc = *target_pc;
@@ -1279,7 +1281,7 @@ impl Program {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
-                        match cursor.seek_gt_index(&record_from_regs)? {
+                        match cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GT)? {
                             CursorResult::Ok(found) => {
                                 if !found {
                                     state.pc = *target_pc;
@@ -1314,7 +1316,7 @@ impl Program {
                                 ));
                             }
                         };
-                        match cursor.seek_gt_rowid(rowid)? {
+                        match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GT)? {
                             CursorResult::Ok(found) => {
                                 if !found {
                                     state.pc = *target_pc;
@@ -2052,7 +2054,7 @@ fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<Cur
         let max_attempts = 100;
         for count in 0..max_attempts {
             rowid = distribution.sample(&mut rng).try_into().unwrap();
-            match cursor.seek_rowid(rowid)? {
+            match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ)? {
                 CursorResult::Ok(false) => break, // Found a non-existing rowid
                 CursorResult::Ok(true) => {
                     if count == max_attempts - 1 {
@@ -2593,6 +2595,8 @@ fn execute_sqlite_version(version_integer: i64) -> String {
 #[cfg(test)]
 mod tests {
 
+    use crate::types::{SeekKey, SeekOp};
+
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_length, exec_like, exec_lower, exec_ltrim,
         exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob, exec_round,
@@ -2607,6 +2611,7 @@ mod tests {
     mock! {
         Cursor {
             fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
+            fn seek<'a>(&mut self, key: SeekKey<'a>, op: SeekOp) -> Result<CursorResult<bool>>;
             fn rowid(&self) -> Result<Option<u64>>;
             fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
         }
@@ -2621,24 +2626,8 @@ mod tests {
             self.rowid()
         }
 
-        fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-            self.seek_rowid(rowid)
-        }
-
-        fn seek_ge_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
-            unimplemented!();
-        }
-
-        fn seek_gt_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
-            unimplemented!();
-        }
-
-        fn seek_ge_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
-            unimplemented!();
-        }
-
-        fn seek_gt_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
-            unimplemented!();
+        fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<CursorResult<bool>> {
+            self.seek(key, op)
         }
 
         fn rewind(&mut self) -> Result<CursorResult<()>> {
@@ -2713,10 +2702,10 @@ mod tests {
             .return_once(|| Ok(CursorResult::Ok(())));
         mock.expect_rowid()
             .return_once(|| Ok(Some(std::i64::MAX as u64)));
-        mock.expect_seek_rowid()
-            .with(predicate::always())
-            .returning(|rowid| {
-                if rowid == 50 {
+        mock.expect_seek()
+            .with(predicate::always(), predicate::always())
+            .returning(|rowid, _| {
+                if rowid == SeekKey::TableRowId(50) {
                     Ok(CursorResult::Ok(false))
                 } else {
                     Ok(CursorResult::Ok(true))
@@ -2734,9 +2723,9 @@ mod tests {
             .return_once(|| Ok(CursorResult::Ok(())));
         mock.expect_rowid()
             .return_once(|| Ok(Some(std::i64::MAX as u64)));
-        mock.expect_seek_rowid()
-            .with(predicate::always())
-            .return_once(|_| Ok(CursorResult::IO));
+        mock.expect_seek()
+            .with(predicate::always(), predicate::always())
+            .return_once(|_, _| Ok(CursorResult::IO));
 
         let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng());
         assert!(matches!(result, Ok(CursorResult::IO)));
@@ -2747,9 +2736,9 @@ mod tests {
             .return_once(|| Ok(CursorResult::Ok(())));
         mock.expect_rowid()
             .return_once(|| Ok(Some(std::i64::MAX as u64)));
-        mock.expect_seek_rowid()
-            .with(predicate::always())
-            .returning(|_| Ok(CursorResult::Ok(true)));
+        mock.expect_seek()
+            .with(predicate::always(), predicate::always())
+            .returning(|_, _| Ok(CursorResult::Ok(true)));
 
         // Mock the random number generation
         let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1));

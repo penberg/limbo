@@ -1,4 +1,7 @@
-use crate::Result;
+use crate::{
+    types::{SeekKey, SeekOp},
+    Result,
+};
 use std::cell::{Ref, RefCell};
 
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
@@ -48,23 +51,7 @@ impl Cursor for PseudoCursor {
         Ok(x)
     }
 
-    fn seek_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
-        unimplemented!();
-    }
-
-    fn seek_ge_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
-        unimplemented!();
-    }
-
-    fn seek_gt_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
-        unimplemented!();
-    }
-
-    fn seek_ge_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
-        unimplemented!();
-    }
-
-    fn seek_gt_index(&mut self, _: &OwnedRecord) -> Result<CursorResult<bool>> {
+    fn seek(&mut self, _: SeekKey<'_>, _: SeekOp) -> Result<CursorResult<bool>> {
         unimplemented!();
     }
 

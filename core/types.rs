@@ -409,17 +409,26 @@ pub enum CursorResult<T> {
     IO,
 }
 
+#[derive(Clone, PartialEq, Debug)]
+pub enum SeekOp {
+    EQ,
+    GE,
+    GT,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub enum SeekKey<'a> {
+    TableRowId(u64),
+    IndexKey(&'a OwnedRecord),
+}
+
 pub trait Cursor {
     fn is_empty(&self) -> bool;
     fn rewind(&mut self) -> Result<CursorResult<()>>;
     fn next(&mut self) -> Result<CursorResult<()>>;
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Option<u64>>;
-    fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
-    fn seek_ge_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
-    fn seek_gt_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
-    fn seek_ge_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>>;
-    fn seek_gt_index(&mut self, key: &OwnedRecord) -> Result<CursorResult<bool>>;
+    fn seek(&mut self, key: SeekKey, op: SeekOp) -> Result<CursorResult<bool>>;
     fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
     fn insert(
