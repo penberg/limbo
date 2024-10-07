@@ -57,6 +57,7 @@ pub struct BTreeCursor {
     record: RefCell<Option<OwnedRecord>>,
     null_flag: bool,
     database_header: Rc<RefCell<DatabaseHeader>>,
+    going_upwards: bool,
 }
 
 impl BTreeCursor {
@@ -73,6 +74,7 @@ impl BTreeCursor {
             record: RefCell::new(None),
             null_flag: false,
             database_header,
+            going_upwards: false,
         }
     }
 
@@ -110,6 +112,7 @@ impl BTreeCursor {
                     }
                     None => match parent {
                         Some(ref parent) => {
+                            self.going_upwards = true;
                             self.page.replace(Some(parent.clone()));
                             continue;
                         }
@@ -151,11 +154,21 @@ impl BTreeCursor {
                     left_child_page,
                     ..
                 }) => {
-                    mem_page.advance();
-                    let mem_page =
-                        MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
-                    self.page.replace(Some(Rc::new(mem_page)));
-                    continue;
+                    if self.going_upwards {
+                        self.going_upwards = false;
+                        mem_page.advance();
+                        let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                        let rowid = match record.values.last() {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
+                    } else {
+                        let mem_page =
+                            MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
+                        self.page.replace(Some(Rc::new(mem_page)));
+                        continue;
+                    }
                 }
                 BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
                     mem_page.advance();
@@ -164,6 +177,7 @@ impl BTreeCursor {
                         Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                         _ => unreachable!("index cells should have an integer rowid"),
                     };
+
                     return Ok(CursorResult::Ok((Some(rowid), Some(record))));
                 }
             }
@@ -375,7 +389,6 @@ impl BTreeCursor {
                         let SeekKey::IndexKey(index_key) = key else {
                             unreachable!("index seek key should be a record");
                         };
-                        mem_page.advance();
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let comparison = match cmp {
                             SeekOp::GT => index_key < &record,
@@ -388,6 +401,8 @@ impl BTreeCursor {
                             self.page.replace(Some(Rc::new(mem_page)));
                             found_cell = true;
                             break;
+                        } else {
+                            mem_page.advance();
                         }
                     }
                     BTreeCell::IndexLeafCell(_) => {
