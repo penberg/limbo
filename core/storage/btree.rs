@@ -223,12 +223,12 @@ impl BTreeCursor {
                         unreachable!("table seek key should be a rowid");
                     };
                     mem_page.advance();
-                    let comparison = match op {
+                    let found = match op {
                         SeekOp::GT => *cell_rowid > rowid_key,
                         SeekOp::GE => *cell_rowid >= rowid_key,
                         SeekOp::EQ => *cell_rowid == rowid_key,
                     };
-                    if comparison {
+                    if found {
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
                     }
@@ -239,12 +239,12 @@ impl BTreeCursor {
                     };
                     mem_page.advance();
                     let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
-                    let comparison = match op {
+                    let found = match op {
                         SeekOp::GT => record > *index_key,
                         SeekOp::GE => record >= *index_key,
                         SeekOp::EQ => record == *index_key,
                     };
-                    if comparison {
+                    if found {
                         let rowid = match record.values.get(1) {
                             Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                             _ => unreachable!("index cells should have an integer rowid"),
@@ -359,12 +359,12 @@ impl BTreeCursor {
                             unreachable!("table seek key should be a rowid");
                         };
                         mem_page.advance();
-                        let comparison = match cmp {
+                        let target_leaf_page_is_in_left_subtree = match cmp {
                             SeekOp::GT => rowid_key < *_rowid,
                             SeekOp::GE => rowid_key <= *_rowid,
                             SeekOp::EQ => rowid_key <= *_rowid,
                         };
-                        if comparison {
+                        if target_leaf_page_is_in_left_subtree {
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
@@ -390,12 +390,12 @@ impl BTreeCursor {
                             unreachable!("index seek key should be a record");
                         };
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
-                        let comparison = match cmp {
+                        let target_leaf_page_is_in_the_left_subtree = match cmp {
                             SeekOp::GT => index_key < &record,
                             SeekOp::GE => index_key <= &record,
                             SeekOp::EQ => index_key <= &record,
                         };
-                        if comparison {
+                        if target_leaf_page_is_in_the_left_subtree {
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
