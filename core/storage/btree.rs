@@ -245,7 +245,7 @@ impl BTreeCursor {
                         SeekOp::EQ => record == *index_key,
                     };
                     if found {
-                        let rowid = match record.values.get(1) {
+                        let rowid = match record.values.last() {
                             Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                             _ => unreachable!("index cells should have an integer rowid"),
                         };
