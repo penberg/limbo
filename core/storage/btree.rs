@@ -396,6 +396,7 @@ impl BTreeCursor {
                             SeekOp::EQ => index_key <= &record,
                         };
                         if target_leaf_page_is_in_the_left_subtree {
+                            // TODO: indexes store payloads in interior cells as well. What if cmp is SeekOp::EQ and the only exactly equal key is in the interior cell?
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
