@@ -72,7 +72,7 @@ This document describes the SQLite compatibility status of Limbo:
 | hex(X)                       | Yes    |         |
 | ifnull(X,Y)                  | Yes    |         |
 | iif(X,Y,Z)                   | No     |         |
-| instr(X,Y)                   | No     |         |
+| instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | No     |         |
 | length(X)                    | Yes    |         |
 | like(X,Y)                    | No     |         |

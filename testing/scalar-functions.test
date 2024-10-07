@@ -75,6 +75,58 @@ do_execsql_test ifnull-2 {
   select ifnull(null, 2);
 } {2}
 
+do_execsql_test instr-str {
+  select instr('limbo', 'im');
+} {2}
+
+do_execsql_test instr-str-not-found {
+  select instr('limbo', 'xyz');
+} {0}
+
+do_execsql_test instr-blob {
+  select instr(x'000102', x'01');
+} {2}
+
+do_execsql_test instr-blob-not-found {
+  select instr(x'000102', x'10');
+} {0}
+
+do_execsql_test instr-null {
+  select instr(null, 'limbo');
+} {}
+
+do_execsql_test instr-integer {
+  select instr(123, 2);
+} {2}
+
+do_execsql_test instr-integer-not-found {
+  select instr(123, 5);
+} {0}
+
+do_execsql_test instr-integer-leading-zeros {
+  select instr(0001, 0);
+} {0}
+
+do_execsql_test instr-real {
+  select instr(12.34, 2.3);
+} {2}
+
+do_execsql_test instr-real-not-found {
+  select instr(12.34, 5);
+} {0}
+
+do_execsql_test instr-real-trailing-zeros {
+  select instr(1.10000, 0);
+} {0}
+
+do_execsql_test instr-blob {
+  select instr(x'01020304', x'02');
+} {2}
+
+do_execsql_test instr-blob-not-found {
+  select instr(x'01020304', x'05');
+} {0}
+
 do_execsql_test upper {
   select upper('Limbo')
 } {LIMBO}

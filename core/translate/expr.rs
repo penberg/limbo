@@ -1324,16 +1324,20 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Nullif => {
+                        ScalarFunc::Nullif | ScalarFunc::Instr => {
                             let args = if let Some(args) = args {
                                 if args.len() != 2 {
                                     crate::bail_parse_error!(
-                                        "nullif function must have two argument"
+                                        "{} function must have two argument",
+                                        srf.to_string()
                                     );
                                 }
                                 args
                             } else {
-                                crate::bail_parse_error!("nullif function with no arguments");
+                                crate::bail_parse_error!(
+                                    "{} function with no arguments",
+                                    srf.to_string()
+                                );
                             };
 
                             let first_reg = program.alloc_register();
