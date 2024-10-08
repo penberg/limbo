@@ -257,6 +257,28 @@ impl BTreeCursor {
                 }
             }
         }
+
+        // We have now iterated over all cells in the leaf page and found no match.
+        let is_index = matches!(key, SeekKey::IndexKey(_));
+        if is_index {
+            // Unlike tables, indexes store payloads in interior cells as well. self.move_to() always moves to a leaf page, so there are cases where we need to
+            // move back up to the parent interior cell and get the next record from there to perform a correct seek.
+            // an example of how this can occur:
+            //
+            // we do an index seek for key K with cmp = SeekOp::GT, meaning we want to seek to the first key that is greater than K.
+            // in self.move_to(), we encounter an interior cell with key K' = K+2, and move the left child page, which is a leaf page.
+            // the reason we move to the left child page is that we know that in an index, all keys in the left child page are less than K' i.e. less than K+2,
+            // meaning that the left subtree may contain a key greater than K, e.g. K+1. however, it is possible that it doesn't, in which case the correct
+            // next key is K+2, which is in the parent interior cell.
+            //
+            // In the seek() method, once we have landed in the leaf page and find that there is no cell with a key greater than K,
+            // if we were to return Ok(CursorResult::Ok((None, None))), self.record would be None, which is incorrect, because we already know
+            // that there is a record with a key greater than K (K' = K+2) in the parent interior cell. Hence, we need to move back up to the parent
+            // interior cell and get the next record from there. self.get_next_record() does that automatically by setting self.going_upwards to true
+            // and then obtaining the next record from the parent interior cell.
+            return self.get_next_record();
+        }
+
         Ok(CursorResult::Ok((None, None)))
     }
 
@@ -396,7 +418,6 @@ impl BTreeCursor {
                             SeekOp::EQ => index_key <= &record,
                         };
                         if target_leaf_page_is_in_the_left_subtree {
-                            // TODO: indexes store payloads in interior cells as well. What if cmp is SeekOp::EQ and the only exactly equal key is in the interior cell?
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
