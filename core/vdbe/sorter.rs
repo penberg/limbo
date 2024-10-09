@@ -2,13 +2,10 @@ use crate::{
     types::{Cursor, CursorResult, OwnedRecord, OwnedValue},
     Result,
 };
-use std::{
-    cell::{Ref, RefCell},
-    collections::{BTreeMap, VecDeque},
-};
+use std::cell::{Ref, RefCell};
 
 pub struct Sorter {
-    records: BTreeMap<OwnedRecord, VecDeque<OwnedRecord>>,
+    records: Vec<OwnedRecord>,
     current: RefCell<Option<OwnedRecord>>,
     order: Vec<bool>,
 }
@@ -16,17 +13,9 @@ pub struct Sorter {
 impl Sorter {
     pub fn new(order: Vec<bool>) -> Self {
         Self {
-            records: BTreeMap::new(),
+            records: Vec::new(),
             current: RefCell::new(None),
             order,
-        }
-    }
-
-    pub fn insert(&mut self, key: OwnedRecord, record: OwnedRecord) {
-        if let Some(vec) = self.records.get_mut(&key) {
-            vec.push_back(record);
-        } else {
-            self.records.insert(key, VecDeque::from(vec![record]));
         }
     }
 }
@@ -36,34 +25,19 @@ impl Cursor for Sorter {
         self.current.borrow().is_none()
     }
 
+    // We do the sorting here since this is what is called by the SorterSort instruction
     fn rewind(&mut self) -> Result<CursorResult<()>> {
-        let mut c = self.current.borrow_mut();
-        for (_, record) in self.records.iter_mut() {
-            let record = record.pop_front();
-            if record.is_some() {
-                *c = record;
-                break;
-            }
-        }
+        let key_fields = self.order.len();
+        self.records
+            .sort_by_cached_key(|record| OwnedRecord::new(record.values[0..key_fields].to_vec()));
+        self.records.reverse();
 
-        Ok(CursorResult::Ok(()))
+        self.next()
     }
 
     fn next(&mut self) -> Result<CursorResult<()>> {
         let mut c = self.current.borrow_mut();
-        let mut matched = false;
-        for (_, record) in self.records.iter_mut() {
-            let record = record.pop_front();
-            if record.is_some() {
-                *c = record;
-                matched = true;
-                break;
-            }
-        }
-        self.records.retain(|_, v| !v.is_empty());
-        if !matched {
-            *c = None;
-        }
+        *c = self.records.pop();
         Ok(CursorResult::Ok(()))
     }
 
@@ -84,7 +58,9 @@ impl Cursor for Sorter {
     }
 
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
-        Ok(self.current.borrow())
+        let ret = self.current.borrow();
+        // log::trace!("returning {:?}", ret);
+        Ok(ret)
     }
 
     fn insert(
@@ -95,9 +71,7 @@ impl Cursor for Sorter {
     ) -> Result<CursorResult<()>> {
         let _ = key;
         let _ = moved_before;
-        let key_fields = self.order.len();
-        let key = OwnedRecord::new(record.values[0..key_fields].to_vec());
-        self.insert(key, OwnedRecord::new(record.values.to_vec()));
+        self.records.push(OwnedRecord::new(record.values.to_vec()));
         Ok(CursorResult::Ok(()))
     }
 
