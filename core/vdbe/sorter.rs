@@ -1,5 +1,5 @@
 use crate::{
-    types::{Cursor, CursorResult, OwnedRecord, OwnedValue},
+    types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp},
     Result,
 };
 use std::cell::{Ref, RefCell};
@@ -49,7 +49,7 @@ impl Cursor for Sorter {
         todo!();
     }
 
-    fn seek_rowid(&mut self, _: u64) -> Result<CursorResult<bool>> {
+    fn seek(&mut self, _: SeekKey<'_>, _: SeekOp) -> Result<CursorResult<bool>> {
         unimplemented!();
     }
 

@@ -44,8 +44,8 @@ do_execsql_test table-star {
 } {1|hat|79.0|hat}
 
 do_execsql_test table-star-2 {
-    select p.*, u.age from users u join products p limit 1;
-} {1|hat|79.0|94}
+    select p.*, u.first_name from users u join products p on u.id = p.id limit 1;
+} {1|hat|79.0|Jamie}
 
 do_execsql_test seekrowid {
     select * from users u where u.id = 5;

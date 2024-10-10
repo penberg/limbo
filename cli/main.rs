@@ -201,7 +201,7 @@ fn display_schema(
 ) -> anyhow::Result<()> {
     let sql = match table {
         Some(table_name) => format!(
-            "SELECT sql FROM sqlite_schema WHERE type='table' AND name = '{}' AND name NOT LIKE 'sqlite_%'",
+            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND tbl_name = '{}' AND name NOT LIKE 'sqlite_%'",
             table_name
         ),
         None => String::from(

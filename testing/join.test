@@ -200,3 +200,9 @@ Jamie||Edward}
 do_execsql_test left-join-constant-condition-true-inner-join-constant-condition-false {
     select u.first_name, p.name, u2.first_name from users u left join products as p on 1 join users u2 on 0 limit 5;
 } {}
+
+do_execsql_test join-utilizing-both-seekrowid-and-secondary-index {
+  select u.first_name, p.name from users u join products p on u.id = p.id and u.age > 70;
+} {Matthew|boots
+Nicholas|shorts
+Jamie|hat}

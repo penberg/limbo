@@ -46,6 +46,7 @@ impl Schema {
 #[derive(Clone, Debug)]
 pub enum Table {
     BTree(Rc<BTreeTable>),
+    Index(Rc<Index>),
     Pseudo(Rc<PseudoTable>),
 }
 
@@ -57,6 +58,7 @@ impl Table {
     pub fn get_rowid_alias_column(&self) -> Option<(usize, &Column)> {
         match self {
             Table::BTree(table) => table.get_rowid_alias_column(),
+            Table::Index(_) => None,
             Table::Pseudo(_) => None,
         }
     }
@@ -64,6 +66,7 @@ impl Table {
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
         match self {
             Table::BTree(table) => table.column_is_rowid_alias(col),
+            Table::Index(_) => false,
             Table::Pseudo(_) => false,
         }
     }
@@ -71,6 +74,7 @@ impl Table {
     pub fn get_name(&self) -> &str {
         match self {
             Table::BTree(table) => &table.name,
+            Table::Index(index) => &index.name,
             Table::Pseudo(_) => "",
         }
     }
@@ -78,6 +82,10 @@ impl Table {
     pub fn column_index_to_name(&self, index: usize) -> Option<&str> {
         match self {
             Table::BTree(table) => match table.columns.get(index) {
+                Some(column) => Some(&column.name),
+                None => None,
+            },
+            Table::Index(i) => match i.columns.get(index) {
                 Some(column) => Some(&column.name),
                 None => None,
             },
@@ -91,6 +99,7 @@ impl Table {
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         match self {
             Table::BTree(table) => table.get_column(name),
+            Table::Index(index) => unimplemented!(),
             Table::Pseudo(table) => table.get_column(name),
         }
     }
@@ -98,6 +107,7 @@ impl Table {
     pub fn get_column_at(&self, index: usize) -> &Column {
         match self {
             Table::BTree(table) => table.columns.get(index).unwrap(),
+            Table::Index(index) => unimplemented!(),
             Table::Pseudo(table) => table.columns.get(index).unwrap(),
         }
     }
@@ -105,6 +115,7 @@ impl Table {
     pub fn columns(&self) -> &Vec<Column> {
         match self {
             Table::BTree(table) => &table.columns,
+            Table::Index(index) => unimplemented!(),
             Table::Pseudo(table) => &table.columns,
         }
     }
@@ -112,7 +123,8 @@ impl Table {
     pub fn has_rowid(&self) -> bool {
         match self {
             Table::BTree(table) => table.has_rowid,
-            Table::Pseudo(_) => todo!(),
+            Table::Index(_) => unimplemented!(),
+            Table::Pseudo(_) => unimplemented!(),
         }
     }
 }
