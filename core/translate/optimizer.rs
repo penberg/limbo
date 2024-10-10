@@ -9,12 +9,14 @@ use crate::{
 };
 
 use super::plan::{
-    get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Operator, Plan,
-    ProjectionColumn, Search,
+    get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Direction, Operator,
+    Plan, ProjectionColumn, Search,
 };
 
 /**
  * Make a few passes over the plan to optimize it.
+ * TODO: these could probably be done in less passes,
+ * but having them separate makes them easier to understand
  */
 pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCache)> {
     let mut expr_result_cache = ExpressionResultCache::new();
@@ -39,12 +41,96 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCac
         &select_plan.referenced_tables,
         &select_plan.available_indexes,
     )?;
+    eliminate_unnecessary_orderby(
+        &mut select_plan.root_operator,
+        &select_plan.referenced_tables,
+        &select_plan.available_indexes,
+    )?;
     find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(&select_plan.root_operator, &mut expr_result_cache);
     Ok((select_plan, expr_result_cache))
 }
 
+fn _operator_is_already_ordered_by(
+    operator: &mut Operator,
+    key: &mut ast::Expr,
+    available_indexes: &Vec<Rc<Index>>,
+) -> Result<bool> {
+    match operator {
+        Operator::Scan {
+            table,
+            table_identifier,
+            ..
+        } => {
+            let tuple = (table.clone(), table_identifier.clone());
+            Ok(key.is_primary_key_of(&tuple))
+        }
+        Operator::Search {
+            table,
+            table_identifier,
+            search,
+            ..
+        } => match search {
+            Search::PrimaryKeyEq { .. } => {
+                let tuple = (table.clone(), table_identifier.clone());
+                Ok(key.is_primary_key_of(&tuple))
+            }
+            Search::PrimaryKeySearch { .. } => {
+                let tuple = (table.clone(), table_identifier.clone());
+                Ok(key.is_primary_key_of(&tuple))
+            }
+            Search::IndexSearch { index, .. } => {
+                let tuple = (table.clone(), table_identifier.clone());
+                let index_idx = key.check_index_scan(&tuple, available_indexes)?;
+                let index_is_the_same = index_idx
+                    .map(|i| Rc::ptr_eq(&available_indexes[i], index))
+                    .unwrap_or(false);
+                Ok(index_is_the_same)
+            }
+        },
+        Operator::Join { left, .. } => {
+            _operator_is_already_ordered_by(left, key, available_indexes)
+        }
+        Operator::Aggregate { source, .. } => {
+            _operator_is_already_ordered_by(source, key, available_indexes)
+        }
+        Operator::Projection { source, .. } => {
+            _operator_is_already_ordered_by(source, key, available_indexes)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn eliminate_unnecessary_orderby(
+    operator: &mut Operator,
+    referenced_tables: &Vec<(Rc<BTreeTable>, String)>,
+    available_indexes: &Vec<Rc<Index>>,
+) -> Result<()> {
+    match operator {
+        Operator::Order { source, key, .. } => {
+            if key.len() != 1 || key.first().unwrap().1 != Direction::Ascending {
+                // TODO: handle multiple order by keys and descending order
+                return Ok(());
+            }
+            let already_ordered = _operator_is_already_ordered_by(
+                source,
+                &mut key.first_mut().unwrap().0,
+                available_indexes,
+            )?;
+            if already_ordered {
+                *operator = source.take_ownership();
+            }
+            Ok(())
+        }
+        Operator::Limit { source, .. } => {
+            eliminate_unnecessary_orderby(source, referenced_tables, available_indexes)?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 /**
- * Use indexes where possible (currently just primary key lookups)
+ * Use indexes where possible
  */
 fn use_indexes(
     operator: &mut Operator,
