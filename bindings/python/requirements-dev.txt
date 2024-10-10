@@ -1,5 +1,7 @@
 coverage==7.6.1
-    # via pytest-cov
+    # via
+    #   limbo (pyproject.toml)
+    #   pytest-cov
 iniconfig==2.0.0
     # via pytest
 mypy==1.11.0
