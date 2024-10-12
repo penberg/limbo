@@ -1,6 +1,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
+use std::usize;
+
+use sqlite3_parser::ast;
 
 use crate::schema::{BTreeTable, Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -8,7 +11,7 @@ use crate::translate::expr::resolve_ident_pseudo_table;
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{BranchOffset, Insn, Program};
-use crate::Result;
+use crate::{Connection, Result};
 
 use super::expr::{
     translate_aggregation, translate_condition_expr, translate_expr, translate_table_columns,
@@ -1462,7 +1465,7 @@ fn epilogue(
     });
 
     program.resolve_label(init_label, program.offset());
-    program.emit_insn(Insn::Transaction);
+    program.emit_insn(Insn::Transaction { write: false });
 
     program.emit_constant_insns();
     program.emit_insn(Insn::Goto {
@@ -1478,6 +1481,7 @@ pub fn emit_program(
     database_header: Rc<RefCell<DatabaseHeader>>,
     mut plan: Plan,
     cache: ExpressionResultCache,
+    connection: Weak<Connection>,
 ) -> Result<Program> {
     let (mut program, mut metadata, init_label, halt_label, start_offset) = prologue(cache)?;
     loop {
@@ -1496,7 +1500,7 @@ pub fn emit_program(
             }
             OpStepResult::Done => {
                 epilogue(&mut program, init_label, halt_label, start_offset)?;
-                return Ok(program.build(database_header));
+                return Ok(program.build(database_header, connection));
             }
         }
     }

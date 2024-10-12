@@ -5,6 +5,7 @@ use log::trace;
 use std::cell::RefCell;
 use std::ffi;
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 macro_rules! stub {
@@ -32,8 +33,8 @@ pub mod util;
 use util::sqlite3_safety_check_sick_or_ok;
 
 pub struct sqlite3 {
-    pub(crate) _db: limbo_core::Database,
-    pub(crate) conn: limbo_core::Connection,
+    pub(crate) _db: Rc<limbo_core::Database>,
+    pub(crate) conn: Rc<limbo_core::Connection>,
     pub(crate) err_code: ffi::c_int,
     pub(crate) err_mask: ffi::c_int,
     pub(crate) malloc_failed: bool,
@@ -42,7 +43,7 @@ pub struct sqlite3 {
 }
 
 impl sqlite3 {
-    pub fn new(db: limbo_core::Database, conn: limbo_core::Connection) -> Self {
+    pub fn new(db: Rc<limbo_core::Database>, conn: Rc<limbo_core::Connection>) -> Self {
         Self {
             _db: db,
             conn,

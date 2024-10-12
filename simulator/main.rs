@@ -1,4 +1,4 @@
-use limbo_core::{Database, File, PlatformIO, Result, IO};
+use limbo_core::{Database, File, OpenFlags, PlatformIO, Result, IO};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
@@ -91,8 +91,8 @@ impl SimulatorIO {
 }
 
 impl IO for SimulatorIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn limbo_core::File>> {
-        let inner = self.inner.open_file(path)?;
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
+        let inner = self.inner.open_file(path, flags)?;
         let file = Rc::new(SimulatorFile {
             inner,
             fault: RefCell::new(false),
@@ -186,6 +186,10 @@ impl limbo_core::File for SimulatorFile {
             ));
         }
         self.inner.pwrite(pos, buffer, c)
+    }
+
+    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
+        todo!()
     }
 }
 
