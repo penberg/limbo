@@ -5,7 +5,7 @@ source $testdir/tester.tcl
 
 do_execsql_test schema {
   .schema
-} {{CREATE TABLE users (
+} {"CREATE TABLE users (
         id INTEGER PRIMARY KEY,
         first_name TEXT,
         last_name TEXT,
@@ -21,11 +21,12 @@ CREATE TABLE products (
         id INTEGER PRIMARY KEY,
         name TEXT,
         price REAL
-    );}}
+    );
+CREATE INDEX age_idx on users (age);"}
 
 do_execsql_test schema-1 {
   .schema users
-} {{CREATE TABLE users (
+} {"CREATE TABLE users (
         id INTEGER PRIMARY KEY,
         first_name TEXT,
         last_name TEXT,
@@ -36,7 +37,8 @@ do_execsql_test schema-1 {
         state TEXT,
         zipcode TEXT,
         age INTEGER
-    );}}
+    );
+CREATE INDEX age_idx on users (age);"}
 
 do_execsql_test schema-2 {
   .schema products

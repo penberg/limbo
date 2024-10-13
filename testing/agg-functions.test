@@ -28,8 +28,8 @@ do_execsql_test select-total-text {
 } {0.0}
 
 do_execsql_test select-limit {
-  SELECT id FROM users LIMIT 1;
-} {1}
+  SELECT typeof(id) FROM users LIMIT 1;
+} {integer}
 
 do_execsql_test select-count {
   SELECT count(id) FROM users;

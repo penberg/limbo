@@ -5,13 +5,13 @@ use crate::storage::sqlite3_ondisk::{
     read_btree_cell, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
     TableInteriorCell, TableLeafCell,
 };
-use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue};
+use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp};
 use crate::Result;
 
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
-use super::sqlite3_ondisk::{write_varint_to_vec, OverflowCell};
+use super::sqlite3_ondisk::{write_varint_to_vec, IndexInteriorCell, IndexLeafCell, OverflowCell};
 
 /*
     These are offsets of fields in the header of a b-tree page.
@@ -23,6 +23,7 @@ const BTREE_HEADER_OFFSET_CELL_CONTENT: usize = 5; /* pointer to first byte of c
 const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -> u8 */
 const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
 
+#[derive(Debug)]
 pub struct MemPage {
     parent: Option<Rc<MemPage>>,
     page_idx: usize,
@@ -56,6 +57,7 @@ pub struct BTreeCursor {
     record: RefCell<Option<OwnedRecord>>,
     null_flag: bool,
     database_header: Rc<RefCell<DatabaseHeader>>,
+    going_upwards: bool,
 }
 
 impl BTreeCursor {
@@ -72,6 +74,7 @@ impl BTreeCursor {
             record: RefCell::new(None),
             null_flag: false,
             database_header,
+            going_upwards: false,
         }
     }
 
@@ -87,7 +90,10 @@ impl BTreeCursor {
         Ok(CursorResult::Ok(page.cell_count() == 0))
     }
 
-    fn get_next_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+    fn get_next_record<'a>(
+        &mut self,
+        predicate: Option<(SeekKey<'a>, SeekOp)>,
+    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
             let mem_page = self.get_mem_page();
             let page_idx = mem_page.page_idx;
@@ -109,6 +115,7 @@ impl BTreeCursor {
                     }
                     None => match parent {
                         Some(ref parent) => {
+                            self.going_upwards = true;
                             self.page.replace(Some(parent.clone()));
                             continue;
                         }
@@ -130,6 +137,7 @@ impl BTreeCursor {
                     _left_child_page,
                     _rowid,
                 }) => {
+                    assert!(predicate.is_none());
                     mem_page.advance();
                     let mem_page =
                         MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
@@ -141,59 +149,179 @@ impl BTreeCursor {
                     _payload,
                     first_overflow_page: _,
                 }) => {
+                    assert!(predicate.is_none());
                     mem_page.advance();
                     let record = crate::storage::sqlite3_ondisk::read_record(_payload)?;
                     return Ok(CursorResult::Ok((Some(*_rowid), Some(record))));
                 }
-                BTreeCell::IndexInteriorCell(_) => {
-                    unimplemented!();
+                BTreeCell::IndexInteriorCell(IndexInteriorCell {
+                    payload,
+                    left_child_page,
+                    ..
+                }) => {
+                    if !self.going_upwards {
+                        let mem_page =
+                            MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
+                        self.page.replace(Some(Rc::new(mem_page)));
+                        continue;
+                    }
+
+                    self.going_upwards = false;
+                    mem_page.advance();
+
+                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                    if predicate.is_none() {
+                        let rowid = match record.values.last() {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
+                    }
+
+                    let (key, op) = predicate.as_ref().unwrap();
+                    let SeekKey::IndexKey(index_key) = key else {
+                        unreachable!("index seek key should be a record");
+                    };
+                    let found = match op {
+                        SeekOp::GT => &record > *index_key,
+                        SeekOp::GE => &record >= *index_key,
+                        SeekOp::EQ => &record == *index_key,
+                    };
+                    if found {
+                        let rowid = match record.values.last() {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
+                    } else {
+                        continue;
+                    }
                 }
-                BTreeCell::IndexLeafCell(_) => {
-                    unimplemented!();
+                BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
+                    mem_page.advance();
+                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                    if predicate.is_none() {
+                        let rowid = match record.values.last() {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
+                    }
+                    let (key, op) = predicate.as_ref().unwrap();
+                    let SeekKey::IndexKey(index_key) = key else {
+                        unreachable!("index seek key should be a record");
+                    };
+                    let found = match op {
+                        SeekOp::GT => &record > *index_key,
+                        SeekOp::GE => &record >= *index_key,
+                        SeekOp::EQ => &record == *index_key,
+                    };
+                    if found {
+                        let rowid = match record.values.last() {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
+                    } else {
+                        continue;
+                    }
                 }
             }
         }
     }
 
-    fn btree_seek_rowid(
+    fn seek<'a>(
         &mut self,
-        rowid: u64,
+        key: SeekKey<'a>,
+        op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        self.move_to(rowid)?;
+        match self.move_to(key.clone(), op.clone())? {
+            CursorResult::Ok(_) => {}
+            CursorResult::IO => return Ok(CursorResult::IO),
+        };
 
         let mem_page = self.get_mem_page();
-
         let page_idx = mem_page.page_idx;
         let page = self.pager.read_page(page_idx)?;
         let page = RefCell::borrow(&page);
         if page.is_locked() {
             return Ok(CursorResult::IO);
         }
+
         let page = page.contents.read().unwrap();
         let page = page.as_ref().unwrap();
 
         for cell_idx in 0..page.cell_count() {
-            match &page.cell_get(
+            let cell = page.cell_get(
                 cell_idx,
                 self.pager.clone(),
                 self.max_local(page.page_type()),
                 self.min_local(page.page_type()),
                 self.usable_space(),
-            )? {
+            )?;
+            match &cell {
                 BTreeCell::TableLeafCell(TableLeafCell {
                     _rowid: cell_rowid,
-                    _payload: p,
+                    _payload: payload,
                     first_overflow_page: _,
                 }) => {
-                    if *cell_rowid == rowid {
-                        let record = crate::storage::sqlite3_ondisk::read_record(p)?;
+                    let SeekKey::TableRowId(rowid_key) = key else {
+                        unreachable!("table seek key should be a rowid");
+                    };
+                    mem_page.advance();
+                    let found = match op {
+                        SeekOp::GT => *cell_rowid > rowid_key,
+                        SeekOp::GE => *cell_rowid >= rowid_key,
+                        SeekOp::EQ => *cell_rowid == rowid_key,
+                    };
+                    if found {
+                        let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         return Ok(CursorResult::Ok((Some(*cell_rowid), Some(record))));
+                    }
+                }
+                BTreeCell::IndexLeafCell(IndexLeafCell { payload, .. }) => {
+                    let SeekKey::IndexKey(index_key) = key else {
+                        unreachable!("index seek key should be a record");
+                    };
+                    mem_page.advance();
+                    let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                    let found = match op {
+                        SeekOp::GT => record > *index_key,
+                        SeekOp::GE => record >= *index_key,
+                        SeekOp::EQ => record == *index_key,
+                    };
+                    if found {
+                        let rowid = match record.values.last() {
+                            Some(OwnedValue::Integer(rowid)) => *rowid as u64,
+                            _ => unreachable!("index cells should have an integer rowid"),
+                        };
+                        return Ok(CursorResult::Ok((Some(rowid), Some(record))));
                     }
                 }
                 cell_type => {
                     unreachable!("unexpected cell type: {:?}", cell_type);
                 }
             }
+        }
+
+        // We have now iterated over all cells in the leaf page and found no match.
+        let is_index = matches!(key, SeekKey::IndexKey(_));
+        if is_index {
+            // Unlike tables, indexes store payloads in interior cells as well. self.move_to() always moves to a leaf page, so there are cases where we need to
+            // move back up to the parent interior cell and get the next record from there to perform a correct seek.
+            // an example of how this can occur:
+            //
+            // we do an index seek for key K with cmp = SeekOp::GT, meaning we want to seek to the first key that is greater than K.
+            // in self.move_to(), we encounter an interior cell with key K' = K+2, and move the left child page, which is a leaf page.
+            // the reason we move to the left child page is that we know that in an index, all keys in the left child page are less than K' i.e. less than K+2,
+            // meaning that the left subtree may contain a key greater than K, e.g. K+1. however, it is possible that it doesn't, in which case the correct
+            // next key is K+2, which is in the parent interior cell.
+            //
+            // In the seek() method, once we have landed in the leaf page and find that there is no cell with a key greater than K,
+            // if we were to return Ok(CursorResult::Ok((None, None))), self.record would be None, which is incorrect, because we already know
+            // that there is a record with a key greater than K (K' = K+2) in the parent interior cell. Hence, we need to move back up the tree
+            // and get the next matching record from there.
+            return self.get_next_record(Some((key, op)));
         }
 
         Ok(CursorResult::Ok((None, None)))
@@ -240,7 +368,7 @@ impl BTreeCursor {
         }
     }
 
-    pub fn move_to(&mut self, key: u64) -> Result<CursorResult<()>> {
+    pub fn move_to<'a>(&mut self, key: SeekKey<'a>, cmp: SeekOp) -> Result<CursorResult<()>> {
         // For a table with N rows, we can find any row by row id in O(log(N)) time by starting at the root page and following the B-tree pointers.
         // B-trees consist of interior pages and leaf pages. Interior pages contain pointers to other pages, while leaf pages contain the actual row data.
         //
@@ -294,8 +422,16 @@ impl BTreeCursor {
                         _left_child_page,
                         _rowid,
                     }) => {
-                        if key < *_rowid {
-                            mem_page.advance();
+                        let SeekKey::TableRowId(rowid_key) = key else {
+                            unreachable!("table seek key should be a rowid");
+                        };
+                        mem_page.advance();
+                        let target_leaf_page_is_in_left_subtree = match cmp {
+                            SeekOp::GT => rowid_key < *_rowid,
+                            SeekOp::GE => rowid_key <= *_rowid,
+                            SeekOp::EQ => rowid_key <= *_rowid,
+                        };
+                        if target_leaf_page_is_in_left_subtree {
                             let mem_page =
                                 MemPage::new(Some(mem_page.clone()), *_left_child_page as usize, 0);
                             self.page.replace(Some(Rc::new(mem_page)));
@@ -312,20 +448,43 @@ impl BTreeCursor {
                             "we don't iterate leaf cells while trying to move to a leaf cell"
                         );
                     }
-                    BTreeCell::IndexInteriorCell(_) => {
-                        unimplemented!();
+                    BTreeCell::IndexInteriorCell(IndexInteriorCell {
+                        left_child_page,
+                        payload,
+                        ..
+                    }) => {
+                        let SeekKey::IndexKey(index_key) = key else {
+                            unreachable!("index seek key should be a record");
+                        };
+                        let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
+                        let target_leaf_page_is_in_the_left_subtree = match cmp {
+                            SeekOp::GT => index_key < &record,
+                            SeekOp::GE => index_key <= &record,
+                            SeekOp::EQ => index_key <= &record,
+                        };
+                        if target_leaf_page_is_in_the_left_subtree {
+                            let mem_page =
+                                MemPage::new(Some(mem_page.clone()), *left_child_page as usize, 0);
+                            self.page.replace(Some(Rc::new(mem_page)));
+                            found_cell = true;
+                            break;
+                        } else {
+                            mem_page.advance();
+                        }
                     }
                     BTreeCell::IndexLeafCell(_) => {
-                        unimplemented!();
+                        unreachable!(
+                            "we don't iterate leaf cells while trying to move to a leaf cell"
+                        );
                     }
                 }
             }
 
             if !found_cell {
-                let parent = mem_page.clone();
+                let parent = mem_page.parent.clone();
                 match page.rightmost_pointer() {
                     Some(right_most_pointer) => {
-                        let mem_page = MemPage::new(Some(parent), right_most_pointer as usize, 0);
+                        let mem_page = MemPage::new(parent, right_most_pointer as usize, 0);
                         self.page.replace(Some(Rc::new(mem_page)));
                         continue;
                     }
@@ -1230,7 +1389,7 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
 impl Cursor for BTreeCursor {
     fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
         self.move_to_rightmost()?;
-        match self.get_next_record()? {
+        match self.get_next_record(None)? {
             CursorResult::Ok((rowid, next)) => {
                 if rowid.is_none() {
                     match self.is_empty_table()? {
@@ -1255,7 +1414,7 @@ impl Cursor for BTreeCursor {
     fn rewind(&mut self) -> Result<CursorResult<()>> {
         let mem_page = MemPage::new(None, self.root_page, 0);
         self.page.replace(Some(Rc::new(mem_page)));
-        match self.get_next_record()? {
+        match self.get_next_record(None)? {
             CursorResult::Ok((rowid, next)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(next);
@@ -1266,7 +1425,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn next(&mut self) -> Result<CursorResult<()>> {
-        match self.get_next_record()? {
+        match self.get_next_record(None)? {
             CursorResult::Ok((rowid, next)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(next);
@@ -1285,8 +1444,8 @@ impl Cursor for BTreeCursor {
         Ok(*self.rowid.borrow())
     }
 
-    fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>> {
-        match self.btree_seek_rowid(rowid)? {
+    fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<CursorResult<bool>> {
+        match self.seek(key, op)? {
             CursorResult::Ok((rowid, record)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(record);
@@ -1311,7 +1470,7 @@ impl Cursor for BTreeCursor {
             _ => unreachable!("btree tables are indexed by integers!"),
         };
         if !moved_before {
-            match self.move_to(*int_key as u64)? {
+            match self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ)? {
                 CursorResult::Ok(_) => {}
                 CursorResult::IO => return Ok(CursorResult::IO),
             };
@@ -1336,7 +1495,7 @@ impl Cursor for BTreeCursor {
             OwnedValue::Integer(i) => i,
             _ => unreachable!("btree tables are indexed by integers!"),
         };
-        match self.move_to(*int_key as u64)? {
+        match self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ)? {
             CursorResult::Ok(_) => {}
             CursorResult::IO => return Ok(CursorResult::IO),
         };

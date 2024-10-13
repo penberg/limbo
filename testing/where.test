@@ -92,24 +92,25 @@ do_execsql_test where-clause-no-table-constant-condition-false-7 {
     select 1 where 'hamburger';
 } {}
 
+# this test functions as an assertion that the index on users.age is being used, since the results are ordered by age without an order by.
 do_execsql_test select-where-and {
     select first_name, age from users where first_name = 'Jamie' and age > 80
-} {Jamie|94
+} {Jamie|87
 Jamie|88
-Jamie|99
+Jamie|88
 Jamie|92
-Jamie|87
-Jamie|88
+Jamie|94
+Jamie|99
 }
 
 do_execsql_test select-where-or {
     select first_name, age from users where first_name = 'Jamie' and age > 80
-} {Jamie|94
+} {Jamie|87
 Jamie|88
-Jamie|99
+Jamie|88
 Jamie|92
-Jamie|87
-Jamie|88
+Jamie|94
+Jamie|99
 }
 
 do_execsql_test select-where-and-or {
@@ -267,3 +268,44 @@ do_execsql_test where-complex-parentheses {
     select id, name from products where ((id = 5 and name = 'sweatshirt') or (id = 1 and name = 'hat')) and (name = 'sweatshirt' or name = 'hat') ORDER BY id;
 } {1|hat
 5|sweatshirt}
+
+# regression test for primary key index behavior
+do_execsql_test where-id-index-seek-regression-test {
+    select id from users where id > 9995;
+} {9996
+9997
+9998
+9999
+10000}
+
+do_execsql_test where-id-index-seek-regression-test-2 {
+    select count(1) from users where id > 0;
+} {10000}
+
+# regression test for secondary index (users.age) behavior
+do_execsql_test where-age-index-seek-regression-test {
+    select age from users where age >= 100 limit 20;
+} {100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100
+100}
+
+do_execsql_test where-age-index-seek-regression-test-2 {
+    select count(1) from users where age > 0;
+} {10000}
