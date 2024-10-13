@@ -534,10 +534,10 @@ pub fn insn_to_str(
                 "".to_string(),
             ),
             Insn::SeekGT {
-                is_index,
+                is_index: _,
                 cursor_id,
                 start_reg,
-                num_regs,
+                num_regs: _,
                 target_pc,
             } => (
                 "SeekGT",
@@ -549,10 +549,10 @@ pub fn insn_to_str(
                 "".to_string(),
             ),
             Insn::SeekGE {
-                is_index,
+                is_index: _,
                 cursor_id,
                 start_reg,
-                num_regs,
+                num_regs: _,
                 target_pc,
             } => (
                 "SeekGE",
@@ -566,7 +566,7 @@ pub fn insn_to_str(
             Insn::IdxGT {
                 cursor_id,
                 start_reg,
-                num_regs,
+                num_regs: _,
                 target_pc,
             } => (
                 "IdxGT",
@@ -580,7 +580,7 @@ pub fn insn_to_str(
             Insn::IdxGE {
                 cursor_id,
                 start_reg,
-                num_regs,
+                num_regs: _,
                 target_pc,
             } => (
                 "IdxGE",
