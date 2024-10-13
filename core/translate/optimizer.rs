@@ -2,11 +2,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use sqlite3_parser::ast;
 
-use crate::{
-    schema::{BTreeTable, Index},
-    util::normalize_ident,
-    Result,
-};
+use crate::{schema::Index, util::normalize_ident, Result};
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, BTreeTableReference,
@@ -43,7 +39,6 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCac
     )?;
     eliminate_unnecessary_orderby(
         &mut select_plan.root_operator,
-        &select_plan.referenced_tables,
         &select_plan.available_indexes,
     )?;
     find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(&select_plan.root_operator, &mut expr_result_cache);
@@ -58,16 +53,16 @@ fn _operator_is_already_ordered_by(
     match operator {
         Operator::Scan {
             table_reference, ..
-        } => Ok(key.is_primary_key_of(&table_reference)),
+        } => Ok(key.is_primary_key_of(table_reference)),
         Operator::Search {
             table_reference,
             search,
             ..
         } => match search {
-            Search::PrimaryKeyEq { .. } => Ok(key.is_primary_key_of(&table_reference)),
-            Search::PrimaryKeySearch { .. } => Ok(key.is_primary_key_of(&table_reference)),
+            Search::PrimaryKeyEq { .. } => Ok(key.is_primary_key_of(table_reference)),
+            Search::PrimaryKeySearch { .. } => Ok(key.is_primary_key_of(table_reference)),
             Search::IndexSearch { index, .. } => {
-                let index_idx = key.check_index_scan(&table_reference, available_indexes)?;
+                let index_idx = key.check_index_scan(table_reference, available_indexes)?;
                 let index_is_the_same = index_idx
                     .map(|i| Rc::ptr_eq(&available_indexes[i], index))
                     .unwrap_or(false);
@@ -89,7 +84,6 @@ fn _operator_is_already_ordered_by(
 
 fn eliminate_unnecessary_orderby(
     operator: &mut Operator,
-    referenced_tables: &Vec<BTreeTableReference>,
     available_indexes: &Vec<Rc<Index>>,
 ) -> Result<()> {
     match operator {
@@ -109,7 +103,7 @@ fn eliminate_unnecessary_orderby(
             Ok(())
         }
         Operator::Limit { source, .. } => {
-            eliminate_unnecessary_orderby(source, referenced_tables, available_indexes)?;
+            eliminate_unnecessary_orderby(source, available_indexes)?;
             Ok(())
         }
         _ => Ok(()),

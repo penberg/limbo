@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use sqlite3_parser::ast;
 
-use crate::schema::{BTreeTable, Column, PseudoTable, Table};
+use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::resolve_ident_pseudo_table;
 use crate::translate::plan::Search;
@@ -403,10 +403,10 @@ impl Emitter for Operator {
                                 .unwrap_or(m.termination_label_stack.last().unwrap());
                             match cmp_op {
                                 ast::Operator::Equals | ast::Operator::LessEquals => {
-                                    if index_cursor_id.is_some() {
+                                    if let Some(index_cursor_id) = index_cursor_id {
                                         program.emit_insn_with_label_dependency(
                                             Insn::IdxGT {
-                                                cursor_id: index_cursor_id.unwrap(),
+                                                cursor_id: index_cursor_id,
                                                 start_reg: cmp_reg,
                                                 num_regs: 1,
                                                 target_pc: abort_jump_target,
@@ -430,10 +430,10 @@ impl Emitter for Operator {
                                     }
                                 }
                                 ast::Operator::Less => {
-                                    if index_cursor_id.is_some() {
+                                    if let Some(index_cursor_id) = index_cursor_id {
                                         program.emit_insn_with_label_dependency(
                                             Insn::IdxGE {
-                                                cursor_id: index_cursor_id.unwrap(),
+                                                cursor_id: index_cursor_id,
                                                 start_reg: cmp_reg,
                                                 num_regs: 1,
                                                 target_pc: abort_jump_target,
@@ -459,9 +459,9 @@ impl Emitter for Operator {
                                 _ => {}
                             }
 
-                            if index_cursor_id.is_some() {
+                            if let Some(index_cursor_id) = index_cursor_id {
                                 program.emit_insn(Insn::DeferredSeek {
-                                    index_cursor_id: index_cursor_id.unwrap(),
+                                    index_cursor_id,
                                     table_cursor_id,
                                 });
                             }

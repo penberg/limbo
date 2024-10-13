@@ -99,7 +99,7 @@ impl Table {
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         match self {
             Table::BTree(table) => table.get_column(name),
-            Table::Index(index) => unimplemented!(),
+            Table::Index(_) => unimplemented!(),
             Table::Pseudo(table) => table.get_column(name),
         }
     }
@@ -107,7 +107,7 @@ impl Table {
     pub fn get_column_at(&self, index: usize) -> &Column {
         match self {
             Table::BTree(table) => table.columns.get(index).unwrap(),
-            Table::Index(index) => unimplemented!(),
+            Table::Index(_) => unimplemented!(),
             Table::Pseudo(table) => table.columns.get(index).unwrap(),
         }
     }
@@ -115,7 +115,7 @@ impl Table {
     pub fn columns(&self) -> &Vec<Column> {
         match self {
             Table::BTree(table) => &table.columns,
-            Table::Index(index) => unimplemented!(),
+            Table::Index(_) => unimplemented!(),
             Table::Pseudo(table) => &table.columns,
         }
     }

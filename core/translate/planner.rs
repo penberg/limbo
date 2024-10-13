@@ -1,12 +1,6 @@
 use super::plan::{Aggregate, BTreeTableReference, Direction, Operator, Plan, ProjectionColumn};
-use crate::{
-    function::Func,
-    schema::{BTreeTable, Schema},
-    util::normalize_ident,
-    Result,
-};
+use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
 use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
-use std::rc::Rc;
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -279,13 +273,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             Ok(Plan {
                 root_operator: operator,
                 referenced_tables,
-                available_indexes: schema
-                    .indexes
-                    .clone()
-                    .into_iter()
-                    .map(|(_, v)| v)
-                    .flatten()
-                    .collect(),
+                available_indexes: schema.indexes.clone().into_values().flatten().collect(),
             })
         }
         _ => todo!(),

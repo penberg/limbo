@@ -90,9 +90,9 @@ impl BTreeCursor {
         Ok(CursorResult::Ok(page.cell_count() == 0))
     }
 
-    fn get_next_record<'a>(
+    fn get_next_record(
         &mut self,
-        predicate: Option<(SeekKey<'a>, SeekOp)>,
+        predicate: Option<(SeekKey<'_>, SeekOp)>,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
             let mem_page = self.get_mem_page();
@@ -230,9 +230,9 @@ impl BTreeCursor {
         }
     }
 
-    fn seek<'a>(
+    fn seek(
         &mut self,
-        key: SeekKey<'a>,
+        key: SeekKey<'_>,
         op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         match self.move_to(key.clone(), op.clone())? {
@@ -368,7 +368,7 @@ impl BTreeCursor {
         }
     }
 
-    pub fn move_to<'a>(&mut self, key: SeekKey<'a>, cmp: SeekOp) -> Result<CursorResult<()>> {
+    pub fn move_to(&mut self, key: SeekKey<'_>, cmp: SeekOp) -> Result<CursorResult<()>> {
         // For a table with N rows, we can find any row by row id in O(log(N)) time by starting at the root page and following the B-tree pointers.
         // B-trees consist of interior pages and leaf pages. Interior pages contain pointers to other pages, while leaf pages contain the actual row data.
         //
