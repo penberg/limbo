@@ -16,7 +16,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Plan {
     pub root_operator: Operator,
-    pub referenced_tables: Vec<(Rc<BTreeTable>, String)>,
+    pub referenced_tables: Vec<BTreeTableReference>,
     pub available_indexes: Vec<Rc<Index>>,
 }
 
@@ -111,8 +111,7 @@ pub enum Operator {
     // e.g. SELECT * FROM t1 WHERE t1.foo = 5
     Scan {
         id: usize,
-        table: Rc<BTreeTable>,
-        table_identifier: String,
+        table_reference: BTreeTableReference,
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
     },
@@ -121,8 +120,7 @@ pub enum Operator {
     // (i.e. a primary key or a secondary index)
     Search {
         id: usize,
-        table: Rc<BTreeTable>,
-        table_identifier: String,
+        table_reference: BTreeTableReference,
         search: Search,
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
@@ -131,6 +129,12 @@ pub enum Operator {
     // This operator is used to represent an empty query.
     // e.g. SELECT * from foo WHERE 0 will eventually be optimized to Nothing.
     Nothing,
+}
+
+#[derive(Clone, Debug)]
+pub struct BTreeTableReference {
+    pub table: Rc<BTreeTable>,
+    pub table_identifier: String,
 }
 
 /// An enum that represents a search operation that can be used to search for a row in a table using an index
@@ -157,27 +161,27 @@ pub enum Search {
 pub enum ProjectionColumn {
     Column(ast::Expr),
     Star,
-    TableStar(Rc<BTreeTable>, String),
+    TableStar(BTreeTableReference),
 }
 
 impl ProjectionColumn {
-    pub fn column_count(&self, referenced_tables: &[(Rc<BTreeTable>, String)]) -> usize {
+    pub fn column_count(&self, referenced_tables: &[BTreeTableReference]) -> usize {
         match self {
             ProjectionColumn::Column(_) => 1,
             ProjectionColumn::Star => {
                 let mut count = 0;
-                for (table, _) in referenced_tables {
-                    count += table.columns.len();
+                for table_reference in referenced_tables {
+                    count += table_reference.table.columns.len();
                 }
                 count
             }
-            ProjectionColumn::TableStar(table, _) => table.columns.len(),
+            ProjectionColumn::TableStar(table_reference) => table_reference.table.columns.len(),
         }
     }
 }
 
 impl Operator {
-    pub fn column_count(&self, referenced_tables: &[(Rc<BTreeTable>, String)]) -> usize {
+    pub fn column_count(&self, referenced_tables: &[BTreeTableReference]) -> usize {
         match self {
             Operator::Aggregate {
                 group_by,
@@ -194,8 +198,12 @@ impl Operator {
                 .iter()
                 .map(|e| e.column_count(referenced_tables))
                 .sum(),
-            Operator::Scan { table, .. } => table.columns.len(),
-            Operator::Search { table, .. } => table.columns.len(),
+            Operator::Scan {
+                table_reference, ..
+            } => table_reference.table.columns.len(),
+            Operator::Search {
+                table_reference, ..
+            } => table_reference.table.columns.len(),
             Operator::Nothing => 0,
         }
     }
@@ -243,13 +251,27 @@ impl Operator {
                         _ => "expr".to_string(),
                     },
                     ProjectionColumn::Star => "*".to_string(),
-                    ProjectionColumn::TableStar(_, tbl) => format!("{}.{}", tbl, "*"),
+                    ProjectionColumn::TableStar(table_reference) => {
+                        format!("{}.{}", table_reference.table_identifier, "*")
+                    }
                 })
                 .collect(),
-            Operator::Scan { table, .. } => table.columns.iter().map(|c| c.name.clone()).collect(),
-            Operator::Search { table, .. } => {
-                table.columns.iter().map(|c| c.name.clone()).collect()
-            }
+            Operator::Scan {
+                table_reference, ..
+            } => table_reference
+                .table
+                .columns
+                .iter()
+                .map(|c| c.name.clone())
+                .collect(),
+            Operator::Search {
+                table_reference, ..
+            } => table_reference
+                .table
+                .columns
+                .iter()
+                .map(|c| c.name.clone())
+                .collect(),
             Operator::Nothing => vec![],
         }
     }
@@ -394,7 +416,9 @@ impl Display for Operator {
                         .map(|expr| match expr {
                             ProjectionColumn::Column(c) => c.to_string(),
                             ProjectionColumn::Star => "*".to_string(),
-                            ProjectionColumn::TableStar(_, a) => format!("{}.{}", a, "*"),
+                            ProjectionColumn::TableStar(table_reference) => {
+                                format!("{}.{}", table_reference.table_identifier, "*")
+                            }
                         })
                         .collect::<Vec<String>>()
                         .join(", ");
@@ -402,16 +426,19 @@ impl Display for Operator {
                     fmt_operator(source, f, level + 1, true)
                 }
                 Operator::Scan {
-                    table,
+                    table_reference,
                     predicates: filter,
-                    table_identifier,
                     ..
                 } => {
-                    let table_name = if table.name == *table_identifier {
-                        table.name.clone()
-                    } else {
-                        format!("{} AS {}", &table.name, &table_identifier)
-                    };
+                    let table_name =
+                        if table_reference.table.name == table_reference.table_identifier {
+                            table_reference.table_identifier.clone()
+                        } else {
+                            format!(
+                                "{} AS {}",
+                                &table_reference.table.name, &table_reference.table_identifier
+                            )
+                        };
                     let filter_string = filter.as_ref().map(|f| {
                         let filters_string = f
                             .iter()
@@ -427,7 +454,7 @@ impl Display for Operator {
                     Ok(())
                 }
                 Operator::Search {
-                    table_identifier,
+                    table_reference,
                     search,
                     ..
                 } => {
@@ -436,14 +463,14 @@ impl Display for Operator {
                             writeln!(
                                 f,
                                 "{}SEARCH {} USING INTEGER PRIMARY KEY (rowid=?)",
-                                indent, table_identifier
+                                indent, table_reference.table_identifier
                             )?;
                         }
                         Search::IndexSearch { index, .. } => {
                             writeln!(
                                 f,
                                 "{}SEARCH {} USING INDEX {}",
-                                indent, table_identifier, index.name
+                                indent, table_reference.table_identifier, index.name
                             )?;
                         }
                     }
@@ -466,7 +493,7 @@ impl Display for Operator {
     then the return value will be (in bits): 110
 */
 pub fn get_table_ref_bitmask_for_operator<'a>(
-    tables: &'a Vec<(Rc<BTreeTable>, String)>,
+    tables: &'a Vec<BTreeTableReference>,
     operator: &'a Operator,
 ) -> Result<usize> {
     let mut table_refs_mask = 0;
@@ -495,18 +522,22 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
         Operator::Projection { source, .. } => {
             table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
         }
-        Operator::Scan { table, .. } => {
+        Operator::Scan {
+            table_reference, ..
+        } => {
             table_refs_mask |= 1
                 << tables
                     .iter()
-                    .position(|(t, _)| Rc::ptr_eq(t, table))
+                    .position(|t| Rc::ptr_eq(&t.table, &table_reference.table))
                     .unwrap();
         }
-        Operator::Search { table, .. } => {
+        Operator::Search {
+            table_reference, ..
+        } => {
             table_refs_mask |= 1
                 << tables
                     .iter()
-                    .position(|(t, _)| Rc::ptr_eq(t, table))
+                    .position(|t| Rc::ptr_eq(&t.table, &table_reference.table))
                     .unwrap();
         }
         Operator::Nothing => {}
@@ -523,7 +554,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
     then the return value will be (in bits): 011
 */
 pub fn get_table_ref_bitmask_for_ast_expr<'a>(
-    tables: &'a Vec<(Rc<BTreeTable>, String)>,
+    tables: &'a Vec<BTreeTableReference>,
     predicate: &'a ast::Expr,
 ) -> Result<usize> {
     let mut table_refs_mask = 0;
@@ -537,7 +568,7 @@ pub fn get_table_ref_bitmask_for_ast_expr<'a>(
             let matching_tables = tables
                 .iter()
                 .enumerate()
-                .filter(|(_, (table, _))| table.get_column(&ident).is_some());
+                .filter(|(_, table_reference)| table_reference.table.get_column(&ident).is_some());
 
             let mut matches = 0;
             let mut matching_tbl = None;
@@ -561,17 +592,17 @@ pub fn get_table_ref_bitmask_for_ast_expr<'a>(
             let matching_table = tables
                 .iter()
                 .enumerate()
-                .find(|(_, (_, t_id))| *t_id == tbl);
+                .find(|(_, t)| t.table_identifier == tbl);
 
             if matching_table.is_none() {
                 crate::bail_parse_error!("introspect: table not found: {}", &tbl)
             }
-            let matching_table = matching_table.unwrap();
-            if matching_table.1 .0.get_column(&ident).is_none() {
+            let (table_index, table_reference) = matching_table.unwrap();
+            if table_reference.table.get_column(&ident).is_none() {
                 crate::bail_parse_error!("column with qualified name {}.{} not found", &tbl, &ident)
             }
 
-            table_refs_mask |= 1 << matching_table.0;
+            table_refs_mask |= 1 << table_index;
         }
         ast::Expr::Literal(_) => {}
         ast::Expr::Like { lhs, rhs, .. } => {

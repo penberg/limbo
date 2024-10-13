@@ -18,7 +18,7 @@ use super::expr::{
     ConditionMetadata,
 };
 use super::optimizer::ExpressionResultCache;
-use super::plan::Plan;
+use super::plan::{BTreeTableReference, Plan};
 use super::plan::{Operator, ProjectionColumn};
 
 /**
@@ -32,19 +32,19 @@ pub trait Emitter {
         &mut self,
         pb: &mut ProgramBuilder,
         m: &mut Metadata,
-        referenced_tables: &[(Rc<BTreeTable>, String)],
+        referenced_tables: &[BTreeTableReference],
     ) -> Result<OpStepResult>;
     fn result_columns(
         &self,
         program: &mut ProgramBuilder,
-        referenced_tables: &[(Rc<BTreeTable>, String)],
+        referenced_tables: &[BTreeTableReference],
         metadata: &mut Metadata,
         cursor_override: Option<&SortCursorOverride>,
     ) -> Result<usize>;
     fn result_row(
         &mut self,
         program: &mut ProgramBuilder,
-        referenced_tables: &[(Rc<BTreeTable>, String)],
+        referenced_tables: &[BTreeTableReference],
         metadata: &mut Metadata,
         cursor_override: Option<&SortCursorOverride>,
     ) -> Result<()>;
@@ -163,13 +163,12 @@ impl Emitter for Operator {
         &mut self,
         program: &mut ProgramBuilder,
         m: &mut Metadata,
-        referenced_tables: &[(Rc<BTreeTable>, String)],
+        referenced_tables: &[BTreeTableReference],
     ) -> Result<OpStepResult> {
         let current_operator_column_count = self.column_count(referenced_tables);
         match self {
             Operator::Scan {
-                table,
-                table_identifier,
+                table_reference,
                 id,
                 step,
                 predicates,
@@ -182,10 +181,10 @@ impl Emitter for Operator {
                 match *step {
                     SCAN_OPEN_READ => {
                         let cursor_id = program.alloc_cursor_id(
-                            Some(table_identifier.clone()),
-                            Some(Table::BTree(table.clone())),
+                            Some(table_reference.table_identifier.clone()),
+                            Some(Table::BTree(table_reference.table.clone())),
                         );
-                        let root_page = table.root_page;
+                        let root_page = table_reference.table.root_page;
                         let next_row_label = program.allocate_label();
                         m.next_row_labels.insert(*id, next_row_label);
                         program.emit_insn(Insn::OpenReadAsync {
@@ -197,7 +196,8 @@ impl Emitter for Operator {
                         Ok(OpStepResult::Continue)
                     }
                     SCAN_BODY => {
-                        let cursor_id = program.resolve_cursor_id(table_identifier, None);
+                        let cursor_id =
+                            program.resolve_cursor_id(&table_reference.table_identifier, None);
                         program.emit_insn(Insn::RewindAsync { cursor_id });
                         let scan_loop_body_label = program.allocate_label();
                         let halt_label = m.termination_label_stack.last().unwrap();
@@ -237,7 +237,8 @@ impl Emitter for Operator {
                         Ok(OpStepResult::ReadyToEmit)
                     }
                     SCAN_NEXT => {
-                        let cursor_id = program.resolve_cursor_id(table_identifier, None);
+                        let cursor_id =
+                            program.resolve_cursor_id(&table_reference.table_identifier, None);
                         program
                             .resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
                         program.emit_insn(Insn::NextAsync { cursor_id });
@@ -255,8 +256,7 @@ impl Emitter for Operator {
                 }
             }
             Operator::Search {
-                table,
-                table_identifier,
+                table_reference,
                 search,
                 predicates,
                 step,
@@ -270,8 +270,8 @@ impl Emitter for Operator {
                 match *step {
                     SEARCH_OPEN_READ => {
                         let table_cursor_id = program.alloc_cursor_id(
-                            Some(table_identifier.clone()),
-                            Some(Table::BTree(table.clone())),
+                            Some(table_reference.table_identifier.clone()),
+                            Some(Table::BTree(table_reference.table.clone())),
                         );
 
                         let next_row_label = program.allocate_label();
@@ -285,7 +285,7 @@ impl Emitter for Operator {
                         m.scan_loop_body_labels.push(scan_loop_body_label);
                         program.emit_insn(Insn::OpenReadAsync {
                             cursor_id: table_cursor_id,
-                            root_page: table.root_page,
+                            root_page: table_reference.table.root_page,
                         });
                         program.emit_insn(Insn::OpenReadAwait);
 
@@ -303,7 +303,8 @@ impl Emitter for Operator {
                         Ok(OpStepResult::Continue)
                     }
                     SEARCH_BODY => {
-                        let table_cursor_id = program.resolve_cursor_id(table_identifier, None);
+                        let table_cursor_id =
+                            program.resolve_cursor_id(&table_reference.table_identifier, None);
 
                         // Open the loop for the index search.
                         // Primary key equality search is handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
@@ -521,7 +522,7 @@ impl Emitter for Operator {
                                 program.resolve_cursor_id(&index.name, None)
                             }
                             Search::PrimaryKeySearch { .. } => {
-                                program.resolve_cursor_id(table_identifier, None)
+                                program.resolve_cursor_id(&table_reference.table_identifier, None)
                             }
                             Search::PrimaryKeyEq { .. } => unreachable!(),
                         };
@@ -642,11 +643,13 @@ impl Emitter for Operator {
                             // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
                             let right_cursor_id = match right.as_ref() {
                                 Operator::Scan {
-                                    table_identifier, ..
-                                } => program.resolve_cursor_id(table_identifier, None),
+                                    table_reference, ..
+                                } => program
+                                    .resolve_cursor_id(&table_reference.table_identifier, None),
                                 Operator::Search {
-                                    table_identifier, ..
-                                } => program.resolve_cursor_id(table_identifier, None),
+                                    table_reference, ..
+                                } => program
+                                    .resolve_cursor_id(&table_reference.table_identifier, None),
                                 _ => unreachable!(),
                             };
                             program.emit_insn(Insn::NullRow {
@@ -1394,41 +1397,37 @@ impl Emitter for Operator {
     fn result_columns(
         &self,
         program: &mut ProgramBuilder,
-        referenced_tables: &[(Rc<BTreeTable>, String)],
+        referenced_tables: &[BTreeTableReference],
         m: &mut Metadata,
         cursor_override: Option<&SortCursorOverride>,
     ) -> Result<usize> {
         let col_count = self.column_count(referenced_tables);
         match self {
             Operator::Scan {
-                table,
-                table_identifier,
-                ..
+                table_reference, ..
             } => {
                 let start_reg = program.alloc_registers(col_count);
                 let table = cursor_override
                     .map(|c| c.pseudo_table.clone())
-                    .unwrap_or_else(|| Table::BTree(table.clone()));
-                let cursor_id = cursor_override
-                    .map(|c| c.cursor_id)
-                    .unwrap_or_else(|| program.resolve_cursor_id(table_identifier, None));
+                    .unwrap_or_else(|| Table::BTree(table_reference.table.clone()));
+                let cursor_id = cursor_override.map(|c| c.cursor_id).unwrap_or_else(|| {
+                    program.resolve_cursor_id(&table_reference.table_identifier, None)
+                });
                 let start_column_offset = cursor_override.map(|c| c.sort_key_len).unwrap_or(0);
                 translate_table_columns(program, cursor_id, &table, start_column_offset, start_reg);
 
                 Ok(start_reg)
             }
             Operator::Search {
-                table,
-                table_identifier,
-                ..
+                table_reference, ..
             } => {
                 let start_reg = program.alloc_registers(col_count);
                 let table = cursor_override
                     .map(|c| c.pseudo_table.clone())
-                    .unwrap_or_else(|| Table::BTree(table.clone()));
-                let cursor_id = cursor_override
-                    .map(|c| c.cursor_id)
-                    .unwrap_or_else(|| program.resolve_cursor_id(table_identifier, None));
+                    .unwrap_or_else(|| Table::BTree(table_reference.table.clone()));
+                let cursor_id = cursor_override.map(|c| c.cursor_id).unwrap_or_else(|| {
+                    program.resolve_cursor_id(&table_reference.table_identifier, None)
+                });
                 let start_column_offset = cursor_override.map(|c| c.sort_key_len).unwrap_or(0);
                 translate_table_columns(program, cursor_id, &table, start_column_offset, start_reg);
 
@@ -1544,13 +1543,16 @@ impl Emitter for Operator {
                             cur_reg += 1;
                         }
                         ProjectionColumn::Star => {
-                            for (table, table_identifier) in referenced_tables.iter() {
+                            for table_reference in referenced_tables.iter() {
                                 let table = cursor_override
                                     .map(|c| c.pseudo_table.clone())
-                                    .unwrap_or_else(|| Table::BTree(table.clone()));
+                                    .unwrap_or_else(|| Table::BTree(table_reference.table.clone()));
                                 let cursor_id =
                                     cursor_override.map(|c| c.cursor_id).unwrap_or_else(|| {
-                                        program.resolve_cursor_id(table_identifier, None)
+                                        program.resolve_cursor_id(
+                                            &table_reference.table_identifier,
+                                            None,
+                                        )
                                     });
                                 let start_column_offset =
                                     cursor_override.map(|c| c.sort_key_len).unwrap_or(0);
@@ -1563,18 +1565,19 @@ impl Emitter for Operator {
                                 );
                             }
                         }
-                        ProjectionColumn::TableStar(_, table_identifier) => {
-                            let (table, table_identifier) = referenced_tables
+                        ProjectionColumn::TableStar(table_reference) => {
+                            let table_ref = referenced_tables
                                 .iter()
-                                .find(|(_, id)| id == table_identifier)
+                                .find(|t| t.table_identifier == table_reference.table_identifier)
                                 .unwrap();
 
                             let table = cursor_override
                                 .map(|c| c.pseudo_table.clone())
-                                .unwrap_or_else(|| Table::BTree(table.clone()));
+                                .unwrap_or_else(|| Table::BTree(table_ref.table.clone()));
                             let cursor_id =
                                 cursor_override.map(|c| c.cursor_id).unwrap_or_else(|| {
-                                    program.resolve_cursor_id(table_identifier, None)
+                                    program
+                                        .resolve_cursor_id(&table_reference.table_identifier, None)
                                 });
                             let start_column_offset =
                                 cursor_override.map(|c| c.sort_key_len).unwrap_or(0);
@@ -1597,7 +1600,7 @@ impl Emitter for Operator {
     fn result_row(
         &mut self,
         program: &mut ProgramBuilder,
-        referenced_tables: &[(Rc<BTreeTable>, String)],
+        referenced_tables: &[BTreeTableReference],
         m: &mut Metadata,
         cursor_override: Option<&SortCursorOverride>,
     ) -> Result<()> {

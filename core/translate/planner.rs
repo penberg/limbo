@@ -1,4 +1,4 @@
-use super::plan::{Aggregate, Direction, Operator, Plan, ProjectionColumn};
+use super::plan::{Aggregate, BTreeTableReference, Direction, Operator, Plan, ProjectionColumn};
 use crate::{
     function::Func,
     schema::{BTreeTable, Schema},
@@ -113,16 +113,14 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                             let name_normalized = normalize_ident(name.0.as_str());
                             let referenced_table = referenced_tables
                                 .iter()
-                                .find(|(_t, t_id)| *t_id == name_normalized);
+                                .find(|t| t.table_identifier == name_normalized);
 
                             if referenced_table.is_none() {
                                 crate::bail_parse_error!("Table {} not found", name.0);
                             }
-                            let (table, identifier) = referenced_table.unwrap();
-                            projection_expressions.push(ProjectionColumn::TableStar(
-                                table.clone(),
-                                identifier.clone(),
-                            ));
+                            let table_reference = referenced_table.unwrap();
+                            projection_expressions
+                                .push(ProjectionColumn::TableStar(table_reference.clone()));
                         }
                         ast::ResultColumn::Expr(expr, _) => {
                             projection_expressions.push(ProjectionColumn::Column(expr.clone()));
@@ -299,7 +297,7 @@ fn parse_from(
     schema: &Schema,
     from: Option<FromClause>,
     operator_id_counter: &mut OperatorIdCounter,
-) -> Result<(Operator, Vec<(Rc<BTreeTable>, String)>)> {
+) -> Result<(Operator, Vec<BTreeTableReference>)> {
     if from.as_ref().and_then(|f| f.select.as_ref()).is_none() {
         return Ok((Operator::Nothing, vec![]));
     }
@@ -318,15 +316,17 @@ fn parse_from(
                 })
                 .map(|a| a.0);
 
-            (table, alias.unwrap_or(qualified_name.name.0))
+            BTreeTableReference {
+                table: table.clone(),
+                table_identifier: alias.unwrap_or(qualified_name.name.0),
+            }
         }
         _ => todo!(),
     };
 
     let mut operator = Operator::Scan {
-        table: first_table.0.clone(),
+        table_reference: first_table.clone(),
         predicates: None,
-        table_identifier: first_table.1.clone(),
         id: operator_id_counter.get_next_id(),
         step: 0,
     };
@@ -353,7 +353,7 @@ fn parse_join(
     schema: &Schema,
     join: ast::JoinedSelectTable,
     operator_id_counter: &mut OperatorIdCounter,
-    tables: &mut Vec<(Rc<BTreeTable>, String)>,
+    tables: &mut Vec<BTreeTableReference>,
 ) -> Result<(Operator, bool, Option<Vec<ast::Expr>>)> {
     let ast::JoinedSelectTable {
         operator,
@@ -372,8 +372,10 @@ fn parse_join(
                     ast::As::Elided(id) => id,
                 })
                 .map(|a| a.0);
-
-            (table, alias.unwrap_or(qualified_name.name.0))
+            BTreeTableReference {
+                table: table.clone(),
+                table_identifier: alias.unwrap_or(qualified_name.name.0),
+            }
         }
         _ => todo!(),
     };
@@ -402,9 +404,8 @@ fn parse_join(
 
     Ok((
         Operator::Scan {
-            table: table.0.clone(),
+            table_reference: table.clone(),
             predicates: None,
-            table_identifier: table.1.clone(),
             id: operator_id_counter.get_next_id(),
             step: 0,
         },
