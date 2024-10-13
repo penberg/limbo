@@ -9,8 +9,8 @@ use crate::{
 };
 
 use super::plan::{
-    get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, Direction, Operator,
-    Plan, ProjectionColumn, Search,
+    get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, BTreeTableReference,
+    Direction, Operator, Plan, ProjectionColumn, Search,
 };
 
 /**
@@ -57,30 +57,17 @@ fn _operator_is_already_ordered_by(
 ) -> Result<bool> {
     match operator {
         Operator::Scan {
-            table,
-            table_identifier,
-            ..
-        } => {
-            let tuple = (table.clone(), table_identifier.clone());
-            Ok(key.is_primary_key_of(&tuple))
-        }
+            table_reference, ..
+        } => Ok(key.is_primary_key_of(&table_reference)),
         Operator::Search {
-            table,
-            table_identifier,
+            table_reference,
             search,
             ..
         } => match search {
-            Search::PrimaryKeyEq { .. } => {
-                let tuple = (table.clone(), table_identifier.clone());
-                Ok(key.is_primary_key_of(&tuple))
-            }
-            Search::PrimaryKeySearch { .. } => {
-                let tuple = (table.clone(), table_identifier.clone());
-                Ok(key.is_primary_key_of(&tuple))
-            }
+            Search::PrimaryKeyEq { .. } => Ok(key.is_primary_key_of(&table_reference)),
+            Search::PrimaryKeySearch { .. } => Ok(key.is_primary_key_of(&table_reference)),
             Search::IndexSearch { index, .. } => {
-                let tuple = (table.clone(), table_identifier.clone());
-                let index_idx = key.check_index_scan(&tuple, available_indexes)?;
+                let index_idx = key.check_index_scan(&table_reference, available_indexes)?;
                 let index_is_the_same = index_idx
                     .map(|i| Rc::ptr_eq(&available_indexes[i], index))
                     .unwrap_or(false);
@@ -102,7 +89,7 @@ fn _operator_is_already_ordered_by(
 
 fn eliminate_unnecessary_orderby(
     operator: &mut Operator,
-    referenced_tables: &Vec<(Rc<BTreeTable>, String)>,
+    referenced_tables: &Vec<BTreeTableReference>,
     available_indexes: &Vec<Rc<Index>>,
 ) -> Result<()> {
     match operator {
@@ -134,15 +121,14 @@ fn eliminate_unnecessary_orderby(
  */
 fn use_indexes(
     operator: &mut Operator,
-    referenced_tables: &[(Rc<BTreeTable>, String)],
+    referenced_tables: &[BTreeTableReference],
     available_indexes: &[Rc<Index>],
 ) -> Result<()> {
     match operator {
         Operator::Search { .. } => Ok(()),
         Operator::Scan {
-            table,
+            table_reference,
             predicates: filter,
-            table_identifier,
             id,
             ..
         } => {
@@ -153,11 +139,14 @@ fn use_indexes(
             let fs = filter.as_mut().unwrap();
             for i in 0..fs.len() {
                 let f = fs[i].take_ownership();
-                let table = referenced_tables
+                let table_ref = referenced_tables
                     .iter()
-                    .find(|(t, t_id)| Rc::ptr_eq(t, table) && t_id == table_identifier)
+                    .find(|t| {
+                        Rc::ptr_eq(&t.table, &table_reference.table)
+                            && t.table_identifier == table_reference.table_identifier
+                    })
                     .unwrap();
-                match try_extract_index_search_expression(f, table, available_indexes)? {
+                match try_extract_index_search_expression(f, table_ref, available_indexes)? {
                     Either::Left(non_index_using_expr) => {
                         fs[i] = non_index_using_expr;
                     }
@@ -165,8 +154,7 @@ fn use_indexes(
                         fs.remove(i);
                         *operator = Operator::Search {
                             id: *id,
-                            table: table.0.clone(),
-                            table_identifier: table.1.clone(),
+                            table_reference: table_ref.clone(),
                             predicates: Some(fs.clone()),
                             search: index_search,
                             step: 0,
@@ -363,7 +351,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
 */
 fn push_predicates(
     operator: &mut Operator,
-    referenced_tables: &Vec<(Rc<BTreeTable>, String)>,
+    referenced_tables: &Vec<BTreeTableReference>,
 ) -> Result<()> {
     match operator {
         Operator::Filter {
@@ -465,17 +453,17 @@ fn push_predicates(
 fn push_predicate(
     operator: &mut Operator,
     predicate: ast::Expr,
-    referenced_tables: &Vec<(Rc<BTreeTable>, String)>,
+    referenced_tables: &Vec<BTreeTableReference>,
 ) -> Result<Option<ast::Expr>> {
     match operator {
         Operator::Scan {
             predicates,
-            table_identifier,
+            table_reference,
             ..
         } => {
             let table_index = referenced_tables
                 .iter()
-                .position(|(_, t_id)| t_id == table_identifier)
+                .position(|t| t.table_identifier == table_reference.table_identifier)
                 .unwrap();
 
             let predicate_bitmask =
@@ -751,7 +739,7 @@ fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_o
                         }
                     }
                     ProjectionColumn::Star => {}
-                    ProjectionColumn::TableStar(_, _) => {}
+                    ProjectionColumn::TableStar(_) => {}
                 }
             }
 
@@ -985,21 +973,21 @@ pub trait Optimizable {
             .check_constant()?
             .map_or(false, |c| c == ConstantPredicate::AlwaysFalse))
     }
-    fn is_primary_key_of(&self, table: &(Rc<BTreeTable>, String)) -> bool;
+    fn is_primary_key_of(&self, table_reference: &BTreeTableReference) -> bool;
     fn check_index_scan(
         &mut self,
-        table: &(Rc<BTreeTable>, String),
+        table_reference: &BTreeTableReference,
         available_indexes: &[Rc<Index>],
     ) -> Result<Option<usize>>;
 }
 
 impl Optimizable for ast::Expr {
-    fn is_primary_key_of(&self, table: &(Rc<BTreeTable>, String)) -> bool {
+    fn is_primary_key_of(&self, table_reference: &BTreeTableReference) -> bool {
         match self {
             ast::Expr::Id(ident) => {
                 let ident = normalize_ident(&ident.0);
-                table
-                    .0
+                table_reference
+                    .table
                     .get_column(&ident)
                     .map_or(false, |(_, c)| c.primary_key)
             }
@@ -1007,9 +995,9 @@ impl Optimizable for ast::Expr {
                 let tbl = normalize_ident(&tbl.0);
                 let ident = normalize_ident(&ident.0);
 
-                tbl == table.1
-                    && table
-                        .0
+                tbl == table_reference.table_identifier
+                    && table_reference
+                        .table
                         .get_column(&ident)
                         .map_or(false, |(_, c)| c.primary_key)
             }
@@ -1018,7 +1006,7 @@ impl Optimizable for ast::Expr {
     }
     fn check_index_scan(
         &mut self,
-        table: &(Rc<BTreeTable>, String),
+        table_reference: &BTreeTableReference,
         available_indexes: &[Rc<Index>],
     ) -> Result<Option<usize>> {
         match self {
@@ -1028,7 +1016,8 @@ impl Optimizable for ast::Expr {
                     .iter()
                     .enumerate()
                     .filter(|(_, i)| {
-                        i.table_name == table.1 && i.columns.iter().any(|c| c.name == ident)
+                        i.table_name == table_reference.table_identifier
+                            && i.columns.iter().any(|c| c.name == ident)
                     })
                     .collect::<Vec<_>>();
                 if indexes.is_empty() {
@@ -1042,7 +1031,7 @@ impl Optimizable for ast::Expr {
             ast::Expr::Qualified(_, ident) => {
                 let ident = normalize_ident(&ident.0);
                 let index = available_indexes.iter().enumerate().find(|(_, i)| {
-                    if i.table_name != table.0.name {
+                    if i.table_name != table_reference.table.name {
                         return false;
                     }
                     i.columns.iter().any(|c| normalize_ident(&c.name) == ident)
@@ -1053,11 +1042,11 @@ impl Optimizable for ast::Expr {
                 Ok(Some(index.unwrap().0))
             }
             ast::Expr::Binary(lhs, op, rhs) => {
-                let lhs_index = lhs.check_index_scan(table, available_indexes)?;
+                let lhs_index = lhs.check_index_scan(table_reference, available_indexes)?;
                 if lhs_index.is_some() {
                     return Ok(lhs_index);
                 }
-                let rhs_index = rhs.check_index_scan(table, available_indexes)?;
+                let rhs_index = rhs.check_index_scan(table_reference, available_indexes)?;
                 if rhs_index.is_some() {
                     // swap lhs and rhs
                     let lhs_new = rhs.take_ownership();
@@ -1196,12 +1185,12 @@ pub enum Either<T, U> {
 
 pub fn try_extract_index_search_expression(
     expr: ast::Expr,
-    table: &(Rc<BTreeTable>, String),
+    table_reference: &BTreeTableReference,
     available_indexes: &[Rc<Index>],
 ) -> Result<Either<ast::Expr, Search>> {
     match expr {
         ast::Expr::Binary(mut lhs, operator, mut rhs) => {
-            if lhs.is_primary_key_of(table) {
+            if lhs.is_primary_key_of(table_reference) {
                 match operator {
                     ast::Operator::Equals => {
                         return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *rhs }));
@@ -1219,7 +1208,7 @@ pub fn try_extract_index_search_expression(
                 }
             }
 
-            if rhs.is_primary_key_of(table) {
+            if rhs.is_primary_key_of(table_reference) {
                 match operator {
                     ast::Operator::Equals => {
                         return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *lhs }));
@@ -1237,7 +1226,7 @@ pub fn try_extract_index_search_expression(
                 }
             }
 
-            if let Some(index_index) = lhs.check_index_scan(table, available_indexes)? {
+            if let Some(index_index) = lhs.check_index_scan(table_reference, available_indexes)? {
                 match operator {
                     ast::Operator::Equals
                     | ast::Operator::Greater
@@ -1254,7 +1243,7 @@ pub fn try_extract_index_search_expression(
                 }
             }
 
-            if let Some(index_index) = rhs.check_index_scan(table, available_indexes)? {
+            if let Some(index_index) = rhs.check_index_scan(table_reference, available_indexes)? {
                 match operator {
                     ast::Operator::Equals
                     | ast::Operator::Greater

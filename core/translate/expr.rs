@@ -11,7 +11,7 @@ use crate::{
     vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
 };
 
-use super::plan::Aggregate;
+use super::plan::{Aggregate, BTreeTableReference};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct ConditionMetadata {
@@ -22,7 +22,7 @@ pub struct ConditionMetadata {
 
 pub fn translate_condition_expr(
     program: &mut ProgramBuilder,
-    referenced_tables: &[(Rc<BTreeTable>, String)],
+    referenced_tables: &[BTreeTableReference],
     expr: &ast::Expr,
     cursor_hint: Option<usize>,
     condition_metadata: ConditionMetadata,
@@ -555,7 +555,7 @@ pub fn translate_condition_expr(
 
 pub fn get_cached_or_translate(
     program: &mut ProgramBuilder,
-    referenced_tables: Option<&[(Rc<BTreeTable>, String)]>,
+    referenced_tables: Option<&[BTreeTableReference]>,
     expr: &ast::Expr,
     cursor_hint: Option<usize>,
     cached_results: Option<&Vec<&CachedResult>>,
@@ -582,7 +582,7 @@ pub fn get_cached_or_translate(
 
 pub fn translate_expr(
     program: &mut ProgramBuilder,
-    referenced_tables: Option<&[(Rc<BTreeTable>, String)]>,
+    referenced_tables: Option<&[BTreeTableReference]>,
     expr: &ast::Expr,
     target_register: usize,
     cursor_hint: Option<usize>,
@@ -1541,14 +1541,15 @@ pub fn resolve_ident_qualified(
     program: &ProgramBuilder,
     table_name: &str,
     ident: &str,
-    referenced_tables: &[(Rc<BTreeTable>, String)],
+    referenced_tables: &[BTreeTableReference],
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
     let ident = normalize_ident(ident);
     let table_name = normalize_ident(table_name);
-    for (catalog_table, identifier) in referenced_tables.iter() {
-        if *identifier == table_name {
-            let res = catalog_table
+    for table_reference in referenced_tables.iter() {
+        if table_reference.table_identifier == table_name {
+            let res = table_reference
+                .table
                 .columns
                 .iter()
                 .enumerate()
@@ -1573,7 +1574,8 @@ pub fn resolve_ident_qualified(
                         is_primary_key = res.1.primary_key;
                     }
                 }
-                let cursor_id = program.resolve_cursor_id(identifier, cursor_hint);
+                let cursor_id =
+                    program.resolve_cursor_id(&table_reference.table_identifier, cursor_hint);
                 return Ok((idx, col_type, cursor_id, is_primary_key));
             }
         }
@@ -1588,18 +1590,25 @@ pub fn resolve_ident_qualified(
 pub fn resolve_ident_table(
     program: &ProgramBuilder,
     ident: &str,
-    referenced_tables: Option<&[(Rc<BTreeTable>, String)]>,
+    referenced_tables: Option<&[BTreeTableReference]>,
     cursor_hint: Option<usize>,
 ) -> Result<(usize, Type, usize, bool)> {
     let ident = normalize_ident(ident);
     let mut found = Vec::new();
-    for (catalog_table, identifier) in referenced_tables.unwrap() {
-        let res = catalog_table
+    for table_reference in referenced_tables.unwrap() {
+        let res = table_reference
+            .table
             .columns
             .iter()
             .enumerate()
             .find(|(_, col)| col.name == *ident)
-            .map(|(idx, col)| (idx, col.ty, catalog_table.column_is_rowid_alias(col)));
+            .map(|(idx, col)| {
+                (
+                    idx,
+                    col.ty,
+                    table_reference.table.column_is_rowid_alias(col),
+                )
+            });
         let mut idx;
         let mut col_type;
         let mut is_rowid_alias;
@@ -1616,10 +1625,11 @@ pub fn resolve_ident_table(
                 }) {
                     idx = res.0;
                     col_type = res.1.ty;
-                    is_rowid_alias = catalog_table.column_is_rowid_alias(res.1);
+                    is_rowid_alias = table_reference.table.column_is_rowid_alias(res.1);
                 }
             }
-            let cursor_id = program.resolve_cursor_id(identifier, cursor_hint);
+            let cursor_id =
+                program.resolve_cursor_id(&table_reference.table_identifier, cursor_hint);
             found.push((idx, col_type, cursor_id, is_rowid_alias));
         }
     }
@@ -1685,7 +1695,7 @@ pub fn translate_table_columns(
 
 pub fn translate_aggregation(
     program: &mut ProgramBuilder,
-    referenced_tables: &[(Rc<BTreeTable>, String)],
+    referenced_tables: &[BTreeTableReference],
     agg: &Aggregate,
     target_register: usize,
     cursor_hint: Option<usize>,
