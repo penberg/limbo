@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use sqlite3_parser::ast;
 
-use crate::schema::{BTreeTable, Column, PseudoTable, Table};
+use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::resolve_ident_pseudo_table;
 use crate::translate::plan::Search;

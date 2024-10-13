@@ -1,15 +1,11 @@
 use crate::{function::JsonFunc, Result};
 use sqlite3_parser::ast::{self, UnaryOperator};
-use std::rc::Rc;
 
 use super::optimizer::CachedResult;
 use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
 use crate::schema::{PseudoTable, Table, Type};
 use crate::util::normalize_ident;
-use crate::{
-    schema::BTreeTable,
-    vdbe::{builder::ProgramBuilder, BranchOffset, Insn},
-};
+use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
 
 use super::plan::{Aggregate, BTreeTableReference};
 
