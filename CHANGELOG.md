@@ -4,6 +4,8 @@
 
 ### Added
 
+- Primary key index scans and single-column secondary index scans (Jussi Saurio)
+
 - `GROUP BY` support (Jussi Saurio)
 
 - Overflow page support (Pere Diaz Bou)
