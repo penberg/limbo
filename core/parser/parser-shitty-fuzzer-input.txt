@@ -1,0 +1,381 @@
+SELECT avg(age) FROM users;
+SELECT avg(first_name) FROM users;
+SELECT sum(age) FROM users;
+SELECT sum(first_name) FROM users;
+SELECT total(age) FROM users;
+SELECT total(first_name) FROM users WHERE id < 3;
+SELECT typeof(id) FROM users LIMIT 1;
+SELECT count(id) FROM users;
+SELECT count(*) FROM users;
+SELECT max(age) FROM users;
+SELECT min(age) FROM users;
+SELECT max(first_name) FROM users;
+SELECT min(first_name) FROM users;
+SELECT group_concat(name) FROM products;
+SELECT group_concat(name, ';') FROM products;
+SELECT group_concat(name, id) FROM products;
+SELECT string_agg(name, ',') FROM products;
+SELECT string_agg(name, id) FROM products;
+select coalesce(NULL, 1);
+select coalesce(NULL, NULL, 1);
+select coalesce(NULL, NULL, NULL);
+select coalesce(1, 2, 3);
+select coalesce(NULL, 1) from users limit 1;
+select coalesce(NULL, age) from users where age = 94 limit 1;
+select coalesce(NULL, age), coalesce(NULL, id) from users where age = 94 limit 1;
+select name, glob('sweat*', name) from products;
+select * from products where name glob 'sweat*';
+select * from products where name glob 'sweat?r';
+select * from products where glob('sweat*', name)=1
+select * from products where name not glob 'sweat*' and price >= 70.0;
+select * from products where name glob 'sweat*' or price >= 80.0;
+select first_name, last_name from users where last_name glob first_name;
+select first_name, last_name from users where last_name glob concat(first_name, '*');
+select * from products where 'foobar' glob 'fooba';
+select u.first_name, sum(u.age) from users u group by u.first_name limit 10;
+select u.first_name, p.name, sum(u.age) from users u join products p on u.id = p.id group by u.first_name, p.name limit 10;
+select u.first_name, p.name, sum(u.age) from users u join products p on u.id = p.id group by u.first_name, p.name order by p.name limit 10;
+select u.first_name, p.name, sum(u.age) from users u join products p on u.id = p.id group by u.first_name, p.name order by sum(u.age) limit 10;
+select u.first_name, sum(u.age), count(u.age) from users u group by u.first_name order by sum(u.age) limit 10;
+select u.first_name, sum(u.age), group_concat(u.age) from users u group by u.first_name order by u.first_name limit 10;
+select u.first_name, group_concat(u.last_name) from users u group by u.first_name order by -1 * length(group_concat(u.last_name)) limit 1;
+select u.first_name, sum(u.age) from users u group by u.first_name order by -1 * sum(u.age) limit 10;
+select u.first_name, sum(u.age) + count(1) from users u group by u.first_name limit 5;
+select length(phone_number), count(1) from users group by length(phone_number) order by count(1);
+select upper(substr(phone_number, 1,3)), count(1) from users group by upper(substr(phone_number, 1,3)) order by -1 * count(1) limit 5;
+select * from users, products limit 1;
+select first_name, price from users, products limit 1;
+select users.first_name, products.name from users join products where products.id = 1 limit 2;
+select users.first_name, products.name from users join products where users.id = 1 limit 2;
+select users.first_name as user_name, products.name as product_name from users join products on users.id = products.id;
+select first_name, name from users join products on first_name != name limit 1;
+select users.first_name as user_name, products.name as product_name from users join products on users.first_name = products.name;
+select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 join users as u2 on u1.id = u2.id + 1 limit 1;
+select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 join users as u2 on u1.id = u2.id + 1 where u1.id = 5 limit 1;
+select u.first_name from users u join products as p on u.first_name != p.name where u.last_name = 'Williams' limit 1;
+select u.first_name, p.name from users u join products as p where 1 limit 5;
+select u.first_name from users u join products as p where 0 limit 5;
+select users.first_name as user_name, products.name as product_name from users left join products on users.id = products.id limit 12;
+select u.first_name, p.name from users u left join products as p on u.id = p.id where u.id >= 10 limit 5;
+select users.first_name, products.name from users left join products on users.id < 2 where users.id < 3;
+select users.first_name as user_name, products.name as product_name from users left join products on users.first_name = products.name limit 3;
+select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u1.id = u2.id + 1 limit 2;
+select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u2.id = u1.id + 1 limit 2;
+select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u1.id = u2.id + 1 where u1.id = 5 limit 2;
+select u.first_name, p.name from users u left join products as p on u.id = p.id and u.first_name = p.name limit 2;
+select u.first_name, p.name from users u left join products as p on u.id = p.id or u.first_name = p.name limit 2;
+select u.first_name, p.name from users u left join products as p where u.id = p.id or u.first_name = p.name limit 2;
+select users.first_name, products.name from users left join products on users.id = products.id where users.first_name like 'Jam%' order by null limit 2;
+select users.first_name, products.name from users left join products on users.id = products.id order by products.name limit 1;
+select u.first_name, p.name from users u left join products as p on 1 limit 5;
+select u.first_name, p.name from users u left join products as p on 0 limit 5;
+select u1.first_name, u2.first_name, u3.first_name, u4.first_name from users u1 join users u2 on u1.id = u2.id join users u3 on u2.id = u3.id + 1 join users u4 on u3.id = u4.id + 1 limit 1;
+select u.first_name, p.name, p2.name from users u left join products p on p.name = u.first_name join products p2 on length(p2.name) > 8 where u.first_name = 'Franklin';
+select u.first_name, p.name, p2.name from users u left join products p on p.name = u.first_name join products p2 on length(p2.name) > 8 where u.first_name = 'Franklin';
+select u.first_name, u2.first_name, p.name from users u join users u2 on u.id = u2.id + 1 left join products p on p.name = u.first_name where u.first_name = 'Franklin';
+select u.first_name, u2.first_name, p.name from users u join users u2 on u.id = u2.id + 1 left join products p on p.name = u.first_name or p.name like 'sweat%' where u.first_name = 'Franklin';
+select u.first_name, p.name, u2.first_name from users u left join products as p on 0 join users u2 on 1 limit 5;
+select u.first_name, p.name, u2.first_name from users u left join products as p on 1 join users u2 on 0 limit 5;
+select u.first_name, p.name from users u join products p on u.id = p.id and u.age > 70;
+select json('{a:5,b:6}') ;
+SELECT json('{ MNO_123$xyz : 789 }');
+select json('{"a":5, "b":6, }');
+FAIL: SELECT json('{"a": ''abcd''}');
+SELECT json('{a: 0x0}')
+SELECT json('{a: 0xabcdef}')
+SELECT json('{a: -0xabcdef}')
+SELECT json('{x: 4.}')
+SELECT json('{x: +4.}')
+SELECT json('{x: -4.}')
+SELECT json('{x: Infinity}')
+SELECT json('{x: -Infinity}')
+select name, like('sweat%', name) from products;
+select * from products where name like 'sweat%';
+select * from products where name like 'SWEAT%';
+select * from products where name like 'sweat_r';
+select * from products where name like 'SwEaT_R';
+select * from products where like('sweat%', name)=1
+select * from products where name not like 'sweat%' and price >= 70.0;
+select * from products where name like 'sweat%' or price >= 80.0;
+select first_name, last_name from users where last_name like first_name;
+select first_name, last_name from users where last_name like concat(first_name, '%');
+select * from products where 'foobar' like 'fooba';
+select * from products order by price;
+select * from products order by name limit 5;
+select id, name from products order by name limit 5;
+select price, name from products where price > 70 order by name;
+select u.first_name from users u order by u.first_name limit 1;
+select first_name, last_name, age from users order by 3,2 limit 2;
+SELECT length(date('now')) = 10;
+SELECT date('2023-05-18');
+SELECT date('2023-05-18 15:30:45');
+SELECT date('2023-05-18T15:30:45');
+SELECT date('2023-05-18 15:30:45.123');
+SELECT date(2460082);
+SELECT date(2460082.5);
+SELECT date('not a date');
+SELECT date(NULL);
+SELECT date('10001-01-01');
+SELECT date('15:30:45');
+SELECT date('2023-05-18 15:30:45Z');
+SELECT date('2023-05-18 23:30:45+02:00');
+SELECT date('2023-05-19 01:30:45-05:00');
+SELECT date('2023-05-18 23:30:45-03:00');
+SELECT date('2023-05-19 01:30:45+03:00');
+SELECT date('2023-05-18T15:30:45+02:00');
+SELECT date('2023-05-18 15:30:45.123+02:00');
+SELECT date('2023-05-18 15:30:45+25:00');
+SELECT date('2023-05-18', '+10 days');
+SELECT date('2023-05-18', '-10 days');
+SELECT date('2023-05-18', '+1 days', '-1 days', '+10 days');
+SELECT date('2023-05-18', 'invalid modifier');
+SELECT length(time()) = 8;
+SELECT length(time('now')) = 8;
+SELECT time('04:02:00');
+SELECT time('2023-05-18 15:30:45');
+SELECT time('2023-05-18T15:30:45');
+SELECT time('2023-05-18 15:30:45.123');
+SELECT time(2460082);
+SELECT time(2460082.2);
+SELECT time('not a time');
+SELECT time(NULL);
+SELECT time('25:05:01');
+SELECT time('2024-02-02');
+SELECT time('2023-05-18 15:30:45Z');
+SELECT time('2023-05-18 23:30:45+07:00');
+SELECT time('2023-05-19 01:30:45-05:00');
+SELECT time('2023-05-18 23:30:45-03:00');
+SELECT time('2023-05-19 01:30:45+03:00');
+SELECT time('2023-05-18T15:30:45+02:00');
+SELECT time('2023-05-18 15:30:45.123+02:00');
+SELECT time('2023-05-18 15:30:45+25:00');
+SELECT time('2023-05-18 15:30:45', 'start of day');
+SELECT time('2023-05-18 15:30:45', '+2 hours');
+SELECT time('2023-05-18 15:30:45', '+45 minutes');
+SELECT time('2023-05-18 15:30:45', '+30 seconds');
+SELECT time('2023-05-18 15:30:45', '-3 hours');
+SELECT time('2023-05-18 15:30:45', '-15 minutes');
+SELECT time('2023-05-18 15:30:45', '-45 seconds');
+SELECT time('2023-05-18 15:30:45', '+1 hours', '-30 minutes', '+15 seconds');
+SELECT time('2023-05-18 15:30:45', 'invalid modifier');
+SELECT time('2023-05-18 15:30:45', '+1 hour', 'invalid modifier');
+SELECT unixepoch('1970-01-01');
+SELECT unixepoch('1969-12-31 23:59:59');
+SELECT unixepoch('9999-12-31 23:59:59');
+SELECT unixepoch('0000-01-01 00:00:00');
+SELECT unixepoch('2022-01-27 12:59:28.052');
+select concat('l', 'i');
+select concat('l', 1);
+select concat('l', 1.5);
+select concat('l', null, 'i');
+select concat_ws(',', 1, 2);
+select concat_ws(',', 1);
+select concat_ws(null, 1, 2);
+select concat_ws(',', 1, 2), concat_ws(',', 3, 4)
+select char(108, 105)
+select char()
+select char(null)
+select char('a')
+select abs(1);
+select abs(-1);
+select abs('a');
+select abs(null);
+select ifnull(1, 2);
+select ifnull(null, 2);
+select instr('limbo', 'im');
+select instr('limbo', 'xyz');
+FAIL: select instr(x'000102', x'01');
+FAIL: select instr(x'000102', x'10');
+select instr(null, 'limbo');
+select instr(123, 2);
+select instr(123, 5);
+select instr(0001, 0);
+select instr(12.34, 2.3);
+select instr(12.34, 5);
+select instr(1.10000, 0);
+FAIL: select instr(x'01020304', x'02');
+FAIL: select instr(x'01020304', x'05');
+select upper('Limbo')
+select upper(1)
+select upper('a')
+select upper(null)
+select lower('Limbo')
+select lower(1)
+select lower('A')
+select lower(null)
+select hex('limbo')
+select hex(100)
+select hex(null)
+SELECT unhex('6162');
+SELECT unhex(6162);
+SELECT unhex('2E');
+SELECT unhex('2e');
+SELECT unhex('x');
+SELECT unhex(NULL);
+SELECT trim('   Limbo    ');
+SELECT trim(1);
+SELECT trim(null);
+SELECT trim('   Leading');
+SELECT trim('Trailing   ');
+SELECT trim('Limbo', 'Limbo');
+SELECT trim(1, '1');
+SELECT trim(null, 'null');
+SELECT trim('Limbo', 'xyz');
+SELECT ltrim('   Limbo    ');
+SELECT ltrim(1);
+SELECT ltrim(null);
+SELECT ltrim('   Leading');
+SELECT ltrim('Limbo');
+SELECT ltrim('Limbo', 'Limbo');
+SELECT ltrim(1, '1');
+SELECT ltrim(null, 'null');
+SELECT ltrim('Limbo', 'xyz');
+SELECT rtrim('   Limbo    ');
+SELECT rtrim(1);
+SELECT rtrim(null);
+SELECT rtrim('Trailing   ');
+SELECT rtrim('Limbo');
+SELECT rtrim('Limbo', 'Limbo');
+SELECT rtrim(1, '1');
+SELECT rtrim(null, 'null');
+SELECT rtrim('Limbo', 'xyz');
+SELECT round(123.456);
+SELECT round(123.456, 2);
+SELECT round(123.5, '1');
+SELECT round('123.456', 2);
+SELECT round('abc', 1);
+SELECT round(123, 1);
+SELECT round(123.456, -1);
+SELECT round(123.456, 0);
+SELECT round(123.456, null);
+SELECT length('limbo');
+SELECT length(12345);
+SELECT length(123.456);
+SELECT length(NULL);
+SELECT length('');
+select length(date('now')) = 10;
+select min(-10,2,3)
+select min('b','a','z')
+select min('42',100)
+FAIL: select min(3.14,x'616263')
+select max('42',100)
+FAIL: select max(3.14,x'616263')
+select min(null,null)
+select max(-10,2,3)
+select max('b','a','z')
+select min(1,5.0)
+select max(1,5.0)
+select min(5.0,1)
+select max(null,null)
+select nullif(1, 2)
+select nullif(1, 1)
+select nullif('limbo', 'limbo')
+SELECT substr('limbo', 1, 3);
+SELECT substr('limbo', 1, 10);
+SELECT substr('limbo', 10, 3);
+SELECT substr('limbo', 3);
+SELECT substring('limbo', 1, 3);
+SELECT substring('limbo', 1, 10);
+SELECT substring('limbo', 10, 3);
+SELECT substring('limbo', 3);
+SELECT substring('limbo', 10);
+SELECT typeof(null);
+SELECT typeof(nuLL);
+SELECT typeof('hello');
+SELECT typeof('');
+SELECT typeof(123);
+SELECT typeof(1.0);
+FAIL: SELECT typeof(x'61');
+FAIL: SELECT typeof(x'');
+SELECT typeof(sum(age)) from users;
+SELECT typeof(sum(price)) from products;
+SELECT typeof(group_concat(name)) from products;
+SELECT unicode('a');
+SELECT unicode('😊');
+SELECT unicode('');
+SELECT unicode(23);
+SELECT unicode(23.45);
+SELECT unicode(NULL);
+SELECT quote(concat('abc', char(0), 'def'))
+SELECT quote('limbo')
+SELECT quote(null)
+SELECT quote(123)
+SELECT sign(42);
+SELECT sign(-42);
+SELECT sign(0);
+SELECT sign(42.0);
+SELECT sign(-42.0);
+SELECT sign(0.0);
+SELECT sign('42');
+SELECT sign('-42');
+SELECT sign('0');
+SELECT sign('abc');
+SELECT sign(NULL);
+SELECT length(randomblob(2));
+SELECT length(randomblob(0));
+SELECT length(randomblob(-2));
+SELECT length(randomblob('2'));
+FAIL: SELECT zeroblob(0) = x'';
+FAIL: SELECT zeroblob(1) = x'00';
+FAIL: SELECT zeroblob('3') = x'000000';
+FAIL: SELECT zeroblob('a') = x'';
+FAIL: SELECT zeroblob(x'01') = x'';
+SELECT 1
+SELECT 2
+FAIL: SELECT x'';
+FAIL: SELECT x'6C696D626f';
+FAIL: SELECT x'F09FA680';
+SELECT id FROM users LIMIT 0;
+select price from products limit 1;
+select u.age + 1 from users u where u.age = 91 limit 1;
+select u.aGe + 1 from USERS u where U.AGe = 91 limit 1;
+select p.*, p.name from products p limit 1;
+select p.*, u.first_name from users u join products p on u.id = p.id limit 1;
+select * from users u where u.id = 5;
+select last_name from users where id = 2000;
+select count(1) from users where last_name = 'Rodriguez';
+select count(1) from users where id != 2000;
+select count(1) from users where id > 2000;
+select count(1) from users where id >= 2000;
+select count(1) from users where id < 2000;
+select count(1) from users where id <= 2000;
+select count(1) from users where 1;
+select count(1) from users where 0;
+select 1 where 1;
+select 1 where '1';
+select 1 where 6.66;
+select 1 where '6.66';
+select 1 where -1;
+select 1 where '-1';
+select 1 where 0;
+select 1 where '0';
+select 1 where 0.0;
+select 1 where '0.0';
+select 1 where -0.0;
+select 1 where '-0.0';
+select 1 where 'hamburger';
+select first_name, age from users where first_name = 'Jamie' and age > 80
+select first_name, age from users where first_name = 'Jamie' and age > 80
+select first_name, age from users where first_name = 'Jamie' or age = 1 and age = 2
+select * from products where price > 50 and name != 'hat';
+select * from products where price > 50 and name != 'sweatshirt' and price < 75;
+select * from products where price > 75 or name = 'shirt' or name = 'coat';
+select * from products where name in ('hat', 'sweatshirt', 'shorts');
+select * from products where name not in ('hat', 'sweatshirt', 'shorts');
+select * from products where name in ('hat', 'sweatshirt', 'shorts') or price in (81.0, 82.0);
+select * from products where name not in ('hat', 'sweatshirt', 'shorts') and price not in (81.0, 82.0, 78.0, 1.0, 33.0);
+select * from products where name in ('hat', 'sweatshirt', 'shorts') or price not in (82.0, 18.0, 78.0, 33.0, 81.0);
+select * from products where name in ();
+select * from products where name not in ();
+select * from products where name in ('hat', 'sweatshirt', 'shorts') and price > 70 or name = 'boots';
+select * from products where name in ('hat', 'shorts') or price > 70 and name like '%shirt%';
+select * from products where name not in ('shirt', 'boots') or name = 'shirt';
+select id, first_name, age from users where id = 5 and age < 50;
+select id, first_name, age from users where age < 50 and id = 5;
+select id, name from products where (id = 5 and name = 'sweatshirt') and (id = 5 and name = 'sweatshirt') ORDER BY id;
+select id, name from products where ((id = 5 and name = 'sweatshirt') or (id = 1 and name = 'hat')) ORDER BY id;
+select id, name from products where ((id = 5 and name = 'sweatshirt') or (id = 1 and name = 'hat')) and (name = 'sweatshirt' or name = 'hat') ORDER BY id;
+select id from users where id > 9995;
+select count(1) from users where id > 0;
+select age from users where age >= 100 limit 20;
+select count(1) from users where age > 0;
