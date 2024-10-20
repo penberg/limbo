@@ -48,6 +48,7 @@ pest = "2.0"
 pest_derive = "2.0"
 mockall = "0.13.0"
 rand = "0.8.5"
+winnow = { version = "0.6.20", features = ["simd"] }
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
