@@ -15,7 +15,7 @@ use crate::{
 
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
-    schema: &Schema,
+    schema: Rc<RefCell<Schema>>,
     with: &Option<With>,
     or_conflict: &Option<ResolveType>,
     tbl_name: &QualifiedName,
@@ -38,8 +38,9 @@ pub fn translate_insert(
 
     // open table
     let table_name = &tbl_name.name;
+    let schema_ref = schema.borrow();
 
-    let table = match schema.get_table(table_name.0.as_str()) {
+    let table = match schema_ref.get_table(table_name.0.as_str()) {
         Some(table) => table,
         None => crate::bail_corrupt_error!("Parse error: no such table: {}", table_name),
     };

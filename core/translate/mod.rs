@@ -7,6 +7,7 @@
 //! a SELECT statement will be translated into a sequence of instructions that
 //! will read rows from the database and filter them according to a WHERE clause.
 
+pub(crate) mod create_table;
 pub(crate) mod emitter;
 pub(crate) mod expr;
 pub(crate) mod insert;
@@ -23,13 +24,14 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
 use crate::{bail_parse_error, Result};
+use create_table::translate_create_table;
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
-    schema: &Schema,
+    schema: Rc<RefCell<Schema>>,
     stmt: ast::Stmt,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
@@ -41,7 +43,20 @@ pub fn translate(
         ast::Stmt::Begin(_, _) => bail_parse_error!("BEGIN not supported yet"),
         ast::Stmt::Commit(_) => bail_parse_error!("COMMIT not supported yet"),
         ast::Stmt::CreateIndex { .. } => bail_parse_error!("CREATE INDEX not supported yet"),
-        ast::Stmt::CreateTable { .. } => bail_parse_error!("CREATE TABLE not supported yet"),
+        ast::Stmt::CreateTable {
+            temporary,
+            if_not_exists,
+            tbl_name,
+            body,
+        } => translate_create_table(
+            schema,
+            temporary,
+            if_not_exists,
+            &tbl_name,
+            &body,
+            database_header,
+            pager,
+        ),
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
         ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
         ast::Stmt::CreateVirtualTable { .. } => {

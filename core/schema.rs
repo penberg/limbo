@@ -187,7 +187,7 @@ impl BTreeTable {
         }
     }
 
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn to_sql(&self) -> String {
         let mut sql = format!("CREATE TABLE {} (\n", self.name);
         for (i, column) in self.columns.iter().enumerate() {
@@ -198,8 +198,11 @@ impl BTreeTable {
             sql.push_str(&column.name);
             sql.push(' ');
             sql.push_str(&column.ty.to_string());
+            if column.primary_key {
+                sql.push_str(" PRIMARY KEY");
+            }
         }
-        sql.push_str(");\n");
+        sql.push(')');
         sql
     }
 }
@@ -238,7 +241,7 @@ impl Default for PseudoTable {
     }
 }
 
-fn create_table(
+pub fn create_table(
     tbl_name: QualifiedName,
     body: CreateTableBody,
     root_page: usize,

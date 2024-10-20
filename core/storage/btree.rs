@@ -23,6 +23,14 @@ const BTREE_HEADER_OFFSET_CELL_CONTENT: usize = 5; /* pointer to first byte of c
 const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -> u8 */
 const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
 
+/*
+    The InsertType enum is to distinguish between inserting a new table into page 1 of of database, and inserting a regular record.
+*/
+enum InsertType {
+    NewTableRecord,
+    RegularRecord,
+}
+
 #[derive(Debug)]
 pub struct MemPage {
     parent: Option<Rc<MemPage>>,
@@ -500,6 +508,7 @@ impl BTreeCursor {
         &mut self,
         key: &OwnedValue,
         record: &OwnedRecord,
+        insert_type: InsertType,
     ) -> Result<CursorResult<()>> {
         let page_ref = self.get_page()?;
         let int_key = match key {
@@ -529,7 +538,13 @@ impl BTreeCursor {
         // insert cell
 
         let mut cell_payload: Vec<u8> = Vec::new();
-        self.fill_cell_payload(page_type, Some(int_key), &mut cell_payload, record);
+        self.fill_cell_payload(
+            page_type,
+            Some(int_key),
+            &mut cell_payload,
+            record,
+            &insert_type,
+        );
 
         // insert
         let overflow = {
@@ -537,7 +552,7 @@ impl BTreeCursor {
 
             let mut page = page.contents.write().unwrap();
             let page = page.as_mut().unwrap();
-            self.insert_into_cell(page, cell_payload.as_slice(), cell_idx);
+            self.insert_into_cell(page, cell_payload.as_slice(), cell_idx, &insert_type);
             page.overflow_cells.len()
         };
 
@@ -549,7 +564,13 @@ impl BTreeCursor {
     }
 
     /* insert to postion and shift other pointers */
-    fn insert_into_cell(&mut self, page: &mut PageContent, payload: &[u8], cell_idx: usize) {
+    fn insert_into_cell(
+        &mut self,
+        page: &mut PageContent,
+        payload: &[u8],
+        cell_idx: usize,
+        insert_type: &InsertType,
+    ) {
         let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
         let enough_space = payload.len() + 2 <= free as usize;
         if !enough_space {
@@ -562,14 +583,18 @@ impl BTreeCursor {
         }
 
         // TODO: insert into cell payload in internal page
-        let pc = self.allocate_cell_space(page, payload.len() as u16);
+        let pc = self.allocate_cell_space(page, payload.len() as u16, insert_type);
         let buf = page.as_ptr();
 
         // copy data
         buf[pc as usize..pc as usize + payload.len()].copy_from_slice(payload);
         //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
         let (pointer_area_pc_by_idx, _) = page.cell_get_raw_pointer_region();
-        let pointer_area_pc_by_idx = pointer_area_pc_by_idx + (2 * cell_idx);
+        let mut pointer_area_pc_by_idx = pointer_area_pc_by_idx + (2 * cell_idx);
+
+        if let InsertType::NewTableRecord = &insert_type {
+            pointer_area_pc_by_idx -= 100; // decrement pointer_area_pc_by_idx by 100 to avoid double counting of the 100 byte database header
+        }
 
         // move previous pointers forward and insert new pointer there
         let n_cells_forward = 2 * (page.cell_count() - cell_idx);
@@ -841,7 +866,7 @@ impl BTreeCursor {
                             current_cell_index..current_cell_index + cells_to_copy;
                         for (j, cell_idx) in cell_index_range.enumerate() {
                             let cell = scratch_cells[cell_idx];
-                            self.insert_into_cell(page, cell, j);
+                            self.insert_into_cell(page, cell, j, &InsertType::RegularRecord);
                         }
                         divider_cells_index.push(current_cell_index + cells_to_copy - 1);
                         current_cell_index += cells_to_copy;
@@ -906,7 +931,12 @@ impl BTreeCursor {
                             let n = write_varint(&mut divider_cell.as_mut_slice()[4..], key);
                             divider_cell.truncate(4 + n);
                             let parent_cell_idx = self.find_cell(parent, key);
-                            self.insert_into_cell(parent, divider_cell.as_slice(), parent_cell_idx);
+                            self.insert_into_cell(
+                                parent,
+                                divider_cell.as_slice(),
+                                parent_cell_idx,
+                                &InsertType::RegularRecord,
+                            );
                         } else {
                             // move cell
                             let key = match cell {
@@ -914,7 +944,12 @@ impl BTreeCursor {
                                 _ => unreachable!(),
                             };
                             let parent_cell_idx = self.find_cell(page, key);
-                            self.insert_into_cell(parent, cell_payload, parent_cell_idx);
+                            self.insert_into_cell(
+                                parent,
+                                cell_payload,
+                                parent_cell_idx,
+                                &InsertType::RegularRecord,
+                            );
                             // self.drop_cell(*page, 0);
                         }
                     }
@@ -1029,7 +1064,12 @@ impl BTreeCursor {
     /*
         Allocate space for a cell on a page.
     */
-    fn allocate_cell_space(&mut self, page_ref: &PageContent, amount: u16) -> u16 {
+    fn allocate_cell_space(
+        &mut self,
+        page_ref: &PageContent,
+        amount: u16,
+        insert_type: &InsertType,
+    ) -> u16 {
         let amount = amount as usize;
 
         let (cell_offset, _) = page_ref.cell_get_raw_pointer_region();
@@ -1057,9 +1097,14 @@ impl BTreeCursor {
         let db_header = RefCell::borrow(&self.database_header);
         top -= amount;
 
-        {
-            let buf = page_ref.as_ptr();
-            buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+        let buf = page_ref.as_ptr();
+        match insert_type {
+            InsertType::NewTableRecord => {
+                buf[105..107].copy_from_slice(&(top as u16).to_be_bytes());
+            }
+            InsertType::RegularRecord => {
+                buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
+            }
         }
 
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
@@ -1226,6 +1271,7 @@ impl BTreeCursor {
         int_key: Option<u64>,
         cell_payload: &mut Vec<u8>,
         record: &OwnedRecord,
+        insert_type: &InsertType,
     ) {
         assert!(matches!(
             page_type,
@@ -1248,7 +1294,9 @@ impl BTreeCursor {
         if record_buf.len() <= max_local {
             // enough allowed space to fit inside a btree page
             cell_payload.extend_from_slice(record_buf.as_slice());
-            cell_payload.resize(cell_payload.len() + 4, 0);
+            if let InsertType::RegularRecord = insert_type {
+                cell_payload.resize(cell_payload.len() + 4, 0);
+            }
             return;
         }
 
@@ -1475,8 +1523,12 @@ impl Cursor for BTreeCursor {
                 CursorResult::IO => return Ok(CursorResult::IO),
             };
         }
-
-        match self.insert_to_page(key, _record)? {
+        let insert_type = if _record.is_table_record() {
+            InsertType::NewTableRecord
+        } else {
+            InsertType::RegularRecord
+        };
+        match self.insert_to_page(key, _record, insert_type)? {
             CursorResult::Ok(_) => Ok(CursorResult::Ok(())),
             CursorResult::IO => Ok(CursorResult::IO),
         }

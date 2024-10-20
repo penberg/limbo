@@ -401,6 +401,13 @@ impl OwnedRecord {
         header_bytes_buf.truncate(n);
         buf.splice(initial_i..initial_i, header_bytes_buf.iter().cloned());
     }
+
+    pub fn is_table_record(&self) -> bool {
+        if let Some(OwnedValue::Text(ref value)) = self.values.first() {
+            return **value == "table";
+        }
+        false
+    }
 }
 
 #[derive(PartialEq, Debug)]
