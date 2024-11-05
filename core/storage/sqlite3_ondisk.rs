@@ -42,7 +42,7 @@
 //! https://www.sqlite.org/fileformat.html
 
 use crate::error::LimboError;
-use crate::io::{Buffer, Completion, ReadCompletion, WriteCompletion};
+use crate::io::{Buffer, Completion, ReadCompletion, SyncCompletion, WriteCompletion};
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
@@ -560,6 +560,18 @@ pub fn begin_write_btree_page(
     };
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
     page_source.write_page(page_id, buffer.clone(), c)?;
+    Ok(())
+}
+
+pub fn begin_sync(page_io: Rc<dyn DatabaseStorage>, syncing: Rc<RefCell<bool>>) -> Result<()> {
+    assert!(!*syncing.borrow());
+    *syncing.borrow_mut() = true;
+    let completion = Completion::Sync(SyncCompletion {
+        complete: Box::new(move |_| {
+            *syncing.borrow_mut() = false;
+        }),
+    });
+    page_io.sync(Rc::new(completion))?;
     Ok(())
 }
 

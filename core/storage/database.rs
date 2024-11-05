@@ -14,6 +14,7 @@ pub trait DatabaseStorage {
         buffer: Rc<RefCell<Buffer>>,
         c: Rc<Completion>,
     ) -> Result<()>;
+    fn sync(&self, c: Rc<Completion>) -> Result<()>;
 }
 
 #[cfg(feature = "fs")]
@@ -51,6 +52,10 @@ impl DatabaseStorage for FileStorage {
         let pos = (page_idx - 1) * buffer_size;
         self.file.pwrite(pos, buffer, c)?;
         Ok(())
+    }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        self.file.sync(c)
     }
 }
 

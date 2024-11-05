@@ -170,11 +170,7 @@ impl Wal for WalFile {
 
     fn should_checkpoint(&self) -> bool {
         let frame_id = *self.max_frame.borrow() as usize;
-        if frame_id < self.checkpoint_threshold {
-            true
-        } else {
-            false
-        }
+        frame_id >= self.checkpoint_threshold
     }
 
     fn checkpoint(
@@ -195,7 +191,7 @@ impl Wal for WalFile {
                 return Ok(CheckpointStatus::IO);
             }
 
-            begin_write_btree_page(pager, &page, write_counter.clone());
+            begin_write_btree_page(pager, &page, write_counter.clone())?;
             self.ongoing_checkpoint.insert(page_id);
         }
 
