@@ -14,9 +14,12 @@ fn main() {
     println!("Seed: {}", seed);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let io = Arc::new(SimulatorIO::new(seed).unwrap());
-    let db = match Database::open_file(io.clone(), "./testing/testing.db") {
+    let test_path = "./testing/testing.db";
+    let db = match Database::open_file(io.clone(), test_path) {
         Ok(db) => db,
-        Err(_) => todo!(),
+        Err(e) => {
+            panic!("error opening database test file {}: {:?}", test_path, e);
+        }
     };
     for _ in 0..100 {
         let conn = db.connect();
@@ -189,7 +192,7 @@ impl limbo_core::File for SimulatorFile {
     }
 
     fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
-        todo!()
+        self.inner.sync(c)
     }
 }
 

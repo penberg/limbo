@@ -158,6 +158,10 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
     ) -> Result<()> {
         todo!()
     }
+
+    fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
+        todo!()
+    }
 }
 
 pub struct Wal {}

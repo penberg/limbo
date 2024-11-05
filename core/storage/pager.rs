@@ -362,7 +362,6 @@ impl Pager {
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         RefCell::borrow(&page).set_locked();
         if let Some(frame_id) = self.wal.borrow().find_frame(page_idx as u64)? {
-            dbg!(frame_id);
             self.wal
                 .borrow()
                 .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
@@ -407,7 +406,7 @@ impl Pager {
                     let db_size = self.db_header.borrow().database_size;
                     for page_id in self.dirty_pages.borrow().iter() {
                         let mut cache = self.page_cache.borrow_mut();
-                        let page = cache.get(&page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+                        let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
                         self.wal.borrow_mut().append_frame(
                             page.clone(),
                             db_size,
@@ -420,7 +419,6 @@ impl Pager {
                 }
                 FlushState::Checkpoint => {
                     let in_flight = self.flush_info.borrow().in_flight_writes.clone();
-                    dbg!("checkpoint");
                     match self.wal.borrow_mut().checkpoint(self, in_flight)? {
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
                         CheckpointStatus::Done => {
@@ -429,7 +427,6 @@ impl Pager {
                     };
                 }
                 FlushState::CheckpointDone => {
-                    dbg!("checkpoint done");
                     let in_flight = *self.flush_info.borrow().in_flight_writes.borrow();
                     if in_flight == 0 {
                         self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
@@ -453,7 +450,6 @@ impl Pager {
                     }
                 }
                 FlushState::SyncDbFile => {
-                    dbg!("sync db");
                     sqlite3_ondisk::begin_sync(self.page_io.clone(), self.syncing.clone())?;
                     self.flush_info.borrow_mut().state = FlushState::WaitSyncDbFile;
                 }

@@ -3,8 +3,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
-    begin_read_page, begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE,
-    WAL_HEADER_SIZE,
+    begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
 use crate::Completion;
 use crate::{storage::pager::Page, Result};
@@ -130,7 +129,7 @@ impl Wal for WalFile {
         &mut self,
         page: Rc<RefCell<Page>>,
         db_size: u32,
-        pager: &Pager,
+        _pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<()> {
         self.ensure_init()?;
