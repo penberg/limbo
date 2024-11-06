@@ -1,4 +1,4 @@
-use crate::{Completion, File, OpenFlags, Result, IO};
+use crate::{Completion, File, LimboError, OpenFlags, Result, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
@@ -71,7 +71,7 @@ impl File for GenericFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<Completion>,
+        _c: Rc<Completion>,
     ) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
@@ -81,9 +81,10 @@ impl File for GenericFile {
         Ok(())
     }
 
-    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+    fn sync(&self, _c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
-        file.sync(c)
+        file.sync_all().map_err(|err| LimboError::IOError(err))?;
+        Ok(())
     }
 }
 
