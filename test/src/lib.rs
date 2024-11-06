@@ -37,7 +37,7 @@ impl TempDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use limbo_core::{CheckpointStatus, RowResult, Value};
+    use limbo_core::{CheckpointStatus, Connection, RowResult, Value};
     use log::debug;
 
     #[ignore]
@@ -97,16 +97,7 @@ mod tests {
                     eprintln!("{}", err);
                 }
             }
-            loop {
-                match conn.cacheflush()? {
-                    CheckpointStatus::Done => {break;}
-                    CheckpointStatus::IO => {
-
-                        tmp_db.io.run_once()?;
-                    }
-
-                }
-            };
+            do_flush(&conn, &tmp_db)?;
         }
         Ok(())
     }
@@ -143,7 +134,7 @@ mod tests {
         };
 
         // this flush helped to review hex of test.db
-        conn.cacheflush()?;
+        do_flush(&conn, &tmp_db)?;
 
         match conn.query(list_query) {
             Ok(Some(ref mut rows)) => loop {
@@ -174,7 +165,7 @@ mod tests {
                 eprintln!("{}", err);
             }
         }
-        conn.cacheflush()?;
+        do_flush(&conn, &tmp_db)?;
         Ok(())
     }
 
@@ -248,7 +239,7 @@ mod tests {
                 eprintln!("{}", err);
             }
         }
-        conn.cacheflush()?;
+        do_flush(&conn, &tmp_db)?;
         Ok(())
     }
 
@@ -262,7 +253,7 @@ mod tests {
 
         for i in 0..iterations {
             let insert_query = format!("INSERT INTO test VALUES ({})", i);
-            conn.cacheflush().unwrap();
+            do_flush(&conn, &tmp_db)?;
             conn.clear_page_cache().unwrap();
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
@@ -281,7 +272,7 @@ mod tests {
             };
         }
 
-        conn.cacheflush().unwrap();
+        do_flush(&conn, &tmp_db)?;
         conn.clear_page_cache().unwrap();
         let list_query = "SELECT * FROM test LIMIT 1";
         let mut current_index = 0;
@@ -309,7 +300,7 @@ mod tests {
                 eprintln!("{}", err);
             }
         }
-        conn.cacheflush()?;
+        do_flush(&conn, &tmp_db)?;
         Ok(())
     }
 
@@ -328,5 +319,19 @@ mod tests {
                 break;
             }
         }
+    }
+
+    fn do_flush(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
+        loop {
+            match conn.cacheflush()? {
+                CheckpointStatus::Done => {
+                    break;
+                }
+                CheckpointStatus::IO => {
+                    tmp_db.io.run_once()?;
+                }
+            }
+        }
+        Ok(())
     }
 }
