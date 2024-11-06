@@ -416,6 +416,7 @@ impl Pager {
                     }
                     self.dirty_pages.borrow_mut().clear();
                     self.flush_info.borrow_mut().state = FlushState::SyncWal;
+                    return Ok(CheckpointStatus::IO);
                 }
                 FlushState::Checkpoint => {
                     let in_flight = self.flush_info.borrow().in_flight_writes.clone();
@@ -495,14 +496,23 @@ impl Pager {
         header.database_size += 1;
         {
             // update database size
-            let first_page_ref = self.read_page(1).unwrap();
-            let first_page = RefCell::borrow_mut(&first_page_ref);
-            first_page.set_dirty();
-            self.add_dirty(1);
+            // read sync for now
+            loop {
+                let first_page_ref = self.read_page(1)?;
+                let first_page = RefCell::borrow_mut(&first_page_ref);
+                if first_page.is_locked() {
+                    drop(first_page);
+                    self.io.run_once()?;
+                    continue;
+                }
+                first_page.set_dirty();
+                self.add_dirty(1);
 
-            let contents = first_page.contents.write().unwrap();
-            let contents = contents.as_ref().unwrap();
-            contents.write_database_header(&header);
+                let contents = first_page.contents.write().unwrap();
+                let contents = contents.as_ref().unwrap();
+                contents.write_database_header(&header);
+                break;
+            }
         }
 
         let page_ref = Rc::new(RefCell::new(Page::new(0)));

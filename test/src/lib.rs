@@ -37,7 +37,8 @@ impl TempDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use limbo_core::{RowResult, Value};
+    use limbo_core::{CheckpointStatus, RowResult, Value};
+    use log::debug;
 
     #[ignore]
     #[test]
@@ -96,7 +97,16 @@ mod tests {
                     eprintln!("{}", err);
                 }
             }
-            conn.cacheflush()?;
+            loop {
+                match conn.cacheflush()? {
+                    CheckpointStatus::Done => {break;}
+                    CheckpointStatus::IO => {
+
+                        tmp_db.io.run_once()?;
+                    }
+
+                }
+            };
         }
         Ok(())
     }

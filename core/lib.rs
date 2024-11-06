@@ -269,9 +269,8 @@ impl Connection {
         Ok(())
     }
 
-    pub fn cacheflush(&self) -> Result<()> {
-        self.pager.cacheflush()?;
-        Ok(())
+    pub fn cacheflush(&self) -> Result<CheckpointStatus> {
+        self.pager.cacheflush()
     }
 
     pub fn clear_page_cache(&self) -> Result<()> {

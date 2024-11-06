@@ -80,6 +80,11 @@ impl File for GenericFile {
         file.write_all(buf)?;
         Ok(())
     }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let mut file = self.file.borrow_mut();
+        file.sync(c)
+    }
 }
 
 impl Drop for GenericFile {
