@@ -1,4 +1,4 @@
-use crate::{Completion, File, OpenFlags, Result, WriteCompletion, IO};
+use crate::{Completion, File, LimboError, OpenFlags, Result, WriteCompletion, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
@@ -59,7 +59,7 @@ impl File for WindowsFile {
         {
             let r = match &(*c) {
                 Completion::Read(r) => r,
-                Completion::Write(_) => unreachable!(),
+                _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
             let buf = buf.as_mut_slice();
@@ -85,7 +85,7 @@ impl File for WindowsFile {
 
     fn sync(&self, c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
-        file.sync_all()?;
+        file.sync_all().map_err(|err| LimboError::IOError(err))?;
         Ok(())
     }
 }
