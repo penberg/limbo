@@ -501,7 +501,7 @@ impl BTreeCursor {
         key: &OwnedValue,
         record: &OwnedRecord,
     ) -> Result<CursorResult<()>> {
-        let page_ref = self.get_page()?;
+        let page_ref = self.get_current_page()?;
         let int_key = match key {
             OwnedValue::Integer(i) => *i as u64,
             _ => unreachable!("btree tables are indexed by integers!"),
@@ -658,7 +658,7 @@ impl BTreeCursor {
         page.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, page.cell_count() as u16 - 1);
     }
 
-    fn get_page(&mut self) -> crate::Result<Rc<RefCell<Page>>> {
+    fn get_current_page(&mut self) -> crate::Result<Rc<RefCell<Page>>> {
         let mem_page = {
             let mem_page = self.page.borrow();
             let mem_page = mem_page.as_ref().unwrap();
@@ -1499,7 +1499,7 @@ impl Cursor for BTreeCursor {
             CursorResult::Ok(_) => {}
             CursorResult::IO => return Ok(CursorResult::IO),
         };
-        let page_ref = self.get_page()?;
+        let page_ref = self.get_current_page()?;
         let page = RefCell::borrow(&page_ref);
         if page.is_locked() {
             return Ok(CursorResult::IO);
