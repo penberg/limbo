@@ -80,12 +80,14 @@ impl File for WindowsFile {
         let buf = buffer.borrow();
         let buf = buf.as_slice();
         file.write_all(buf)?;
+        c.complete(buffer.borrow().len() as i32);
         Ok(())
     }
 
     fn sync(&self, c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.sync_all().map_err(|err| LimboError::IOError(err))?;
+        c.complete(0);
         Ok(())
     }
 }
