@@ -1,4 +1,4 @@
-use limbo_core::{Database, File, PlatformIO, Result, IO};
+use limbo_core::{Database, File, OpenFlags, PlatformIO, Result, IO};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
@@ -14,9 +14,12 @@ fn main() {
     println!("Seed: {}", seed);
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let io = Arc::new(SimulatorIO::new(seed).unwrap());
-    let db = match Database::open_file(io.clone(), "./testing/testing.db") {
+    let test_path = "./testing/testing.db";
+    let db = match Database::open_file(io.clone(), test_path) {
         Ok(db) => db,
-        Err(_) => todo!(),
+        Err(e) => {
+            panic!("error opening database test file {}: {:?}", test_path, e);
+        }
     };
     for _ in 0..100 {
         let conn = db.connect();
@@ -91,8 +94,8 @@ impl SimulatorIO {
 }
 
 impl IO for SimulatorIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn limbo_core::File>> {
-        let inner = self.inner.open_file(path)?;
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
+        let inner = self.inner.open_file(path, flags)?;
         let file = Rc::new(SimulatorFile {
             inner,
             fault: RefCell::new(false),
@@ -186,6 +189,14 @@ impl limbo_core::File for SimulatorFile {
             ));
         }
         self.inner.pwrite(pos, buffer, c)
+    }
+
+    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
+        self.inner.sync(c)
+    }
+
+    fn size(&self) -> Result<u64> {
+        Ok(self.inner.size()?)
     }
 }
 

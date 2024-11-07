@@ -1,3 +1,4 @@
+use std::rc::Weak;
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use sqlite3_parser::ast::{
@@ -5,13 +6,13 @@ use sqlite3_parser::ast::{
 };
 
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
-use crate::Result;
 use crate::{
     schema::{Schema, Table},
     storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
+use crate::{Connection, Result};
 
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
@@ -23,6 +24,7 @@ pub fn translate_insert(
     body: &InsertBody,
     _returning: &Option<Vec<ResultColumn>>,
     database_header: Rc<RefCell<DatabaseHeader>>,
+    connection: Weak<Connection>,
 ) -> Result<Program> {
     assert!(with.is_none());
     assert!(or_conflict.is_none());
@@ -203,11 +205,11 @@ pub fn translate_insert(
         description: String::new(),
     });
     program.resolve_label(init_label, program.offset());
-    program.emit_insn(Insn::Transaction);
+    program.emit_insn(Insn::Transaction { write: true });
     program.emit_constant_insns();
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
     program.resolve_deferred_labels();
-    Ok(program.build(database_header))
+    Ok(program.build(database_header, connection))
 }

@@ -395,10 +395,10 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
-            Insn::Transaction => (
+            Insn::Transaction { write } => (
                 "Transaction",
                 0,
-                0,
+                *write as i32,
                 0,
                 OwnedValue::Text(Rc::new("".to_string())),
                 0,

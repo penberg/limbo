@@ -1,11 +1,12 @@
-use limbo_core::{Result, IO};
+use limbo_core::{OpenFlags, Page, Result, IO};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Database {
-    _inner: limbo_core::Database,
+    _inner: Rc<limbo_core::Database>,
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -14,9 +15,9 @@ impl Database {
     #[wasm_bindgen(constructor)]
     pub fn new(path: &str) -> Database {
         let io = Arc::new(PlatformIO { vfs: VFS::new() });
-        let file = io.open_file(path).unwrap();
+        let file = io.open_file(path, limbo_core::OpenFlags::None).unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
-        let wal = Rc::new(Wal {});
+        let wal = Rc::new(RefCell::new(Wal {}));
         let inner = limbo_core::Database::open(io, page_io, wal).unwrap();
         Database { _inner: inner }
     }
@@ -51,7 +52,7 @@ impl limbo_core::File for File {
     fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         let r = match &*c {
             limbo_core::Completion::Read(r) => r,
-            limbo_core::Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         {
             let mut buf = r.buf_mut();
@@ -71,6 +72,14 @@ impl limbo_core::File for File {
     ) -> Result<()> {
         todo!()
     }
+
+    fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
+        todo!()
+    }
+
+    fn size(&self) -> Result<u64> {
+        todo!()
+    }
 }
 
 pub struct PlatformIO {
@@ -78,7 +87,7 @@ pub struct PlatformIO {
 }
 
 impl limbo_core::IO for PlatformIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn limbo_core::File>> {
+    fn open_file(&self, path: &str, _flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
         let fd = self.vfs.open(path);
         Ok(Rc::new(File {
             vfs: VFS::new(),
@@ -127,11 +136,13 @@ impl DatabaseStorage {
     }
 }
 
+struct BufferPool {}
+
 impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
         let r = match &(*c) {
             limbo_core::Completion::Read(r) => r,
-            limbo_core::Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         let size = r.buf().len();
         assert!(page_idx > 0);
@@ -151,6 +162,10 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
     ) -> Result<()> {
         todo!()
     }
+
+    fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
+        todo!()
+    }
 }
 
 pub struct Wal {}
@@ -168,11 +183,46 @@ impl limbo_core::Wal for Wal {
         Ok(None)
     }
 
+    fn begin_write_tx(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn end_write_tx(&self) -> Result<()> {
+        todo!()
+    }
+
     fn read_frame(
         &self,
         _frame_id: u64,
         _page: Rc<std::cell::RefCell<limbo_core::Page>>,
+        _buffer_pool: Rc<limbo_core::BufferPool>,
     ) -> Result<()> {
+        todo!()
+    }
+
+    fn should_checkpoint(&self) -> bool {
+        todo!()
+    }
+
+    fn append_frame(
+        &mut self,
+        _page: Rc<RefCell<Page>>,
+        _db_size: u32,
+        _pager: &limbo_core::Pager,
+        _write_counter: Rc<RefCell<usize>>,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    fn checkpoint(
+        &mut self,
+        _pager: &limbo_core::Pager,
+        _write_counter: Rc<RefCell<usize>>,
+    ) -> Result<limbo_core::CheckpointStatus> {
+        todo!()
+    }
+
+    fn sync(&mut self) -> Result<limbo_core::CheckpointStatus> {
         todo!()
     }
 }

@@ -14,10 +14,17 @@ pub trait File {
     fn unlock_file(&self) -> Result<()>;
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
     fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
+    fn sync(&self, c: Rc<Completion>) -> Result<()>;
+    fn size(&self) -> Result<u64>;
+}
+
+pub enum OpenFlags {
+    None,
+    Create,
 }
 
 pub trait IO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>>;
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>>;
 
     fn run_once(&self) -> Result<()>;
 
@@ -28,10 +35,12 @@ pub trait IO {
 
 pub type Complete = dyn Fn(Rc<RefCell<Buffer>>);
 pub type WriteComplete = dyn Fn(i32);
+pub type SyncComplete = dyn Fn(i32);
 
 pub enum Completion {
     Read(ReadCompletion),
     Write(WriteCompletion),
+    Sync(SyncCompletion),
 }
 
 pub struct ReadCompletion {
@@ -43,13 +52,18 @@ impl Completion {
     pub fn complete(&self, result: i32) {
         match self {
             Completion::Read(r) => r.complete(),
-            Completion::Write(w) => w.complete(result), // fix
+            Completion::Write(w) => w.complete(result),
+            Completion::Sync(s) => s.complete(result), // fix
         }
     }
 }
 
 pub struct WriteCompletion {
     pub complete: Box<WriteComplete>,
+}
+
+pub struct SyncCompletion {
+    pub complete: Box<SyncComplete>,
 }
 
 impl ReadCompletion {
@@ -74,8 +88,19 @@ impl WriteCompletion {
     pub fn new(complete: Box<WriteComplete>) -> Self {
         Self { complete }
     }
+
     pub fn complete(&self, bytes_written: i32) {
         (self.complete)(bytes_written);
+    }
+}
+
+impl SyncCompletion {
+    pub fn new(complete: Box<SyncComplete>) -> Self {
+        Self { complete }
+    }
+
+    pub fn complete(&self, res: i32) {
+        (self.complete)(res);
     }
 }
 

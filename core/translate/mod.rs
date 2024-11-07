@@ -16,13 +16,13 @@ pub(crate) mod planner;
 pub(crate) mod select;
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
-use crate::{bail_parse_error, Result};
+use crate::{bail_parse_error, Connection, Result};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast;
@@ -33,6 +33,7 @@ pub fn translate(
     stmt: ast::Stmt,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
+    connection: Weak<Connection>,
 ) -> Result<Program> {
     match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
@@ -53,12 +54,14 @@ pub fn translate(
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
         ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
-        ast::Stmt::Pragma(name, body) => translate_pragma(&name, body, database_header, pager),
+        ast::Stmt::Pragma(name, body) => {
+            translate_pragma(&name, body, database_header, pager, connection)
+        }
         ast::Stmt::Reindex { .. } => bail_parse_error!("REINDEX not supported yet"),
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
         ast::Stmt::Rollback { .. } => bail_parse_error!("ROLLBACK not supported yet"),
         ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
-        ast::Stmt::Select(select) => translate_select(schema, select, database_header),
+        ast::Stmt::Select(select) => translate_select(schema, select, database_header, connection),
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
         ast::Stmt::Insert {
@@ -77,6 +80,7 @@ pub fn translate(
             &body,
             &returning,
             database_header,
+            connection,
         ),
     }
 }
@@ -86,6 +90,7 @@ fn translate_pragma(
     body: Option<ast::PragmaBody>,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
+    connection: Weak<Connection>,
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
@@ -96,6 +101,7 @@ fn translate_pragma(
         init_label,
     );
     let start_offset = program.offset();
+    let mut write = false;
     match body {
         None => {
             let pragma_result = program.alloc_register();
@@ -124,6 +130,7 @@ fn translate_pragma(
                 },
                 _ => 0,
             };
+            write = true;
             update_pragma(
                 &name.name.0,
                 value_to_update,
@@ -140,13 +147,13 @@ fn translate_pragma(
         description: String::new(),
     });
     program.resolve_label(init_label, program.offset());
-    program.emit_insn(Insn::Transaction);
+    program.emit_insn(Insn::Transaction { write });
     program.emit_constant_insns();
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
     program.resolve_deferred_labels();
-    Ok(program.build(database_header))
+    Ok(program.build(database_header, connection))
 }
 
 fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {

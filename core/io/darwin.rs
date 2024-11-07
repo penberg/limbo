@@ -2,7 +2,7 @@ use crate::error::LimboError;
 use crate::io::common;
 use crate::Result;
 
-use super::{Completion, File, IO};
+use super::{Completion, File, OpenFlags, IO};
 use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
@@ -12,6 +12,7 @@ use rustix::io::Errno;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
+use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 pub struct DarwinIO {
@@ -31,12 +32,13 @@ impl DarwinIO {
 }
 
 impl IO for DarwinIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
             .read(true)
             .custom_flags(libc::O_NONBLOCK)
             .write(true)
+            .create(matches!(flags, OpenFlags::Create))
             .open(path)?;
 
         let darwin_file = Rc::new(DarwinFile {
@@ -70,7 +72,7 @@ impl IO for DarwinIO {
                             let c: &Completion = c;
                             let r = match c {
                                 Completion::Read(r) => r,
-                                Completion::Write(_) => unreachable!(),
+                                _ => unreachable!(),
                             };
                             let mut buf = r.buf_mut();
                             file.seek(std::io::SeekFrom::Start(pos as u64))?;
@@ -153,7 +155,9 @@ impl File for DarwinFile {
         if lock_result == -1 {
             let err = std::io::Error::last_os_error();
             if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError("Failed locking file. File is locked by another process".to_string()));
+                return Err(LimboError::LockingError(
+                    "Failed locking file. File is locked by another process".to_string(),
+                ));
             } else {
                 return Err(LimboError::LockingError(format!(
                     "Failed locking file, {}",
@@ -184,12 +188,12 @@ impl File for DarwinFile {
         Ok(())
     }
 
-     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-       let file = self.file.borrow();
+    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
+        let file = self.file.borrow();
         let result = {
             let r = match &(*c) {
                 Completion::Read(r) => r,
-                Completion::Write(_) => unreachable!(),
+                _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
@@ -255,6 +259,24 @@ impl File for DarwinFile {
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let file = self.file.borrow();
+        let result = rustix::fs::fsync(file.as_fd());
+        match result {
+            std::result::Result::Ok(()) => {
+                trace!("fsync");
+                c.complete(0);
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn size(&self) -> Result<u64> {
+        let file = self.file.borrow();
+        Ok(file.metadata().unwrap().len())
     }
 }
 

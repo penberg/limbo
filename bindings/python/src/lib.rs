@@ -4,6 +4,7 @@ use limbo_core::IO;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 mod errors;
@@ -198,7 +199,7 @@ fn stmt_is_dml(sql: &str) -> bool {
 #[pyclass]
 #[derive(Clone)]
 pub struct Connection {
-    conn: Arc<Mutex<limbo_core::Connection>>,
+    conn: Arc<Mutex<Rc<limbo_core::Connection>>>,
     io: Arc<limbo_core::PlatformIO>,
 }
 
@@ -238,7 +239,7 @@ pub fn connect(path: &str) -> Result<Connection> {
     })?);
     let db = limbo_core::Database::open_file(io.clone(), path)
         .map_err(|e| PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e)))?;
-    let conn: limbo_core::Connection = db.connect();
+    let conn: Rc<limbo_core::Connection> = db.connect();
     Ok(Connection {
         conn: Arc::new(Mutex::new(conn)),
         io,

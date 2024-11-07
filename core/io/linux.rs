@@ -1,10 +1,11 @@
-use super::{common, Completion, File, IO};
+use super::{common, Completion, File, OpenFlags, IO};
 use crate::{LimboError, Result};
 use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
 use std::cell::RefCell;
 use std::fmt;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
@@ -48,7 +49,10 @@ impl LinuxIO {
     pub fn new() -> Result<Self> {
         let ring = io_uring::IoUring::new(MAX_IOVECS as u32)?;
         let inner = InnerLinuxIO {
-            ring: WrappedIOUring{ring, pending_ops: 0},
+            ring: WrappedIOUring {
+                ring,
+                pending_ops: 0,
+            },
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
                 iov_len: 0,
@@ -74,7 +78,8 @@ impl InnerLinuxIO {
 impl WrappedIOUring {
     fn submit_entry(&mut self, entry: &io_uring::squeue::Entry) {
         unsafe {
-            self.ring.submission()
+            self.ring
+                .submission()
                 .push(entry)
                 .expect("submission queue is full");
         }
@@ -102,9 +107,13 @@ impl WrappedIOUring {
 }
 
 impl IO for LinuxIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::options().read(true).write(true).open(path)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(matches!(flags, OpenFlags::Create))
+            .open(path)?;
         // Let's attempt to enable direct I/O. Not all filesystems support it
         // so ignore any errors.
         let fd = file.as_raw_fd();
@@ -128,7 +137,7 @@ impl IO for LinuxIO {
         let ring = &mut inner.ring;
 
         if ring.empty() {
-            return Ok(())
+            return Ok(());
         }
 
         ring.wait_for_completion()?;
@@ -216,7 +225,7 @@ impl File for LinuxFile {
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let r = match &(*c) {
             Completion::Read(r) => r,
-            Completion::Write(_) => unreachable!(),
+            _ => unreachable!(),
         };
         trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
@@ -255,6 +264,21 @@ impl File for LinuxFile {
         };
         io.ring.submit_entry(&write);
         Ok(())
+    }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let fd = io_uring::types::Fd(self.file.as_raw_fd());
+        let ptr = Rc::into_raw(c.clone());
+        let sync = io_uring::opcode::Fsync::new(fd)
+            .build()
+            .user_data(ptr as u64);
+        let mut io = self.io.borrow_mut();
+        io.ring.submit_entry(&sync);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<u64> {
+        Ok(self.file.metadata().unwrap().len())
     }
 }
 

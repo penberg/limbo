@@ -1,4 +1,4 @@
-use crate::{Completion, File, Result, IO};
+use crate::{Completion, File, LimboError, OpenFlags, Result, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
@@ -13,7 +13,7 @@ impl GenericIO {
 }
 
 impl IO for GenericIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::open(path)?;
         Ok(Rc::new(GenericFile {
@@ -57,7 +57,7 @@ impl File for GenericFile {
         {
             let r = match &(*c) {
                 Completion::Read(r) => r,
-                Completion::Write(_) => unreachable!(),
+                _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
             let buf = buf.as_mut_slice();
@@ -78,7 +78,20 @@ impl File for GenericFile {
         let buf = buffer.borrow();
         let buf = buf.as_slice();
         file.write_all(buf)?;
+        c.complete(buf.len() as i32);
         Ok(())
+    }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let mut file = self.file.borrow_mut();
+        file.sync_all().map_err(|err| LimboError::IOError(err))?;
+        c.complete(0);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<u64> {
+        let file = self.file.borrow();
+        Ok(file.metadata().unwrap().len())
     }
 }
 

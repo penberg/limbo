@@ -13,6 +13,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use super::wal::CheckpointStatus;
+
 pub struct Page {
     pub flags: AtomicUsize,
     pub contents: RwLock<Option<PageContent>>,
@@ -230,6 +232,13 @@ impl DumbLruPageCache {
         }
         self.detach(tail);
     }
+
+    fn clear(&mut self) {
+        let to_remove: Vec<usize> = self.map.borrow().iter().map(|v| *v.0).collect();
+        for key in to_remove {
+            self.delete(key);
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -256,6 +265,23 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
     }
 }
 
+#[derive(Clone)]
+enum FlushState {
+    Start,
+    SyncWal,
+    Checkpoint,
+    CheckpointDone,
+    SyncDbFile,
+    WaitSyncDbFile,
+}
+
+/// This will keep track of the state of current cache flush in order to not repeat work
+struct FlushInfo {
+    state: FlushState,
+    /// Number of writes taking place. When in_flight gets to 0 we can schedule a fsync.
+    in_flight_writes: Rc<RefCell<usize>>,
+}
+
 /// The pager interface implements the persistence layer by providing access
 /// to pages of the database file, including caching, concurrency control, and
 /// transaction management.
@@ -263,7 +289,7 @@ pub struct Pager {
     /// Source of the database pages.
     pub page_io: Rc<dyn DatabaseStorage>,
     /// The write-ahead log (WAL) for the database.
-    wal: Rc<dyn Wal>,
+    wal: Rc<RefCell<dyn Wal>>,
     /// A page cache for the database.
     page_cache: RefCell<DumbLruPageCache>,
     /// Buffer pool for temporary data storage.
@@ -272,6 +298,9 @@ pub struct Pager {
     pub io: Arc<dyn crate::io::IO>,
     dirty_pages: Rc<RefCell<HashSet<usize>>>,
     db_header: Rc<RefCell<DatabaseHeader>>,
+
+    flush_info: RefCell<FlushInfo>,
+    syncing: Rc<RefCell<bool>>,
 }
 
 impl Pager {
@@ -284,7 +313,7 @@ impl Pager {
     pub fn finish_open(
         db_header_ref: Rc<RefCell<DatabaseHeader>>,
         page_io: Rc<dyn DatabaseStorage>,
-        wal: Rc<dyn Wal>,
+        wal: Rc<RefCell<dyn Wal>>,
         io: Arc<dyn crate::io::IO>,
     ) -> Result<Self> {
         let db_header = RefCell::borrow(&db_header_ref);
@@ -299,17 +328,28 @@ impl Pager {
             io,
             dirty_pages: Rc::new(RefCell::new(HashSet::new())),
             db_header: db_header_ref.clone(),
+            flush_info: RefCell::new(FlushInfo {
+                state: FlushState::Start,
+                in_flight_writes: Rc::new(RefCell::new(0)),
+            }),
+            syncing: Rc::new(RefCell::new(false)),
         })
     }
 
     pub fn begin_read_tx(&self) -> Result<()> {
-        self.wal.begin_read_tx()?;
+        self.wal.borrow().begin_read_tx()?;
         Ok(())
     }
 
-    pub fn end_read_tx(&self) -> Result<()> {
-        self.wal.end_read_tx()?;
+    pub fn begin_write_tx(&self) -> Result<()> {
+        self.wal.borrow().begin_read_tx()?;
         Ok(())
+    }
+
+    pub fn end_tx(&self) -> Result<CheckpointStatus> {
+        self.cacheflush()?;
+        self.wal.borrow().end_read_tx()?;
+        Ok(CheckpointStatus::Done)
     }
 
     /// Reads a page from the database.
@@ -321,8 +361,10 @@ impl Pager {
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
         RefCell::borrow(&page).set_locked();
-        if let Some(frame_id) = self.wal.find_frame(page_idx as u64)? {
-            self.wal.read_frame(frame_id, page.clone())?;
+        if let Some(frame_id) = self.wal.borrow().find_frame(page_idx as u64)? {
+            self.wal
+                .borrow()
+                .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
             {
                 let page = page.borrow_mut();
                 page.set_uptodate();
@@ -356,19 +398,91 @@ impl Pager {
         dirty_pages.insert(page_id);
     }
 
-    pub fn cacheflush(&self) -> Result<()> {
-        let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
-        if dirty_pages.len() == 0 {
-            return Ok(());
+    pub fn cacheflush(&self) -> Result<CheckpointStatus> {
+        loop {
+            let state = self.flush_info.borrow().state.clone();
+            match state {
+                FlushState::Start => {
+                    let db_size = self.db_header.borrow().database_size;
+                    for page_id in self.dirty_pages.borrow().iter() {
+                        let mut cache = self.page_cache.borrow_mut();
+                        let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+                        self.wal.borrow_mut().append_frame(
+                            page.clone(),
+                            db_size,
+                            self,
+                            self.flush_info.borrow().in_flight_writes.clone(),
+                        )?;
+                    }
+                    self.dirty_pages.borrow_mut().clear();
+                    self.flush_info.borrow_mut().state = FlushState::SyncWal;
+                    return Ok(CheckpointStatus::IO);
+                }
+                FlushState::Checkpoint => {
+                    let in_flight = self.flush_info.borrow().in_flight_writes.clone();
+                    match self.wal.borrow_mut().checkpoint(self, in_flight)? {
+                        CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
+                        CheckpointStatus::Done => {
+                            self.flush_info.borrow_mut().state = FlushState::CheckpointDone;
+                        }
+                    };
+                }
+                FlushState::CheckpointDone => {
+                    let in_flight = *self.flush_info.borrow().in_flight_writes.borrow();
+                    if in_flight == 0 {
+                        self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
+                    } else {
+                        return Ok(CheckpointStatus::IO);
+                    }
+                }
+                FlushState::SyncWal => {
+                    match self.wal.borrow_mut().sync() {
+                        Ok(CheckpointStatus::IO) => return Ok(CheckpointStatus::IO),
+                        Ok(CheckpointStatus::Done) => {}
+                        Err(e) => return Err(e),
+                    }
+
+                    let should_checkpoint = self.wal.borrow().should_checkpoint();
+                    if should_checkpoint {
+                        self.flush_info.borrow_mut().state = FlushState::Checkpoint;
+                    } else {
+                        self.flush_info.borrow_mut().state = FlushState::Start;
+                        break;
+                    }
+                }
+                FlushState::SyncDbFile => {
+                    sqlite3_ondisk::begin_sync(self.page_io.clone(), self.syncing.clone())?;
+                    self.flush_info.borrow_mut().state = FlushState::WaitSyncDbFile;
+                }
+                FlushState::WaitSyncDbFile => {
+                    if *self.syncing.borrow() {
+                        return Ok(CheckpointStatus::IO);
+                    } else {
+                        self.flush_info.borrow_mut().state = FlushState::Start;
+                        break;
+                    }
+                }
+            }
         }
-        for page_id in dirty_pages.iter() {
-            let mut cache = self.page_cache.borrow_mut();
-            let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
-            sqlite3_ondisk::begin_write_btree_page(self, &page)?;
+        Ok(CheckpointStatus::Done)
+    }
+
+    // WARN: used for testing purposes
+    pub fn clear_page_cache(&self) {
+        loop {
+            match self
+                .wal
+                .borrow_mut()
+                .checkpoint(self, Rc::new(RefCell::new(0)))
+            {
+                Ok(CheckpointStatus::IO) => {}
+                Ok(CheckpointStatus::Done) => {
+                    break;
+                }
+                Err(err) => panic!("error while clearing cache {}", err),
+            }
         }
-        dirty_pages.clear();
-        self.io.run_once()?;
-        Ok(())
+        self.page_cache.borrow_mut().clear();
     }
 
     /*
@@ -382,14 +496,23 @@ impl Pager {
         header.database_size += 1;
         {
             // update database size
-            let first_page_ref = self.read_page(1).unwrap();
-            let first_page = RefCell::borrow_mut(&first_page_ref);
-            first_page.set_dirty();
-            self.add_dirty(1);
+            // read sync for now
+            loop {
+                let first_page_ref = self.read_page(1)?;
+                let first_page = RefCell::borrow_mut(&first_page_ref);
+                if first_page.is_locked() {
+                    drop(first_page);
+                    self.io.run_once()?;
+                    continue;
+                }
+                first_page.set_dirty();
+                self.add_dirty(1);
 
-            let contents = first_page.contents.write().unwrap();
-            let contents = contents.as_ref().unwrap();
-            contents.write_database_header(&header);
+                let contents = first_page.contents.write().unwrap();
+                let contents = contents.as_ref().unwrap();
+                contents.write_database_header(&header);
+                break;
+            }
         }
 
         let page_ref = Rc::new(RefCell::new(Page::new(0)));

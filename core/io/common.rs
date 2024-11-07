@@ -13,7 +13,7 @@ pub mod tests {
         // Parent process opens the file
         let io1 = create_io().expect("Failed to create IO");
         let _file1 = io1
-            .open_file(&path)
+            .open_file(&path, crate::io::OpenFlags::None)
             .expect("Failed to open file in parent process");
 
         let current_exe = std::env::current_exe().expect("Failed to get current executable path");
@@ -38,7 +38,7 @@ pub mod tests {
         if std::env::var("RUST_TEST_CHILD_PROCESS").is_ok() {
             let path = std::env::var("RUST_TEST_FILE_PATH")?;
             let io = create_io()?;
-            match io.open_file(&path) {
+            match io.open_file(&path, crate::io::OpenFlags::None) {
                 Ok(_) => std::process::exit(0),
                 Err(_) => std::process::exit(1),
             }

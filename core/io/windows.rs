@@ -1,4 +1,4 @@
-use crate::{Completion, File, Result, WriteCompletion, IO};
+use crate::{Completion, File, LimboError, OpenFlags, Result, WriteCompletion, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
@@ -13,9 +13,13 @@ impl WindowsIO {
 }
 
 impl IO for WindowsIO {
-    fn open_file(&self, path: &str) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::open(path)?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .create(matches!(flags, OpenFlags::Create))
+            .open(path)?;
         Ok(Rc::new(WindowsFile {
             file: RefCell::new(file),
         }))
@@ -55,7 +59,7 @@ impl File for WindowsFile {
         {
             let r = match &(*c) {
                 Completion::Read(r) => r,
-                Completion::Write(_) => unreachable!(),
+                _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
             let buf = buf.as_mut_slice();
@@ -76,6 +80,19 @@ impl File for WindowsFile {
         let buf = buffer.borrow();
         let buf = buf.as_slice();
         file.write_all(buf)?;
+        c.complete(buffer.borrow().len() as i32);
         Ok(())
+    }
+
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+        let mut file = self.file.borrow_mut();
+        file.sync_all().map_err(|err| LimboError::IOError(err))?;
+        c.complete(0);
+        Ok(())
+    }
+
+    fn size(&self) -> Result<u64> {
+        let file = self.file.borrow();
+        Ok(file.metadata().unwrap().len())
     }
 }
