@@ -276,7 +276,7 @@ impl File for DarwinFile {
 
     fn size(&self) -> Result<u64> {
         let file = self.file.borrow();
-        Ok(file.metadata().unwrap().size())
+        Ok(file.metadata().unwrap().len())
     }
 }
 

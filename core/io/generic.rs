@@ -2,7 +2,6 @@ use crate::{Completion, File, LimboError, OpenFlags, Result, IO};
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
-use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 pub struct GenericIO {}
@@ -92,7 +91,7 @@ impl File for GenericFile {
 
     fn size(&self) -> Result<u64> {
         let file = self.file.borrow();
-        Ok(file.metadata().unwrap().size())
+        Ok(file.metadata().unwrap().len())
     }
 }
 

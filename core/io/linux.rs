@@ -278,7 +278,7 @@ impl File for LinuxFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(self.file.metadata().unwrap().size())
+        Ok(self.file.metadata().unwrap().len())
     }
 }
 
