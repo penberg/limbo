@@ -12,6 +12,7 @@ use rustix::io::Errno;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
+use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 pub struct DarwinIO {
@@ -271,6 +272,11 @@ impl File for DarwinFile {
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn size(&self) -> Result<u64> {
+        let file = self.file.borrow();
+        Ok(file.metadata().unwrap().size())
     }
 }
 

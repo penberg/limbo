@@ -5,6 +5,7 @@ use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
 use std::cell::RefCell;
 use std::fmt;
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
@@ -274,6 +275,10 @@ impl File for LinuxFile {
         let mut io = self.io.borrow_mut();
         io.ring.submit_entry(&sync);
         Ok(())
+    }
+
+    fn size(&self) -> Result<u64> {
+        Ok(self.file.metadata().unwrap().size())
     }
 }
 

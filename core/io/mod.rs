@@ -15,6 +15,7 @@ pub trait File {
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
     fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
     fn sync(&self, c: Rc<Completion>) -> Result<()>;
+    fn size(&self) -> Result<u64>;
 }
 
 pub enum OpenFlags {

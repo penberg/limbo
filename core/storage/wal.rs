@@ -10,7 +10,7 @@ use crate::{storage::pager::Page, Result};
 
 use super::buffer_pool::BufferPool;
 use super::pager::Pager;
-use super::sqlite3_ondisk::{self, begin_write_btree_page};
+use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
 
 /// Write-ahead log (WAL).
 pub trait Wal {
@@ -70,6 +70,7 @@ pub struct WalFile {
     ongoing_checkpoint: HashSet<usize>,
 
     syncing: Rc<RefCell<bool>>,
+    page_size: usize,
 }
 
 pub enum CheckpointStatus {
@@ -224,7 +225,7 @@ impl Wal for WalFile {
 
 #[cfg(feature = "fs")]
 impl WalFile {
-    pub fn new(io: Arc<dyn IO>, wal_path: String) -> Self {
+    pub fn new(io: Arc<dyn IO>, wal_path: String, page_size: usize) -> Self {
         Self {
             io,
             wal_path,
@@ -237,6 +238,7 @@ impl WalFile {
             checkpoint_threshold: 1000,
             ongoing_checkpoint: HashSet::new(),
             syncing: Rc::new(RefCell::new(false)),
+            page_size,
         }
     }
 
@@ -247,14 +249,30 @@ impl WalFile {
                 .open_file(&self.wal_path, crate::io::OpenFlags::Create)
             {
                 Ok(file) => {
-                    *self.file.borrow_mut() = Some(file.clone());
-                    let wal_header = match sqlite3_ondisk::begin_read_wal_header(file) {
-                        Ok(header) => header,
-                        Err(err) => panic!("{:?}", err),
-                    };
-                    // TODO: Return a completion instead.
-                    self.io.run_once()?;
-                    self.wal_header.replace(Some(wal_header));
+                    if file.size()? > 0 {
+                        let wal_header = match sqlite3_ondisk::begin_read_wal_header(&file) {
+                            Ok(header) => header,
+                            Err(err) => panic!("Couldn't read header page: {:?}", err),
+                        };
+                        // TODO: Return a completion instead.
+                        self.io.run_once()?;
+                        self.wal_header.replace(Some(wal_header));
+                    } else {
+                        let wal_header = WalHeader {
+                            magic: (0x377f0682_u32).to_be_bytes(),
+                            file_format: 3007000,
+                            page_size: self.page_size as u32,
+                            checkpoint_seq: 0, // TODO implement sequence number
+                            salt_1: 0,         // TODO implement salt
+                            salt_2: 0,
+                            checksum_1: 0,
+                            checksum_2: 0, // TODO implement checksum header
+                        };
+                        sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
+                        self.wal_header
+                            .replace(Some(Rc::new(RefCell::new(wal_header))));
+                    }
+                    *self.file.borrow_mut() = Some(file);
                 }
                 Err(err) => panic!("{:?} {}", err, &self.wal_path),
             };

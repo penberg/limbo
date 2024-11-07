@@ -92,14 +92,14 @@ pub const WAL_FRAME_HEADER_SIZE: usize = 24;
 
 #[derive(Debug, Default)]
 pub struct WalHeader {
-    magic: [u8; 4],
-    file_format: u32,
+    pub magic: [u8; 4],
+    pub file_format: u32,
     pub page_size: u32,
-    checkpoint_seq: u32,
-    salt_1: u32,
-    salt_2: u32,
-    checksum_1: u32,
-    checksum_2: u32,
+    pub checkpoint_seq: u32,
+    pub salt_1: u32,
+    pub salt_2: u32,
+    pub checksum_1: u32,
+    pub checksum_2: u32,
 }
 
 #[allow(dead_code)]
@@ -956,7 +956,7 @@ pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
     payload.extend_from_slice(&varint);
 }
 
-pub fn begin_read_wal_header(io: Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
+pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(WAL_HEADER_SIZE, drop_fn)));
     let result = Rc::new(RefCell::new(WalHeader::default()));
@@ -1064,6 +1064,39 @@ pub fn begin_write_wal_frame(
     };
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
     io.pwrite(offset, buffer.clone(), c)?;
+    Ok(())
+}
+
+pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<()> {
+    let buffer = {
+        let drop_fn = Rc::new(|_buf| {});
+
+        let mut buffer = Buffer::allocate(WAL_HEADER_SIZE, drop_fn);
+        let buf = buffer.as_mut_slice();
+
+        buf[0..4].copy_from_slice(&header.magic);
+        buf[4..8].copy_from_slice(&header.file_format.to_be_bytes());
+        buf[8..12].copy_from_slice(&header.page_size.to_be_bytes());
+        buf[12..16].copy_from_slice(&header.checkpoint_seq.to_be_bytes());
+        buf[16..20].copy_from_slice(&header.salt_1.to_be_bytes());
+        buf[20..24].copy_from_slice(&header.salt_2.to_be_bytes());
+        buf[24..28].copy_from_slice(&header.checksum_1.to_be_bytes());
+        buf[28..32].copy_from_slice(&header.checksum_2.to_be_bytes());
+
+        Rc::new(RefCell::new(buffer))
+    };
+
+    let write_complete = {
+        Box::new(move |bytes_written: i32| {
+            if bytes_written < WAL_HEADER_SIZE as i32 {
+                log::error!(
+                    "wal header wrote({bytes_written}) less than expected({WAL_HEADER_SIZE})"
+                );
+            }
+        })
+    };
+    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    io.pwrite(0, buffer.clone(), c)?;
     Ok(())
 }
 

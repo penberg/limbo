@@ -68,14 +68,13 @@ impl Database {
         let file = io.open_file(path, io::OpenFlags::None)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
-        let wal = Rc::new(RefCell::new(WalFile::new(io.clone(), wal_path)));
-        Self::open(io, page_io, wal)
+        Self::open(io, page_io, wal_path)
     }
 
     pub fn open(
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
-        wal: Rc<RefCell<dyn Wal>>,
+        wal_path: String,
     ) -> Result<Rc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         DATABASE_VERSION.get_or_init(|| {
@@ -83,6 +82,11 @@ impl Database {
             version.to_string()
         });
         io.run_once()?;
+        let wal = Rc::new(RefCell::new(WalFile::new(
+            io.clone(),
+            wal_path,
+            db_header.borrow().page_size as usize,
+        )));
         let pager = Rc::new(Pager::finish_open(
             db_header.clone(),
             page_io,

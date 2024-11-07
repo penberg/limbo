@@ -76,6 +76,10 @@ impl limbo_core::File for File {
     fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
         todo!()
     }
+
+    fn size(&self) -> Result<()> {
+        todo!()
+    }
 }
 
 pub struct PlatformIO {

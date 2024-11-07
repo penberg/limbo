@@ -194,6 +194,10 @@ impl limbo_core::File for SimulatorFile {
     fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
         self.inner.sync(c)
     }
+
+    fn size(&self) -> Result<u64> {
+        Ok(self.inner.size()?)
+    }
 }
 
 impl Drop for SimulatorFile {
