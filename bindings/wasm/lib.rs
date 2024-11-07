@@ -77,7 +77,7 @@ impl limbo_core::File for File {
         todo!()
     }
 
-    fn size(&self) -> Result<()> {
+    fn size(&self) -> Result<u64> {
         todo!()
     }
 }

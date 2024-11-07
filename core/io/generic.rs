@@ -72,19 +72,21 @@ impl File for GenericFile {
         &self,
         pos: usize,
         buffer: Rc<RefCell<crate::Buffer>>,
-        _c: Rc<Completion>,
+        c: Rc<Completion>,
     ) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         let buf = buffer.borrow();
         let buf = buf.as_slice();
         file.write_all(buf)?;
+        c.complete(buf.len() as i32);
         Ok(())
     }
 
-    fn sync(&self, _c: Rc<Completion>) -> Result<()> {
+    fn sync(&self, c: Rc<Completion>) -> Result<()> {
         let mut file = self.file.borrow_mut();
         file.sync_all().map_err(|err| LimboError::IOError(err))?;
+        c.complete(0);
         Ok(())
     }
 
