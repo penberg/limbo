@@ -2,7 +2,6 @@ use crate::{Completion, File, LimboError, OpenFlags, Result, WriteCompletion, IO
 use log::trace;
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
-use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 pub struct WindowsIO {}
