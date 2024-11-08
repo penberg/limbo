@@ -53,7 +53,6 @@ impl MemPage {
 enum WriteState {
     Start,
     BalanceStart,
-    BalanceGetPage,
     BalanceGetParentPage,
     BalanceMoveUp,
 }
@@ -787,7 +786,6 @@ impl BTreeCursor {
                 let right_page_ref = self.allocate_page(page.page_type());
                 let right_page = RefCell::borrow_mut(&right_page_ref);
                 let right_page_id = right_page.id;
-                let mut right_page = right_page.contents.write().unwrap();
 
                 self.write_info.new_pages.borrow_mut().clear();
                 self.write_info
@@ -815,7 +813,6 @@ impl BTreeCursor {
                 self.write_info.state = WriteState::BalanceGetParentPage;
                 Ok(())
             }
-            WriteState::BalanceGetPage => todo!(),
             WriteState::BalanceGetParentPage => {
                 let current_page = self.write_info.current_page.borrow();
                 let mem_page = &current_page.as_ref().unwrap().0;

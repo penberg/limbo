@@ -1100,22 +1100,6 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
     Ok(())
 }
 
-fn finish_read_wal_frame(
-    buf: Rc<RefCell<Buffer>>,
-    frame: Rc<RefCell<WalFrameHeader>>,
-) -> Result<()> {
-    let buf = buf.borrow();
-    let buf = buf.as_slice();
-    let mut frame = frame.borrow_mut();
-    frame.page_number = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
-    frame.db_size = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
-    frame.salt_1 = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
-    frame.salt_2 = u32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]);
-    frame.checksum_1 = u32::from_be_bytes([buf[16], buf[17], buf[18], buf[19]]);
-    frame.checksum_2 = u32::from_be_bytes([buf[20], buf[21], buf[22], buf[23]]);
-    Ok(())
-}
-
 /*
     Checks if payload will overflow a cell based on max local and
     it will return the min size that will be stored in that case,
