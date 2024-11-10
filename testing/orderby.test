@@ -17,6 +17,20 @@ do_execsql_test basic-order-by {
 2|cap|82.0
 8|sneakers|82.0}
 
+do_execsql_test basic-order-by {
+    select * from products order by price desc;
+} {2|cap|82.0
+8|sneakers|82.0
+11|accessories|81.0
+1|hat|79.0
+7|jeans|78.0
+5|sweatshirt|74.0
+6|shorts|70.0
+10|coat|33.0
+4|sweater|25.0
+3|shirt|18.0
+9|boots|1.0}
+
 do_execsql_test basic-order-by-and-limit {
     select * from products order by name limit 5;
 } {11|accessories|81.0
@@ -25,6 +39,14 @@ do_execsql_test basic-order-by-and-limit {
 10|coat|33.0
 1|hat|79.0}
 
+do_execsql_test basic-order-by-and-limit {
+    select * from products order by name desc limit 5;
+} {5|sweatshirt|74.0
+4|sweater|25.0
+8|sneakers|82.0
+6|shorts|70.0
+3|shirt|18.0}
+
 do_execsql_test basic-order-by-and-limit-2 {
     select id, name from products order by name limit 5;
 } {11|accessories
@@ -32,6 +54,14 @@ do_execsql_test basic-order-by-and-limit-2 {
 2|cap
 10|coat
 1|hat}
+
+do_execsql_test basic-order-by-and-limit-2 {
+    select id, name from products order by name desc limit 5;
+} {5|sweatshirt
+4|sweater
+8|sneakers
+6|shorts
+3|shirt}
 
 do_execsql_test basic-order-by-and-limit-3 {
     select price, name from products where price > 70 order by name;
@@ -42,11 +72,47 @@ do_execsql_test basic-order-by-and-limit-3 {
 82.0|sneakers
 74.0|sweatshirt}
 
+do_execsql_test basic-order-by-and-limit-3 {
+    select price, name from products where price > 70 order by name desc;
+} {74.0|sweatshirt
+82.0|sneakers
+78.0|jeans
+79.0|hat
+82.0|cap
+81.0|accessories}
+
 do_execsql_test order-by-qualified {
     select u.first_name from users u order by u.first_name limit 1;
 } {Aaron}
+
+do_execsql_test order-by-qualified {
+    select u.first_name from users u order by u.first_name desc limit 1;
+} {Zoe}
 
 do_execsql_test order-by-column-number {
     select first_name, last_name, age from users order by 3,2 limit 2;
 } {Teresa|Allen|1
 David|Baker|1}
+
+do_execsql_test order-by-column-number {
+    select first_name, last_name, age from users order by 3 desc, 2 asc limit 2;
+} {Connor|Adkins|100
+John|Bell|100}
+
+do_execsql_test order-by-column-number {
+    select first_name, last_name, age from users order by 3 asc, 2 desc limit 2;
+} {Kyle|Wolf|1
+Jason|Williams|1}
+
+do_execsql_test order-by-column-number {
+    select first_name, last_name, age from users order by 3 asc, 2 desc limit 10;
+} {Kyle|Wolf|1
+Jason|Williams|1
+Tracey|Williams|1
+Jessica|Werner|1
+Jasmine|Warren|1
+Dennis|Ward|1
+Whitney|Walker|1
+Robert|Villanueva|1
+Cynthia|Thomas|1
+Brandon|Tate|1}

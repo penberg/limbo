@@ -232,6 +232,13 @@ impl ProgramBuilder {
                     assert!(*pc_if_empty < 0);
                     *pc_if_empty = to_offset;
                 }
+                Insn::LastAwait {
+                    cursor_id: _cursor_id,
+                    pc_if_empty,
+                } => {
+                    assert!(*pc_if_empty < 0);
+                    *pc_if_empty = to_offset;
+                }
                 Insn::Goto { target_pc } => {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
@@ -266,6 +273,10 @@ impl ProgramBuilder {
                     *target_pc = to_offset;
                 }
                 Insn::NextAwait { pc_if_next, .. } => {
+                    assert!(*pc_if_next < 0);
+                    *pc_if_next = to_offset;
+                }
+                Insn::PrevAwait { pc_if_next, .. } => {
                     assert!(*pc_if_next < 0);
                     *pc_if_next = to_offset;
                 }

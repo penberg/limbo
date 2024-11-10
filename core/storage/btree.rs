@@ -117,6 +117,10 @@ impl BTreeCursor {
         }
     }
 
+    fn cell_count(&self) -> Result<CursorResult<usize>> {
+        self.load_page_with(|page| Ok(CursorResult::Ok(page.cell_count())))
+    }
+
     fn is_empty_table(&mut self) -> Result<CursorResult<bool>> {
         let page = self.pager.read_page(self.root_page)?;
         let page = RefCell::borrow(&page);
@@ -126,6 +130,106 @@ impl BTreeCursor {
 
         let cell_count = page.contents.as_ref().unwrap().cell_count();
         Ok(CursorResult::Ok(cell_count == 0))
+    }
+
+    fn get_cell_with<T>(
+        &self,
+        handle: impl Fn(BTreeCell) -> Result<CursorResult<T>>,
+    ) -> Result<CursorResult<T>> {
+        let mem_page_rc = self.stack.top();
+        let cell_idx = self.stack.current_index();
+
+        debug!("current id={} cell={}", mem_page_rc.borrow().id, cell_idx);
+        if mem_page_rc.borrow().is_locked() {
+            return Ok(CursorResult::IO);
+        }
+        if !mem_page_rc.borrow().is_loaded() {
+            self.pager.load_page(mem_page_rc.clone())?;
+            return Ok(CursorResult::IO);
+        }
+        let mem_page = mem_page_rc.borrow();
+
+        let contents = mem_page.contents.as_ref().unwrap();
+
+        let cell = contents.cell_get(
+            cell_idx,
+            self.pager.clone(),
+            self.max_local(contents.page_type()),
+            self.min_local(contents.page_type()),
+            self.usable_space(),
+        )?;
+
+        handle(cell)
+    }
+
+    fn move_to_child_rightmost(&mut self) -> Result<CursorResult<()>> {
+        // let mem_page = self.get_mem_page();
+
+        // let handle_cell = |cell: BTreeCell| match cell {
+        //     BTreeCell::TableInteriorCell(TableInteriorCell {
+        //         _left_child_page,
+        //         _rowid,
+        //     }) => {
+        //         let cell_count = self.cell_count(_left_child_page as usize)?;
+        //         match cell_count {
+        //             CursorResult::Ok(cell_count) => {
+        //                 self.page.replace(Some(Rc::new(MemPage::new(
+        //                     Some(mem_page.clone()),
+        //                     _left_child_page as usize,
+        //                     cell_count - 1,
+        //                 ))));
+        //                 Ok(CursorResult::Ok(()))
+        //             }
+        //             CursorResult::IO => Ok(CursorResult::IO),
+        //         }
+        //     }
+        //     _ => todo!(),
+        // };
+
+        // self.get_cell_with(handle_cell)
+        Ok(CursorResult::Ok(()))
+    }
+
+    fn btree_prev(&mut self) -> Result<CursorResult<()>> {
+        // let mut mem_page = self.get_mem_page();
+        // loop {
+        //     if mem_page.cell_idx() > 0 {
+        //         mem_page.retreat();
+        //         let page_idx = mem_page.page_idx;
+        //         self.page.replace(Some(mem_page));
+        //         match self.load_page_with(page_idx, |page| Ok(CursorResult::Ok(page.is_leaf())))? {
+        //             CursorResult::Ok(true) => return Ok(CursorResult::Ok(())),
+        //             CursorResult::Ok(false) => return self.move_to_child_rightmost(),
+        //             CursorResult::IO => return Ok(CursorResult::IO),
+        //         };
+        //     }
+        //     match &mem_page.parent {
+        //         Some(parent) => mem_page = parent.clone(),
+        //         None => {
+        //             // moved to start of btree
+        //             self.page.replace(None);
+        //             return Ok(CursorResult::Ok(()));
+        //         }
+        //     }
+        // }
+        Ok(CursorResult::Ok(()))
+    }
+
+    fn get_prev_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+        let handle_cell = |cell: BTreeCell| match cell {
+            BTreeCell::TableLeafCell(TableLeafCell {
+                _rowid, _payload, ..
+            }) => {
+                let record: OwnedRecord = crate::storage::sqlite3_ondisk::read_record(&_payload)?;
+                Ok(CursorResult::Ok((Some(_rowid), Some(record))))
+            }
+            BTreeCell::IndexLeafCell(_) => todo!(),
+            _ => unreachable!(),
+        };
+
+        let record = self.get_cell_with(handle_cell)?;
+        self.btree_prev()?;
+        Ok(record)
     }
 
     fn get_next_record(
@@ -726,6 +830,39 @@ impl BTreeCursor {
         self.free_cell_range(page, cell_start as u16, cell_len as u16);
         page.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, page.cell_count() as u16 - 1);
     }
+
+    fn load_page_with<T>(
+        &self,
+        handle: impl Fn(&PageContent) -> Result<CursorResult<T>>,
+    ) -> Result<CursorResult<T>> {
+        let mem_page_rc = self.stack.top();
+        let cell_idx = self.stack.current_index();
+
+        debug!("current id={} cell={}", mem_page_rc.borrow().id, cell_idx);
+        if mem_page_rc.borrow().is_locked() {
+            return Ok(CursorResult::IO);
+        }
+        if !mem_page_rc.borrow().is_loaded() {
+            self.pager.load_page(mem_page_rc.clone())?;
+            return Ok(CursorResult::IO);
+        }
+        let mem_page = mem_page_rc.borrow();
+
+        let contents = mem_page.contents.as_ref().unwrap();
+
+        handle(contents)
+    }
+
+    // fn get_page(&mut self) -> crate::Result<Rc<RefCell<Page>>> {
+    //     let mem_page = {
+    //         let mem_page = self.page.borrow();
+    //         let mem_page = mem_page.as_ref().unwrap();
+    //         mem_page.clone()
+    //     };
+    //     let page_idx = mem_page.page_idx;
+    //     let page_ref = self.pager.read_page(page_idx)?;
+    //     Ok(page_ref)
+    // }
 
     /// This is a naive algorithm that doesn't try to distribute cells evenly by content.
     /// It will try to split the page in half by keys not by content.
@@ -1570,11 +1707,29 @@ impl Cursor for BTreeCursor {
         }
     }
 
+    fn last(&mut self) -> Result<CursorResult<()>> {
+        match self.move_to_rightmost()? {
+            CursorResult::Ok(_) => self.prev(),
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
     fn next(&mut self) -> Result<CursorResult<()>> {
         match self.get_next_record(None)? {
             CursorResult::Ok((rowid, next)) => {
                 self.rowid.replace(rowid);
                 self.record.replace(next);
+                Ok(CursorResult::Ok(()))
+            }
+            CursorResult::IO => Ok(CursorResult::IO),
+        }
+    }
+
+    fn prev(&mut self) -> Result<CursorResult<()>> {
+        match self.get_prev_record()? {
+            CursorResult::Ok((rowid, record)) => {
+                self.rowid.replace(rowid);
+                self.record.replace(record);
                 Ok(CursorResult::Ok(()))
             }
             CursorResult::IO => Ok(CursorResult::IO),

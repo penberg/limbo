@@ -114,6 +114,7 @@ pub enum Operator {
         table_reference: BTreeTableReference,
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
+        reverse: Option<bool>,
     },
     // Search operator
     // This operator is used to search for a row in a table using an index

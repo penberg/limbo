@@ -319,6 +319,7 @@ fn parse_from(
         predicates: None,
         id: operator_id_counter.get_next_id(),
         step: 0,
+        reverse: None,
     };
 
     let mut tables = vec![first_table];
@@ -398,6 +399,7 @@ fn parse_join(
             predicates: None,
             id: operator_id_counter.get_next_id(),
             step: 0,
+            reverse: None,
         },
         outer,
         predicates,
