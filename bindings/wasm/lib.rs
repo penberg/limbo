@@ -136,6 +136,7 @@ impl DatabaseStorage {
     }
 }
 
+#[allow(dead_code)]
 struct BufferPool {}
 
 impl limbo_core::DatabaseStorage for DatabaseStorage {

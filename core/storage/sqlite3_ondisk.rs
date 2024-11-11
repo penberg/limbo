@@ -50,6 +50,7 @@ use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
 use log::trace;
 use std::cell::RefCell;
+use std::pin::Pin;
 use std::rc::Rc;
 
 /// The size of the database header in bytes.
@@ -267,7 +268,7 @@ impl TryFrom<u8> for PageType {
 #[derive(Debug, Clone)]
 pub struct OverflowCell {
     pub index: usize,
-    pub payload: Vec<u8>,
+    pub payload: Pin<Vec<u8>>,
 }
 
 #[derive(Debug)]
