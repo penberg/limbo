@@ -30,12 +30,6 @@ const PAGE_ERROR: usize = 0b100;
 /// Page is dirty. Flush needed.
 const PAGE_DIRTY: usize = 0b1000;
 
-impl Default for Page {
-    fn default() -> Self {
-        Self::new(0)
-    }
-}
-
 impl Page {
     pub fn new(id: usize) -> Page {
         Page {
@@ -167,7 +161,7 @@ impl DumbLruPageCache {
         ptr?;
         let ptr = unsafe { ptr.unwrap().as_mut() };
         let page = ptr.page.clone();
-        self.detach(ptr);
+        //self.detach(ptr);
         self.touch(ptr);
         Some(page)
     }
@@ -179,6 +173,13 @@ impl DumbLruPageCache {
 
     fn detach(&mut self, entry: &mut PageCacheEntry) {
         let mut current = entry.as_non_null();
+
+        {
+            // evict buffer
+            let page = entry.page.borrow_mut();
+            let mut contents = page.contents.write().unwrap();
+            let _ = contents.as_mut().take();
+        }
 
         let (next, prev) = unsafe {
             let c = current.as_mut();

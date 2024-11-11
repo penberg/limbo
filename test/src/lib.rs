@@ -51,6 +51,7 @@ mod tests {
         let list_query = "SELECT * FROM test";
         let max_iterations = 10000;
         for i in 0..max_iterations {
+            debug!("inserting {} ", i);
             if (i % 100) == 0 {
                 let progress = (i as f64 / max_iterations as f64) * 100.0;
                 println!("progress {:.1}%", progress);
