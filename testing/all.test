@@ -8,7 +8,6 @@ source $testdir/coalesce.test
 source $testdir/glob.test
 source $testdir/join.test
 source $testdir/insert.test
-source $testdir/join.test
 source $testdir/json.test
 source $testdir/like.test
 source $testdir/orderby.test
