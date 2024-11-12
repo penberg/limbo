@@ -304,6 +304,12 @@ enum FlushState {
     WaitSyncDbFile,
 }
 
+#[derive(Clone)]
+enum CheckpointState {
+    Checkpoint,
+    CheckpointDone,
+}
+
 /// This will keep track of the state of current cache flush in order to not repeat work
 struct FlushInfo {
     state: FlushState,
@@ -329,6 +335,7 @@ pub struct Pager {
     db_header: Rc<RefCell<DatabaseHeader>>,
 
     flush_info: RefCell<FlushInfo>,
+    checkpoint_state: RefCell<CheckpointState>,
     syncing: Rc<RefCell<bool>>,
 }
 
@@ -362,6 +369,7 @@ impl Pager {
                 in_flight_writes: Rc::new(RefCell::new(0)),
             }),
             syncing: Rc::new(RefCell::new(false)),
+            checkpoint_state: RefCell::new(CheckpointState::Checkpoint),
         })
     }
 
@@ -376,7 +384,10 @@ impl Pager {
     }
 
     pub fn end_tx(&self) -> Result<CheckpointStatus> {
-        self.cacheflush()?;
+        match self.cacheflush()? {
+            CheckpointStatus::Done => {}
+            CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
+        };
         self.wal.borrow().end_read_tx()?;
         Ok(CheckpointStatus::Done)
     }
@@ -492,12 +503,11 @@ impl Pager {
                     return Ok(CheckpointStatus::IO);
                 }
                 FlushState::Checkpoint => {
-                    let in_flight = self.flush_info.borrow().in_flight_writes.clone();
-                    match self.wal.borrow_mut().checkpoint(self, in_flight)? {
-                        CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
+                    match self.checkpoint()? {
                         CheckpointStatus::Done => {
-                            self.flush_info.borrow_mut().state = FlushState::CheckpointDone;
+                            self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
                         }
+                        CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
                     };
                 }
                 FlushState::CheckpointDone => {
@@ -538,6 +548,33 @@ impl Pager {
             }
         }
         Ok(CheckpointStatus::Done)
+    }
+
+    pub fn checkpoint(&self) -> Result<CheckpointStatus> {
+        loop {
+            let state = self.checkpoint_state.borrow().clone();
+            match state {
+                CheckpointState::Checkpoint => {
+                    let in_flight = self.flush_info.borrow().in_flight_writes.clone();
+                    match self.wal.borrow_mut().checkpoint(self, in_flight)? {
+                        CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
+                        CheckpointStatus::Done => {
+                            self.checkpoint_state
+                                .replace(CheckpointState::CheckpointDone);
+                        }
+                    };
+                }
+                CheckpointState::CheckpointDone => {
+                    let in_flight = self.flush_info.borrow().in_flight_writes.clone();
+                    if *in_flight.borrow() > 0 {
+                        return Ok(CheckpointStatus::IO);
+                    } else {
+                        self.checkpoint_state.replace(CheckpointState::Checkpoint);
+                        return Ok(CheckpointStatus::Done);
+                    }
+                }
+            }
+        }
     }
 
     // WARN: used for testing purposes

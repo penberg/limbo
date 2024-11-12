@@ -48,7 +48,7 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
-use log::trace;
+use log::{debug, trace};
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -1018,6 +1018,7 @@ pub fn begin_write_wal_frame(
 ) -> Result<()> {
     let page_finish = page.clone();
     let page_id = page.borrow().id;
+    trace!("begin_write_wal_frame(offset={}, page={})", offset, page_id);
 
     let header = WalFrameHeader {
         page_number: page_id as u32,
@@ -1039,12 +1040,12 @@ pub fn begin_write_wal_frame(
         );
         let buf = buffer.as_mut_slice();
 
-        buf[0..4].copy_from_slice(&header.page_number.to_ne_bytes());
-        buf[4..8].copy_from_slice(&header.db_size.to_ne_bytes());
-        buf[8..12].copy_from_slice(&header.salt_1.to_ne_bytes());
-        buf[12..16].copy_from_slice(&header.salt_2.to_ne_bytes());
-        buf[16..20].copy_from_slice(&header.checksum_1.to_ne_bytes());
-        buf[20..24].copy_from_slice(&header.checksum_2.to_ne_bytes());
+        buf[0..4].copy_from_slice(&header.page_number.to_be_bytes());
+        buf[4..8].copy_from_slice(&header.db_size.to_be_bytes());
+        buf[8..12].copy_from_slice(&header.salt_1.to_be_bytes());
+        buf[12..16].copy_from_slice(&header.salt_2.to_be_bytes());
+        buf[16..20].copy_from_slice(&header.checksum_1.to_be_bytes());
+        buf[20..24].copy_from_slice(&header.checksum_2.to_be_bytes());
         buf[WAL_FRAME_HEADER_SIZE..].copy_from_slice(&contents.as_ptr());
 
         Rc::new(RefCell::new(buffer))

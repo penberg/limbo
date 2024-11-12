@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-use log::debug;
+use log::{debug, trace};
 
 use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
@@ -140,6 +140,12 @@ impl Wal for WalFile {
         let page_id = page.borrow().id;
         let frame_id = *self.max_frame.borrow();
         let offset = self.frame_offset(frame_id);
+        trace!(
+            "append_frame(frame={}, offset={}, page_id={})",
+            frame_id,
+            offset,
+            page_id
+        );
         begin_write_wal_frame(
             self.file.borrow().as_ref().unwrap(),
             offset,

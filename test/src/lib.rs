@@ -306,6 +306,74 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn test_wal_restart() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
+        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+        // threshold is 1000 by default
+
+        fn insert(i: usize, conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
+            let insert_query = format!("INSERT INTO test VALUES ({})", i);
+            match conn.query(insert_query) {
+                Ok(Some(ref mut rows)) => loop {
+                    match rows.next_row()? {
+                        RowResult::IO => {
+                            tmp_db.io.run_once()?;
+                        }
+                        RowResult::Done => break,
+                        _ => unreachable!(),
+                    }
+                },
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("{}", err);
+                }
+            };
+            tmp_db.io.run_once()?;
+            Ok(())
+        }
+
+        fn count(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<usize> {
+            let list_query = "SELECT count(x) FROM test";
+            loop {
+                match conn.query(list_query).unwrap() {
+                    Some(ref mut rows) => loop {
+                        match rows.next_row()? {
+                            RowResult::Row(row) => {
+                                let first_value = &row.values[0];
+                                let count = match first_value {
+                                    Value::Integer(i) => *i as i32,
+                                    _ => unreachable!(),
+                                };
+                                return Ok(count as usize);
+                            }
+                            RowResult::IO => {
+                                tmp_db.io.run_once()?;
+                            }
+                            RowResult::Done => break,
+                        }
+                    },
+                    None => {}
+                }
+            }
+        }
+
+        {
+            let conn = tmp_db.connect_limbo();
+            insert(1, &conn, &tmp_db).unwrap();
+            assert_eq!(count(&conn, &tmp_db).unwrap(), 1);
+        }
+        {
+            let conn = tmp_db.connect_limbo();
+            assert_eq!(
+                count(&conn, &tmp_db).unwrap(),
+                1,
+                "failed to read from wal from another connection"
+            );
+        }
+        Ok(())
+    }
+
     fn compare_string(a: &String, b: &String) {
         assert_eq!(a.len(), b.len(), "Strings are not equal in size!");
         let a = a.as_bytes();

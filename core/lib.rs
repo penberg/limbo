@@ -283,6 +283,27 @@ impl Connection {
         self.pager.clear_page_cache();
         Ok(())
     }
+
+    pub fn checkpoint(&self) -> Result<()> {
+        self.pager.clear_page_cache();
+        Ok(())
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        loop {
+            // TODO: make this async?
+            match self.pager.checkpoint().unwrap() {
+                CheckpointStatus::Done => {
+                    return;
+                }
+                CheckpointStatus::IO => {
+                    self.pager.io.run_once().unwrap();
+                }
+            };
+        }
+    }
 }
 
 pub struct Statement {
