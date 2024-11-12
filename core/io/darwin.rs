@@ -12,7 +12,6 @@ use rustix::io::Errno;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
-use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 
 pub struct DarwinIO {

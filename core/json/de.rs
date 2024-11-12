@@ -140,7 +140,6 @@ unicode_letter = _{
 
 value = _{ null | boolean | string | number | object | array }
 "#]
-
 struct Parser;
 
 /// Deserialize an instance of type `T` from a string of JSON5 text. Can fail if the input is
