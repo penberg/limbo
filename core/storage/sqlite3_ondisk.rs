@@ -525,6 +525,7 @@ fn finish_read_page(
         page.contents.write().unwrap().replace(inner);
         page.set_uptodate();
         page.clear_locked();
+        page.set_loaded();
     }
     Ok(())
 }

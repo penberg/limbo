@@ -3,7 +3,7 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::Wal;
 use crate::{Buffer, Result};
-use log::trace;
+use log::{debug, trace};
 use sieve_cache::SieveCache;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -29,6 +29,8 @@ const PAGE_LOCKED: usize = 0b010;
 const PAGE_ERROR: usize = 0b100;
 /// Page is dirty. Flush needed.
 const PAGE_DIRTY: usize = 0b1000;
+/// Page's contents are loaded in memory.
+const PAGE_LOADED: usize = 0b10000;
 
 impl Page {
     pub fn new(id: usize) -> Page {
@@ -86,6 +88,19 @@ impl Page {
     pub fn clear_dirty(&self) {
         self.flags.fetch_and(!PAGE_DIRTY, Ordering::SeqCst);
     }
+
+    pub fn is_loaded(&self) -> bool {
+        self.flags.load(Ordering::SeqCst) & PAGE_LOADED != 0
+    }
+
+    pub fn set_loaded(&self) {
+        self.flags.fetch_or(PAGE_LOADED, Ordering::SeqCst);
+    }
+
+    pub fn clear_loaded(&self) {
+        log::debug!("clear loaded {}", self.id);
+        self.flags.fetch_and(!PAGE_LOADED, Ordering::SeqCst);
+    }
 }
 
 #[allow(dead_code)]
@@ -119,8 +134,13 @@ impl DumbLruPageCache {
         }
     }
 
+    pub fn contains_key(&mut self, key: usize) -> bool {
+        self.map.borrow().contains_key(&key)
+    }
+
     pub fn insert(&mut self, key: usize, value: Rc<RefCell<Page>>) {
-        self.delete(key);
+        debug!("cache_insert(key={})", key);
+        self._delete(key, false);
         let mut entry = Box::new(PageCacheEntry {
             key,
             next: None,
@@ -138,6 +158,11 @@ impl DumbLruPageCache {
     }
 
     pub fn delete(&mut self, key: usize) {
+        self._delete(key, true)
+    }
+
+    pub fn _delete(&mut self, key: usize, clean_page: bool) {
+        debug!("cache_delete(key={}, clean={})", key, clean_page);
         let ptr = self.map.borrow_mut().remove(&key);
         if ptr.is_none() {
             return;
@@ -145,7 +170,7 @@ impl DumbLruPageCache {
         let mut ptr = ptr.unwrap();
         {
             let ptr = unsafe { ptr.as_mut() };
-            self.detach(ptr);
+            self.detach(ptr, clean_page);
         }
         unsafe { drop_in_place(ptr.as_ptr()) };
     }
@@ -157,6 +182,7 @@ impl DumbLruPageCache {
     }
 
     pub fn get(&mut self, key: &usize) -> Option<Rc<RefCell<Page>>> {
+        debug!("cache_get(key={})", key);
         let ptr = self.get_ptr(*key);
         ptr?;
         let ptr = unsafe { ptr.unwrap().as_mut() };
@@ -171,12 +197,14 @@ impl DumbLruPageCache {
         todo!();
     }
 
-    fn detach(&mut self, entry: &mut PageCacheEntry) {
+    fn detach(&mut self, entry: &mut PageCacheEntry, clean_page: bool) {
         let mut current = entry.as_non_null();
 
-        {
+        if clean_page {
             // evict buffer
             let page = entry.page.borrow_mut();
+            page.clear_loaded();
+            debug!("cleaning up page {}", page.id);
             let mut contents = page.contents.write().unwrap();
             let _ = contents.as_mut().take();
         }
@@ -231,7 +259,7 @@ impl DumbLruPageCache {
             // TODO: drop from another clean entry?
             return;
         }
-        self.detach(tail);
+        self.detach(tail, true);
     }
 
     fn clear(&mut self) {
@@ -358,6 +386,7 @@ impl Pager {
         trace!("read_page(page_idx = {})", page_idx);
         let mut page_cache = self.page_cache.borrow_mut();
         if let Some(page) = page_cache.get(&page_idx) {
+            trace!("read_page(page_idx = {}) = cached", page_idx);
             return Ok(page.clone());
         }
         let page = Rc::new(RefCell::new(Page::new(page_idx)));
@@ -370,6 +399,8 @@ impl Pager {
                 let page = page.borrow_mut();
                 page.set_uptodate();
             }
+            // TODO(pere) ensure page is inserted, we should probably first insert to page cache
+            // and if successful, read frame or page
             page_cache.insert(page_idx, page.clone());
             return Ok(page);
         }
@@ -379,8 +410,42 @@ impl Pager {
             page.clone(),
             page_idx,
         )?;
+        // TODO(pere) ensure page is inserted
         page_cache.insert(page_idx, page.clone());
         Ok(page)
+    }
+
+    /// Loads pages if not loaded
+    pub fn load_page(&self, page: Rc<RefCell<Page>>) -> Result<()> {
+        let id = page.borrow().id;
+        trace!("load_page(page_idx = {})", id);
+        let mut page_cache = self.page_cache.borrow_mut();
+        page.borrow_mut().set_locked();
+        if let Some(frame_id) = self.wal.borrow().find_frame(id as u64)? {
+            self.wal
+                .borrow()
+                .read_frame(frame_id, page.clone(), self.buffer_pool.clone())?;
+            {
+                let page = page.borrow_mut();
+                page.set_uptodate();
+            }
+            // TODO(pere) ensure page is inserted
+            if !page_cache.contains_key(id) {
+                page_cache.insert(id, page.clone());
+            }
+            return Ok(());
+        }
+        sqlite3_ondisk::begin_read_page(
+            self.page_io.clone(),
+            self.buffer_pool.clone(),
+            page.clone(),
+            id,
+        )?;
+        // TODO(pere) ensure page is inserted
+        if !page_cache.contains_key(id) {
+            page_cache.insert(id, page.clone());
+        }
+        Ok(())
     }
 
     /// Writes the database header.
@@ -406,8 +471,15 @@ impl Pager {
                 FlushState::Start => {
                     let db_size = self.db_header.borrow().database_size;
                     for page_id in self.dirty_pages.borrow().iter() {
+                        debug!("appending frame {}", page_id);
                         let mut cache = self.page_cache.borrow_mut();
                         let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+                        {
+                            let contents = page.borrow();
+                            let contents = contents.contents.read().unwrap();
+                            let contents = contents.as_ref().unwrap();
+                            debug!("appending frame {} {:?}", page_id, contents.page_type());
+                        }
                         self.wal.borrow_mut().append_frame(
                             page.clone(),
                             db_size,
@@ -540,9 +612,11 @@ impl Pager {
         Ok(page_ref)
     }
 
-    pub fn put_page(&self, id: usize, page: Rc<RefCell<Page>>) {
+    pub fn put_loaded_page(&self, id: usize, page: Rc<RefCell<Page>>) {
         let mut cache = RefCell::borrow_mut(&self.page_cache);
-        cache.insert(id, page);
+        // cache insert invalidates previous page
+        cache.insert(id, page.clone());
+        page.borrow_mut().set_loaded();
     }
 
     pub fn usable_size(&self) -> usize {

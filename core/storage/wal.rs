@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
+use log::debug;
+
 use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
@@ -115,10 +117,11 @@ impl Wal for WalFile {
         page: Rc<RefCell<Page>>,
         buffer_pool: Rc<BufferPool>,
     ) -> Result<()> {
+        debug!("read_frame({})", frame_id);
         let offset = self.frame_offset(frame_id);
         begin_read_wal_frame(
             self.file.borrow().as_ref().unwrap(),
-            offset,
+            offset + WAL_FRAME_HEADER_SIZE,
             buffer_pool,
             page,
         )?;
@@ -285,7 +288,7 @@ impl WalFile {
         let header = header.as_ref().unwrap().borrow();
         let page_size = header.page_size;
         let page_offset = frame_id * (page_size as u64 + WAL_FRAME_HEADER_SIZE as u64);
-        let offset = WAL_HEADER_SIZE as u64 + WAL_FRAME_HEADER_SIZE as u64 + page_offset;
+        let offset = WAL_HEADER_SIZE as u64 + page_offset;
         offset as usize
     }
 }

@@ -41,7 +41,7 @@ struct WriteInfo {
     page_copy: RefCell<Option<PageContent>>, // this holds the copy a of a page needed for buffer references
 }
 
-/* TODO(Pere)
+/*
 ** Maximum depth of an SQLite B-Tree structure. Any B-Tree deeper than
 ** this will be declared corrupt. This value is calculated based on a
 ** maximum database size of 2^31 pages a minimum fanout of 2 for a
@@ -64,8 +64,7 @@ pub struct BTreeCursor {
 
     current_page: RefCell<i32>,
     cell_indices: RefCell<[usize; BTCURSOR_MAX_DEPTH + 1]>,
-    stack: RefCell<[Option<Rc<RefCell<Page>>>; BTCURSOR_MAX_DEPTH + 1]>, // TODO(pere) stack of cell idx
-                                                                         // TODO(pere) stack of pages
+    stack: RefCell<[Option<Rc<RefCell<Page>>>; BTCURSOR_MAX_DEPTH + 1]>,
 }
 
 impl BTreeCursor {
@@ -115,12 +114,16 @@ impl BTreeCursor {
             let mem_page_rc = self.top_from_stack();
             let cell_idx = self.current_index();
 
-            let mem_page = RefCell::borrow(&mem_page_rc);
-            debug!("current id={} cell={}", mem_page.id, cell_idx);
-            if mem_page.is_locked() {
-                // TODO(pere): request load page
+            debug!("current id={} cell={}", mem_page_rc.borrow().id, cell_idx);
+            if mem_page_rc.borrow().is_locked() {
                 return Ok(CursorResult::IO);
             }
+            if !mem_page_rc.borrow().is_loaded() {
+                self.pager.load_page(mem_page_rc.clone())?;
+                return Ok(CursorResult::IO);
+            }
+            let mem_page = mem_page_rc.borrow();
+
             let page = mem_page.contents.read().unwrap();
             let page = page.as_ref().unwrap();
 
@@ -369,9 +372,17 @@ impl BTreeCursor {
     }
 
     fn push_to_stack(&self, page: Rc<RefCell<Page>>) {
-        debug!("push to stack {} {}", self.current_page.borrow(), page.borrow().id);
+        debug!(
+            "push to stack {} {}",
+            self.current_page.borrow(),
+            page.borrow().id
+        );
         *self.current_page.borrow_mut() += 1;
         let current = *self.current_page.borrow();
+        assert!(
+            current < BTCURSOR_MAX_DEPTH as i32,
+            "corrupted database, stack is bigger than expected"
+        );
         self.stack.borrow_mut()[current as usize] = Some(page);
         self.cell_indices.borrow_mut()[current as usize] = 0;
     }
@@ -386,11 +397,16 @@ impl BTreeCursor {
 
     fn top_from_stack(&self) -> Rc<RefCell<Page>> {
         let current = *self.current_page.borrow();
-        debug!("top_from_stack(current={})", current);
-        self.stack.borrow()[current as usize]
+        let page = self.stack.borrow()[current as usize]
             .as_ref()
             .unwrap()
-            .clone()
+            .clone();
+        debug!(
+            "top_from_stack(current={}, page_id={})",
+            current,
+            page.borrow().id
+        );
+        page
     }
 
     fn parent(&self) -> Rc<RefCell<Page>> {
@@ -862,19 +878,24 @@ impl BTreeCursor {
                 );
 
                 self.write_info.state = WriteState::BalanceGetParentPage;
-                return Ok(CursorResult::Ok(()));
+                Ok(CursorResult::Ok(()))
             }
             WriteState::BalanceGetParentPage => {
-
                 let parent_rc = self.parent();
-                if !&parent_rc.borrow().is_locked() {
+                let loaded = parent_rc.borrow().is_loaded();
+                let locked = parent_rc.borrow().is_locked();
+
+                if locked {
+                    Ok(CursorResult::IO)
+                } else {
+                    if !loaded {
+                        debug!("balance_leaf(loading page {} {})", locked, loaded);
+                        self.pager.load_page(parent_rc.clone())?;
+                        return Ok(CursorResult::IO);
+                    }
                     parent_rc.borrow_mut().set_dirty();
                     self.write_info.state = WriteState::BalanceMoveUp;
                     Ok(CursorResult::Ok(()))
-                } else {
-                    // TODO(pere): maybe request load, it might be that parent was already
-                    // requested
-                    Ok(CursorResult::IO)
                 }
             }
             WriteState::BalanceMoveUp => {
@@ -931,6 +952,7 @@ impl BTreeCursor {
                 // reset pages
                 for page in new_pages.iter() {
                     let page = page.borrow_mut();
+                    assert!(page.is_dirty());
                     let mut page = page.contents.write().unwrap();
                     let page = page.as_mut().unwrap();
 
@@ -1121,9 +1143,8 @@ impl BTreeCursor {
             self.push_to_stack(root.clone());
             self.push_to_stack(child.clone());
 
-            self.pager.put_page(root_id, root);
-            self.pager.put_page(child_id, child);
-
+            self.pager.put_loaded_page(root_id, root);
+            self.pager.put_loaded_page(child_id, child);
         }
     }
 
