@@ -5,7 +5,7 @@ use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
 use std::cell::RefCell;
 use std::fmt;
-use std::os::unix::fs::MetadataExt;
+use std::collections::HashMap;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
@@ -37,6 +37,8 @@ pub struct LinuxIO {
 struct WrappedIOUring {
     ring: io_uring::IoUring,
     pending_ops: usize,
+    pub pending: HashMap<u64, Rc<Completion>>,
+    key: u64
 }
 
 struct InnerLinuxIO {
@@ -52,6 +54,8 @@ impl LinuxIO {
             ring: WrappedIOUring {
                 ring,
                 pending_ops: 0,
+                pending: HashMap::new(),
+                key: 0
             },
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
@@ -76,7 +80,8 @@ impl InnerLinuxIO {
 }
 
 impl WrappedIOUring {
-    fn submit_entry(&mut self, entry: &io_uring::squeue::Entry) {
+    fn submit_entry(&mut self, entry: &io_uring::squeue::Entry, c: Rc<Completion>) {
+        self.pending.insert(entry.get_user_data(), c);
         unsafe {
             self.ring
                 .submission()
@@ -103,6 +108,11 @@ impl WrappedIOUring {
 
     fn empty(&self) -> bool {
         self.pending_ops == 0
+    }
+
+    fn get_key(&mut self) -> u64 {
+        self.key +=1;
+        self.key
     }
 }
 
@@ -149,8 +159,11 @@ impl IO for LinuxIO {
                     LinuxIOError::IOUringCQError(result)
                 )));
             }
-            let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
-            c.complete(cqe.result());
+            {
+                let c = ring.pending.get(&cqe.user_data()).unwrap().clone();
+                c.complete(cqe.result());
+            }
+            ring.pending.remove(&cqe.user_data());
         }
         Ok(())
     }
@@ -170,6 +183,7 @@ pub struct LinuxFile {
     io: Rc<RefCell<InnerLinuxIO>>,
     file: std::fs::File,
 }
+
 
 impl File for LinuxFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
@@ -234,16 +248,16 @@ impl File for LinuxFile {
             let mut buf = r.buf_mut();
             let len = buf.len();
             let buf = buf.as_mut_ptr();
-            let ptr = Rc::into_raw(c.clone());
             let iovec = io.get_iovec(buf, len);
             io_uring::opcode::Readv::new(fd, iovec, 1)
                 .offset(pos as u64)
                 .build()
-                .user_data(ptr as u64)
+                .user_data(io.ring.get_key())
         };
-        io.ring.submit_entry(&read_e);
+        io.ring.submit_entry(&read_e, c);
         Ok(())
     }
+
 
     fn pwrite(
         &self,
@@ -255,25 +269,25 @@ impl File for LinuxFile {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let write = {
             let buf = buffer.borrow();
-            let ptr = Rc::into_raw(c.clone());
+            trace!("pwrite(pos = {}, length = {})", pos, buf.len());
             let iovec = io.get_iovec(buf.as_ptr(), buf.len());
             io_uring::opcode::Writev::new(fd, iovec, 1)
                 .offset(pos as u64)
                 .build()
-                .user_data(ptr as u64)
+                .user_data(io.ring.get_key())
         };
-        io.ring.submit_entry(&write);
+        io.ring.submit_entry(&write, c);
         Ok(())
     }
 
     fn sync(&self, c: Rc<Completion>) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        let ptr = Rc::into_raw(c.clone());
+        let mut io = self.io.borrow_mut();
+        trace!("sync()");
         let sync = io_uring::opcode::Fsync::new(fd)
             .build()
-            .user_data(ptr as u64);
-        let mut io = self.io.borrow_mut();
-        io.ring.submit_entry(&sync);
+            .user_data(io.ring.get_key());
+        io.ring.submit_entry(&sync, c);
         Ok(())
     }
 

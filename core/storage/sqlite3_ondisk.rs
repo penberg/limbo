@@ -960,7 +960,7 @@ pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
 
 pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Rc::new(RefCell::new(Buffer::allocate(WAL_HEADER_SIZE, drop_fn)));
+    let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let result = Rc::new(RefCell::new(WalHeader::default()));
     let header = result.clone();
     let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
@@ -1074,7 +1074,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
     let buffer = {
         let drop_fn = Rc::new(|_buf| {});
 
-        let mut buffer = Buffer::allocate(WAL_HEADER_SIZE, drop_fn);
+        let mut buffer = Buffer::allocate(512, drop_fn);
         let buf = buffer.as_mut_slice();
 
         buf[0..4].copy_from_slice(&header.magic);
