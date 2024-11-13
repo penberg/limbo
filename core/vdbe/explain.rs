@@ -866,6 +866,33 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=r[{}]", dst_reg, src_reg),
             ),
+            Insn::CreateBtree { db, root, flags } => (
+                "CreateBtree",
+                *db as i32,
+                *root as i32,
+                *flags as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=root iDb={} flags={}", root, db, flags),
+            ),
+            Insn::Close { cursor_id } => (
+                "Close",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::IsNull { src, target_pc } => (
+                "IsNull",
+                *src as i32,
+                *target_pc as i32,
+                0,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("if (r[{}]==NULL) goto {}", src, target_pc),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

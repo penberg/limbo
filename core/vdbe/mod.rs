@@ -469,6 +469,30 @@ pub enum Insn {
         dst_reg: usize,
         amount: usize, // 0 amount means we include src_reg, dst_reg..=dst_reg+amount = src_reg..=src_reg+amount
     },
+
+    /// Allocate a new b-tree.
+    CreateBtree {
+        /// Allocate b-tree in main database if zero or in temp database if non-zero (P1).
+        db: usize,
+        /// The root page of the new b-tree (P2).
+        root: usize,
+        /// Flags (P3).
+        flags: usize,
+    },
+
+    /// Close a cursor.
+    Close {
+        cursor_id: CursorID,
+    },
+
+    /// Check if the register is null.
+    IsNull {
+        /// Source register (P1).
+        src: usize,
+
+        /// Jump to this PC if the register is null (P2).
+        target_pc: BranchOffset,
+    },
 }
 
 // Index of insn in list of insns
@@ -2086,6 +2110,20 @@ impl Program {
                         state.registers[*dst_reg + i] = state.registers[*src_reg + i].clone();
                     }
                     state.pc += 1;
+                }
+                Insn::CreateBtree { .. } => {
+                    todo!();
+                }
+                Insn::Close { cursor_id } => {
+                    cursors.remove(cursor_id);
+                    state.pc += 1;
+                }
+                Insn::IsNull { src, target_pc } => {
+                    if matches!(state.registers[*src], OwnedValue::Null) {
+                        state.pc = *target_pc;
+                    } else {
+                        state.pc += 1;
+                    }
                 }
             }
         }
