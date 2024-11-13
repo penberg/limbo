@@ -539,6 +539,7 @@ pub fn begin_write_btree_page(
     let page_finish = page.clone();
 
     let page_id = page.borrow().id;
+    log::trace!("begin_write_btree_page(page_id={})", page_id);
     let buffer = {
         let page = page.borrow();
         let contents = page.contents.read().unwrap();
@@ -549,6 +550,7 @@ pub fn begin_write_btree_page(
     *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
+        log::trace!("finish_write_btree_page");
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
@@ -1054,6 +1056,7 @@ pub fn begin_write_wal_frame(
     *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
+        log::info!("finished");
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
