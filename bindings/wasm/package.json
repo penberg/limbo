@@ -1,0 +1,20 @@
+{
+  "name": "limbo-wasm",
+  "collaborators": [
+    "the Limbo authors"
+  ],
+  "version": "0.0.4",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/penberg/limbo"
+  },
+  "files": [
+    "snippets",
+    "limbo_wasm_bg.wasm",
+    "limbo_wasm.js",
+    "limbo_wasm.d.ts"
+  ],
+  "main": "limbo_wasm.js",
+  "types": "limbo_wasm.d.ts"
+}
