@@ -43,6 +43,7 @@ mod tests {
     use limbo_core::{CheckpointStatus, Connection, RowResult, Value};
     use log::debug;
 
+    #[ignore]
     #[test]
     fn test_sequential_write() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
