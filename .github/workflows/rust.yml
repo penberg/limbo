@@ -31,7 +31,7 @@ jobs:
       run: cargo build --verbose
     - name: Test
       env:
-        RUST_LOG: ${{ runner.debug && 'limbo_core::storage=debug' || '' }}
+        RUST_LOG: ${{ runner.debug && 'limbo_core::storage=trace || '' }}
       run: cargo test --verbose
 
   build-wasm:
