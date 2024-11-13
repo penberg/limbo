@@ -533,6 +533,17 @@ pub enum StepResult<'a> {
     Row(Record<'a>),
 }
 
+/// If there is I/O, the instruction is restarted.
+/// Evaluate a Result<CursorResult<T>>, if IO return Ok(StepResult::IO).
+macro_rules! io {
+    ($expr:expr) => {
+        match $expr? {
+            CursorResult::Ok(v) => v,
+            CursorResult::IO => return Ok(StepResult::IO),
+        }
+    };
+}
+
 struct RegexCache {
     like: HashMap<String, Regex>,
     glob: HashMap<String, Regex>,
@@ -1102,13 +1113,7 @@ impl Program {
                 }
                 Insn::RewindAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    match cursor.rewind()? {
-                        CursorResult::Ok(()) => {}
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
-                    }
+                    io!(cursor.rewind());
                     state.pc += 1;
                 }
                 Insn::LastAsync { cursor_id } => {
@@ -1194,13 +1199,7 @@ impl Program {
                 Insn::NextAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.set_null_flag(false);
-                    match cursor.next()? {
-                        CursorResult::Ok(_) => {}
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
-                    }
+                    io!(cursor.next());
                     state.pc += 1;
                 }
                 Insn::PrevAsync { cursor_id } => {
@@ -1386,18 +1385,11 @@ impl Program {
                             ));
                         }
                     };
-                    match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ)? {
-                        CursorResult::Ok(found) => {
-                            if !found {
-                                state.pc = *target_pc;
-                            } else {
-                                state.pc += 1;
-                            }
-                        }
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
+                    let found = io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ));
+                    if !found {
+                        state.pc = *target_pc;
+                    } else {
+                        state.pc += 1;
                     }
                 }
                 Insn::DeferredSeek {
@@ -1418,31 +1410,19 @@ impl Program {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
-                        match cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GE)? {
-                            CursorResult::Ok(found) => {
-                                if !found {
-                                    state.pc = *target_pc;
-                                } else {
-                                    state.pc += 1;
-                                }
-                            }
-                            CursorResult::IO => {
-                                // If there is I/O, the instruction is restarted.
-                                return Ok(StepResult::IO);
-                            }
+                        let found =
+                            io!(cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GE));
+                        if !found {
+                            state.pc = *target_pc;
+                        } else {
+                            state.pc += 1;
                         }
                     } else {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
-                                match cursor.rewind()? {
-                                    CursorResult::Ok(()) => {}
-                                    CursorResult::IO => {
-                                        // If there is I/O, the instruction is restarted.
-                                        return Ok(StepResult::IO);
-                                    }
-                                }
+                                io!(cursor.rewind());
                                 state.pc += 1;
                                 continue;
                             }
@@ -1453,18 +1433,11 @@ impl Program {
                                 ));
                             }
                         };
-                        match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE)? {
-                            CursorResult::Ok(found) => {
-                                if !found {
-                                    state.pc = *target_pc;
-                                } else {
-                                    state.pc += 1;
-                                }
-                            }
-                            CursorResult::IO => {
-                                // If there is I/O, the instruction is restarted.
-                                return Ok(StepResult::IO);
-                            }
+                        let found = io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE));
+                        if !found {
+                            state.pc = *target_pc;
+                        } else {
+                            state.pc += 1;
                         }
                     }
                 }
@@ -1479,31 +1452,19 @@ impl Program {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
-                        match cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GT)? {
-                            CursorResult::Ok(found) => {
-                                if !found {
-                                    state.pc = *target_pc;
-                                } else {
-                                    state.pc += 1;
-                                }
-                            }
-                            CursorResult::IO => {
-                                // If there is I/O, the instruction is restarted.
-                                return Ok(StepResult::IO);
-                            }
+                        let found =
+                            io!(cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GT));
+                        if !found {
+                            state.pc = *target_pc;
+                        } else {
+                            state.pc += 1;
                         }
                     } else {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
-                                match cursor.rewind()? {
-                                    CursorResult::Ok(()) => {}
-                                    CursorResult::IO => {
-                                        // If there is I/O, the instruction is restarted.
-                                        return Ok(StepResult::IO);
-                                    }
-                                }
+                                io!(cursor.rewind());
                                 state.pc += 1;
                                 continue;
                             }
@@ -1514,18 +1475,11 @@ impl Program {
                                 ));
                             }
                         };
-                        match cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GT)? {
-                            CursorResult::Ok(found) => {
-                                if !found {
-                                    state.pc = *target_pc;
-                                } else {
-                                    state.pc += 1;
-                                }
-                            }
-                            CursorResult::IO => {
-                                // If there is I/O, the instruction is restarted.
-                                return Ok(StepResult::IO);
-                            }
+                        let found = io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GT));
+                        if !found {
+                            state.pc = *target_pc;
+                        } else {
+                            state.pc += 1;
                         }
                     }
                 }
@@ -1892,13 +1846,7 @@ impl Program {
                 } => {
                     assert!(*pc_if_next >= 0);
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    match cursor.next()? {
-                        CursorResult::Ok(_) => {}
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
-                    }
+                    io!(cursor.next());
                     if !cursor.is_empty() {
                         state.pc = *pc_if_next;
                     } else {
@@ -2175,15 +2123,8 @@ impl Program {
                         _ => unreachable!("Not a record! Cannot insert a non record value."),
                     };
                     let key = &state.registers[*key_reg];
-                    match cursor.insert(key, record, true)? {
-                        CursorResult::Ok(_) => {
-                            state.pc += 1;
-                        }
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
-                    }
+                    io!(cursor.insert(key, record, true));
+                    state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
@@ -2195,13 +2136,8 @@ impl Program {
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
                     // TODO: make io handle rng
-                    let rowid = get_new_rowid(cursor, thread_rng())?;
-                    match rowid {
-                        CursorResult::Ok(rowid) => {
-                            state.registers[*rowid_reg] = OwnedValue::Integer(rowid);
-                        }
-                        CursorResult::IO => return Ok(StepResult::IO),
-                    }
+                    let rowid = io!(get_new_rowid(cursor, thread_rng()));
+                    state.registers[*rowid_reg] = OwnedValue::Integer(rowid);
                     state.pc += 1;
                 }
                 Insn::MustBeInt { reg } => {
@@ -2225,11 +2161,12 @@ impl Program {
                     target_pc,
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
-                    match cursor.exists(&state.registers[*rowid_reg])? {
-                        CursorResult::Ok(true) => state.pc += 1,
-                        CursorResult::Ok(false) => state.pc = *target_pc,
-                        CursorResult::IO => return Ok(StepResult::IO),
-                    };
+                    let exists = io!(cursor.exists(&state.registers[*rowid_reg]));
+                    if exists {
+                        state.pc += 1;
+                    } else {
+                        state.pc = *target_pc;
+                    }
                 }
                 // this cursor may be reused for next insert
                 // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
