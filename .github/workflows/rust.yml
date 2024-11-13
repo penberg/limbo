@@ -17,23 +17,6 @@ jobs:
     - name: Check formatting
       run: cargo fmt --check
 
-  test-wal-restart:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-    - uses: actions/checkout@v3
-    - uses: Swatinem/rust-cache@v2
-    - name: Build
-      run: cargo build --verbose
-    - name: Test
-      env:
-        RUST_LOG: 'trace'
-      run: cargo test --verbose
-      timeout-minutes: 5
   build-native:
     strategy:
       matrix:
