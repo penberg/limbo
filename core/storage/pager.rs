@@ -11,13 +11,13 @@ use std::hash::Hash;
 use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::wal::CheckpointStatus;
 
 pub struct Page {
     pub flags: AtomicUsize,
-    pub contents: RwLock<Option<PageContent>>,
+    pub contents: Option<PageContent>,
     pub id: usize,
 }
 
@@ -36,7 +36,7 @@ impl Page {
     pub fn new(id: usize) -> Page {
         Page {
             flags: AtomicUsize::new(0),
-            contents: RwLock::new(None),
+            contents: None,
             id,
         }
     }
@@ -202,11 +202,10 @@ impl DumbLruPageCache {
 
         if clean_page {
             // evict buffer
-            let page = entry.page.borrow_mut();
+            let mut page = entry.page.borrow_mut();
             page.clear_loaded();
             debug!("cleaning up page {}", page.id);
-            let mut contents = page.contents.write().unwrap();
-            let _ = contents.as_mut().take();
+            let _ = page.contents.take();
         }
 
         let (next, prev) = unsafe {
@@ -297,9 +296,9 @@ impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
 #[derive(Clone)]
 enum FlushState {
     Start,
+    WaitAppendFrames,
     SyncWal,
     Checkpoint,
-    CheckpointDone,
     SyncDbFile,
     WaitSyncDbFile,
 }
@@ -484,15 +483,10 @@ impl Pager {
                 FlushState::Start => {
                     let db_size = self.db_header.borrow().database_size;
                     for page_id in self.dirty_pages.borrow().iter() {
-                        debug!("appending frame {}", page_id);
                         let mut cache = self.page_cache.borrow_mut();
                         let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
-                        {
-                            let contents = page.borrow();
-                            let contents = contents.contents.read().unwrap();
-                            let contents = contents.as_ref().unwrap();
-                            debug!("appending frame {} {:?}", page_id, contents.page_type());
-                        }
+                        let page_type = page.borrow().contents.as_ref().unwrap().maybe_page_type();
+                        debug!("appending frame {} {:?}", page_id, page_type);
                         self.wal.borrow_mut().append_frame(
                             page.clone(),
                             db_size,
@@ -501,21 +495,13 @@ impl Pager {
                         )?;
                     }
                     self.dirty_pages.borrow_mut().clear();
-                    self.flush_info.borrow_mut().state = FlushState::SyncWal;
+                    self.flush_info.borrow_mut().state = FlushState::WaitAppendFrames;
                     return Ok(CheckpointStatus::IO);
                 }
-                FlushState::Checkpoint => {
-                    match self.checkpoint()? {
-                        CheckpointStatus::Done => {
-                            self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
-                        }
-                        CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
-                    };
-                }
-                FlushState::CheckpointDone => {
+                FlushState::WaitAppendFrames => {
                     let in_flight = *self.flush_info.borrow().in_flight_writes.borrow();
                     if in_flight == 0 {
-                        self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
+                        self.flush_info.borrow_mut().state = FlushState::SyncWal;
                     } else {
                         return Ok(CheckpointStatus::IO);
                     }
@@ -534,6 +520,14 @@ impl Pager {
                         self.flush_info.borrow_mut().state = FlushState::Start;
                         break;
                     }
+                }
+                FlushState::Checkpoint => {
+                    match self.checkpoint()? {
+                        CheckpointStatus::Done => {
+                            self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
+                        }
+                        CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
+                    };
                 }
                 FlushState::SyncDbFile => {
                     sqlite3_ondisk::begin_sync(self.page_io.clone(), self.syncing.clone())?;
@@ -621,8 +615,7 @@ impl Pager {
                 first_page.set_dirty();
                 self.add_dirty(1);
 
-                let contents = first_page.contents.write().unwrap();
-                let contents = contents.as_ref().unwrap();
+                let contents = first_page.contents.as_ref().unwrap();
                 contents.write_database_header(&header);
                 break;
             }
@@ -641,11 +634,11 @@ impl Pager {
                 bp.put(buf);
             });
             let buffer = Rc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
-            page.contents = RwLock::new(Some(PageContent {
+            page.contents = Some(PageContent {
                 offset: 0,
                 buffer,
                 overflow_cells: Vec::new(),
-            }));
+            });
             let mut cache = RefCell::borrow_mut(&self.page_cache);
             cache.insert(page.id, page_ref.clone());
         }

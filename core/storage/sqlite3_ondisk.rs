@@ -48,7 +48,7 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
-use log::{debug, trace};
+use log::trace;
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -293,6 +293,13 @@ impl PageContent {
         self.read_u8(self.offset).try_into().unwrap()
     }
 
+    pub fn maybe_page_type(&self) -> Option<PageType> {
+        match self.read_u8(self.offset).try_into() {
+            Ok(v) => Some(v),
+            Err(_) => None, // this could be an overflow page
+        }
+    }
+
     #[allow(clippy::mut_from_ref)]
     pub fn as_ptr(&self) -> &mut [u8] {
         unsafe {
@@ -521,8 +528,8 @@ fn finish_read_page(
         overflow_cells: Vec::new(),
     };
     {
-        let page = page.borrow_mut();
-        page.contents.write().unwrap().replace(inner);
+        let mut page = page.borrow_mut();
+        page.contents.replace(inner);
         page.set_uptodate();
         page.clear_locked();
         page.set_loaded();
@@ -542,8 +549,7 @@ pub fn begin_write_btree_page(
     log::trace!("begin_write_btree_page(page_id={})", page_id);
     let buffer = {
         let page = page.borrow();
-        let contents = page.contents.read().unwrap();
-        let contents = contents.as_ref().unwrap();
+        let contents = page.contents.as_ref().unwrap();
         contents.buffer.clone()
     };
 
@@ -723,9 +729,8 @@ fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8
                     break;
                 }
             }
-            let page = page.borrow();
-            let contents = page.contents.write().unwrap();
-            let contents = contents.as_ref().unwrap();
+            let mut page = page.borrow_mut();
+            let contents = page.contents.as_mut().unwrap();
 
             let to_read = left_to_read.min(usable_size - 4);
             let buf = contents.as_ptr();
@@ -1032,9 +1037,8 @@ pub fn begin_write_wal_frame(
     };
     let buffer = {
         let page = page.borrow();
-        let contents = page.contents.read().unwrap();
+        let contents = page.contents.as_ref().unwrap();
         let drop_fn = Rc::new(|_buf| {});
-        let contents = contents.as_ref().unwrap();
 
         let mut buffer = Buffer::allocate(
             contents.buffer.borrow().len() + WAL_FRAME_HEADER_SIZE,
@@ -1048,7 +1052,7 @@ pub fn begin_write_wal_frame(
         buf[12..16].copy_from_slice(&header.salt_2.to_be_bytes());
         buf[16..20].copy_from_slice(&header.checksum_1.to_be_bytes());
         buf[20..24].copy_from_slice(&header.checksum_2.to_be_bytes());
-        buf[WAL_FRAME_HEADER_SIZE..].copy_from_slice(&contents.as_ptr());
+        buf[WAL_FRAME_HEADER_SIZE..].copy_from_slice(contents.as_ptr());
 
         Rc::new(RefCell::new(buffer))
     };
