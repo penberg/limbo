@@ -304,7 +304,7 @@ enum FlushState {
     WaitSyncDbFile,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum CheckpointState {
     Checkpoint,
     CheckpointDone,
@@ -553,6 +553,7 @@ impl Pager {
     pub fn checkpoint(&self) -> Result<CheckpointStatus> {
         loop {
             let state = self.checkpoint_state.borrow().clone();
+            log::trace!("checkpoint(state={:?})", state);
             match state {
                 CheckpointState::Checkpoint => {
                     let in_flight = self.flush_info.borrow().in_flight_writes.clone();
