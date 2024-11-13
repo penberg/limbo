@@ -119,7 +119,7 @@ impl WrappedIOUring {
 }
 
 impl IO for LinuxIO {
-    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
             .read(true)
@@ -129,10 +129,12 @@ impl IO for LinuxIO {
         // Let's attempt to enable direct I/O. Not all filesystems support it
         // so ignore any errors.
         let fd = file.as_raw_fd();
-        match nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT)) {
-            Ok(_) => {},
-            Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
-        };
+        if direct {
+            match nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT)) {
+                Ok(_) => {},
+                Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
+            };
+        }
         let linux_file = Rc::new(LinuxFile {
             io: self.inner.clone(),
             file,

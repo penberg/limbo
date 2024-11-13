@@ -15,7 +15,9 @@ impl Database {
     #[wasm_bindgen(constructor)]
     pub fn new(path: &str) -> Database {
         let io = Arc::new(PlatformIO { vfs: VFS::new() });
-        let file = io.open_file(path, limbo_core::OpenFlags::None).unwrap();
+        let file = io
+            .open_file(path, limbo_core::OpenFlags::None, false)
+            .unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
         let wal = Rc::new(RefCell::new(Wal {}));
         let inner = limbo_core::Database::open(io, page_io, wal).unwrap();
@@ -87,7 +89,12 @@ pub struct PlatformIO {
 }
 
 impl limbo_core::IO for PlatformIO {
-    fn open_file(&self, path: &str, _flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
+    fn open_file(
+        &self,
+        path: &str,
+        _flags: OpenFlags,
+        _direct: bool,
+    ) -> Result<Rc<dyn limbo_core::File>> {
         let fd = self.vfs.open(path);
         Ok(Rc::new(File {
             vfs: VFS::new(),

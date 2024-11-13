@@ -255,7 +255,7 @@ impl WalFile {
         if self.file.borrow().is_none() {
             match self
                 .io
-                .open_file(&self.wal_path, crate::io::OpenFlags::Create)
+                .open_file(&self.wal_path, crate::io::OpenFlags::Create, false)
             {
                 Ok(file) => {
                     if file.size()? > 0 {

@@ -94,8 +94,13 @@ impl SimulatorIO {
 }
 
 impl IO for SimulatorIO {
-    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn limbo_core::File>> {
-        let inner = self.inner.open_file(path, flags)?;
+    fn open_file(
+        &self,
+        path: &str,
+        flags: OpenFlags,
+        _direct: bool,
+    ) -> Result<Rc<dyn limbo_core::File>> {
+        let inner = self.inner.open_file(path, flags, false)?;
         let file = Rc::new(SimulatorFile {
             inner,
             fault: RefCell::new(false),

@@ -65,7 +65,7 @@ pub struct Database {
 impl Database {
     #[cfg(feature = "fs")]
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
-        let file = io.open_file(path, io::OpenFlags::None)?;
+        let file = io.open_file(path, io::OpenFlags::None, true)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
         let db_header = Pager::begin_open(page_io.clone())?;
