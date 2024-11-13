@@ -4,8 +4,8 @@ use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
 use std::cell::RefCell;
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
@@ -38,7 +38,7 @@ struct WrappedIOUring {
     ring: io_uring::IoUring,
     pending_ops: usize,
     pub pending: HashMap<u64, Rc<Completion>>,
-    key: u64
+    key: u64,
 }
 
 struct InnerLinuxIO {
@@ -55,7 +55,7 @@ impl LinuxIO {
                 ring,
                 pending_ops: 0,
                 pending: HashMap::new(),
-                key: 0
+                key: 0,
             },
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
@@ -111,7 +111,7 @@ impl WrappedIOUring {
     }
 
     fn get_key(&mut self) -> u64 {
-        self.key +=1;
+        self.key += 1;
         self.key
     }
 }
@@ -155,8 +155,9 @@ impl IO for LinuxIO {
             let result = cqe.result();
             if result < 0 {
                 return Err(LimboError::LinuxIOError(format!(
-                    "{}",
-                    LinuxIOError::IOUringCQError(result)
+                    "{} cqe: {:?}",
+                    LinuxIOError::IOUringCQError(result),
+                    cqe
                 )));
             }
             {
@@ -183,7 +184,6 @@ pub struct LinuxFile {
     io: Rc<RefCell<InnerLinuxIO>>,
     file: std::fs::File,
 }
-
 
 impl File for LinuxFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
@@ -257,7 +257,6 @@ impl File for LinuxFile {
         io.ring.submit_entry(&read_e, c);
         Ok(())
     }
-
 
     fn pwrite(
         &self,

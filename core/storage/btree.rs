@@ -334,7 +334,6 @@ impl BTreeCursor {
                             };
                             return Ok(CursorResult::Ok((Some(rowid), Some(record))));
                         } else {
-
                         }
                     }
                     cell_type => {
@@ -548,7 +547,6 @@ impl BTreeCursor {
                             found_cell = true;
                             break;
                         } else {
-
                         }
                     }
                     BTreeCell::TableLeafCell(TableLeafCell {
