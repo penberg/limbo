@@ -4,6 +4,10 @@
 
 ### Added
 
+- Add Add Database.prepare() and Statement.all() to Wasm bindings (Pekka Enberg)
+
+- WAL improvements (Pere Diaz Bou)
+
 - Primary key index scans and single-column secondary index scans (Jussi Saurio)
 
 - `GROUP BY` support (Jussi Saurio)
