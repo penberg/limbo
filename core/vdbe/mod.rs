@@ -1098,6 +1098,7 @@ impl Program {
                             )));
                         }
                     }
+                    log::trace!("Halt auto_commit {}", self.auto_commit);
                     if self.auto_commit {
                         return match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),

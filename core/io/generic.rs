@@ -13,7 +13,7 @@ impl GenericIO {
 }
 
 impl IO for GenericIO {
-    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags, _direct: bool) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::open(path)?;
         Ok(Rc::new(GenericFile {

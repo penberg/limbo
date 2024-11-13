@@ -24,7 +24,7 @@ pub enum OpenFlags {
 }
 
 pub trait IO {
-    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>>;
+    fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Rc<dyn File>>;
 
     fn run_once(&self) -> Result<()>;
 

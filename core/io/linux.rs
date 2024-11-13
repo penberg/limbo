@@ -4,8 +4,8 @@ use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
 use nix::fcntl::{FcntlArg, OFlag};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
@@ -37,6 +37,8 @@ pub struct LinuxIO {
 struct WrappedIOUring {
     ring: io_uring::IoUring,
     pending_ops: usize,
+    pub pending: HashMap<u64, Rc<Completion>>,
+    key: u64,
 }
 
 struct InnerLinuxIO {
@@ -52,6 +54,8 @@ impl LinuxIO {
             ring: WrappedIOUring {
                 ring,
                 pending_ops: 0,
+                pending: HashMap::new(),
+                key: 0,
             },
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
@@ -76,7 +80,9 @@ impl InnerLinuxIO {
 }
 
 impl WrappedIOUring {
-    fn submit_entry(&mut self, entry: &io_uring::squeue::Entry) {
+    fn submit_entry(&mut self, entry: &io_uring::squeue::Entry, c: Rc<Completion>) {
+        log::trace!("submit_entry({:?})", entry);
+        self.pending.insert(entry.get_user_data(), c);
         unsafe {
             self.ring
                 .submission()
@@ -95,6 +101,7 @@ impl WrappedIOUring {
         // NOTE: This works because CompletionQueue's next function pops the head of the queue. This is not normal behaviour of iterators
         let entry = self.ring.completion().next();
         if entry.is_some() {
+            log::trace!("get_completion({:?})", entry);
             // consumed an entry from completion queue, update pending_ops
             self.pending_ops -= 1;
         }
@@ -104,10 +111,15 @@ impl WrappedIOUring {
     fn empty(&self) -> bool {
         self.pending_ops == 0
     }
+
+    fn get_key(&mut self) -> u64 {
+        self.key += 1;
+        self.key
+    }
 }
 
 impl IO for LinuxIO {
-    fn open_file(&self, path: &str, flags: OpenFlags) -> Result<Rc<dyn File>> {
+    fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
             .read(true)
@@ -117,10 +129,12 @@ impl IO for LinuxIO {
         // Let's attempt to enable direct I/O. Not all filesystems support it
         // so ignore any errors.
         let fd = file.as_raw_fd();
-        match nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT)) {
-            Ok(_) => {},
-            Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
-        };
+        if direct {
+            match nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT)) {
+                Ok(_) => {},
+                Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
+            };
+        }
         let linux_file = Rc::new(LinuxFile {
             io: self.inner.clone(),
             file,
@@ -145,12 +159,16 @@ impl IO for LinuxIO {
             let result = cqe.result();
             if result < 0 {
                 return Err(LimboError::LinuxIOError(format!(
-                    "{}",
-                    LinuxIOError::IOUringCQError(result)
+                    "{} cqe: {:?}",
+                    LinuxIOError::IOUringCQError(result),
+                    cqe
                 )));
             }
-            let c = unsafe { Rc::from_raw(cqe.user_data() as *const Completion) };
-            c.complete(cqe.result());
+            {
+                let c = ring.pending.get(&cqe.user_data()).unwrap().clone();
+                c.complete(cqe.result());
+            }
+            ring.pending.remove(&cqe.user_data());
         }
         Ok(())
     }
@@ -234,14 +252,13 @@ impl File for LinuxFile {
             let mut buf = r.buf_mut();
             let len = buf.len();
             let buf = buf.as_mut_ptr();
-            let ptr = Rc::into_raw(c.clone());
             let iovec = io.get_iovec(buf, len);
             io_uring::opcode::Readv::new(fd, iovec, 1)
                 .offset(pos as u64)
                 .build()
-                .user_data(ptr as u64)
+                .user_data(io.ring.get_key())
         };
-        io.ring.submit_entry(&read_e);
+        io.ring.submit_entry(&read_e, c);
         Ok(())
     }
 
@@ -255,25 +272,25 @@ impl File for LinuxFile {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let write = {
             let buf = buffer.borrow();
-            let ptr = Rc::into_raw(c.clone());
+            trace!("pwrite(pos = {}, length = {})", pos, buf.len());
             let iovec = io.get_iovec(buf.as_ptr(), buf.len());
             io_uring::opcode::Writev::new(fd, iovec, 1)
                 .offset(pos as u64)
                 .build()
-                .user_data(ptr as u64)
+                .user_data(io.ring.get_key())
         };
-        io.ring.submit_entry(&write);
+        io.ring.submit_entry(&write, c);
         Ok(())
     }
 
     fn sync(&self, c: Rc<Completion>) -> Result<()> {
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
-        let ptr = Rc::into_raw(c.clone());
+        let mut io = self.io.borrow_mut();
+        trace!("sync()");
         let sync = io_uring::opcode::Fsync::new(fd)
             .build()
-            .user_data(ptr as u64);
-        let mut io = self.io.borrow_mut();
-        io.ring.submit_entry(&sync);
+            .user_data(io.ring.get_key());
+        io.ring.submit_entry(&sync, c);
         Ok(())
     }
 

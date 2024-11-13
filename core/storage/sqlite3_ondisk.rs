@@ -48,7 +48,7 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
-use log::trace;
+use log::{debug, trace};
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -525,6 +525,7 @@ fn finish_read_page(
         page.contents.write().unwrap().replace(inner);
         page.set_uptodate();
         page.clear_locked();
+        page.set_loaded();
     }
     Ok(())
 }
@@ -538,6 +539,7 @@ pub fn begin_write_btree_page(
     let page_finish = page.clone();
 
     let page_id = page.borrow().id;
+    log::trace!("begin_write_btree_page(page_id={})", page_id);
     let buffer = {
         let page = page.borrow();
         let contents = page.contents.read().unwrap();
@@ -549,6 +551,7 @@ pub fn begin_write_btree_page(
     let write_complete = {
         let buf_copy = buffer.clone();
         Box::new(move |bytes_written: i32| {
+            log::trace!("finish_write_btree_page");
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
             *write_counter.borrow_mut() -= 1;
@@ -959,7 +962,7 @@ pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
 
 pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Rc<RefCell<WalHeader>>> {
     let drop_fn = Rc::new(|_buf| {});
-    let buf = Rc::new(RefCell::new(Buffer::allocate(WAL_HEADER_SIZE, drop_fn)));
+    let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let result = Rc::new(RefCell::new(WalHeader::default()));
     let header = result.clone();
     let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
@@ -1017,6 +1020,7 @@ pub fn begin_write_wal_frame(
 ) -> Result<()> {
     let page_finish = page.clone();
     let page_id = page.borrow().id;
+    trace!("begin_write_wal_frame(offset={}, page={})", offset, page_id);
 
     let header = WalFrameHeader {
         page_number: page_id as u32,
@@ -1038,12 +1042,12 @@ pub fn begin_write_wal_frame(
         );
         let buf = buffer.as_mut_slice();
 
-        buf[0..4].copy_from_slice(&header.page_number.to_ne_bytes());
-        buf[4..8].copy_from_slice(&header.db_size.to_ne_bytes());
-        buf[8..12].copy_from_slice(&header.salt_1.to_ne_bytes());
-        buf[12..16].copy_from_slice(&header.salt_2.to_ne_bytes());
-        buf[16..20].copy_from_slice(&header.checksum_1.to_ne_bytes());
-        buf[20..24].copy_from_slice(&header.checksum_2.to_ne_bytes());
+        buf[0..4].copy_from_slice(&header.page_number.to_be_bytes());
+        buf[4..8].copy_from_slice(&header.db_size.to_be_bytes());
+        buf[8..12].copy_from_slice(&header.salt_1.to_be_bytes());
+        buf[12..16].copy_from_slice(&header.salt_2.to_be_bytes());
+        buf[16..20].copy_from_slice(&header.checksum_1.to_be_bytes());
+        buf[20..24].copy_from_slice(&header.checksum_2.to_be_bytes());
         buf[WAL_FRAME_HEADER_SIZE..].copy_from_slice(&contents.as_ptr());
 
         Rc::new(RefCell::new(buffer))
@@ -1052,6 +1056,7 @@ pub fn begin_write_wal_frame(
     *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
+        log::info!("finished");
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
@@ -1072,7 +1077,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
     let buffer = {
         let drop_fn = Rc::new(|_buf| {});
 
-        let mut buffer = Buffer::allocate(WAL_HEADER_SIZE, drop_fn);
+        let mut buffer = Buffer::allocate(512, drop_fn);
         let buf = buffer.as_mut_slice();
 
         buf[0..4].copy_from_slice(&header.magic);

@@ -65,7 +65,7 @@ pub struct Database {
 impl Database {
     #[cfg(feature = "fs")]
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
-        let file = io.open_file(path, io::OpenFlags::None)?;
+        let file = io.open_file(path, io::OpenFlags::None, true)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
         let db_header = Pager::begin_open(page_io.clone())?;
@@ -282,6 +282,27 @@ impl Connection {
     pub fn clear_page_cache(&self) -> Result<()> {
         self.pager.clear_page_cache();
         Ok(())
+    }
+
+    pub fn checkpoint(&self) -> Result<()> {
+        self.pager.clear_page_cache();
+        Ok(())
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        loop {
+            // TODO: make this async?
+            match self.pager.checkpoint().unwrap() {
+                CheckpointStatus::Done => {
+                    return;
+                }
+                CheckpointStatus::IO => {
+                    self.pager.io.run_once().unwrap();
+                }
+            };
+        }
     }
 }
 

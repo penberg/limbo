@@ -25,12 +25,15 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: Swatinem/rust-cache@v2
     - uses: actions/checkout@v3
+    - uses: Swatinem/rust-cache@v2
     - name: Build
       run: cargo build --verbose
     - name: Test
+      env:
+        RUST_LOG: ${{ runner.debug && 'limbo_core::storage=trace' || '' }}
       run: cargo test --verbose
+      timeout-minutes: 5
 
   build-wasm:
     runs-on: ubuntu-latest

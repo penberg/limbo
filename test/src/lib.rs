@@ -28,9 +28,12 @@ impl TempDatabase {
     }
 
     pub fn connect_limbo(&self) -> Rc<limbo_core::Connection> {
+        log::debug!("conneting to limbo");
         let db = Database::open_file(self.io.clone(), self.path.to_str().unwrap()).unwrap();
 
-        db.connect()
+        let conn = db.connect();
+        log::debug!("connected to limbo");
+        conn
     }
 }
 
@@ -51,6 +54,7 @@ mod tests {
         let list_query = "SELECT * FROM test";
         let max_iterations = 10000;
         for i in 0..max_iterations {
+            debug!("inserting {} ", i);
             if (i % 100) == 0 {
                 let progress = (i as f64 / max_iterations as f64) * 100.0;
                 println!("progress {:.1}%", progress);
@@ -103,7 +107,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_simple_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
@@ -169,7 +172,6 @@ mod tests {
         Ok(())
     }
 
-    #[ignore]
     #[test]
     fn test_sequential_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
@@ -302,6 +304,78 @@ mod tests {
             }
         }
         do_flush(&conn, &tmp_db)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_wal_restart() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
+        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+        // threshold is 1000 by default
+
+        fn insert(i: usize, conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
+            log::debug!("inserting {}", i);
+            let insert_query = format!("INSERT INTO test VALUES ({})", i);
+            match conn.query(insert_query) {
+                Ok(Some(ref mut rows)) => loop {
+                    match rows.next_row()? {
+                        RowResult::IO => {
+                            tmp_db.io.run_once()?;
+                        }
+                        RowResult::Done => break,
+                        _ => unreachable!(),
+                    }
+                },
+                Ok(None) => {}
+                Err(err) => {
+                    eprintln!("{}", err);
+                }
+            };
+            log::debug!("inserted {}", i);
+            tmp_db.io.run_once()?;
+            Ok(())
+        }
+
+        fn count(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<usize> {
+            log::debug!("counting");
+            let list_query = "SELECT count(x) FROM test";
+            loop {
+                match conn.query(list_query).unwrap() {
+                    Some(ref mut rows) => loop {
+                        match rows.next_row()? {
+                            RowResult::Row(row) => {
+                                let first_value = &row.values[0];
+                                let count = match first_value {
+                                    Value::Integer(i) => *i as i32,
+                                    _ => unreachable!(),
+                                };
+                                log::debug!("counted {}", count);
+                                return Ok(count as usize);
+                            }
+                            RowResult::IO => {
+                                tmp_db.io.run_once()?;
+                            }
+                            RowResult::Done => break,
+                        }
+                    },
+                    None => {}
+                }
+            }
+        }
+
+        {
+            let conn = tmp_db.connect_limbo();
+            insert(1, &conn, &tmp_db).unwrap();
+            assert_eq!(count(&conn, &tmp_db).unwrap(), 1);
+        }
+        {
+            let conn = tmp_db.connect_limbo();
+            assert_eq!(
+                count(&conn, &tmp_db).unwrap(),
+                1,
+                "failed to read from wal from another connection"
+            );
+        }
         Ok(())
     }
 
