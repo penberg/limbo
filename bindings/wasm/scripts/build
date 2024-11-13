@@ -1,0 +1,4 @@
+#!/bin/bash
+
+wasm-pack build --no-pack --target nodejs
+cp package.json pkg/package.json
