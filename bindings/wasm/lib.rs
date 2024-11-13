@@ -6,7 +6,8 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Database {
-    _inner: Rc<limbo_core::Database>,
+    db: Rc<limbo_core::Database>,
+    conn: Rc<limbo_core::Connection>,
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -18,12 +19,48 @@ impl Database {
         let file = io.open_file(path, limbo_core::OpenFlags::None).unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
         let wal = Rc::new(RefCell::new(Wal {}));
-        let inner = limbo_core::Database::open(io, page_io, wal).unwrap();
-        Database { _inner: inner }
+        let db = limbo_core::Database::open(io, page_io, wal).unwrap();
+        let conn = db.connect();
+        Database { db, conn }
     }
 
     #[wasm_bindgen]
     pub fn exec(&self, _sql: &str) {}
+
+    #[wasm_bindgen]
+    pub fn prepare(&self, _sql: &str) -> Statement {
+        let stmt = self.conn.prepare(_sql).unwrap();
+        Statement {
+            inner: RefCell::new(stmt),
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct Statement {
+    inner: RefCell<limbo_core::Statement>,
+}
+
+#[wasm_bindgen]
+impl Statement {
+    pub fn all(&self) -> js_sys::Array {
+        let array = js_sys::Array::new();
+        loop {
+            match self.inner.borrow_mut().step() {
+                Ok(limbo_core::RowResult::Row(row)) => {
+                    let row_array = js_sys::Array::new();
+                    for value in row.values {
+                        row_array.push(&JsValue::from_str(&value.to_string()));
+                    }
+                    array.push(&row_array);
+                }
+                Ok(limbo_core::RowResult::IO) => todo!(),
+                Ok(limbo_core::RowResult::Done) => break,
+                Err(e) => panic!("Error: {:?}", e),
+            }
+        }
+        array
+    }
 }
 
 pub struct File {
@@ -202,7 +239,7 @@ impl limbo_core::Wal for Wal {
     }
 
     fn should_checkpoint(&self) -> bool {
-        todo!()
+        false
     }
 
     fn append_frame(
@@ -224,7 +261,7 @@ impl limbo_core::Wal for Wal {
     }
 
     fn sync(&mut self) -> Result<limbo_core::CheckpointStatus> {
-        todo!()
+        Ok(limbo_core::CheckpointStatus::Done)
     }
 }
 

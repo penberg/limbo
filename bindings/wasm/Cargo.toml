@@ -12,5 +12,6 @@ path = "lib.rs"
 
 [dependencies]
 console_error_panic_hook = "0.1.7"
+js-sys = "0.3.72"
 limbo_core = { path = "../../core", default-features = false }
 wasm-bindgen = "0.2"
