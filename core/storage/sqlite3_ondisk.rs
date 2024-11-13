@@ -550,8 +550,8 @@ pub fn begin_write_btree_page(
     *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
-        log::trace!("finish_write_btree_page");
         Box::new(move |bytes_written: i32| {
+            log::trace!("finish_write_btree_page");
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
             *write_counter.borrow_mut() -= 1;

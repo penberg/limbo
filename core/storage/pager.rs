@@ -336,6 +336,7 @@ pub struct Pager {
 
     flush_info: RefCell<FlushInfo>,
     checkpoint_state: RefCell<CheckpointState>,
+    checkpoint_inflight: Rc<RefCell<usize>>,
     syncing: Rc<RefCell<bool>>,
 }
 
@@ -370,6 +371,7 @@ impl Pager {
             }),
             syncing: Rc::new(RefCell::new(false)),
             checkpoint_state: RefCell::new(CheckpointState::Checkpoint),
+            checkpoint_inflight: Rc::new(RefCell::new(0)),
         })
     }
 
@@ -556,7 +558,7 @@ impl Pager {
             log::trace!("checkpoint(state={:?})", state);
             match state {
                 CheckpointState::Checkpoint => {
-                    let in_flight = self.flush_info.borrow().in_flight_writes.clone();
+                    let in_flight = self.checkpoint_inflight.clone();
                     match self.wal.borrow_mut().checkpoint(self, in_flight)? {
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
                         CheckpointStatus::Done => {
@@ -566,7 +568,7 @@ impl Pager {
                     };
                 }
                 CheckpointState::CheckpointDone => {
-                    let in_flight = self.flush_info.borrow().in_flight_writes.clone();
+                    let in_flight = self.checkpoint_inflight.clone();
                     if *in_flight.borrow() > 0 {
                         return Ok(CheckpointStatus::IO);
                     } else {
