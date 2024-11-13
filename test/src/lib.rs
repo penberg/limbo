@@ -28,9 +28,12 @@ impl TempDatabase {
     }
 
     pub fn connect_limbo(&self) -> Rc<limbo_core::Connection> {
+        log::debug!("conneting to limbo");
         let db = Database::open_file(self.io.clone(), self.path.to_str().unwrap()).unwrap();
 
-        db.connect()
+        let conn = db.connect();
+        log::debug!("connected to limbo");
+        conn
     }
 }
 
@@ -313,6 +316,7 @@ mod tests {
         // threshold is 1000 by default
 
         fn insert(i: usize, conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
+            log::debug!("inserting {}", i);
             let insert_query = format!("INSERT INTO test VALUES ({})", i);
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
@@ -329,11 +333,13 @@ mod tests {
                     eprintln!("{}", err);
                 }
             };
+            log::debug!("inserted {}", i);
             tmp_db.io.run_once()?;
             Ok(())
         }
 
         fn count(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<usize> {
+            log::debug!("counting");
             let list_query = "SELECT count(x) FROM test";
             loop {
                 match conn.query(list_query).unwrap() {
@@ -345,6 +351,7 @@ mod tests {
                                     Value::Integer(i) => *i as i32,
                                     _ => unreachable!(),
                                 };
+                                log::debug!("counted {}", count);
                                 return Ok(count as usize);
                             }
                             RowResult::IO => {
