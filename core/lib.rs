@@ -25,8 +25,7 @@ use std::{cell::RefCell, rc::Rc};
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
 use storage::sqlite3_ondisk::DatabaseHeader;
-#[cfg(feature = "fs")]
-use storage::wal::WalFile;
+pub use storage::wal::WalFile;
 
 use translate::optimizer::optimize_plan;
 use translate::planner::prepare_select_plan;

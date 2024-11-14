@@ -1,4 +1,4 @@
-use limbo_core::{OpenFlags, Page, Result, IO};
+use limbo_core::{OpenFlags, Page, Pager, Result, WalFile, IO};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -20,7 +20,13 @@ impl Database {
             .open_file(path, limbo_core::OpenFlags::None, false)
             .unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
-        let wal = Rc::new(RefCell::new(Wal {}));
+        let db_header = Pager::begin_open(page_io.clone()).unwrap();
+        let wal_path = format!("{}-wal", path);
+        let wal = Rc::new(RefCell::new(WalFile::new(
+            io.clone(),
+            wal_path,
+            db_header.borrow().page_size as usize,
+        )));
         let db = limbo_core::Database::open(io, page_io, wal).unwrap();
         let conn = db.connect();
         Database { db, conn }
@@ -56,7 +62,7 @@ impl Statement {
                     }
                     array.push(&row_array);
                 }
-                Ok(limbo_core::RowResult::IO) => todo!(),
+                Ok(limbo_core::RowResult::IO) => {}
                 Ok(limbo_core::RowResult::Done) => break,
                 Err(e) => panic!("Error: {:?}", e),
             }
@@ -109,15 +115,15 @@ impl limbo_core::File for File {
         _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
         _c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
-        todo!()
+        Ok(())
     }
 
     fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
-        todo!()
+        Ok(())
     }
 
     fn size(&self) -> Result<u64> {
-        todo!()
+        Ok(self.vfs.size(self.fd))
     }
 }
 
@@ -213,65 +219,6 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
     }
 }
 
-pub struct Wal {}
-
-impl limbo_core::Wal for Wal {
-    fn begin_read_tx(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn end_read_tx(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn find_frame(&self, _page_id: u64) -> Result<Option<u64>> {
-        Ok(None)
-    }
-
-    fn begin_write_tx(&self) -> Result<()> {
-        todo!()
-    }
-
-    fn end_write_tx(&self) -> Result<()> {
-        todo!()
-    }
-
-    fn read_frame(
-        &self,
-        _frame_id: u64,
-        _page: Rc<std::cell::RefCell<limbo_core::Page>>,
-        _buffer_pool: Rc<limbo_core::BufferPool>,
-    ) -> Result<()> {
-        todo!()
-    }
-
-    fn should_checkpoint(&self) -> bool {
-        false
-    }
-
-    fn append_frame(
-        &mut self,
-        _page: Rc<RefCell<Page>>,
-        _db_size: u32,
-        _pager: &limbo_core::Pager,
-        _write_counter: Rc<RefCell<usize>>,
-    ) -> Result<()> {
-        todo!()
-    }
-
-    fn checkpoint(
-        &mut self,
-        _pager: &limbo_core::Pager,
-        _write_counter: Rc<RefCell<usize>>,
-    ) -> Result<limbo_core::CheckpointStatus> {
-        todo!()
-    }
-
-    fn sync(&mut self) -> Result<limbo_core::CheckpointStatus> {
-        Ok(limbo_core::CheckpointStatus::Done)
-    }
-}
-
 #[wasm_bindgen(module = "/vfs.js")]
 extern "C" {
     type VFS;
@@ -290,6 +237,9 @@ extern "C" {
 
     #[wasm_bindgen(method)]
     fn pread(this: &VFS, fd: i32, buffer: &mut [u8], offset: usize) -> i32;
+
+    #[wasm_bindgen(method)]
+    fn size(this: &VFS, fd: i32) -> u64;
 }
 
 #[wasm_bindgen(start)]

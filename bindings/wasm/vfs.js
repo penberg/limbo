@@ -19,6 +19,11 @@ class VFS {
   pwrite(fd, buffer, offset) {
     return fs.writeSync(fd, buffer, 0, buffer.length, offset);
   }
+
+  size(fd) {
+    let stats = fs.fstatSync(fd);
+    return BigInt(stats.size);
+  }
 }
 
 module.exports = { VFS };

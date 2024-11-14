@@ -57,7 +57,6 @@ pub trait Wal {
     fn sync(&mut self) -> Result<CheckpointStatus>;
 }
 
-#[cfg(feature = "fs")]
 pub struct WalFile {
     io: Arc<dyn crate::io::IO>,
     wal_path: String,
@@ -80,7 +79,6 @@ pub enum CheckpointStatus {
     IO,
 }
 
-#[cfg(feature = "fs")]
 impl Wal for WalFile {
     /// Begin a read transaction.
     fn begin_read_tx(&self) -> Result<()> {
@@ -232,7 +230,6 @@ impl Wal for WalFile {
     }
 }
 
-#[cfg(feature = "fs")]
 impl WalFile {
     pub fn new(io: Arc<dyn IO>, wal_path: String, page_size: usize) -> Self {
         Self {
