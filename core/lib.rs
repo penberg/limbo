@@ -22,9 +22,11 @@ use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::rc::Weak;
 use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
+use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
-use storage::sqlite3_ondisk::DatabaseHeader;
+use storage::pager::allocate_page;
+use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 
 use translate::optimizer::optimize_plan;
@@ -64,7 +66,8 @@ pub struct Database {
 impl Database {
     #[cfg(feature = "fs")]
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
-        let file = io.open_file(path, io::OpenFlags::None, true)?;
+        let file = io.open_file(path, io::OpenFlags::Create, true)?;
+        maybe_init_database_file(&file, &io)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
         let db_header = Pager::begin_open(page_io.clone())?;
@@ -160,6 +163,46 @@ impl Database {
             db: Rc::downgrade(self),
         })
     }
+}
+
+pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result<()> {
+    if file.size().unwrap() == 0 {
+        // init db
+        let db_header = DatabaseHeader::default();
+        let page1 = allocate_page(
+            1,
+            &Rc::new(BufferPool::new(db_header.page_size as usize)),
+            DATABASE_HEADER_SIZE,
+        );
+        {
+            // Create the sqlite_schema table, for this we just need to create the btree page
+            // for the first page of the database which is basically like any other btree page
+            // but with a 100 byte offset, so we just init the page so that sqlite understands
+            // this is a correct page.
+            btree_init_page(
+                &page1,
+                storage::sqlite3_ondisk::PageType::TableLeaf,
+                &db_header,
+            );
+
+            let mut page = page1.borrow_mut();
+            let contents = page.contents.as_mut().unwrap();
+            contents.write_database_header(&db_header);
+            // write the first page to disk synchronously
+            let flag_complete = Rc::new(RefCell::new(false));
+            {
+                let flag_complete = flag_complete.clone();
+                let completion = Completion::Write(WriteCompletion::new(Box::new(move |_| {
+                    *flag_complete.borrow_mut() = true;
+                })));
+                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))
+                    .unwrap();
+            }
+            io.run_once()?;
+            assert!(*flag_complete.borrow());
+        }
+    };
+    Ok(())
 }
 
 pub struct Connection {

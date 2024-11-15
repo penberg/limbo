@@ -1086,25 +1086,7 @@ impl BTreeCursor {
 
     fn allocate_page(&self, page_type: PageType) -> Rc<RefCell<Page>> {
         let page = self.pager.allocate_page().unwrap();
-
-        {
-            // setup btree page
-            let mut contents = page.borrow_mut();
-            debug!("allocating page {}", contents.id);
-            let contents = contents.contents.as_mut().unwrap();
-            let id = page_type as u8;
-            contents.write_u8(BTREE_HEADER_OFFSET_TYPE, id);
-            contents.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);
-            contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
-
-            let db_header = RefCell::borrow(&self.database_header);
-            let cell_content_area_start = db_header.page_size - db_header.unused_space as u16;
-            contents.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, cell_content_area_start);
-
-            contents.write_u8(BTREE_HEADER_OFFSET_FRAGMENTED, 0);
-            contents.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, 0);
-        }
-
+        btree_init_page(&page, page_type, &*self.database_header.borrow());
         page
     }
 
@@ -1697,6 +1679,23 @@ impl Cursor for BTreeCursor {
             Ok(CursorResult::Ok(equals))
         }
     }
+}
+
+pub fn btree_init_page(page: &Rc<RefCell<Page>>, page_type: PageType, db_header: &DatabaseHeader) {
+    // setup btree page
+    let mut contents = page.borrow_mut();
+    debug!("allocating page {}", contents.id);
+    let contents = contents.contents.as_mut().unwrap();
+    let id = page_type as u8;
+    contents.write_u8(BTREE_HEADER_OFFSET_TYPE, id);
+    contents.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);
+    contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
+
+    let cell_content_area_start = db_header.page_size - db_header.unused_space as u16;
+    contents.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, cell_content_area_start);
+
+    contents.write_u8(BTREE_HEADER_OFFSET_FRAGMENTED, 0);
+    contents.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, 0);
 }
 
 fn to_static_buf(buf: &[u8]) -> &'static [u8] {

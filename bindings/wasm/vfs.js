@@ -4,8 +4,8 @@ class VFS {
   constructor() {
   }
 
-  open(path) {
-    return fs.openSync(path, 'r');
+  open(path, flags) {
+    return fs.openSync(path, flags);
   }
 
   close(fd) {
@@ -23,6 +23,10 @@ class VFS {
   size(fd) {
     let stats = fs.fstatSync(fd);
     return BigInt(stats.size);
+  }
+
+  sync(fd) {
+    return fs.fsyncSync(fd);
   }
 }
 
