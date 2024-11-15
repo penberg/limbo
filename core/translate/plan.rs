@@ -26,6 +26,12 @@ impl Display for Plan {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IterationDirection {
+    Forwards,
+    Backwards,
+}
+
 /**
   An Operator is a Node in the query plan.
   Operators form a tree structure, with each having zero or more children.
@@ -114,7 +120,7 @@ pub enum Operator {
         table_reference: BTreeTableReference,
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
-        reverse: Option<bool>,
+        iter_dir: Option<IterationDirection>,
     },
     // Search operator
     // This operator is used to search for a row in a table using an index

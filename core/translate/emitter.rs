@@ -8,7 +8,7 @@ use sqlite3_parser::ast;
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::expr::resolve_ident_pseudo_table;
-use crate::translate::plan::Search;
+use crate::translate::plan::{IterationDirection, Search};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{BranchOffset, Insn, Program};
@@ -173,13 +173,15 @@ impl Emitter for Operator {
                 id,
                 step,
                 predicates,
-                reverse,
+                iter_dir,
             } => {
                 *step += 1;
                 const SCAN_OPEN_READ: usize = 1;
                 const SCAN_BODY: usize = 2;
                 const SCAN_NEXT: usize = 3;
-                let reverse = reverse.is_some_and(|r| r);
+                let reverse = iter_dir
+                    .as_ref()
+                    .is_some_and(|iter_dir| *iter_dir == IterationDirection::Backwards);
                 match *step {
                     SCAN_OPEN_READ => {
                         let cursor_id = program.alloc_cursor_id(
