@@ -2,10 +2,15 @@
 
 This document describes the SQLite compatibility status of Limbo:
 
+* [Limitations](#limitations)
 * [SQL statements](#sql-statements)
 * [SQL functions](#sql-functions)
 * [SQLite API](#sqlite-api)
 * [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+
+## Limitations
+
+* Limbo does not support database access from multiple processes.
 
 ## SQL statements
 
