@@ -621,25 +621,13 @@ impl Pager {
             }
         }
 
-        let page_ref = Rc::new(RefCell::new(Page::new(0)));
+        let page_ref = allocate_page(header.database_size as usize, &self.buffer_pool, 0);
         {
             // setup page and add to cache
-            let mut page = RefCell::borrow_mut(&page_ref);
-            page.id = header.database_size as usize;
+            let page = page_ref.borrow_mut();
             page.set_dirty();
             self.add_dirty(page.id);
-            let buffer = self.buffer_pool.get();
-            let bp = self.buffer_pool.clone();
-            let drop_fn = Rc::new(move |buf| {
-                bp.put(buf);
-            });
-            let buffer = Rc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
-            page.contents = Some(PageContent {
-                offset: 0,
-                buffer,
-                overflow_cells: Vec::new(),
-            });
-            let mut cache = RefCell::borrow_mut(&self.page_cache);
+            let mut cache = self.page_cache.borrow_mut();
             cache.insert(page.id, page_ref.clone());
         }
         Ok(page_ref)
@@ -656,4 +644,27 @@ impl Pager {
         let db_header = self.db_header.borrow();
         (db_header.page_size - db_header.unused_space as u16) as usize
     }
+}
+
+pub fn allocate_page(
+    page_id: usize,
+    buffer_pool: &Rc<BufferPool>,
+    offset: usize,
+) -> Rc<RefCell<Page>> {
+    let page_ref = Rc::new(RefCell::new(Page::new(page_id)));
+    {
+        let mut page = RefCell::borrow_mut(&page_ref);
+        let buffer = buffer_pool.get();
+        let bp = buffer_pool.clone();
+        let drop_fn = Rc::new(move |buf| {
+            bp.put(buf);
+        });
+        let buffer = Rc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
+        page.contents = Some(PageContent {
+            offset,
+            buffer,
+            overflow_cells: Vec::new(),
+        });
+    }
+    page_ref
 }

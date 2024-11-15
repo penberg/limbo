@@ -1,4 +1,4 @@
-use limbo_core::{OpenFlags, Page, Pager, Result, WalFile, IO};
+use limbo_core::{maybe_init_database_file, OpenFlags, Pager, Result, WalFile};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -15,10 +15,11 @@ pub struct Database {
 impl Database {
     #[wasm_bindgen(constructor)]
     pub fn new(path: &str) -> Database {
-        let io = Arc::new(PlatformIO { vfs: VFS::new() });
+        let io: Arc<dyn limbo_core::IO> = Arc::new(PlatformIO { vfs: VFS::new() });
         let file = io
-            .open_file(path, limbo_core::OpenFlags::None, false)
+            .open_file(path, limbo_core::OpenFlags::Create, false)
             .unwrap();
+        maybe_init_database_file(&file, &io).unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
         let db_header = Pager::begin_open(page_io.clone()).unwrap();
         let wal_path = format!("{}-wal", path);
@@ -111,14 +112,24 @@ impl limbo_core::File for File {
 
     fn pwrite(
         &self,
-        _pos: usize,
-        _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        _c: Rc<limbo_core::Completion>,
+        pos: usize,
+        buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
+        c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
+        let w = match &*c {
+            limbo_core::Completion::Write(w) => w,
+            _ => unreachable!(),
+        };
+        let buf = buffer.borrow();
+        let buf: &[u8] = buf.as_slice();
+        self.vfs.pwrite(self.fd, buf, pos);
+        w.complete(buf.len() as i32);
         Ok(())
     }
 
-    fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
+    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
+        self.vfs.sync(self.fd);
+        c.complete(0);
         Ok(())
     }
 
@@ -138,7 +149,7 @@ impl limbo_core::IO for PlatformIO {
         _flags: OpenFlags,
         _direct: bool,
     ) -> Result<Rc<dyn limbo_core::File>> {
-        let fd = self.vfs.open(path);
+        let fd = self.vfs.open(path, "w+");
         Ok(Rc::new(File {
             vfs: VFS::new(),
             fd,
@@ -207,11 +218,14 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
 
     fn write_page(
         &self,
-        _page_idx: usize,
-        _buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        _c: Rc<limbo_core::Completion>,
+        page_idx: usize,
+        buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
+        c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
-        todo!()
+        let size = buffer.borrow().len();
+        let pos = (page_idx - 1) * size;
+        self.file.pwrite(pos, buffer, c)?;
+        Ok(())
     }
 
     fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
@@ -227,7 +241,7 @@ extern "C" {
     fn new() -> VFS;
 
     #[wasm_bindgen(method)]
-    fn open(this: &VFS, path: &str) -> i32;
+    fn open(this: &VFS, path: &str, flags: &str) -> i32;
 
     #[wasm_bindgen(method)]
     fn close(this: &VFS, fd: i32) -> bool;
@@ -240,6 +254,9 @@ extern "C" {
 
     #[wasm_bindgen(method)]
     fn size(this: &VFS, fd: i32) -> u64;
+
+    #[wasm_bindgen(method)]
+    fn sync(this: &VFS, fd: i32) -> u64;
 }
 
 #[wasm_bindgen(start)]

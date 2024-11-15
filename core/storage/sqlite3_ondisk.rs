@@ -61,7 +61,7 @@ const DEFAULT_CACHE_SIZE: i32 = -2000;
 // Minimum number of pages that cache can hold.
 pub const MIN_PAGE_CACHE_SIZE: usize = 10;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct DatabaseHeader {
     magic: [u8; 16],
     pub page_size: u16,
@@ -112,6 +112,36 @@ pub struct WalFrameHeader {
     salt_2: u32,
     checksum_1: u32,
     checksum_2: u32,
+}
+
+impl Default for DatabaseHeader {
+    fn default() -> Self {
+        Self {
+            magic: *b"SQLite format 3\0",
+            page_size: 4096,
+            write_version: 2,
+            read_version: 2,
+            unused_space: 0,
+            max_embed_frac: 64,
+            min_embed_frac: 32,
+            min_leaf_frac: 32,
+            change_counter: 1,
+            database_size: 1,
+            freelist_trunk_page: 0,
+            freelist_pages: 0,
+            schema_cookie: 0,
+            schema_format: 4, // latest format, new sqlite3 databases use this format
+            default_cache_size: 500, // pages
+            vacuum: 0,
+            text_encoding: 1, // utf-8
+            user_version: 1,
+            incremental_vacuum: 0,
+            application_id: 0,
+            reserved: [0; 20],
+            version_valid_for: 3047000,
+            version_number: 3047000,
+        }
+    }
 }
 
 pub fn begin_read_database_header(
