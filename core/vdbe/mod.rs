@@ -2825,6 +2825,10 @@ mod tests {
         fn exists(&mut self, _key: &OwnedValue) -> Result<CursorResult<bool>> {
             unimplemented!()
         }
+
+        fn create_tree(&mut self, _flags: usize) -> u32 {
+            unimplemented!()
+        }
     }
 
     #[test]
