@@ -32,10 +32,11 @@ use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{
     AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
 };
-use crate::DATABASE_VERSION;
+use crate::util::parse_schema_rows;
 #[cfg(feature = "json")]
 use crate::{function::JsonFunc, json::get_json};
 use crate::{Connection, Result, TransactionState};
+use crate::{Rows, DATABASE_VERSION};
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
@@ -492,6 +493,10 @@ pub enum Insn {
 
         /// Jump to this PC if the register is null (P2).
         target_pc: BranchOffset,
+    },
+    ParseSchema {
+        db: usize,
+        where_clause: String,
     },
 }
 
@@ -2111,8 +2116,20 @@ impl Program {
                     }
                     state.pc += 1;
                 }
-                Insn::CreateBtree { .. } => {
-                    todo!();
+                Insn::CreateBtree { db, root, flags: _ } => {
+                    if *db > 0 {
+                        // TODO: implement temp datbases
+                        todo!("temp databases not implemented yet");
+                    }
+                    let mut cursor = Box::new(BTreeCursor::new(
+                        pager.clone(),
+                        0,
+                        self.database_header.clone(),
+                    ));
+
+                    let root_page = cursor.create_tree(1);
+                    state.registers[*root] = OwnedValue::Integer(root_page as i64);
+                    state.pc += 1;
                 }
                 Insn::Close { cursor_id } => {
                     cursors.remove(cursor_id);
@@ -2125,12 +2142,29 @@ impl Program {
                         state.pc += 1;
                     }
                 }
+                Insn::ParseSchema {
+                    db: _,
+                    where_clause,
+                } => {
+                    let conn = self.connection.upgrade();
+                    let conn = conn.as_ref().unwrap();
+                    let stmt = conn.prepare(format!(
+                        "SELECT * FROM  sqlite_schema WHERE {}",
+                        where_clause
+                    ))?;
+                    let rows = Rows { stmt };
+                    let mut schema = RefCell::borrow_mut(&conn.schema);
+                    // TODO: This function below is synchronous, make it not async
+                    parse_schema_rows(Some(rows), &mut *schema, conn.pager.io.clone())?;
+                    state.pc += 1;
+                }
             }
         }
     }
 }
 
 fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<CursorResult<i64>> {
+    // TODO: try last + 1 and if it's already a big number then use randomness
     cursor.seek_to_last()?;
     let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
     if rowid > i64::MAX.try_into().unwrap() {

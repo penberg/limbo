@@ -893,6 +893,15 @@ pub fn insn_to_str(
                 0,
                 format!("if (r[{}]==NULL) goto {}", src, target_pc),
             ),
+            Insn::ParseSchema { db, where_clause } => (
+                "ParseSchema",
+                *db as i32,
+                0,
+                0,
+                OwnedValue::Text(Rc::new(where_clause.clone())),
+                0,
+                where_clause.clone(),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

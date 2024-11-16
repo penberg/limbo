@@ -1676,6 +1676,20 @@ impl Cursor for BTreeCursor {
             Ok(CursorResult::Ok(equals))
         }
     }
+
+    fn create_tree(&mut self, flags: usize) -> u32 {
+        let page_type = match flags {
+            1 => PageType::TableLeaf,
+            2 => PageType::IndexLeaf,
+            _ => unreachable!(
+                "wrong create table falgs, should be 1 for table and 2 for index, got {}",
+                flags,
+            ),
+        };
+        let page = self.allocate_page(page_type);
+        let id = page.borrow().id;
+        id as u32
+    }
 }
 
 pub fn btree_init_page(page: &Rc<RefCell<Page>>, page_type: PageType, db_header: &DatabaseHeader) {

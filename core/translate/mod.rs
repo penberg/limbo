@@ -29,6 +29,7 @@ use sqlite3_parser::ast;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
+    sql: &str, // raw sql query before parsing into stmt, useful for CREATE TABLE
     schema: &Schema,
     stmt: ast::Stmt,
     database_header: Rc<RefCell<DatabaseHeader>>,
@@ -52,6 +53,7 @@ pub fn translate(
                 bail_parse_error!("TEMPORARY table not supported yet");
             }
             translate_create_table(
+                sql,
                 tbl_name,
                 body,
                 if_not_exists,
@@ -142,6 +144,7 @@ addr  opcode         p1    p2    p3    p4             p5  comment
 
 */
 fn translate_create_table(
+    sql: &str,
     tbl_name: ast::QualifiedName,
     body: ast::CreateTableBody,
     if_not_exists: bool,
@@ -185,61 +188,12 @@ fn translate_create_table(
         rowid_reg,
         prev_largest_reg: 0,
     });
-    let blob_reg = program.alloc_register();
-    program.emit_insn(Insn::Blob {
-        value: vec![0, 0, 0, 0, 0, 0],
-        dest: blob_reg,
-    });
-    program.emit_insn(Insn::InsertAsync {
-        cursor: sqlite_schema_cursor_id,
-        key_reg: rowid_reg,
-        record_reg: blob_reg,
-        flag: 0,
-    });
-    program.emit_insn(Insn::InsertAwait {
-        cursor_id: sqlite_schema_cursor_id,
-    });
-    program.emit_insn(Insn::Close {
-        cursor_id: sqlite_schema_cursor_id,
-    });
-    program.emit_insn(Insn::Close {
-        cursor_id: sqlite_schema_cursor_id,
-    });
     let null_reg_1 = program.alloc_register();
     let null_reg_2 = program.alloc_register();
     program.emit_insn(Insn::Null {
         dest: null_reg_1,
         dest_end: Some(null_reg_2),
     });
-    // TODO: Noop
-    let sqlite_schema_cursor_id = program.alloc_cursor_id(Some(table_id), Some(table));
-    program.emit_insn(Insn::OpenWriteAsync {
-        cursor_id: sqlite_schema_cursor_id,
-        root_page: 1,
-    });
-    program.emit_insn(Insn::OpenWriteAwait {});
-    let seek_failed_label = program.allocate_label();
-    program.emit_insn_with_label_dependency(
-        Insn::SeekRowid {
-            cursor_id: sqlite_schema_cursor_id,
-            src_reg: rowid_reg,
-            target_pc: seek_failed_label,
-        },
-        seek_failed_label,
-    );
-    let rowid_reg_2 = program.alloc_register();
-    program.emit_insn(Insn::RowId {
-        cursor_id: sqlite_schema_cursor_id,
-        dest: rowid_reg_2,
-    });
-    program.resolve_label(seek_failed_label, program.offset());
-    program.emit_insn_with_label_dependency(
-        Insn::IsNull {
-            src: rowid_reg,
-            target_pc: parse_schema_label,
-        },
-        parse_schema_label,
-    );
     let type_reg = program.alloc_register();
     program.emit_insn(Insn::String8 {
         value: "table".to_string(),
@@ -263,20 +217,35 @@ fn translate_create_table(
     });
     let sql_reg = program.alloc_register();
     program.emit_insn(Insn::String8 {
-        value: "TODO".to_string(),
+        value: sql.to_string(),
         dest: sql_reg,
     });
     let record_reg = program.alloc_register();
     program.emit_insn(Insn::MakeRecord {
         start_reg: type_reg,
-        count: 4,
+        count: 5,
         dest_reg: record_reg,
     });
     // TODO: Delete
-    // TODO: Insert
+    program.emit_insn(Insn::InsertAsync {
+        cursor: sqlite_schema_cursor_id,
+        key_reg: rowid_reg,
+        record_reg,
+        flag: 0,
+    });
+    program.emit_insn(Insn::InsertAwait {
+        cursor_id: sqlite_schema_cursor_id,
+    });
     program.resolve_label(parse_schema_label, program.offset());
     // TODO: SetCookie
-    // TODO: ParseSchema
+    //
+    // TODO: remove format, it sucks for performance but is convinient
+    let parse_schema_where_clause = format!("tbl_name = '{}' AND type != 'trigger'", tbl_name);
+    program.emit_insn(Insn::ParseSchema {
+        db: sqlite_schema_cursor_id,
+        where_clause: parse_schema_where_clause,
+    });
+
     // TODO: SqlExec
     program.emit_insn(Insn::Halt {
         err_code: 0,
