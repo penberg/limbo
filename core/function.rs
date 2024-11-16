@@ -1,11 +1,13 @@
 use std::fmt;
 use std::fmt::Display;
 
+#[cfg(feature = "json")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonFunc {
     Json,
 }
 
+#[cfg(feature = "json")]
 impl Display for JsonFunc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -129,6 +131,7 @@ impl Display for ScalarFunc {
 pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
+    #[cfg(feature = "json")]
     Json(JsonFunc),
 }
 
@@ -137,6 +140,7 @@ impl Display for Func {
         match self {
             Func::Agg(agg_func) => write!(f, "{}", agg_func.to_string()),
             Func::Scalar(scalar_func) => write!(f, "{}", scalar_func),
+            #[cfg(feature = "json")]
             Func::Json(json_func) => write!(f, "{}", json_func),
         }
     }
@@ -189,6 +193,7 @@ impl Func {
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),
+            #[cfg(feature = "json")]
             "json" => Ok(Func::Json(JsonFunc::Json)),
             "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),
             "hex" => Ok(Func::Scalar(ScalarFunc::Hex)),
