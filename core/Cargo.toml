@@ -51,7 +51,6 @@ indexmap = { version="2.2.6", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 pest = { version = "2.0", optional = true }
 pest_derive = { version = "2.0", optional = true }
-mockall = "0.13.0"
 rand = "0.8.5"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
@@ -63,6 +62,7 @@ criterion = { version = "0.5", features = [
     "async",
     "async_futures",
 ] }
+mockall = "0.13.0"
 rstest = "0.18.2"
 rusqlite = "0.29.0"
 tempfile = "3.8.0"
