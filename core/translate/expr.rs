@@ -1,11 +1,13 @@
-use crate::{function::JsonFunc, Result};
 use sqlite3_parser::ast::{self, UnaryOperator};
 
 use super::optimizer::CachedResult;
+#[cfg(feature = "json")]
+use crate::function::JsonFunc;
 use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
 use crate::schema::{PseudoTable, Table, Type};
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
+use crate::Result;
 
 use super::plan::{Aggregate, BTreeTableReference};
 
@@ -742,6 +744,7 @@ pub fn translate_expr(
                 Func::Agg(_) => {
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
+                #[cfg(feature = "json")]
                 Func::Json(j) => match j {
                     JsonFunc::Json => {
                         let args = if let Some(args) = args {

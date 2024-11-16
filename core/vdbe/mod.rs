@@ -24,8 +24,7 @@ pub mod sorter;
 mod datetime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
-use crate::function::{AggFunc, FuncCtx, JsonFunc, ScalarFunc};
-use crate::json::get_json;
+use crate::function::{AggFunc, FuncCtx, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -34,6 +33,8 @@ use crate::types::{
     AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
 };
 use crate::DATABASE_VERSION;
+#[cfg(feature = "json")]
+use crate::{function::JsonFunc, json::get_json};
 use crate::{Connection, Result, TransactionState};
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
@@ -57,6 +58,7 @@ pub type PageIdx = usize;
 #[derive(Debug)]
 pub enum Func {
     Scalar(ScalarFunc),
+    #[cfg(feature = "json")]
     Json(JsonFunc),
 }
 
@@ -64,6 +66,7 @@ impl Display for Func {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             Func::Scalar(scalar_func) => scalar_func.to_string(),
+            #[cfg(feature = "json")]
             Func::Json(json_func) => json_func.to_string(),
         };
         write!(f, "{}", str)
@@ -1751,6 +1754,7 @@ impl Program {
                 } => {
                     let arg_count = func.arg_count;
                     match &func.func {
+                        #[cfg(feature = "json")]
                         crate::function::Func::Json(JsonFunc::Json) => {
                             let json_value = &state.registers[*start_reg];
                             let json_str = get_json(json_value);
