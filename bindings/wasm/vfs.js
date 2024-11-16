@@ -26,7 +26,7 @@ class VFS {
   }
 
   sync(fd) {
-    return fs.fsyncSync(fd);
+    fs.fsyncSync(fd);
   }
 }
 

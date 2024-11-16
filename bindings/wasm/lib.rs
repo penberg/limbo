@@ -256,7 +256,7 @@ extern "C" {
     fn size(this: &VFS, fd: i32) -> u64;
 
     #[wasm_bindgen(method)]
-    fn sync(this: &VFS, fd: i32) -> u64;
+    fn sync(this: &VFS, fd: i32);
 }
 
 #[wasm_bindgen(start)]
