@@ -46,6 +46,9 @@ dist = false
 # Whether to enable GitHub Attestations
 github-attestations = true
 
+[profile.release]
+lto = true
+
 [profile.dist]
 inherits = "release"
 lto = "thin"
