@@ -4,7 +4,7 @@
 
 use clap::Parser;
 use hdrhistogram::Histogram;
-use limbo_core::{Database, IO, PlatformIO};
+use limbo_core::{Database, PlatformIO, IO};
 use std::ops::{Coroutine, CoroutineState};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -24,7 +24,8 @@ fn main() {
     for i in 0..opts.count {
         let mut recorder = hist.recorder();
         let io = io.clone();
-        let tenant =  #[coroutine] move || {
+        let tenant = #[coroutine]
+        move || {
             let database = format!("database{}.db", i);
             let db = Database::open_file(io.clone(), &database).unwrap();
             let conn = db.connect();
@@ -45,7 +46,7 @@ fn main() {
                         }
                     }
                     assert!(count == 100);
-                    recorder.record(now.elapsed().as_nanos() as u64).unwrap();    
+                    recorder.record(now.elapsed().as_nanos() as u64).unwrap();
                 }
                 yield;
             }
@@ -63,10 +64,9 @@ fn main() {
                             let _ = tenants.remove(i);
                             completed += 1;
                         }
-                        CoroutineState::Yielded(_) => {
-                        }
-                    }        
-                },
+                        CoroutineState::Yielded(_) => {}
+                    }
+                }
                 None => {
                     continue;
                 }

@@ -2022,11 +2022,10 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 [[package]]
 name = "sqlite3-parser"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb5307dad6cb84730ce8bdefde56ff4cf95fe516972d52e2bbdc8a8cd8f2520b"
 dependencies = [
  "bitflags 2.6.0",
  "cc",
+ "env_logger 0.11.5",
  "fallible-iterator 0.3.0",
  "indexmap",
  "log",
