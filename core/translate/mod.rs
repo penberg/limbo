@@ -16,6 +16,7 @@ pub(crate) mod planner;
 pub(crate) mod select;
 
 use std::cell::RefCell;
+use std::fmt::Display;
 use std::rc::{Rc, Weak};
 
 use crate::schema::Schema;
@@ -26,10 +27,10 @@ use crate::{bail_parse_error, Connection, Result};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast;
+use sqlite3_parser::ast::fmt::ToTokens;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
-    sql: &str, // raw sql query before parsing into stmt, useful for CREATE TABLE
     schema: &Schema,
     stmt: ast::Stmt,
     database_header: Rc<RefCell<DatabaseHeader>>,
@@ -53,7 +54,6 @@ pub fn translate(
                 bail_parse_error!("TEMPORARY table not supported yet");
             }
             translate_create_table(
-                sql,
                 tbl_name,
                 body,
                 if_not_exists,
@@ -144,7 +144,6 @@ addr  opcode         p1    p2    p3    p4             p5  comment
 
 */
 fn translate_create_table(
-    sql: &str,
     tbl_name: ast::QualifiedName,
     body: ast::CreateTableBody,
     if_not_exists: bool,
@@ -153,6 +152,33 @@ fn translate_create_table(
     schema: &Schema,
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
+    if schema.get_table(tbl_name.name.0.as_str()).is_some() {
+        if if_not_exists {
+            let init_label = program.allocate_label();
+            program.emit_insn_with_label_dependency(
+                Insn::Init {
+                    target_pc: init_label,
+                },
+                init_label,
+            );
+            let start_offset = program.offset();
+            program.emit_insn(Insn::Halt {
+                err_code: 0,
+                description: String::new(),
+            });
+            program.resolve_label(init_label, program.offset());
+            program.emit_insn(Insn::Transaction { write: true });
+            program.emit_constant_insns();
+            program.emit_insn(Insn::Goto {
+                target_pc: start_offset,
+            });
+            return Ok(program.build(database_header, connection));
+        }
+        bail_parse_error!("Table {} already exists", tbl_name);
+    }
+
+    let sql = create_table_body_to_str(&tbl_name, &body);
+
     let parse_schema_label = program.allocate_label();
     let init_label = program.allocate_label();
     program.emit_insn_with_label_dependency(
@@ -361,4 +387,28 @@ fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pa
         }
         _ => todo!(),
     }
+}
+
+struct TableFormatter<'a> {
+    body: &'a ast::CreateTableBody,
+}
+impl<'a> Display for TableFormatter<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.body.to_fmt(f)
+    }
+}
+
+fn create_table_body_to_str(tbl_name: &ast::QualifiedName, body: &ast::CreateTableBody) -> String {
+    let mut sql = String::new();
+    let formatter = TableFormatter { body };
+    sql.push_str(format!("CREATE TABLE {} {}", tbl_name.name.0, formatter).as_str());
+    match body {
+        ast::CreateTableBody::ColumnsAndConstraints {
+            columns: _,
+            constraints: _,
+            options: _,
+        } => {}
+        ast::CreateTableBody::AsSelect(_select) => todo!("as select not yet supported"),
+    }
+    sql
 }

@@ -186,7 +186,6 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Rc::new(translate::translate(
-                        sql.as_str(),
                         &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
@@ -212,7 +211,6 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Rc::new(translate::translate(
-                        sql.as_str(),
                         &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
@@ -224,7 +222,6 @@ impl Connection {
                 }
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(
-                        sql.as_str(),
                         &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
@@ -259,7 +256,6 @@ impl Connection {
             match cmd {
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(
-                        sql.as_str(),
                         &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
@@ -271,7 +267,6 @@ impl Connection {
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
                     let program = translate::translate(
-                        sql.as_str(),
                         &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
