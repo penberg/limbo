@@ -47,6 +47,8 @@ dist = false
 github-attestations = true
 
 [profile.release]
+codegen-units = 1
+panic = "abort"
 lto = true
 
 [profile.dist]
