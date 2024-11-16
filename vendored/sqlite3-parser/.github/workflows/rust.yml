@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build
+      - name: Run tests
+        run: cargo test
+
+  direct-minimal-versions:
+    name: Test min versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: nightly
+      - run: |
+          cargo update -Z direct-minimal-versions
+          cargo test
