@@ -1,0 +1,11 @@
+{
+  "name": "limbo-perf",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "limbo-wasm": "../pkg",
+    "better-sqlite3": "^9.5.0",
+    "libsql": "..",
+    "mitata": "^0.1.11"
+  }
+}
