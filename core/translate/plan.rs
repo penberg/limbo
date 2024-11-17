@@ -9,7 +9,6 @@ use sqlite3_parser::ast;
 use crate::{
     function::AggFunc,
     schema::{BTreeTable, Index},
-    util::normalize_ident,
     Result,
 };
 
@@ -146,6 +145,7 @@ pub enum Operator {
 pub struct BTreeTableReference {
     pub table: Rc<BTreeTable>,
     pub table_identifier: String,
+    pub table_index: usize,
 }
 
 /// An enum that represents a search operation that can be used to search for a row in a table using an index
@@ -574,46 +574,12 @@ pub fn get_table_ref_bitmask_for_ast_expr<'a>(
             table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, e1)?;
             table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, e2)?;
         }
-        ast::Expr::Id(ident) => {
-            let ident = normalize_ident(&ident.0);
-            let matching_tables = tables
-                .iter()
-                .enumerate()
-                .filter(|(_, table_reference)| table_reference.table.get_column(&ident).is_some());
-
-            let mut matches = 0;
-            let mut matching_tbl = None;
-            for table in matching_tables {
-                matching_tbl = Some(table);
-                matches += 1;
-                if matches > 1 {
-                    crate::bail_parse_error!("ambiguous column name {}", &ident)
-                }
-            }
-
-            if let Some((tbl_index, _)) = matching_tbl {
-                table_refs_mask |= 1 << tbl_index;
-            } else {
-                crate::bail_parse_error!("column not found: {}", &ident)
-            }
+        ast::Expr::Column { table, .. } => {
+            table_refs_mask |= 1 << table;
         }
-        ast::Expr::Qualified(tbl, ident) => {
-            let tbl = normalize_ident(&tbl.0);
-            let ident = normalize_ident(&ident.0);
-            let matching_table = tables
-                .iter()
-                .enumerate()
-                .find(|(_, t)| t.table_identifier == tbl);
-
-            if matching_table.is_none() {
-                crate::bail_parse_error!("introspect: table not found: {}", &tbl)
-            }
-            let (table_index, table_reference) = matching_table.unwrap();
-            if table_reference.table.get_column(&ident).is_none() {
-                crate::bail_parse_error!("column with qualified name {}.{} not found", &tbl, &ident)
-            }
-
-            table_refs_mask |= 1 << table_index;
+        ast::Expr::Id(_) => unreachable!("Id should be resolved to a Column before optimizer"),
+        ast::Expr::Qualified(_, _) => {
+            unreachable!("Qualified should be resolved to a Column before optimizer")
         }
         ast::Expr::Literal(_) => {}
         ast::Expr::Like { lhs, rhs, .. } => {

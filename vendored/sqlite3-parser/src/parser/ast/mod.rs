@@ -327,6 +327,17 @@ pub enum Expr {
     },
     /// Identifier
     Id(Id),
+    /// Column
+    Column {
+        /// the x in `x.y.z`. index of the db in catalog.
+        database: Option<usize>,
+        /// the y in `x.y.z`. index of the table in catalog.
+        table: usize,
+        /// the z in `x.y.z`. index of the column in the table.
+        column: usize,
+        /// is the column a primary key
+        is_primary_key: bool,
+    },
     /// `IN`
     InList {
         /// expression

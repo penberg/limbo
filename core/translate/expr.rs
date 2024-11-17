@@ -1440,23 +1440,29 @@ pub fn translate_expr(
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
-        ast::Expr::Id(ident) => {
-            // let (idx, col) = table.unwrap().get_column(&ident.0).unwrap();
-            let (idx, col_type, cursor_id, is_rowid_alias) =
-                resolve_ident_table(program, &ident.0, referenced_tables, cursor_hint)?;
-            if is_rowid_alias {
+        ast::Expr::Id(_) => unreachable!("Id should be resolved to a Column before translation"),
+        ast::Expr::Column {
+            database: _,
+            table,
+            column,
+            is_primary_key,
+        } => {
+            let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
+            let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier, cursor_hint);
+            if *is_primary_key {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
                     dest: target_register,
                 });
             } else {
                 program.emit_insn(Insn::Column {
-                    column: idx,
-                    dest: target_register,
                     cursor_id,
+                    column: *column,
+                    dest: target_register,
                 });
             }
-            maybe_apply_affinity(col_type, target_register, program);
+            let column = &tbl_ref.table.columns[*column];
+            maybe_apply_affinity(column.ty, target_register, program);
             Ok(target_register)
         }
         ast::Expr::InList { .. } => todo!(),
@@ -1539,28 +1545,8 @@ pub fn translate_expr(
             }
             Ok(target_register)
         }
-        ast::Expr::Qualified(tbl, ident) => {
-            let (idx, col_type, cursor_id, is_primary_key) = resolve_ident_qualified(
-                program,
-                &tbl.0,
-                &ident.0,
-                referenced_tables.unwrap(),
-                cursor_hint,
-            )?;
-            if is_primary_key {
-                program.emit_insn(Insn::RowId {
-                    cursor_id,
-                    dest: target_register,
-                });
-            } else {
-                program.emit_insn(Insn::Column {
-                    column: idx,
-                    dest: target_register,
-                    cursor_id,
-                });
-            }
-            maybe_apply_affinity(col_type, target_register, program);
-            Ok(target_register)
+        ast::Expr::Qualified(_, _) => {
+            unreachable!("Qualified should be resolved to a Column before translation")
         }
         ast::Expr::Raise(_, _) => todo!(),
         ast::Expr::Subquery(_) => todo!(),
@@ -1602,112 +1588,6 @@ fn wrap_eval_jump_expr(
         dest: target_register,
     });
     program.preassign_label_to_next_insn(if_true_label);
-}
-
-pub fn resolve_ident_qualified(
-    program: &ProgramBuilder,
-    table_name: &str,
-    ident: &str,
-    referenced_tables: &[BTreeTableReference],
-    cursor_hint: Option<usize>,
-) -> Result<(usize, Type, usize, bool)> {
-    let ident = normalize_ident(ident);
-    let table_name = normalize_ident(table_name);
-    for table_reference in referenced_tables.iter() {
-        if table_reference.table_identifier == table_name {
-            let res = table_reference
-                .table
-                .columns
-                .iter()
-                .enumerate()
-                .find(|(_, col)| col.name == *ident)
-                .map(|(idx, col)| (idx, col.ty, col.primary_key));
-            let mut idx;
-            let mut col_type;
-            let mut is_primary_key;
-            if res.is_some() {
-                (idx, col_type, is_primary_key) = res.unwrap();
-                // overwrite if cursor hint is provided
-                if let Some(cursor_hint) = cursor_hint {
-                    let cols = &program.cursor_ref[cursor_hint].1;
-                    if let Some(res) = cols.as_ref().and_then(|res| {
-                        res.columns()
-                            .iter()
-                            .enumerate()
-                            .find(|x| x.1.name == format!("{}.{}", table_name, ident))
-                    }) {
-                        idx = res.0;
-                        col_type = res.1.ty;
-                        is_primary_key = res.1.primary_key;
-                    }
-                }
-                let cursor_id =
-                    program.resolve_cursor_id(&table_reference.table_identifier, cursor_hint);
-                return Ok((idx, col_type, cursor_id, is_primary_key));
-            }
-        }
-    }
-    crate::bail_parse_error!(
-        "column with qualified name {}.{} not found",
-        table_name,
-        ident
-    );
-}
-
-pub fn resolve_ident_table(
-    program: &ProgramBuilder,
-    ident: &str,
-    referenced_tables: Option<&[BTreeTableReference]>,
-    cursor_hint: Option<usize>,
-) -> Result<(usize, Type, usize, bool)> {
-    let ident = normalize_ident(ident);
-    let mut found = Vec::new();
-    for table_reference in referenced_tables.unwrap() {
-        let res = table_reference
-            .table
-            .columns
-            .iter()
-            .enumerate()
-            .find(|(_, col)| col.name == *ident)
-            .map(|(idx, col)| {
-                (
-                    idx,
-                    col.ty,
-                    table_reference.table.column_is_rowid_alias(col),
-                )
-            });
-        let mut idx;
-        let mut col_type;
-        let mut is_rowid_alias;
-        if res.is_some() {
-            (idx, col_type, is_rowid_alias) = res.unwrap();
-            // overwrite if cursor hint is provided
-            if let Some(cursor_hint) = cursor_hint {
-                let cols = &program.cursor_ref[cursor_hint].1;
-                if let Some(res) = cols.as_ref().and_then(|res| {
-                    res.columns()
-                        .iter()
-                        .enumerate()
-                        .find(|x| x.1.name == *ident)
-                }) {
-                    idx = res.0;
-                    col_type = res.1.ty;
-                    is_rowid_alias = table_reference.table.column_is_rowid_alias(res.1);
-                }
-            }
-            let cursor_id =
-                program.resolve_cursor_id(&table_reference.table_identifier, cursor_hint);
-            found.push((idx, col_type, cursor_id, is_rowid_alias));
-        }
-    }
-    if found.len() == 1 {
-        return Ok(found[0]);
-    }
-    if found.is_empty() {
-        crate::bail_parse_error!("column with name {} not found", ident.as_str());
-    }
-
-    crate::bail_parse_error!("ambiguous column name {}", ident.as_str());
 }
 
 pub fn resolve_ident_pseudo_table(ident: &String, pseudo_table: &PseudoTable) -> Result<usize> {
@@ -1827,13 +1707,8 @@ pub fn translate_aggregation(
 
             if agg.args.len() == 2 {
                 match &agg.args[1] {
-                    ast::Expr::Id(ident) => {
-                        if ident.0.starts_with('"') {
-                            delimiter_expr =
-                                ast::Expr::Literal(ast::Literal::String(ident.0.to_string()));
-                        } else {
-                            delimiter_expr = agg.args[1].clone();
-                        }
+                    ast::Expr::Column { .. } => {
+                        delimiter_expr = agg.args[1].clone();
                     }
                     ast::Expr::Literal(ast::Literal::String(s)) => {
                         delimiter_expr = ast::Expr::Literal(ast::Literal::String(s.to_string()));
@@ -1926,12 +1801,8 @@ pub fn translate_aggregation(
             let delimiter_expr: ast::Expr;
 
             match &agg.args[1] {
-                ast::Expr::Id(ident) => {
-                    if ident.0.starts_with('"') {
-                        crate::bail_parse_error!("no such column: \",\" - should this be a string literal in single-quotes?");
-                    } else {
-                        delimiter_expr = agg.args[1].clone();
-                    }
+                ast::Expr::Column { .. } => {
+                    delimiter_expr = agg.args[1].clone();
                 }
                 ast::Expr::Literal(ast::Literal::String(s)) => {
                     delimiter_expr = ast::Expr::Literal(ast::Literal::String(s.to_string()));

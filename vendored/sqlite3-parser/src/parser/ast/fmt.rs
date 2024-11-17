@@ -637,6 +637,7 @@ impl ToTokens for Expr {
                 Ok(())
             }
             Self::Id(id) => id.to_tokens(s),
+            Self::Column { .. } => Ok(()),
             Self::InList { lhs, not, rhs } => {
                 lhs.to_tokens(s)?;
                 if *not {
