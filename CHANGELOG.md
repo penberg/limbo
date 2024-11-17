@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- Panic in codegen with `COUNT(*)` (Jussi Saurio)
+
 - Fix `LIKE` to be case insensitive (RJ Barman)
 
 ## 0.0.4 - 2024-08-22
