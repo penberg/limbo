@@ -1764,6 +1764,18 @@ impl Program {
                             }
                         }
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
+                            ScalarFunc::Cast => {
+                                assert!(arg_count == 2);
+                                assert!(*start_reg + 1 < state.registers.len());
+                                let reg_value_argument = state.registers[*start_reg].clone();
+                                let OwnedValue::Text(reg_value_type) =
+                                    state.registers[*start_reg + 1].clone()
+                                else {
+                                    unreachable!("Cast with non-text type");
+                                };
+                                let result = exec_cast(&reg_value_argument, &reg_value_type);
+                                state.registers[*dest] = result;
+                            }
                             ScalarFunc::Char => {
                                 let reg_values =
                                     state.registers[*start_reg..*start_reg + arg_count].to_vec();
@@ -2665,6 +2677,183 @@ fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
         },
         _ => false,
     }
+}
+
+fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
+    if matches!(value, OwnedValue::Null) {
+        return OwnedValue::Null;
+    }
+    match affinity(datatype) {
+        // NONE	Casting a value to a type-name with no affinity causes the value to be converted into a BLOB. Casting to a BLOB consists of first casting the value to TEXT in the encoding of the database connection, then interpreting the resulting byte sequence as a BLOB instead of as TEXT.
+        // Historically called NONE, but it's the same as BLOB
+        "BLOB" => {
+            // Convert to TEXT first, then interpret as BLOB
+            // TODO: handle encoding
+            let text = value.to_string();
+            OwnedValue::Blob(Rc::new(text.into_bytes()))
+        }
+        // TEXT To cast a BLOB value to TEXT, the sequence of bytes that make up the BLOB is interpreted as text encoded using the database encoding.
+        // Casting an INTEGER or REAL value into TEXT renders the value as if via sqlite3_snprintf() except that the resulting TEXT uses the encoding of the database connection.
+        "TEXT" => {
+            // Convert everything to text representation
+            // TODO: handle encoding and whatever sqlite3_snprintf does
+            OwnedValue::Text(Rc::new(value.to_string()))
+        }
+        "REAL" => match value {
+            OwnedValue::Blob(b) => {
+                // Convert BLOB to TEXT first
+                let text = String::from_utf8_lossy(b);
+                cast_text_to_real(&text)
+            }
+            OwnedValue::Text(t) => cast_text_to_real(t),
+            OwnedValue::Integer(i) => OwnedValue::Float(*i as f64),
+            OwnedValue::Float(f) => OwnedValue::Float(*f),
+            _ => OwnedValue::Float(0.0),
+        },
+        "INTEGER" => match value {
+            OwnedValue::Blob(b) => {
+                // Convert BLOB to TEXT first
+                let text = String::from_utf8_lossy(b);
+                cast_text_to_integer(&text)
+            }
+            OwnedValue::Text(t) => cast_text_to_integer(t),
+            OwnedValue::Integer(i) => OwnedValue::Integer(*i),
+            // A cast of a REAL value into an INTEGER results in the integer between the REAL value and zero
+            // that is closest to the REAL value. If a REAL is greater than the greatest possible signed integer (+9223372036854775807)
+            // then the result is the greatest possible signed integer and if the REAL is less than the least possible signed integer (-9223372036854775808)
+            // then the result is the least possible signed integer.
+            OwnedValue::Float(f) => {
+                let i = f.floor() as i128;
+                if i > i64::MAX as i128 {
+                    OwnedValue::Integer(i64::MAX)
+                } else if i < i64::MIN as i128 {
+                    OwnedValue::Integer(i64::MIN)
+                } else {
+                    OwnedValue::Integer(i as i64)
+                }
+            }
+            _ => OwnedValue::Integer(0),
+        },
+        "NUMERIC" => match value {
+            OwnedValue::Blob(b) => {
+                let text = String::from_utf8_lossy(b);
+                cast_text_to_numeric(&text)
+            }
+            OwnedValue::Text(t) => cast_text_to_numeric(t),
+            OwnedValue::Integer(i) => OwnedValue::Integer(*i),
+            OwnedValue::Float(f) => OwnedValue::Float(*f),
+            _ => value.clone(), // TODO probably wrong
+        },
+        _ => value.clone(),
+    }
+}
+
+/// For tables not declared as STRICT, the affinity of a column is determined by the declared type of the column, according to the following rules in the order shown:
+/// If the declared type contains the string "INT" then it is assigned INTEGER affinity.
+/// If the declared type of the column contains any of the strings "CHAR", "CLOB", or "TEXT" then that column has TEXT affinity. Notice that the type VARCHAR contains the string "CHAR" and is thus assigned TEXT affinity.
+/// If the declared type for a column contains the string "BLOB" or if no type is specified then the column has affinity BLOB.
+/// If the declared type for a column contains any of the strings "REAL", "FLOA", or "DOUB" then the column has REAL affinity.
+/// Otherwise, the affinity is NUMERIC.
+/// Note that the order of the rules for determining column affinity is important. A column whose declared type is "CHARINT" will match both rules 1 and 2 but the first rule takes precedence and so the column affinity will be INTEGER.
+fn affinity(datatype: &str) -> &str {
+    let datatype = datatype.to_uppercase();
+    // Rule 1: INT -> INTEGER affinity
+    if datatype.contains("INT") {
+        return "INTEGER";
+    }
+
+    // Rule 2: CHAR/CLOB/TEXT -> TEXT affinity
+    if datatype.contains("CHAR") || datatype.contains("CLOB") || datatype.contains("TEXT") {
+        return "TEXT";
+    }
+
+    // Rule 3: BLOB or empty -> BLOB affinity (historically called NONE)
+    if datatype.contains("BLOB") || datatype.is_empty() {
+        return "BLOB";
+    }
+
+    // Rule 4: REAL/FLOA/DOUB -> REAL affinity
+    if datatype.contains("REAL") || datatype.contains("FLOA") || datatype.contains("DOUB") {
+        return "REAL";
+    }
+
+    // Rule 5: Otherwise -> NUMERIC affinity
+    "NUMERIC"
+}
+
+/// When casting a TEXT value to INTEGER, the longest possible prefix of the value that can be interpreted as an integer number
+/// is extracted from the TEXT value and the remainder ignored. Any leading spaces in the TEXT value when converting from TEXT to INTEGER are ignored.
+/// If there is no prefix that can be interpreted as an integer number, the result of the conversion is 0.
+/// If the prefix integer is greater than +9223372036854775807 then the result of the cast is exactly +9223372036854775807.
+/// Similarly, if the prefix integer is less than -9223372036854775808 then the result of the cast is exactly -9223372036854775808.
+/// When casting to INTEGER, if the text looks like a floating point value with an exponent, the exponent will be ignored
+/// because it is no part of the integer prefix. For example, "CAST('123e+5' AS INTEGER)" results in 123, not in 12300000.
+/// The CAST operator understands decimal integers only — conversion of hexadecimal integers stops at the "x" in the "0x" prefix of the hexadecimal integer string and thus result of the CAST is always zero.
+fn cast_text_to_integer(text: &str) -> OwnedValue {
+    let text = text.trim();
+    if let Ok(i) = text.parse::<i64>() {
+        return OwnedValue::Integer(i);
+    }
+    // Try to find longest valid prefix that parses as an integer
+    // TODO: inefficient
+    let mut end_index = text.len() - 1;
+    while end_index > 0 {
+        if let Ok(i) = text[..=end_index].parse::<i64>() {
+            return OwnedValue::Integer(i);
+        }
+        end_index -= 1;
+    }
+    OwnedValue::Integer(0)
+}
+
+/// When casting a TEXT value to REAL, the longest possible prefix of the value that can be interpreted
+/// as a real number is extracted from the TEXT value and the remainder ignored. Any leading spaces in
+/// the TEXT value are ignored when converging from TEXT to REAL.
+/// If there is no prefix that can be interpreted as a real number, the result of the conversion is 0.0.
+fn cast_text_to_real(text: &str) -> OwnedValue {
+    let trimmed = text.trim_start();
+    if let Ok(num) = trimmed.parse::<f64>() {
+        return OwnedValue::Float(num);
+    }
+    // Try to find longest valid prefix that parses as a float
+    // TODO: inefficient
+    let mut end_index = trimmed.len() - 1;
+    while end_index > 0 {
+        if let Ok(num) = trimmed[..=end_index].parse::<f64>() {
+            return OwnedValue::Float(num);
+        }
+        end_index -= 1;
+    }
+    OwnedValue::Float(0.0)
+}
+
+/// NUMERIC	Casting a TEXT or BLOB value into NUMERIC yields either an INTEGER or a REAL result.
+/// If the input text looks like an integer (there is no decimal point nor exponent) and the value
+/// is small enough to fit in a 64-bit signed integer, then the result will be INTEGER.
+/// Input text that looks like floating point (there is a decimal point and/or an exponent)
+/// and the text describes a value that can be losslessly converted back and forth between IEEE 754
+/// 64-bit float and a 51-bit signed integer, then the result is INTEGER. (In the previous sentence,
+/// a 51-bit integer is specified since that is one bit less than the length of the mantissa of an
+/// IEEE 754 64-bit float and thus provides a 1-bit of margin for the text-to-float conversion operation.)
+/// Any text input that describes a value outside the range of a 64-bit signed integer yields a REAL result.
+/// Casting a REAL or INTEGER value to NUMERIC is a no-op, even if a real value could be losslessly converted to an integer.
+fn cast_text_to_numeric(text: &str) -> OwnedValue {
+    if !text.contains('.') && !text.contains('e') && !text.contains('E') {
+        // Looks like an integer
+        if let Ok(i) = text.parse::<i64>() {
+            return OwnedValue::Integer(i);
+        }
+    }
+    // Try as float
+    if let Ok(f) = text.parse::<f64>() {
+        // Check if can be losslessly converted to 51-bit integer
+        let i = f as i64;
+        if f == i as f64 && i.abs() < (1i64 << 51) {
+            return OwnedValue::Integer(i);
+        }
+        return OwnedValue::Float(f);
+    }
+    OwnedValue::Integer(0)
 }
 
 fn execute_sqlite_version(version_integer: i64) -> String {
