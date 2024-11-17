@@ -158,7 +158,9 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     ) {
                                         aggregate_expressions.push(Aggregate {
                                             func: f,
-                                            args: vec![],
+                                            args: vec![ast::Expr::Literal(ast::Literal::Numeric(
+                                                "1".to_string(),
+                                            ))],
                                             original_expr: expr.clone(),
                                         });
                                     }

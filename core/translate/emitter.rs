@@ -811,7 +811,20 @@ impl Emitter for Operator {
                                 )?;
                             }
                             for (i, agg) in aggregates.iter().enumerate() {
-                                let expr = &agg.args[0]; // TODO hakhackhachkachkachk hack hack
+                                // TODO it's a hack to assume aggregate functions have exactly one argument.
+                                // Counterpoint e.g. GROUP_CONCAT(expr, separator).
+                                //
+                                // Here we are collecting scalars for the group by sorter, which will include
+                                // both the group by expressions and the aggregate arguments.
+                                // e.g. in `select u.first_name, sum(u.age) from users group by u.first_name`
+                                // the sorter will have two scalars: u.first_name and u.age.
+                                // these are then sorted by u.first_name, and for each u.first_name, we sum the u.age.
+                                // the actual aggregation is done later in GROUP_BY_SORT_AND_COMPARE below.
+                                //
+                                // This is why we take the first argument of each aggregate function currently.
+                                // It's mostly an artifact of the current architecture being a bit poor; we should recognize
+                                // which scalars are dependencies of aggregate functions and explicitly collect those.
+                                let expr = &agg.args[0];
                                 let agg_reg = start_reg + sort_keys_count + i;
                                 translate_expr(
                                     program,
