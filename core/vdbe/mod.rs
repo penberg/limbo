@@ -2756,7 +2756,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
 /// Otherwise, the affinity is NUMERIC.
 /// Note that the order of the rules for determining column affinity is important. A column whose declared type is "CHARINT" will match both rules 1 and 2 but the first rule takes precedence and so the column affinity will be INTEGER.
 fn affinity(datatype: &str) -> &str {
-    let datatype = datatype.to_uppercase();
+    // Note: callers of this function must ensure that the datatype is uppercase.
     // Rule 1: INT -> INTEGER affinity
     if datatype.contains("INT") {
         return "INTEGER";

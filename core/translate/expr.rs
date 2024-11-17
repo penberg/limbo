@@ -729,7 +729,10 @@ pub fn translate_expr(
             )?;
             let reg_type = program.alloc_register();
             program.emit_insn(Insn::String8 {
-                value: type_name.name.to_string(),
+                // we make a comparison against uppercase static strs in the affinity() function,
+                // so we need to make sure we're comparing against the uppercase version,
+                // and it's better to do this once instead of every time we check affinity
+                value: type_name.name.to_uppercase(),
                 dest: reg_type,
             });
             program.mark_last_insn_constant();
