@@ -127,3 +127,7 @@ do_execsql_test group_by_function_expression_ridiculous {
 (97|36
 (20|35
 (31|35}
+
+do_execsql_test group_by_count_star {
+  select u.first_name, count(*) from users u group by u.first_name limit 1;
+} {Aaron|41}
