@@ -536,6 +536,8 @@ pub fn translate_condition_expr(
             }
         }
         ast::Expr::Parenthesized(exprs) => {
+            // TODO: this is probably not correct; multiple expressions in a parenthesized expression
+            // are reserved for special cases like `(a, b) IN ((1, 2), (3, 4))`.
             for expr in exprs {
                 let _ = translate_condition_expr(
                     program,
@@ -1470,7 +1472,26 @@ pub fn translate_expr(
         },
         ast::Expr::Name(_) => todo!(),
         ast::Expr::NotNull(_) => todo!(),
-        ast::Expr::Parenthesized(_) => todo!(),
+        ast::Expr::Parenthesized(exprs) => {
+            if exprs.is_empty() {
+                crate::bail_parse_error!("parenthesized expression with no arguments");
+            }
+            if exprs.len() == 1 {
+                translate_expr(
+                    program,
+                    referenced_tables,
+                    &exprs[0],
+                    target_register,
+                    cursor_hint,
+                    cached_results,
+                )?;
+            } else {
+                // Parenthesized expressions with multiple arguments are reserved for special cases
+                // like `(a, b) IN ((1, 2), (3, 4))`.
+                todo!("TODO: parenthesized expression with multiple arguments not yet supported");
+            }
+            Ok(target_register)
+        }
         ast::Expr::Qualified(tbl, ident) => {
             let (idx, col_type, cursor_id, is_primary_key) = resolve_ident_qualified(
                 program,
