@@ -35,6 +35,10 @@ do_execsql_test select-add {
     select u.age + 1 from users u where u.age = 91 limit 1;
 } {92}
 
+do_execsql_test select-subtract {
+    select u.age - 1 from users u where u.age = 91 limit 1;
+} {90}
+
 do_execsql_test case-insensitive-columns {
     select u.aGe + 1 from USERS u where U.AGe = 91 limit 1;
 } {92}

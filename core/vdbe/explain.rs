@@ -28,6 +28,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=r[{}]+r[{}]", dest, lhs, rhs),
             ),
+            Insn::Subtract { lhs, rhs, dest } => (
+                "Subtract",
+                *lhs as i32,
+                *rhs as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}]-r[{}]", dest, lhs, rhs),
+            ),
             Insn::Multiply { lhs, rhs, dest } => (
                 "Multiply",
                 *lhs as i32,
