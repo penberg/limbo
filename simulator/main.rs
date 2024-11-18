@@ -269,7 +269,7 @@ fn gen_random_name(env: &mut SimulatorEnv) -> String {
 }
 
 fn gen_random_text(env: &mut SimulatorEnv) -> String {
-    let big_text = env.rng.gen_ratio(1, 100);
+    let big_text = env.rng.gen_ratio(1, 1000);
     if big_text {
         let max_size: u64 = 2 * 1024 * 1024 * 1024;
         let size = env.rng.gen_range(1024..max_size);
@@ -312,7 +312,7 @@ fn get_all_rows(
     conn: &mut Rc<Connection>,
     query: &str,
 ) -> Result<Vec<Vec<Value>>> {
-    log::info!("running query '{}'", query);
+    log::info!("running query '{}'", &query[0..query.len().min(4096)]);
     let mut out = Vec::new();
     let rows = conn.query(query)?;
     if rows.is_none() {
@@ -535,62 +535,4 @@ impl Table {
         out.push_str(");");
         out
     }
-}
-
-fn get_schema(
-    io: Arc<dyn limbo_core::IO>,
-    conn: &Rc<limbo_core::Connection>,
-    table: Option<&str>,
-) -> Result<()> {
-    let sql = match table {
-        Some(table_name) => format!(
-            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND tbl_name = '{}' AND name NOT LIKE 'sqlite_%'",
-            table_name
-        ),
-        None => String::from(
-            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
-        ),
-    };
-
-    match conn.query(sql) {
-        Ok(Some(ref mut rows)) => {
-            let mut found = false;
-            loop {
-                match rows.next_row()? {
-                    RowResult::Row(row) => {
-                        if let Some(limbo_core::Value::Text(schema)) = row.values.first() {
-                            println!("{};", schema);
-                            found = true;
-                        }
-                    }
-                    RowResult::IO => {
-                        io.run_once()?;
-                    }
-                    RowResult::Done => break,
-                }
-            }
-            if !found {
-                if let Some(table_name) = table {
-                    println!("Error: Table '{}' not found.", table_name);
-                } else {
-                    println!("No tables or indexes found in the database.");
-                }
-            }
-        }
-        Ok(None) => {
-            println!("No results returned from the query.");
-        }
-        Err(err) => {
-            if err.to_string().contains("no such table: sqlite_schema") {
-                return Err(LimboError::InternalError("Unable to access database schema. The database may be using an older SQLite version or may not be properly initialized.".to_string()));
-            } else {
-                return Err(LimboError::InternalError(format!(
-                    "Error querying schema: {}",
-                    err
-                )));
-            }
-        }
-    }
-
-    Ok(())
 }
