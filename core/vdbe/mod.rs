@@ -583,6 +583,10 @@ impl Program {
                         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
                             state.registers[dest] = OwnedValue::Float(lhs + rhs);
                         }
+                        (OwnedValue::Float(f), OwnedValue::Integer(i))
+                        | (OwnedValue::Integer(i), OwnedValue::Float(f)) => {
+                            state.registers[dest] = OwnedValue::Float(*f + *i as f64);
+                        }
                         (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
                             state.registers[dest] = OwnedValue::Null;
                         }
