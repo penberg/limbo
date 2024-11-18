@@ -1,8 +1,10 @@
 # Changelog
 
-### Unreleased
+### 0.0.5 - 2024-11-18
 
 ### Added
+
+- `CREATE TABLE` support (Pere Diaz Bou)
 
 - Add Add Database.prepare() and Statement.all() to Wasm bindings (Pekka Enberg)
 
