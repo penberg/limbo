@@ -156,7 +156,11 @@ impl BTreeCursor {
             }
 
             let cell_idx = cell_idx as usize;
-            debug!("current id={} cell={}", mem_page_rc.borrow().id, cell_idx);
+            debug!(
+                "get_prev_record current id={} cell={}",
+                mem_page_rc.borrow().id,
+                cell_idx
+            );
             if mem_page_rc.borrow().is_locked() {
                 return Ok(CursorResult::IO);
             }
