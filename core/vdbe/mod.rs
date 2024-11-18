@@ -2164,7 +2164,6 @@ impl Program {
 }
 
 fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<CursorResult<i64>> {
-    // TODO: try last + 1 and if it's already a big number then use randomness
     cursor.seek_to_last()?;
     let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
     if rowid > i64::MAX.try_into().unwrap() {
