@@ -648,7 +648,7 @@ impl BTreeCursor {
                 pointer_area_pc_by_idx + 2,
             );
         }
-        page.write_u16(pointer_area_pc_by_idx, pc);
+        page.write_u16(pointer_area_pc_by_idx - page.offset, pc);
 
         // update first byte of content area
         page.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, pc);
@@ -1128,17 +1128,13 @@ impl BTreeCursor {
         if gap + 2 + amount > top {
             // defragment
             self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
-            let buf = page_ref.as_ptr();
-            top = u16::from_be_bytes([buf[5], buf[6]]) as usize;
+            top = page_ref.read_u16(BTREE_HEADER_OFFSET_CELL_CONTENT) as usize;
         }
 
         let db_header = RefCell::borrow(&self.database_header);
         top -= amount;
 
-        {
-            let buf = page_ref.as_ptr();
-            buf[5..7].copy_from_slice(&(top as u16).to_be_bytes());
-        }
+        page_ref.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, top as u16);
 
         let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
         assert!(top + amount <= usable_space);
@@ -1358,6 +1354,7 @@ impl BTreeCursor {
                 let id = page.id as u32;
                 let contents = page.contents.as_mut().unwrap();
 
+                // TODO: take into account offset here?
                 let buf = contents.as_ptr();
                 let as_bytes = id.to_be_bytes();
                 // update pointer to new overflow page
@@ -1678,6 +1675,20 @@ impl Cursor for BTreeCursor {
             };
             Ok(CursorResult::Ok(equals))
         }
+    }
+
+    fn btree_create(&mut self, flags: usize) -> u32 {
+        let page_type = match flags {
+            1 => PageType::TableLeaf,
+            2 => PageType::IndexLeaf,
+            _ => unreachable!(
+                "wrong create table falgs, should be 1 for table and 2 for index, got {}",
+                flags,
+            ),
+        };
+        let page = self.allocate_page(page_type);
+        let id = page.borrow().id;
+        id as u32
     }
 }
 

@@ -29,6 +29,7 @@ use storage::database::FileStorage;
 use storage::pager::allocate_page;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
+use util::parse_schema_rows;
 
 use translate::optimizer::optimize_plan;
 use translate::planner::prepare_select_plan;
@@ -59,7 +60,7 @@ enum TransactionState {
 
 pub struct Database {
     pager: Rc<Pager>,
-    schema: Rc<Schema>,
+    schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     transaction_state: RefCell<TransactionState>,
 }
@@ -98,7 +99,7 @@ impl Database {
             wal,
             io.clone(),
         )?);
-        let bootstrap_schema = Rc::new(Schema::new());
+        let bootstrap_schema = Rc::new(RefCell::new(Schema::new()));
         let conn = Rc::new(Connection {
             pager: pager.clone(),
             schema: bootstrap_schema.clone(),
@@ -107,46 +108,8 @@ impl Database {
         });
         let mut schema = Schema::new();
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
-        if let Some(mut rows) = rows {
-            loop {
-                match rows.next_row()? {
-                    RowResult::Row(row) => {
-                        let ty = row.get::<&str>(0)?;
-                        if ty != "table" && ty != "index" {
-                            continue;
-                        }
-                        match ty {
-                            "table" => {
-                                let root_page: i64 = row.get::<i64>(3)?;
-                                let sql: &str = row.get::<&str>(4)?;
-                                let table = schema::BTreeTable::from_sql(sql, root_page as usize)?;
-                                schema.add_table(Rc::new(table));
-                            }
-                            "index" => {
-                                let root_page: i64 = row.get::<i64>(3)?;
-                                match row.get::<&str>(4) {
-                                    Ok(sql) => {
-                                        let index =
-                                            schema::Index::from_sql(sql, root_page as usize)?;
-                                        schema.add_index(Rc::new(index));
-                                    }
-                                    _ => continue,
-                                    // TODO parse auto index structures
-                                }
-                            }
-                            _ => continue,
-                        }
-                    }
-                    RowResult::IO => {
-                        // TODO: How do we ensure that the I/O we submitted to
-                        // read the schema is actually complete?
-                        io.run_once()?;
-                    }
-                    RowResult::Done => break,
-                }
-            }
-        }
-        let schema = Rc::new(schema);
+        parse_schema_rows(rows, &mut schema, io)?;
+        let schema = Rc::new(RefCell::new(schema));
         let header = db_header;
         Ok(Rc::new(Database {
             pager,
@@ -208,7 +171,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
 
 pub struct Connection {
     pager: Rc<Pager>,
-    schema: Rc<Schema>,
+    schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     db: Weak<Database>, // backpointer to the database holding this connection
 }
@@ -223,7 +186,7 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Rc::new(translate::translate(
-                        &self.schema,
+                        &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -248,7 +211,7 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Rc::new(translate::translate(
-                        &self.schema,
+                        &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -259,7 +222,7 @@ impl Connection {
                 }
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(
-                        &self.schema,
+                        &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -271,7 +234,7 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let plan = prepare_select_plan(&self.schema, select)?;
+                            let plan = prepare_select_plan(&*self.schema.borrow(), select)?;
                             let (plan, _) = optimize_plan(plan)?;
                             println!("{}", plan);
                         }
@@ -293,7 +256,7 @@ impl Connection {
             match cmd {
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(
-                        &self.schema,
+                        &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -304,7 +267,7 @@ impl Connection {
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
                     let program = translate::translate(
-                        &self.schema,
+                        &*self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),

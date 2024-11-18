@@ -373,6 +373,7 @@ impl OwnedRecord {
         let mut header_size = buf.len() - initial_i;
         // write content
         for value in &self.values {
+            // TODO: make integers and floats with smaller serial types
             match value {
                 OwnedValue::Null => {}
                 OwnedValue::Integer(i) => buf.extend_from_slice(&i.to_be_bytes()),
@@ -440,4 +441,5 @@ pub trait Cursor {
     fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
     fn set_null_flag(&mut self, flag: bool);
     fn get_null_flag(&self) -> bool;
+    fn btree_create(&mut self, flags: usize) -> u32;
 }

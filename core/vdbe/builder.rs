@@ -319,6 +319,10 @@ impl ProgramBuilder {
                     assert!(*target_pc < 0);
                     *target_pc = to_offset;
                 }
+                Insn::IsNull { src: _, target_pc } => {
+                    assert!(*target_pc < 0);
+                    *target_pc = to_offset;
+                }
                 _ => {
                     todo!("missing resolve_label for {:?}", insn);
                 }
