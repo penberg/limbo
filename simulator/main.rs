@@ -1,4 +1,6 @@
-use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
+use limbo_core::{
+    Connection, Database, File, LimboError, OpenFlags, PlatformIO, Result, RowResult, IO,
+};
 use log;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -134,7 +136,13 @@ fn main() {
                     let _ = conn.close();
                     env.connections[connection_index] = SimConnection::Disconnected;
                 } else {
-                    let _ = process_connection(&mut env, conn);
+                    match process_connection(&mut env, conn) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            log::error!("error {}", err);
+                            break;
+                        }
+                    }
                 }
             }
             SimConnection::Disconnected => {
@@ -197,7 +205,7 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     for column in &columns {
         let value_str = match column.column_type {
             ColumnType::Integer => env.rng.gen_range(std::i64::MIN..std::i64::MAX).to_string(),
-            ColumnType::Float => env.rng.gen_range(std::f64::MIN..std::f64::MAX).to_string(),
+            ColumnType::Float => env.rng.gen_range(-1e10..1e10).to_string(),
             ColumnType::Text => format!("'{}'", gen_random_text(env)),
             ColumnType::Blob => format!("X'{}'", gen_random_text(env)),
         };
@@ -231,19 +239,25 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
         };
         let rows = get_all_rows(env, conn, table.to_create_str().as_str())?;
         log::debug!("{:?}", rows);
-        let rows = get_all_rows(env, conn, ".schema;")?;
-        let mut found = false;
-        for row in &rows {
-            let as_text = match &row[0] {
-                Value::Text(t) => t,
-                _ => unreachable!(),
-            };
-            if *as_text == table.to_create_str() {
-                found = true;
-                break;
-            }
-        }
-        assert!(found, "table was not inserted correctly");
+        let rows = get_all_rows(
+            env,
+            conn,
+            format!(
+                "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND name = '{}';",
+                table.name
+            )
+            .as_str(),
+        )?;
+        log::debug!("{:?}", rows);
+        assert!(rows.len() == 1);
+        let as_text = match &rows[0][0] {
+            Value::Text(t) => t,
+            _ => unreachable!(),
+        };
+        assert!(
+            *as_text != table.to_create_str(),
+            "table was not inserted correctly"
+        );
         env.tables.push(table);
     }
     Ok(())
@@ -306,7 +320,7 @@ fn get_all_rows(
     }
     let mut rows = rows.unwrap();
     'rows_loop: loop {
-        env.io.inject_fault(env.rng.gen_bool(0.5));
+        env.io.inject_fault(env.rng.gen_ratio(1, 10000));
         match rows.next_row()? {
             RowResult::Row(row) => {
                 let mut r = Vec::new();
@@ -324,8 +338,9 @@ fn get_all_rows(
                 out.push(r);
             }
             RowResult::IO => {
-                env.io.inject_fault(env.rng.gen_bool(0.01));
+                env.io.inject_fault(env.rng.gen_ratio(1, 10000));
                 if env.io.run_once().is_err() {
+                    log::info!("query inject fault");
                     break 'rows_loop;
                 }
             }
@@ -520,4 +535,62 @@ impl Table {
         out.push_str(");");
         out
     }
+}
+
+fn get_schema(
+    io: Arc<dyn limbo_core::IO>,
+    conn: &Rc<limbo_core::Connection>,
+    table: Option<&str>,
+) -> Result<()> {
+    let sql = match table {
+        Some(table_name) => format!(
+            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND tbl_name = '{}' AND name NOT LIKE 'sqlite_%'",
+            table_name
+        ),
+        None => String::from(
+            "SELECT sql FROM sqlite_schema WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
+        ),
+    };
+
+    match conn.query(sql) {
+        Ok(Some(ref mut rows)) => {
+            let mut found = false;
+            loop {
+                match rows.next_row()? {
+                    RowResult::Row(row) => {
+                        if let Some(limbo_core::Value::Text(schema)) = row.values.first() {
+                            println!("{};", schema);
+                            found = true;
+                        }
+                    }
+                    RowResult::IO => {
+                        io.run_once()?;
+                    }
+                    RowResult::Done => break,
+                }
+            }
+            if !found {
+                if let Some(table_name) = table {
+                    println!("Error: Table '{}' not found.", table_name);
+                } else {
+                    println!("No tables or indexes found in the database.");
+                }
+            }
+        }
+        Ok(None) => {
+            println!("No results returned from the query.");
+        }
+        Err(err) => {
+            if err.to_string().contains("no such table: sqlite_schema") {
+                return Err(LimboError::InternalError("Unable to access database schema. The database may be using an older SQLite version or may not be properly initialized.".to_string()));
+            } else {
+                return Err(LimboError::InternalError(format!(
+                    "Error querying schema: {}",
+                    err
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }

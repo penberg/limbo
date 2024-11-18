@@ -1,4 +1,5 @@
 use log::debug;
+use nix::NixPath;
 
 use crate::storage::pager::{Page, Pager};
 use crate::storage::sqlite3_ondisk::{
@@ -1313,12 +1314,18 @@ impl BTreeCursor {
         }
 
         let max_local = self.max_local(page_type.clone());
+        log::debug!(
+            "fill_cell_payload(record_size={}, max_local={})",
+            record_buf.len(),
+            max_local
+        );
         if record_buf.len() <= max_local {
             // enough allowed space to fit inside a btree page
             cell_payload.extend_from_slice(record_buf.as_slice());
             cell_payload.resize(cell_payload.len() + 4, 0);
             return;
         }
+        log::debug!("fill_cell_payload(overflow)");
 
         let min_local = self.min_local(page_type);
         let mut space_left = min_local + (record_buf.len() - min_local) % (self.usable_space() - 4);
