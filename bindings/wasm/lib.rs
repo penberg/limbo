@@ -149,7 +149,7 @@ impl limbo_core::IO for PlatformIO {
         _flags: OpenFlags,
         _direct: bool,
     ) -> Result<Rc<dyn limbo_core::File>> {
-        let fd = self.vfs.open(path, "w+");
+        let fd = self.vfs.open(path, "a+");
         Ok(Rc::new(File {
             vfs: VFS::new(),
             fd,
