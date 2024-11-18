@@ -88,7 +88,7 @@ impl Cursor for Sorter {
         todo!()
     }
 
-    fn create_tree(&mut self, _flags: usize) -> u32 {
+    fn btree_create(&mut self, _flags: usize) -> u32 {
         unreachable!("Why did you try to build a new tree with a sorter??? Stand up, open the door and take a walk for 30 min to come back with a better plan.");
     }
 }

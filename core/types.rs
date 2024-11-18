@@ -441,5 +441,5 @@ pub trait Cursor {
     fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
     fn set_null_flag(&mut self, flag: bool);
     fn get_null_flag(&self) -> bool;
-    fn create_tree(&mut self, flags: usize) -> u32;
+    fn btree_create(&mut self, flags: usize) -> u32;
 }

@@ -88,7 +88,7 @@ impl Cursor for PseudoCursor {
         todo!()
     }
 
-    fn create_tree(&mut self, _flags: usize) -> u32 {
+    fn btree_create(&mut self, _flags: usize) -> u32 {
         unreachable!("Please don't.")
     }
 }

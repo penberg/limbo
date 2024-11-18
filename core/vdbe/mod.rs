@@ -2127,7 +2127,7 @@ impl Program {
                         self.database_header.clone(),
                     ));
 
-                    let root_page = cursor.create_tree(1);
+                    let root_page = cursor.btree_create(1);
                     state.registers[*root] = OwnedValue::Integer(root_page as i64);
                     state.pc += 1;
                 }
@@ -2826,7 +2826,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn create_tree(&mut self, _flags: usize) -> u32 {
+        fn btree_create(&mut self, _flags: usize) -> u32 {
             unimplemented!()
         }
     }

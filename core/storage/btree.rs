@@ -1677,7 +1677,7 @@ impl Cursor for BTreeCursor {
         }
     }
 
-    fn create_tree(&mut self, flags: usize) -> u32 {
+    fn btree_create(&mut self, flags: usize) -> u32 {
         let page_type = match flags {
             1 => PageType::TableLeaf,
             2 => PageType::IndexLeaf,
