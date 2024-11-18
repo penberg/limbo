@@ -535,7 +535,7 @@ pub enum StepResult<'a> {
 
 /// If there is I/O, the instruction is restarted.
 /// Evaluate a Result<CursorResult<T>>, if IO return Ok(StepResult::IO).
-macro_rules! return_on_io {
+macro_rules! return_if_io {
     ($expr:expr) => {
         match $expr? {
             CursorResult::Ok(v) => v,
@@ -1113,18 +1113,12 @@ impl Program {
                 }
                 Insn::RewindAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    return_on_io!(cursor.rewind());
+                    return_if_io!(cursor.rewind());
                     state.pc += 1;
                 }
                 Insn::LastAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    match cursor.last()? {
-                        CursorResult::Ok(()) => {}
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
-                    }
+                    return_if_io!(cursor.last());
                     state.pc += 1;
                 }
                 Insn::LastAwait {
@@ -1199,19 +1193,13 @@ impl Program {
                 Insn::NextAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.set_null_flag(false);
-                    return_on_io!(cursor.next());
+                    return_if_io!(cursor.next());
                     state.pc += 1;
                 }
                 Insn::PrevAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.set_null_flag(false);
-                    match cursor.prev()? {
-                        CursorResult::Ok(_) => {}
-                        CursorResult::IO => {
-                            // If there is I/O, the instruction is restarted.
-                            return Ok(StepResult::IO);
-                        }
-                    }
+                    return_if_io!(cursor.prev());
                     state.pc += 1;
                 }
                 Insn::PrevAwait {
@@ -1385,7 +1373,7 @@ impl Program {
                             ));
                         }
                     };
-                    let found = return_on_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ));
+                    let found = return_if_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ));
                     if !found {
                         state.pc = *target_pc;
                     } else {
@@ -1410,7 +1398,7 @@ impl Program {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
-                        let found = return_on_io!(
+                        let found = return_if_io!(
                             cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GE)
                         );
                         if !found {
@@ -1423,7 +1411,7 @@ impl Program {
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
-                                return_on_io!(cursor.rewind());
+                                return_if_io!(cursor.rewind());
                                 state.pc += 1;
                                 continue;
                             }
@@ -1435,7 +1423,7 @@ impl Program {
                             }
                         };
                         let found =
-                            return_on_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE));
+                            return_if_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE));
                         if !found {
                             state.pc = *target_pc;
                         } else {
@@ -1454,7 +1442,7 @@ impl Program {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
-                        let found = return_on_io!(
+                        let found = return_if_io!(
                             cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GT)
                         );
                         if !found {
@@ -1467,7 +1455,7 @@ impl Program {
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
-                                return_on_io!(cursor.rewind());
+                                return_if_io!(cursor.rewind());
                                 state.pc += 1;
                                 continue;
                             }
@@ -1479,7 +1467,7 @@ impl Program {
                             }
                         };
                         let found =
-                            return_on_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GT));
+                            return_if_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GT));
                         if !found {
                             state.pc = *target_pc;
                         } else {
@@ -1850,7 +1838,7 @@ impl Program {
                 } => {
                     assert!(*pc_if_next >= 0);
                     let cursor = cursors.get_mut(cursor_id).unwrap();
-                    return_on_io!(cursor.next());
+                    return_if_io!(cursor.next());
                     if !cursor.is_empty() {
                         state.pc = *pc_if_next;
                     } else {
@@ -2127,7 +2115,7 @@ impl Program {
                         _ => unreachable!("Not a record! Cannot insert a non record value."),
                     };
                     let key = &state.registers[*key_reg];
-                    return_on_io!(cursor.insert(key, record, true));
+                    return_if_io!(cursor.insert(key, record, true));
                     state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
@@ -2140,7 +2128,7 @@ impl Program {
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
                     // TODO: make io handle rng
-                    let rowid = return_on_io!(get_new_rowid(cursor, thread_rng()));
+                    let rowid = return_if_io!(get_new_rowid(cursor, thread_rng()));
                     state.registers[*rowid_reg] = OwnedValue::Integer(rowid);
                     state.pc += 1;
                 }
@@ -2165,7 +2153,7 @@ impl Program {
                     target_pc,
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
-                    let exists = return_on_io!(cursor.exists(&state.registers[*rowid_reg]));
+                    let exists = return_if_io!(cursor.exists(&state.registers[*rowid_reg]));
                     if exists {
                         state.pc += 1;
                     } else {

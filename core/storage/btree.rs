@@ -39,7 +39,7 @@ const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer righ
 pub const BTCURSOR_MAX_DEPTH: usize = 20;
 
 /// Evaluate a Result<CursorResult<T>>, if IO return IO.
-macro_rules! return_on_io {
+macro_rules! return_if_io {
     ($expr:expr) => {
         match $expr? {
             CursorResult::Ok(v) => v,
@@ -395,7 +395,7 @@ impl BTreeCursor {
         key: SeekKey<'_>,
         op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        return_on_io!(self.move_to(key.clone(), op.clone()));
+        return_if_io!(self.move_to(key.clone(), op.clone()));
 
         {
             let page_rc = self.stack.top();
@@ -699,7 +699,7 @@ impl BTreeCursor {
                 WriteState::BalanceStart
                 | WriteState::BalanceMoveUp
                 | WriteState::BalanceGetParentPage => {
-                    return_on_io!(self.balance_leaf());
+                    return_if_io!(self.balance_leaf());
                 }
                 WriteState::Finish => {
                     self.write_info.state = WriteState::Start;
@@ -1689,10 +1689,10 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
 
 impl Cursor for BTreeCursor {
     fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
-        return_on_io!(self.move_to_rightmost());
-        let (rowid, record) = return_on_io!(self.get_next_record(None));
+        return_if_io!(self.move_to_rightmost());
+        let (rowid, record) = return_if_io!(self.get_next_record(None));
         if rowid.is_none() {
-            let is_empty = return_on_io!(self.is_empty_table());
+            let is_empty = return_if_io!(self.is_empty_table());
             assert!(is_empty);
             return Ok(CursorResult::Ok(()));
         }
@@ -1708,7 +1708,7 @@ impl Cursor for BTreeCursor {
     fn rewind(&mut self) -> Result<CursorResult<()>> {
         self.move_to_root();
 
-        let (rowid, record) = return_on_io!(self.get_next_record(None));
+        let (rowid, record) = return_if_io!(self.get_next_record(None));
         self.rowid.replace(rowid);
         self.record.replace(record);
         Ok(CursorResult::Ok(()))
@@ -1722,7 +1722,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn next(&mut self) -> Result<CursorResult<()>> {
-        let (rowid, record) = return_on_io!(self.get_next_record(None));
+        let (rowid, record) = return_if_io!(self.get_next_record(None));
         self.rowid.replace(rowid);
         self.record.replace(record);
         Ok(CursorResult::Ok(()))
@@ -1749,7 +1749,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<CursorResult<bool>> {
-        let (rowid, record) = return_on_io!(self.seek(key, op));
+        let (rowid, record) = return_if_io!(self.seek(key, op));
         self.rowid.replace(rowid);
         self.record.replace(record);
         Ok(CursorResult::Ok(rowid.is_some()))
@@ -1770,10 +1770,10 @@ impl Cursor for BTreeCursor {
             _ => unreachable!("btree tables are indexed by integers!"),
         };
         if !moved_before {
-            return_on_io!(self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ));
+            return_if_io!(self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ));
         }
 
-        return_on_io!(self.insert_into_page(key, _record));
+        return_if_io!(self.insert_into_page(key, _record));
         Ok(CursorResult::Ok(()))
     }
 
@@ -1790,7 +1790,7 @@ impl Cursor for BTreeCursor {
             OwnedValue::Integer(i) => i,
             _ => unreachable!("btree tables are indexed by integers!"),
         };
-        return_on_io!(self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ));
+        return_if_io!(self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ));
         let page_ref = self.stack.top();
         let page = page_ref.borrow();
         // TODO(pere): request load
