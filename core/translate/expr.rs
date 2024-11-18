@@ -706,6 +706,13 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::Subtract => {
+                    program.emit_insn(Insn::Subtract {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 ast::Operator::Multiply => {
                     program.emit_insn(Insn::Multiply {
                         lhs: e1_reg,
