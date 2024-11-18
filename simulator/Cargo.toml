@@ -18,3 +18,7 @@ path = "main.rs"
 limbo_core = { path = "../core" }
 rand = "0.8.5"
 rand_chacha = "0.3.1"
+log = "0.4.20"
+tempfile = "3.0.7"
+env_logger = "0.10.1"
+anarchist-readable-name-generator-lib = "0.1.2"

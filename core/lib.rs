@@ -294,18 +294,17 @@ impl Connection {
         self.pager.clear_page_cache();
         Ok(())
     }
-}
 
-impl Drop for Connection {
-    fn drop(&mut self) {
+    /// Close a connection and checkpoint.
+    pub fn close(&self) -> Result<()> {
         loop {
             // TODO: make this async?
-            match self.pager.checkpoint().unwrap() {
+            match self.pager.checkpoint()? {
                 CheckpointStatus::Done => {
-                    return;
+                    return Ok(());
                 }
                 CheckpointStatus::IO => {
-                    self.pager.io.run_once().unwrap();
+                    self.pager.io.run_once()?;
                 }
             };
         }
