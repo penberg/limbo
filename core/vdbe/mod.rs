@@ -2686,7 +2686,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
     match affinity(datatype) {
         // NONE	Casting a value to a type-name with no affinity causes the value to be converted into a BLOB. Casting to a BLOB consists of first casting the value to TEXT in the encoding of the database connection, then interpreting the resulting byte sequence as a BLOB instead of as TEXT.
         // Historically called NONE, but it's the same as BLOB
-        "BLOB" => {
+        Affinity::BLOB => {
             // Convert to TEXT first, then interpret as BLOB
             // TODO: handle encoding
             let text = value.to_string();
@@ -2694,12 +2694,12 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
         }
         // TEXT To cast a BLOB value to TEXT, the sequence of bytes that make up the BLOB is interpreted as text encoded using the database encoding.
         // Casting an INTEGER or REAL value into TEXT renders the value as if via sqlite3_snprintf() except that the resulting TEXT uses the encoding of the database connection.
-        "TEXT" => {
+        Affinity::TEXT => {
             // Convert everything to text representation
             // TODO: handle encoding and whatever sqlite3_snprintf does
             OwnedValue::Text(Rc::new(value.to_string()))
         }
-        "REAL" => match value {
+        Affinity::REAL => match value {
             OwnedValue::Blob(b) => {
                 // Convert BLOB to TEXT first
                 let text = String::from_utf8_lossy(b);
@@ -2710,7 +2710,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
             OwnedValue::Float(f) => OwnedValue::Float(*f),
             _ => OwnedValue::Float(0.0),
         },
-        "INTEGER" => match value {
+        Affinity::INTEGER => match value {
             OwnedValue::Blob(b) => {
                 // Convert BLOB to TEXT first
                 let text = String::from_utf8_lossy(b);
@@ -2734,7 +2734,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
             }
             _ => OwnedValue::Integer(0),
         },
-        "NUMERIC" => match value {
+        Affinity::NUMERIC => match value {
             OwnedValue::Blob(b) => {
                 let text = String::from_utf8_lossy(b);
                 cast_text_to_numeric(&text)
@@ -2744,8 +2744,15 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
             OwnedValue::Float(f) => OwnedValue::Float(*f),
             _ => value.clone(), // TODO probably wrong
         },
-        _ => value.clone(),
     }
+}
+
+enum Affinity {
+    INTEGER,
+    TEXT,
+    BLOB,
+    REAL,
+    NUMERIC,
 }
 
 /// For tables not declared as STRICT, the affinity of a column is determined by the declared type of the column, according to the following rules in the order shown:
@@ -2755,30 +2762,30 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
 /// If the declared type for a column contains any of the strings "REAL", "FLOA", or "DOUB" then the column has REAL affinity.
 /// Otherwise, the affinity is NUMERIC.
 /// Note that the order of the rules for determining column affinity is important. A column whose declared type is "CHARINT" will match both rules 1 and 2 but the first rule takes precedence and so the column affinity will be INTEGER.
-fn affinity(datatype: &str) -> &str {
+fn affinity(datatype: &str) -> Affinity {
     // Note: callers of this function must ensure that the datatype is uppercase.
     // Rule 1: INT -> INTEGER affinity
     if datatype.contains("INT") {
-        return "INTEGER";
+        return Affinity::INTEGER;
     }
 
     // Rule 2: CHAR/CLOB/TEXT -> TEXT affinity
     if datatype.contains("CHAR") || datatype.contains("CLOB") || datatype.contains("TEXT") {
-        return "TEXT";
+        return Affinity::TEXT;
     }
 
     // Rule 3: BLOB or empty -> BLOB affinity (historically called NONE)
     if datatype.contains("BLOB") || datatype.is_empty() {
-        return "BLOB";
+        return Affinity::BLOB;
     }
 
     // Rule 4: REAL/FLOA/DOUB -> REAL affinity
     if datatype.contains("REAL") || datatype.contains("FLOA") || datatype.contains("DOUB") {
-        return "REAL";
+        return Affinity::REAL;
     }
 
     // Rule 5: Otherwise -> NUMERIC affinity
-    "NUMERIC"
+    Affinity::NUMERIC
 }
 
 /// When casting a TEXT value to INTEGER, the longest possible prefix of the value that can be interpreted as an integer number
