@@ -626,3 +626,108 @@ do_execsql_test zeroblob-str-a {
 do_execsql_test zeroblob-blob {
   SELECT zeroblob(x'01') = x'';
 } {1}
+
+# CAST tests - INTEGER affinity
+do_execsql_test cast-text-to-integer {
+  SELECT CAST('123' AS INTEGER);
+} {123}
+
+do_execsql_test cast-text-with-spaces-to-integer {
+  SELECT CAST('  123  ' AS INTEGER);
+} {123}
+
+do_execsql_test cast-invalid-text-to-integer {
+  SELECT CAST('abc' AS INTEGER);
+} {0}
+
+do_execsql_test cast-text-prefix-to-integer {
+  SELECT CAST('123abc' AS INTEGER);
+} {123}
+
+do_execsql_test cast-float-to-integer {
+  SELECT CAST(123.45 AS INTEGER);
+} {123}
+
+do_execsql_test cast-large-float-to-integer {
+  SELECT CAST(9223372036854775808.0 AS INTEGER);
+} {9223372036854775807}
+
+do_execsql_test cast-small-float-to-integer {
+  SELECT CAST(-9223372036854775809.0 AS INTEGER);
+} {-9223372036854775808}
+
+do_execsql_test cast-text-exp-to-integer {
+  SELECT CAST('123e+5' AS INTEGER);
+} {123}
+
+# CAST tests - REAL affinity
+do_execsql_test cast-text-to-real {
+  SELECT CAST('123.45' AS REAL);
+} {123.45}
+
+do_execsql_test cast-text-with-spaces-to-real {
+  SELECT CAST('  123.45  ' AS REAL);
+} {123.45}
+
+do_execsql_test cast-invalid-text-to-real {
+  SELECT CAST('abc' AS REAL);
+} {0.0}
+
+do_execsql_test cast-text-prefix-to-real {
+  SELECT CAST('123.45abc' AS REAL);
+} {123.45}
+
+do_execsql_test cast-integer-to-real {
+  SELECT CAST(123 AS REAL);
+} {123.0}
+
+# CAST tests - TEXT affinity
+do_execsql_test cast-integer-to-text {
+  SELECT CAST(123 AS TEXT);
+} {123}
+
+do_execsql_test cast-real-to-text {
+  SELECT CAST(123.45 AS TEXT);
+} {123.45}
+
+do_execsql_test cast-blob-to-text {
+  SELECT CAST(x'68656C6C6F' AS TEXT);
+} {hello}
+
+# CAST tests - BLOB affinity
+# not really a great test since it gets converted back to string for the output anyway...
+do_execsql_test cast-text-to-blob {
+  SELECT hex(CAST('hello' AS BLOB));
+} {68656C6C6F}
+
+do_execsql_test cast-integer-to-blob {
+  SELECT hex(CAST(123 AS BLOB));
+} {313233}
+
+# CAST tests - NUMERIC affinity
+do_execsql_test cast-integer-text-to-numeric {
+  SELECT typeof(CAST('123' AS NUMERIC)), CAST('123' AS NUMERIC);
+} {integer|123}
+
+do_execsql_test cast-float-text-to-numeric {
+  SELECT typeof(CAST('123.45' AS NUMERIC)), CAST('123.45' AS NUMERIC);
+} {real|123.45}
+
+do_execsql_test cast-small-float-to-numeric {
+  SELECT typeof(CAST('1.23' AS NUMERIC)), CAST('1.23' AS NUMERIC);
+} {real|1.23}
+
+# TODO COMPAT: sqlite returns 9.22337203685478e+18, do we care...?
+# do_execsql_test cast-large-text-to-numeric {
+#   SELECT typeof(CAST('9223372036854775808' AS NUMERIC)), CAST('9223372036854775808' AS NUMERIC);
+# } {real|9.223372036854776e18}
+
+do_execsql_test cast-null-to-any {
+  SELECT CAST(NULL AS INTEGER), CAST(NULL AS TEXT), CAST(NULL AS BLOB), CAST(NULL AS REAL), CAST(NULL AS NUMERIC);
+} {||||}
+
+# CAST smoke test in where clause
+do_execsql_test cast-in-where {
+  select age from users where age = cast('45' as integer) limit 1;
+} {45}
+

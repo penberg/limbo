@@ -725,7 +725,37 @@ pub fn translate_expr(
             Ok(target_register)
         }
         ast::Expr::Case { .. } => todo!(),
-        ast::Expr::Cast { .. } => todo!(),
+        ast::Expr::Cast { expr, type_name } => {
+            let type_name = type_name.as_ref().unwrap(); // TODO: why is this optional?
+            let reg_expr = program.alloc_register();
+            translate_expr(
+                program,
+                referenced_tables,
+                expr,
+                reg_expr,
+                cursor_hint,
+                cached_results,
+            )?;
+            let reg_type = program.alloc_register();
+            program.emit_insn(Insn::String8 {
+                // we make a comparison against uppercase static strs in the affinity() function,
+                // so we need to make sure we're comparing against the uppercase version,
+                // and it's better to do this once instead of every time we check affinity
+                value: type_name.name.to_uppercase(),
+                dest: reg_type,
+            });
+            program.mark_last_insn_constant();
+            program.emit_insn(Insn::Function {
+                constant_mask: 0,
+                start_reg: reg_expr,
+                dest: target_register,
+                func: FuncCtx {
+                    func: Func::Scalar(ScalarFunc::Cast),
+                    arg_count: 2,
+                },
+            });
+            Ok(target_register)
+        }
         ast::Expr::Collate(_, _) => todo!(),
         ast::Expr::DoublyQualified(_, _, _) => todo!(),
         ast::Expr::Exists(_) => todo!(),
@@ -790,6 +820,9 @@ pub fn translate_expr(
                 },
                 Func::Scalar(srf) => {
                     match srf {
+                        ScalarFunc::Cast => {
+                            unreachable!("this is always ast::Expr::Cast")
+                        }
                         ScalarFunc::Char => {
                             let args = args.clone().unwrap_or_else(Vec::new);
 
