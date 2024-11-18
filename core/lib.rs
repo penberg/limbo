@@ -147,6 +147,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 &page1,
                 storage::sqlite3_ondisk::PageType::TableLeaf,
                 &db_header,
+                DATABASE_HEADER_SIZE,
             );
 
             let mut page = page1.borrow_mut();

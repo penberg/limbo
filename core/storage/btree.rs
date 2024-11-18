@@ -13,7 +13,9 @@ use std::cell::{Ref, RefCell};
 use std::pin::Pin;
 use std::rc::Rc;
 
-use super::sqlite3_ondisk::{write_varint_to_vec, IndexInteriorCell, IndexLeafCell, OverflowCell};
+use super::sqlite3_ondisk::{
+    write_varint_to_vec, IndexInteriorCell, IndexLeafCell, OverflowCell, DATABASE_HEADER_SIZE,
+};
 
 /*
     These are offsets of fields in the header of a b-tree page.
@@ -592,6 +594,10 @@ impl BTreeCursor {
                     let overflow = {
                         let mut page = page_ref.borrow_mut();
                         let contents = page.contents.as_mut().unwrap();
+                        log::debug!(
+                            "insert_into_page(overflow, cell_count={})",
+                            contents.cell_count()
+                        );
 
                         self.insert_into_cell(contents, cell_payload.as_slice(), cell_idx);
                         contents.overflow_cells.len()
@@ -801,7 +807,7 @@ impl BTreeCursor {
                     "indexes still not supported "
                 );
 
-                let right_page_ref = self.allocate_page(page.page_type());
+                let right_page_ref = self.allocate_page(page.page_type(), 0);
                 let right_page = right_page_ref.borrow_mut();
                 let right_page_id = right_page.id;
 
@@ -983,7 +989,6 @@ impl BTreeCursor {
                 {
                     let mut page = page.borrow_mut();
                     let contents = page.contents.as_mut().unwrap();
-                    assert!(contents.cell_count() > 1);
                     let divider_cell_index = divider_cells_index[page_id_index];
                     let cell_payload = scratch_cells[divider_cell_index];
                     let cell = read_btree_cell(
@@ -1045,31 +1050,58 @@ impl BTreeCursor {
         /* todo: balance deeper, create child and copy contents of root there. Then split root */
         /* if we are in root page then we just need to create a new root and push key there */
 
-        let new_root_page_ref = self.allocate_page(PageType::TableInterior);
-        {
+        let new_root_page_ref = self.allocate_page(PageType::TableInterior, DATABASE_HEADER_SIZE);
+        let is_page_1 = {
+            let current_root = self.stack.top();
+            let current_root_ref = current_root.borrow();
+            let current_root_contents = current_root_ref.contents.as_ref().unwrap();
+            let is_page_1 = current_root_contents.offset == DATABASE_HEADER_SIZE;
+
             let mut new_root_page = new_root_page_ref.borrow_mut();
             let new_root_page_id = new_root_page.id;
             let new_root_page_contents = new_root_page.contents.as_mut().unwrap();
+            if is_page_1 {
+                new_root_page_contents
+                    .write_u8(BTREE_HEADER_OFFSET_TYPE, PageType::TableInterior as u8);
+                let current_root_buf = current_root_contents.as_ptr();
+                let new_root_buf = new_root_page_contents.as_ptr();
+                new_root_buf[0..DATABASE_HEADER_SIZE]
+                    .copy_from_slice(&current_root_buf[0..DATABASE_HEADER_SIZE]);
+            }
             // point new root right child to previous root
             new_root_page_contents
                 .write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, new_root_page_id as u32);
             new_root_page_contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
-        }
+            // TODO:: this page should have offset
+            // copy header bytes to here
+            is_page_1
+        };
 
         /* swap splitted page buffer with new root buffer so we don't have to update page idx */
         {
             let (root_id, child_id, child) = {
                 let page_ref = self.stack.top();
                 let child = page_ref.clone();
-                let mut page_rc = page_ref.borrow_mut();
+                let mut child_rc = page_ref.borrow_mut();
                 let mut new_root_page = new_root_page_ref.borrow_mut();
 
                 // Swap the entire Page structs
-                std::mem::swap(&mut page_rc.id, &mut new_root_page.id);
+                std::mem::swap(&mut child_rc.id, &mut new_root_page.id);
+                // TODO:: shift bytes by offset to left on child because now child has offset 100
+                // and header bytes
+                // Also change the offset of page
+                //
+                if is_page_1 {
+                    // Remove heaader from child and set offset to 0
+                    let contents = child_rc.contents.as_mut().unwrap();
+                    contents.offset = 0;
+                    let buf = contents.as_ptr();
+                    buf.copy_within(DATABASE_HEADER_SIZE.., 0);
+                }
 
                 self.pager.add_dirty(new_root_page.id);
-                self.pager.add_dirty(page_rc.id);
-                (new_root_page.id, page_rc.id, child)
+                self.pager.add_dirty(child_rc.id);
+                (new_root_page.id, child_rc.id, child)
             };
 
             debug!("Balancing root. root={}, rightmost={}", root_id, child_id);
@@ -1085,9 +1117,9 @@ impl BTreeCursor {
         }
     }
 
-    fn allocate_page(&self, page_type: PageType) -> Rc<RefCell<Page>> {
+    fn allocate_page(&self, page_type: PageType, offset: usize) -> Rc<RefCell<Page>> {
         let page = self.pager.allocate_page().unwrap();
-        btree_init_page(&page, page_type, &*self.database_header.borrow());
+        btree_init_page(&page, page_type, &*self.database_header.borrow(), offset);
         page
     }
 
@@ -1693,17 +1725,23 @@ impl Cursor for BTreeCursor {
                 flags,
             ),
         };
-        let page = self.allocate_page(page_type);
+        let page = self.allocate_page(page_type, 0);
         let id = page.borrow().id;
         id as u32
     }
 }
 
-pub fn btree_init_page(page: &Rc<RefCell<Page>>, page_type: PageType, db_header: &DatabaseHeader) {
+pub fn btree_init_page(
+    page: &Rc<RefCell<Page>>,
+    page_type: PageType,
+    db_header: &DatabaseHeader,
+    offset: usize,
+) {
     // setup btree page
     let mut contents = page.borrow_mut();
-    debug!("allocating page {}", contents.id);
+    debug!("btree_init_page(id={}, offset={})", contents.id, offset);
     let contents = contents.contents.as_mut().unwrap();
+    contents.offset = offset;
     let id = page_type as u8;
     contents.write_u8(BTREE_HEADER_OFFSET_TYPE, id);
     contents.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);

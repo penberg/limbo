@@ -408,6 +408,7 @@ impl PageContent {
         min_local: usize,
         usable_size: usize,
     ) -> Result<BTreeCell> {
+        log::debug!("cell_get(idx={})", idx);
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
