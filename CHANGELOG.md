@@ -1,6 +1,12 @@
 # Changelog
 
-### 0.0.5 - 2024-11-18
+## 0.0.6 - 2024-11-18
+
+### Fixed
+
+- Fix database truncation caused by `limbo-wasm` opening file in wrong mode (Pere Diaz Bou)
+
+## 0.0.5 - 2024-11-18
 
 ### Added
 
