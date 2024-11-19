@@ -222,10 +222,10 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
 }
 
 fn compare_equal_rows(a: &Vec<Vec<Value>>, b: &Vec<Vec<Value>>) {
-    assert_eq!(a.len(), b.len());
+    assert_eq!(a.len(), b.len(), "lengths are different");
     for (r1, r2) in a.iter().zip(b) {
         for (v1, v2) in r1.iter().zip(r2) {
-            assert_eq!(v1, v2);
+            assert_eq!(v1, v2, "values are different");
         }
     }
 }
