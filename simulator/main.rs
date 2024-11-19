@@ -37,6 +37,7 @@ struct SimulatorOpts {
     read_percent: usize,
     write_percent: usize,
     delete_percent: usize,
+    page_size: usize,
 }
 
 struct Table {
@@ -99,8 +100,9 @@ fn main() {
         read_percent,
         write_percent,
         delete_percent,
+        page_size: 4096, // TODO: randomize this too
     };
-    let io = Arc::new(SimulatorIO::new(seed).unwrap());
+    let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
     let mut path = TempDir::new().unwrap().into_path();
     path.push("simulator.db");
@@ -152,7 +154,7 @@ fn main() {
         }
     }
 
-    env.io.print_fault_stats();
+    env.io.print_stats();
 }
 
 fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
@@ -372,10 +374,11 @@ struct SimulatorIO {
     files: RefCell<Vec<Rc<SimulatorFile>>>,
     rng: RefCell<ChaCha8Rng>,
     nr_run_once_faults: RefCell<usize>,
+    page_size: usize,
 }
 
 impl SimulatorIO {
-    fn new(seed: u64) -> Result<Self> {
+    fn new(seed: u64, page_size: usize) -> Result<Self> {
         let inner = Box::new(PlatformIO::new()?);
         let fault = RefCell::new(false);
         let files = RefCell::new(Vec::new());
@@ -387,6 +390,7 @@ impl SimulatorIO {
             files,
             rng,
             nr_run_once_faults,
+            page_size,
         })
     }
 
@@ -397,10 +401,10 @@ impl SimulatorIO {
         }
     }
 
-    fn print_fault_stats(&self) {
+    fn print_stats(&self) {
         println!("run_once faults: {}", self.nr_run_once_faults.borrow());
         for file in self.files.borrow().iter() {
-            file.print_fault_stats();
+            file.print_stats();
         }
     }
 }
@@ -418,6 +422,10 @@ impl IO for SimulatorIO {
             fault: RefCell::new(false),
             nr_pread_faults: RefCell::new(0),
             nr_pwrite_faults: RefCell::new(0),
+            reads: RefCell::new(0),
+            writes: RefCell::new(0),
+            syncs: RefCell::new(0),
+            page_size: self.page_size,
         });
         self.files.borrow_mut().push(file.clone());
         Ok(file)
@@ -448,6 +456,10 @@ struct SimulatorFile {
     fault: RefCell<bool>,
     nr_pread_faults: RefCell<usize>,
     nr_pwrite_faults: RefCell<usize>,
+    writes: RefCell<usize>,
+    reads: RefCell<usize>,
+    syncs: RefCell<usize>,
+    page_size: usize,
 }
 
 impl SimulatorFile {
@@ -455,11 +467,14 @@ impl SimulatorFile {
         self.fault.replace(fault);
     }
 
-    fn print_fault_stats(&self) {
+    fn print_stats(&self) {
         println!(
-            "pread faults: {}, pwrite faults: {}",
+            "pread faults: {}, pwrite faults: {}, reads: {}, writes: {}, syncs: {}",
             *self.nr_pread_faults.borrow(),
-            *self.nr_pwrite_faults.borrow()
+            *self.nr_pwrite_faults.borrow(),
+            *self.reads.borrow(),
+            *self.writes.borrow(),
+            *self.syncs.borrow(),
         );
     }
 }
@@ -490,6 +505,7 @@ impl limbo_core::File for SimulatorFile {
                 "Injected fault".into(),
             ));
         }
+        *self.reads.borrow_mut() += 1;
         self.inner.pread(pos, c)
     }
 
@@ -505,10 +521,12 @@ impl limbo_core::File for SimulatorFile {
                 "Injected fault".into(),
             ));
         }
+        *self.writes.borrow_mut() += 1;
         self.inner.pwrite(pos, buffer, c)
     }
 
     fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
+        *self.syncs.borrow_mut() += 1;
         self.inner.sync(c)
     }
 
