@@ -1,5 +1,5 @@
 use limbo_core::{
-    Connection, Database, File, LimboError, OpenFlags, PlatformIO, Result, RowResult, IO,
+    Connection, Database, File, LimboError, OpenFlags, PlatformIO, Result, Row, RowResult, IO,
 };
 use log;
 use rand::prelude::*;
@@ -200,23 +200,29 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     }
 
     let columns = env.tables[table].columns.clone();
+    let mut row = Vec::new();
 
     // gen insert query
     for column in &columns {
-        let value_str = match column.column_type {
-            ColumnType::Integer => env.rng.gen_range(std::i64::MIN..std::i64::MAX).to_string(),
-            ColumnType::Float => env.rng.gen_range(-1e10..1e10).to_string(),
-            ColumnType::Text => format!("'{}'", gen_random_text(env)),
-            ColumnType::Blob => format!("X'{}'", gen_random_text(env)),
+        let value = match column.column_type {
+            ColumnType::Integer => Value::Integer(env.rng.gen_range(std::i64::MIN..std::i64::MAX)),
+            ColumnType::Float => Value::Float(env.rng.gen_range(-1e10..1e10)),
+            ColumnType::Text => Value::Text(gen_random_text(env)),
+            ColumnType::Blob => Value::Blob(gen_random_text(env).as_bytes().to_vec()),
         };
-        query.push_str(value_str.as_str());
+
+        query.push_str(value.to_string().as_str());
         query.push(',');
+        row.push(value);
     }
+
+    let table = &mut env.tables[table];
+    table.rows.push(row);
 
     query.pop();
     query.push_str(");");
 
-    let _ = get_all_rows(env, conn, query.as_str());
+    let _ = get_all_rows(env, conn, query.as_str())?;
 
     Ok(())
 }
@@ -314,10 +320,18 @@ fn get_all_rows(
 ) -> Result<Vec<Vec<Value>>> {
     log::info!("running query '{}'", &query[0..query.len().min(4096)]);
     let mut out = Vec::new();
-    let rows = conn.query(query)?;
-    if rows.is_none() {
-        return Ok(out);
+    let rows = conn.query(query);
+    if rows.is_err() {
+        let err = rows.err();
+        log::error!(
+            "Error running query '{}': {:?}",
+            &query[0..query.len().min(4096)],
+            err
+        );
+        return Err(err.unwrap());
     }
+    let rows = rows.unwrap();
+    assert!(rows.is_some());
     let mut rows = rows.unwrap();
     'rows_loop: loop {
         env.io.inject_fault(env.rng.gen_ratio(1, 10000));
@@ -519,6 +533,7 @@ impl ColumnType {
         }
     }
 }
+
 impl Table {
     pub fn to_create_str(&self) -> String {
         let mut out = String::new();
@@ -535,4 +550,21 @@ impl Table {
         out.push_str(");");
         out
     }
+}
+
+impl Value {
+    pub fn to_string(&self) -> String {
+        match self {
+            Value::Null => "NULL".to_string(),
+            Value::Integer(i) => i.to_string(),
+            Value::Float(f) => f.to_string(),
+            Value::Text(t) => format!("'{}'", t.clone()),
+            Value::Blob(vec) => to_sqlite_blob(&vec),
+        }
+    }
+}
+
+fn to_sqlite_blob(bytes: &Vec<u8>) -> String {
+    let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
+    format!("X'{}'", hex)
 }
