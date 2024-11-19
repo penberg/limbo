@@ -9,6 +9,7 @@ use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekO
 use crate::Result;
 
 use std::cell::{Ref, RefCell};
+use std::i32;
 use std::pin::Pin;
 use std::rc::Rc;
 
@@ -193,14 +194,9 @@ impl BTreeCursor {
                     _rowid,
                 }) => {
                     let mem_page = self.pager.read_page(_left_child_page as usize)?;
-                    let cell_count = mem_page.borrow().contents.as_ref().unwrap().cell_count();
-                    if cell_count == 0 {
-                        // leaf page is empty, load next leaf page
-                        self.stack.retreat();
-                    } else {
-                        self.stack.push(mem_page);
-                        self.stack.set_cell_index(cell_count as i32 - 1);
-                    }
+                    self.stack.push(mem_page);
+                    // use cell_index = i32::MAX to tell next loop to go to the end of the current page
+                    self.stack.set_cell_index(i32::MAX);
                     continue;
                 }
                 BTreeCell::TableLeafCell(TableLeafCell {
