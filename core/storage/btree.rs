@@ -1,8 +1,10 @@
 use log::debug;
-use nix::NixPath;
 
 use crate::storage::pager::{Page, Pager};
-use crate::storage::sqlite3_ondisk::{read_btree_cell, read_record, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType, TableInteriorCell, TableLeafCell};
+use crate::storage::sqlite3_ondisk::{
+    read_btree_cell, read_record, read_varint, write_varint, BTreeCell, DatabaseHeader,
+    PageContent, PageType, TableInteriorCell, TableLeafCell,
+};
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp};
 use crate::Result;
 
@@ -817,11 +819,7 @@ impl BTreeCursor {
                     .borrow_mut()
                     .push(right_page_ref.clone());
 
-                debug!(
-                    "splitting left={} right={}",
-                    page_rc.id,
-                    right_page_id
-                );
+                debug!("splitting left={} right={}", page_rc.id, right_page_id);
 
                 self.write_info.state = WriteState::BalanceGetParentPage;
                 Ok(CursorResult::Ok(()))
@@ -920,7 +918,11 @@ impl BTreeCursor {
                 let mut current_cell_index = 0_usize;
                 let mut divider_cells_index = Vec::new(); /* index to scratch cells that will be used as dividers in order */
 
-                debug!("balance_leaf::distribute(cells={}, cells_per_page={})", scratch_cells.len(), cells_per_page);
+                debug!(
+                    "balance_leaf::distribute(cells={}, cells_per_page={})",
+                    scratch_cells.len(),
+                    cells_per_page
+                );
 
                 for (i, page) in new_pages.iter_mut().enumerate() {
                     let mut page = page.borrow_mut();
@@ -934,7 +936,10 @@ impl BTreeCursor {
                     } else {
                         cells_per_page
                     };
-                    debug!("balance_leaf::distribute(page={}, cells_to_copy={})", page_id, cells_to_copy);
+                    debug!(
+                        "balance_leaf::distribute(page={}, cells_to_copy={})",
+                        page_id, cells_to_copy
+                    );
 
                     let cell_index_range = current_cell_index..current_cell_index + cells_to_copy;
                     for (j, cell_idx) in cell_index_range.enumerate() {
@@ -1102,7 +1107,7 @@ impl BTreeCursor {
                 if is_page_1 {
                     // Remove header from child and set offset to 0
                     let contents = child_rc.contents.as_mut().unwrap();
-                    let (cell_pointer_offset, _ ) = contents.cell_get_raw_pointer_region();
+                    let (cell_pointer_offset, _) = contents.cell_get_raw_pointer_region();
                     // change cell pointers
                     for cell_idx in 0..contents.cell_count() {
                         let cell_pointer_offset = cell_pointer_offset + (2 * cell_idx) - offset;
@@ -1110,9 +1115,9 @@ impl BTreeCursor {
                         contents.write_u16(cell_pointer_offset, pc - offset as u16);
                     }
 
-                        contents.offset = 0;
+                    contents.offset = 0;
                     let buf = contents.as_ptr();
-                        buf.copy_within(DATABASE_HEADER_SIZE.., 0);
+                    buf.copy_within(DATABASE_HEADER_SIZE.., 0);
                 }
 
                 self.pager.add_dirty(new_root_page.id);
