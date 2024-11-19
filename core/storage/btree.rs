@@ -138,7 +138,7 @@ impl BTreeCursor {
 
             // moved to current page begin
             // todo: find a better way to flag moved to end or begin of page
-            if cell_idx < 0 {
+            if self.stack.curr_idx_out_of_begin() {
                 loop {
                     if self.stack.current_index() > 0 {
                         self.stack.retreat();
@@ -1573,6 +1573,11 @@ impl PageStack {
     fn current_index(&self) -> i32 {
         let current = self.current();
         self.cell_indices.borrow()[current]
+    }
+
+    fn curr_idx_out_of_begin(&self) -> bool {
+        let cell_idx = self.current_index();
+        cell_idx < 0
     }
 
     /// Advance the current cell index of the current page to the next cell.
