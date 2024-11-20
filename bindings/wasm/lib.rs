@@ -39,19 +39,31 @@ impl Database {
     #[wasm_bindgen]
     pub fn prepare(&self, _sql: &str) -> Statement {
         let stmt = self.conn.prepare(_sql).unwrap();
-        Statement {
-            inner: RefCell::new(stmt),
-        }
+        Statement::new(RefCell::new(stmt), false)
     }
 }
 
 #[wasm_bindgen]
 pub struct Statement {
     inner: RefCell<limbo_core::Statement>,
+    raw: bool,
 }
 
 #[wasm_bindgen]
 impl Statement {
+    fn new(inner: RefCell<limbo_core::Statement>, raw: bool) -> Self {
+        Statement { inner, raw }
+    }
+
+    #[wasm_bindgen]
+    pub fn raw(mut self, toggle: Option<bool>) -> Self {
+        self.raw = match toggle {
+            Some(toggle) => toggle,
+            None => true,
+        };
+        self
+    }
+
     pub fn all(&self) -> js_sys::Array {
         let array = js_sys::Array::new();
         loop {
