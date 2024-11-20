@@ -39,19 +39,31 @@ impl Database {
     #[wasm_bindgen]
     pub fn prepare(&self, _sql: &str) -> Statement {
         let stmt = self.conn.prepare(_sql).unwrap();
-        Statement {
-            inner: RefCell::new(stmt),
-        }
+        Statement::new(RefCell::new(stmt), false)
     }
 }
 
 #[wasm_bindgen]
 pub struct Statement {
     inner: RefCell<limbo_core::Statement>,
+    raw: bool,
 }
 
 #[wasm_bindgen]
 impl Statement {
+    fn new(inner: RefCell<limbo_core::Statement>, raw: bool) -> Self {
+        Statement { inner, raw }
+    }
+
+    #[wasm_bindgen]
+    pub fn raw(mut self, toggle: Option<bool>) -> Self {
+        self.raw = match toggle {
+            Some(toggle) => toggle,
+            None => true,
+        };
+        self
+    }
+
     pub fn all(&self) -> js_sys::Array {
         let array = js_sys::Array::new();
         loop {
@@ -59,7 +71,8 @@ impl Statement {
                 Ok(limbo_core::RowResult::Row(row)) => {
                     let row_array = js_sys::Array::new();
                     for value in row.values {
-                        row_array.push(&JsValue::from_str(&value.to_string()));
+                        let value = to_js_value(value);
+                        row_array.push(&value);
                     }
                     array.push(&row_array);
                 }
@@ -69,6 +82,22 @@ impl Statement {
             }
         }
         array
+    }
+}
+
+fn to_js_value(value: limbo_core::Value) -> JsValue {
+    match value {
+        limbo_core::Value::Null => JsValue::null(),
+        limbo_core::Value::Integer(i) => {
+            if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
+                JsValue::from(i as i32)
+            } else {
+                JsValue::from(i)
+            }
+        }
+        limbo_core::Value::Float(f) => JsValue::from(f),
+        limbo_core::Value::Text(t) => JsValue::from_str(t),
+        limbo_core::Value::Blob(b) => js_sys::Uint8Array::from(b.as_slice()).into(),
     }
 }
 
