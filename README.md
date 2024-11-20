@@ -86,9 +86,9 @@ pip install pylimbo
 Example usage:
 
 ```python
-import pylimbo
+import limbo
 
-con = pylimbo.connect("sqlite.db")
+con = limbo.connect("sqlite.db")
 cur = con.cursor()
 res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
