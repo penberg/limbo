@@ -29,7 +29,6 @@ struct SimulatorOpts {
     ticks: usize,
     max_connections: usize,
     max_tables: usize,
-    seed: u64,
     // this next options are the distribution of workload where read_percent + write_percent +
     // delete_percent == 100%
     read_percent: usize,
@@ -94,7 +93,6 @@ fn main() {
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
-        seed,
         read_percent,
         write_percent,
         delete_percent,
