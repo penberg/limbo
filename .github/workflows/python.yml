@@ -206,9 +206,6 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ env.working-directory }}
     if: "startsWith(github.ref, 'refs/tags/')"
     needs: [linux, macos-arm64, macos-x86_64, sdist]
     steps:
@@ -220,6 +217,5 @@ jobs:
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         with:
-          working-directory: ${{ env.working-directory }}
           command: upload
           args: --skip-existing *
