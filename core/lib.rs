@@ -147,6 +147,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 &page1,
                 storage::sqlite3_ondisk::PageType::TableLeaf,
                 &db_header,
+                DATABASE_HEADER_SIZE,
             );
 
             let mut page = page1.borrow_mut();
@@ -294,18 +295,17 @@ impl Connection {
         self.pager.clear_page_cache();
         Ok(())
     }
-}
 
-impl Drop for Connection {
-    fn drop(&mut self) {
+    /// Close a connection and checkpoint.
+    pub fn close(&self) -> Result<()> {
         loop {
             // TODO: make this async?
-            match self.pager.checkpoint().unwrap() {
+            match self.pager.checkpoint()? {
                 CheckpointStatus::Done => {
-                    return;
+                    return Ok(());
                 }
                 CheckpointStatus::IO => {
-                    self.pager.io.run_once().unwrap();
+                    self.pager.io.run_once()?;
                 }
             };
         }

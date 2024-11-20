@@ -367,6 +367,7 @@ mod tests {
             let conn = tmp_db.connect_limbo();
             insert(1, &conn, &tmp_db).unwrap();
             assert_eq!(count(&conn, &tmp_db).unwrap(), 1);
+            conn.close()?;
         }
         {
             let conn = tmp_db.connect_limbo();
@@ -375,6 +376,7 @@ mod tests {
                 1,
                 "failed to read from wal from another connection"
             );
+            conn.close()?;
         }
         Ok(())
     }

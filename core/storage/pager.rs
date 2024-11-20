@@ -139,8 +139,8 @@ impl DumbLruPageCache {
     }
 
     pub fn insert(&mut self, key: usize, value: Rc<RefCell<Page>>) {
-        debug!("cache_insert(key={})", key);
         self._delete(key, false);
+        debug!("cache_insert(key={})", key);
         let mut entry = Box::new(PageCacheEntry {
             key,
             next: None,
@@ -660,6 +660,7 @@ pub fn allocate_page(
             bp.put(buf);
         });
         let buffer = Rc::new(RefCell::new(Buffer::new(buffer, drop_fn)));
+        page.set_loaded();
         page.contents = Some(PageContent {
             offset,
             buffer,

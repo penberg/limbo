@@ -320,11 +320,11 @@ impl Clone for PageContent {
 
 impl PageContent {
     pub fn page_type(&self) -> PageType {
-        self.read_u8(self.offset).try_into().unwrap()
+        self.read_u8(0).try_into().unwrap()
     }
 
     pub fn maybe_page_type(&self) -> Option<PageType> {
-        match self.read_u8(self.offset).try_into() {
+        match self.read_u8(0).try_into() {
             Ok(v) => Some(v),
             Err(_) => None, // this could be an overflow page
         }
@@ -342,7 +342,7 @@ impl PageContent {
 
     fn read_u8(&self, pos: usize) -> u8 {
         let buf = self.as_ptr();
-        buf[pos]
+        buf[self.offset + pos]
     }
 
     pub fn read_u16(&self, pos: usize) -> u16 {
@@ -361,16 +361,19 @@ impl PageContent {
     }
 
     pub fn write_u8(&self, pos: usize, value: u8) {
+        log::debug!("write_u8(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos] = value;
     }
 
     pub fn write_u16(&self, pos: usize, value: u16) {
+        log::debug!("write_u16(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_u32(&self, pos: usize, value: u32) {
+        log::debug!("write_u32(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
     }
@@ -408,6 +411,7 @@ impl PageContent {
         min_local: usize,
         usable_size: usize,
     ) -> Result<BTreeCell> {
+        log::debug!("cell_get(idx={})", idx);
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
@@ -432,6 +436,7 @@ impl PageContent {
         )
     }
 
+    /// When using this fu
     pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
         let cell_start = match self.page_type() {
             PageType::IndexInterior => 12,

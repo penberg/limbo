@@ -2128,6 +2128,7 @@ impl Program {
                     cursor, rowid_reg, ..
                 } => {
                     let cursor = cursors.get_mut(cursor).unwrap();
+                    // TODO: make io handle rng
                     let rowid = get_new_rowid(cursor, thread_rng())?;
                     match rowid {
                         CursorResult::Ok(rowid) => {

@@ -93,15 +93,18 @@ fn main() -> anyhow::Result<()> {
                 // At prompt, increment interrupt count
                 if interrupt_count.fetch_add(1, Ordering::SeqCst) >= 1 {
                     eprintln!("Interrupted. Exiting...");
+                    conn.close()?;
                     break;
                 }
                 println!("Use .quit to exit or press Ctrl-C again to force quit.");
                 continue;
             }
             Err(ReadlineError::Eof) => {
+                conn.close()?;
                 break;
             }
             Err(err) => {
+                conn.close()?;
                 anyhow::bail!(err)
             }
         }
