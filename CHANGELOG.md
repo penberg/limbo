@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.8 - 2024-11-20
+
+### Added
+
+* Python package build and example usage (Pekka Enberg)
+
 ## 0.0.7 - 2024-11-20
 
 ### Added

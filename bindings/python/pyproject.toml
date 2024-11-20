@@ -3,7 +3,7 @@ requires = ['maturin>=1,<2', 'typing_extensions']
 build-backend = 'maturin'
 
 [project]
-name = 'limbo'
+name = 'pylimbo'
 description = "Limbo is a work-in-progress, in-process OLTP database management system, compatible with SQLite."
 requires-python = '>=3.9'
 classifiers = [

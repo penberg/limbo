@@ -35,7 +35,9 @@
 
 ## Getting Started
 
-First, install the `limbo` command line tool:
+### CLI
+
+Instal `limbo` with:
 
 ```
 curl --proto '=https' --tlsv1.2 -LsSf \
@@ -56,19 +58,42 @@ limbo> SELECT * FROM users;
 2|bob
 ```
 
-You can also access the database from JavaScript:
+### JavaScript (wip)
+
+Installation:
+
+```console
+npm i limbo-wasm
+```
+
+Example usage:
 
 ```js
 import { Database } from 'limbo-wasm';
 
-const db = new Database('hello.db');
-
+const db = new Database('sqlite.db');
 const stmt = db.prepare('SELECT * FROM users');
-
 const users = stmt.all();
-
 console.log(users);
 ```
+
+### Python (wip)
+
+```console
+pip install limbo
+```
+
+Example usage:
+
+```python
+import pylimbo
+
+con = pylimbo.connect("sqlite.db")
+cur = con.cursor()
+res = cur.execute("SELECT * FROM users")
+print(res.fetchone())
+```
+
 ## Developing
 
 Run tests:
