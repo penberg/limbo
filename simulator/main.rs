@@ -345,8 +345,8 @@ fn get_all_rows(
                         limbo_core::Value::Null => Value::Null,
                         limbo_core::Value::Integer(i) => Value::Integer(*i),
                         limbo_core::Value::Float(f) => Value::Float(*f),
-                        limbo_core::Value::Text(t) => Value::Text(t.clone().to_owned()),
-                        limbo_core::Value::Blob(b) => Value::Blob(b.clone().to_owned()),
+                        limbo_core::Value::Text(t) => Value::Text(t.to_string()),
+                        limbo_core::Value::Blob(b) => Value::Blob(b.to_vec()),
                     };
                     r.push(v);
                 }
