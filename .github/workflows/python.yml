@@ -124,7 +124,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: dist
+          path: ./dist
 
   macos-x86_64:
     runs-on: macos-13
@@ -153,7 +153,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: dist
+          path: ./dist
 
   macos-arm64:
     runs-on: macos-14
@@ -182,7 +182,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: dist
+          path: ./dist
 
   sdist:
     runs-on: ubuntu-latest
@@ -201,7 +201,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: dist
+          path: ./dist
 
   release:
     name: Release
