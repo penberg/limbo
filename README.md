@@ -80,7 +80,7 @@ console.log(users);
 ### Python (wip)
 
 ```console
-pip install limbo
+pip install pylimbo
 ```
 
 Example usage:
