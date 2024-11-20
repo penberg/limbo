@@ -1,6 +1,4 @@
-use limbo_core::{
-    Connection, Database, File, LimboError, OpenFlags, PlatformIO, Result, Row, RowResult, IO,
-};
+use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
 use log;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -9,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use anarchist_readable_name_generator_lib::{readable_name, readable_name_custom};
+use anarchist_readable_name_generator_lib::readable_name_custom;
 
 struct SimulatorEnv {
     opts: SimulatorOpts,
