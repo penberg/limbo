@@ -2,8 +2,8 @@ use log::debug;
 
 use crate::storage::pager::{Page, Pager};
 use crate::storage::sqlite3_ondisk::{
-    read_btree_cell, read_record, read_varint, write_varint, BTreeCell, DatabaseHeader,
-    PageContent, PageType, TableInteriorCell, TableLeafCell,
+    read_btree_cell, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
+    TableInteriorCell, TableLeafCell,
 };
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp};
 use crate::Result;
