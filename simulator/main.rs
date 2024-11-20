@@ -1,6 +1,4 @@
-use limbo_core::{
-    Connection, Database, File, LimboError, OpenFlags, PlatformIO, Result, Row, RowResult, IO,
-};
+use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
 use log;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -9,7 +7,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use anarchist_readable_name_generator_lib::{readable_name, readable_name_custom};
+use anarchist_readable_name_generator_lib::readable_name_custom;
 
 struct SimulatorEnv {
     opts: SimulatorOpts,
@@ -31,7 +29,6 @@ struct SimulatorOpts {
     ticks: usize,
     max_connections: usize,
     max_tables: usize,
-    seed: u64,
     // this next options are the distribution of workload where read_percent + write_percent +
     // delete_percent == 100%
     read_percent: usize,
@@ -96,7 +93,6 @@ fn main() {
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
-        seed,
         read_percent,
         write_percent,
         delete_percent,
@@ -345,8 +341,8 @@ fn get_all_rows(
                         limbo_core::Value::Null => Value::Null,
                         limbo_core::Value::Integer(i) => Value::Integer(*i),
                         limbo_core::Value::Float(f) => Value::Float(*f),
-                        limbo_core::Value::Text(t) => Value::Text(t.clone().to_owned()),
-                        limbo_core::Value::Blob(b) => Value::Blob(b.clone().to_owned()),
+                        limbo_core::Value::Text(t) => Value::Text(t.to_string()),
+                        limbo_core::Value::Blob(b) => Value::Blob(b.to_vec()),
                     };
                     r.push(v);
                 }
