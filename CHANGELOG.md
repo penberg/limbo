@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.7 - 2024-11-20
+
+### Added
+
+* Minor improvements to JavaScript API (Pekka Enberg)
+* `CAST` support (Jussi Saurio)
+
+### Fixed
+
+* Fix issues found in-btree code with the DST (Pere Diaz Bou)
+
 ## 0.0.6 - 2024-11-18
 
 ### Fixed
