@@ -35,39 +35,40 @@
 
 ## Getting Started
 
-Installing:
+First, install the `limbo` command line tool:
 
 ```
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/penberg/limbo/releases/latest/download/limbo-installer.sh | sh
 ```
 
-Limbo is currently work-in-progress so it's recommended that you either use the `sqlite3` program to create a test database:
-
-```console
-$ sqlite3 database.db
-SQLite version 3.42.0 2023-05-16 12:36:15
-Enter ".help" for usage hints.
-sqlite> CREATE TABLE users (id INT PRIMARY KEY, username TEXT);
-sqlite> INSERT INTO users VALUES (1, 'alice');
-sqlite> INSERT INTO users VALUES (2, 'bob');
-```
-
-or use the testing script to generate one for you:
-
-```console
-pipenv run ./testing/gen-database.py
-```
-
-You can then start the Limbo shell with:
+Then use the SQL shell to create and query a database:
 
 ```console
 $ limbo database.db
-Welcome to Limbo SQL shell!
-> SELECT * FROM users LIMIT 1;
-|1|Cody|Miller|mhurst@example.org|525.595.7319x21268|33667 Shaw Extension Suite 104|West Robert|VA|45161|`
+Limbo v0.0.6
+Enter ".help" for usage hints.
+limbo> CREATE TABLE users (id INT PRIMARY KEY, username TEXT);
+limbo> INSERT INTO users VALUES (1, 'alice');
+limbo> INSERT INTO users VALUES (2, 'bob');
+limbo> SELECT * FROM users;
+1|alice
+2|bob
 ```
 
+You can also access the database from JavaScript:
+
+```js
+import { Database } from 'limbo-wasm';
+
+const db = new Database('hello.db');
+
+const stmt = db.prepare('SELECT * FROM users');
+
+const users = stmt.all();
+
+console.log(users);
+```
 ## Developing
 
 Run tests:
