@@ -22,7 +22,7 @@ This document describes the SQLite compatibility status of Limbo:
 | BEGIN TRANSACTION            | No      |         |
 | COMMIT TRANSACTION           | No      |         |
 | CREATE INDEX                 | No      |         |
-| CREATE TABLE                 | No      |         |
+| CREATE TABLE                 | Partial |         |
 | CREATE TRIGGER               | No      |         |
 | CREATE VIEW                  | No      |         |
 | CREATE VIRTUAL TABLE         | No      |         |
