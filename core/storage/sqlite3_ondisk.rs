@@ -48,6 +48,7 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
+use cfg_block::cfg_block;
 use log::trace;
 use std::cell::RefCell;
 use std::pin::Pin;
@@ -90,10 +91,15 @@ pub struct DatabaseHeader {
 
 pub const WAL_HEADER_SIZE: usize = 32;
 pub const WAL_FRAME_HEADER_SIZE: usize = 24;
+pub const WAL_MAGIC_BE: u32 = 0x377f0683;
+#[allow(dead_code)]
+pub const WAL_MAGIC_LE: u32 = 0x377f0682;
 
 #[derive(Debug, Default)]
+#[repr(C)] // This helps with encoding because rust does not respect the order in structs, so in
+           // this case we want to keep the order
 pub struct WalHeader {
-    pub magic: [u8; 4],
+    pub magic: u32,
     pub file_format: u32,
     pub page_size: u32,
     pub checkpoint_seq: u32,
@@ -1018,7 +1024,7 @@ fn finish_read_wal_header(buf: Rc<RefCell<Buffer>>, header: Rc<RefCell<WalHeader
     let buf = buf.borrow();
     let buf = buf.as_slice();
     let mut header = header.borrow_mut();
-    header.magic.copy_from_slice(&buf[0..4]);
+    header.magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
     header.file_format = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
     header.page_size = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);
     header.checkpoint_seq = u32::from_be_bytes([buf[12], buf[13], buf[14], buf[15]]);
@@ -1057,12 +1063,14 @@ pub fn begin_write_wal_frame(
     page: &Rc<RefCell<Page>>,
     db_size: u32,
     write_counter: Rc<RefCell<usize>>,
-) -> Result<()> {
+    wal_header: &WalHeader,
+    checksums: (u32, u32),
+) -> Result<(u32, u32)> {
     let page_finish = page.clone();
     let page_id = page.borrow().id;
     trace!("begin_write_wal_frame(offset={}, page={})", offset, page_id);
 
-    let header = WalFrameHeader {
+    let mut header = WalFrameHeader {
         page_number: page_id as u32,
         db_size,
         salt_1: 0,
@@ -1070,7 +1078,7 @@ pub fn begin_write_wal_frame(
         checksum_1: 0,
         checksum_2: 0,
     };
-    let buffer = {
+    let (buffer, checksums) = {
         let page = page.borrow();
         let contents = page.contents.as_ref().unwrap();
         let drop_fn = Rc::new(|_buf| {});
@@ -1080,16 +1088,29 @@ pub fn begin_write_wal_frame(
             drop_fn,
         );
         let buf = buffer.as_mut_slice();
-
         buf[0..4].copy_from_slice(&header.page_number.to_be_bytes());
         buf[4..8].copy_from_slice(&header.db_size.to_be_bytes());
+
+        {
+            let contents_buf = contents.as_ptr();
+            let native = wal_header.magic & 1; // LSB is set on big endian checksums
+            let native = cfg!(target_endian = "big") as u32 == native; // check if checksum
+                                                                       // type and native type is the same so that we know when to swap bytes
+            let checksums = checksum_wal(&buf[0..8], wal_header, checksums, native);
+            let checksums = checksum_wal(contents_buf, wal_header, checksums, native);
+            header.checksum_1 = checksums.0;
+            header.checksum_2 = checksums.1;
+            header.salt_1 = wal_header.salt_1;
+            header.salt_2 = wal_header.salt_2;
+        }
+
         buf[8..12].copy_from_slice(&header.salt_1.to_be_bytes());
         buf[12..16].copy_from_slice(&header.salt_2.to_be_bytes());
         buf[16..20].copy_from_slice(&header.checksum_1.to_be_bytes());
         buf[20..24].copy_from_slice(&header.checksum_2.to_be_bytes());
         buf[WAL_FRAME_HEADER_SIZE..].copy_from_slice(contents.as_ptr());
 
-        Rc::new(RefCell::new(buffer))
+        (Rc::new(RefCell::new(buffer)), checksums)
     };
 
     *write_counter.borrow_mut() += 1;
@@ -1109,7 +1130,7 @@ pub fn begin_write_wal_frame(
     };
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
     io.pwrite(offset, buffer.clone(), c)?;
-    Ok(())
+    Ok(checksums)
 }
 
 pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<()> {
@@ -1119,7 +1140,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
         let mut buffer = Buffer::allocate(512, drop_fn);
         let buf = buffer.as_mut_slice();
 
-        buf[0..4].copy_from_slice(&header.magic);
+        buf[0..4].copy_from_slice(&header.magic.to_be_bytes());
         buf[4..8].copy_from_slice(&header.file_format.to_be_bytes());
         buf[8..12].copy_from_slice(&header.page_size.to_be_bytes());
         buf[12..16].copy_from_slice(&header.checkpoint_seq.to_be_bytes());
@@ -1165,6 +1186,42 @@ pub fn payload_overflows(
         space_left = min_local;
     }
     (true, space_left + 4)
+}
+
+pub fn checksum_wal(
+    buf: &[u8],
+    wal_header: &WalHeader,
+    input: (u32, u32),
+    native_endian: bool, // Sqlite interprets big endian as "native"
+) -> (u32, u32) {
+    assert!(buf.len() % 8 == 0, "buffer must be a multiple of 8");
+    let mut s0: u32 = input.0;
+    let mut s1: u32 = input.1;
+    let mut i = 0;
+    if native_endian {
+        while i < buf.len() {
+            let v0 = u32::from_ne_bytes(buf[i..i + 4].try_into().unwrap());
+            let v1 = u32::from_ne_bytes(buf[i + 4..i + 8].try_into().unwrap());
+            s0 = s0.wrapping_add(v0.wrapping_add(s1));
+            s1 = s1.wrapping_add(v1.wrapping_add(s0));
+            i += 8;
+        }
+    } else {
+        while i < buf.len() {
+            let v0 = u32::from_ne_bytes(buf[i..i + 4].try_into().unwrap()).swap_bytes();
+            let v1 = u32::from_ne_bytes(buf[i + 4..i + 8].try_into().unwrap()).swap_bytes();
+            s0 = s0.wrapping_add(v0.wrapping_add(s1));
+            s1 = s1.wrapping_add(v1.wrapping_add(s0));
+            i += 8;
+        }
+    }
+    (s0, s1)
+}
+
+impl WalHeader {
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { std::mem::transmute::<&WalHeader, &[u8; std::mem::size_of::<WalHeader>()]>(self) }
+    }
 }
 
 #[cfg(test)]
