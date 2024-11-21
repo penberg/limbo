@@ -91,4 +91,12 @@ impl Cursor for PseudoCursor {
     fn btree_create(&mut self, _flags: usize) -> u32 {
         unreachable!("Please don't.")
     }
+
+    fn last(&mut self) -> Result<CursorResult<()>> {
+        todo!()
+    }
+
+    fn prev(&mut self) -> Result<CursorResult<()>> {
+        todo!()
+    }
 }

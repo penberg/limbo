@@ -6,7 +6,7 @@ use crate::{schema::Index, util::normalize_ident, Result};
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, BTreeTableReference,
-    Direction, Operator, Plan, ProjectionColumn, Search,
+    Direction, IterationDirection, Operator, Plan, ProjectionColumn, Search,
 };
 
 /**
@@ -88,16 +88,18 @@ fn eliminate_unnecessary_orderby(
 ) -> Result<()> {
     match operator {
         Operator::Order { source, key, .. } => {
-            if key.len() != 1 || key.first().unwrap().1 != Direction::Ascending {
-                // TODO: handle multiple order by keys and descending order
+            if key.len() != 1 {
+                // TODO: handle multiple order by keys
                 return Ok(());
             }
-            let already_ordered = _operator_is_already_ordered_by(
-                source,
-                &mut key.first_mut().unwrap().0,
-                available_indexes,
-            )?;
+
+            let (key, direction) = key.first_mut().unwrap();
+
+            let already_ordered = _operator_is_already_ordered_by(source, key, available_indexes)?;
+
             if already_ordered {
+                push_scan_direction(source, direction);
+
                 *operator = source.take_ownership();
             }
             Ok(())
@@ -569,6 +571,21 @@ fn push_predicate(
             Ok(Some(push_result.unwrap()))
         }
         Operator::Nothing => Ok(Some(predicate)),
+    }
+}
+
+fn push_scan_direction(operator: &mut Operator, direction: &Direction) {
+    match operator {
+        Operator::Projection { source, .. } => push_scan_direction(source, direction),
+        Operator::Scan { iter_dir, .. } => {
+            if iter_dir.is_none() {
+                match direction {
+                    Direction::Ascending => *iter_dir = Some(IterationDirection::Forwards),
+                    Direction::Descending => *iter_dir = Some(IterationDirection::Backwards),
+                }
+            }
+        }
+        _ => todo!(),
     }
 }
 

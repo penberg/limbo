@@ -26,6 +26,12 @@ impl Display for Plan {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IterationDirection {
+    Forwards,
+    Backwards,
+}
+
 /**
   An Operator is a Node in the query plan.
   Operators form a tree structure, with each having zero or more children.
@@ -109,11 +115,16 @@ pub enum Operator {
     // It takes a table to scan and an optional list of predicates to evaluate.
     // The predicates are used to filter rows from the table.
     // e.g. SELECT * FROM t1 WHERE t1.foo = 5
+    // The iter_dir are uset to indicate the direction of the iterator.
+    // The use of Option for iter_dir is aimed at implementing a conservative optimization strategy: it only pushes
+    // iter_dir down to Scan when iter_dir is None, to prevent potential result set errors caused by multiple
+    // assignments. for more detailed discussions, please refer to https://github.com/penberg/limbo/pull/376
     Scan {
         id: usize,
         table_reference: BTreeTableReference,
         predicates: Option<Vec<ast::Expr>>,
         step: usize,
+        iter_dir: Option<IterationDirection>,
     },
     // Search operator
     // This operator is used to search for a row in a table using an index

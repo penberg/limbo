@@ -426,7 +426,9 @@ pub enum SeekKey<'a> {
 pub trait Cursor {
     fn is_empty(&self) -> bool;
     fn rewind(&mut self) -> Result<CursorResult<()>>;
+    fn last(&mut self) -> Result<CursorResult<()>>;
     fn next(&mut self) -> Result<CursorResult<()>>;
+    fn prev(&mut self) -> Result<CursorResult<()>>;
     fn wait_for_completion(&mut self) -> Result<()>;
     fn rowid(&self) -> Result<Option<u64>>;
     fn seek(&mut self, key: SeekKey, op: SeekOp) -> Result<CursorResult<bool>>;
