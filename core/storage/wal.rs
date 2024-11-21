@@ -279,7 +279,11 @@ impl WalFile {
                     } else {
                         // magic is a single number represented as WAL_MAGIC_LE but the big endian
                         // counterpart is just the same number with LSB set to 1.
-                        let magic = WAL_MAGIC_LE | cfg!(target_endian = "big") as u32;
+                        let magic = if cfg!(target_endian = "big") {
+                            WAL_MAGIC_BE
+                        } else {
+                            WAL_MAGIC_LE
+                        };
                         let mut wal_header = WalHeader {
                             magic,
                             file_format: 3007000,

@@ -91,9 +91,10 @@ pub struct DatabaseHeader {
 
 pub const WAL_HEADER_SIZE: usize = 32;
 pub const WAL_FRAME_HEADER_SIZE: usize = 24;
-pub const WAL_MAGIC_BE: u32 = 0x377f0683;
-#[allow(dead_code)]
+// magic is a single number represented as WAL_MAGIC_LE but the big endian
+// counterpart is just the same number with LSB set to 1.
 pub const WAL_MAGIC_LE: u32 = 0x377f0682;
+pub const WAL_MAGIC_BE: u32 = 0x377f0683;
 
 #[derive(Debug, Default)]
 #[repr(C)] // This helps with encoding because rust does not respect the order in structs, so in
@@ -1093,11 +1094,11 @@ pub fn begin_write_wal_frame(
 
         {
             let contents_buf = contents.as_ptr();
-            let native = wal_header.magic & 1; // LSB is set on big endian checksums
-            let native = cfg!(target_endian = "big") as u32 == native; // check if checksum
-                                                                       // type and native type is the same so that we know when to swap bytes
-            let checksums = checksum_wal(&buf[0..8], wal_header, checksums, native);
-            let checksums = checksum_wal(contents_buf, wal_header, checksums, native);
+            let expects_be = wal_header.magic & 1; // LSB is set on big endian checksums
+            let use_native_endian = cfg!(target_endian = "big") as u32 == expects_be; // check if checksum
+                                                                                      // type and native type is the same so that we know when to swap bytes
+            let checksums = checksum_wal(&buf[0..8], wal_header, checksums, use_native_endian);
+            let checksums = checksum_wal(contents_buf, wal_header, checksums, use_native_endian);
             header.checksum_1 = checksums.0;
             header.checksum_2 = checksums.1;
             header.salt_1 = wal_header.salt_1;
