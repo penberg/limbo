@@ -38,6 +38,25 @@ const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer righ
 */
 pub const BTCURSOR_MAX_DEPTH: usize = 20;
 
+/// Evaluate a Result<CursorResult<T>>, if IO return IO.
+macro_rules! return_if_io {
+    ($expr:expr) => {
+        match $expr? {
+            CursorResult::Ok(v) => v,
+            CursorResult::IO => return Ok(CursorResult::IO),
+        }
+    };
+}
+
+/// Check if the page is unlocked, if not return IO.
+macro_rules! return_if_locked {
+    ($expr:expr) => {{
+        if $expr.is_locked() {
+            return Ok(CursorResult::IO);
+        }
+    }};
+}
+
 #[derive(Debug)]
 enum WriteState {
     Start,
@@ -126,9 +145,7 @@ impl BTreeCursor {
     fn is_empty_table(&mut self) -> Result<CursorResult<bool>> {
         let page = self.pager.read_page(self.root_page)?;
         let page = RefCell::borrow(&page);
-        if page.is_locked() {
-            return Ok(CursorResult::IO);
-        }
+        return_if_locked!(page);
 
         let cell_count = page.contents.as_ref().unwrap().cell_count();
         Ok(CursorResult::Ok(cell_count == 0))
@@ -224,9 +241,7 @@ impl BTreeCursor {
             let cell_idx = self.stack.current_index() as usize;
 
             debug!("current id={} cell={}", mem_page_rc.borrow().id, cell_idx);
-            if mem_page_rc.borrow().is_locked() {
-                return Ok(CursorResult::IO);
-            }
+            return_if_locked!(mem_page_rc.borrow());
             if !mem_page_rc.borrow().is_loaded() {
                 self.pager.load_page(mem_page_rc.clone())?;
                 return Ok(CursorResult::IO);
@@ -380,17 +395,12 @@ impl BTreeCursor {
         key: SeekKey<'_>,
         op: SeekOp,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
-        match self.move_to(key.clone(), op.clone())? {
-            CursorResult::Ok(_) => {}
-            CursorResult::IO => return Ok(CursorResult::IO),
-        };
+        return_if_io!(self.move_to(key.clone(), op.clone()));
 
         {
             let page_rc = self.stack.top();
             let page = page_rc.borrow();
-            if page.is_locked() {
-                return Ok(CursorResult::IO);
-            }
+            return_if_locked!(page);
 
             let contents = page.contents.as_ref().unwrap();
 
@@ -485,9 +495,7 @@ impl BTreeCursor {
             let page_idx = mem_page.borrow().id;
             let page = self.pager.read_page(page_idx)?;
             let page = RefCell::borrow(&page);
-            if page.is_locked() {
-                return Ok(CursorResult::IO);
-            }
+            return_if_locked!(page);
             let contents = page.contents.as_ref().unwrap();
             if contents.is_leaf() {
                 if contents.cell_count() > 0 {
@@ -540,9 +548,7 @@ impl BTreeCursor {
         loop {
             let page_rc = self.stack.top();
             let page = RefCell::borrow(&page_rc);
-            if page.is_locked() {
-                return Ok(CursorResult::IO);
-            }
+            return_if_locked!(page);
 
             let contents = page.contents.as_ref().unwrap();
             if contents.is_leaf() {
@@ -653,9 +659,7 @@ impl BTreeCursor {
                     // get page and find cell
                     let (cell_idx, page_type) = {
                         let mut page = page_ref.borrow_mut();
-                        if page.is_locked() {
-                            return Ok(CursorResult::IO);
-                        }
+                        return_if_locked!(page);
 
                         page.set_dirty();
                         self.pager.add_dirty(page.id);
@@ -695,10 +699,7 @@ impl BTreeCursor {
                 WriteState::BalanceStart
                 | WriteState::BalanceMoveUp
                 | WriteState::BalanceGetParentPage => {
-                    let res = self.balance_leaf()?;
-                    if matches!(res, CursorResult::IO) {
-                        return Ok(res);
-                    }
+                    return_if_io!(self.balance_leaf());
                 }
                 WriteState::Finish => {
                     self.write_info.state = WriteState::Start;
@@ -912,20 +913,16 @@ impl BTreeCursor {
             WriteState::BalanceGetParentPage => {
                 let parent_rc = self.stack.parent();
                 let loaded = parent_rc.borrow().is_loaded();
-                let locked = parent_rc.borrow().is_locked();
+                return_if_locked!(parent_rc.borrow());
 
-                if locked {
-                    Ok(CursorResult::IO)
-                } else {
-                    if !loaded {
-                        debug!("balance_leaf(loading page {} {})", locked, loaded);
-                        self.pager.load_page(parent_rc.clone())?;
-                        return Ok(CursorResult::IO);
-                    }
-                    parent_rc.borrow_mut().set_dirty();
-                    self.write_info.state = WriteState::BalanceMoveUp;
-                    Ok(CursorResult::Ok(()))
+                if !loaded {
+                    debug!("balance_leaf(loading page)");
+                    self.pager.load_page(parent_rc.clone())?;
+                    return Ok(CursorResult::IO);
                 }
+                parent_rc.borrow_mut().set_dirty();
+                self.write_info.state = WriteState::BalanceMoveUp;
+                Ok(CursorResult::Ok(()))
             }
             WriteState::BalanceMoveUp => {
                 let parent_ref = self.stack.parent();
@@ -1692,23 +1689,16 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
 
 impl Cursor for BTreeCursor {
     fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
-        self.move_to_rightmost()?;
-        match self.get_next_record(None)? {
-            CursorResult::Ok((rowid, next)) => {
-                if rowid.is_none() {
-                    match self.is_empty_table()? {
-                        CursorResult::Ok(is_empty) => {
-                            assert!(is_empty)
-                        }
-                        CursorResult::IO => (),
-                    }
-                }
-                self.rowid.replace(rowid);
-                self.record.replace(next);
-                Ok(CursorResult::Ok(()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
+        return_if_io!(self.move_to_rightmost());
+        let (rowid, record) = return_if_io!(self.get_next_record(None));
+        if rowid.is_none() {
+            let is_empty = return_if_io!(self.is_empty_table());
+            assert!(is_empty);
+            return Ok(CursorResult::Ok(()));
         }
+        self.rowid.replace(rowid);
+        self.record.replace(record);
+        Ok(CursorResult::Ok(()))
     }
 
     fn is_empty(&self) -> bool {
@@ -1718,14 +1708,10 @@ impl Cursor for BTreeCursor {
     fn rewind(&mut self) -> Result<CursorResult<()>> {
         self.move_to_root();
 
-        match self.get_next_record(None)? {
-            CursorResult::Ok((rowid, next)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(next);
-                Ok(CursorResult::Ok(()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
+        let (rowid, record) = return_if_io!(self.get_next_record(None));
+        self.rowid.replace(rowid);
+        self.record.replace(record);
+        Ok(CursorResult::Ok(()))
     }
 
     fn last(&mut self) -> Result<CursorResult<()>> {
@@ -1736,14 +1722,10 @@ impl Cursor for BTreeCursor {
     }
 
     fn next(&mut self) -> Result<CursorResult<()>> {
-        match self.get_next_record(None)? {
-            CursorResult::Ok((rowid, next)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(next);
-                Ok(CursorResult::Ok(()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
+        let (rowid, record) = return_if_io!(self.get_next_record(None));
+        self.rowid.replace(rowid);
+        self.record.replace(record);
+        Ok(CursorResult::Ok(()))
     }
 
     fn prev(&mut self) -> Result<CursorResult<()>> {
@@ -1767,14 +1749,10 @@ impl Cursor for BTreeCursor {
     }
 
     fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<CursorResult<bool>> {
-        match self.seek(key, op)? {
-            CursorResult::Ok((rowid, record)) => {
-                self.rowid.replace(rowid);
-                self.record.replace(record);
-                Ok(CursorResult::Ok(rowid.is_some()))
-            }
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
+        let (rowid, record) = return_if_io!(self.seek(key, op));
+        self.rowid.replace(rowid);
+        self.record.replace(record);
+        Ok(CursorResult::Ok(rowid.is_some()))
     }
 
     fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
@@ -1792,16 +1770,11 @@ impl Cursor for BTreeCursor {
             _ => unreachable!("btree tables are indexed by integers!"),
         };
         if !moved_before {
-            match self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ)? {
-                CursorResult::Ok(_) => {}
-                CursorResult::IO => return Ok(CursorResult::IO),
-            };
+            return_if_io!(self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ));
         }
 
-        match self.insert_into_page(key, _record)? {
-            CursorResult::Ok(_) => Ok(CursorResult::Ok(())),
-            CursorResult::IO => Ok(CursorResult::IO),
-        }
+        return_if_io!(self.insert_into_page(key, _record));
+        Ok(CursorResult::Ok(()))
     }
 
     fn set_null_flag(&mut self, flag: bool) {
@@ -1817,16 +1790,11 @@ impl Cursor for BTreeCursor {
             OwnedValue::Integer(i) => i,
             _ => unreachable!("btree tables are indexed by integers!"),
         };
-        match self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ)? {
-            CursorResult::Ok(_) => {}
-            CursorResult::IO => return Ok(CursorResult::IO),
-        };
+        return_if_io!(self.move_to(SeekKey::TableRowId(*int_key as u64), SeekOp::EQ));
         let page_ref = self.stack.top();
         let page = page_ref.borrow();
-        if page.is_locked() {
-            // TODO(pere); request load
-            return Ok(CursorResult::IO);
-        }
+        // TODO(pere): request load
+        return_if_locked!(page);
 
         let contents = page.contents.as_ref().unwrap();
 
