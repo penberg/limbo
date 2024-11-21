@@ -2236,7 +2236,10 @@ impl Program {
 }
 
 fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<CursorResult<i64>> {
-    cursor.seek_to_last()?;
+    match cursor.seek_to_last()? {
+        CursorResult::Ok(()) => {}
+        CursorResult::IO => return Ok(CursorResult::IO),
+    }
     let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
     if rowid > i64::MAX.try_into().unwrap() {
         let distribution = Uniform::from(1..=i64::MAX);
