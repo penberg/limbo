@@ -21,13 +21,13 @@ use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
-use std::rc::Weak;
-use std::sync::{Arc, OnceLock};
+use std::sync::Weak;
+use std::sync::{Arc, OnceLock, RwLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
-use storage::pager::allocate_page;
+use storage::pager::{allocate_page, DumbLruPageCache};
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 use util::parse_schema_rows;
@@ -64,11 +64,12 @@ pub struct Database {
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     transaction_state: RefCell<TransactionState>,
+    shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
 }
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
+    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Arc<Database>> {
         let file = io.open_file(path, io::OpenFlags::Create, true)?;
         maybe_init_database_file(&file, &io)?;
         let page_io = Rc::new(FileStorage::new(file));
@@ -87,18 +88,20 @@ impl Database {
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<RefCell<dyn Wal>>,
-    ) -> Result<Rc<Database>> {
+    ) -> Result<Arc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
         DATABASE_VERSION.get_or_init(|| {
             let version = db_header.borrow().version_number;
             version.to_string()
         });
+        let shared_page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
         let pager = Rc::new(Pager::finish_open(
             db_header.clone(),
             page_io,
             wal,
             io.clone(),
+            shared_page_cache.clone(),
         )?);
         let bootstrap_schema = Rc::new(RefCell::new(Schema::new()));
         let conn = Rc::new(Connection {
@@ -113,21 +116,22 @@ impl Database {
         parse_schema_rows(rows, &mut schema, io)?;
         let schema = Rc::new(RefCell::new(schema));
         let header = db_header;
-        Ok(Rc::new(Database {
+        Ok(Arc::new(Database {
             pager,
             schema,
             header,
             transaction_state: RefCell::new(TransactionState::None),
+            shared_page_cache,
         }))
     }
 
-    pub fn connect(self: &Rc<Database>) -> Rc<Connection> {
+    pub fn connect(self: &Arc<Database>) -> Rc<Connection> {
         Rc::new(Connection {
             pager: self.pager.clone(),
             schema: self.schema.clone(),
             header: self.header.clone(),
-            db: Rc::downgrade(self),
             last_insert_rowid: Cell::new(0),
+            db: Arc::downgrade(self),
         })
     }
 }

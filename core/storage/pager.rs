@@ -11,7 +11,7 @@ use std::hash::Hash;
 use std::ptr::{drop_in_place, NonNull};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use super::wal::CheckpointStatus;
 
@@ -117,7 +117,7 @@ impl PageCacheEntry {
     }
 }
 
-struct DumbLruPageCache {
+pub struct DumbLruPageCache {
     capacity: usize,
     map: RefCell<HashMap<usize, NonNull<PageCacheEntry>>>,
     head: RefCell<Option<NonNull<PageCacheEntry>>>,
@@ -325,7 +325,7 @@ pub struct Pager {
     /// The write-ahead log (WAL) for the database.
     wal: Rc<RefCell<dyn Wal>>,
     /// A page cache for the database.
-    page_cache: RefCell<DumbLruPageCache>,
+    page_cache: Arc<RwLock<DumbLruPageCache>>,
     /// Buffer pool for temporary data storage.
     buffer_pool: Rc<BufferPool>,
     /// I/O interface for input/output operations.
@@ -351,11 +351,11 @@ impl Pager {
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<RefCell<dyn Wal>>,
         io: Arc<dyn crate::io::IO>,
+        page_cache: Arc<RwLock<DumbLruPageCache>>,
     ) -> Result<Self> {
         let db_header = RefCell::borrow(&db_header_ref);
         let page_size = db_header.page_size as usize;
         let buffer_pool = Rc::new(BufferPool::new(page_size));
-        let page_cache = RefCell::new(DumbLruPageCache::new(10));
         Ok(Self {
             page_io,
             wal,
@@ -396,7 +396,7 @@ impl Pager {
     /// Reads a page from the database.
     pub fn read_page(&self, page_idx: usize) -> crate::Result<Rc<RefCell<Page>>> {
         trace!("read_page(page_idx = {})", page_idx);
-        let mut page_cache = self.page_cache.borrow_mut();
+        let mut page_cache = self.page_cache.write().unwrap();
         if let Some(page) = page_cache.get(&page_idx) {
             trace!("read_page(page_idx = {}) = cached", page_idx);
             return Ok(page.clone());
@@ -431,7 +431,7 @@ impl Pager {
     pub fn load_page(&self, page: Rc<RefCell<Page>>) -> Result<()> {
         let id = page.borrow().id;
         trace!("load_page(page_idx = {})", id);
-        let mut page_cache = self.page_cache.borrow_mut();
+        let mut page_cache = self.page_cache.write().unwrap();
         page.borrow_mut().set_locked();
         if let Some(frame_id) = self.wal.borrow().find_frame(id as u64)? {
             self.wal
@@ -467,7 +467,8 @@ impl Pager {
 
     /// Changes the size of the page cache.
     pub fn change_page_cache_size(&self, capacity: usize) {
-        self.page_cache.borrow_mut().resize(capacity);
+        let mut page_cache = self.page_cache.write().unwrap();
+        page_cache.resize(capacity);
     }
 
     pub fn add_dirty(&self, page_id: usize) {
@@ -483,7 +484,7 @@ impl Pager {
                 FlushState::Start => {
                     let db_size = self.db_header.borrow().database_size;
                     for page_id in self.dirty_pages.borrow().iter() {
-                        let mut cache = self.page_cache.borrow_mut();
+                        let mut cache = self.page_cache.write().unwrap();
                         let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
                         let page_type = page.borrow().contents.as_ref().unwrap().maybe_page_type();
                         debug!("appending frame {} {:?}", page_id, page_type);
@@ -589,7 +590,7 @@ impl Pager {
                 Err(err) => panic!("error while clearing cache {}", err),
             }
         }
-        self.page_cache.borrow_mut().clear();
+        self.page_cache.write().unwrap().clear();
     }
 
     /*
@@ -627,14 +628,14 @@ impl Pager {
             let page = page_ref.borrow_mut();
             page.set_dirty();
             self.add_dirty(page.id);
-            let mut cache = self.page_cache.borrow_mut();
+            let mut cache = self.page_cache.write().unwrap();
             cache.insert(page.id, page_ref.clone());
         }
         Ok(page_ref)
     }
 
     pub fn put_loaded_page(&self, id: usize, page: Rc<RefCell<Page>>) {
-        let mut cache = RefCell::borrow_mut(&self.page_cache);
+        let mut cache = self.page_cache.write().unwrap();
         // cache insert invalidates previous page
         cache.insert(id, page.clone());
         page.borrow_mut().set_loaded();

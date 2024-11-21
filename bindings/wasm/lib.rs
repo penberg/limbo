@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub struct Database {
-    db: Rc<limbo_core::Database>,
+    db: Arc<limbo_core::Database>,
     conn: Rc<limbo_core::Connection>,
 }
 
