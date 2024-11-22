@@ -137,6 +137,8 @@ pub struct DumbLruPageCache {
     head: RefCell<Option<NonNull<PageCacheEntry>>>,
     tail: RefCell<Option<NonNull<PageCacheEntry>>>,
 }
+unsafe impl Send for DumbLruPageCache {}
+unsafe impl Sync for DumbLruPageCache {}
 
 impl DumbLruPageCache {
     pub fn new(capacity: usize) -> Self {
@@ -674,4 +676,29 @@ pub fn allocate_page(page_id: usize, buffer_pool: &Rc<BufferPool>, offset: usize
         });
     }
     page
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, RwLock};
+
+    use super::{DumbLruPageCache, Page};
+
+    #[test]
+    fn test_shared_cache() {
+        // ensure cache can be shared between threads
+        let cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
+
+        let thread = {
+            let cache = cache.clone();
+            std::thread::spawn(move || {
+                let mut cache = cache.write().unwrap();
+                cache.insert(1, Arc::new(Page::new(1)));
+            })
+        };
+        let _ = thread.join();
+        let mut cache = cache.write().unwrap();
+        let page = cache.get(&1);
+        assert_eq!(page.unwrap().get().id, 1);
+    }
 }
