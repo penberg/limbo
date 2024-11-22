@@ -8,8 +8,8 @@ use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
+use crate::Completion;
 use crate::{storage::pager::Page, Result};
-use crate::{Completion, OpenFlags};
 
 use self::sqlite3_ondisk::{checksum_wal, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
