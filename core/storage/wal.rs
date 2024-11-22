@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use log::{debug, trace};
@@ -7,8 +8,8 @@ use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
-use crate::Completion;
 use crate::{storage::pager::Page, Result};
+use crate::{Completion, OpenFlags};
 
 use self::sqlite3_ondisk::{checksum_wal, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
@@ -61,22 +62,24 @@ pub trait Wal {
 
 pub struct WalFile {
     io: Arc<dyn crate::io::IO>,
-    wal_path: String,
-    file: RefCell<Option<Rc<dyn File>>>,
-    wal_header: RefCell<Option<Rc<RefCell<sqlite3_ondisk::WalHeader>>>>,
-    min_frame: RefCell<u64>,
-    max_frame: RefCell<u64>,
-    nbackfills: RefCell<u64>,
-    // Maps pgno to frame id and offset in wal file
-    frame_cache: RefCell<HashMap<u64, Vec<u64>>>, // FIXME: for now let's use a simple hashmap instead of a shm file
-    checkpoint_threshold: usize,
-    ongoing_checkpoint: HashSet<usize>,
 
     syncing: Rc<RefCell<bool>>,
     page_size: usize,
 
-    last_checksum: RefCell<(u32, u32)>, // Check of last frame in WAL, this is a cumulative checksum
-                                        // over all frames in the WAL
+    ongoing_checkpoint: HashSet<usize>,
+    shared: Arc<RwLock<WalFileShared>>,
+    checkpoint_threshold: usize,
+}
+
+pub struct WalFileShared {
+    wal_header: Arc<RwLock<sqlite3_ondisk::WalHeader>>,
+    min_frame: u64,
+    max_frame: u64,
+    nbackfills: u64,
+    // Maps pgno to frame id and offset in wal file
+    frame_cache: HashMap<u64, Vec<u64>>, // FIXME: for now let's use a simple hashmap instead of a shm file
+    last_checksum: (u32, u32), // Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
+    file: Rc<dyn File>,
 }
 
 pub enum CheckpointStatus {
@@ -87,7 +90,8 @@ pub enum CheckpointStatus {
 impl Wal for WalFile {
     /// Begin a read transaction.
     fn begin_read_tx(&self) -> Result<()> {
-        self.min_frame.replace(*self.nbackfills.borrow() + 1);
+        let mut shared = self.shared.write().unwrap();
+        shared.min_frame = shared.nbackfills + 1;
         Ok(())
     }
 
@@ -98,15 +102,14 @@ impl Wal for WalFile {
 
     /// Find the latest frame containing a page.
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>> {
-        let frame_cache = self.frame_cache.borrow();
-        let frames = frame_cache.get(&page_id);
+        let shared = self.shared.read().unwrap();
+        let frames = shared.frame_cache.get(&page_id);
         if frames.is_none() {
             return Ok(None);
         }
-        self.ensure_init()?;
         let frames = frames.unwrap();
         for frame in frames.iter().rev() {
-            if *frame <= *self.max_frame.borrow() {
+            if *frame <= shared.max_frame {
                 return Ok(Some(*frame));
             }
         }
@@ -122,8 +125,9 @@ impl Wal for WalFile {
     ) -> Result<()> {
         debug!("read_frame({})", frame_id);
         let offset = self.frame_offset(frame_id);
+        let shared = self.shared.read().unwrap();
         begin_read_wal_frame(
-            self.file.borrow().as_ref().unwrap(),
+            &shared.file,
             offset + WAL_FRAME_HEADER_SIZE,
             buffer_pool,
             page,
@@ -139,9 +143,9 @@ impl Wal for WalFile {
         _pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<()> {
-        self.ensure_init()?;
         let page_id = page.borrow().id;
-        let frame_id = *self.max_frame.borrow();
+        let mut shared = self.shared.write().unwrap();
+        let frame_id = shared.max_frame;
         let offset = self.frame_offset(frame_id);
         trace!(
             "append_frame(frame={}, offset={}, page_id={})",
@@ -149,12 +153,11 @@ impl Wal for WalFile {
             offset,
             page_id
         );
-        let header = self.wal_header.borrow();
-        let header = header.as_ref().unwrap();
-        let header = header.borrow();
-        let checksums = *self.last_checksum.borrow();
+        let header = shared.wal_header.clone();
+        let header = header.read().unwrap();
+        let checksums = shared.last_checksum;
         let checksums = begin_write_wal_frame(
-            self.file.borrow().as_ref().unwrap(),
+            &shared.file,
             offset,
             &page,
             db_size,
@@ -162,15 +165,14 @@ impl Wal for WalFile {
             &header,
             checksums,
         )?;
-        self.last_checksum.replace(checksums);
-        self.max_frame.replace(frame_id + 1);
+        shared.last_checksum = checksums;
+        shared.max_frame = frame_id + 1;
         {
-            let mut frame_cache = self.frame_cache.borrow_mut();
-            let frames = frame_cache.get_mut(&(page_id as u64));
+            let frames = shared.frame_cache.get_mut(&(page_id as u64));
             match frames {
                 Some(frames) => frames.push(frame_id),
                 None => {
-                    frame_cache.insert(page_id as u64, vec![frame_id]);
+                    shared.frame_cache.insert(page_id as u64, vec![frame_id]);
                 }
             }
         }
@@ -188,7 +190,8 @@ impl Wal for WalFile {
     }
 
     fn should_checkpoint(&self) -> bool {
-        let frame_id = *self.max_frame.borrow() as usize;
+        let shared = self.shared.read().unwrap();
+        let frame_id = shared.max_frame as usize;
         frame_id >= self.checkpoint_threshold
     }
 
@@ -197,7 +200,8 @@ impl Wal for WalFile {
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<CheckpointStatus> {
-        for (page_id, _frames) in self.frame_cache.borrow().iter() {
+        let mut shared = self.shared.write().unwrap();
+        for (page_id, _frames) in shared.frame_cache.iter() {
             // move page from WAL to database file
             // TODO(Pere): use splice syscall in linux to do zero-copy file page movements to improve perf
             let page_id = *page_id as usize;
@@ -214,16 +218,15 @@ impl Wal for WalFile {
             self.ongoing_checkpoint.insert(page_id);
         }
 
-        self.frame_cache.borrow_mut().clear();
-        *self.max_frame.borrow_mut() = 0;
+        // TODO: only clear checkpointed frames
+        shared.frame_cache.clear();
+        shared.max_frame = 0;
         self.ongoing_checkpoint.clear();
         Ok(CheckpointStatus::Done)
     }
 
     fn sync(&mut self) -> Result<CheckpointStatus> {
-        self.ensure_init()?;
-        let file = self.file.borrow();
-        let file = file.as_ref().unwrap();
+        let shared = self.shared.write().unwrap();
         {
             let syncing = self.syncing.clone();
             let completion = Completion::Sync(SyncCompletion {
@@ -231,7 +234,7 @@ impl Wal for WalFile {
                     *syncing.borrow_mut() = false;
                 }),
             });
-            file.sync(Rc::new(completion))?;
+            shared.file.sync(Rc::new(completion))?;
         }
 
         if *self.syncing.borrow() {
@@ -243,87 +246,86 @@ impl Wal for WalFile {
 }
 
 impl WalFile {
-    pub fn new(io: Arc<dyn IO>, wal_path: String, page_size: usize) -> Self {
+    pub fn new(io: Arc<dyn IO>, page_size: usize, shared: Arc<RwLock<WalFileShared>>) -> Self {
         Self {
             io,
-            wal_path,
-            file: RefCell::new(None),
-            wal_header: RefCell::new(None),
-            frame_cache: RefCell::new(HashMap::new()),
-            min_frame: RefCell::new(0),
-            max_frame: RefCell::new(0),
-            nbackfills: RefCell::new(0),
-            checkpoint_threshold: 1000,
+            shared,
             ongoing_checkpoint: HashSet::new(),
             syncing: Rc::new(RefCell::new(false)),
+            checkpoint_threshold: 1000,
             page_size,
-            last_checksum: RefCell::new((0, 0)),
         }
-    }
-
-    fn ensure_init(&self) -> Result<()> {
-        if self.file.borrow().is_none() {
-            match self
-                .io
-                .open_file(&self.wal_path, crate::io::OpenFlags::Create, false)
-            {
-                Ok(file) => {
-                    if file.size()? > 0 {
-                        let wal_header = match sqlite3_ondisk::begin_read_wal_header(&file) {
-                            Ok(header) => header,
-                            Err(err) => panic!("Couldn't read header page: {:?}", err),
-                        };
-                        // TODO: Return a completion instead.
-                        self.io.run_once()?;
-                        self.wal_header.replace(Some(wal_header));
-                    } else {
-                        let magic = if cfg!(target_endian = "big") {
-                            WAL_MAGIC_BE
-                        } else {
-                            WAL_MAGIC_LE
-                        };
-                        let mut wal_header = WalHeader {
-                            magic,
-                            file_format: 3007000,
-                            page_size: self.page_size as u32,
-                            checkpoint_seq: 0, // TODO implement sequence number
-                            salt_1: 0,         // TODO implement salt
-                            salt_2: 0,
-                            checksum_1: 0,
-                            checksum_2: 0,
-                        };
-                        let native = cfg!(target_endian = "big"); // if target_endian is
-                                                                  // already big then we don't care but if isn't, header hasn't yet been
-                                                                  // encoded to big endian, therefore we wan't to swap bytes to compute this
-                                                                  // checksum.
-                        let checksums = *self.last_checksum.borrow_mut();
-                        let checksums = checksum_wal(
-                            &wal_header.as_bytes()[..WAL_HEADER_SIZE - 2 * 4], // first 24 bytes
-                            &wal_header,
-                            checksums,
-                            native, // this is false because we haven't encoded the wal header yet
-                        );
-                        wal_header.checksum_1 = checksums.0;
-                        wal_header.checksum_2 = checksums.1;
-                        self.last_checksum.replace(checksums);
-                        sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
-                        self.wal_header
-                            .replace(Some(Rc::new(RefCell::new(wal_header))));
-                    }
-                    *self.file.borrow_mut() = Some(file);
-                }
-                Err(err) => panic!("{:?} {}", err, &self.wal_path),
-            };
-        }
-        Ok(())
     }
 
     fn frame_offset(&self, frame_id: u64) -> usize {
-        let header = self.wal_header.borrow();
-        let header = header.as_ref().unwrap().borrow();
-        let page_size = header.page_size;
+        let page_size = self.page_size;
         let page_offset = frame_id * (page_size as u64 + WAL_FRAME_HEADER_SIZE as u64);
         let offset = WAL_HEADER_SIZE as u64 + page_offset;
         offset as usize
+    }
+}
+
+impl WalFileShared {
+    pub fn open_shared(
+        io: &Arc<dyn IO>,
+        path: &str,
+        page_size: u16,
+    ) -> Result<Arc<RwLock<WalFileShared>>> {
+        let file = io.open_file(path, crate::io::OpenFlags::Create, false)?;
+        let header = if file.size()? > 0 {
+            let wal_header = match sqlite3_ondisk::begin_read_wal_header(&file) {
+                Ok(header) => header,
+                Err(err) => panic!("Couldn't read header page: {:?}", err),
+            };
+            log::info!("recover not implemented yet");
+            // TODO: Return a completion instead.
+            io.run_once()?;
+            wal_header
+        } else {
+            let magic = if cfg!(target_endian = "big") {
+                WAL_MAGIC_BE
+            } else {
+                WAL_MAGIC_LE
+            };
+            let mut wal_header = WalHeader {
+                magic,
+                file_format: 3007000,
+                page_size: page_size as u32,
+                checkpoint_seq: 0, // TODO implement sequence number
+                salt_1: 0,         // TODO implement salt
+                salt_2: 0,
+                checksum_1: 0,
+                checksum_2: 0,
+            };
+            let native = cfg!(target_endian = "big"); // if target_endian is
+                                                      // already big then we don't care but if isn't, header hasn't yet been
+                                                      // encoded to big endian, therefore we wan't to swap bytes to compute this
+                                                      // checksum.
+            let checksums = (0, 0);
+            let checksums = checksum_wal(
+                &wal_header.as_bytes()[..WAL_HEADER_SIZE - 2 * 4], // first 24 bytes
+                &wal_header,
+                checksums,
+                native, // this is false because we haven't encoded the wal header yet
+            );
+            wal_header.checksum_1 = checksums.0;
+            wal_header.checksum_2 = checksums.1;
+            sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
+            Arc::new(RwLock::new(wal_header))
+        };
+        let checksum = {
+            let checksum = header.read().unwrap();
+            (checksum.checksum_1, checksum.checksum_2)
+        };
+        let shared = WalFileShared {
+            wal_header: header,
+            min_frame: 0,
+            max_frame: 0,
+            nbackfills: 0,
+            frame_cache: HashMap::new(),
+            last_checksum: checksum,
+            file,
+        };
+        Ok(Arc::new(RwLock::new(shared)))
     }
 }

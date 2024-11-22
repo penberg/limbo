@@ -1,4 +1,4 @@
-use limbo_core::{maybe_init_database_file, OpenFlags, Pager, Result, WalFile};
+use limbo_core::{maybe_init_database_file, OpenFlags, Pager, Result, WalFile, WalFileShared};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -22,13 +22,21 @@ impl Database {
         maybe_init_database_file(&file, &io).unwrap();
         let page_io = Rc::new(DatabaseStorage::new(file));
         let db_header = Pager::begin_open(page_io.clone()).unwrap();
+
+        // ensure db header is there
+        io.run_once().unwrap();
+
         let wal_path = format!("{}-wal", path);
+        let wal_shared =
+            WalFileShared::open_shared(&io, wal_path.as_str(), db_header.borrow().page_size)
+                .unwrap();
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
-            wal_path,
             db_header.borrow().page_size as usize,
+            wal_shared.clone(),
         )));
-        let db = limbo_core::Database::open(io, page_io, wal).unwrap();
+
+        let db = limbo_core::Database::open(io, page_io, wal, wal_shared).unwrap();
         let conn = db.connect();
         Database { db, conn }
     }

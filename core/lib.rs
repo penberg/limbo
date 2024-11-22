@@ -28,8 +28,9 @@ use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
 use storage::pager::{allocate_page, DumbLruPageCache};
-use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
+use storage::sqlite3_ondisk::{DatabaseHeader, WalHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
+pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
 use translate::optimizer::optimize_plan;
@@ -64,30 +65,38 @@ pub struct Database {
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     transaction_state: RefCell<TransactionState>,
+    // Shared structures of a Database are the parts that are common to multiple threads that might
+    // create DB connections.
     shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
+    shared_wal: Arc<RwLock<WalFileShared>>,
 }
 
 impl Database {
     #[cfg(feature = "fs")]
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Arc<Database>> {
+        use storage::wal::WalFileShared;
+
         let file = io.open_file(path, io::OpenFlags::Create, true)?;
         maybe_init_database_file(&file, &io)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
+        let wal_shared =
+            WalFileShared::open_shared(&io, wal_path.as_str(), db_header.borrow().page_size)?;
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
-            wal_path,
             db_header.borrow().page_size as usize,
+            wal_shared.clone(),
         )));
-        Self::open(io, page_io, wal)
+        Self::open(io, page_io, wal, wal_shared)
     }
 
     pub fn open(
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<RefCell<dyn Wal>>,
+        shared_wal: Arc<RwLock<WalFileShared>>,
     ) -> Result<Arc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
@@ -122,6 +131,7 @@ impl Database {
             header,
             transaction_state: RefCell::new(TransactionState::None),
             shared_page_cache,
+            shared_wal,
         }))
     }
 
