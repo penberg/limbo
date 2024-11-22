@@ -10,6 +10,8 @@ use crate::storage::sqlite3_ondisk::{
 use crate::Completion;
 use crate::{storage::pager::Page, Result};
 
+use self::sqlite3_ondisk::{checksum_wal, WAL_MAGIC_BE, WAL_MAGIC_LE};
+
 use super::buffer_pool::BufferPool;
 use super::pager::Pager;
 use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
@@ -72,6 +74,9 @@ pub struct WalFile {
 
     syncing: Rc<RefCell<bool>>,
     page_size: usize,
+
+    last_checksum: RefCell<(u32, u32)>, // Check of last frame in WAL, this is a cumulative checksum
+                                        // over all frames in the WAL
 }
 
 pub enum CheckpointStatus {
@@ -144,13 +149,20 @@ impl Wal for WalFile {
             offset,
             page_id
         );
-        begin_write_wal_frame(
+        let header = self.wal_header.borrow();
+        let header = header.as_ref().unwrap();
+        let header = header.borrow();
+        let checksums = *self.last_checksum.borrow();
+        let checksums = begin_write_wal_frame(
             self.file.borrow().as_ref().unwrap(),
             offset,
             &page,
             db_size,
             write_counter,
+            &*header,
+            checksums,
         )?;
+        self.last_checksum.replace(checksums);
         self.max_frame.replace(frame_id + 1);
         {
             let mut frame_cache = self.frame_cache.borrow_mut();
@@ -245,6 +257,7 @@ impl WalFile {
             ongoing_checkpoint: HashSet::new(),
             syncing: Rc::new(RefCell::new(false)),
             page_size,
+            last_checksum: RefCell::new((0, 0)),
         }
     }
 
@@ -264,16 +277,37 @@ impl WalFile {
                         self.io.run_once()?;
                         self.wal_header.replace(Some(wal_header));
                     } else {
-                        let wal_header = WalHeader {
-                            magic: (0x377f0682_u32).to_be_bytes(),
+                        // magic is a single number represented as WAL_MAGIC_LE but the big endian
+                        // counterpart is just the same number with LSB set to 1.
+                        let magic = if cfg!(target_endian = "big") {
+                            WAL_MAGIC_BE
+                        } else {
+                            WAL_MAGIC_LE
+                        };
+                        let mut wal_header = WalHeader {
+                            magic,
                             file_format: 3007000,
                             page_size: self.page_size as u32,
                             checkpoint_seq: 0, // TODO implement sequence number
                             salt_1: 0,         // TODO implement salt
                             salt_2: 0,
                             checksum_1: 0,
-                            checksum_2: 0, // TODO implement checksum header
+                            checksum_2: 0,
                         };
+                        let native = cfg!(target_endian = "big"); // if target_endian is
+                                                                  // already big then we don't care but if isn't, header hasn't yet been
+                                                                  // encoded to big endian, therefore we wan't to swap bytes to compute this
+                                                                  // checksum.
+                        let checksums = *self.last_checksum.borrow_mut();
+                        let checksums = checksum_wal(
+                            &wal_header.as_bytes()[..WAL_HEADER_SIZE - 2 * 4], // first 24 bytes
+                            &wal_header,
+                            checksums,
+                            native, // this is false because we haven't encoded the wal header yet
+                        );
+                        wal_header.checksum_1 = checksums.0;
+                        wal_header.checksum_2 = checksums.1;
+                        self.last_checksum.replace(checksums);
                         sqlite3_ondisk::begin_write_wal_header(&file, &wal_header)?;
                         self.wal_header
                             .replace(Some(Rc::new(RefCell::new(wal_header))));
