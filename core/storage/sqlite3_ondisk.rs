@@ -45,7 +45,7 @@ use crate::error::LimboError;
 use crate::io::{Buffer, Completion, ReadCompletion, SyncCompletion, WriteCompletion};
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
-use crate::storage::pager::{Page, Pager};
+use crate::storage::pager::Pager;
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
 use log::trace;
@@ -53,6 +53,8 @@ use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
+
+use super::pager::PageRef;
 
 /// The size of the database header in bytes.
 pub const DATABASE_HEADER_SIZE: usize = 100;
@@ -532,7 +534,7 @@ impl PageContent {
 pub fn begin_read_page(
     page_io: Rc<dyn DatabaseStorage>,
     buffer_pool: Rc<BufferPool>,
-    page: Rc<RefCell<Page>>,
+    page: PageRef,
     page_idx: usize,
 ) -> Result<()> {
     trace!("begin_read_btree_page(page_idx = {})", page_idx);
@@ -545,7 +547,7 @@ pub fn begin_read_page(
     let complete = Box::new(move |buf: Rc<RefCell<Buffer>>| {
         let page = page.clone();
         if finish_read_page(page_idx, buf, page.clone()).is_err() {
-            page.borrow_mut().set_error();
+            page.set_error();
         }
     });
     let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
@@ -553,11 +555,7 @@ pub fn begin_read_page(
     Ok(())
 }
 
-fn finish_read_page(
-    page_idx: usize,
-    buffer_ref: Rc<RefCell<Buffer>>,
-    page: Rc<RefCell<Page>>,
-) -> Result<()> {
+fn finish_read_page(page_idx: usize, buffer_ref: Rc<RefCell<Buffer>>, page: PageRef) -> Result<()> {
     trace!("finish_read_btree_page(page_idx = {})", page_idx);
     let pos = if page_idx == 1 {
         DATABASE_HEADER_SIZE
@@ -570,8 +568,7 @@ fn finish_read_page(
         overflow_cells: Vec::new(),
     };
     {
-        let mut page = page.borrow_mut();
-        page.contents.replace(inner);
+        page.get().contents.replace(inner);
         page.set_uptodate();
         page.clear_locked();
         page.set_loaded();
@@ -581,16 +578,16 @@ fn finish_read_page(
 
 pub fn begin_write_btree_page(
     pager: &Pager,
-    page: &Rc<RefCell<Page>>,
+    page: &PageRef,
     write_counter: Rc<RefCell<usize>>,
 ) -> Result<()> {
     let page_source = &pager.page_io;
     let page_finish = page.clone();
 
-    let page_id = page.borrow().id;
+    let page_id = page.get().id;
     log::trace!("begin_write_btree_page(page_id={})", page_id);
     let buffer = {
-        let page = page.borrow();
+        let page = page.get();
         let contents = page.contents.as_ref().unwrap();
         contents.buffer.clone()
     };
@@ -604,7 +601,7 @@ pub fn begin_write_btree_page(
             let buf_len = buf_copy.borrow().len();
             *write_counter.borrow_mut() -= 1;
 
-            page_finish.borrow_mut().clear_dirty();
+            page_finish.clear_dirty();
             if bytes_written < buf_len as i32 {
                 log::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
@@ -771,7 +768,7 @@ fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8
                     break;
                 }
             }
-            let mut page = page.borrow_mut();
+            let page = page.get();
             let contents = page.contents.as_mut().unwrap();
 
             let to_read = left_to_read.min(usable_size - 4);
@@ -1040,7 +1037,7 @@ pub fn begin_read_wal_frame(
     io: &Rc<dyn File>,
     offset: usize,
     buffer_pool: Rc<BufferPool>,
-    page: Rc<RefCell<Page>>,
+    page: PageRef,
 ) -> Result<()> {
     let buf = buffer_pool.get();
     let drop_fn = Rc::new(move |buf| {
@@ -1061,14 +1058,14 @@ pub fn begin_read_wal_frame(
 pub fn begin_write_wal_frame(
     io: &Rc<dyn File>,
     offset: usize,
-    page: &Rc<RefCell<Page>>,
+    page: &PageRef,
     db_size: u32,
     write_counter: Rc<RefCell<usize>>,
     wal_header: &WalHeader,
     checksums: (u32, u32),
 ) -> Result<(u32, u32)> {
     let page_finish = page.clone();
-    let page_id = page.borrow().id;
+    let page_id = page.get().id;
     trace!("begin_write_wal_frame(offset={}, page={})", offset, page_id);
 
     let mut header = WalFrameHeader {
@@ -1080,7 +1077,7 @@ pub fn begin_write_wal_frame(
         checksum_2: 0,
     };
     let (buffer, checksums) = {
-        let page = page.borrow();
+        let page = page.get();
         let contents = page.contents.as_ref().unwrap();
         let drop_fn = Rc::new(|_buf| {});
 
@@ -1123,7 +1120,7 @@ pub fn begin_write_wal_frame(
             let buf_len = buf_copy.borrow().len();
             *write_counter.borrow_mut() -= 1;
 
-            page_finish.borrow_mut().clear_dirty();
+            page_finish.clear_dirty();
             if bytes_written < buf_len as i32 {
                 log::error!("wrote({bytes_written}) less than expected({buf_len})");
             }

@@ -9,12 +9,12 @@ use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
 use crate::Completion;
-use crate::{storage::pager::Page, Result};
+use crate::Result;
 
 use self::sqlite3_ondisk::{checksum_wal, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
 use super::buffer_pool::BufferPool;
-use super::pager::Pager;
+use super::pager::{PageRef, Pager};
 use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
 
 /// Write-ahead log (WAL).
@@ -35,17 +35,12 @@ pub trait Wal {
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>>;
 
     /// Read a frame from the WAL.
-    fn read_frame(
-        &self,
-        frame_id: u64,
-        page: Rc<RefCell<Page>>,
-        buffer_pool: Rc<BufferPool>,
-    ) -> Result<()>;
+    fn read_frame(&self, frame_id: u64, page: PageRef, buffer_pool: Rc<BufferPool>) -> Result<()>;
 
     /// Write a frame to the WAL.
     fn append_frame(
         &mut self,
-        page: Rc<RefCell<Page>>,
+        page: PageRef,
         db_size: u32,
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
@@ -117,12 +112,7 @@ impl Wal for WalFile {
     }
 
     /// Read a frame from the WAL.
-    fn read_frame(
-        &self,
-        frame_id: u64,
-        page: Rc<RefCell<Page>>,
-        buffer_pool: Rc<BufferPool>,
-    ) -> Result<()> {
+    fn read_frame(&self, frame_id: u64, page: PageRef, buffer_pool: Rc<BufferPool>) -> Result<()> {
         debug!("read_frame({})", frame_id);
         let offset = self.frame_offset(frame_id);
         let shared = self.shared.read().unwrap();
@@ -138,12 +128,12 @@ impl Wal for WalFile {
     /// Write a frame to the WAL.
     fn append_frame(
         &mut self,
-        page: Rc<RefCell<Page>>,
+        page: PageRef,
         db_size: u32,
         _pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<()> {
-        let page_id = page.borrow().id;
+        let page_id = page.get().id;
         let mut shared = self.shared.write().unwrap();
         let frame_id = shared.max_frame;
         let offset = self.frame_offset(frame_id);
@@ -210,7 +200,7 @@ impl Wal for WalFile {
             }
 
             let page = pager.read_page(page_id)?;
-            if page.borrow().is_locked() {
+            if page.is_locked() {
                 return Ok(CheckpointStatus::IO);
             }
 

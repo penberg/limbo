@@ -28,7 +28,7 @@ use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
 use storage::pager::{allocate_page, DumbLruPageCache};
-use storage::sqlite3_ondisk::{DatabaseHeader, WalHeader, DATABASE_HEADER_SIZE};
+use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
@@ -167,8 +167,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 DATABASE_HEADER_SIZE,
             );
 
-            let mut page = page1.borrow_mut();
-            let contents = page.contents.as_mut().unwrap();
+            let contents = page1.get().contents.as_mut().unwrap();
             contents.write_database_header(&db_header);
             // write the first page to disk synchronously
             let flag_complete = Rc::new(RefCell::new(false));
