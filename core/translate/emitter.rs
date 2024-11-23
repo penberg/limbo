@@ -923,16 +923,13 @@ fn inner_loop_source_emit(
 
             let group_by_metadata = m.group_by_metadata.as_ref().unwrap();
 
-            program.emit_insn(Insn::MakeRecord {
+            sorter_insert(
+                program,
                 start_reg,
-                count: column_count,
-                dest_reg: group_by_metadata.sorter_key_register,
-            });
-
-            program.emit_insn(Insn::SorterInsert {
-                cursor_id: group_by_metadata.sort_cursor,
-                record_reg: group_by_metadata.sorter_key_register,
-            });
+                column_count,
+                group_by_metadata.sort_cursor,
+                group_by_metadata.sorter_key_register,
+            );
 
             Ok(())
         }
@@ -1021,16 +1018,13 @@ fn inner_loop_source_emit(
             }
 
             let sort_metadata = m.sort_metadata.as_mut().unwrap();
-            program.emit_insn(Insn::MakeRecord {
+            sorter_insert(
+                program,
                 start_reg,
-                count: orderby_sorter_column_count,
-                dest_reg: sort_metadata.sorter_data_register,
-            });
-
-            program.emit_insn(Insn::SorterInsert {
-                cursor_id: sort_metadata.sort_cursor,
-                record_reg: sort_metadata.sorter_data_register,
-            });
+                orderby_sorter_column_count,
+                sort_metadata.sort_cursor,
+                sort_metadata.sorter_data_register,
+            );
 
             Ok(())
         }
@@ -1606,16 +1600,13 @@ fn group_by_emit(
             );
         }
         Some(_) => {
-            program.emit_insn(Insn::MakeRecord {
-                start_reg: output_row_start_reg,
-                count: output_column_count,
-                dest_reg: group_by_metadata.sorter_key_register,
-            });
-
-            program.emit_insn(Insn::SorterInsert {
-                cursor_id: m.sort_metadata.as_ref().unwrap().sort_cursor,
-                record_reg: group_by_metadata.sorter_key_register,
-            });
+            sorter_insert(
+                program,
+                output_row_start_reg,
+                output_column_count,
+                m.sort_metadata.as_ref().unwrap().sort_cursor,
+                group_by_metadata.sorter_key_register,
+            );
         }
     }
 
@@ -1830,4 +1821,22 @@ fn emit_result_row(
             jump_label_on_limit_reached,
         );
     }
+}
+
+fn sorter_insert(
+    program: &mut ProgramBuilder,
+    start_reg: usize,
+    column_count: usize,
+    cursor_id: usize,
+    record_reg: usize,
+) {
+    program.emit_insn(Insn::MakeRecord {
+        start_reg,
+        count: column_count,
+        dest_reg: record_reg,
+    });
+    program.emit_insn(Insn::SorterInsert {
+        cursor_id,
+        record_reg,
+    });
 }
