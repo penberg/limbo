@@ -720,6 +720,13 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::Divide => {
+                    program.emit_insn(Insn::Divide {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 other_unimplemented => todo!("{:?}", other_unimplemented),
             }
             Ok(target_register)

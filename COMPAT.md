@@ -236,7 +236,7 @@ This document describes the SQLite compatibility status of Limbo:
 | DecrJumpZero    | Yes    |
 | Delete          | No     |
 | Destroy         | No     |
-| Divide          | No     |
+| Divide          | Yes    |
 | DropIndex       | No     |
 | DropTable       | No     |
 | DropTrigger     | No     |
