@@ -343,14 +343,7 @@ impl ProgramBuilder {
     }
 
     // translate table to cursor id
-    pub fn resolve_cursor_id(
-        &self,
-        table_identifier: &str,
-        cursor_hint: Option<CursorID>,
-    ) -> CursorID {
-        if let Some(cursor_hint) = cursor_hint {
-            return cursor_hint;
-        }
+    pub fn resolve_cursor_id(&self, table_identifier: &str) -> CursorID {
         self.cursor_ref
             .iter()
             .position(|(t_ident, _)| {

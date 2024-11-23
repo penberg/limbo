@@ -503,7 +503,6 @@ fn open_loop(
                         program,
                         referenced_tables,
                         predicate,
-                        None,
                         condition_metadata,
                         None,
                     )?;
@@ -531,7 +530,7 @@ fn open_loop(
             predicates,
             iter_dir,
         } => {
-            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier, None);
+            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
             if iter_dir
                 .as_ref()
                 .is_some_and(|dir| *dir == IterationDirection::Backwards)
@@ -575,7 +574,6 @@ fn open_loop(
                         program,
                         referenced_tables,
                         expr,
-                        None,
                         condition_metadata,
                         None,
                     )?;
@@ -592,14 +590,13 @@ fn open_loop(
             predicates,
             ..
         } => {
-            let table_cursor_id =
-                program.resolve_cursor_id(&table_reference.table_identifier, None);
+            let table_cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
 
             // Open the loop for the index search.
             // Primary key equality search is handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
             if !matches!(search, Search::PrimaryKeyEq { .. }) {
                 let index_cursor_id = if let Search::IndexSearch { index, .. } = search {
-                    Some(program.resolve_cursor_id(&index.name, None))
+                    Some(program.resolve_cursor_id(&index.name))
                 } else {
                     None
                 };
@@ -617,14 +614,7 @@ fn open_loop(
                     ast::Operator::Equals
                     | ast::Operator::Greater
                     | ast::Operator::GreaterEquals => {
-                        translate_expr(
-                            program,
-                            Some(referenced_tables),
-                            cmp_expr,
-                            cmp_reg,
-                            None,
-                            None,
-                        )?;
+                        translate_expr(program, Some(referenced_tables), cmp_expr, cmp_reg, None)?;
                     }
                     ast::Operator::Less | ast::Operator::LessEquals => {
                         program.emit_insn(Insn::Null {
@@ -657,14 +647,7 @@ fn open_loop(
                     *m.termination_label_stack.last().unwrap(),
                 );
                 if *cmp_op == ast::Operator::Less || *cmp_op == ast::Operator::LessEquals {
-                    translate_expr(
-                        program,
-                        Some(referenced_tables),
-                        cmp_expr,
-                        cmp_reg,
-                        None,
-                        None,
-                    )?;
+                    translate_expr(program, Some(referenced_tables), cmp_expr, cmp_reg, None)?;
                 }
 
                 program.defer_label_resolution(scan_loop_body_label, program.offset() as usize);
@@ -755,14 +738,7 @@ fn open_loop(
 
             if let Search::PrimaryKeyEq { cmp_expr } = search {
                 let src_reg = program.alloc_register();
-                translate_expr(
-                    program,
-                    Some(referenced_tables),
-                    cmp_expr,
-                    src_reg,
-                    None,
-                    None,
-                )?;
+                translate_expr(program, Some(referenced_tables), cmp_expr, src_reg, None)?;
                 program.emit_insn_with_label_dependency(
                     Insn::SeekRowid {
                         cursor_id: table_cursor_id,
@@ -784,7 +760,6 @@ fn open_loop(
                         program,
                         referenced_tables,
                         predicate,
-                        None,
                         condition_metadata,
                         None,
                     )?;
@@ -909,7 +884,7 @@ fn inner_loop_source_emit(
             for expr in group_by.iter() {
                 let key_reg = cur_reg;
                 cur_reg += 1;
-                translate_expr(program, Some(referenced_tables), expr, key_reg, None, None)?;
+                translate_expr(program, Some(referenced_tables), expr, key_reg, None)?;
             }
             for agg in aggregates.iter() {
                 // Here we are collecting scalars for the group by sorter, which will include
@@ -921,7 +896,7 @@ fn inner_loop_source_emit(
                 for expr in agg.args.iter() {
                     let agg_reg = cur_reg;
                     cur_reg += 1;
-                    translate_expr(program, Some(referenced_tables), expr, agg_reg, None, None)?;
+                    translate_expr(program, Some(referenced_tables), expr, agg_reg, None)?;
                 }
             }
 
@@ -991,7 +966,7 @@ fn inner_loop_source_emit(
             let start_reg = program.alloc_registers(orderby_sorter_column_count);
             for (i, (expr, _)) in order_by.iter().enumerate() {
                 let key_reg = start_reg + i;
-                translate_expr(program, Some(referenced_tables), expr, key_reg, None, None)?;
+                translate_expr(program, Some(referenced_tables), expr, key_reg, None)?;
             }
             let mut cur_reg = start_reg + order_by_len;
             let mut cur_idx_in_orderby_sorter = order_by_len;
@@ -1007,14 +982,7 @@ fn inner_loop_source_emit(
                         contains_aggregates,
                     } => {
                         assert!(!*contains_aggregates);
-                        translate_expr(
-                            program,
-                            Some(referenced_tables),
-                            expr,
-                            cur_reg,
-                            None,
-                            None,
-                        )?;
+                        translate_expr(program, Some(referenced_tables), expr, cur_reg, None)?;
                     }
                     other => unreachable!("{:?}", other),
                 }
@@ -1044,7 +1012,7 @@ fn inner_loop_source_emit(
             m.aggregation_start_register = Some(start_reg);
             for (i, agg) in aggregates.iter().enumerate() {
                 let reg = start_reg + i;
-                translate_aggregation(program, referenced_tables, agg, reg, None)?;
+                translate_aggregation(program, referenced_tables, agg, reg)?;
             }
             for (i, expr) in result_columns.iter().enumerate() {
                 match expr {
@@ -1058,7 +1026,7 @@ fn inner_loop_source_emit(
                             continue;
                         }
                         let reg = start_reg + num_aggs + i;
-                        translate_expr(program, Some(referenced_tables), expr, reg, None, None)?;
+                        translate_expr(program, Some(referenced_tables), expr, reg, None)?;
                     }
                     ResultSetColumn::Agg(_) => { /* do nothing, aggregates are computed above */ }
                 }
@@ -1076,7 +1044,7 @@ fn inner_loop_source_emit(
                     } => {
                         assert!(!*contains_aggregates);
                         let reg = start_reg + i;
-                        translate_expr(program, Some(referenced_tables), expr, reg, None, None)?;
+                        translate_expr(program, Some(referenced_tables), expr, reg, None)?;
                     }
                     other => unreachable!(
                         "Unexpected non-scalar result column in inner loop: {:?}",
@@ -1131,10 +1099,10 @@ fn close_loop(
                 let right_cursor_id = match right.as_ref() {
                     SourceOperator::Scan {
                         table_reference, ..
-                    } => program.resolve_cursor_id(&table_reference.table_identifier, None),
+                    } => program.resolve_cursor_id(&table_reference.table_identifier),
                     SourceOperator::Search {
                         table_reference, ..
-                    } => program.resolve_cursor_id(&table_reference.table_identifier, None),
+                    } => program.resolve_cursor_id(&table_reference.table_identifier),
                     _ => unreachable!(),
                 };
                 program.emit_insn(Insn::NullRow {
@@ -1165,7 +1133,7 @@ fn close_loop(
             iter_dir,
             ..
         } => {
-            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier, None);
+            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
             program.resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
             if iter_dir
                 .as_ref()
@@ -1210,9 +1178,9 @@ fn close_loop(
                 return Ok(());
             }
             let cursor_id = match search {
-                Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name, None),
+                Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
                 Search::PrimaryKeySearch { .. } => {
-                    program.resolve_cursor_id(&table_reference.table_identifier, None)
+                    program.resolve_cursor_id(&table_reference.table_identifier)
                 }
                 Search::PrimaryKeyEq { .. } => unreachable!(),
             };
@@ -1562,7 +1530,6 @@ fn group_by_emit(
                 Some(referenced_tables),
                 expr,
                 cur_reg,
-                None,
                 Some(&precomputed_exprs_to_register),
             )?;
             cur_reg += 1;
@@ -1582,7 +1549,6 @@ fn group_by_emit(
                     Some(referenced_tables),
                     expr,
                     cur_reg,
-                    None,
                     Some(&precomputed_exprs_to_register),
                 )?;
             }
@@ -1688,7 +1654,6 @@ fn agg_without_group_by_emit(
                     Some(referenced_tables),
                     expr,
                     output_reg + i,
-                    None,
                     Some(&precomputed_exprs_to_register),
                 )?;
             }
