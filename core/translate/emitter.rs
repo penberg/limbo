@@ -1,3 +1,6 @@
+// This module contains code for emitting bytecode instructions for SQL query execution.
+// It handles translating high-level SQL operations into low-level bytecode that can be executed by the virtual machine.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -20,6 +23,7 @@ use super::optimizer::Optimizable;
 use super::plan::{Aggregate, BTreeTableReference, Direction, Plan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
+// Metadata for handling LEFT JOIN operations
 #[derive(Debug)]
 pub struct LeftJoinMetadata {
     // integer register that holds a flag that is set to true if the current row has a match for the left join
@@ -32,6 +36,7 @@ pub struct LeftJoinMetadata {
     pub on_match_jump_to_label: BranchOffset,
 }
 
+// Metadata for handling ORDER BY operations
 #[derive(Debug)]
 pub struct SortMetadata {
     // cursor id for the Sorter table where the sorted rows are stored
@@ -40,6 +45,7 @@ pub struct SortMetadata {
     pub sorter_data_register: usize,
 }
 
+// Metadata for handling GROUP BY operations
 #[derive(Debug)]
 pub struct GroupByMetadata {
     // Cursor ID for the Sorter table where the grouped rows are stored
@@ -97,6 +103,7 @@ pub struct Metadata {
     pub result_columns_to_skip_in_orderby_sorter: Option<Vec<usize>>,
 }
 
+/// Initialize the program with basic setup and return initial metadata and labels
 fn prologue() -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
@@ -126,6 +133,9 @@ fn prologue() -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> 
     Ok((program, metadata, init_label, start_offset))
 }
 
+/// Clean up and finalize the program, resolving any remaining labels
+/// Note that although these are the final instructions, typically an SQLite
+/// query will jump to the Transaction instruction via init_label.
 fn epilogue(
     program: &mut ProgramBuilder,
     metadata: &mut Metadata,
@@ -152,6 +162,8 @@ fn epilogue(
     Ok(())
 }
 
+/// Main entry point for emitting bytecode for a SQL query
+/// Takes a query plan and generates the corresponding bytecode program
 pub fn emit_program(
     database_header: Rc<RefCell<DatabaseHeader>>,
     mut plan: Plan,
@@ -167,7 +179,7 @@ pub fn emit_program(
         }
     }
 
-    // OPEN CURSORS ETC
+    // Initialize cursors and other resources needed for query execution
     if let Some(ref mut order_by) = plan.order_by {
         init_order_by(&mut program, order_by, &mut metadata)?;
     }
@@ -178,7 +190,7 @@ pub fn emit_program(
     }
     init_source(&mut program, &plan.source, &mut metadata)?;
 
-    // REWIND CURSORS, EMIT CONDITIONS
+    // Set up main query execution loop
     open_loop(
         &mut program,
         &mut plan.source,
@@ -186,10 +198,10 @@ pub fn emit_program(
         &mut metadata,
     )?;
 
-    // EMIT COLUMNS AND OTHER EXPRS IN INNER LOOP
+    // Process result columns and expressions in the inner loop
     inner_loop_emit(&mut program, &mut plan, &mut metadata)?;
 
-    // CLOSE LOOP
+    // Clean up and close the main execution loop
     close_loop(
         &mut program,
         &mut plan.source,
@@ -199,8 +211,7 @@ pub fn emit_program(
 
     let mut order_by_necessary = plan.order_by.is_some();
 
-    // IF GROUP BY, SORT BY GROUPS AND DO AGGREGATION ETC
-    // EITHER EMITS RESULTROWS DIRECTLY OR INSERTS INTO ORDER BY SORTER
+    // Handle GROUP BY and aggregation processing
     if let Some(ref mut group_by) = plan.group_by {
         group_by_emit(
             &mut program,
@@ -213,7 +224,7 @@ pub fn emit_program(
             &mut metadata,
         )?;
     } else if let Some(ref mut aggregates) = plan.aggregates {
-        // Example: SELECT sum(x), count(*) FROM t;
+        // Handle aggregation without GROUP BY
         agg_without_group_by_emit(
             &mut program,
             &plan.referenced_tables,
@@ -221,12 +232,11 @@ pub fn emit_program(
             aggregates,
             &mut metadata,
         )?;
-        // If we have an aggregate without a group by, we don't need an order by because currently
-        // there can only be a single row result in those cases.
+        // Single row result for aggregates without GROUP BY, so ORDER BY not needed
         order_by_necessary = false;
     }
 
-    // EMIT RESULT ROWS FROM THE ORDER BY SORTER
+    // Process ORDER BY results if needed
     if let Some(ref mut order_by) = plan.order_by {
         if order_by_necessary {
             order_by_emit(
@@ -239,12 +249,13 @@ pub fn emit_program(
         }
     }
 
-    // EPILOGUE
+    // Finalize program
     epilogue(&mut program, &mut metadata, init_label, start_offset)?;
 
     Ok(program.build(database_header, connection))
 }
 
+/// Initialize resources needed for ORDER BY processing
 fn init_order_by(
     program: &mut ProgramBuilder,
     order_by: &Vec<(ast::Expr, Direction)>,
@@ -268,6 +279,7 @@ fn init_order_by(
     Ok(())
 }
 
+/// Initialize resources needed for GROUP BY processing
 fn init_group_by(
     program: &mut ProgramBuilder,
     group_by: &Vec<ast::Expr>,
@@ -349,15 +361,7 @@ fn init_group_by(
     Ok(())
 }
 
-// fn init_agg_without_group_by(
-//     program: &mut ProgramBuilder,
-//     aggregates: &Vec<Aggregate>,
-//     m: &mut Metadata,
-// ) -> Result<()> {
-
-//     Ok(())
-// }
-
+/// Initialize resources needed for the source operators (tables, joins, etc)
 fn init_source(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
@@ -449,6 +453,9 @@ fn init_source(
     }
 }
 
+/// Set up the main query execution loop
+/// For example in the case of a nested table scan, this means emitting the RewindAsync instruction
+/// for all tables involved, outermost first.
 fn open_loop(
     program: &mut ProgramBuilder,
     source: &mut SourceOperator,
@@ -793,6 +800,12 @@ fn open_loop(
     }
 }
 
+/// SQLite (and so Limbo) processes joins as a nested loop.
+/// The inner loop may emit rows to various destinations depending on the query:
+/// - a GROUP BY sorter (grouping is done by sorting based on the GROUP BY keys and aggregating while the GROUP BY keys match)
+/// - an ORDER BY sorter (when there is no GROUP BY, but there is an ORDER BY)
+/// - an AggStep (the columns are collected for aggregation, which is finished later)
+/// - a ResultRow (there is none of the above, so the loop emits a result row directly)
 pub enum InnerLoopEmitTarget<'a> {
     GroupBySorter {
         group_by: &'a Vec<ast::Expr>,
@@ -801,12 +814,14 @@ pub enum InnerLoopEmitTarget<'a> {
     OrderBySorter {
         order_by: &'a Vec<(ast::Expr, Direction)>,
     },
+    AggStep,
     ResultRow {
         limit: Option<usize>,
     },
-    AggStep,
 }
 
+/// Emits the bytecode for the inner loop of a query.
+/// At this point the cursors for all tables have been opened and rewound.
 fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metadata) -> Result<()> {
     if let Some(wc) = &plan.where_clause {
         for predicate in wc.iter() {
@@ -869,6 +884,9 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
     );
 }
 
+/// This is a helper function for inner_loop_emit,
+/// which does a different thing depending on the emit target.
+/// See the InnerLoopEmitTarget enum for more details.
 fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
     result_columns: &Vec<ResultSetColumn>,
@@ -1075,6 +1093,9 @@ fn inner_loop_source_emit(
     }
 }
 
+/// Closes the loop for a given source operator.
+/// For example in the case of a nested table scan, this means emitting the NextAsync instruction
+/// for all tables involved, innermost first.
 fn close_loop(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
@@ -1209,6 +1230,9 @@ fn close_loop(
     }
 }
 
+/// Emits the bytecode for processing a GROUP BY clause.
+/// This is called when the main query execution loop has finished processing,
+/// and we now have data in the GROUP BY sorter.
 fn group_by_emit(
     program: &mut ProgramBuilder,
     result_columns: &Vec<ResultSetColumn>,
@@ -1623,6 +1647,9 @@ fn group_by_emit(
     Ok(())
 }
 
+/// Emits the bytecode for processing an aggregate without a GROUP BY clause.
+/// This is called when the main query execution loop has finished processing,
+/// and we can now materialize the aggregate results.
 fn agg_without_group_by_emit(
     program: &mut ProgramBuilder,
     referenced_tables: &Vec<BTreeTableReference>,
@@ -1679,6 +1706,9 @@ fn agg_without_group_by_emit(
     Ok(())
 }
 
+/// Emits the bytecode for processing an ORDER BY clause.
+/// This is called when the main query execution loop has finished processing,
+/// and we can now emit rows from the ORDER BY sorter.
 fn order_by_emit(
     program: &mut ProgramBuilder,
     order_by: &Vec<(ast::Expr, Direction)>,
@@ -1779,6 +1809,7 @@ fn order_by_emit(
     Ok(())
 }
 
+/// Emits the bytecode for emitting a result row.
 fn emit_result_row(
     program: &mut ProgramBuilder,
     start_reg: usize,
@@ -1806,6 +1837,8 @@ fn emit_result_row(
     }
 }
 
+/// Emits the bytecode for inserting a row into a sorter.
+/// This can be either a GROUP BY sorter or an ORDER BY sorter.
 fn sorter_insert(
     program: &mut ProgramBuilder,
     start_reg: usize,
