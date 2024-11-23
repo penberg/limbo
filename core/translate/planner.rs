@@ -239,8 +239,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             let mut operator_id_counter = OperatorIdCounter::new();
 
             // Parse the FROM clause
-            let (mut source, referenced_tables) =
-                parse_from(schema, from, &mut operator_id_counter)?;
+            let (source, referenced_tables) = parse_from(schema, from, &mut operator_id_counter)?;
 
             let mut plan = Plan {
                 source,
@@ -270,14 +269,15 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     ast::ResultColumn::Star => {
                         for table_reference in plan.referenced_tables.iter() {
                             for (idx, col) in table_reference.table.columns.iter().enumerate() {
-                                plan.result_columns.push(ResultSetColumn::Scalar(
-                                    ast::Expr::Column {
+                                plan.result_columns.push(ResultSetColumn::Expr {
+                                    expr: ast::Expr::Column {
                                         database: None, // TODO: support different databases
                                         table: table_reference.table_index,
                                         column: idx,
                                         is_rowid_alias: col.primary_key,
                                     },
-                                ));
+                                    contains_aggregates: false,
+                                });
                             }
                         }
                     }
@@ -293,13 +293,15 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         }
                         let table_reference = referenced_table.unwrap();
                         for (idx, col) in table_reference.table.columns.iter().enumerate() {
-                            plan.result_columns
-                                .push(ResultSetColumn::Scalar(ast::Expr::Column {
+                            plan.result_columns.push(ResultSetColumn::Expr {
+                                expr: ast::Expr::Column {
                                     database: None, // TODO: support different databases
                                     table: table_reference.table_index,
                                     column: idx,
                                     is_rowid_alias: col.primary_key,
-                                }));
+                                },
+                                contains_aggregates: false,
+                            });
                         }
                     }
                     ast::ResultColumn::Expr(mut expr, _) => {
@@ -331,10 +333,14 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                         plan.result_columns.push(ResultSetColumn::Agg(agg));
                                     }
                                     Ok(_) => {
+                                        let cur_agg_count = aggregate_expressions.len();
                                         resolve_aggregates(&expr, &mut aggregate_expressions);
-                                        // TODO: can be compound aggregate
-                                        plan.result_columns
-                                            .push(ResultSetColumn::Scalar(expr.clone()));
+                                        let contains_aggregates =
+                                            cur_agg_count != aggregate_expressions.len();
+                                        plan.result_columns.push(ResultSetColumn::Expr {
+                                            expr: expr.clone(),
+                                            contains_aggregates,
+                                        });
                                     }
                                     _ => {}
                                 }
@@ -364,13 +370,21 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                 }
                             }
                             ast::Expr::Binary(lhs, _, rhs) => {
+                                let cur_agg_count = aggregate_expressions.len();
                                 resolve_aggregates(&lhs, &mut aggregate_expressions);
                                 resolve_aggregates(&rhs, &mut aggregate_expressions);
-                                plan.result_columns
-                                    .push(ResultSetColumn::Scalar(expr.clone()));
+                                let contains_aggregates =
+                                    cur_agg_count != aggregate_expressions.len();
+                                plan.result_columns.push(ResultSetColumn::Expr {
+                                    expr: expr.clone(),
+                                    contains_aggregates,
+                                });
                             }
                             e => {
-                                plan.result_columns.push(ResultSetColumn::Scalar(e.clone()));
+                                plan.result_columns.push(ResultSetColumn::Expr {
+                                    expr: e.clone(),
+                                    contains_aggregates: false,
+                                });
                             }
                         }
                     }

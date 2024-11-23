@@ -14,9 +14,11 @@ use crate::{
 
 #[derive(Debug)]
 pub enum ResultSetColumn {
-    Scalar(ast::Expr),
+    Expr {
+        expr: ast::Expr,
+        contains_aggregates: bool,
+    },
     Agg(Aggregate),
-    ComputedAgg(ast::Expr),
 }
 
 #[derive(Debug)]

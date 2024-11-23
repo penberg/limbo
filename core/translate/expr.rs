@@ -3,7 +3,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
 use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
-use crate::schema::{PseudoTable, Table, Type};
+use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
 use crate::Result;

@@ -35,8 +35,6 @@ pub struct LeftJoinMetadata {
 pub struct SortMetadata {
     // cursor id for the Sorter table where the sorted rows are stored
     pub sort_cursor: usize,
-    // cursor id for the Pseudo table where rows are temporarily inserted from the Sorter table
-    pub pseudo_table_cursor: usize,
     // label where the SorterData instruction is emitted; SorterNext will jump here if there is more data to read
     pub sorter_data_label: BranchOffset,
     // label for the instruction immediately following SorterNext; SorterSort will jump here in case there is no data
@@ -75,13 +73,6 @@ pub struct GroupByMetadata {
     // The comparison result is used to determine if the current row belongs to the same group as the previous row
     // Each group by expression has a corresponding register
     pub group_exprs_comparison_register: usize,
-}
-
-#[derive(Debug)]
-pub struct SortCursorOverride {
-    pub cursor_id: usize,
-    pub pseudo_table: Table,
-    pub sort_key_len: usize,
 }
 
 /// The Metadata struct holds various information and labels used during bytecode generation.
@@ -175,6 +166,14 @@ pub fn emit_program(
 ) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
 
+    // Trivial exit on LIMIT 0
+    if let Some(limit) = plan.limit {
+        if limit == 0 {
+            epilogue(&mut program, &mut metadata, init_label, start_offset)?;
+            return Ok(program.build(database_header, connection));
+        }
+    }
+
     // OPEN CURSORS ETC
     if let Some(ref mut order_by) = plan.order_by {
         init_order_by(&mut program, order_by, &mut metadata)?;
@@ -221,7 +220,13 @@ pub fn emit_program(
         )?;
     } else if let Some(ref mut aggregates) = plan.aggregates {
         // Example: SELECT sum(x), count(*) FROM t;
-        agg_without_group_by_emit(&mut program, aggregates, &mut metadata)?;
+        agg_without_group_by_emit(
+            &mut program,
+            &plan.referenced_tables,
+            &plan.result_columns,
+            aggregates,
+            &mut metadata,
+        )?;
         // If we have an aggregate without a group by, we don't need an order by because currently
         // there can only be a single row result in those cases.
         order_by_necessary = false;
@@ -247,8 +252,6 @@ pub fn emit_program(
 }
 
 const ORDER_BY_ID: usize = 0;
-const GROUP_BY_ID: usize = 1;
-const AGG_WITHOUT_GROUP_BY_ID: usize = 2;
 
 fn init_order_by(
     program: &mut ProgramBuilder,
@@ -261,7 +264,6 @@ fn init_order_by(
         ORDER_BY_ID,
         SortMetadata {
             sort_cursor,
-            pseudo_table_cursor: usize::MAX, // will be set later
             sorter_data_register: program.alloc_register(),
             sorter_data_label: program.allocate_label(),
             done_label: program.allocate_label(),
@@ -827,7 +829,6 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
     if let Some(group_by) = &plan.group_by {
         return inner_loop_source_emit(
             program,
-            &plan.source,
             &plan.result_columns,
             &plan.aggregates,
             m,
@@ -843,7 +844,6 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
     if plan.aggregates.is_some() {
         return inner_loop_source_emit(
             program,
-            &plan.source,
             &plan.result_columns,
             &plan.aggregates,
             m,
@@ -855,7 +855,6 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
     if let Some(order_by) = &plan.order_by {
         return inner_loop_source_emit(
             program,
-            &plan.source,
             &plan.result_columns,
             &plan.aggregates,
             m,
@@ -866,7 +865,6 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
     // if we have neither, we emit a ResultRow. In that case, if we have a Limit, we handle that with DecrJumpZero.
     return inner_loop_source_emit(
         program,
-        &plan.source,
         &plan.result_columns,
         &plan.aggregates,
         m,
@@ -877,7 +875,6 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
 
 fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
-    source: &SourceOperator,
     result_columns: &Vec<ResultSetColumn>,
     aggregates: &Option<Vec<Aggregate>>,
     m: &mut Metadata,
@@ -940,7 +937,11 @@ fn inner_loop_source_emit(
             let mut result_columns_to_skip: Option<Vec<usize>> = None;
             for (i, rc) in result_columns.iter().enumerate() {
                 match rc {
-                    ResultSetColumn::Scalar(expr) => {
+                    ResultSetColumn::Expr {
+                        expr,
+                        contains_aggregates,
+                    } => {
+                        assert!(!*contains_aggregates);
                         let found = order_by.iter().enumerate().find(|(_, (e, _))| e == expr);
                         if let Some((j, _)) = found {
                             if let Some(ref mut v) = result_columns_to_skip {
@@ -965,11 +966,6 @@ fn inner_loop_source_emit(
                             m.result_column_indexes_in_orderby_sorter.insert(i, j);
                         }
                     }
-                    ResultSetColumn::ComputedAgg(_) => {
-                        unreachable!(
-                            "ComputedAgg should have been rewritten to a normal agg before emit"
-                        );
-                    }
                 }
             }
             let order_by_len = order_by.len();
@@ -993,7 +989,11 @@ fn inner_loop_source_emit(
                     }
                 }
                 match rc {
-                    ResultSetColumn::Scalar(expr) => {
+                    ResultSetColumn::Expr {
+                        expr,
+                        contains_aggregates,
+                    } => {
+                        assert!(!*contains_aggregates);
                         translate_expr(
                             program,
                             Some(referenced_tables),
@@ -1038,12 +1038,19 @@ fn inner_loop_source_emit(
             }
             for (i, expr) in result_columns.iter().enumerate() {
                 match expr {
-                    ResultSetColumn::Scalar(expr) => {
+                    ResultSetColumn::Expr {
+                        expr,
+                        contains_aggregates,
+                    } => {
+                        if *contains_aggregates {
+                            // Do nothing, aggregates will be computed above and this full result expression will be
+                            // computed later
+                            continue;
+                        }
                         let reg = start_reg + num_aggs + i;
                         translate_expr(program, Some(referenced_tables), expr, reg, None, None)?;
                     }
                     ResultSetColumn::Agg(_) => { /* do nothing, aggregates are computed above */ }
-                    other => unreachable!("Unexpected non-scalar result column: {:?}", other),
                 }
             }
             Ok(())
@@ -1053,7 +1060,11 @@ fn inner_loop_source_emit(
             let start_reg = program.alloc_registers(result_columns.len());
             for (i, expr) in result_columns.iter().enumerate() {
                 match expr {
-                    ResultSetColumn::Scalar(expr) => {
+                    ResultSetColumn::Expr {
+                        expr,
+                        contains_aggregates,
+                    } => {
+                        assert!(!*contains_aggregates);
                         let reg = start_reg + i;
                         translate_expr(program, Some(referenced_tables), expr, reg, None, None)?;
                     }
@@ -1298,7 +1309,7 @@ fn group_by_emit(
 
     // Read the group by columns from the pseudo cursor
     let groups_start_reg = program.alloc_registers(group_by.len());
-    for (i, expr) in group_by.iter().enumerate() {
+    for i in 0..group_by.len() {
         let sorter_column_index = i;
         let group_reg = groups_start_reg + i;
         program.emit_insn(Insn::Column {
@@ -1401,7 +1412,7 @@ fn group_by_emit(
     );
 
     // Read the group by columns for a finished group
-    for (i, expr) in group_by.iter().enumerate() {
+    for i in 0..group_by.len() {
         let key_reg = group_exprs_start_register + i;
         let sorter_column_index = i;
         program.emit_insn(Insn::Column {
@@ -1482,7 +1493,6 @@ fn group_by_emit(
         });
     }
 
-    // TODO handle result column expressions like LENGTH(SUM(x))
     // we now have the group by columns in registers (group_exprs_start_register..group_exprs_start_register + group_by.len() - 1)
     // and the agg results in (agg_start_reg..agg_start_reg + aggregates.len() - 1)
     // we need to call translate_expr on each result column, but replace the expr with a register copy in case any part of the
@@ -1505,7 +1515,7 @@ fn group_by_emit(
     if let Some(order_by) = order_by {
         for (i, rc) in result_columns.iter().enumerate() {
             match rc {
-                ResultSetColumn::Scalar(expr) => {
+                ResultSetColumn::Expr { expr, .. } => {
                     let found = order_by.iter().enumerate().find(|(_, (e, _))| e == expr);
                     if let Some((j, _)) = found {
                         if let Some(ref mut v) = result_columns_to_skip {
@@ -1530,11 +1540,6 @@ fn group_by_emit(
                         m.result_column_indexes_in_orderby_sorter.insert(i, j);
                     }
                 }
-                ResultSetColumn::ComputedAgg(_) => {
-                    unreachable!(
-                        "ComputedAgg should have been rewritten to a normal agg before emit"
-                    );
-                }
             }
         }
     }
@@ -1543,8 +1548,8 @@ fn group_by_emit(
         .as_ref()
         .map(|v| v.len())
         .unwrap_or(0);
-    let output_row_start_reg =
-        program.alloc_registers(result_columns.len() + order_by_len - result_columns_to_skip_len);
+    let output_column_count = result_columns.len() + order_by_len - result_columns_to_skip_len;
+    let output_row_start_reg = program.alloc_registers(output_column_count);
     let mut cur_reg = output_row_start_reg;
     if let Some(order_by) = order_by {
         for (expr, _) in order_by.iter() {
@@ -1567,7 +1572,7 @@ fn group_by_emit(
             }
         }
         match rc {
-            ResultSetColumn::Scalar(expr) => {
+            ResultSetColumn::Expr { expr, .. } => {
                 translate_expr(
                     program,
                     Some(referenced_tables),
@@ -1589,12 +1594,6 @@ fn group_by_emit(
                     unreachable!("agg {:?} not found", agg);
                 }
             }
-            ResultSetColumn::ComputedAgg(agg) => {
-                unreachable!(
-                    "ComputedAgg should have been rewritten to a normal agg before emit: {:?}",
-                    agg
-                );
-            }
         }
         m.result_column_indexes_in_orderby_sorter
             .insert(i, res_col_idx_in_orderby_sorter);
@@ -1613,7 +1612,7 @@ fn group_by_emit(
                 program.mark_last_insn_constant();
                 program.emit_insn(Insn::ResultRow {
                     start_reg: output_row_start_reg,
-                    count: aggregates.len() + group_by.len(),
+                    count: output_column_count,
                 });
                 program.emit_insn_with_label_dependency(
                     Insn::DecrJumpZero {
@@ -1627,7 +1626,7 @@ fn group_by_emit(
         Some(_) => {
             program.emit_insn(Insn::MakeRecord {
                 start_reg: output_row_start_reg,
-                count: aggregates.len() + group_by.len(),
+                count: output_column_count,
                 dest_reg: group_by_metadata.sorter_key_register,
             });
 
@@ -1668,6 +1667,8 @@ fn group_by_emit(
 
 fn agg_without_group_by_emit(
     program: &mut ProgramBuilder,
+    referenced_tables: &Vec<BTreeTableReference>,
+    result_columns: &Vec<ResultSetColumn>,
     aggregates: &Vec<Aggregate>,
     m: &mut Metadata,
 ) -> Result<()> {
@@ -1679,16 +1680,46 @@ fn agg_without_group_by_emit(
             func: agg.func.clone(),
         });
     }
-    let output_reg = program.alloc_registers(aggregates.len());
-    program.emit_insn(Insn::Copy {
-        src_reg: agg_start_reg,
-        dst_reg: output_reg,
-        amount: aggregates.len() - 1,
-    });
+    // we now have the group by columns in registers (group_exprs_start_register..group_exprs_start_register + group_by.len() - 1)
+    // and the agg results in (agg_start_reg..agg_start_reg + aggregates.len() - 1)
+    // we need to call translate_expr on each result column, but replace the expr with a register copy in case any part of the
+    // result column expression matches a) a group by column or b) an aggregation result.
+    let mut precomputed_exprs_to_register = Vec::with_capacity(aggregates.len());
+    for (i, agg) in aggregates.iter().enumerate() {
+        precomputed_exprs_to_register.push((&agg.original_expr, agg_start_reg + i));
+    }
+
+    let output_reg = program.alloc_registers(result_columns.len());
+    for (i, rc) in result_columns.iter().enumerate() {
+        match rc {
+            ResultSetColumn::Expr { expr, .. } => {
+                translate_expr(
+                    program,
+                    Some(referenced_tables),
+                    expr,
+                    output_reg + i,
+                    None,
+                    Some(&precomputed_exprs_to_register),
+                )?;
+            }
+            ResultSetColumn::Agg(agg) => {
+                let found = aggregates.iter().enumerate().find(|(_, a)| **a == *agg);
+                if let Some((i, _)) = found {
+                    program.emit_insn(Insn::Copy {
+                        src_reg: agg_start_reg + i,
+                        dst_reg: output_reg + i,
+                        amount: 0,
+                    });
+                } else {
+                    unreachable!("agg {:?} not found", agg);
+                }
+            }
+        }
+    }
     // This always emits a ResultRow because currently it can only be used for a single row result
     program.emit_insn(Insn::ResultRow {
         start_reg: output_reg,
-        count: aggregates.len(),
+        count: result_columns.len(),
     });
 
     Ok(())
@@ -1719,9 +1750,8 @@ fn sort_order_by(
         }
         pseudo_columns.push(Column {
             name: match expr {
-                ResultSetColumn::Scalar(expr) => expr.to_string(),
+                ResultSetColumn::Expr { expr, .. } => expr.to_string(),
                 ResultSetColumn::Agg(agg) => agg.to_string(),
-                _ => unreachable!(),
             },
             primary_key: false,
             ty: crate::schema::Type::Null,
