@@ -20,21 +20,7 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
         &mut select_plan.where_clause,
         &select_plan.referenced_tables,
     )?;
-    if eliminate_constants(&mut select_plan.source)?
-        == ConstantConditionEliminationResult::ImpossibleCondition
-    {
-        return Ok(Plan {
-            source: SourceOperator::Nothing,
-            aggregates: None,
-            result_columns: vec![],
-            where_clause: None,
-            group_by: None,
-            order_by: None,
-            limit: None,
-            referenced_tables: select_plan.referenced_tables,
-            available_indexes: select_plan.available_indexes,
-        });
-    }
+    eliminate_constants(&mut select_plan.source)?;
     use_indexes(
         &mut select_plan.source,
         &select_plan.referenced_tables,

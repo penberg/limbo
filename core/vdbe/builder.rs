@@ -361,10 +361,6 @@ impl ProgramBuilder {
             .unwrap()
     }
 
-    pub fn resolve_cursor_to_table(&self, cursor_id: CursorID) -> Option<Table> {
-        self.cursor_ref[cursor_id].1.clone()
-    }
-
     pub fn resolve_deferred_labels(&mut self) {
         for i in 0..self.deferred_label_resolutions.len() {
             let (label, insn_reference) = self.deferred_label_resolutions[i];

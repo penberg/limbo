@@ -16,6 +16,7 @@ use super::expr::{
     translate_aggregation, translate_aggregation_groupby, translate_condition_expr, translate_expr,
     ConditionMetadata,
 };
+use super::optimizer::Optimizable;
 use super::plan::{Aggregate, BTreeTableReference, Direction, Plan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
@@ -825,6 +826,19 @@ pub enum InnerLoopEmitTarget<'a> {
 }
 
 fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metadata) -> Result<()> {
+    if let Some(wc) = &plan.where_clause {
+        for predicate in wc.iter() {
+            if predicate.is_always_false()? {
+                return Ok(());
+            } else if predicate.is_always_true()? {
+                // do nothing
+            } else {
+                unreachable!(
+                    "all WHERE clause terms that are not trivially true or false should have been pushed down to the source"
+                );
+            }
+        }
+    }
     // if we have a group by, we emit a record into the group by sorter.
     if let Some(group_by) = &plan.group_by {
         return inner_loop_source_emit(
@@ -886,7 +900,6 @@ fn inner_loop_source_emit(
             group_by,
             aggregates,
         } => {
-            // TODO: DOESNT WORK YET
             let sort_keys_count = group_by.len();
             let aggregate_arguments_count =
                 aggregates.iter().map(|agg| agg.args.len()).sum::<usize>();

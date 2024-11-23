@@ -18,6 +18,5 @@ pub fn translate_select(
 ) -> Result<Program> {
     let select_plan = prepare_select_plan(schema, select)?;
     let optimized_plan = optimize_plan(select_plan)?;
-    // println!("optimized_plan: {:?}", optimized_plan);
     emit_program(database_header, optimized_plan, connection)
 }

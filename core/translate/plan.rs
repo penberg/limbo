@@ -130,48 +130,6 @@ pub enum Search {
 }
 
 impl SourceOperator {
-    pub fn column_count(&self, referenced_tables: &[BTreeTableReference]) -> usize {
-        match self {
-            SourceOperator::Join { left, right, .. } => {
-                left.column_count(referenced_tables) + right.column_count(referenced_tables)
-            }
-            SourceOperator::Scan {
-                table_reference, ..
-            } => table_reference.table.columns.len(),
-            SourceOperator::Search {
-                table_reference, ..
-            } => table_reference.table.columns.len(),
-            SourceOperator::Nothing => 0,
-        }
-    }
-
-    pub fn column_names(&self) -> Vec<String> {
-        match self {
-            SourceOperator::Join { left, right, .. } => {
-                let mut names = left.column_names();
-                names.extend(right.column_names());
-                names
-            }
-            SourceOperator::Scan {
-                table_reference, ..
-            } => table_reference
-                .table
-                .columns
-                .iter()
-                .map(|c| c.name.clone())
-                .collect(),
-            SourceOperator::Search {
-                table_reference, ..
-            } => table_reference
-                .table
-                .columns
-                .iter()
-                .map(|c| c.name.clone())
-                .collect(),
-            SourceOperator::Nothing => vec![],
-        }
-    }
-
     pub fn id(&self) -> usize {
         match self {
             SourceOperator::Join { id, .. } => *id,
