@@ -90,7 +90,7 @@ impl Table {
                 None => None,
             },
             Table::Pseudo(table) => match table.columns.get(index) {
-                Some(column) => Some(&column.name),
+                Some(_) => None,
                 None => None,
             },
         }

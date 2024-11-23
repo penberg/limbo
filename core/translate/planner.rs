@@ -68,7 +68,6 @@ fn bind_column_references(
     referenced_tables: &[BTreeTableReference],
 ) -> Result<()> {
     match expr {
-        ast::Expr::AggRef { .. } => unreachable!(),
         ast::Expr::Id(id) => {
             let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
@@ -93,7 +92,7 @@ fn bind_column_references(
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx,
-                is_primary_key,
+                is_rowid_alias: is_primary_key,
             };
             Ok(())
         }
@@ -122,7 +121,7 @@ fn bind_column_references(
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx.unwrap(),
-                is_primary_key: col.primary_key,
+                is_rowid_alias: col.primary_key,
             };
             Ok(())
         }
@@ -276,7 +275,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                         database: None, // TODO: support different databases
                                         table: table_reference.table_index,
                                         column: idx,
-                                        is_primary_key: col.primary_key,
+                                        is_rowid_alias: col.primary_key,
                                     },
                                 ));
                             }
@@ -299,7 +298,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     database: None, // TODO: support different databases
                                     table: table_reference.table_index,
                                     column: idx,
-                                    is_primary_key: col.primary_key,
+                                    is_rowid_alias: col.primary_key,
                                 }));
                         }
                     }
@@ -333,6 +332,9 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     }
                                     Ok(_) => {
                                         resolve_aggregates(&expr, &mut aggregate_expressions);
+                                        // TODO: can be compound aggregate
+                                        plan.result_columns
+                                            .push(ResultSetColumn::Scalar(expr.clone()));
                                     }
                                     _ => {}
                                 }

@@ -335,13 +335,8 @@ pub enum Expr {
         table: usize,
         /// the z in `x.y.z`. index of the column in the table.
         column: usize,
-        /// is the column a primary key
-        is_primary_key: bool,
-    },
-    /// AggRef is a reference to a computed aggregate
-    AggRef {
-        /// index of the aggregate in the aggregates vector parsed from the query
-        index: usize,
+        /// is the column a rowid alias
+        is_rowid_alias: bool,
     },
     /// `IN`
     InList {

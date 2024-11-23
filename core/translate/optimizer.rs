@@ -25,7 +25,14 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
     {
         return Ok(Plan {
             source: SourceOperator::Nothing,
-            ..select_plan
+            aggregates: None,
+            result_columns: vec![],
+            where_clause: None,
+            group_by: None,
+            order_by: None,
+            limit: None,
+            referenced_tables: select_plan.referenced_tables,
+            available_indexes: select_plan.available_indexes,
         });
     }
     use_indexes(
@@ -478,7 +485,7 @@ impl Optimizable for ast::Expr {
             ast::Expr::Column {
                 table,
                 column,
-                is_primary_key,
+                is_rowid_alias: is_primary_key,
                 ..
             } => *is_primary_key && *table == table_index,
             _ => false,
