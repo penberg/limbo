@@ -1083,26 +1083,12 @@ fn inner_loop_source_emit(
                     ),
                 }
             }
-            program.emit_insn(Insn::ResultRow {
+            emit_result_row(
+                program,
                 start_reg,
-                count: result_columns.len(),
-            });
-            if let Some(limit) = limit {
-                let jump_label = m.termination_label_stack.last().unwrap();
-                let limit_reg = program.alloc_register();
-                program.emit_insn(Insn::Integer {
-                    value: limit as i64,
-                    dest: limit_reg,
-                });
-                program.mark_last_insn_constant();
-                program.emit_insn_with_label_dependency(
-                    Insn::DecrJumpZero {
-                        reg: limit_reg,
-                        target_pc: *jump_label,
-                    },
-                    *jump_label,
-                );
-            }
+                result_columns.len(),
+                limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
+            );
 
             Ok(())
         }
@@ -1612,25 +1598,12 @@ fn group_by_emit(
 
     match order_by {
         None => {
-            if let Some(limit) = limit {
-                let limit_reg = program.alloc_register();
-                program.emit_insn(Insn::Integer {
-                    value: limit as i64,
-                    dest: limit_reg,
-                });
-                program.mark_last_insn_constant();
-                program.emit_insn(Insn::ResultRow {
-                    start_reg: output_row_start_reg,
-                    count: output_column_count,
-                });
-                program.emit_insn_with_label_dependency(
-                    Insn::DecrJumpZero {
-                        reg: limit_reg,
-                        target_pc: *m.termination_label_stack.last().unwrap(),
-                    },
-                    *m.termination_label_stack.last().unwrap(),
-                );
-            }
+            emit_result_row(
+                program,
+                output_row_start_reg,
+                output_column_count,
+                limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
+            );
         }
         Some(_) => {
             program.emit_insn(Insn::MakeRecord {
@@ -1726,10 +1699,7 @@ fn agg_without_group_by_emit(
         }
     }
     // This always emits a ResultRow because currently it can only be used for a single row result
-    program.emit_insn(Insn::ResultRow {
-        start_reg: output_reg,
-        count: result_columns.len(),
-    });
+    emit_result_row(program, output_reg, result_columns.len(), None);
 
     Ok(())
 }
@@ -1815,26 +1785,12 @@ fn sort_order_by(
             dest: reg,
         });
     }
-    program.emit_insn(Insn::ResultRow {
+    emit_result_row(
+        program,
         start_reg,
-        count: result_columns.len(),
-    });
-
-    if let Some(limit) = limit {
-        let limit_reg = program.alloc_register();
-        program.emit_insn(Insn::Integer {
-            value: limit as i64,
-            dest: limit_reg,
-        });
-        program.mark_last_insn_constant();
-        program.emit_insn_with_label_dependency(
-            Insn::DecrJumpZero {
-                reg: limit_reg,
-                target_pc: sort_metadata.done_label,
-            },
-            sort_metadata.done_label,
-        );
-    }
+        result_columns.len(),
+        limit.map(|l| (l, sort_metadata.done_label)),
+    );
 
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
@@ -1847,4 +1803,31 @@ fn sort_order_by(
     program.resolve_label(sort_metadata.done_label, program.offset());
 
     Ok(())
+}
+
+fn emit_result_row(
+    program: &mut ProgramBuilder,
+    start_reg: usize,
+    column_count: usize,
+    limit: Option<(usize, BranchOffset)>,
+) {
+    program.emit_insn(Insn::ResultRow {
+        start_reg,
+        count: column_count,
+    });
+    if let Some((limit, jump_label_on_limit_reached)) = limit {
+        let limit_reg = program.alloc_register();
+        program.emit_insn(Insn::Integer {
+            value: limit as i64,
+            dest: limit_reg,
+        });
+        program.mark_last_insn_constant();
+        program.emit_insn_with_label_dependency(
+            Insn::DecrJumpZero {
+                reg: limit_reg,
+                target_pc: jump_label_on_limit_reached,
+            },
+            jump_label_on_limit_reached,
+        );
+    }
 }
