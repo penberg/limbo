@@ -568,6 +568,9 @@ pub fn translate_expr(
 ) -> Result<usize> {
     if let Some(precomputed_exprs_to_registers) = precomputed_exprs_to_registers {
         for (precomputed_expr, reg) in precomputed_exprs_to_registers.iter() {
+            // TODO: implement a custom equality check for expressions
+            // there are lots of examples where this breaks, even simple ones like
+            // sum(x) != SUM(x)
             if expr == *precomputed_expr {
                 program.emit_insn(Insn::Copy {
                     src_reg: *reg,

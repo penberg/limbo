@@ -963,6 +963,9 @@ fn inner_loop_source_emit(
                         }
                     }
                     ResultSetColumn::Agg(agg) => {
+                        // TODO: implement a custom equality check for expressions
+                        // there are lots of examples where this breaks, even simple ones like
+                        // sum(x) != SUM(x)
                         let found = order_by
                             .iter()
                             .enumerate()
@@ -1525,6 +1528,9 @@ fn group_by_emit(
                     }
                 }
                 ResultSetColumn::Agg(agg) => {
+                    // TODO: implement a custom equality check for expressions
+                    // there are lots of examples where this breaks, even simple ones like
+                    // sum(x) != SUM(x)
                     let found = order_by
                         .iter()
                         .enumerate()
