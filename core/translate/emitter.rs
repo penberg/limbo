@@ -237,7 +237,7 @@ pub fn emit_program(
     // EMIT RESULT ROWS FROM THE ORDER BY SORTER
     if let Some(ref mut order_by) = plan.order_by {
         if order_by_necessary {
-            sort_order_by(
+            order_by_emit(
                 &mut program,
                 order_by,
                 &plan.result_columns,
@@ -1694,7 +1694,7 @@ fn agg_without_group_by_emit(
     Ok(())
 }
 
-fn sort_order_by(
+fn order_by_emit(
     program: &mut ProgramBuilder,
     order_by: &Vec<(ast::Expr, Direction)>,
     result_columns: &Vec<ResultSetColumn>,
