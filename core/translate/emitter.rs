@@ -36,10 +36,6 @@ pub struct LeftJoinMetadata {
 pub struct SortMetadata {
     // cursor id for the Sorter table where the sorted rows are stored
     pub sort_cursor: usize,
-    // label where the SorterData instruction is emitted; SorterNext will jump here if there is more data to read
-    pub sorter_data_label: BranchOffset,
-    // label for the instruction immediately following SorterNext; SorterSort will jump here in case there is no data
-    pub done_label: BranchOffset,
     // register where the sorter data is inserted and later retrieved from
     pub sorter_data_register: usize,
 }
@@ -58,12 +54,8 @@ pub struct GroupByMetadata {
     pub subroutine_accumulator_output_return_offset_register: usize,
     // Label for the instruction that sets the accumulator indicator to true (indicating data exists in the accumulator for the current group)
     pub accumulator_indicator_set_true_label: BranchOffset,
-    // Label for the instruction where SorterData is emitted (used for fetching sorted data)
-    pub sorter_data_label: BranchOffset,
     // Register holding the key used for sorting in the Sorter
     pub sorter_key_register: usize,
-    // Label for the instruction signaling the completion of grouping operations
-    pub grouping_done_label: BranchOffset,
     // Register holding a flag to abort the grouping process if necessary
     pub abort_flag_register: usize,
     // Register holding a boolean indicating whether there's data in the accumulator (used for aggregation)
@@ -263,8 +255,6 @@ fn init_order_by(
     m.sort_metadata = Some(SortMetadata {
         sort_cursor,
         sorter_data_register: program.alloc_register(),
-        sorter_data_label: program.allocate_label(),
-        done_label: program.allocate_label(),
     });
     let mut order = Vec::new();
     for (_, direction) in order_by.iter() {
@@ -299,8 +289,6 @@ fn init_group_by(
 
     let subroutine_accumulator_clear_label = program.allocate_label();
     let subroutine_accumulator_output_label = program.allocate_label();
-    let sorter_data_label = program.allocate_label();
-    let grouping_done_label = program.allocate_label();
 
     let mut order = Vec::new();
     const ASCENDING: i64 = 0;
@@ -352,8 +340,6 @@ fn init_group_by(
         subroutine_accumulator_output_label,
         subroutine_accumulator_output_return_offset_register: program.alloc_register(),
         accumulator_indicator_set_true_label: program.allocate_label(),
-        sorter_data_label,
-        grouping_done_label,
         abort_flag_register,
         data_in_accumulator_indicator_register,
         group_exprs_accumulator_register,
@@ -1233,6 +1219,8 @@ fn group_by_emit(
     referenced_tables: &[BTreeTableReference],
     m: &mut Metadata,
 ) -> Result<()> {
+    let sorter_data_label = program.allocate_label();
+    let grouping_done_label = program.allocate_label();
     let group_by_metadata = m.group_by_metadata.as_mut().unwrap();
 
     let GroupByMetadata {
@@ -1280,15 +1268,12 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterSort {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_empty: group_by_metadata.grouping_done_label,
+            pc_if_empty: grouping_done_label,
         },
-        group_by_metadata.grouping_done_label,
+        grouping_done_label,
     );
 
-    program.defer_label_resolution(
-        group_by_metadata.sorter_data_label,
-        program.offset() as usize,
-    );
+    program.defer_label_resolution(sorter_data_label, program.offset() as usize);
     // Read a row from the sorted data in the sorter into the pseudo cursor
     program.emit_insn(Insn::SorterData {
         cursor_id: group_by_metadata.sort_cursor,
@@ -1421,12 +1406,12 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_next: group_by_metadata.sorter_data_label,
+            pc_if_next: sorter_data_label,
         },
-        group_by_metadata.sorter_data_label,
+        sorter_data_label,
     );
 
-    program.resolve_label(group_by_metadata.grouping_done_label, program.offset());
+    program.resolve_label(grouping_done_label, program.offset());
 
     program.add_comment(program.offset(), "emit row for final group");
     program.emit_insn_with_label_dependency(
@@ -1701,7 +1686,8 @@ fn order_by_emit(
     limit: Option<usize>,
     m: &mut Metadata,
 ) -> Result<()> {
-    // TODO: DOESNT WORK YET
+    let sorter_data_label = program.allocate_label();
+    let sorting_done_label = program.allocate_label();
     program.resolve_label(m.termination_label_stack.pop().unwrap(), program.offset());
     let mut pseudo_columns = vec![];
     for (i, _) in order_by.iter().enumerate() {
@@ -1750,19 +1736,17 @@ fn order_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterSort {
             cursor_id: sort_metadata.sort_cursor,
-            pc_if_empty: sort_metadata.done_label,
+            pc_if_empty: sorting_done_label,
         },
-        sort_metadata.done_label,
+        sorting_done_label,
     );
 
-    program.defer_label_resolution(sort_metadata.sorter_data_label, program.offset() as usize);
+    program.defer_label_resolution(sorter_data_label, program.offset() as usize);
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_metadata.sort_cursor,
         dest_reg: sort_metadata.sorter_data_register,
         pseudo_cursor,
     });
-
-    let sort_metadata = m.sort_metadata.as_mut().unwrap();
 
     // EMIT COLUMNS FROM SORTER AND EMIT ROW
     let cursor_id = pseudo_cursor;
@@ -1779,18 +1763,18 @@ fn order_by_emit(
         program,
         start_reg,
         result_columns.len(),
-        limit.map(|l| (l, sort_metadata.done_label)),
+        limit.map(|l| (l, sorting_done_label)),
     );
 
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
             cursor_id: sort_metadata.sort_cursor,
-            pc_if_next: sort_metadata.sorter_data_label,
+            pc_if_next: sorter_data_label,
         },
-        sort_metadata.sorter_data_label,
+        sorter_data_label,
     );
 
-    program.resolve_label(sort_metadata.done_label, program.offset());
+    program.resolve_label(sorting_done_label, program.offset());
 
     Ok(())
 }
