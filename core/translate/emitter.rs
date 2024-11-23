@@ -1653,8 +1653,7 @@ fn agg_without_group_by_emit(
             func: agg.func.clone(),
         });
     }
-    // we now have the group by columns in registers (group_exprs_start_register..group_exprs_start_register + group_by.len() - 1)
-    // and the agg results in (agg_start_reg..agg_start_reg + aggregates.len() - 1)
+    // we now have the agg results in (agg_start_reg..agg_start_reg + aggregates.len() - 1)
     // we need to call translate_expr on each result column, but replace the expr with a register copy in case any part of the
     // result column expression matches a) a group by column or b) an aggregation result.
     let mut precomputed_exprs_to_register = Vec::with_capacity(aggregates.len());
