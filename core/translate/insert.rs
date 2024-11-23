@@ -98,7 +98,7 @@ pub fn translate_insert(
                                 expr,
                                 column_registers_start + col,
                                 None,
-                                None,
+                                0,
                             )?;
                         }
                         program.emit_insn(Insn::Yield {

@@ -235,8 +235,8 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let plan = prepare_select_plan(&self.schema.borrow(), select)?;
-                            let (plan, _) = optimize_plan(plan)?;
+                            let plan = prepare_select_plan(&*self.schema.borrow(), select)?;
+                            let plan = optimize_plan(plan)?;
                             println!("{}", plan);
                         }
                         _ => todo!(),

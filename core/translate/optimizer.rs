@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
 
 use sqlite3_parser::ast;
 
@@ -6,7 +6,7 @@ use crate::{schema::Index, Result};
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, BTreeTableReference,
-    Direction, IterationDirection, Operator, Plan, ProjectionColumn, Search,
+    Direction, IterationDirection, Plan, Search, SourceOperator,
 };
 
 /**
@@ -14,49 +14,45 @@ use super::plan::{
  * TODO: these could probably be done in less passes,
  * but having them separate makes them easier to understand
  */
-pub fn optimize_plan(mut select_plan: Plan) -> Result<(Plan, ExpressionResultCache)> {
-    let mut expr_result_cache = ExpressionResultCache::new();
+pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
     push_predicates(
-        &mut select_plan.root_operator,
+        &mut select_plan.source,
+        &mut select_plan.where_clause,
         &select_plan.referenced_tables,
     )?;
-    if eliminate_constants(&mut select_plan.root_operator)?
+    if eliminate_constants(&mut select_plan.source)?
         == ConstantConditionEliminationResult::ImpossibleCondition
     {
-        return Ok((
-            Plan {
-                root_operator: Operator::Nothing,
-                referenced_tables: vec![],
-                available_indexes: vec![],
-            },
-            expr_result_cache,
-        ));
+        return Ok(Plan {
+            source: SourceOperator::Nothing,
+            ..select_plan
+        });
     }
     use_indexes(
-        &mut select_plan.root_operator,
+        &mut select_plan.source,
         &select_plan.referenced_tables,
         &select_plan.available_indexes,
     )?;
     eliminate_unnecessary_orderby(
-        &mut select_plan.root_operator,
+        &mut select_plan.source,
+        &mut select_plan.order_by,
         &select_plan.referenced_tables,
         &select_plan.available_indexes,
     )?;
-    find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(&select_plan.root_operator, &mut expr_result_cache);
-    Ok((select_plan, expr_result_cache))
+    Ok(select_plan)
 }
 
 fn _operator_is_already_ordered_by(
-    operator: &mut Operator,
+    operator: &mut SourceOperator,
     key: &mut ast::Expr,
     referenced_tables: &[BTreeTableReference],
     available_indexes: &Vec<Rc<Index>>,
 ) -> Result<bool> {
     match operator {
-        Operator::Scan {
+        SourceOperator::Scan {
             table_reference, ..
         } => Ok(key.is_primary_key_of(table_reference.table_index)),
-        Operator::Search {
+        SourceOperator::Search {
             table_reference,
             search,
             ..
@@ -77,61 +73,53 @@ fn _operator_is_already_ordered_by(
                 Ok(index_is_the_same)
             }
         },
-        Operator::Join { left, .. } => {
+        SourceOperator::Join { left, .. } => {
             _operator_is_already_ordered_by(left, key, referenced_tables, available_indexes)
-        }
-        Operator::Aggregate { source, .. } => {
-            _operator_is_already_ordered_by(source, key, referenced_tables, available_indexes)
-        }
-        Operator::Projection { source, .. } => {
-            _operator_is_already_ordered_by(source, key, referenced_tables, available_indexes)
         }
         _ => Ok(false),
     }
 }
 
 fn eliminate_unnecessary_orderby(
-    operator: &mut Operator,
+    operator: &mut SourceOperator,
+    order_by: &mut Option<Vec<(ast::Expr, Direction)>>,
     referenced_tables: &[BTreeTableReference],
     available_indexes: &Vec<Rc<Index>>,
 ) -> Result<()> {
-    match operator {
-        Operator::Order { source, key, .. } => {
-            if key.len() != 1 {
-                // TODO: handle multiple order by keys
-                return Ok(());
-            }
-
-            let (key, direction) = key.first_mut().unwrap();
-
-            let already_ordered = _operator_is_already_ordered_by(source, key, referenced_tables, available_indexes)?;
-
-            if already_ordered {
-                push_scan_direction(source, direction);
-
-                *operator = source.take_ownership();
-            }
-            Ok(())
-        }
-        Operator::Limit { source, .. } => {
-            eliminate_unnecessary_orderby(source, referenced_tables, available_indexes)?;
-            Ok(())
-        }
-        _ => Ok(()),
+    if order_by.is_none() {
+        return Ok(());
     }
+
+    let o = order_by.as_mut().unwrap();
+
+    if o.len() != 1 {
+        // TODO: handle multiple order by keys
+        return Ok(());
+    }
+
+    let (key, _) = o.first_mut().unwrap();
+
+    let already_ordered =
+        _operator_is_already_ordered_by(operator, key, referenced_tables, available_indexes)?;
+
+    if already_ordered {
+        *order_by = None;
+    }
+
+    Ok(())
 }
 
 /**
  * Use indexes where possible
  */
 fn use_indexes(
-    operator: &mut Operator,
+    operator: &mut SourceOperator,
     referenced_tables: &[BTreeTableReference],
     available_indexes: &[Rc<Index>],
 ) -> Result<()> {
     match operator {
-        Operator::Search { .. } => Ok(()),
-        Operator::Scan {
+        SourceOperator::Search { .. } => Ok(()),
+        SourceOperator::Scan {
             table_reference,
             predicates: filter,
             id,
@@ -162,12 +150,11 @@ fn use_indexes(
                     }
                     Either::Right(index_search) => {
                         fs.remove(i);
-                        *operator = Operator::Search {
+                        *operator = SourceOperator::Search {
                             id: *id,
                             table_reference: table_reference.clone(),
                             predicates: Some(fs.clone()),
                             search: index_search,
-                            step: 0,
                         };
 
                         return Ok(());
@@ -177,32 +164,12 @@ fn use_indexes(
 
             Ok(())
         }
-        Operator::Aggregate { source, .. } => {
-            use_indexes(source, referenced_tables, available_indexes)?;
-            Ok(())
-        }
-        Operator::Filter { source, .. } => {
-            use_indexes(source, referenced_tables, available_indexes)?;
-            Ok(())
-        }
-        Operator::Limit { source, .. } => {
-            use_indexes(source, referenced_tables, available_indexes)?;
-            Ok(())
-        }
-        Operator::Join { left, right, .. } => {
+        SourceOperator::Join { left, right, .. } => {
             use_indexes(left, referenced_tables, available_indexes)?;
             use_indexes(right, referenced_tables, available_indexes)?;
             Ok(())
         }
-        Operator::Order { source, .. } => {
-            use_indexes(source, referenced_tables, available_indexes)?;
-            Ok(())
-        }
-        Operator::Projection { source, .. } => {
-            use_indexes(source, referenced_tables, available_indexes)?;
-            Ok(())
-        }
-        Operator::Nothing => Ok(()),
+        SourceOperator::Nothing => Ok(()),
     }
 }
 
@@ -214,33 +181,11 @@ enum ConstantConditionEliminationResult {
 
 // removes predicates that are always true
 // returns a ConstantEliminationResult indicating whether any predicates are always false
-fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionEliminationResult> {
+fn eliminate_constants(
+    operator: &mut SourceOperator,
+) -> Result<ConstantConditionEliminationResult> {
     match operator {
-        Operator::Filter {
-            source, predicates, ..
-        } => {
-            let mut i = 0;
-            while i < predicates.len() {
-                let predicate = &predicates[i];
-                if predicate.is_always_true()? {
-                    predicates.remove(i);
-                } else if predicate.is_always_false()? {
-                    return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
-                } else {
-                    i += 1;
-                }
-            }
-
-            if predicates.is_empty() {
-                *operator = source.take_ownership();
-                eliminate_constants(operator)?;
-            } else {
-                eliminate_constants(source)?;
-            }
-
-            Ok(ConstantConditionEliminationResult::Continue)
-        }
-        Operator::Join {
+        SourceOperator::Join {
             left,
             right,
             predicates,
@@ -278,44 +223,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
 
             Ok(ConstantConditionEliminationResult::Continue)
         }
-        Operator::Aggregate { source, .. } => {
-            if eliminate_constants(source)?
-                == ConstantConditionEliminationResult::ImpossibleCondition
-            {
-                *source = Box::new(Operator::Nothing);
-            }
-            // Aggregation operator can return a row even if the source is empty e.g. count(1) from users where 0
-            Ok(ConstantConditionEliminationResult::Continue)
-        }
-        Operator::Limit { source, .. } => {
-            let constant_elimination_result = eliminate_constants(source)?;
-            if constant_elimination_result
-                == ConstantConditionEliminationResult::ImpossibleCondition
-            {
-                *operator = Operator::Nothing;
-            }
-            Ok(constant_elimination_result)
-        }
-        Operator::Order { source, .. } => {
-            if eliminate_constants(source)?
-                == ConstantConditionEliminationResult::ImpossibleCondition
-            {
-                *operator = Operator::Nothing;
-                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
-            }
-            Ok(ConstantConditionEliminationResult::Continue)
-        }
-        Operator::Projection { source, .. } => {
-            if eliminate_constants(source)?
-                == ConstantConditionEliminationResult::ImpossibleCondition
-            {
-                *operator = Operator::Nothing;
-                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
-            }
-
-            Ok(ConstantConditionEliminationResult::Continue)
-        }
-        Operator::Scan { predicates, .. } => {
+        SourceOperator::Scan { predicates, .. } => {
             if let Some(ps) = predicates {
                 let mut i = 0;
                 while i < ps.len() {
@@ -335,7 +243,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
             }
             Ok(ConstantConditionEliminationResult::Continue)
         }
-        Operator::Search { predicates, .. } => {
+        SourceOperator::Search { predicates, .. } => {
             if let Some(predicates) = predicates {
                 let mut i = 0;
                 while i < predicates.len() {
@@ -352,7 +260,7 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
 
             Ok(ConstantConditionEliminationResult::Continue)
         }
-        Operator::Nothing => Ok(ConstantConditionEliminationResult::Continue),
+        SourceOperator::Nothing => Ok(ConstantConditionEliminationResult::Continue),
     }
 }
 
@@ -360,42 +268,35 @@ fn eliminate_constants(operator: &mut Operator) -> Result<ConstantConditionElimi
   Recursively pushes predicates down the tree, as far as possible.
 */
 fn push_predicates(
-    operator: &mut Operator,
+    operator: &mut SourceOperator,
+    where_clause: &mut Option<Vec<ast::Expr>>,
     referenced_tables: &Vec<BTreeTableReference>,
 ) -> Result<()> {
-    match operator {
-        Operator::Filter {
-            source, predicates, ..
-        } => {
-            let mut i = 0;
-            while i < predicates.len() {
-                // try to push the predicate to the source
-                // if it succeeds, remove the predicate from the filter
-                let predicate_owned = predicates[i].take_ownership();
-                let Some(predicate) = push_predicate(source, predicate_owned, referenced_tables)?
-                else {
-                    predicates.remove(i);
-                    continue;
-                };
-                predicates[i] = predicate;
-                i += 1;
-            }
-
-            if predicates.is_empty() {
-                *operator = source.take_ownership();
-            }
-
-            Ok(())
+    if let Some(predicates) = where_clause {
+        let mut i = 0;
+        while i < predicates.len() {
+            let predicate = predicates[i].take_ownership();
+            let Some(predicate) = push_predicate(operator, predicate, referenced_tables)? else {
+                predicates.remove(i);
+                continue;
+            };
+            predicates[i] = predicate;
+            i += 1;
         }
-        Operator::Join {
+        if predicates.is_empty() {
+            *where_clause = None;
+        }
+    }
+    match operator {
+        SourceOperator::Join {
             left,
             right,
             predicates,
             outer,
             ..
         } => {
-            push_predicates(left, referenced_tables)?;
-            push_predicates(right, referenced_tables)?;
+            push_predicates(left, where_clause, referenced_tables)?;
+            push_predicates(right, where_clause, referenced_tables)?;
 
             if predicates.is_none() {
                 return Ok(());
@@ -433,26 +334,9 @@ fn push_predicates(
 
             Ok(())
         }
-        Operator::Aggregate { source, .. } => {
-            push_predicates(source, referenced_tables)?;
-
-            Ok(())
-        }
-        Operator::Limit { source, .. } => {
-            push_predicates(source, referenced_tables)?;
-            Ok(())
-        }
-        Operator::Order { source, .. } => {
-            push_predicates(source, referenced_tables)?;
-            Ok(())
-        }
-        Operator::Projection { source, .. } => {
-            push_predicates(source, referenced_tables)?;
-            Ok(())
-        }
-        Operator::Scan { .. } => Ok(()),
-        Operator::Search { .. } => Ok(()),
-        Operator::Nothing => Ok(()),
+        SourceOperator::Scan { .. } => Ok(()),
+        SourceOperator::Search { .. } => Ok(()),
+        SourceOperator::Nothing => Ok(()),
     }
 }
 
@@ -461,12 +345,12 @@ fn push_predicates(
   Returns Ok(None) if the predicate was pushed, otherwise returns itself as Ok(Some(predicate))
 */
 fn push_predicate(
-    operator: &mut Operator,
+    operator: &mut SourceOperator,
     predicate: ast::Expr,
     referenced_tables: &Vec<BTreeTableReference>,
 ) -> Result<Option<ast::Expr>> {
     match operator {
-        Operator::Scan {
+        SourceOperator::Scan {
             predicates,
             table_reference,
             ..
@@ -497,22 +381,8 @@ fn push_predicate(
 
             Ok(None)
         }
-        Operator::Search { .. } => Ok(Some(predicate)),
-        Operator::Filter {
-            source,
-            predicates: ps,
-            ..
-        } => {
-            let push_result = push_predicate(source, predicate, referenced_tables)?;
-            if push_result.is_none() {
-                return Ok(None);
-            }
-
-            ps.push(push_result.unwrap());
-
-            Ok(None)
-        }
-        Operator::Join {
+        SourceOperator::Search { .. } => Ok(Some(predicate)),
+        SourceOperator::Join {
             left,
             right,
             predicates: join_on_preds,
@@ -552,46 +422,13 @@ fn push_predicate(
 
             Ok(None)
         }
-        Operator::Aggregate { source, .. } => {
-            let push_result = push_predicate(source, predicate, referenced_tables)?;
-            if push_result.is_none() {
-                return Ok(None);
-            }
-
-            Ok(Some(push_result.unwrap()))
-        }
-        Operator::Limit { source, .. } => {
-            let push_result = push_predicate(source, predicate, referenced_tables)?;
-            if push_result.is_none() {
-                return Ok(None);
-            }
-
-            Ok(Some(push_result.unwrap()))
-        }
-        Operator::Order { source, .. } => {
-            let push_result = push_predicate(source, predicate, referenced_tables)?;
-            if push_result.is_none() {
-                return Ok(None);
-            }
-
-            Ok(Some(push_result.unwrap()))
-        }
-        Operator::Projection { source, .. } => {
-            let push_result = push_predicate(source, predicate, referenced_tables)?;
-            if push_result.is_none() {
-                return Ok(None);
-            }
-
-            Ok(Some(push_result.unwrap()))
-        }
-        Operator::Nothing => Ok(Some(predicate)),
+        SourceOperator::Nothing => Ok(Some(predicate)),
     }
 }
 
-fn push_scan_direction(operator: &mut Operator, direction: &Direction) {
+fn push_scan_direction(operator: &mut SourceOperator, direction: &Direction) {
     match operator {
-        Operator::Projection { source, .. } => push_scan_direction(source, direction),
-        Operator::Scan { iter_dir, .. } => {
+        SourceOperator::Scan { iter_dir, .. } => {
             if iter_dir.is_none() {
                 match direction {
                     Direction::Ascending => *iter_dir = Some(IterationDirection::Forwards),
@@ -600,381 +437,6 @@ fn push_scan_direction(operator: &mut Operator, direction: &Direction) {
             }
         }
         _ => todo!(),
-    }
-}
-
-#[derive(Debug)]
-pub struct ExpressionResultCache {
-    resultmap: HashMap<usize, CachedResult>,
-    keymap: HashMap<usize, Vec<usize>>,
-}
-
-#[derive(Debug)]
-pub struct CachedResult {
-    pub register_idx: usize,
-    pub source_expr: ast::Expr,
-}
-
-const OPERATOR_ID_MULTIPLIER: usize = 10000;
-
-/**
-  ExpressionResultCache is a cache for the results of expressions that are computed in the query plan,
-  or more precisely, the VM registers that hold the results of these expressions.
-
-  Right now the cache is mainly used to avoid recomputing e.g. the result of an aggregation expression
-  e.g. SELECT t.a, SUM(t.b) FROM t GROUP BY t.a ORDER BY SUM(t.b)
-*/
-impl ExpressionResultCache {
-    pub fn new() -> Self {
-        ExpressionResultCache {
-            resultmap: HashMap::new(),
-            keymap: HashMap::new(),
-        }
-    }
-
-    /**
-        Store the result of an expression that is computed in the query plan.
-        The result is stored in a VM register. A copy of the expression AST node is
-        stored as well, so that parent operators can use it to compare their own expressions
-        with the one that was computed in a child operator.
-
-        This is a weakness of our current reliance on a 3rd party AST library, as we can't
-        e.g. modify the AST to add identifiers to nodes or replace nodes with some kind of
-        reference to a register, etc.
-    */
-    pub fn cache_result_register(
-        &mut self,
-        operator_id: usize,
-        result_column_idx: usize,
-        register_idx: usize,
-        expr: ast::Expr,
-    ) {
-        let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
-        self.resultmap.insert(
-            key,
-            CachedResult {
-                register_idx,
-                source_expr: expr,
-            },
-        );
-    }
-
-    /**
-      Set a mapping from a parent operator to a child operator, so that the parent operator
-      can look up the register of a result that was computed in the child operator.
-      E.g. "Parent operator's result column 3 is computed in child operator 5, result column 2"
-    */
-    pub fn set_precomputation_key(
-        &mut self,
-        operator_id: usize,
-        result_column_idx: usize,
-        child_operator_id: usize,
-        child_operator_result_column_idx_mask: usize,
-    ) {
-        let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
-
-        let mut values = Vec::new();
-        for i in 0..64 {
-            if (child_operator_result_column_idx_mask >> i) & 1 == 1 {
-                values.push(child_operator_id * OPERATOR_ID_MULTIPLIER + i);
-            }
-        }
-        self.keymap.insert(key, values);
-    }
-
-    /**
-      Get the cache entries for a given operator and result column index.
-      There may be multiple cached entries, e.g. a binary operator's both
-      arms may have been cached.
-    */
-    pub fn get_cached_result_registers(
-        &self,
-        operator_id: usize,
-        result_column_idx: usize,
-    ) -> Option<Vec<&CachedResult>> {
-        let key = operator_id * OPERATOR_ID_MULTIPLIER + result_column_idx;
-        self.keymap.get(&key).and_then(|keys| {
-            let mut results = Vec::new();
-            for key in keys {
-                if let Some(result) = self.resultmap.get(key) {
-                    results.push(result);
-                }
-            }
-            if results.is_empty() {
-                None
-            } else {
-                Some(results)
-            }
-        })
-    }
-}
-
-type ResultColumnIndexBitmask = usize;
-
-/**
-  Find all result columns in an operator that match an expression, either fully or partially.
-  This is used to find the result columns that are computed in an operator and that are used
-  in a parent operator, so that the parent operator can look up the register that holds the result
-  of the child operator's expression.
-
-  The result is returned as a bitmask due to performance neuroticism. A limitation of this is that
-  we can only handle 64 result columns per operator.
-*/
-fn find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-    expr: &ast::Expr,
-    operator: &Operator,
-) -> ResultColumnIndexBitmask {
-    let exact_match = match operator {
-        Operator::Aggregate {
-            aggregates,
-            group_by,
-            ..
-        } => {
-            let mut idx = 0;
-            let mut mask = 0;
-            for agg in aggregates.iter() {
-                if agg.original_expr == *expr {
-                    mask |= 1 << idx;
-                }
-                idx += 1;
-            }
-
-            if let Some(group_by) = group_by {
-                for g in group_by.iter() {
-                    if g == expr {
-                        mask |= 1 << idx;
-                    }
-                    idx += 1
-                }
-            }
-
-            mask
-        }
-        Operator::Filter { .. } => 0,
-        Operator::Limit { .. } => 0,
-        Operator::Join { .. } => 0,
-        Operator::Order { .. } => 0,
-        Operator::Projection { expressions, .. } => {
-            let mut mask = 0;
-            for (idx, e) in expressions.iter().enumerate() {
-                match e {
-                    ProjectionColumn::Column(c) => {
-                        if c == expr {
-                            mask |= 1 << idx;
-                        }
-                    }
-                    ProjectionColumn::Star => {}
-                    ProjectionColumn::TableStar(_) => {}
-                }
-            }
-
-            mask
-        }
-        Operator::Scan { .. } => 0,
-        Operator::Search { .. } => 0,
-        Operator::Nothing => 0,
-    };
-
-    if exact_match != 0 {
-        return exact_match;
-    }
-
-    match expr {
-        ast::Expr::Between {
-            lhs,
-            not: _,
-            start,
-            end,
-        } => {
-            let mut mask = 0;
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(start, operator);
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(end, operator);
-            mask
-        }
-        ast::Expr::Binary(lhs, _op, rhs) => {
-            let mut mask = 0;
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(rhs, operator);
-            mask
-        }
-        ast::Expr::Case {
-            base,
-            when_then_pairs,
-            else_expr,
-        } => {
-            let mut mask = 0;
-            if let Some(base) = base {
-                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(base, operator);
-            }
-            for (w, t) in when_then_pairs.iter() {
-                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(w, operator);
-                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(t, operator);
-            }
-            if let Some(e) = else_expr {
-                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(e, operator);
-            }
-            mask
-        }
-        ast::Expr::Cast { expr, type_name: _ } => {
-            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-                expr, operator,
-            )
-        }
-        ast::Expr::Collate(expr, _collation) => {
-            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-                expr, operator,
-            )
-        }
-        ast::Expr::DoublyQualified(_schema, _tbl, _ident) => 0,
-        ast::Expr::Exists(_) => 0,
-        ast::Expr::FunctionCall {
-            name: _,
-            distinctness: _,
-            args,
-            order_by: _,
-            filter_over: _,
-        } => {
-            let mut mask = 0;
-            if let Some(args) = args {
-                for a in args.iter() {
-                    mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(a, operator);
-                }
-            }
-            mask
-        }
-        ast::Expr::FunctionCallStar {
-            name: _,
-            filter_over: _,
-        } => 0,
-        ast::Expr::Id(_) => unreachable!("Ids have been bound to Column references"),
-        ast::Expr::Column { .. } => 0,
-        ast::Expr::InList { lhs, not: _, rhs } => {
-            let mut mask = 0;
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
-            if let Some(rhs) = rhs {
-                for r in rhs.iter() {
-                    mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(r, operator);
-                }
-            }
-            mask
-        }
-        ast::Expr::InSelect {
-            lhs,
-            not: _,
-            rhs: _,
-        } => {
-            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-                lhs, operator,
-            )
-        }
-        ast::Expr::InTable {
-            lhs: _,
-            not: _,
-            rhs: _,
-            args: _,
-        } => 0,
-        ast::Expr::IsNull(expr) => {
-            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-                expr, operator,
-            )
-        }
-        ast::Expr::Like {
-            lhs,
-            not: _,
-            op: _,
-            rhs,
-            escape: _,
-        } => {
-            let mut mask = 0;
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(lhs, operator);
-            mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(rhs, operator);
-            mask
-        }
-        ast::Expr::Literal(_) => 0,
-        ast::Expr::Name(_) => 0,
-        ast::Expr::NotNull(expr) => {
-            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-                expr, operator,
-            )
-        }
-        ast::Expr::Parenthesized(expr) => {
-            let mut mask = 0;
-            for e in expr.iter() {
-                mask |= find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(e, operator);
-            }
-            mask
-        }
-        ast::Expr::Qualified(_, _) => {
-            unreachable!("Qualified expressions have been bound to Column references")
-        }
-        ast::Expr::Raise(_, _) => 0,
-        ast::Expr::Subquery(_) => 0,
-        ast::Expr::Unary(_op, expr) => {
-            find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(
-                expr, operator,
-            )
-        }
-        ast::Expr::Variable(_) => 0,
-    }
-}
-
-/**
- * This function is used to find all the expressions that are shared between the parent operator and the child operators.
- * If an expression is shared between the parent and child operators, then the parent operator should not recompute the expression.
- * Instead, it should use the result of the expression that was computed by the child operator.
-*/
-fn find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(
-    operator: &Operator,
-    expr_result_cache: &mut ExpressionResultCache,
-) {
-    match operator {
-        Operator::Aggregate {
-            source,
-            ..
-        } => {
-            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(
-                source, expr_result_cache,
-            )
-        }
-        Operator::Filter { .. } => unreachable!(),
-        Operator::Limit { source, .. } => {
-            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
-        }
-        Operator::Join { .. } => {}
-        Operator::Order { source, key, .. } => {
-            for (idx, (expr, _)) in key.iter().enumerate() {
-                let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(expr, source);
-                if result != 0 {
-                    expr_result_cache.set_precomputation_key(
-                        operator.id(),
-                        idx,
-                        source.id(),
-                        result,
-                    );
-                }
-            }
-            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
-        }
-        Operator::Projection { source, expressions, .. } => {
-            for (idx, expr) in expressions.iter().enumerate() {
-                if let ProjectionColumn::Column(expr) = expr {
-                    let result = find_indexes_of_all_result_columns_in_operator_that_match_expr_either_fully_or_partially(expr, source);
-                    if result != 0 {
-                        expr_result_cache.set_precomputation_key(
-                            operator.id(),
-                            idx,
-                            source.id(),
-                            result,
-                        );
-                    }
-                }
-            }
-            find_shared_expressions_in_child_operators_and_mark_them_so_that_the_parent_operator_doesnt_recompute_them(source, expr_result_cache)
-        }
-        Operator::Scan { .. } => {}
-        Operator::Search { .. } => {}
-        Operator::Nothing => {}
     }
 }
 
@@ -1286,8 +748,8 @@ impl TakeOwnership for ast::Expr {
     }
 }
 
-impl TakeOwnership for Operator {
+impl TakeOwnership for SourceOperator {
     fn take_ownership(&mut self) -> Self {
-        std::mem::replace(self, Operator::Nothing)
+        std::mem::replace(self, SourceOperator::Nothing)
     }
 }

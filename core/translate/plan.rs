@@ -13,15 +13,28 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub enum ResultSetColumn {
+    Scalar(ast::Expr),
+    Agg(Aggregate),
+    ComputedAgg(ast::Expr),
+}
+
+#[derive(Debug)]
 pub struct Plan {
-    pub root_operator: Operator,
+    pub source: SourceOperator,
+    pub result_columns: Vec<ResultSetColumn>,
+    pub where_clause: Option<Vec<ast::Expr>>,
+    pub group_by: Option<Vec<ast::Expr>>,
+    pub order_by: Option<Vec<(ast::Expr, Direction)>>,
+    pub aggregates: Option<Vec<Aggregate>>,
+    pub limit: Option<usize>,
     pub referenced_tables: Vec<BTreeTableReference>,
     pub available_indexes: Vec<Rc<Index>>,
 }
 
 impl Display for Plan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.root_operator)
+        write!(f, "{}", self.source)
     }
 }
 
@@ -45,69 +58,17 @@ pub enum IterationDirection {
   TODO: perhaps 'step' shouldn't be in this struct, since it's an execution time concept, not a plan time concept.
 */
 #[derive(Clone, Debug)]
-pub enum Operator {
-    // Aggregate operator
-    // This operator is used to compute aggregate functions like SUM, AVG, COUNT, etc.
-    // It takes a source operator and a list of aggregate functions to compute.
-    // GROUP BY is not supported yet.
-    Aggregate {
-        id: usize,
-        source: Box<Operator>,
-        aggregates: Vec<Aggregate>,
-        group_by: Option<Vec<ast::Expr>>,
-        step: usize,
-    },
-    // Filter operator
-    // This operator is used to filter rows from the source operator.
-    // It takes a source operator and a list of predicates to evaluate.
-    // Only rows for which all predicates evaluate to true are passed to the next operator.
-    // Generally filter operators will only exist in unoptimized plans,
-    // as the optimizer will try to push filters down to the lowest possible level,
-    // e.g. a table scan.
-    Filter {
-        id: usize,
-        source: Box<Operator>,
-        predicates: Vec<ast::Expr>,
-    },
-    // Limit operator
-    // This operator is used to limit the number of rows returned by the source operator.
-    Limit {
-        id: usize,
-        source: Box<Operator>,
-        limit: usize,
-        step: usize,
-    },
+pub enum SourceOperator {
     // Join operator
     // This operator is used to join two source operators.
     // It takes a left and right source operator, a list of predicates to evaluate,
     // and a boolean indicating whether it is an outer join.
     Join {
         id: usize,
-        left: Box<Operator>,
-        right: Box<Operator>,
+        left: Box<SourceOperator>,
+        right: Box<SourceOperator>,
         predicates: Option<Vec<ast::Expr>>,
         outer: bool,
-        step: usize,
-    },
-    // Order operator
-    // This operator is used to sort the rows returned by the source operator.
-    Order {
-        id: usize,
-        source: Box<Operator>,
-        key: Vec<(ast::Expr, Direction)>,
-        step: usize,
-    },
-    // Projection operator
-    // This operator is used to project columns from the source operator.
-    // It takes a source operator and a list of expressions to evaluate.
-    // e.g. SELECT foo, bar FROM t1
-    // In this example, the expressions would be [foo, bar]
-    // and the source operator would be a Scan operator for table t1.
-    Projection {
-        id: usize,
-        source: Box<Operator>,
-        expressions: Vec<ProjectionColumn>,
-        step: usize,
     },
     // Scan operator
     // This operator is used to scan a table.
@@ -122,7 +83,6 @@ pub enum Operator {
         id: usize,
         table_reference: BTreeTableReference,
         predicates: Option<Vec<ast::Expr>>,
-        step: usize,
         iter_dir: Option<IterationDirection>,
     },
     // Search operator
@@ -133,7 +93,6 @@ pub enum Operator {
         table_reference: BTreeTableReference,
         search: Search,
         predicates: Option<Vec<ast::Expr>>,
-        step: usize,
     },
     // Nothing operator
     // This operator is used to represent an empty query.
@@ -168,106 +127,30 @@ pub enum Search {
     },
 }
 
-#[derive(Clone, Debug)]
-pub enum ProjectionColumn {
-    Column(ast::Expr),
-    Star,
-    TableStar(BTreeTableReference),
-}
-
-impl ProjectionColumn {
+impl SourceOperator {
     pub fn column_count(&self, referenced_tables: &[BTreeTableReference]) -> usize {
         match self {
-            ProjectionColumn::Column(_) => 1,
-            ProjectionColumn::Star => {
-                let mut count = 0;
-                for table_reference in referenced_tables {
-                    count += table_reference.table.columns.len();
-                }
-                count
-            }
-            ProjectionColumn::TableStar(table_reference) => table_reference.table.columns.len(),
-        }
-    }
-}
-
-impl Operator {
-    pub fn column_count(&self, referenced_tables: &[BTreeTableReference]) -> usize {
-        match self {
-            Operator::Aggregate {
-                group_by,
-                aggregates,
-                ..
-            } => aggregates.len() + group_by.as_ref().map_or(0, |g| g.len()),
-            Operator::Filter { source, .. } => source.column_count(referenced_tables),
-            Operator::Limit { source, .. } => source.column_count(referenced_tables),
-            Operator::Join { left, right, .. } => {
+            SourceOperator::Join { left, right, .. } => {
                 left.column_count(referenced_tables) + right.column_count(referenced_tables)
             }
-            Operator::Order { source, .. } => source.column_count(referenced_tables),
-            Operator::Projection { expressions, .. } => expressions
-                .iter()
-                .map(|e| e.column_count(referenced_tables))
-                .sum(),
-            Operator::Scan {
+            SourceOperator::Scan {
                 table_reference, ..
             } => table_reference.table.columns.len(),
-            Operator::Search {
+            SourceOperator::Search {
                 table_reference, ..
             } => table_reference.table.columns.len(),
-            Operator::Nothing => 0,
+            SourceOperator::Nothing => 0,
         }
     }
 
     pub fn column_names(&self) -> Vec<String> {
         match self {
-            Operator::Aggregate {
-                aggregates,
-                group_by,
-                ..
-            } => {
-                let mut names = vec![];
-                for agg in aggregates.iter() {
-                    names.push(agg.func.to_string().to_string());
-                }
-
-                if let Some(group_by) = group_by {
-                    for expr in group_by.iter() {
-                        match expr {
-                            ast::Expr::Id(ident) => names.push(ident.0.clone()),
-                            ast::Expr::Qualified(tbl, ident) => {
-                                names.push(format!("{}.{}", tbl.0, ident.0))
-                            }
-                            e => names.push(e.to_string()),
-                        }
-                    }
-                }
-
-                names
-            }
-            Operator::Filter { source, .. } => source.column_names(),
-            Operator::Limit { source, .. } => source.column_names(),
-            Operator::Join { left, right, .. } => {
+            SourceOperator::Join { left, right, .. } => {
                 let mut names = left.column_names();
                 names.extend(right.column_names());
                 names
             }
-            Operator::Order { source, .. } => source.column_names(),
-            Operator::Projection { expressions, .. } => expressions
-                .iter()
-                .map(|e| match e {
-                    ProjectionColumn::Column(expr) => match expr {
-                        ast::Expr::Id(ident) => ident.0.clone(),
-                        ast::Expr::Qualified(tbl, ident) => format!("{}.{}", tbl.0, ident.0),
-                        _ => "expr".to_string(),
-                    },
-                    ProjectionColumn::Star => "*".to_string(),
-                    ProjectionColumn::TableStar(table_reference) => {
-                        format!("{}.{}", table_reference.table_identifier, "*")
-                    }
-                })
-                .collect(),
-            Operator::Scan {
+            SourceOperator::Scan {
                 table_reference, ..
             } => table_reference
                 .table
@@ -275,7 +158,7 @@ impl Operator {
                 .iter()
                 .map(|c| c.name.clone())
                 .collect(),
-            Operator::Search {
+            SourceOperator::Search {
                 table_reference, ..
             } => table_reference
                 .table
@@ -283,21 +166,16 @@ impl Operator {
                 .iter()
                 .map(|c| c.name.clone())
                 .collect(),
-            Operator::Nothing => vec![],
+            SourceOperator::Nothing => vec![],
         }
     }
 
     pub fn id(&self) -> usize {
         match self {
-            Operator::Aggregate { id, .. } => *id,
-            Operator::Filter { id, .. } => *id,
-            Operator::Limit { id, .. } => *id,
-            Operator::Join { id, .. } => *id,
-            Operator::Order { id, .. } => *id,
-            Operator::Projection { id, .. } => *id,
-            Operator::Scan { id, .. } => *id,
-            Operator::Search { id, .. } => *id,
-            Operator::Nothing => unreachable!(),
+            SourceOperator::Join { id, .. } => *id,
+            SourceOperator::Scan { id, .. } => *id,
+            SourceOperator::Search { id, .. } => *id,
+            SourceOperator::Nothing => unreachable!(),
         }
     }
 }
@@ -337,10 +215,10 @@ impl Display for Aggregate {
 }
 
 // For EXPLAIN QUERY PLAN
-impl Display for Operator {
+impl Display for SourceOperator {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         fn fmt_operator(
-            operator: &Operator,
+            operator: &SourceOperator,
             f: &mut Formatter,
             level: usize,
             last: bool,
@@ -356,34 +234,7 @@ impl Display for Operator {
             };
 
             match operator {
-                Operator::Aggregate {
-                    source, aggregates, ..
-                } => {
-                    // e.g. Aggregate count(*), sum(x)
-                    let aggregates_display_string = aggregates
-                        .iter()
-                        .map(|agg| agg.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ");
-                    writeln!(f, "{}AGGREGATE {}", indent, aggregates_display_string)?;
-                    fmt_operator(source, f, level + 1, true)
-                }
-                Operator::Filter {
-                    source, predicates, ..
-                } => {
-                    let predicates_string = predicates
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<String>>()
-                        .join(" AND ");
-                    writeln!(f, "{}FILTER {}", indent, predicates_string)?;
-                    fmt_operator(source, f, level + 1, true)
-                }
-                Operator::Limit { source, limit, .. } => {
-                    writeln!(f, "{}TAKE {}", indent, limit)?;
-                    fmt_operator(source, f, level + 1, true)
-                }
-                Operator::Join {
+                SourceOperator::Join {
                     left,
                     right,
                     predicates,
@@ -408,35 +259,7 @@ impl Display for Operator {
                     fmt_operator(left, f, level + 1, false)?;
                     fmt_operator(right, f, level + 1, true)
                 }
-                Operator::Order { source, key, .. } => {
-                    let sort_keys_string = key
-                        .iter()
-                        .map(|(expr, dir)| format!("{} {}", expr, dir))
-                        .collect::<Vec<String>>()
-                        .join(", ");
-                    writeln!(f, "{}SORT {}", indent, sort_keys_string)?;
-                    fmt_operator(source, f, level + 1, true)
-                }
-                Operator::Projection {
-                    source,
-                    expressions,
-                    ..
-                } => {
-                    let expressions = expressions
-                        .iter()
-                        .map(|expr| match expr {
-                            ProjectionColumn::Column(c) => c.to_string(),
-                            ProjectionColumn::Star => "*".to_string(),
-                            ProjectionColumn::TableStar(table_reference) => {
-                                format!("{}.{}", table_reference.table_identifier, "*")
-                            }
-                        })
-                        .collect::<Vec<String>>()
-                        .join(", ");
-                    writeln!(f, "{}PROJECT {}", indent, expressions)?;
-                    fmt_operator(source, f, level + 1, true)
-                }
-                Operator::Scan {
+                SourceOperator::Scan {
                     table_reference,
                     predicates: filter,
                     ..
@@ -464,7 +287,7 @@ impl Display for Operator {
                     }?;
                     Ok(())
                 }
-                Operator::Search {
+                SourceOperator::Search {
                     table_reference,
                     search,
                     ..
@@ -487,7 +310,7 @@ impl Display for Operator {
                     }
                     Ok(())
                 }
-                Operator::Nothing => Ok(()),
+                SourceOperator::Nothing => Ok(()),
             }
         }
         writeln!(f, "QUERY PLAN")?;
@@ -505,35 +328,15 @@ impl Display for Operator {
 */
 pub fn get_table_ref_bitmask_for_operator<'a>(
     tables: &'a Vec<BTreeTableReference>,
-    operator: &'a Operator,
+    operator: &'a SourceOperator,
 ) -> Result<usize> {
     let mut table_refs_mask = 0;
     match operator {
-        Operator::Aggregate { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
-        }
-        Operator::Filter {
-            source, predicates, ..
-        } => {
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
-            for predicate in predicates {
-                table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, predicate)?;
-            }
-        }
-        Operator::Limit { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
-        }
-        Operator::Join { left, right, .. } => {
+        SourceOperator::Join { left, right, .. } => {
             table_refs_mask |= get_table_ref_bitmask_for_operator(tables, left)?;
             table_refs_mask |= get_table_ref_bitmask_for_operator(tables, right)?;
         }
-        Operator::Order { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
-        }
-        Operator::Projection { source, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, source)?;
-        }
-        Operator::Scan {
+        SourceOperator::Scan {
             table_reference, ..
         } => {
             table_refs_mask |= 1
@@ -542,7 +345,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
                     .position(|t| Rc::ptr_eq(&t.table, &table_reference.table))
                     .unwrap();
         }
-        Operator::Search {
+        SourceOperator::Search {
             table_reference, ..
         } => {
             table_refs_mask |= 1
@@ -551,7 +354,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
                     .position(|t| Rc::ptr_eq(&t.table, &table_reference.table))
                     .unwrap();
         }
-        Operator::Nothing => {}
+        SourceOperator::Nothing => {}
     }
     Ok(table_refs_mask)
 }

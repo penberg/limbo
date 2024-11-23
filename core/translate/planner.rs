@@ -1,4 +1,6 @@
-use super::plan::{Aggregate, BTreeTableReference, Direction, Operator, Plan, ProjectionColumn};
+use super::plan::{
+    Aggregate, BTreeTableReference, Direction, Plan, ResultSetColumn, SourceOperator,
+};
 use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
 use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
 
@@ -66,6 +68,7 @@ fn bind_column_references(
     referenced_tables: &[BTreeTableReference],
 ) -> Result<()> {
     match expr {
+        ast::Expr::AggRef { .. } => unreachable!(),
         ast::Expr::Id(id) => {
             let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
@@ -237,146 +240,157 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             let mut operator_id_counter = OperatorIdCounter::new();
 
             // Parse the FROM clause
-            let (mut operator, referenced_tables) =
+            let (mut source, referenced_tables) =
                 parse_from(schema, from, &mut operator_id_counter)?;
+
+            let mut plan = Plan {
+                source,
+                result_columns: vec![],
+                where_clause: None,
+                group_by: None,
+                order_by: None,
+                aggregates: None,
+                limit: None,
+                referenced_tables,
+                available_indexes: schema.indexes.clone().into_values().flatten().collect(),
+            };
 
             // Parse the WHERE clause
             if let Some(w) = where_clause {
                 let mut predicates = vec![];
                 break_predicate_at_and_boundaries(w, &mut predicates);
                 for expr in predicates.iter_mut() {
-                    bind_column_references(expr, &referenced_tables)?;
+                    bind_column_references(expr, &plan.referenced_tables)?;
                 }
-                operator = Operator::Filter {
-                    source: Box::new(operator),
-                    predicates,
-                    id: operator_id_counter.get_next_id(),
-                };
+                plan.where_clause = Some(predicates);
             }
 
-            // If there are aggregate functions, we aggregate + project the columns.
-            // If there are no aggregate functions, we can simply project the columns.
-            // For a simple SELECT *, the projection operator is skipped as well.
-            let is_select_star = col_count == 1 && matches!(columns[0], ast::ResultColumn::Star);
-            if !is_select_star {
-                let mut aggregate_expressions = Vec::new();
-                let mut projection_expressions = Vec::with_capacity(col_count);
-                for column in columns.clone() {
-                    match column {
-                        ast::ResultColumn::Star => {
-                            projection_expressions.push(ProjectionColumn::Star);
-                        }
-                        ast::ResultColumn::TableStar(name) => {
-                            let name_normalized = normalize_ident(name.0.as_str());
-                            let referenced_table = referenced_tables
-                                .iter()
-                                .find(|t| t.table_identifier == name_normalized);
-
-                            if referenced_table.is_none() {
-                                crate::bail_parse_error!("Table {} not found", name.0);
+            let mut aggregate_expressions = Vec::new();
+            for column in columns.clone() {
+                match column {
+                    ast::ResultColumn::Star => {
+                        for table_reference in plan.referenced_tables.iter() {
+                            for (idx, col) in table_reference.table.columns.iter().enumerate() {
+                                plan.result_columns.push(ResultSetColumn::Scalar(
+                                    ast::Expr::Column {
+                                        database: None, // TODO: support different databases
+                                        table: table_reference.table_index,
+                                        column: idx,
+                                        is_primary_key: col.primary_key,
+                                    },
+                                ));
                             }
-                            let table_reference = referenced_table.unwrap();
-                            projection_expressions
-                                .push(ProjectionColumn::TableStar(table_reference.clone()));
                         }
-                        ast::ResultColumn::Expr(mut expr, _) => {
-                            bind_column_references(&mut expr, &referenced_tables)?;
-                            projection_expressions.push(ProjectionColumn::Column(expr.clone()));
-                            match expr.clone() {
-                                ast::Expr::FunctionCall {
-                                    name,
-                                    distinctness: _,
-                                    args,
-                                    filter_over: _,
-                                    order_by: _,
-                                } => {
-                                    let args_count = if let Some(args) = &args {
-                                        args.len()
-                                    } else {
-                                        0
-                                    };
-                                    match Func::resolve_function(
-                                        normalize_ident(name.0.as_str()).as_str(),
-                                        args_count,
-                                    ) {
-                                        Ok(Func::Agg(f)) => {
-                                            aggregate_expressions.push(Aggregate {
-                                                func: f,
-                                                args: args.unwrap(),
-                                                original_expr: expr.clone(),
-                                            });
-                                        }
-                                        Ok(_) => {
-                                            resolve_aggregates(&expr, &mut aggregate_expressions);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                ast::Expr::FunctionCallStar {
-                                    name,
-                                    filter_over: _,
-                                } => {
-                                    if let Ok(Func::Agg(f)) = Func::resolve_function(
-                                        normalize_ident(name.0.as_str()).as_str(),
-                                        0,
-                                    ) {
-                                        aggregate_expressions.push(Aggregate {
+                    }
+                    ast::ResultColumn::TableStar(name) => {
+                        let name_normalized = normalize_ident(name.0.as_str());
+                        let referenced_table = plan
+                            .referenced_tables
+                            .iter()
+                            .find(|t| t.table_identifier == name_normalized);
+
+                        if referenced_table.is_none() {
+                            crate::bail_parse_error!("Table {} not found", name.0);
+                        }
+                        let table_reference = referenced_table.unwrap();
+                        for (idx, col) in table_reference.table.columns.iter().enumerate() {
+                            plan.result_columns
+                                .push(ResultSetColumn::Scalar(ast::Expr::Column {
+                                    database: None, // TODO: support different databases
+                                    table: table_reference.table_index,
+                                    column: idx,
+                                    is_primary_key: col.primary_key,
+                                }));
+                        }
+                    }
+                    ast::ResultColumn::Expr(mut expr, _) => {
+                        bind_column_references(&mut expr, &plan.referenced_tables)?;
+                        match &expr {
+                            ast::Expr::FunctionCall {
+                                name,
+                                distinctness: _,
+                                args,
+                                filter_over: _,
+                                order_by: _,
+                            } => {
+                                let args_count = if let Some(args) = &args {
+                                    args.len()
+                                } else {
+                                    0
+                                };
+                                match Func::resolve_function(
+                                    normalize_ident(name.0.as_str()).as_str(),
+                                    args_count,
+                                ) {
+                                    Ok(Func::Agg(f)) => {
+                                        let agg = Aggregate {
                                             func: f,
-                                            args: vec![ast::Expr::Literal(ast::Literal::Numeric(
-                                                "1".to_string(),
-                                            ))],
+                                            args: args.as_ref().unwrap().clone(),
                                             original_expr: expr.clone(),
-                                        });
+                                        };
+                                        aggregate_expressions.push(agg.clone());
+                                        plan.result_columns.push(ResultSetColumn::Agg(agg));
                                     }
+                                    Ok(_) => {
+                                        resolve_aggregates(&expr, &mut aggregate_expressions);
+                                    }
+                                    _ => {}
                                 }
-                                ast::Expr::Binary(lhs, _, rhs) => {
-                                    resolve_aggregates(&lhs, &mut aggregate_expressions);
-                                    resolve_aggregates(&rhs, &mut aggregate_expressions);
+                            }
+                            ast::Expr::FunctionCallStar {
+                                name,
+                                filter_over: _,
+                            } => {
+                                if let Ok(Func::Agg(f)) = Func::resolve_function(
+                                    normalize_ident(name.0.as_str()).as_str(),
+                                    0,
+                                ) {
+                                    let agg = Aggregate {
+                                        func: f,
+                                        args: vec![ast::Expr::Literal(ast::Literal::Numeric(
+                                            "1".to_string(),
+                                        ))],
+                                        original_expr: expr.clone(),
+                                    };
+                                    aggregate_expressions.push(agg.clone());
+                                    plan.result_columns.push(ResultSetColumn::Agg(agg));
+                                } else {
+                                    crate::bail_parse_error!(
+                                        "Invalid aggregate function: {}",
+                                        name.0
+                                    );
                                 }
-                                _ => {}
+                            }
+                            ast::Expr::Binary(lhs, _, rhs) => {
+                                resolve_aggregates(&lhs, &mut aggregate_expressions);
+                                resolve_aggregates(&rhs, &mut aggregate_expressions);
+                                plan.result_columns
+                                    .push(ResultSetColumn::Scalar(expr.clone()));
+                            }
+                            e => {
+                                plan.result_columns.push(ResultSetColumn::Scalar(e.clone()));
                             }
                         }
                     }
-                }
-                if let Some(group_by) = group_by.as_mut() {
-                    for expr in group_by.exprs.iter_mut() {
-                        bind_column_references(expr, &referenced_tables)?;
-                    }
-                    if aggregate_expressions.is_empty() {
-                        crate::bail_parse_error!(
-                            "GROUP BY clause without aggregate functions is not allowed"
-                        );
-                    }
-                    for scalar in projection_expressions.iter() {
-                        match scalar {
-                            ProjectionColumn::Column(_) => {}
-                            _ => {
-                                crate::bail_parse_error!(
-                                    "Only column references are allowed in the SELECT clause when using GROUP BY"
-                                );
-                            }
-                        }
-                    }
-                }
-                if !aggregate_expressions.is_empty() {
-                    operator = Operator::Aggregate {
-                        source: Box::new(operator),
-                        aggregates: aggregate_expressions,
-                        group_by: group_by.map(|g| g.exprs), // TODO: support HAVING
-                        id: operator_id_counter.get_next_id(),
-                        step: 0,
-                    }
-                }
-
-                if !projection_expressions.is_empty() {
-                    operator = Operator::Projection {
-                        source: Box::new(operator),
-                        expressions: projection_expressions,
-                        id: operator_id_counter.get_next_id(),
-                        step: 0,
-                    };
                 }
             }
+            if let Some(group_by) = group_by.as_mut() {
+                for expr in group_by.exprs.iter_mut() {
+                    bind_column_references(expr, &plan.referenced_tables)?;
+                }
+                if aggregate_expressions.is_empty() {
+                    crate::bail_parse_error!(
+                        "GROUP BY clause without aggregate functions is not allowed"
+                    );
+                }
+            }
+
+            plan.group_by = group_by.map(|g| g.exprs);
+            plan.aggregates = if aggregate_expressions.is_empty() {
+                None
+            } else {
+                Some(aggregate_expressions)
+            };
 
             // Parse the ORDER BY clause
             if let Some(order_by) = select.order_by {
@@ -402,7 +416,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         o.expr
                     };
 
-                    bind_column_references(&mut expr, &referenced_tables)?;
+                    bind_column_references(&mut expr, &plan.referenced_tables)?;
 
                     key.push((
                         expr,
@@ -412,40 +426,22 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         }),
                     ));
                 }
-                operator = Operator::Order {
-                    source: Box::new(operator),
-                    key,
-                    id: operator_id_counter.get_next_id(),
-                    step: 0,
-                };
+                plan.order_by = Some(key);
             }
 
             // Parse the LIMIT clause
             if let Some(limit) = &select.limit {
-                operator = match &limit.expr {
+                plan.limit = match &limit.expr {
                     ast::Expr::Literal(ast::Literal::Numeric(n)) => {
                         let l = n.parse()?;
-                        if l == 0 {
-                            Operator::Nothing
-                        } else {
-                            Operator::Limit {
-                                source: Box::new(operator),
-                                limit: l,
-                                id: operator_id_counter.get_next_id(),
-                                step: 0,
-                            }
-                        }
+                        Some(l)
                     }
                     _ => todo!(),
                 }
             }
 
             // Return the unoptimized query plan
-            Ok(Plan {
-                root_operator: operator,
-                referenced_tables,
-                available_indexes: schema.indexes.clone().into_values().flatten().collect(),
-            })
+            Ok(plan)
         }
         _ => todo!(),
     }
@@ -456,9 +452,9 @@ fn parse_from(
     schema: &Schema,
     from: Option<FromClause>,
     operator_id_counter: &mut OperatorIdCounter,
-) -> Result<(Operator, Vec<BTreeTableReference>)> {
+) -> Result<(SourceOperator, Vec<BTreeTableReference>)> {
     if from.as_ref().and_then(|f| f.select.as_ref()).is_none() {
-        return Ok((Operator::Nothing, vec![]));
+        return Ok((SourceOperator::Nothing, vec![]));
     }
 
     let from = from.unwrap();
@@ -484,11 +480,10 @@ fn parse_from(
         _ => todo!(),
     };
 
-    let mut operator = Operator::Scan {
+    let mut operator = SourceOperator::Scan {
         table_reference: first_table.clone(),
         predicates: None,
         id: operator_id_counter.get_next_id(),
-        step: 0,
         iter_dir: None,
     };
 
@@ -498,13 +493,12 @@ fn parse_from(
     for join in from.joins.unwrap_or_default().into_iter() {
         let (right, outer, predicates) =
             parse_join(schema, join, operator_id_counter, &mut tables, table_index)?;
-        operator = Operator::Join {
+        operator = SourceOperator::Join {
             left: Box::new(operator),
             right: Box::new(right),
             predicates,
             outer,
             id: operator_id_counter.get_next_id(),
-            step: 0,
         };
         table_index += 1;
     }
@@ -518,7 +512,7 @@ fn parse_join(
     operator_id_counter: &mut OperatorIdCounter,
     tables: &mut Vec<BTreeTableReference>,
     table_index: usize,
-) -> Result<(Operator, bool, Option<Vec<ast::Expr>>)> {
+) -> Result<(SourceOperator, bool, Option<Vec<ast::Expr>>)> {
     let ast::JoinedSelectTable {
         operator,
         table,
@@ -574,11 +568,10 @@ fn parse_join(
     }
 
     Ok((
-        Operator::Scan {
+        SourceOperator::Scan {
             table_reference: table.clone(),
             predicates: None,
             id: operator_id_counter.get_next_id(),
-            step: 0,
             iter_dir: None,
         },
         outer,

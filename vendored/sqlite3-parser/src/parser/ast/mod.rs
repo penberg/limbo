@@ -338,6 +338,11 @@ pub enum Expr {
         /// is the column a primary key
         is_primary_key: bool,
     },
+    /// AggRef is a reference to a computed aggregate
+    AggRef {
+        /// index of the aggregate in the aggregates vector parsed from the query
+        index: usize,
+    },
     /// `IN`
     InList {
         /// expression

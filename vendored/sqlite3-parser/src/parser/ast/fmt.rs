@@ -638,6 +638,7 @@ impl ToTokens for Expr {
             }
             Self::Id(id) => id.to_tokens(s),
             Self::Column { .. } => Ok(()),
+            Self::AggRef { .. } => Ok(()),
             Self::InList { lhs, not, rhs } => {
                 lhs.to_tokens(s)?;
                 if *not {
