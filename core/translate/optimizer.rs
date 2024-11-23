@@ -90,12 +90,13 @@ fn eliminate_unnecessary_orderby(
         return Ok(());
     }
 
-    let (key, _) = o.first_mut().unwrap();
+    let (key, direction) = o.first_mut().unwrap();
 
     let already_ordered =
         _operator_is_already_ordered_by(operator, key, referenced_tables, available_indexes)?;
 
     if already_ordered {
+        push_scan_direction(operator, direction);
         *order_by = None;
     }
 
