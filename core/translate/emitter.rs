@@ -87,11 +87,11 @@ pub struct Metadata {
     // for example, in a join with two nested scans, the inner loop will jump to its Next instruction when the join condition is false;
     // in a join with a scan and a seek, the seek will jump to the scan's Next instruction when the join condition is false.
     next_row_labels: HashMap<usize, BranchOffset>,
-    // labels for the Rewind instructions.
+    // labels for the instructions beginning the inner loop of a scan operator.
     scan_loop_body_labels: Vec<BranchOffset>,
     // metadata for the group by operator
     group_by_metadata: Option<GroupByMetadata>,
-    // mapping between Order operator id and associated metadata
+    // metadata for the order by operator
     sort_metadata: Option<SortMetadata>,
     // mapping between Join operator id and associated metadata (for left joins only)
     left_joins: HashMap<usize, LeftJoinMetadata>,
