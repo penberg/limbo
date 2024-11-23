@@ -92,7 +92,7 @@ pub struct Metadata {
     // metadata for the group by operator
     group_by_metadata: Option<GroupByMetadata>,
     // mapping between Order operator id and associated metadata
-    sorts: HashMap<usize, SortMetadata>,
+    sort_metadata: Option<SortMetadata>,
     // mapping between Join operator id and associated metadata (for left joins only)
     left_joins: HashMap<usize, LeftJoinMetadata>,
     // First register of the aggregation results
@@ -125,7 +125,7 @@ fn prologue() -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> 
         left_joins: HashMap::new(),
         next_row_labels: HashMap::new(),
         scan_loop_body_labels: vec![],
-        sorts: HashMap::new(),
+        sort_metadata: None,
         aggregation_start_register: None,
         result_column_indexes_in_orderby_sorter: HashMap::new(),
         result_columns_to_skip_in_orderby_sorter: None,
@@ -261,15 +261,12 @@ fn init_order_by(
 ) -> Result<()> {
     m.termination_label_stack.push(program.allocate_label());
     let sort_cursor = program.alloc_cursor_id(None, None);
-    m.sorts.insert(
-        ORDER_BY_ID,
-        SortMetadata {
-            sort_cursor,
-            sorter_data_register: program.alloc_register(),
-            sorter_data_label: program.allocate_label(),
-            done_label: program.allocate_label(),
-        },
-    );
+    m.sort_metadata = Some(SortMetadata {
+        sort_cursor,
+        sorter_data_register: program.alloc_register(),
+        sorter_data_label: program.allocate_label(),
+        done_label: program.allocate_label(),
+    });
     let mut order = Vec::new();
     for (_, direction) in order_by.iter() {
         order.push(OwnedValue::Integer(*direction as i64));
@@ -1024,7 +1021,7 @@ fn inner_loop_source_emit(
                 cur_reg += 1;
             }
 
-            let sort_metadata = m.sorts.get_mut(&ORDER_BY_ID).unwrap();
+            let sort_metadata = m.sort_metadata.as_mut().unwrap();
             program.emit_insn(Insn::MakeRecord {
                 start_reg,
                 count: orderby_sorter_column_count,
@@ -1644,7 +1641,7 @@ fn group_by_emit(
             });
 
             program.emit_insn(Insn::SorterInsert {
-                cursor_id: m.sorts.get(&ORDER_BY_ID).unwrap().sort_cursor,
+                cursor_id: m.sort_metadata.as_ref().unwrap().sort_cursor,
                 record_reg: group_by_metadata.sorter_key_register,
             });
         }
@@ -1783,7 +1780,7 @@ fn sort_order_by(
             columns: pseudo_columns,
         }))),
     );
-    let sort_metadata = m.sorts.get(&ORDER_BY_ID).unwrap();
+    let sort_metadata = m.sort_metadata.as_mut().unwrap();
 
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
@@ -1806,7 +1803,7 @@ fn sort_order_by(
         pseudo_cursor,
     });
 
-    let sort_metadata = m.sorts.get_mut(&ORDER_BY_ID).unwrap();
+    let sort_metadata = m.sort_metadata.as_mut().unwrap();
 
     // EMIT COLUMNS FROM SORTER AND EMIT ROW
     let cursor_id = pseudo_cursor;
