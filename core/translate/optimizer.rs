@@ -44,15 +44,15 @@ fn _operator_is_already_ordered_by(
     match operator {
         SourceOperator::Scan {
             table_reference, ..
-        } => Ok(key.is_primary_key_of(table_reference.table_index)),
+        } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
         SourceOperator::Search {
             table_reference,
             search,
             ..
         } => match search {
-            Search::PrimaryKeyEq { .. } => Ok(key.is_primary_key_of(table_reference.table_index)),
+            Search::PrimaryKeyEq { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
             Search::PrimaryKeySearch { .. } => {
-                Ok(key.is_primary_key_of(table_reference.table_index))
+                Ok(key.is_rowid_alias_of(table_reference.table_index))
             }
             Search::IndexSearch { index, .. } => {
                 let index_idx = key.check_index_scan(
@@ -457,7 +457,7 @@ pub trait Optimizable {
             .check_constant()?
             .map_or(false, |c| c == ConstantPredicate::AlwaysFalse))
     }
-    fn is_primary_key_of(&self, table_index: usize) -> bool;
+    fn is_rowid_alias_of(&self, table_index: usize) -> bool;
     fn check_index_scan(
         &mut self,
         table_index: usize,
@@ -467,14 +467,13 @@ pub trait Optimizable {
 }
 
 impl Optimizable for ast::Expr {
-    fn is_primary_key_of(&self, table_index: usize) -> bool {
+    fn is_rowid_alias_of(&self, table_index: usize) -> bool {
         match self {
             ast::Expr::Column {
                 table,
-                column,
-                is_rowid_alias: is_primary_key,
+                is_rowid_alias,
                 ..
-            } => *is_primary_key && *table == table_index,
+            } => *is_rowid_alias && *table == table_index,
             _ => false,
         }
     }
@@ -652,7 +651,7 @@ pub fn try_extract_index_search_expression(
 ) -> Result<Either<ast::Expr, Search>> {
     match expr {
         ast::Expr::Binary(mut lhs, operator, mut rhs) => {
-            if lhs.is_primary_key_of(table_index) {
+            if lhs.is_rowid_alias_of(table_index) {
                 match operator {
                     ast::Operator::Equals => {
                         return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *rhs }));
@@ -670,7 +669,7 @@ pub fn try_extract_index_search_expression(
                 }
             }
 
-            if rhs.is_primary_key_of(table_index) {
+            if rhs.is_rowid_alias_of(table_index) {
                 match operator {
                     ast::Operator::Equals => {
                         return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *lhs }));

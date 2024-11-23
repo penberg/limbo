@@ -207,7 +207,8 @@ pub fn emit_program(
 
     let mut order_by_necessary = plan.order_by.is_some();
 
-    // IF GROUP BY, SORT BY GROUPS AND DO AGGREGATION
+    // IF GROUP BY, SORT BY GROUPS AND DO AGGREGATION ETC
+    // EITHER EMITS RESULTROWS DIRECTLY OR INSERTS INTO ORDER BY SORTER
     if let Some(ref mut group_by) = plan.group_by {
         group_by_emit(
             &mut program,
@@ -233,7 +234,7 @@ pub fn emit_program(
         order_by_necessary = false;
     }
 
-    // IF ORDER BY, SORT BY ORDER BY
+    // EMIT RESULT ROWS FROM THE ORDER BY SORTER
     if let Some(ref mut order_by) = plan.order_by {
         if order_by_necessary {
             sort_order_by(
@@ -251,8 +252,6 @@ pub fn emit_program(
 
     Ok(program.build(database_header, connection))
 }
-
-const ORDER_BY_ID: usize = 0;
 
 fn init_order_by(
     program: &mut ProgramBuilder,
