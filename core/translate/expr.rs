@@ -2,7 +2,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
-use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
+use crate::function::{AggFunc, Func, FuncCtx, MathFuncArity, ScalarFunc};
 use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
@@ -1603,6 +1603,9 @@ pub fn translate_expr(
                         }
                     }
                 }
+                Func::Math(mfs) => match mfs {
+                    _ => unimplemented!(),
+                },
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
