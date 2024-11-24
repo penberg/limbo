@@ -730,43 +730,94 @@ impl Program {
                         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
                             state.registers[dest] = OwnedValue::Float(lhs - rhs);
                         }
-                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs))
-                        | (OwnedValue::Integer(rhs), OwnedValue::Float(lhs)) => {
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
                             state.registers[dest] = OwnedValue::Float(lhs - *rhs as f64);
+                        }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            state.registers[dest] = OwnedValue::Float(*lhs as f64 - rhs);
                         }
                         (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
                             state.registers[dest] = OwnedValue::Null;
                         }
-                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
-                            match other {
-                                OwnedValue::Null => {
-                                    state.registers[dest] = OwnedValue::Null;
-                                }
-                                OwnedValue::Integer(i) => match aggctx.final_value() {
-                                    OwnedValue::Float(acc) => {
-                                        state.registers[dest] = OwnedValue::Float(acc - *i as f64);
-                                    }
-                                    OwnedValue::Integer(acc) => {
-                                        state.registers[dest] = OwnedValue::Integer(acc - i);
-                                    }
-                                    _ => {
-                                        todo!("{:?}", aggctx);
-                                    }
-                                },
-                                OwnedValue::Float(f) => match aggctx.final_value() {
-                                    OwnedValue::Float(acc) => {
-                                        state.registers[dest] = OwnedValue::Float(acc - f);
-                                    }
-                                    OwnedValue::Integer(acc) => {
-                                        state.registers[dest] = OwnedValue::Float(*acc as f64 - f);
-                                    }
-                                    _ => {
-                                        todo!("{:?}", aggctx);
-                                    }
-                                },
-                                rest => unimplemented!("{:?}", rest),
+                        (OwnedValue::Agg(aggctx), rhs) => match rhs {
+                            OwnedValue::Null => {
+                                state.registers[dest] = OwnedValue::Null;
                             }
-                        }
+                            OwnedValue::Integer(i) => match aggctx.final_value() {
+                                OwnedValue::Float(acc) => {
+                                    state.registers[dest] = OwnedValue::Float(acc - *i as f64);
+                                }
+                                OwnedValue::Integer(acc) => {
+                                    state.registers[dest] = OwnedValue::Integer(acc - i);
+                                }
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            OwnedValue::Float(f) => match aggctx.final_value() {
+                                OwnedValue::Float(acc) => {
+                                    state.registers[dest] = OwnedValue::Float(acc - f);
+                                }
+                                OwnedValue::Integer(acc) => {
+                                    state.registers[dest] = OwnedValue::Float(*acc as f64 - f);
+                                }
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            OwnedValue::Agg(aggctx2) => {
+                                let acc = aggctx.final_value();
+                                let acc2 = aggctx2.final_value();
+                                match (acc, acc2) {
+                                    (OwnedValue::Integer(acc), OwnedValue::Integer(acc2)) => {
+                                        state.registers[dest] = OwnedValue::Integer(acc - acc2);
+                                    }
+                                    (OwnedValue::Float(acc), OwnedValue::Float(acc2)) => {
+                                        state.registers[dest] = OwnedValue::Float(acc - acc2);
+                                    }
+                                    (OwnedValue::Integer(acc), OwnedValue::Float(acc2)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Float(*acc as f64 - acc2);
+                                    }
+                                    (OwnedValue::Float(acc), OwnedValue::Integer(acc2)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Float(acc - *acc2 as f64);
+                                    }
+                                    _ => {
+                                        todo!("{:?} {:?}", acc, acc2);
+                                    }
+                                }
+                            }
+                            rest => unimplemented!("{:?}", rest),
+                        },
+                        (lhs, OwnedValue::Agg(aggctx)) => match lhs {
+                            OwnedValue::Null => {
+                                state.registers[dest] = OwnedValue::Null;
+                            }
+                            OwnedValue::Integer(i) => match aggctx.final_value() {
+                                OwnedValue::Float(acc) => {
+                                    state.registers[dest] = OwnedValue::Float(*i as f64 - acc);
+                                }
+                                OwnedValue::Integer(acc) => {
+                                    state.registers[dest] = OwnedValue::Integer(i - acc);
+                                }
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            OwnedValue::Float(f) => match aggctx.final_value() {
+                                OwnedValue::Float(acc) => {
+                                    state.registers[dest] = OwnedValue::Float(f - acc);
+                                }
+                                OwnedValue::Integer(acc) => {
+                                    state.registers[dest] = OwnedValue::Float(f - *acc as f64);
+                                }
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            rest => unimplemented!("{:?}", rest),
+                        },
                         others => {
                             todo!("{:?}", others);
                         }

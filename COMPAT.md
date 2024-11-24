@@ -355,7 +355,7 @@ This document describes the SQLite compatibility status of Limbo:
 | SorterSort      | Yes    |
 | String          | No     |
 | String8         | Yes    |
-| Subtract        | No     |
+| Subtract        | Yes    |
 | TableLock       | No     |
 | ToBlob          | No     |
 | ToInt           | No     |
