@@ -1603,7 +1603,38 @@ pub fn translate_expr(
                         }
                     }
                 }
-                Func::Math(mfs) => match mfs {
+                Func::Math(math_func) => match math_func.arity() {
+                    MathFuncArity::Unary => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 1 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 1 argument",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let reg = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            reg,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                     _ => unimplemented!(),
                 },
             }

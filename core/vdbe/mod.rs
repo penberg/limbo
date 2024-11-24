@@ -2491,7 +2491,12 @@ impl Program {
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
                         },
-                        crate::function::Func::Math(math_func) => match math_func {
+                        crate::function::Func::Math(math_func) => match math_func.arity() {
+                            MathFuncArity::Unary => {
+                                let reg_value = &state.registers[*start_reg];
+                                let result = exec_math_unary(reg_value, math_func);
+                                state.registers[*dest] = result;
+                            }
                             _ => unimplemented!(),
                         },
                         crate::function::Func::Agg(_) => {
@@ -3598,6 +3603,63 @@ fn execute_sqlite_version(version_integer: i64) -> String {
     let release = version_integer % 1_000;
 
     format!("{}.{}.{}", major, minor, release)
+}
+
+fn to_f64(reg: &OwnedValue) -> Option<f64> {
+    match reg {
+        OwnedValue::Integer(i) => Some(*i as f64),
+        OwnedValue::Float(f) => Some(*f),
+        OwnedValue::Text(t) => t.parse::<f64>().ok(),
+        OwnedValue::Agg(ctx) => to_f64(ctx.final_value()),
+        _ => None,
+    }
+}
+
+fn exec_math_unary(reg: &OwnedValue, function: &MathFunc) -> OwnedValue {
+    // In case of some functions and integer input, return the input as is
+    if let OwnedValue::Integer(_) = reg {
+        if matches! { function, MathFunc::Ceil | MathFunc::Ceiling | MathFunc::Floor | MathFunc::Trunc }
+        {
+            return reg.clone();
+        }
+    }
+
+    let f = match to_f64(reg) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let result = match function {
+        MathFunc::Acos => f.acos(),
+        MathFunc::Acosh => f.acosh(),
+        MathFunc::Asin => f.asin(),
+        MathFunc::Asinh => f.asinh(),
+        MathFunc::Atan => f.atan(),
+        MathFunc::Atanh => f.atanh(),
+        MathFunc::Ceil | MathFunc::Ceiling => f.ceil(),
+        MathFunc::Cos => f.cos(),
+        MathFunc::Cosh => f.cosh(),
+        MathFunc::Degrees => f.to_degrees(),
+        MathFunc::Exp => f.exp(),
+        MathFunc::Floor => f.floor(),
+        MathFunc::Ln => f.ln(),
+        MathFunc::Log10 => f.log10(),
+        MathFunc::Log2 => f.log2(),
+        MathFunc::Radians => f.to_radians(),
+        MathFunc::Sin => f.sin(),
+        MathFunc::Sinh => f.sinh(),
+        MathFunc::Sqrt => f.sqrt(),
+        MathFunc::Tan => f.tan(),
+        MathFunc::Tanh => f.tanh(),
+        MathFunc::Trunc => f.trunc(),
+        _ => unreachable!("Unexpected mathematical unary function {:?}", function),
+    };
+
+    if result.is_nan() {
+        OwnedValue::Null
+    } else {
+        OwnedValue::Float(result)
+    }
 }
 
 #[cfg(test)]

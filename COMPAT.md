@@ -164,36 +164,36 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 
 | Function   | Status | Comment |
 | ---------- | ------ | ------- |
-| acos(X)    | No     |         |
-| acosh(X)   | No     |         |
-| asin(X)    | No     |         |
-| asinh(X)   | No     |         |
-| atan(X)    | No     |         |
+| acos(X)    | Yes    |         |
+| acosh(X)   | Yes    |         |
+| asin(X)    | Yes    |         |
+| asinh(X)   | Yes    |         |
+| atan(X)    | Yes    |         |
 | atan2(Y,X) | No     |         |
-| atanh(X)   | No     |         |
-| ceil(X)    | No     |         |
-| ceiling(X) | No     |         |
-| cos(X)     | No     |         |
-| cosh(X)    | No     |         |
-| degrees(X) | No     |         |
-| exp(X)     | No     |         |
-| floor(X)   | No     |         |
-| ln(X)      | No     |         |
+| atanh(X)   | Yes    |         |
+| ceil(X)    | Yes    |         |
+| ceiling(X) | Yes    |         |
+| cos(X)     | Yes    |         |
+| cosh(X)    | Yes    |         |
+| degrees(X) | Yes    |         |
+| exp(X)     | Yes    |         |
+| floor(X)   | Yes    |         |
+| ln(X)      | Yes    |         |
 | log(B,X)   | No     |         |
 | log(X)     | No     |         |
-| log10(X)   | No     |         |
-| log2(X)    | No     |         |
+| log10(X)   | Yes    |         |
+| log2(X)    | Yes    |         |
 | mod(X,Y)   | No     |         |
 | pi()       | No     |         |
 | pow(X,Y)   | No     |         |
 | power(X,Y) | No     |         |
-| radians(X) | No     |         |
-| sin(X)     | No     |         |
-| sinh(X)    | No     |         |
-| sqrt(X)    | No     |         |
-| tan(X)     | No     |         |
-| tanh(X)    | No     |         |
-| trunc(X)   | No     |         |
+| radians(X) | Yes    |         |
+| sin(X)     | Yes    |         |
+| sinh(X)    | Yes    |         |
+| sqrt(X)    | Yes    |         |
+| tan(X)     | Yes    |         |
+| tanh(X)    | Yes    |         |
+| trunc(X)   | Yes    |         |
 
 ### Aggregate functions
 

@@ -361,3 +361,433 @@ do_execsql_test bitwise-not-zero {
 	SELECT ~0
 } {-1}
 
+
+set tolerance 1e-13
+
+do_execsql_test_tolerance acos-int {
+  SELECT acos(1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance acos-float {
+  SELECT acos(-0.5)
+} {2.0943951023931957} $tolerance
+
+do_execsql_test_tolerance acos-str {
+  SELECT acos('-0.5')
+} {2.0943951023931957} $tolerance
+
+do_execsql_test_tolerance acos-null {
+  SELECT acos(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance acosh-int {
+  SELECT acosh(1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance acosh-float {
+  SELECT acosh(1.5)
+} {0.962423650119207} $tolerance
+
+do_execsql_test_tolerance acosh-str {
+  SELECT acosh('1.5')
+} {0.962423650119207} $tolerance
+
+do_execsql_test_tolerance acosh-invalid {
+  SELECT acosh(0.99)
+} {} $tolerance
+
+do_execsql_test_tolerance acosh-null {
+  SELECT acosh(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance asin-int {
+  SELECT asin(1)
+} {1.5707963267948966} $tolerance
+
+do_execsql_test_tolerance asin-float {
+  SELECT asin(-0.5)
+} {-0.5235987755982989} $tolerance
+
+do_execsql_test_tolerance asin-str {
+  SELECT asin('-0.5')
+} {-0.5235987755982989} $tolerance
+
+do_execsql_test_tolerance asin-null {
+  SELECT asin(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance sin-int {
+  SELECT sin(1)
+} {0.841470984807897} $tolerance
+
+do_execsql_test_tolerance sin-float {
+  SELECT sin(-0.5)
+} {-0.479425538604203} $tolerance
+
+do_execsql_test_tolerance sin-str {
+  SELECT sin('-0.5')
+} {-0.479425538604203} $tolerance
+
+do_execsql_test_tolerance sin-null {
+  SELECT sin(null)
+} {} $tolerance
+
+do_execsql_test_tolerance sin-products-id {
+  SELECT sin(id) from products
+} {0.8414709848078965
+0.9092974268256817
+0.1411200080598672
+-0.7568024953079282
+-0.9589242746631385
+-0.27941549819892586
+0.6569865987187891
+0.9893582466233818
+0.4121184852417566
+-0.5440211108893698
+-0.9999902065507035} $tolerance
+
+
+do_execsql_test_tolerance asinh-int {
+  SELECT asinh(1)
+} {0.881373587019543} $tolerance
+
+do_execsql_test_tolerance asinh-float {
+  SELECT asinh(-0.5)
+} {-0.48121182505960347} $tolerance
+
+do_execsql_test_tolerance asinh-str {
+  SELECT asinh('-0.5')
+} {-0.48121182505960347} $tolerance
+
+do_execsql_test_tolerance asinh-null {
+  SELECT asinh(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance atan-int {
+  SELECT atan(1)
+} {0.7853981633974483} $tolerance
+
+do_execsql_test_tolerance atan-float {
+  SELECT atan(-0.5)
+} {-0.4636476090008061} $tolerance
+
+do_execsql_test_tolerance atan-str {
+  SELECT atan('-0.5')
+} {-0.4636476090008061} $tolerance
+
+do_execsql_test_tolerance atan-null {
+  SELECT atan(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance tan-int {
+  SELECT tan(1)
+} {1.5574077246549} $tolerance
+
+do_execsql_test_tolerance tan-float {
+  SELECT tan(-0.5)
+} {-0.54630248984379} $tolerance
+
+do_execsql_test_tolerance tan-str {
+  SELECT tan('-0.5')
+} {-0.54630248984379} $tolerance
+
+do_execsql_test_tolerance tan-null {
+  SELECT tan(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance atanh-int {
+  SELECT atanh(0)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance atanh-float {
+  SELECT atanh(-0.5)
+} {-0.5493061443340548} $tolerance
+
+do_execsql_test_tolerance atanh-str {
+  SELECT atanh('-0.5')
+} {-0.5493061443340548} $tolerance
+
+do_execsql_test_tolerance atanh-null {
+  SELECT atanh(null)
+} {} $tolerance
+
+
+do_execsql_test ceil-int {
+  SELECT ceil(1)
+} {1}
+
+do_execsql_test ceil-float {
+  SELECT ceil(-1.5)
+} {-1.0}
+
+do_execsql_test ceil-str {
+  SELECT ceil('1.5')
+} {2.0}
+
+do_execsql_test ceil-null {
+  SELECT ceil(null)
+} {}
+
+
+do_execsql_test ceiling-int {
+  SELECT ceiling(1)
+} {1}
+
+do_execsql_test ceiling-float {
+  SELECT ceiling(-1.5)
+} {-1.0}
+
+do_execsql_test ceiling-str {
+  SELECT ceiling('1.5')
+} {2.0}
+
+do_execsql_test ceiling-null {
+  SELECT ceiling(null)
+} {}
+
+
+do_execsql_test_tolerance cos-int {
+  SELECT cos(1)
+} {0.54030230586814} $tolerance
+
+do_execsql_test_tolerance cos-float {
+  SELECT cos(-0.5)
+} {0.877582561890373} $tolerance
+
+do_execsql_test_tolerance cos-str {
+  SELECT cos('-0.5')
+} {0.877582561890373} $tolerance
+
+do_execsql_test_tolerance cos-null {
+  SELECT cos(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance cosh-int {
+  SELECT cosh(1)
+} {1.54308063481524} $tolerance
+
+do_execsql_test_tolerance cosh-float {
+  SELECT cosh(-0.5)
+} {1.12762596520638} $tolerance
+
+do_execsql_test_tolerance cosh-str {
+  SELECT cosh('-0.5')
+} {1.12762596520638} $tolerance
+
+do_execsql_test_tolerance cosh-null {
+  SELECT cosh(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance degrees-int {
+  SELECT degrees(1)
+} {57.2957795130823} $tolerance
+
+do_execsql_test_tolerance degrees-float {
+  SELECT degrees(-0.5)
+} {-28.6478897565412} $tolerance
+
+do_execsql_test_tolerance degrees-str {
+  SELECT degrees('-0.5')
+} {-28.6478897565412} $tolerance
+
+do_execsql_test_tolerance degrees-null {
+  SELECT degrees(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance exp-int {
+  SELECT exp(1)
+} {2.71828182845905} $tolerance
+
+do_execsql_test_tolerance exp-float {
+  SELECT exp(-0.5)
+} {0.606530659712633} $tolerance
+
+do_execsql_test_tolerance exp-str {
+  SELECT exp('-0.5')
+} {0.606530659712633} $tolerance
+
+do_execsql_test_tolerance exp-null {
+  SELECT exp(null)
+} {} $tolerance
+
+
+do_execsql_test floor-int {
+  SELECT floor(1)
+} {1}
+
+do_execsql_test floor-float {
+  SELECT floor(-1.5)
+} {-2.0}
+
+do_execsql_test floor-str {
+  SELECT floor('1.5')
+} {1.0}
+
+do_execsql_test floor-null {
+  SELECT floor(null)
+} {}
+
+
+do_execsql_test_tolerance ln-int {
+  SELECT ln(1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance ln-float {
+  SELECT ln(0.5)
+} {-0.693147180559945} $tolerance
+
+do_execsql_test_tolerance ln-str {
+  SELECT ln('0.5')
+} {-0.693147180559945} $tolerance
+
+do_execsql_test_tolerance ln-negative {
+  SELECT ln(-0.5)
+} {} $tolerance
+
+do_execsql_test_tolerance ln-null {
+  SELECT ln(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance log10-int {
+  SELECT log10(1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance log10-float {
+  SELECT log10(0.5)
+} {-0.301029995663981} $tolerance
+
+do_execsql_test_tolerance log10-str {
+  SELECT log10('0.5')
+} {-0.301029995663981} $tolerance
+
+do_execsql_test_tolerance log10-negative {
+  SELECT log10(-0.5)
+} {} $tolerance
+
+do_execsql_test_tolerance log10-null {
+  SELECT log10(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance log2-int {
+  SELECT log2(1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance log2-float {
+  SELECT log2(0.5)
+} {-1.0} $tolerance
+
+do_execsql_test_tolerance log2-str {
+  SELECT log2('0.5')
+} {-1.0} $tolerance
+
+do_execsql_test_tolerance log2-negative {
+  SELECT log2(-0.5)
+} {} $tolerance
+
+do_execsql_test_tolerance log2-null {
+  SELECT log2(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance radians-int {
+  SELECT radians(1)
+} {0.0174532925199433} $tolerance
+
+do_execsql_test_tolerance radians-float {
+  SELECT radians(-0.5)
+} {-0.00872664625997165} $tolerance
+
+do_execsql_test_tolerance radians-str {
+  SELECT radians('-0.5')
+} {-0.00872664625997165} $tolerance
+
+do_execsql_test_tolerance radians-null {
+  SELECT radians(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance sinh-int {
+  SELECT sinh(1)
+} {1.1752011936438} $tolerance
+
+do_execsql_test_tolerance sinh-float {
+  SELECT sinh(-0.5)
+} {-0.521095305493747} $tolerance
+
+do_execsql_test_tolerance sinh-str {
+  SELECT sinh('-0.5')
+} {-0.521095305493747} $tolerance
+
+do_execsql_test_tolerance sinh-null {
+  SELECT sinh(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance sqrt-int {
+  SELECT sqrt(1)
+} {1.0} $tolerance
+
+do_execsql_test_tolerance sqrt-float {
+  SELECT sqrt(0.5)
+} {0.707106781186548} $tolerance
+
+do_execsql_test_tolerance sqrt-str {
+  SELECT sqrt('0.5')
+} {0.707106781186548} $tolerance
+
+do_execsql_test_tolerance sqrt-negative {
+  SELECT sqrt(-0.5)
+} {} $tolerance
+
+do_execsql_test_tolerance sqrt-null {
+  SELECT sqrt(null)
+} {} $tolerance
+
+
+do_execsql_test_tolerance tanh-int {
+  SELECT tanh(1)
+} {0.761594155955765} $tolerance
+
+do_execsql_test_tolerance tanh-float {
+  SELECT tanh(-0.5)
+} {-0.46211715726001} $tolerance
+
+do_execsql_test_tolerance tanh-str {
+  SELECT tanh('-0.5')
+} {-0.46211715726001} $tolerance
+
+do_execsql_test_tolerance tanh-null {
+  SELECT tanh(null)
+} {} $tolerance
+
+
+do_execsql_test trunc-int {
+  SELECT trunc(1)
+} {1}
+
+do_execsql_test trunc-float {
+  SELECT trunc(2.5)
+} {2.0}
+
+do_execsql_test trunc-float-negative {
+  SELECT trunc(-2.5)
+} {-2.0}
+
+do_execsql_test trunc-str {
+  SELECT trunc('2.5')
+} {2.0}
+
+do_execsql_test trunc-null {
+  SELECT trunc(null)
+} {}
