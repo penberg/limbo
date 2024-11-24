@@ -129,3 +129,11 @@ James|5921
 Joseph|5711
 Brian|5059
 William|5047}
+
+do_execsql_test order-by-agg-not-mentioned-in-select {
+  select u.first_name, length(group_concat(u.last_name)) from users u group by u.first_name order by max(u.email) desc limit 5;
+} {Louis|65
+Carolyn|118
+Katelyn|40
+Erik|88
+Collin|15}
