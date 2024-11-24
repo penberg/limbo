@@ -20,6 +20,9 @@ impl OperatorIdCounter {
 }
 
 fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
+    if aggs.iter().any(|a| a.original_expr == *expr) {
+        return;
+    }
     match expr {
         ast::Expr::FunctionCall { name, args, .. } => {
             let args_count = if let Some(args) = &args {
@@ -433,6 +436,9 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     };
 
                     bind_column_references(&mut expr, &plan.referenced_tables)?;
+                    if let Some(aggs) = &mut plan.aggregates {
+                        resolve_aggregates(&expr, aggs);
+                    }
 
                     key.push((
                         expr,
