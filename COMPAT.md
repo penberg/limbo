@@ -286,7 +286,7 @@ This document describes the SQLite compatibility status of Limbo:
 | MaxPgcnt        | No     |
 | MemMax          | No     |
 | Move            | No     |
-| Multiply        | No     |
+| Multiply        | Yes    |
 | MustBeInt       | Yes    |
 | Ne              | Yes    |
 | NewRowid        | Yes    |

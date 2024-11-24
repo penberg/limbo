@@ -835,6 +835,10 @@ impl Program {
                         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
                             state.registers[dest] = OwnedValue::Float(lhs * rhs);
                         }
+                        (OwnedValue::Integer(i), OwnedValue::Float(f))
+                        | (OwnedValue::Float(f), OwnedValue::Integer(i)) => {
+                            state.registers[dest] = OwnedValue::Float(*i as f64 * *f as f64);
+                        }
                         (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
                             state.registers[dest] = OwnedValue::Null;
                         }
@@ -865,6 +869,29 @@ impl Program {
                                         todo!("{:?}", aggctx);
                                     }
                                 },
+                                OwnedValue::Agg(aggctx2) => {
+                                    let acc = aggctx.final_value();
+                                    let acc2 = aggctx2.final_value();
+                                    match (acc, acc2) {
+                                        (OwnedValue::Integer(acc), OwnedValue::Integer(acc2)) => {
+                                            state.registers[dest] = OwnedValue::Integer(acc * acc2);
+                                        }
+                                        (OwnedValue::Float(acc), OwnedValue::Float(acc2)) => {
+                                            state.registers[dest] = OwnedValue::Float(acc * acc2);
+                                        }
+                                        (OwnedValue::Integer(acc), OwnedValue::Float(acc2)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Float(*acc as f64 * acc2);
+                                        }
+                                        (OwnedValue::Float(acc), OwnedValue::Integer(acc2)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Float(acc * *acc2 as f64);
+                                        }
+                                        _ => {
+                                            todo!("{:?} {:?}", acc, acc2);
+                                        }
+                                    }
+                                }
                                 rest => unimplemented!("{:?}", rest),
                             }
                         }
