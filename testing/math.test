@@ -1,0 +1,216 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test add-int {
+  SELECT 10 + 1
+} {11}
+
+do_execsql_test add-float {
+  SELECT 10.1 + 0.3
+} {10.4}
+
+do_execsql_test add-int-float {
+  SELECT 10 + 0.1
+} {10.1}
+
+do_execsql_test subtract-int {
+  SELECT 10 - 1
+} {9}
+
+do_execsql_test subtract-float {
+  SELECT 10.2 - 0.1
+} {10.1}
+
+do_execsql_test subtract-int-float {
+  SELECT 10 - 0.1
+} {9.9}
+
+do_execsql_test multiply-int {
+  SELECT 10 * 2
+} {20}
+
+do_execsql_test multiply-float {
+  SELECT 10.2 * 2.2
+} {22.44}
+
+do_execsql_test multiply-int-float {
+  SELECT 10 * 1.45
+} {14.5}
+
+do_execsql_test multiply-float-int {
+  SELECT 1.45 * 10
+} {14.5}
+
+do_execsql_test divide-int {
+  SELECT 10 / 2
+} {5}
+
+do_execsql_test divide-int-no-fraction {
+  SELECT 10 / 3
+} {3}
+
+do_execsql_test divide-float {
+  SELECT 10.6 / 2.5
+} {4.24}
+
+do_execsql_test divide-int-float {
+  SELECT 10 / 4.0
+} {2.5}
+
+do_execsql_test divide-float-int {
+  SELECT 10.0 / 4
+} {2.5}
+
+do_execsql_test divide-by-zero {
+  SELECT 10 / 0
+} {}
+
+do_execsql_test divide-int-null {
+  SELECT 10 / null
+} {}
+
+do_execsql_test divide-null-int {
+  SELECT null / 10
+} {}
+
+do_execsql_test divide-null {
+  SELECT null / null
+} {}
+
+
+
+do_execsql_test add-agg-int {
+  SELECT sum(id) + 10 from products
+} {76}
+
+do_execsql_test add-int-agg {
+  SELECT 10 + sum(id) from products
+} {76}
+
+do_execsql_test add-agg-float {
+  SELECT sum(id) + 10.1 from products
+} {76.1}
+
+do_execsql_test add-float-agg {
+  SELECT 10.1 + sum(id) from products
+} {76.1}
+
+do_execsql_test add-agg-int-agg-int {
+  SELECT sum(id) + sum(id) from products
+} {132}
+
+do_execsql_test add-agg-float-agg-float {
+  SELECT sum(price) + sum(price) from products
+} {1246.0}
+
+do_execsql_test add-agg-int-agg-float {
+  SELECT sum(id) + sum(price) from products
+} {689.0}
+
+do_execsql_test add-agg-int-agg-float {
+  SELECT sum(id) + sum(price) from products
+} {689.0}
+
+
+
+do_execsql_test subtract-agg-int {
+  SELECT sum(id) - 10 from products
+} {56}
+
+do_execsql_test subtract-int-agg {
+  SELECT 10 - sum(id) from products
+} {-56}
+
+do_execsql_test subtract-agg-float {
+  SELECT sum(id) - 10.1 from products
+} {55.9}
+
+do_execsql_test subtract-float-agg {
+  SELECT 10.1 - sum(id) from products
+} {-55.9}
+
+do_execsql_test subtract-agg-int-agg-int {
+  SELECT sum(id) - sum(id) from products
+} {0}
+
+do_execsql_test subtract-agg-float-agg-float {
+  SELECT sum(price) - sum(price) from products
+} {0.0}
+
+do_execsql_test subtract-agg-int-agg-float {
+  SELECT sum(id) - sum(price) from products
+} {-557.0}
+
+do_execsql_test subtract-agg-float-agg-int {
+  SELECT sum(price) - sum(id) from products
+} {557.0}
+
+
+
+do_execsql_test multiply-agg-int {
+  SELECT sum(id) * 10 from products
+} {660}
+
+do_execsql_test multiply-int-agg {
+  SELECT 10 * sum(id) from products
+} {660}
+
+do_execsql_test multiply-agg-float {
+  SELECT sum(id) * 10.1 from products
+} {666.6}
+
+do_execsql_test multiply-float-agg {
+  SELECT 10.1 * sum(id) from products
+} {666.6}
+
+do_execsql_test multiply-agg-int-agg-int {
+  SELECT sum(id) * sum(id) from products
+} {4356}
+
+do_execsql_test multiply-agg-float-agg-float {
+  SELECT sum(price) * sum(price) from products
+} {388129.0}
+
+do_execsql_test multiply-agg-int-agg-float {
+  SELECT sum(id) * sum(price) from products
+} {41118.0}
+
+do_execsql_test multiply-agg-float-agg-int {
+  SELECT sum(price) * sum(id) from products
+} {41118.0}
+
+
+
+do_execsql_test divide-agg-int {
+  SELECT sum(id) / 10 from products
+} {6}
+
+do_execsql_test divide-int-agg {
+  SELECT 660 / sum(id) from products
+} {10}
+
+do_execsql_test divide-agg-float {
+  SELECT sum(id) / 1.5 from products
+} {44.0}
+
+do_execsql_test divide-float-agg {
+  SELECT 66.0 / sum(id) from products
+} {1.0}
+
+do_execsql_test divide-agg-int-agg-int {
+  SELECT sum(id) / sum(id) from products
+} {1}
+
+do_execsql_test divide-agg-float-agg-float {
+  SELECT sum(price) / sum(price) from products
+} {1.0}
+
+do_execsql_test divide-agg-int-agg-float {
+  SELECT sum(id) / min(price) from products
+} {66.0}
+
+do_execsql_test divide-agg-float-agg-int {
+  SELECT min(price) / min(id) from products
+} {1.0}
