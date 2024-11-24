@@ -1,5 +1,4 @@
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
-use log;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
@@ -279,7 +278,7 @@ fn gen_random_text(env: &mut SimulatorEnv) -> String {
         let size = env.rng.gen_range(1024..max_size);
         let mut name = String::new();
         for i in 0..size {
-            name.push(((i % 26) as u8 + 'A' as u8) as char);
+            name.push(((i % 26) as u8 + b'A') as char);
         }
         name
     } else {
@@ -527,7 +526,7 @@ impl limbo_core::File for SimulatorFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(self.inner.size()?)
+        self.inner.size()
     }
 }
 
@@ -573,7 +572,7 @@ impl Value {
             Value::Integer(i) => i.to_string(),
             Value::Float(f) => f.to_string(),
             Value::Text(t) => format!("'{}'", t.clone()),
-            Value::Blob(vec) => to_sqlite_blob(&vec),
+            Value::Blob(vec) => to_sqlite_blob(vec),
         }
     }
 }

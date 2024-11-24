@@ -340,8 +340,8 @@ mod tests {
             log::debug!("counting");
             let list_query = "SELECT count(x) FROM test";
             loop {
-                match conn.query(list_query).unwrap() {
-                    Some(ref mut rows) => loop {
+                if let Some(ref mut rows) = conn.query(list_query).unwrap() {
+                    loop {
                         match rows.next_row()? {
                             RowResult::Row(row) => {
                                 let first_value = &row.values[0];
@@ -357,8 +357,7 @@ mod tests {
                             }
                             RowResult::Done => break,
                         }
-                    },
-                    None => {}
+                    }
                 }
             }
         }

@@ -48,7 +48,6 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::{Page, Pager};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
-use cfg_block::cfg_block;
 use log::trace;
 use std::cell::RefCell;
 use std::pin::Pin;

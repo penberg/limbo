@@ -2227,7 +2227,7 @@ impl Program {
                     let rows = Rows { stmt };
                     let mut schema = RefCell::borrow_mut(&conn.schema);
                     // TODO: This function below is synchronous, make it not async
-                    parse_schema_rows(Some(rows), &mut *schema, conn.pager.io.clone())?;
+                    parse_schema_rows(Some(rows), &mut schema, conn.pager.io.clone())?;
                     state.pc += 1;
                 }
             }

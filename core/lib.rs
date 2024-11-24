@@ -187,7 +187,7 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Rc::new(translate::translate(
-                        &*self.schema.borrow(),
+                        &self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -212,18 +212,18 @@ impl Connection {
             match cmd {
                 Cmd::Stmt(stmt) => {
                     let program = Rc::new(translate::translate(
-                        &*self.schema.borrow(),
+                        &self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
-                        Rc::downgrade(&self),
+                        Rc::downgrade(self),
                     )?);
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
                 }
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(
-                        &*self.schema.borrow(),
+                        &self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -235,7 +235,7 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let plan = prepare_select_plan(&*self.schema.borrow(), select)?;
+                            let plan = prepare_select_plan(&self.schema.borrow(), select)?;
                             let (plan, _) = optimize_plan(plan)?;
                             println!("{}", plan);
                         }
@@ -257,7 +257,7 @@ impl Connection {
             match cmd {
                 Cmd::Explain(stmt) => {
                     let program = translate::translate(
-                        &*self.schema.borrow(),
+                        &self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),
@@ -268,7 +268,7 @@ impl Connection {
                 Cmd::ExplainQueryPlan(_stmt) => todo!(),
                 Cmd::Stmt(stmt) => {
                     let program = translate::translate(
-                        &*self.schema.borrow(),
+                        &self.schema.borrow(),
                         stmt,
                         self.header.clone(),
                         self.pager.clone(),

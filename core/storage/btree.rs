@@ -273,7 +273,7 @@ impl BTreeCursor {
                 }
             }
 
-            if cell_idx >= contents.cell_count() + 1 {
+            if cell_idx > contents.cell_count() {
                 // end
                 let has_parent = self.stack.current() > 0;
                 if has_parent {
@@ -876,7 +876,7 @@ impl BTreeCursor {
                         .insert(overflow_cell.index, to_static_buf(&overflow_cell.payload));
                 }
                 *self.write_info.rightmost_pointer.borrow_mut() =
-                    page_copy.rightmost_pointer().clone();
+                    page_copy.rightmost_pointer();
 
                 self.write_info.page_copy.replace(Some(page_copy));
 
@@ -1222,7 +1222,7 @@ impl BTreeCursor {
 
     fn allocate_page(&self, page_type: PageType, offset: usize) -> Rc<RefCell<Page>> {
         let page = self.pager.allocate_page().unwrap();
-        btree_init_page(&page, page_type, &*self.database_header.borrow(), offset);
+        btree_init_page(&page, page_type, &self.database_header.borrow(), offset);
         page
     }
 
@@ -1423,7 +1423,7 @@ impl BTreeCursor {
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
         // don't count header and cell pointers?
-        nfree = nfree - first_cell as usize;
+        nfree -= first_cell as usize;
         nfree as u16
     }
 
