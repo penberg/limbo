@@ -202,7 +202,7 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     // gen insert query
     for column in &columns {
         let value = match column.column_type {
-            ColumnType::Integer => Value::Integer(env.rng.gen_range(std::i64::MIN..std::i64::MAX)),
+            ColumnType::Integer => Value::Integer(env.rng.gen_range(i64::MIN..i64::MAX)),
             ColumnType::Float => Value::Float(env.rng.gen_range(-1e10..1e10)),
             ColumnType::Text => Value::Text(gen_random_text(env)),
             ColumnType::Blob => Value::Blob(gen_random_text(env).as_bytes().to_vec()),
@@ -224,7 +224,7 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     Ok(())
 }
 
-fn compare_equal_rows(a: &Vec<Vec<Value>>, b: &Vec<Vec<Value>>) {
+fn compare_equal_rows(a: &[Vec<Value>], b: &[Vec<Value>]) {
     assert_eq!(a.len(), b.len(), "lengths are different");
     for (r1, r2) in a.iter().zip(b) {
         for (v1, v2) in r1.iter().zip(r2) {
@@ -577,7 +577,7 @@ impl Value {
     }
 }
 
-fn to_sqlite_blob(bytes: &Vec<u8>) -> String {
+fn to_sqlite_blob(bytes: &[u8]) -> String {
     let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
     format!("X'{}'", hex)
 }

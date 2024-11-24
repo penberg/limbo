@@ -1190,7 +1190,7 @@ pub fn payload_overflows(
 
 pub fn checksum_wal(
     buf: &[u8],
-    wal_header: &WalHeader,
+    _wal_header: &WalHeader,
     input: (u32, u32),
     native_endian: bool, // Sqlite interprets big endian as "native"
 ) -> (u32, u32) {

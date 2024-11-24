@@ -9,7 +9,6 @@ use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekO
 use crate::Result;
 
 use std::cell::{Ref, RefCell};
-use std::i32;
 use std::pin::Pin;
 use std::rc::Rc;
 
@@ -875,8 +874,7 @@ impl BTreeCursor {
                     scratch_cells
                         .insert(overflow_cell.index, to_static_buf(&overflow_cell.payload));
                 }
-                *self.write_info.rightmost_pointer.borrow_mut() =
-                    page_copy.rightmost_pointer();
+                *self.write_info.rightmost_pointer.borrow_mut() = page_copy.rightmost_pointer();
 
                 self.write_info.page_copy.replace(Some(page_copy));
 

@@ -2823,7 +2823,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
     match affinity(datatype) {
         // NONE	Casting a value to a type-name with no affinity causes the value to be converted into a BLOB. Casting to a BLOB consists of first casting the value to TEXT in the encoding of the database connection, then interpreting the resulting byte sequence as a BLOB instead of as TEXT.
         // Historically called NONE, but it's the same as BLOB
-        Affinity::BLOB => {
+        Affinity::Blob => {
             // Convert to TEXT first, then interpret as BLOB
             // TODO: handle encoding
             let text = value.to_string();
@@ -2831,12 +2831,12 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
         }
         // TEXT To cast a BLOB value to TEXT, the sequence of bytes that make up the BLOB is interpreted as text encoded using the database encoding.
         // Casting an INTEGER or REAL value into TEXT renders the value as if via sqlite3_snprintf() except that the resulting TEXT uses the encoding of the database connection.
-        Affinity::TEXT => {
+        Affinity::Text => {
             // Convert everything to text representation
             // TODO: handle encoding and whatever sqlite3_snprintf does
             OwnedValue::Text(Rc::new(value.to_string()))
         }
-        Affinity::REAL => match value {
+        Affinity::Real => match value {
             OwnedValue::Blob(b) => {
                 // Convert BLOB to TEXT first
                 let text = String::from_utf8_lossy(b);
@@ -2847,7 +2847,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
             OwnedValue::Float(f) => OwnedValue::Float(*f),
             _ => OwnedValue::Float(0.0),
         },
-        Affinity::INTEGER => match value {
+        Affinity::Integer => match value {
             OwnedValue::Blob(b) => {
                 // Convert BLOB to TEXT first
                 let text = String::from_utf8_lossy(b);
@@ -2871,7 +2871,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
             }
             _ => OwnedValue::Integer(0),
         },
-        Affinity::NUMERIC => match value {
+        Affinity::Numeric => match value {
             OwnedValue::Blob(b) => {
                 let text = String::from_utf8_lossy(b);
                 cast_text_to_numeric(&text)
@@ -2885,11 +2885,11 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
 }
 
 enum Affinity {
-    INTEGER,
-    TEXT,
-    BLOB,
-    REAL,
-    NUMERIC,
+    Integer,
+    Text,
+    Blob,
+    Real,
+    Numeric,
 }
 
 /// For tables not declared as STRICT, the affinity of a column is determined by the declared type of the column, according to the following rules in the order shown:
@@ -2903,26 +2903,26 @@ fn affinity(datatype: &str) -> Affinity {
     // Note: callers of this function must ensure that the datatype is uppercase.
     // Rule 1: INT -> INTEGER affinity
     if datatype.contains("INT") {
-        return Affinity::INTEGER;
+        return Affinity::Integer;
     }
 
     // Rule 2: CHAR/CLOB/TEXT -> TEXT affinity
     if datatype.contains("CHAR") || datatype.contains("CLOB") || datatype.contains("TEXT") {
-        return Affinity::TEXT;
+        return Affinity::Text;
     }
 
     // Rule 3: BLOB or empty -> BLOB affinity (historically called NONE)
     if datatype.contains("BLOB") || datatype.is_empty() {
-        return Affinity::BLOB;
+        return Affinity::Blob;
     }
 
     // Rule 4: REAL/FLOA/DOUB -> REAL affinity
     if datatype.contains("REAL") || datatype.contains("FLOA") || datatype.contains("DOUB") {
-        return Affinity::REAL;
+        return Affinity::Real;
     }
 
     // Rule 5: Otherwise -> NUMERIC affinity
-    Affinity::NUMERIC
+    Affinity::Numeric
 }
 
 /// When casting a TEXT value to INTEGER, the longest possible prefix of the value that can be interpreted as an integer number
@@ -2971,7 +2971,7 @@ fn cast_text_to_real(text: &str) -> OwnedValue {
     OwnedValue::Float(0.0)
 }
 
-/// NUMERIC	Casting a TEXT or BLOB value into NUMERIC yields either an INTEGER or a REAL result.
+/// NUMERIC Casting a TEXT or BLOB value into NUMERIC yields either an INTEGER or a REAL result.
 /// If the input text looks like an integer (there is no decimal point nor exponent) and the value
 /// is small enough to fit in a 64-bit signed integer, then the result will be INTEGER.
 /// Input text that looks like floating point (there is a decimal point and/or an exponent)
@@ -3129,7 +3129,7 @@ mod tests {
         mock.expect_seek_to_last()
             .return_once(|| Ok(CursorResult::Ok(())));
         mock.expect_rowid()
-            .return_once(|| Ok(Some(std::i64::MAX as u64)));
+            .return_once(|| Ok(Some(i64::MAX as u64)));
         mock.expect_seek()
             .with(predicate::always(), predicate::always())
             .returning(|rowid, _| {
@@ -3150,7 +3150,7 @@ mod tests {
         mock.expect_seek_to_last()
             .return_once(|| Ok(CursorResult::Ok(())));
         mock.expect_rowid()
-            .return_once(|| Ok(Some(std::i64::MAX as u64)));
+            .return_once(|| Ok(Some(i64::MAX as u64)));
         mock.expect_seek()
             .with(predicate::always(), predicate::always())
             .return_once(|_, _| Ok(CursorResult::IO));
@@ -3163,7 +3163,7 @@ mod tests {
         mock.expect_seek_to_last()
             .return_once(|| Ok(CursorResult::Ok(())));
         mock.expect_rowid()
-            .return_once(|| Ok(Some(std::i64::MAX as u64)));
+            .return_once(|| Ok(Some(i64::MAX as u64)));
         mock.expect_seek()
             .with(predicate::always(), predicate::always())
             .returning(|_, _| Ok(CursorResult::Ok(true)));
