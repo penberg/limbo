@@ -159,7 +159,7 @@ impl Wal for WalFile {
             &page,
             db_size,
             write_counter,
-            &*header,
+            &header,
             checksums,
         )?;
         self.last_checksum.replace(checksums);
@@ -235,9 +235,9 @@ impl Wal for WalFile {
         }
 
         if *self.syncing.borrow() {
-            return Ok(CheckpointStatus::IO);
+            Ok(CheckpointStatus::IO)
         } else {
-            return Ok(CheckpointStatus::Done);
+            Ok(CheckpointStatus::Done)
         }
     }
 }

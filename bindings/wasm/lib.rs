@@ -57,10 +57,7 @@ impl Statement {
 
     #[wasm_bindgen]
     pub fn raw(mut self, toggle: Option<bool>) -> Self {
-        self.raw = match toggle {
-            Some(toggle) => toggle,
-            None => true,
-        };
+        self.raw = toggle.unwrap_or(true);
         self
     }
 

@@ -70,7 +70,7 @@ impl LinuxIO {
 }
 
 impl InnerLinuxIO {
-    pub fn get_iovec<'a>(&'a mut self, buf: *const u8, len: usize) -> &'a iovec {
+    pub fn get_iovec(&mut self, buf: *const u8, len: usize) -> &iovec {
         let iovec = &mut self.iovecs[self.next_iovec];
         iovec.iov_base = buf as *mut std::ffi::c_void;
         iovec.iov_len = len;

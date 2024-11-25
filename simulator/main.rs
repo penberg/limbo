@@ -1,5 +1,4 @@
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
-use log;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
@@ -203,7 +202,7 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     // gen insert query
     for column in &columns {
         let value = match column.column_type {
-            ColumnType::Integer => Value::Integer(env.rng.gen_range(std::i64::MIN..std::i64::MAX)),
+            ColumnType::Integer => Value::Integer(env.rng.gen_range(i64::MIN..i64::MAX)),
             ColumnType::Float => Value::Float(env.rng.gen_range(-1e10..1e10)),
             ColumnType::Text => Value::Text(gen_random_text(env)),
             ColumnType::Blob => Value::Blob(gen_random_text(env).as_bytes().to_vec()),
@@ -225,7 +224,7 @@ fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     Ok(())
 }
 
-fn compare_equal_rows(a: &Vec<Vec<Value>>, b: &Vec<Vec<Value>>) {
+fn compare_equal_rows(a: &[Vec<Value>], b: &[Vec<Value>]) {
     assert_eq!(a.len(), b.len(), "lengths are different");
     for (r1, r2) in a.iter().zip(b) {
         for (v1, v2) in r1.iter().zip(r2) {
@@ -279,7 +278,7 @@ fn gen_random_text(env: &mut SimulatorEnv) -> String {
         let size = env.rng.gen_range(1024..max_size);
         let mut name = String::new();
         for i in 0..size {
-            name.push(((i % 26) as u8 + 'A' as u8) as char);
+            name.push(((i % 26) as u8 + b'A') as char);
         }
         name
     } else {
@@ -527,7 +526,7 @@ impl limbo_core::File for SimulatorFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(self.inner.size()?)
+        self.inner.size()
     }
 }
 
@@ -573,12 +572,12 @@ impl Value {
             Value::Integer(i) => i.to_string(),
             Value::Float(f) => f.to_string(),
             Value::Text(t) => format!("'{}'", t.clone()),
-            Value::Blob(vec) => to_sqlite_blob(&vec),
+            Value::Blob(vec) => to_sqlite_blob(vec),
         }
     }
 }
 
-fn to_sqlite_blob(bytes: &Vec<u8>) -> String {
+fn to_sqlite_blob(bytes: &[u8]) -> String {
     let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
     format!("X'{}'", hex)
 }
