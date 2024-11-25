@@ -13,12 +13,10 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub enum ResultSetColumn {
-    Expr {
-        expr: ast::Expr,
-        contains_aggregates: bool,
-    },
-    Agg(Aggregate),
+pub struct ResultSetColumn {
+    pub expr: ast::Expr,
+    // TODO: encode which aggregates (e.g. index bitmask of plan.aggregates) are present in this column
+    pub contains_aggregates: bool,
 }
 
 #[derive(Debug)]

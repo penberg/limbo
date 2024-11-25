@@ -60,6 +60,7 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
             resolve_aggregates(lhs, aggs);
             resolve_aggregates(rhs, aggs);
         }
+        // TODO: handle other expressions that may contain aggregates
         _ => {}
     }
 }
@@ -272,7 +273,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     ast::ResultColumn::Star => {
                         for table_reference in plan.referenced_tables.iter() {
                             for (idx, col) in table_reference.table.columns.iter().enumerate() {
-                                plan.result_columns.push(ResultSetColumn::Expr {
+                                plan.result_columns.push(ResultSetColumn {
                                     expr: ast::Expr::Column {
                                         database: None, // TODO: support different databases
                                         table: table_reference.table_index,
@@ -296,7 +297,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                         }
                         let table_reference = referenced_table.unwrap();
                         for (idx, col) in table_reference.table.columns.iter().enumerate() {
-                            plan.result_columns.push(ResultSetColumn::Expr {
+                            plan.result_columns.push(ResultSetColumn {
                                 expr: ast::Expr::Column {
                                     database: None, // TODO: support different databases
                                     table: table_reference.table_index,
@@ -333,14 +334,17 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                             original_expr: expr.clone(),
                                         };
                                         aggregate_expressions.push(agg.clone());
-                                        plan.result_columns.push(ResultSetColumn::Agg(agg));
+                                        plan.result_columns.push(ResultSetColumn {
+                                            expr: expr.clone(),
+                                            contains_aggregates: true,
+                                        });
                                     }
                                     Ok(_) => {
                                         let cur_agg_count = aggregate_expressions.len();
                                         resolve_aggregates(&expr, &mut aggregate_expressions);
                                         let contains_aggregates =
                                             cur_agg_count != aggregate_expressions.len();
-                                        plan.result_columns.push(ResultSetColumn::Expr {
+                                        plan.result_columns.push(ResultSetColumn {
                                             expr: expr.clone(),
                                             contains_aggregates,
                                         });
@@ -364,7 +368,10 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                         original_expr: expr.clone(),
                                     };
                                     aggregate_expressions.push(agg.clone());
-                                    plan.result_columns.push(ResultSetColumn::Agg(agg));
+                                    plan.result_columns.push(ResultSetColumn {
+                                        expr: expr.clone(),
+                                        contains_aggregates: true,
+                                    });
                                 } else {
                                     crate::bail_parse_error!(
                                         "Invalid aggregate function: {}",
@@ -372,21 +379,14 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     );
                                 }
                             }
-                            ast::Expr::Binary(lhs, _, rhs) => {
+                            expr => {
                                 let cur_agg_count = aggregate_expressions.len();
-                                resolve_aggregates(&lhs, &mut aggregate_expressions);
-                                resolve_aggregates(&rhs, &mut aggregate_expressions);
+                                resolve_aggregates(expr, &mut aggregate_expressions);
                                 let contains_aggregates =
                                     cur_agg_count != aggregate_expressions.len();
-                                plan.result_columns.push(ResultSetColumn::Expr {
+                                plan.result_columns.push(ResultSetColumn {
                                     expr: expr.clone(),
                                     contains_aggregates,
-                                });
-                            }
-                            e => {
-                                plan.result_columns.push(ResultSetColumn::Expr {
-                                    expr: e.clone(),
-                                    contains_aggregates: false,
                                 });
                             }
                         }
