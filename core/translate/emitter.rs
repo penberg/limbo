@@ -1008,7 +1008,7 @@ fn inner_loop_source_emit(
             let agg_final_label = program.allocate_label();
             m.termination_label_stack.push(agg_final_label);
             let num_aggs = aggregates.len();
-            let start_reg = program.alloc_registers(result_columns.len());
+            let start_reg = program.alloc_registers(num_aggs);
             m.aggregation_start_register = Some(start_reg);
             for (i, agg) in aggregates.iter().enumerate() {
                 let reg = start_reg + i;
