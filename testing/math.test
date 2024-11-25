@@ -15,6 +15,18 @@ do_execsql_test add-int-float {
   SELECT 10 + 0.1
 } {10.1}
 
+do_execsql_test add-agg-int-agg-int {
+  SELECT sum(1) + sum(2)
+} {3}
+
+do_execsql_test add-agg-int-agg-float {
+  SELECT sum(1) + sum(2.5)
+} {3.5}
+
+do_execsql_test add-agg-float-agg-int {
+  SELECT sum(1.5) + sum(2)
+} {3.5}
+
 do_execsql_test subtract-int {
   SELECT 10 - 1
 } {9}
@@ -26,6 +38,18 @@ do_execsql_test subtract-float {
 do_execsql_test subtract-int-float {
   SELECT 10 - 0.1
 } {9.9}
+
+do_execsql_test subtract-agg-int-agg-int {
+  SELECT sum(3) - sum(1)
+} {2}
+
+do_execsql_test subtract-agg-int-agg-float {
+  SELECT sum(3) - sum(1.5)
+} {1.5}
+
+do_execsql_test subtract-agg-float-agg-int {
+  SELECT sum(3.5) - sum(1)
+} {2.5}
 
 do_execsql_test multiply-int {
   SELECT 10 * 2
@@ -42,6 +66,18 @@ do_execsql_test multiply-int-float {
 do_execsql_test multiply-float-int {
   SELECT 1.45 * 10
 } {14.5}
+
+do_execsql_test multiply-agg-int-agg-int {
+  SELECT sum(2) * sum(3)
+} {6}
+
+do_execsql_test multiply-agg-int-agg-float {
+  SELECT sum(2) * sum(3.5)
+} {7.0}
+
+do_execsql_test multiply-agg-float-agg-int {
+  SELECT sum(2.5) * sum(3)
+} {7.5}
 
 do_execsql_test divide-int {
   SELECT 10 / 2
@@ -79,6 +115,17 @@ do_execsql_test divide-null {
   SELECT null / null
 } {}
 
+do_execsql_test divide-agg-int-agg-int {
+  SELECT sum(4) / sum(2)
+} {2}
+
+do_execsql_test divide-agg-int-agg-float {
+  SELECT sum(4) / sum(2.0)
+} {2.0}
+
+do_execsql_test divide-agg-float-agg-int {
+  SELECT sum(4.0) / sum(2)
+} {2.0}
 
 
 do_execsql_test add-agg-int {
