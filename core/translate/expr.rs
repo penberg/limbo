@@ -1635,6 +1635,53 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+
+                    MathFuncArity::Binary => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 2 arguments",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let reg1 = program.alloc_register();
+                        let reg2 = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            reg1,
+                            precomputed_exprs_to_registers,
+                        )?;
+                        if let ast::Expr::Literal(_) = &args[0] {
+                            program.mark_last_insn_constant();
+                        }
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[1],
+                            reg2,
+                            precomputed_exprs_to_registers,
+                        )?;
+                        if let ast::Expr::Literal(_) = &args[1] {
+                            program.mark_last_insn_constant();
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: target_register + 1,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                     _ => unimplemented!(),
                 },
             }

@@ -169,7 +169,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | asin(X)    | Yes    |         |
 | asinh(X)   | Yes    |         |
 | atan(X)    | Yes    |         |
-| atan2(Y,X) | No     |         |
+| atan2(Y,X) | Yes    |         |
 | atanh(X)   | Yes    |         |
 | ceil(X)    | Yes    |         |
 | ceiling(X) | Yes    |         |
@@ -183,10 +183,10 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | log(X)     | No     |         |
 | log10(X)   | Yes    |         |
 | log2(X)    | Yes    |         |
-| mod(X,Y)   | No     |         |
+| mod(X,Y)   | Yes    |         |
 | pi()       | No     |         |
-| pow(X,Y)   | No     |         |
-| power(X,Y) | No     |         |
+| pow(X,Y)   | Yes    |         |
+| power(X,Y) | Yes    |         |
 | radians(X) | Yes    |         |
 | sin(X)     | Yes    |         |
 | sinh(X)    | Yes    |         |

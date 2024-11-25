@@ -791,3 +791,183 @@ do_execsql_test trunc-str {
 do_execsql_test trunc-null {
   SELECT trunc(null)
 } {}
+
+
+do_execsql_test_tolerance atan2-int-int {
+  SELECT atan2(5, -1)
+} {1.76819188664478} $tolerance
+
+do_execsql_test_tolerance atan2-int-float {
+  SELECT atan2(5, -1.5)
+} {1.86225312127276} $tolerance
+
+do_execsql_test_tolerance atan2-int-str {
+  SELECT atan2(5, '-1.5')
+} {1.86225312127276} $tolerance
+
+do_execsql_test_tolerance atan2-float-int {
+  SELECT atan2(5.5, 10)
+} {0.502843210927861} $tolerance
+
+do_execsql_test_tolerance atan2-float-float {
+  SELECT atan2(5.5, -1.5)
+} {1.83704837594582} $tolerance
+
+do_execsql_test_tolerance atan2-float-str {
+  SELECT atan2(5.5, '-1.5')
+} {1.83704837594582} $tolerance
+
+do_execsql_test_tolerance atan2-str-str {
+  SELECT atan2('5.5', '-1.5')
+} {1.83704837594582} $tolerance
+
+do_execsql_test atan2-null-int {
+  SELECT atan2(null, 5)
+} {}
+
+do_execsql_test atan2-int-null {
+  SELECT atan2(5, null)
+} {}
+
+
+do_execsql_test_tolerance mod-int-int {
+  SELECT mod(10, -3)
+} {1.0} $tolerance
+
+do_execsql_test_tolerance mod-int-float {
+  SELECT mod(5, -1.5)
+} {0.5} $tolerance
+
+do_execsql_test_tolerance mod-int-str {
+  SELECT mod(5, '-1.5')
+} {0.5} $tolerance
+
+do_execsql_test_tolerance mod-float-int {
+  SELECT mod(5.5, 2)
+} {1.5} $tolerance
+
+do_execsql_test_tolerance mod-float-float {
+  SELECT mod(5.5, -1.5)
+} {1.0} $tolerance
+
+do_execsql_test_tolerance mod-float-str {
+  SELECT mod(5.5, '-1.5')
+} {1.0} $tolerance
+
+do_execsql_test_tolerance mod-str-str {
+  SELECT mod('5.5', '-1.5')
+} {1.0} $tolerance
+
+do_execsql_test mod-null-int {
+  SELECT mod(null, 5)
+} {}
+
+do_execsql_test mod-int-null {
+  SELECT mod(5, null)
+} {}
+
+do_execsql_test mod-float-zero {
+  SELECT mod(1.5, 0)
+} {}
+
+do_execsql_test mod-products-id {
+  SELECT mod(products.id, 3) from products
+} {1.0
+2.0
+0.0
+1.0
+2.0
+0.0
+1.0
+2.0
+0.0
+1.0
+2.0}
+
+do_execsql_test mod-products-price-id {
+  SELECT mod(products.price, products.id) from products
+} {0.0
+0.0
+0.0
+1.0
+4.0
+4.0
+1.0
+2.0
+1.0
+3.0
+4.0}
+
+
+do_execsql_test_tolerance pow-int-int {
+  SELECT pow(5, -1)
+} {0.2} $tolerance
+
+do_execsql_test_tolerance pow-int-float {
+  SELECT pow(5, -1.5)
+} {0.0894427190999916} $tolerance
+
+do_execsql_test_tolerance pow-int-str {
+  SELECT pow(5, '-1.5')
+} {0.0894427190999916} $tolerance
+
+do_execsql_test_tolerance pow-float-int {
+  SELECT pow(5.5, 2)
+} {30.25} $tolerance
+
+do_execsql_test_tolerance pow-float-float {
+  SELECT pow(5.5, -1.5)
+} {0.077527533220222} $tolerance
+
+do_execsql_test_tolerance pow-float-str {
+  SELECT pow(5.5, '-1.5')
+} {0.077527533220222} $tolerance
+
+do_execsql_test_tolerance pow-str-str {
+  SELECT pow('5.5', '-1.5')
+} {0.077527533220222} $tolerance
+
+do_execsql_test pow-null-int {
+  SELECT pow(null, 5)
+} {}
+
+do_execsql_test pow-int-null {
+  SELECT pow(5, null)
+} {}
+
+
+do_execsql_test_tolerance power-int-int {
+  SELECT power(5, -1)
+} {0.2} $tolerance
+
+do_execsql_test_tolerance power-int-float {
+  SELECT power(5, -1.5)
+} {0.0894427190999916} $tolerance
+
+do_execsql_test_tolerance power-int-str {
+  SELECT power(5, '-1.5')
+} {0.0894427190999916} $tolerance
+
+do_execsql_test_tolerance power-float-int {
+  SELECT power(5.5, 2)
+} {30.25} $tolerance
+
+do_execsql_test_tolerance power-float-float {
+  SELECT power(5.5, -1.5)
+} {0.077527533220222} $tolerance
+
+do_execsql_test_tolerance power-float-str {
+  SELECT power(5.5, '-1.5')
+} {0.077527533220222} $tolerance
+
+do_execsql_test_tolerance power-str-str {
+  SELECT power('5.5', '-1.5')
+} {0.077527533220222} $tolerance
+
+do_execsql_test power-null-int {
+  SELECT power(null, 5)
+} {}
+
+do_execsql_test power-int-null {
+  SELECT power(5, null)
+} {}

@@ -2497,6 +2497,13 @@ impl Program {
                                 let result = exec_math_unary(reg_value, math_func);
                                 state.registers[*dest] = result;
                             }
+
+                            MathFuncArity::Binary => {
+                                let lhs = &state.registers[*start_reg];
+                                let rhs = &state.registers[*start_reg + 1];
+                                let result = exec_math_binary(lhs, rhs, math_func);
+                                state.registers[*dest] = result;
+                            }
                             _ => unimplemented!(),
                         },
                         crate::function::Func::Agg(_) => {
@@ -3653,6 +3660,31 @@ fn exec_math_unary(reg: &OwnedValue, function: &MathFunc) -> OwnedValue {
         MathFunc::Tanh => f.tanh(),
         MathFunc::Trunc => f.trunc(),
         _ => unreachable!("Unexpected mathematical unary function {:?}", function),
+    };
+
+    if result.is_nan() {
+        OwnedValue::Null
+    } else {
+        OwnedValue::Float(result)
+    }
+}
+
+fn exec_math_binary(lhs: &OwnedValue, rhs: &OwnedValue, function: &MathFunc) -> OwnedValue {
+    let lhs = match to_f64(lhs) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let rhs = match to_f64(rhs) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let result = match function {
+        MathFunc::Atan2 => lhs.atan2(rhs),
+        MathFunc::Mod => lhs % rhs,
+        MathFunc::Pow | MathFunc::Power => lhs.powf(rhs),
+        _ => unreachable!("Unexpected mathematical binary function {:?}", function),
     };
 
     if result.is_nan() {
