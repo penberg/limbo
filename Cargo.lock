@@ -1151,6 +1151,7 @@ dependencies = [
 name = "limbo_core"
 version = "0.0.9"
 dependencies = [
+ "bumpalo",
  "cfg_block",
  "chrono",
  "criterion",
