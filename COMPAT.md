@@ -236,7 +236,7 @@ This document describes the SQLite compatibility status of Limbo:
 | DecrJumpZero    | Yes    |
 | Delete          | No     |
 | Destroy         | No     |
-| Divide          | No     |
+| Divide          | Yes    |
 | DropIndex       | No     |
 | DropTable       | No     |
 | DropTrigger     | No     |
@@ -286,7 +286,7 @@ This document describes the SQLite compatibility status of Limbo:
 | MaxPgcnt        | No     |
 | MemMax          | No     |
 | Move            | No     |
-| Multiply        | No     |
+| Multiply        | Yes    |
 | MustBeInt       | Yes    |
 | Ne              | Yes    |
 | NewRowid        | Yes    |
@@ -355,7 +355,7 @@ This document describes the SQLite compatibility status of Limbo:
 | SorterSort      | Yes    |
 | String          | No     |
 | String8         | Yes    |
-| Subtract        | No     |
+| Subtract        | Yes    |
 | TableLock       | No     |
 | ToBlob          | No     |
 | ToInt           | No     |

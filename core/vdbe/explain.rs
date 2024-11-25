@@ -46,6 +46,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=r[{}]*r[{}]", dest, lhs, rhs),
             ),
+            Insn::Divide { lhs, rhs, dest } => (
+                "Divide",
+                *lhs as i32,
+                *rhs as i32,
+                *dest as i32,
+                OwnedValue::Text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}]/r[{}]", dest, lhs, rhs),
+            ),
             Insn::Null { dest, dest_end } => (
                 "Null",
                 0,
