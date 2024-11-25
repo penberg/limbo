@@ -915,41 +915,26 @@ fn inner_loop_source_emit(
         InnerLoopEmitTarget::OrderBySorter { order_by } => {
             // We need to handle the case where we are emitting to sorter.
             // In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
-            // In case any of the sort keys are exactly equal to a result column, we need to skip emitting that result column.
+            // In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
             // We need to do this before rewriting the result columns to registers because we need to know which columns to skip.
             // Moreover, we need to keep track what index in the ORDER BY sorter the result columns have, because the result columns
             // should be emitted in the SELECT clause order, not the ORDER BY clause order.
             let mut result_columns_to_skip: Option<Vec<usize>> = None;
             for (i, rc) in result_columns.iter().enumerate() {
-                if !rc.contains_aggregates {
-                    let found = order_by
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (e, _))| e == &rc.expr);
-                    if let Some((j, _)) = found {
-                        if let Some(ref mut v) = result_columns_to_skip {
-                            v.push(i);
-                        } else {
-                            result_columns_to_skip = Some(vec![i]);
-                        }
-                        m.result_column_indexes_in_orderby_sorter.insert(i, j);
+                // TODO: although this is an optimization and not strictly necessary, we should implement a custom equality check for expressions
+                // there are lots of examples where this breaks, even simple ones like
+                // length(foo) != LENGTH(foo) which causes the length to be computed twice
+                let found = order_by
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (expr, _))| expr == &rc.expr);
+                if let Some((j, _)) = found {
+                    if let Some(ref mut v) = result_columns_to_skip {
+                        v.push(i);
+                    } else {
+                        result_columns_to_skip = Some(vec![i]);
                     }
-                } else {
-                    // TODO: implement a custom equality check for expressions
-                    // there are lots of examples where this breaks, even simple ones like
-                    // sum(x) != SUM(x)
-                    let found = order_by
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (expr, _))| expr == &rc.expr);
-                    if let Some((j, _)) = found {
-                        if let Some(ref mut v) = result_columns_to_skip {
-                            v.push(i);
-                        } else {
-                            result_columns_to_skip = Some(vec![i]);
-                        }
-                        m.result_column_indexes_in_orderby_sorter.insert(i, j);
-                    }
+                    m.result_column_indexes_in_orderby_sorter.insert(i, j);
                 }
             }
             let order_by_len = order_by.len();
@@ -1005,6 +990,8 @@ fn inner_loop_source_emit(
             for (i, rc) in result_columns.iter().enumerate() {
                 if rc.contains_aggregates {
                     // Do nothing, aggregates are computed above
+                    // if this result column is e.g. something like sum(x) + 1 or length(sum(x)), we do not want to translate that (+1) or length() yet,
+                    // it will be computed after the aggregations are finalized.
                     continue;
                 }
                 let reg = start_reg + num_aggs + i;
@@ -1444,42 +1431,27 @@ fn group_by_emit(
 
     // We need to handle the case where we are emitting to sorter.
     // In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
-    // In case any of the sort keys are exactly equal to a result column, we need to skip emitting that result column.
+    // In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
     // We need to do this before rewriting the result columns to registers because we need to know which columns to skip.
     // Moreover, we need to keep track what index in the ORDER BY sorter the result columns have, because the result columns
     // should be emitted in the SELECT clause order, not the ORDER BY clause order.
     let mut result_columns_to_skip: Option<Vec<usize>> = None;
     if let Some(order_by) = order_by {
         for (i, rc) in result_columns.iter().enumerate() {
-            if !rc.contains_aggregates {
-                let found = order_by
-                    .iter()
-                    .enumerate()
-                    .find(|(_, (e, _))| e == &rc.expr);
-                if let Some((j, _)) = found {
-                    if let Some(ref mut v) = result_columns_to_skip {
-                        v.push(i);
-                    } else {
-                        result_columns_to_skip = Some(vec![i]);
-                    }
-                    m.result_column_indexes_in_orderby_sorter.insert(i, j);
+            // TODO: implement a custom equality check for expressions
+            // there are lots of examples where this breaks, even simple ones like
+            // sum(x) != SUM(x)
+            let found = order_by
+                .iter()
+                .enumerate()
+                .find(|(_, (expr, _))| expr == &rc.expr);
+            if let Some((j, _)) = found {
+                if let Some(ref mut v) = result_columns_to_skip {
+                    v.push(i);
+                } else {
+                    result_columns_to_skip = Some(vec![i]);
                 }
-            } else {
-                // TODO: implement a custom equality check for expressions
-                // there are lots of examples where this breaks, even simple ones like
-                // sum(x) != SUM(x)
-                let found = order_by
-                    .iter()
-                    .enumerate()
-                    .find(|(_, (expr, _))| expr == &rc.expr);
-                if let Some((j, _)) = found {
-                    if let Some(ref mut v) = result_columns_to_skip {
-                        v.push(i);
-                    } else {
-                        result_columns_to_skip = Some(vec![i]);
-                    }
-                    m.result_column_indexes_in_orderby_sorter.insert(i, j);
-                }
+                m.result_column_indexes_in_orderby_sorter.insert(i, j);
             }
         }
     }
