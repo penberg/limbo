@@ -913,31 +913,9 @@ fn inner_loop_source_emit(
             Ok(())
         }
         InnerLoopEmitTarget::OrderBySorter { order_by } => {
-            // We need to handle the case where we are emitting to sorter.
-            // In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
-            // In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
-            // We need to do this before rewriting the result columns to registers because we need to know which columns to skip.
-            // Moreover, we need to keep track what index in the ORDER BY sorter the result columns have, because the result columns
-            // should be emitted in the SELECT clause order, not the ORDER BY clause order.
-            let mut result_columns_to_skip: Option<Vec<usize>> = None;
-            for (i, rc) in result_columns.iter().enumerate() {
-                // TODO: although this is an optimization and not strictly necessary, we should implement a custom equality check for expressions
-                // there are lots of examples where this breaks, even simple ones like
-                // length(foo) != LENGTH(foo) which causes the length to be computed twice
-                let found = order_by
-                    .iter()
-                    .enumerate()
-                    .find(|(_, (expr, _))| expr == &rc.expr);
-                if let Some((j, _)) = found {
-                    if let Some(ref mut v) = result_columns_to_skip {
-                        v.push(i);
-                    } else {
-                        result_columns_to_skip = Some(vec![i]);
-                    }
-                    m.result_column_indexes_in_orderby_sorter.insert(i, j);
-                }
-            }
             let order_by_len = order_by.len();
+            let result_columns_to_skip =
+                orderby_deduplicate_result_columns(order_by, result_columns);
             let result_columns_to_skip_len = result_columns_to_skip
                 .as_ref()
                 .map(|v| v.len())
@@ -953,7 +931,10 @@ fn inner_loop_source_emit(
             let mut cur_idx_in_orderby_sorter = order_by_len;
             for (i, rc) in result_columns.iter().enumerate() {
                 if let Some(ref v) = result_columns_to_skip {
-                    if v.contains(&i) {
+                    let found = v.iter().find(|(skipped_idx, _)| *skipped_idx == i);
+                    if let Some((_, result_column_idx)) = found {
+                        m.result_column_indexes_in_orderby_sorter
+                            .insert(i, *result_column_idx);
                         continue;
                     }
                 }
@@ -1429,74 +1410,21 @@ fn group_by_emit(
         precomputed_exprs_to_register.push((&agg.original_expr, agg_start_reg + i));
     }
 
-    // We need to handle the case where we are emitting to sorter.
-    // In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
-    // In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
-    // We need to do this before rewriting the result columns to registers because we need to know which columns to skip.
-    // Moreover, we need to keep track what index in the ORDER BY sorter the result columns have, because the result columns
-    // should be emitted in the SELECT clause order, not the ORDER BY clause order.
-    let mut result_columns_to_skip: Option<Vec<usize>> = None;
-    if let Some(order_by) = order_by {
-        for (i, rc) in result_columns.iter().enumerate() {
-            // TODO: implement a custom equality check for expressions
-            // there are lots of examples where this breaks, even simple ones like
-            // sum(x) != SUM(x)
-            let found = order_by
-                .iter()
-                .enumerate()
-                .find(|(_, (expr, _))| expr == &rc.expr);
-            if let Some((j, _)) = found {
-                if let Some(ref mut v) = result_columns_to_skip {
-                    v.push(i);
-                } else {
-                    result_columns_to_skip = Some(vec![i]);
-                }
-                m.result_column_indexes_in_orderby_sorter.insert(i, j);
-            }
-        }
-    }
-    let order_by_len = order_by.as_ref().map(|v| v.len()).unwrap_or(0);
-    let result_columns_to_skip_len = result_columns_to_skip
-        .as_ref()
-        .map(|v| v.len())
-        .unwrap_or(0);
-    let output_column_count = result_columns.len() + order_by_len - result_columns_to_skip_len;
-    let output_row_start_reg = program.alloc_registers(output_column_count);
-    let mut cur_reg = output_row_start_reg;
-    if let Some(order_by) = order_by {
-        for (expr, _) in order_by.iter() {
-            translate_expr(
-                program,
-                Some(referenced_tables),
-                expr,
-                cur_reg,
-                Some(&precomputed_exprs_to_register),
-            )?;
-            cur_reg += 1;
-        }
-    }
-    let mut res_col_idx_in_orderby_sorter = order_by_len;
-    for (i, rc) in result_columns.iter().enumerate() {
-        if let Some(ref v) = result_columns_to_skip {
-            if v.contains(&i) {
-                continue;
-            }
-        }
-        translate_expr(
-            program,
-            Some(referenced_tables),
-            &rc.expr,
-            cur_reg,
-            Some(&precomputed_exprs_to_register),
-        )?;
-        m.result_column_indexes_in_orderby_sorter
-            .insert(i, res_col_idx_in_orderby_sorter);
-        res_col_idx_in_orderby_sorter += 1;
-        cur_reg += 1;
-    }
-
     match order_by {
         None => {
+            let output_column_count = result_columns.len();
+            let output_row_start_reg = program.alloc_registers(output_column_count);
+            let mut cur_reg = output_row_start_reg;
+            for (i, rc) in result_columns.iter().enumerate() {
+                translate_expr(
+                    program,
+                    Some(referenced_tables),
+                    &rc.expr,
+                    cur_reg,
+                    Some(&precomputed_exprs_to_register),
+                )?;
+                cur_reg += 1;
+            }
             emit_result_row(
                 program,
                 output_row_start_reg,
@@ -1504,7 +1432,47 @@ fn group_by_emit(
                 limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
             );
         }
-        Some(_) => {
+        Some(order_by) => {
+            let skipped_result_cols = orderby_deduplicate_result_columns(order_by, result_columns);
+            let skipped_result_cols_len =
+                skipped_result_cols.as_ref().map(|v| v.len()).unwrap_or(0);
+            let output_column_count =
+                result_columns.len() + order_by.len() - skipped_result_cols_len;
+            let output_row_start_reg = program.alloc_registers(output_column_count);
+            let mut cur_reg = output_row_start_reg;
+            for (expr, _) in order_by.iter() {
+                translate_expr(
+                    program,
+                    Some(referenced_tables),
+                    expr,
+                    cur_reg,
+                    Some(&precomputed_exprs_to_register),
+                )?;
+                cur_reg += 1;
+            }
+
+            let mut res_col_idx_in_orderby_sorter = order_by.len();
+            for (i, rc) in result_columns.iter().enumerate() {
+                if let Some(ref v) = skipped_result_cols {
+                    let found = v.iter().find(|(skipped_idx, _)| *skipped_idx == i);
+                    if let Some((_, result_col_idx_in_orderby_sorter)) = found {
+                        m.result_column_indexes_in_orderby_sorter
+                            .insert(i, *result_col_idx_in_orderby_sorter);
+                        continue;
+                    }
+                }
+                translate_expr(
+                    program,
+                    Some(referenced_tables),
+                    &rc.expr,
+                    cur_reg,
+                    Some(&precomputed_exprs_to_register),
+                )?;
+                m.result_column_indexes_in_orderby_sorter
+                    .insert(i, res_col_idx_in_orderby_sorter);
+                res_col_idx_in_orderby_sorter += 1;
+                cur_reg += 1;
+            }
             sorter_insert(
                 program,
                 output_row_start_reg,
@@ -1537,8 +1505,6 @@ fn group_by_emit(
     program.emit_insn(Insn::Return {
         return_reg: group_by_metadata.subroutine_accumulator_clear_return_offset_register,
     });
-
-    m.result_columns_to_skip_in_orderby_sorter = result_columns_to_skip;
 
     Ok(())
 }
@@ -1731,4 +1697,37 @@ fn sorter_insert(
         cursor_id,
         record_reg,
     });
+}
+
+/// We need to handle the case where we are emitting to sorter.
+/// In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
+/// In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
+/// We need to do this before rewriting the result columns to registers because we need to know which columns to skip.
+/// Moreover, we need to keep track what index in the ORDER BY sorter the result columns have, because the result columns
+/// should be emitted in the SELECT clause order, not the ORDER BY clause order.
+///
+/// If any result columsn can be skipped, returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
+fn orderby_deduplicate_result_columns(
+    order_by: &Vec<(ast::Expr, Direction)>,
+    result_columns: &Vec<ResultSetColumn>,
+) -> Option<Vec<(usize, usize)>> {
+    let mut result_column_remapping: Option<Vec<(usize, usize)>> = None;
+    for (i, rc) in result_columns.iter().enumerate() {
+        // TODO: implement a custom equality check for expressions
+        // there are lots of examples where this breaks, even simple ones like
+        // sum(x) != SUM(x)
+        let found = order_by
+            .iter()
+            .enumerate()
+            .find(|(_, (expr, _))| expr == &rc.expr);
+        if let Some((j, _)) = found {
+            if let Some(ref mut v) = result_column_remapping {
+                v.push((i, j));
+            } else {
+                result_column_remapping = Some(vec![(i, j)]);
+            }
+        }
+    }
+
+    return result_column_remapping;
 }
