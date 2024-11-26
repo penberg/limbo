@@ -1150,6 +1150,7 @@ dependencies = [
  "sqlite3-parser",
  "tempfile",
  "thiserror",
+ "winnow",
 ]
 
 [[package]]
