@@ -881,11 +881,14 @@ fn inner_loop_source_emit(
             let column_count = sort_keys_count + aggregate_arguments_count;
             let start_reg = program.alloc_registers(column_count);
             let mut cur_reg = start_reg;
+
+            // The group by sorter rows will contain the grouping keys first. They are also the sort keys.
             for expr in group_by.iter() {
                 let key_reg = cur_reg;
                 cur_reg += 1;
                 translate_expr(program, Some(referenced_tables), expr, key_reg, None)?;
             }
+            // Then we have the aggregate arguments.
             for agg in aggregates.iter() {
                 // Here we are collecting scalars for the group by sorter, which will include
                 // both the group by expressions and the aggregate arguments.
@@ -899,6 +902,9 @@ fn inner_loop_source_emit(
                     translate_expr(program, Some(referenced_tables), expr, agg_reg, None)?;
                 }
             }
+
+            // TODO: although it's less often useful, SQLite does allow for expressions in the SELECT that are not part of a GROUP BY or aggregate.
+            // We currently ignore those and only emit the GROUP BY keys and aggregate arguments. This should be fixed.
 
             let group_by_metadata = m.group_by_metadata.as_ref().unwrap();
 
@@ -931,6 +937,11 @@ fn inner_loop_source_emit(
             let num_aggs = aggregates.len();
             let start_reg = program.alloc_registers(num_aggs);
             m.aggregation_start_register = Some(start_reg);
+
+            // In planner.rs, we have collected all aggregates from the SELECT clause, including ones where the aggregate is embedded inside
+            // a more complex expression. Some examples: length(sum(x)), sum(x) + avg(y), sum(x) + 1, etc.
+            // The result of those more complex expressions depends on the final result of the aggregate, so we don't translate the complete expressions here.
+            // Instead, we translate the aggregates + any expressions that do not contain aggregates.
             for (i, agg) in aggregates.iter().enumerate() {
                 let reg = start_reg + i;
                 translate_aggregation(program, referenced_tables, agg, reg)?;
@@ -948,7 +959,10 @@ fn inner_loop_source_emit(
             Ok(())
         }
         InnerLoopEmitTarget::ResultRow { limit } => {
-            assert!(aggregates.is_none());
+            assert!(
+                aggregates.is_none(),
+                "We should not get here with aggregates"
+            );
             emit_select_result(
                 program,
                 referenced_tables,
@@ -1112,7 +1126,7 @@ fn group_by_emit(
     referenced_tables: &[BTreeTableReference],
     m: &mut Metadata,
 ) -> Result<()> {
-    let sorter_data_label = program.allocate_label();
+    let sort_loop_start_label = program.allocate_label();
     let grouping_done_label = program.allocate_label();
     let group_by_metadata = m.group_by_metadata.as_mut().unwrap();
 
@@ -1166,7 +1180,7 @@ fn group_by_emit(
         grouping_done_label,
     );
 
-    program.defer_label_resolution(sorter_data_label, program.offset() as usize);
+    program.defer_label_resolution(sort_loop_start_label, program.offset() as usize);
     // Read a row from the sorted data in the sorter into the pseudo cursor
     program.emit_insn(Insn::SorterData {
         cursor_id: group_by_metadata.sort_cursor,
@@ -1299,9 +1313,9 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_next: sorter_data_label,
+            pc_if_next: sort_loop_start_label,
         },
-        sorter_data_label,
+        sort_loop_start_label,
     );
 
     program.resolve_label(grouping_done_label, program.offset());
@@ -1460,7 +1474,7 @@ fn agg_without_group_by_emit(
     Ok(())
 }
 
-/// Emits the bytecode for processing an ORDER BY clause.
+/// Emits the bytecode for outputting rows from an ORDER BY sorter.
 /// This is called when the main query execution loop has finished processing,
 /// and we can now emit rows from the ORDER BY sorter.
 fn order_by_emit(
@@ -1470,18 +1484,20 @@ fn order_by_emit(
     limit: Option<usize>,
     m: &mut Metadata,
 ) -> Result<()> {
-    let sorter_data_label = program.allocate_label();
-    let sorting_done_label = program.allocate_label();
+    let sort_loop_start_label = program.allocate_label();
+    let sort_loop_end_label = program.allocate_label();
     program.resolve_label(m.termination_label_stack.pop().unwrap(), program.offset());
     let mut pseudo_columns = vec![];
     for (i, _) in order_by.iter().enumerate() {
         pseudo_columns.push(Column {
+            // Names don't matter. We are tracking which result column is in which position in the ORDER BY clause in m.result_column_indexes_in_orderby_sorter.
             name: format!("sort_key_{}", i),
             primary_key: false,
             ty: crate::schema::Type::Null,
         });
     }
     for (i, rc) in result_columns.iter().enumerate() {
+        // If any result columns are not in the ORDER BY sorter, it's because they are equal to a sort key and were already added to the pseudo columns above.
         if let Some(ref v) = m.result_columns_to_skip_in_orderby_sorter {
             if v.contains(&i) {
                 continue;
@@ -1517,19 +1533,20 @@ fn order_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterSort {
             cursor_id: sort_metadata.sort_cursor,
-            pc_if_empty: sorting_done_label,
+            pc_if_empty: sort_loop_end_label,
         },
-        sorting_done_label,
+        sort_loop_end_label,
     );
 
-    program.defer_label_resolution(sorter_data_label, program.offset() as usize);
+    program.defer_label_resolution(sort_loop_start_label, program.offset() as usize);
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_metadata.sort_cursor,
         dest_reg: sort_metadata.sorter_data_register,
         pseudo_cursor,
     });
 
-    // EMIT COLUMNS FROM SORTER AND EMIT ROW
+    // We emit the columns in SELECT order, not sorter order (sorter always has the sort keys first).
+    // This is tracked in m.result_column_indexes_in_orderby_sorter.
     let cursor_id = pseudo_cursor;
     let start_reg = program.alloc_registers(result_columns.len());
     for i in 0..result_columns.len() {
@@ -1544,18 +1561,18 @@ fn order_by_emit(
         program,
         start_reg,
         result_columns.len(),
-        limit.map(|l| (l, sorting_done_label)),
+        limit.map(|l| (l, sort_loop_end_label)),
     )?;
 
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
             cursor_id: sort_metadata.sort_cursor,
-            pc_if_next: sorter_data_label,
+            pc_if_next: sort_loop_start_label,
         },
-        sorter_data_label,
+        sort_loop_start_label,
     );
 
-    program.resolve_label(sorting_done_label, program.offset());
+    program.resolve_label(sort_loop_end_label, program.offset());
 
     Ok(())
 }
@@ -1643,11 +1660,14 @@ fn order_by_sorter_insert(
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
 ) -> Result<()> {
     let order_by_len = order_by.len();
+    // If any result columns can be skipped due to being an exact duplicate of a sort key, we need to know which ones and their new index in the ORDER BY sorter.
     let result_columns_to_skip = order_by_deduplicate_result_columns(order_by, result_columns);
     let result_columns_to_skip_len = result_columns_to_skip
         .as_ref()
         .map(|v| v.len())
         .unwrap_or(0);
+
+    // The ORDER BY sorter has the sort keys first, then the result columns.
     let orderby_sorter_column_count =
         order_by_len + result_columns.len() - result_columns_to_skip_len;
     let start_reg = program.alloc_registers(orderby_sorter_column_count);
@@ -1666,6 +1686,7 @@ fn order_by_sorter_insert(
     for (i, rc) in result_columns.iter().enumerate() {
         if let Some(ref v) = result_columns_to_skip {
             let found = v.iter().find(|(skipped_idx, _)| *skipped_idx == i);
+            // If the result column is in the list of columns to skip, we need to know its new index in the ORDER BY sorter.
             if let Some((_, result_column_idx)) = found {
                 result_column_indexes_in_orderby_sorter.insert(i, *result_column_idx);
                 continue;
