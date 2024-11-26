@@ -913,48 +913,15 @@ fn inner_loop_source_emit(
             Ok(())
         }
         InnerLoopEmitTarget::OrderBySorter { order_by } => {
-            let order_by_len = order_by.len();
-            let result_columns_to_skip =
-                orderby_deduplicate_result_columns(order_by, result_columns);
-            let result_columns_to_skip_len = result_columns_to_skip
-                .as_ref()
-                .map(|v| v.len())
-                .unwrap_or(0);
-            let orderby_sorter_column_count =
-                order_by_len + result_columns.len() - result_columns_to_skip_len;
-            let start_reg = program.alloc_registers(orderby_sorter_column_count);
-            for (i, (expr, _)) in order_by.iter().enumerate() {
-                let key_reg = start_reg + i;
-                translate_expr(program, Some(referenced_tables), expr, key_reg, None)?;
-            }
-            let mut cur_reg = start_reg + order_by_len;
-            let mut cur_idx_in_orderby_sorter = order_by_len;
-            for (i, rc) in result_columns.iter().enumerate() {
-                if let Some(ref v) = result_columns_to_skip {
-                    let found = v.iter().find(|(skipped_idx, _)| *skipped_idx == i);
-                    if let Some((_, result_column_idx)) = found {
-                        m.result_column_indexes_in_orderby_sorter
-                            .insert(i, *result_column_idx);
-                        continue;
-                    }
-                }
-                assert!(!rc.contains_aggregates);
-                translate_expr(program, Some(referenced_tables), &rc.expr, cur_reg, None)?;
-                m.result_column_indexes_in_orderby_sorter
-                    .insert(i, cur_idx_in_orderby_sorter);
-                cur_idx_in_orderby_sorter += 1;
-                cur_reg += 1;
-            }
-
-            let sort_metadata = m.sort_metadata.as_mut().unwrap();
-            sorter_insert(
+            order_by_sorter_insert(
                 program,
-                start_reg,
-                orderby_sorter_column_count,
-                sort_metadata.sort_cursor,
-                sort_metadata.sorter_data_register,
-            );
-
+                referenced_tables,
+                order_by,
+                result_columns,
+                &mut m.result_column_indexes_in_orderby_sorter,
+                &m.sort_metadata.as_ref().unwrap(),
+                None,
+            )?;
             Ok(())
         }
         InnerLoopEmitTarget::AggStep => {
@@ -1416,53 +1383,15 @@ fn group_by_emit(
             )?;
         }
         Some(order_by) => {
-            let skipped_result_cols = orderby_deduplicate_result_columns(order_by, result_columns);
-            let skipped_result_cols_len =
-                skipped_result_cols.as_ref().map(|v| v.len()).unwrap_or(0);
-            let output_column_count =
-                result_columns.len() + order_by.len() - skipped_result_cols_len;
-            let output_row_start_reg = program.alloc_registers(output_column_count);
-            let mut cur_reg = output_row_start_reg;
-            for (expr, _) in order_by.iter() {
-                translate_expr(
-                    program,
-                    Some(referenced_tables),
-                    expr,
-                    cur_reg,
-                    Some(&precomputed_exprs_to_register),
-                )?;
-                cur_reg += 1;
-            }
-
-            let mut res_col_idx_in_orderby_sorter = order_by.len();
-            for (i, rc) in result_columns.iter().enumerate() {
-                if let Some(ref v) = skipped_result_cols {
-                    let found = v.iter().find(|(skipped_idx, _)| *skipped_idx == i);
-                    if let Some((_, result_col_idx_in_orderby_sorter)) = found {
-                        m.result_column_indexes_in_orderby_sorter
-                            .insert(i, *result_col_idx_in_orderby_sorter);
-                        continue;
-                    }
-                }
-                translate_expr(
-                    program,
-                    Some(referenced_tables),
-                    &rc.expr,
-                    cur_reg,
-                    Some(&precomputed_exprs_to_register),
-                )?;
-                m.result_column_indexes_in_orderby_sorter
-                    .insert(i, res_col_idx_in_orderby_sorter);
-                res_col_idx_in_orderby_sorter += 1;
-                cur_reg += 1;
-            }
-            sorter_insert(
+            order_by_sorter_insert(
                 program,
-                output_row_start_reg,
-                output_column_count,
-                m.sort_metadata.as_ref().unwrap().sort_cursor,
-                group_by_metadata.sorter_key_register,
-            );
+                referenced_tables,
+                order_by,
+                result_columns,
+                &mut m.result_column_indexes_in_orderby_sorter,
+                &m.sort_metadata.as_ref().unwrap(),
+                Some(&precomputed_exprs_to_register),
+            )?;
         }
     }
 
@@ -1703,6 +1632,65 @@ fn sorter_insert(
     });
 }
 
+fn order_by_sorter_insert(
+    program: &mut ProgramBuilder,
+    referenced_tables: &[BTreeTableReference],
+    order_by: &Vec<(ast::Expr, Direction)>,
+    result_columns: &Vec<ResultSetColumn>,
+    result_column_indexes_in_orderby_sorter: &mut HashMap<usize, usize>,
+    sort_metadata: &SortMetadata,
+    precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
+) -> Result<()> {
+    let order_by_len = order_by.len();
+    let result_columns_to_skip = orderby_deduplicate_result_columns(order_by, result_columns);
+    let result_columns_to_skip_len = result_columns_to_skip
+        .as_ref()
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let orderby_sorter_column_count =
+        order_by_len + result_columns.len() - result_columns_to_skip_len;
+    let start_reg = program.alloc_registers(orderby_sorter_column_count);
+    for (i, (expr, _)) in order_by.iter().enumerate() {
+        let key_reg = start_reg + i;
+        translate_expr(
+            program,
+            Some(referenced_tables),
+            expr,
+            key_reg,
+            precomputed_exprs_to_register,
+        )?;
+    }
+    let mut cur_reg = start_reg + order_by_len;
+    let mut cur_idx_in_orderby_sorter = order_by_len;
+    for (i, rc) in result_columns.iter().enumerate() {
+        if let Some(ref v) = result_columns_to_skip {
+            let found = v.iter().find(|(skipped_idx, _)| *skipped_idx == i);
+            if let Some((_, result_column_idx)) = found {
+                result_column_indexes_in_orderby_sorter.insert(i, *result_column_idx);
+                continue;
+            }
+        }
+        translate_expr(
+            program,
+            Some(referenced_tables),
+            &rc.expr,
+            cur_reg,
+            precomputed_exprs_to_register,
+        )?;
+        result_column_indexes_in_orderby_sorter.insert(i, cur_idx_in_orderby_sorter);
+        cur_idx_in_orderby_sorter += 1;
+        cur_reg += 1;
+    }
+
+    sorter_insert(
+        program,
+        start_reg,
+        orderby_sorter_column_count,
+        sort_metadata.sort_cursor,
+        sort_metadata.sorter_data_register,
+    );
+    Ok(())
+}
 /// We need to handle the case where we are emitting to sorter.
 /// In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
 /// In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
