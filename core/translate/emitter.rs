@@ -982,18 +982,13 @@ fn inner_loop_source_emit(
         }
         InnerLoopEmitTarget::ResultRow { limit } => {
             assert!(aggregates.is_none());
-            let start_reg = program.alloc_registers(result_columns.len());
-            for (i, rc) in result_columns.iter().enumerate() {
-                assert!(!rc.contains_aggregates);
-                let reg = start_reg + i;
-                translate_expr(program, Some(referenced_tables), &rc.expr, reg, None)?;
-            }
-            emit_result_row(
+            emit_select_result(
                 program,
-                start_reg,
-                result_columns.len(),
+                referenced_tables,
+                result_columns,
+                None,
                 limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
-            );
+            )?;
 
             Ok(())
         }
@@ -1412,25 +1407,13 @@ fn group_by_emit(
 
     match order_by {
         None => {
-            let output_column_count = result_columns.len();
-            let output_row_start_reg = program.alloc_registers(output_column_count);
-            let mut cur_reg = output_row_start_reg;
-            for (i, rc) in result_columns.iter().enumerate() {
-                translate_expr(
-                    program,
-                    Some(referenced_tables),
-                    &rc.expr,
-                    cur_reg,
-                    Some(&precomputed_exprs_to_register),
-                )?;
-                cur_reg += 1;
-            }
-            emit_result_row(
+            emit_select_result(
                 program,
-                output_row_start_reg,
-                output_column_count,
+                referenced_tables,
+                result_columns,
+                Some(&precomputed_exprs_to_register),
                 limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
-            );
+            )?;
         }
         Some(order_by) => {
             let skipped_result_cols = orderby_deduplicate_result_columns(order_by, result_columns);
@@ -1535,18 +1518,15 @@ fn agg_without_group_by_emit(
         precomputed_exprs_to_register.push((&agg.original_expr, agg_start_reg + i));
     }
 
-    let output_reg = program.alloc_registers(result_columns.len());
-    for (i, rc) in result_columns.iter().enumerate() {
-        translate_expr(
-            program,
-            Some(referenced_tables),
-            &rc.expr,
-            output_reg + i,
-            Some(&precomputed_exprs_to_register),
-        )?;
-    }
     // This always emits a ResultRow because currently it can only be used for a single row result
-    emit_result_row(program, output_reg, result_columns.len(), None);
+    // Limit is None because we early exit on limit 0 and the max rows here is 1
+    emit_select_result(
+        program,
+        referenced_tables,
+        result_columns,
+        Some(&precomputed_exprs_to_register),
+        None,
+    )?;
 
     Ok(())
 }
@@ -1631,12 +1611,12 @@ fn order_by_emit(
             dest: reg,
         });
     }
-    emit_result_row(
+    emit_result_row_and_limit(
         program,
         start_reg,
         result_columns.len(),
         limit.map(|l| (l, sorting_done_label)),
-    );
+    )?;
 
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
@@ -1651,16 +1631,16 @@ fn order_by_emit(
     Ok(())
 }
 
-/// Emits the bytecode for emitting a result row.
-fn emit_result_row(
+/// Emits the bytecode for: result row and limit.
+fn emit_result_row_and_limit(
     program: &mut ProgramBuilder,
     start_reg: usize,
-    column_count: usize,
+    result_columns_len: usize,
     limit: Option<(usize, BranchOffset)>,
-) {
+) -> Result<()> {
     program.emit_insn(Insn::ResultRow {
         start_reg,
-        count: column_count,
+        count: result_columns_len,
     });
     if let Some((limit, jump_label_on_limit_reached)) = limit {
         let limit_reg = program.alloc_register();
@@ -1677,6 +1657,30 @@ fn emit_result_row(
             jump_label_on_limit_reached,
         );
     }
+    Ok(())
+}
+
+/// Emits the bytecode for: all result columns, result row, and limit.
+fn emit_select_result(
+    program: &mut ProgramBuilder,
+    referenced_tables: &[BTreeTableReference],
+    result_columns: &[ResultSetColumn],
+    precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
+    limit: Option<(usize, BranchOffset)>,
+) -> Result<()> {
+    let start_reg = program.alloc_registers(result_columns.len());
+    for (i, rc) in result_columns.iter().enumerate() {
+        let reg = start_reg + i;
+        translate_expr(
+            program,
+            Some(referenced_tables),
+            &rc.expr,
+            reg,
+            precomputed_exprs_to_register,
+        )?;
+    }
+    emit_result_row_and_limit(program, start_reg, result_columns.len(), limit)?;
+    Ok(())
 }
 
 /// Emits the bytecode for inserting a row into a sorter.
