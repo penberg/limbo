@@ -1632,6 +1632,7 @@ fn sorter_insert(
     });
 }
 
+/// Emits the bytecode for inserting a row into an ORDER BY sorter.
 fn order_by_sorter_insert(
     program: &mut ProgramBuilder,
     referenced_tables: &[BTreeTableReference],
@@ -1642,7 +1643,7 @@ fn order_by_sorter_insert(
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
 ) -> Result<()> {
     let order_by_len = order_by.len();
-    let result_columns_to_skip = orderby_deduplicate_result_columns(order_by, result_columns);
+    let result_columns_to_skip = order_by_deduplicate_result_columns(order_by, result_columns);
     let result_columns_to_skip_len = result_columns_to_skip
         .as_ref()
         .map(|v| v.len())
@@ -1699,7 +1700,7 @@ fn order_by_sorter_insert(
 /// should be emitted in the SELECT clause order, not the ORDER BY clause order.
 ///
 /// If any result columsn can be skipped, returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
-fn orderby_deduplicate_result_columns(
+fn order_by_deduplicate_result_columns(
     order_by: &Vec<(ast::Expr, Direction)>,
     result_columns: &Vec<ResultSetColumn>,
 ) -> Option<Vec<(usize, usize)>> {
