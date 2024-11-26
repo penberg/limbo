@@ -79,6 +79,11 @@ SQLITE_EXEC=sqlite3 make test
 
 When working on a new feature, please consider adding a test case for it.
 
+## TPC-H
+
+[TPC-H](https://www.tpc.org/tpch/) is a standard benchmark for testing database performance. To try out Limbo's performance against a TPC-H compatible workload,
+you can generate or download a TPC-H compatible SQLite database e.g. [here](https://github.com/lovasoa/TPCH-sqlite).
+
 ## Deterministic simulation tests
 
 The `simulator` directory contains a deterministic simulator for testing.
