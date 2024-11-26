@@ -1713,14 +1713,12 @@ fn order_by_sorter_insert(
     );
     Ok(())
 }
-/// We need to handle the case where we are emitting to sorter.
-/// In that case the first columns should be the sort key columns, and the rest is the result columns of the select.
-/// In case any of the sort keys are exactly equal to a result column, we can skip emitting that result column.
-/// We need to do this before rewriting the result columns to registers because we need to know which columns to skip.
-/// Moreover, we need to keep track what index in the ORDER BY sorter the result columns have, because the result columns
-/// should be emitted in the SELECT clause order, not the ORDER BY clause order.
+
+/// In case any of the ORDER BY sort keys are exactly equal to a result column, we can skip emitting that result column.
+/// If we skip a result column, we need to keep track what index in the ORDER BY sorter the result columns have,
+/// because the result columns should be emitted in the SELECT clause order, not the ORDER BY clause order.
 ///
-/// If any result columsn can be skipped, returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
+/// If any result columns can be skipped, this returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
 fn order_by_deduplicate_result_columns(
     order_by: &Vec<(ast::Expr, Direction)>,
     result_columns: &Vec<ResultSetColumn>,
