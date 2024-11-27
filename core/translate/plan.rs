@@ -54,17 +54,7 @@ pub enum IterationDirection {
 }
 
 /**
-  An Operator is a Node in the query plan.
-  Operators form a tree structure, with each having zero or more children.
-  For example, a query like `SELECT t1.foo FROM t1 ORDER BY t1.foo LIMIT 1` would have the following structure:
-    Limit
-      Order
-        Project
-          Scan
-
-  Operators also have a unique ID, which is used to identify them in the query plan and attach metadata.
-  They also have a step counter, which is used to track the current step in the operator's execution.
-  TODO: perhaps 'step' shouldn't be in this struct, since it's an execution time concept, not a plan time concept.
+  A SourceOperator is a Node in the query plan that reads data from a table.
 */
 #[derive(Clone, Debug)]
 pub enum SourceOperator {
