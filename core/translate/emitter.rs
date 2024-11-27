@@ -259,11 +259,13 @@ pub fn emit_program(
 fn init_order_by(
     program: &mut ProgramBuilder,
     order_by: &Vec<(ast::Expr, Direction)>,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
-    m.termination_label_stack.push(program.allocate_label());
+    metadata
+        .termination_label_stack
+        .push(program.allocate_label());
     let sort_cursor = program.alloc_cursor_id(None, None);
-    m.sort_metadata = Some(SortMetadata {
+    metadata.sort_metadata = Some(SortMetadata {
         sort_cursor,
         sorter_data_register: program.alloc_register(),
     });
@@ -284,10 +286,10 @@ fn init_group_by(
     program: &mut ProgramBuilder,
     group_by: &Vec<ast::Expr>,
     aggregates: &Vec<Aggregate>,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_final_label = program.allocate_label();
-    m.termination_label_stack.push(agg_final_label);
+    metadata.termination_label_stack.push(agg_final_label);
     let num_aggs = aggregates.len();
 
     let sort_cursor = program.alloc_cursor_id(None, None);
@@ -343,9 +345,9 @@ fn init_group_by(
         subroutine_accumulator_clear_label,
     );
 
-    m.aggregation_start_register = Some(agg_exprs_start_reg);
+    metadata.aggregation_start_register = Some(agg_exprs_start_reg);
 
-    m.group_by_metadata = Some(GroupByMetadata {
+    metadata.group_by_metadata = Some(GroupByMetadata {
         sort_cursor,
         subroutine_accumulator_clear_label,
         subroutine_accumulator_clear_return_offset_register,
@@ -365,7 +367,7 @@ fn init_group_by(
 fn init_source(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
     match source {
         SourceOperator::Join {
@@ -382,10 +384,10 @@ fn init_source(
                     check_match_flag_label: program.allocate_label(),
                     on_match_jump_to_label: program.allocate_label(),
                 };
-                m.left_joins.insert(*id, lj_metadata);
+                metadata.left_joins.insert(*id, lj_metadata);
             }
-            init_source(program, left, m)?;
-            init_source(program, right, m)?;
+            init_source(program, left, metadata)?;
+            init_source(program, right, metadata)?;
 
             return Ok(());
         }
@@ -400,7 +402,7 @@ fn init_source(
             );
             let root_page = table_reference.table.root_page;
             let next_row_label = program.allocate_label();
-            m.next_row_labels.insert(*id, next_row_label);
+            metadata.next_row_labels.insert(*id, next_row_label);
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id,
                 root_page,
@@ -424,11 +426,11 @@ fn init_source(
 
             if !matches!(search, Search::PrimaryKeyEq { .. }) {
                 // Primary key equality search is handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
-                m.next_row_labels.insert(*id, next_row_label);
+                metadata.next_row_labels.insert(*id, next_row_label);
             }
 
             let scan_loop_body_label = program.allocate_label();
-            m.scan_loop_body_labels.push(scan_loop_body_label);
+            metadata.scan_loop_body_labels.push(scan_loop_body_label);
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id: table_cursor_id,
                 root_page: table_reference.table.root_page,
@@ -460,7 +462,7 @@ fn open_loop(
     program: &mut ProgramBuilder,
     source: &mut SourceOperator,
     referenced_tables: &[BTreeTableReference],
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
     match source {
         SourceOperator::Join {
@@ -471,25 +473,27 @@ fn open_loop(
             outer,
             ..
         } => {
-            open_loop(program, left, referenced_tables, m)?;
+            open_loop(program, left, referenced_tables, metadata)?;
 
-            let mut jump_target_when_false = *m
+            let mut jump_target_when_false = *metadata
                 .next_row_labels
                 .get(&right.id())
-                .or(m.next_row_labels.get(&left.id()))
-                .unwrap_or(m.termination_label_stack.last().unwrap());
+                .or(metadata.next_row_labels.get(&left.id()))
+                .unwrap_or(metadata.termination_label_stack.last().unwrap());
 
             if *outer {
-                let lj_meta = m.left_joins.get(id).unwrap();
+                let lj_meta = metadata.left_joins.get(id).unwrap();
                 program.emit_insn(Insn::Integer {
                     value: 0,
                     dest: lj_meta.match_flag_register,
                 });
                 jump_target_when_false = lj_meta.check_match_flag_label;
             }
-            m.next_row_labels.insert(right.id(), jump_target_when_false);
+            metadata
+                .next_row_labels
+                .insert(right.id(), jump_target_when_false);
 
-            open_loop(program, right, referenced_tables, m)?;
+            open_loop(program, right, referenced_tables, metadata)?;
 
             if let Some(predicates) = predicates {
                 let jump_target_when_true = program.allocate_label();
@@ -511,7 +515,7 @@ fn open_loop(
             }
 
             if *outer {
-                let lj_meta = m.left_joins.get(id).unwrap();
+                let lj_meta = metadata.left_joins.get(id).unwrap();
                 program.defer_label_resolution(
                     lj_meta.set_match_flag_true_label,
                     program.offset() as usize,
@@ -540,7 +544,7 @@ fn open_loop(
                 program.emit_insn(Insn::RewindAsync { cursor_id });
             }
             let scan_loop_body_label = program.allocate_label();
-            let halt_label = m.termination_label_stack.last().unwrap();
+            let halt_label = metadata.termination_label_stack.last().unwrap();
             program.emit_insn_with_label_dependency(
                 if iter_dir
                     .as_ref()
@@ -558,10 +562,10 @@ fn open_loop(
                 },
                 *halt_label,
             );
-            m.scan_loop_body_labels.push(scan_loop_body_label);
+            metadata.scan_loop_body_labels.push(scan_loop_body_label);
             program.defer_label_resolution(scan_loop_body_label, program.offset() as usize);
 
-            let jump_label = m.next_row_labels.get(id).unwrap_or(halt_label);
+            let jump_label = metadata.next_row_labels.get(id).unwrap_or(halt_label);
             if let Some(preds) = predicates {
                 for expr in preds {
                     let jump_target_when_true = program.allocate_label();
@@ -600,7 +604,7 @@ fn open_loop(
                 } else {
                     None
                 };
-                let scan_loop_body_label = *m.scan_loop_body_labels.last().unwrap();
+                let scan_loop_body_label = *metadata.scan_loop_body_labels.last().unwrap();
                 let cmp_reg = program.alloc_register();
                 let (cmp_expr, cmp_op) = match search {
                     Search::IndexSearch {
@@ -631,7 +635,7 @@ fn open_loop(
                             cursor_id: index_cursor_id.unwrap_or(table_cursor_id),
                             start_reg: cmp_reg,
                             num_regs: 1,
-                            target_pc: *m.termination_label_stack.last().unwrap(),
+                            target_pc: *metadata.termination_label_stack.last().unwrap(),
                         },
                         ast::Operator::Greater
                         | ast::Operator::Less
@@ -640,11 +644,11 @@ fn open_loop(
                             cursor_id: index_cursor_id.unwrap_or(table_cursor_id),
                             start_reg: cmp_reg,
                             num_regs: 1,
-                            target_pc: *m.termination_label_stack.last().unwrap(),
+                            target_pc: *metadata.termination_label_stack.last().unwrap(),
                         },
                         _ => unreachable!(),
                     },
-                    *m.termination_label_stack.last().unwrap(),
+                    *metadata.termination_label_stack.last().unwrap(),
                 );
                 if *cmp_op == ast::Operator::Less || *cmp_op == ast::Operator::LessEquals {
                     translate_expr(program, Some(referenced_tables), cmp_expr, cmp_reg, None)?;
@@ -661,10 +665,10 @@ fn open_loop(
                 //
                 // For primary key searches we emit RowId and then compare it to the seek value.
 
-                let abort_jump_target = *m
+                let abort_jump_target = *metadata
                     .next_row_labels
                     .get(id)
-                    .unwrap_or(m.termination_label_stack.last().unwrap());
+                    .unwrap_or(metadata.termination_label_stack.last().unwrap());
                 match cmp_op {
                     ast::Operator::Equals | ast::Operator::LessEquals => {
                         if let Some(index_cursor_id) = index_cursor_id {
@@ -731,10 +735,10 @@ fn open_loop(
                 }
             }
 
-            let jump_label = m
+            let jump_label = metadata
                 .next_row_labels
                 .get(id)
-                .unwrap_or(m.termination_label_stack.last().unwrap());
+                .unwrap_or(metadata.termination_label_stack.last().unwrap());
 
             if let Search::PrimaryKeyEq { cmp_expr } = search {
                 let src_reg = program.alloc_register();
@@ -797,7 +801,11 @@ pub enum InnerLoopEmitTarget<'a> {
 
 /// Emits the bytecode for the inner loop of a query.
 /// At this point the cursors for all tables have been opened and rewound.
-fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metadata) -> Result<()> {
+fn inner_loop_emit(
+    program: &mut ProgramBuilder,
+    plan: &mut Plan,
+    metadata: &mut Metadata,
+) -> Result<()> {
     if let Some(wc) = &plan.where_clause {
         for predicate in wc.iter() {
             if predicate.is_always_false()? {
@@ -817,7 +825,7 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
             program,
             &plan.result_columns,
             &plan.aggregates,
-            m,
+            metadata,
             InnerLoopEmitTarget::GroupBySorter {
                 group_by,
                 aggregates: &plan.aggregates.as_ref().unwrap(),
@@ -832,7 +840,7 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
             program,
             &plan.result_columns,
             &plan.aggregates,
-            m,
+            metadata,
             InnerLoopEmitTarget::AggStep,
             &plan.referenced_tables,
         );
@@ -843,7 +851,7 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
             program,
             &plan.result_columns,
             &plan.aggregates,
-            m,
+            metadata,
             InnerLoopEmitTarget::OrderBySorter { order_by },
             &plan.referenced_tables,
         );
@@ -853,7 +861,7 @@ fn inner_loop_emit(program: &mut ProgramBuilder, plan: &mut Plan, m: &mut Metada
         program,
         &plan.result_columns,
         &plan.aggregates,
-        m,
+        metadata,
         InnerLoopEmitTarget::ResultRow { limit: plan.limit },
         &plan.referenced_tables,
     );
@@ -866,7 +874,7 @@ fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
     result_columns: &Vec<ResultSetColumn>,
     aggregates: &Option<Vec<Aggregate>>,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
     emit_target: InnerLoopEmitTarget,
     referenced_tables: &[BTreeTableReference],
 ) -> Result<()> {
@@ -906,7 +914,7 @@ fn inner_loop_source_emit(
             // TODO: although it's less often useful, SQLite does allow for expressions in the SELECT that are not part of a GROUP BY or aggregate.
             // We currently ignore those and only emit the GROUP BY keys and aggregate arguments. This should be fixed.
 
-            let group_by_metadata = m.group_by_metadata.as_ref().unwrap();
+            let group_by_metadata = metadata.group_by_metadata.as_ref().unwrap();
 
             sorter_insert(
                 program,
@@ -924,8 +932,8 @@ fn inner_loop_source_emit(
                 referenced_tables,
                 order_by,
                 result_columns,
-                &mut m.result_column_indexes_in_orderby_sorter,
-                &m.sort_metadata.as_ref().unwrap(),
+                &mut metadata.result_column_indexes_in_orderby_sorter,
+                &metadata.sort_metadata.as_ref().unwrap(),
                 None,
             )?;
             Ok(())
@@ -933,10 +941,10 @@ fn inner_loop_source_emit(
         InnerLoopEmitTarget::AggStep => {
             let aggregates = aggregates.as_ref().unwrap();
             let agg_final_label = program.allocate_label();
-            m.termination_label_stack.push(agg_final_label);
+            metadata.termination_label_stack.push(agg_final_label);
             let num_aggs = aggregates.len();
             let start_reg = program.alloc_registers(num_aggs);
-            m.aggregation_start_register = Some(start_reg);
+            metadata.aggregation_start_register = Some(start_reg);
 
             // In planner.rs, we have collected all aggregates from the SELECT clause, including ones where the aggregate is embedded inside
             // a more complex expression. Some examples: length(sum(x)), sum(x) + avg(y), sum(x) + 1, etc.
@@ -968,7 +976,7 @@ fn inner_loop_source_emit(
                 referenced_tables,
                 result_columns,
                 None,
-                limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
+                limit.map(|l| (l, *metadata.termination_label_stack.last().unwrap())),
             )?;
 
             Ok(())
@@ -982,7 +990,7 @@ fn inner_loop_source_emit(
 fn close_loop(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
     referenced_tables: &[BTreeTableReference],
 ) -> Result<()> {
     match source {
@@ -993,10 +1001,10 @@ fn close_loop(
             outer,
             ..
         } => {
-            close_loop(program, right, m, referenced_tables)?;
+            close_loop(program, right, metadata, referenced_tables)?;
 
             if *outer {
-                let lj_meta = m.left_joins.get(id).unwrap();
+                let lj_meta = metadata.left_joins.get(id).unwrap();
                 // If the left join match flag has been set to 1, we jump to the next row on the outer table (result row has been emitted already)
                 program.resolve_label(lj_meta.check_match_flag_label, program.offset());
                 program.emit_insn_with_label_dependency(
@@ -1029,13 +1037,13 @@ fn close_loop(
                 );
             }
             let next_row_label = if *outer {
-                m.left_joins.get(id).unwrap().on_match_jump_to_label
+                metadata.left_joins.get(id).unwrap().on_match_jump_to_label
             } else {
-                *m.next_row_labels.get(&right.id()).unwrap()
+                *metadata.next_row_labels.get(&right.id()).unwrap()
             };
             // This points to the NextAsync instruction of the left table
             program.resolve_label(next_row_label, program.offset());
-            close_loop(program, left, m, referenced_tables)?;
+            close_loop(program, left, metadata, referenced_tables)?;
 
             Ok(())
         }
@@ -1046,7 +1054,7 @@ fn close_loop(
             ..
         } => {
             let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
-            program.resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
+            program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
             if iter_dir
                 .as_ref()
                 .is_some_and(|dir| *dir == IterationDirection::Backwards)
@@ -1055,7 +1063,7 @@ fn close_loop(
             } else {
                 program.emit_insn(Insn::NextAsync { cursor_id });
             }
-            let jump_label = m.scan_loop_body_labels.pop().unwrap();
+            let jump_label = metadata.scan_loop_body_labels.pop().unwrap();
 
             if iter_dir
                 .as_ref()
@@ -1096,9 +1104,9 @@ fn close_loop(
                 }
                 Search::PrimaryKeyEq { .. } => unreachable!(),
             };
-            program.resolve_label(*m.next_row_labels.get(id).unwrap(), program.offset());
+            program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
             program.emit_insn(Insn::NextAsync { cursor_id });
-            let jump_label = m.scan_loop_body_labels.pop().unwrap();
+            let jump_label = metadata.scan_loop_body_labels.pop().unwrap();
             program.emit_insn_with_label_dependency(
                 Insn::NextAwait {
                     cursor_id,
@@ -1124,11 +1132,11 @@ fn group_by_emit(
     aggregates: &Vec<Aggregate>,
     limit: Option<usize>,
     referenced_tables: &[BTreeTableReference],
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
     let sort_loop_start_label = program.allocate_label();
     let grouping_done_label = program.allocate_label();
-    let group_by_metadata = m.group_by_metadata.as_mut().unwrap();
+    let group_by_metadata = metadata.group_by_metadata.as_mut().unwrap();
 
     let GroupByMetadata {
         group_exprs_comparison_register: comparison_register,
@@ -1143,7 +1151,7 @@ fn group_by_emit(
         sorter_key_register,
         ..
     } = *group_by_metadata;
-    let halt_label = *m.termination_label_stack.first().unwrap();
+    let halt_label = *metadata.termination_label_stack.first().unwrap();
 
     // all group by columns and all arguments of agg functions are in the sorter.
     // the sort keys are the group by columns (the aggregation within groups is done based on how long the sort keys remain the same)
@@ -1249,7 +1257,7 @@ fn group_by_emit(
             target_pc: halt_label,
             decrement_by: 0,
         },
-        m.termination_label_stack[0],
+        metadata.termination_label_stack[0],
     );
 
     program.add_comment(program.offset(), "goto clear accumulator subroutine");
@@ -1263,7 +1271,7 @@ fn group_by_emit(
 
     // Accumulate the values into the aggregations
     program.resolve_label(agg_step_label, program.offset());
-    let start_reg = m.aggregation_start_register.unwrap();
+    let start_reg = metadata.aggregation_start_register.unwrap();
     let mut cursor_index = group_by.len();
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = start_reg + i;
@@ -1330,7 +1338,8 @@ fn group_by_emit(
     );
 
     program.add_comment(program.offset(), "group by finished");
-    let termination_label = m.termination_label_stack[m.termination_label_stack.len() - 2];
+    let termination_label =
+        metadata.termination_label_stack[metadata.termination_label_stack.len() - 2];
     program.emit_insn_with_label_dependency(
         Insn::Goto {
             target_pc: termination_label,
@@ -1351,7 +1360,7 @@ fn group_by_emit(
     );
 
     program.add_comment(program.offset(), "output group by row subroutine start");
-    let termination_label = *m.termination_label_stack.last().unwrap();
+    let termination_label = *metadata.termination_label_stack.last().unwrap();
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
             reg: group_by_metadata.data_in_accumulator_indicator_register,
@@ -1364,8 +1373,11 @@ fn group_by_emit(
         return_reg: group_by_metadata.subroutine_accumulator_output_return_offset_register,
     });
 
-    let agg_start_reg = m.aggregation_start_register.unwrap();
-    program.resolve_label(m.termination_label_stack.pop().unwrap(), program.offset());
+    let agg_start_reg = metadata.aggregation_start_register.unwrap();
+    program.resolve_label(
+        metadata.termination_label_stack.pop().unwrap(),
+        program.offset(),
+    );
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = agg_start_reg + i;
         program.emit_insn(Insn::AggFinal {
@@ -1393,7 +1405,7 @@ fn group_by_emit(
                 referenced_tables,
                 result_columns,
                 Some(&precomputed_exprs_to_register),
-                limit.map(|l| (l, *m.termination_label_stack.last().unwrap())),
+                limit.map(|l| (l, *metadata.termination_label_stack.last().unwrap())),
             )?;
         }
         Some(order_by) => {
@@ -1402,8 +1414,8 @@ fn group_by_emit(
                 referenced_tables,
                 order_by,
                 result_columns,
-                &mut m.result_column_indexes_in_orderby_sorter,
-                &m.sort_metadata.as_ref().unwrap(),
+                &mut metadata.result_column_indexes_in_orderby_sorter,
+                &metadata.sort_metadata.as_ref().unwrap(),
                 Some(&precomputed_exprs_to_register),
             )?;
         }
@@ -1443,9 +1455,9 @@ fn agg_without_group_by_emit(
     referenced_tables: &Vec<BTreeTableReference>,
     result_columns: &Vec<ResultSetColumn>,
     aggregates: &Vec<Aggregate>,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
-    let agg_start_reg = m.aggregation_start_register.unwrap();
+    let agg_start_reg = metadata.aggregation_start_register.unwrap();
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = agg_start_reg + i;
         program.emit_insn(Insn::AggFinal {
@@ -1482,11 +1494,14 @@ fn order_by_emit(
     order_by: &Vec<(ast::Expr, Direction)>,
     result_columns: &Vec<ResultSetColumn>,
     limit: Option<usize>,
-    m: &mut Metadata,
+    metadata: &mut Metadata,
 ) -> Result<()> {
     let sort_loop_start_label = program.allocate_label();
     let sort_loop_end_label = program.allocate_label();
-    program.resolve_label(m.termination_label_stack.pop().unwrap(), program.offset());
+    program.resolve_label(
+        metadata.termination_label_stack.pop().unwrap(),
+        program.offset(),
+    );
     let mut pseudo_columns = vec![];
     for (i, _) in order_by.iter().enumerate() {
         pseudo_columns.push(Column {
@@ -1498,7 +1513,7 @@ fn order_by_emit(
     }
     for (i, rc) in result_columns.iter().enumerate() {
         // If any result columns are not in the ORDER BY sorter, it's because they are equal to a sort key and were already added to the pseudo columns above.
-        if let Some(ref v) = m.result_columns_to_skip_in_orderby_sorter {
+        if let Some(ref v) = metadata.result_columns_to_skip_in_orderby_sorter {
             if v.contains(&i) {
                 continue;
             }
@@ -1511,7 +1526,8 @@ fn order_by_emit(
     }
 
     let num_columns_in_sorter = order_by.len() + result_columns.len()
-        - m.result_columns_to_skip_in_orderby_sorter
+        - metadata
+            .result_columns_to_skip_in_orderby_sorter
             .as_ref()
             .map(|v| v.len())
             .unwrap_or(0);
@@ -1522,7 +1538,7 @@ fn order_by_emit(
             columns: pseudo_columns,
         }))),
     );
-    let sort_metadata = m.sort_metadata.as_mut().unwrap();
+    let sort_metadata = metadata.sort_metadata.as_mut().unwrap();
 
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
@@ -1553,7 +1569,7 @@ fn order_by_emit(
         let reg = start_reg + i;
         program.emit_insn(Insn::Column {
             cursor_id,
-            column: m.result_column_indexes_in_orderby_sorter[&i],
+            column: metadata.result_column_indexes_in_orderby_sorter[&i],
             dest: reg,
         });
     }
