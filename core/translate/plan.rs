@@ -21,14 +21,23 @@ pub struct ResultSetColumn {
 
 #[derive(Debug)]
 pub struct Plan {
+    /// A tree of sources (tables).
     pub source: SourceOperator,
+    /// the columns inside SELECT ... FROM
     pub result_columns: Vec<ResultSetColumn>,
+    /// where clause split into a vec at 'AND' boundaries.
     pub where_clause: Option<Vec<ast::Expr>>,
+    /// group by clause
     pub group_by: Option<Vec<ast::Expr>>,
+    /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
+    /// all the aggregates collected from the result columns, order by, and (TODO) having clauses
     pub aggregates: Option<Vec<Aggregate>>,
+    /// limit clause
     pub limit: Option<usize>,
+    /// all the tables referenced in the query
     pub referenced_tables: Vec<BTreeTableReference>,
+    /// all the indexes available
     pub available_indexes: Vec<Rc<Index>>,
 }
 
