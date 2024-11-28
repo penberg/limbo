@@ -1,5 +1,5 @@
 use super::plan::{
-    Aggregate, BTreeTableReference, Direction, Plan, ResultSetColumn, SourceOperator,
+    Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
 };
 use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
 use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
@@ -19,9 +19,9 @@ impl OperatorIdCounter {
     }
 }
 
-fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
+fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
     if aggs.iter().any(|a| a.original_expr == *expr) {
-        return;
+        return true;
     }
     match expr {
         ast::Expr::FunctionCall { name, args, .. } => {
@@ -31,17 +31,22 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
                 0
             };
             match Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), args_count) {
-                Ok(Func::Agg(f)) => aggs.push(Aggregate {
-                    func: f,
-                    args: args.clone().unwrap_or_default(),
-                    original_expr: expr.clone(),
-                }),
+                Ok(Func::Agg(f)) => {
+                    aggs.push(Aggregate {
+                        func: f,
+                        args: args.clone().unwrap_or_default(),
+                        original_expr: expr.clone(),
+                    });
+                    true
+                }
                 _ => {
+                    let mut contains_aggregates = false;
                     if let Some(args) = args {
                         for arg in args.iter() {
-                            resolve_aggregates(arg, aggs);
+                            contains_aggregates |= resolve_aggregates(arg, aggs);
                         }
                     }
+                    contains_aggregates
                 }
             }
         }
@@ -53,15 +58,20 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) {
                     func: f,
                     args: vec![],
                     original_expr: expr.clone(),
-                })
+                });
+                true
+            } else {
+                false
             }
         }
         ast::Expr::Binary(lhs, _, rhs) => {
-            resolve_aggregates(lhs, aggs);
-            resolve_aggregates(rhs, aggs);
+            let mut contains_aggregates = false;
+            contains_aggregates |= resolve_aggregates(lhs, aggs);
+            contains_aggregates |= resolve_aggregates(rhs, aggs);
+            contains_aggregates
         }
         // TODO: handle other expressions that may contain aggregates
-        _ => {}
+        _ => false,
     }
 }
 
@@ -340,10 +350,8 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                         });
                                     }
                                     Ok(_) => {
-                                        let cur_agg_count = aggregate_expressions.len();
-                                        resolve_aggregates(&expr, &mut aggregate_expressions);
                                         let contains_aggregates =
-                                            cur_agg_count != aggregate_expressions.len();
+                                            resolve_aggregates(&expr, &mut aggregate_expressions);
                                         plan.result_columns.push(ResultSetColumn {
                                             expr: expr.clone(),
                                             contains_aggregates,
@@ -380,10 +388,8 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                 }
                             }
                             expr => {
-                                let cur_agg_count = aggregate_expressions.len();
-                                resolve_aggregates(expr, &mut aggregate_expressions);
                                 let contains_aggregates =
-                                    cur_agg_count != aggregate_expressions.len();
+                                    resolve_aggregates(expr, &mut aggregate_expressions);
                                 plan.result_columns.push(ResultSetColumn {
                                     expr: expr.clone(),
                                     contains_aggregates,
@@ -393,18 +399,37 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     }
                 }
             }
-            if let Some(group_by) = group_by.as_mut() {
+            if let Some(mut group_by) = group_by {
                 for expr in group_by.exprs.iter_mut() {
                     bind_column_references(expr, &plan.referenced_tables)?;
                 }
-                if aggregate_expressions.is_empty() {
-                    crate::bail_parse_error!(
-                        "GROUP BY clause without aggregate functions is not allowed"
-                    );
-                }
+
+                plan.group_by = Some(GroupBy {
+                    exprs: group_by.exprs,
+                    having: if let Some(having) = group_by.having {
+                        let mut predicates = vec![];
+                        break_predicate_at_and_boundaries(having, &mut predicates);
+                        for expr in predicates.iter_mut() {
+                            bind_column_references(expr, &plan.referenced_tables)?;
+                            let contains_aggregates =
+                                resolve_aggregates(expr, &mut aggregate_expressions);
+                            if !contains_aggregates {
+                                // TODO: sqlite allows HAVING clauses with non aggregate expressions like
+                                // HAVING id = 5. We should support this too eventually (I guess).
+                                // sqlite3-parser does not support HAVING without group by though, so we'll
+                                // need to either make a PR or add it to our vendored version.
+                                crate::bail_parse_error!(
+                                    "HAVING clause must contain an aggregate function"
+                                );
+                            }
+                        }
+                        Some(predicates)
+                    } else {
+                        None
+                    },
+                });
             }
 
-            plan.group_by = group_by.map(|g| g.exprs);
             plan.aggregates = if aggregate_expressions.is_empty() {
                 None
             } else {

@@ -20,7 +20,7 @@ use super::expr::{
     ConditionMetadata,
 };
 use super::optimizer::Optimizable;
-use super::plan::{Aggregate, BTreeTableReference, Direction, Plan};
+use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, Plan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
 // Metadata for handling LEFT JOIN operations
@@ -284,7 +284,7 @@ fn init_order_by(
 /// Initialize resources needed for GROUP BY processing
 fn init_group_by(
     program: &mut ProgramBuilder,
-    group_by: &Vec<ast::Expr>,
+    group_by: &GroupBy,
     aggregates: &Vec<Aggregate>,
     metadata: &mut Metadata,
 ) -> Result<()> {
@@ -296,8 +296,8 @@ fn init_group_by(
 
     let abort_flag_register = program.alloc_register();
     let data_in_accumulator_indicator_register = program.alloc_register();
-    let group_exprs_comparison_register = program.alloc_registers(group_by.len());
-    let group_exprs_accumulator_register = program.alloc_registers(group_by.len());
+    let group_exprs_comparison_register = program.alloc_registers(group_by.exprs.len());
+    let group_exprs_accumulator_register = program.alloc_registers(group_by.exprs.len());
     let agg_exprs_start_reg = program.alloc_registers(num_aggs);
     let sorter_key_register = program.alloc_register();
 
@@ -306,12 +306,12 @@ fn init_group_by(
 
     let mut order = Vec::new();
     const ASCENDING: i64 = 0;
-    for _ in group_by.iter() {
+    for _ in group_by.exprs.iter() {
         order.push(OwnedValue::Integer(ASCENDING));
     }
     program.emit_insn(Insn::SorterOpen {
         cursor_id: sort_cursor,
-        columns: aggregates.len() + group_by.len(),
+        columns: aggregates.len() + group_by.exprs.len(),
         order: OwnedRecord::new(order),
     });
 
@@ -327,8 +327,8 @@ fn init_group_by(
     );
     program.emit_insn(Insn::Null {
         dest: group_exprs_comparison_register,
-        dest_end: if group_by.len() > 1 {
-            Some(group_exprs_comparison_register + group_by.len() - 1)
+        dest_end: if group_by.exprs.len() > 1 {
+            Some(group_exprs_comparison_register + group_by.exprs.len() - 1)
         } else {
             None
         },
@@ -787,7 +787,7 @@ fn open_loop(
 /// - a ResultRow (there is none of the above, so the loop emits a result row directly)
 pub enum InnerLoopEmitTarget<'a> {
     GroupBySorter {
-        group_by: &'a Vec<ast::Expr>,
+        group_by: &'a GroupBy,
         aggregates: &'a Vec<Aggregate>,
     },
     OrderBySorter {
@@ -883,7 +883,7 @@ fn inner_loop_source_emit(
             group_by,
             aggregates,
         } => {
-            let sort_keys_count = group_by.len();
+            let sort_keys_count = group_by.exprs.len();
             let aggregate_arguments_count =
                 aggregates.iter().map(|agg| agg.args.len()).sum::<usize>();
             let column_count = sort_keys_count + aggregate_arguments_count;
@@ -891,7 +891,7 @@ fn inner_loop_source_emit(
             let mut cur_reg = start_reg;
 
             // The group by sorter rows will contain the grouping keys first. They are also the sort keys.
-            for expr in group_by.iter() {
+            for expr in group_by.exprs.iter() {
                 let key_reg = cur_reg;
                 cur_reg += 1;
                 translate_expr(program, Some(referenced_tables), expr, key_reg, None)?;
@@ -1127,7 +1127,7 @@ fn close_loop(
 fn group_by_emit(
     program: &mut ProgramBuilder,
     result_columns: &Vec<ResultSetColumn>,
-    group_by: &Vec<ast::Expr>,
+    group_by: &GroupBy,
     order_by: Option<&Vec<(ast::Expr, Direction)>>,
     aggregates: &Vec<Aggregate>,
     limit: Option<usize>,
@@ -1156,7 +1156,7 @@ fn group_by_emit(
     // all group by columns and all arguments of agg functions are in the sorter.
     // the sort keys are the group by columns (the aggregation within groups is done based on how long the sort keys remain the same)
     let sorter_column_count =
-        group_by.len() + aggregates.iter().map(|agg| agg.args.len()).sum::<usize>();
+        group_by.exprs.len() + aggregates.iter().map(|agg| agg.args.len()).sum::<usize>();
     // sorter column names do not matter
     let pseudo_columns = (0..sorter_column_count)
         .map(|i| Column {
@@ -1197,8 +1197,8 @@ fn group_by_emit(
     });
 
     // Read the group by columns from the pseudo cursor
-    let groups_start_reg = program.alloc_registers(group_by.len());
-    for i in 0..group_by.len() {
+    let groups_start_reg = program.alloc_registers(group_by.exprs.len());
+    for i in 0..group_by.exprs.len() {
         let sorter_column_index = i;
         let group_reg = groups_start_reg + i;
         program.emit_insn(Insn::Column {
@@ -1212,7 +1212,7 @@ fn group_by_emit(
     program.emit_insn(Insn::Compare {
         start_reg_a: comparison_register,
         start_reg_b: groups_start_reg,
-        count: group_by.len(),
+        count: group_by.exprs.len(),
     });
 
     let agg_step_label = program.allocate_label();
@@ -1235,7 +1235,7 @@ fn group_by_emit(
     program.emit_insn(Insn::Move {
         source_reg: groups_start_reg,
         dest_reg: comparison_register,
-        count: group_by.len(),
+        count: group_by.exprs.len(),
     });
 
     program.add_comment(
@@ -1272,7 +1272,7 @@ fn group_by_emit(
     // Accumulate the values into the aggregations
     program.resolve_label(agg_step_label, program.offset());
     let start_reg = metadata.aggregation_start_register.unwrap();
-    let mut cursor_index = group_by.len();
+    let mut cursor_index = group_by.exprs.len();
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = start_reg + i;
         translate_aggregation_groupby(
@@ -1301,7 +1301,7 @@ fn group_by_emit(
     );
 
     // Read the group by columns for a finished group
-    for i in 0..group_by.len() {
+    for i in 0..group_by.exprs.len() {
         let key_reg = group_exprs_start_register + i;
         let sorter_column_index = i;
         program.emit_insn(Insn::Column {
@@ -1369,6 +1369,11 @@ fn group_by_emit(
         },
         termination_label,
     );
+    let group_by_end_without_emitting_row_label = program.allocate_label();
+    program.defer_label_resolution(
+        group_by_end_without_emitting_row_label,
+        program.offset() as usize,
+    );
     program.emit_insn(Insn::Return {
         return_reg: group_by_metadata.subroutine_accumulator_output_return_offset_register,
     });
@@ -1390,12 +1395,29 @@ fn group_by_emit(
     // and the agg results in (agg_start_reg..agg_start_reg + aggregates.len() - 1)
     // we need to call translate_expr on each result column, but replace the expr with a register copy in case any part of the
     // result column expression matches a) a group by column or b) an aggregation result.
-    let mut precomputed_exprs_to_register = Vec::with_capacity(aggregates.len() + group_by.len());
-    for (i, expr) in group_by.iter().enumerate() {
+    let mut precomputed_exprs_to_register =
+        Vec::with_capacity(aggregates.len() + group_by.exprs.len());
+    for (i, expr) in group_by.exprs.iter().enumerate() {
         precomputed_exprs_to_register.push((expr, group_exprs_start_register + i));
     }
     for (i, agg) in aggregates.iter().enumerate() {
         precomputed_exprs_to_register.push((&agg.original_expr, agg_start_reg + i));
+    }
+
+    if let Some(having) = &group_by.having {
+        for expr in having.iter() {
+            translate_condition_expr(
+                program,
+                referenced_tables,
+                expr,
+                ConditionMetadata {
+                    jump_if_condition_is_true: false,
+                    jump_target_when_false: group_by_end_without_emitting_row_label,
+                    jump_target_when_true: i64::MAX, // unused
+                },
+                Some(&precomputed_exprs_to_register),
+            )?;
+        }
     }
 
     match order_by {
@@ -1433,7 +1455,7 @@ fn group_by_emit(
     let start_reg = group_by_metadata.group_exprs_accumulator_register;
     program.emit_insn(Insn::Null {
         dest: start_reg,
-        dest_end: Some(start_reg + group_by.len() + aggregates.len() - 1),
+        dest_end: Some(start_reg + group_by.exprs.len() + aggregates.len() - 1),
     });
 
     program.emit_insn(Insn::Integer {
