@@ -32,3 +32,36 @@ proc do_execsql_test_on_specific_db {db_name test_name sql_statements expected_o
     set combined_expected_output [join $expected_outputs "\n"]
     run_test $::sqlite_exec $db_name $combined_sql $combined_expected_output
 }
+
+proc within_tolerance {actual expected tolerance} {
+    expr {abs($actual - $expected) <= $tolerance}
+}
+
+proc do_execsql_test_tolerance {test_name sql_statements expected_outputs tolerance} {
+    puts "Running test: $test_name"
+    set combined_sql [string trim $sql_statements]
+    set actual_output [evaluate_sql $::sqlite_exec $combined_sql]
+    set actual_values [split $actual_output "\n"]
+    set expected_values [split $expected_outputs "\n"]
+
+    if {[llength $actual_values] != [llength $expected_values]} {
+        puts "Test FAILED: '$sql_statements'"
+        puts "returned '$actual_output'"
+        puts "expected '$expected_outputs'"
+        exit 1
+    }
+
+    for {set i 0} {$i < [llength $actual_values]} {incr i} {
+        set actual [lindex $actual_values $i]
+        set expected [lindex $expected_values $i]
+
+        if {![within_tolerance $actual $expected $tolerance]} {
+            set lower_bound [expr {$expected - $tolerance}]
+            set upper_bound [expr {$expected + $tolerance}]
+            puts "Test FAILED: '$sql_statements'"
+            puts "returned '$actual'"
+            puts "expected a value within the range \[$lower_bound, $upper_bound\]"
+            exit 1
+        }
+    }
+}
