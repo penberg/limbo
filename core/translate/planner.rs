@@ -281,19 +281,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             for column in columns.clone() {
                 match column {
                     ast::ResultColumn::Star => {
-                        for table_reference in plan.referenced_tables.iter() {
-                            for (idx, col) in table_reference.table.columns.iter().enumerate() {
-                                plan.result_columns.push(ResultSetColumn {
-                                    expr: ast::Expr::Column {
-                                        database: None, // TODO: support different databases
-                                        table: table_reference.table_index,
-                                        column: idx,
-                                        is_rowid_alias: col.primary_key,
-                                    },
-                                    contains_aggregates: false,
-                                });
-                            }
-                        }
+                        plan.source.select_star(&mut plan.result_columns);
                     }
                     ast::ResultColumn::TableStar(name) => {
                         let name_normalized = normalize_ident(name.0.as_str());
@@ -538,13 +526,14 @@ fn parse_from(
 
     let mut table_index = 1;
     for join in from.joins.unwrap_or_default().into_iter() {
-        let (right, outer, predicates) =
+        let (right, outer, using, predicates) =
             parse_join(schema, join, operator_id_counter, &mut tables, table_index)?;
         operator = SourceOperator::Join {
             left: Box::new(operator),
             right: Box::new(right),
             predicates,
             outer,
+            using,
             id: operator_id_counter.get_next_id(),
         };
         table_index += 1;
@@ -559,7 +548,12 @@ fn parse_join(
     operator_id_counter: &mut OperatorIdCounter,
     tables: &mut Vec<BTreeTableReference>,
     table_index: usize,
-) -> Result<(SourceOperator, bool, Option<Vec<ast::Expr>>)> {
+) -> Result<(
+    SourceOperator,
+    bool,
+    Option<ast::DistinctNames>,
+    Option<Vec<ast::Expr>>,
+)> {
     let ast::JoinedSelectTable {
         operator,
         table,
@@ -599,6 +593,7 @@ fn parse_join(
         _ => false,
     };
 
+    let mut using = None;
     let mut predicates = None;
     if let Some(constraint) = constraint {
         match constraint {
@@ -610,7 +605,60 @@ fn parse_join(
                 }
                 predicates = Some(preds);
             }
-            ast::JoinConstraint::Using(_) => todo!("USING joins not supported yet"),
+            ast::JoinConstraint::Using(distinct_names) => {
+                // USING join is replaced with a list of equality predicates
+                let mut using_predicates = vec![];
+                for distinct_name in distinct_names.iter() {
+                    let name_normalized = normalize_ident(distinct_name.0.as_str());
+                    let left_table = &tables[table_index - 1];
+                    let right_table = &tables[table_index];
+                    let left_col = left_table
+                        .table
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .find(|(_, col)| col.name == name_normalized);
+                    if left_col.is_none() {
+                        crate::bail_parse_error!(
+                            "Column {}.{} not found",
+                            left_table.table_identifier,
+                            distinct_name.0
+                        );
+                    }
+                    let right_col = right_table
+                        .table
+                        .columns
+                        .iter()
+                        .enumerate()
+                        .find(|(_, col)| col.name == name_normalized);
+                    if right_col.is_none() {
+                        crate::bail_parse_error!(
+                            "Column {}.{} not found",
+                            right_table.table_identifier,
+                            distinct_name.0
+                        );
+                    }
+                    let (left_col_idx, left_col) = left_col.unwrap();
+                    let (right_col_idx, right_col) = right_col.unwrap();
+                    using_predicates.push(ast::Expr::Binary(
+                        Box::new(ast::Expr::Column {
+                            database: None,
+                            table: left_table.table_index,
+                            column: left_col_idx,
+                            is_rowid_alias: left_col.primary_key,
+                        }),
+                        ast::Operator::Equals,
+                        Box::new(ast::Expr::Column {
+                            database: None,
+                            table: right_table.table_index,
+                            column: right_col_idx,
+                            is_rowid_alias: right_col.primary_key,
+                        }),
+                    ));
+                }
+                predicates = Some(using_predicates);
+                using = Some(distinct_names);
+            }
         }
     }
 
@@ -622,6 +670,7 @@ fn parse_join(
             iter_dir: None,
         },
         outer,
+        using,
         predicates,
     ))
 }

@@ -61,6 +61,7 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... CROSS JOIN        | Partial |         |
 | SELECT ... INNER JOIN        | Partial |         |
 | SELECT ... OUTER JOIN        | Partial |         |
+| SELECT ... JOIN USING        | Yes     |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |

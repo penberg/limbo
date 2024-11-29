@@ -8,7 +8,7 @@ use sqlite3_parser::ast;
 
 use crate::{
     function::AggFunc,
-    schema::{BTreeTable, Index},
+    schema::{BTreeTable, Column, Index},
     Result,
 };
 
@@ -60,6 +60,64 @@ pub enum IterationDirection {
     Backwards,
 }
 
+impl SourceOperator {
+    pub fn select_star(&self, out_columns: &mut Vec<ResultSetColumn>) {
+        for (table_ref, col, idx) in self.select_star_helper() {
+            out_columns.push(ResultSetColumn {
+                expr: ast::Expr::Column {
+                    database: None,
+                    table: table_ref.table_index,
+                    column: idx,
+                    is_rowid_alias: col.primary_key,
+                },
+                contains_aggregates: false,
+            });
+        }
+    }
+
+    /// All this ceremony is required to deduplicate columns when joining with USING
+    fn select_star_helper(&self) -> Vec<(&BTreeTableReference, &Column, usize)> {
+        match self {
+            SourceOperator::Join {
+                left, right, using, ..
+            } => {
+                let mut columns = left.select_star_helper();
+
+                // Join columns are filtered out from the right side
+                // in the case of a USING join.
+                if let Some(using_cols) = using {
+                    let right_columns = right.select_star_helper();
+
+                    for (table_ref, col, idx) in right_columns {
+                        if !using_cols
+                            .iter()
+                            .any(|using_col| col.name.eq_ignore_ascii_case(&using_col.0))
+                        {
+                            columns.push((table_ref, col, idx));
+                        }
+                    }
+                } else {
+                    columns.extend(right.select_star_helper());
+                }
+                columns
+            }
+            SourceOperator::Scan {
+                table_reference, ..
+            }
+            | SourceOperator::Search {
+                table_reference, ..
+            } => table_reference
+                .table
+                .columns
+                .iter()
+                .enumerate()
+                .map(|(i, col)| (table_reference, col, i))
+                .collect(),
+            SourceOperator::Nothing => Vec::new(),
+        }
+    }
+}
+
 /**
   A SourceOperator is a Node in the query plan that reads data from a table.
 */
@@ -75,6 +133,7 @@ pub enum SourceOperator {
         right: Box<SourceOperator>,
         predicates: Option<Vec<ast::Expr>>,
         outer: bool,
+        using: Option<ast::DistinctNames>,
     },
     // Scan operator
     // This operator is used to scan a table.
