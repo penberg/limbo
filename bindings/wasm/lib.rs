@@ -64,6 +64,21 @@ impl Statement {
         self
     }
 
+    pub fn get(&self) -> JsValue {
+        match self.inner.borrow_mut().step() {
+            Ok(limbo_core::RowResult::Row(row)) => {
+                let row_array = js_sys::Array::new();
+                for value in row.values {
+                    let value = to_js_value(value);
+                    row_array.push(&value);
+                }
+                JsValue::from(row_array)
+            }
+            Ok(limbo_core::RowResult::IO) | Ok(limbo_core::RowResult::Done) => JsValue::UNDEFINED,
+            Err(e) => panic!("Error: {:?}", e),
+        }
+    }
+
     pub fn all(&self) -> js_sys::Array {
         let array = js_sys::Array::new();
         loop {
@@ -82,6 +97,18 @@ impl Statement {
             }
         }
         array
+    }
+
+    pub fn iterate(&self) -> JsValue {
+        let all = self.all();
+        let iterator_fn = js_sys::Reflect::get(&all, &js_sys::Symbol::iterator())
+            .expect("Failed to get iterator function")
+            .dyn_into::<js_sys::Function>()
+            .expect("Symbol.iterator is not a function");
+
+        iterator_fn
+            .call0(&all)
+            .expect("Failed to call iterator function")
     }
 }
 

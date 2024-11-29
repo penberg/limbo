@@ -30,6 +30,40 @@ test.serial("Statement.raw().all()", async (t) => {
     t.deepEqual(stmt.raw().all(), expected);
 });
 
+test.serial("Statement.raw().get()", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [
+      1, "Alice", "alice@example.org"
+  ];
+  t.deepEqual(stmt.raw().get(), expected);
+
+  const emptyStmt = db.prepare("SELECT * FROM users WHERE id = -1");
+  t.is(emptyStmt.raw().get(), undefined);
+});
+
+test.serial("Statement.raw().iterate()", async (t) => {
+  const db = t.context.db;
+
+  const stmt = db.prepare("SELECT * FROM users");
+  const expected = [
+    { done: false, value: [1, "Alice", "alice@example.org"] },
+    { done: false, value: [2, "Bob", "bob@example.com"] },
+    { done: true, value: undefined },
+  ];
+
+  let iter = stmt.raw().iterate();
+  t.is(typeof iter[Symbol.iterator], 'function');
+  t.deepEqual(iter.next(), expected[0])
+  t.deepEqual(iter.next(), expected[1])
+  t.deepEqual(iter.next(), expected[2])
+
+  const emptyStmt = db.prepare("SELECT * FROM users WHERE id = -1");
+  t.is(typeof emptyStmt[Symbol.iterator], 'undefined');
+  t.throws(() => emptyStmt.next(), { instanceOf: TypeError });
+});
+
 const connect = async (path_opt) => {
     const path = path_opt ?? "hello.db";
     const provider = process.env.PROVIDER;
