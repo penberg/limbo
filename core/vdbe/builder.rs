@@ -343,14 +343,7 @@ impl ProgramBuilder {
     }
 
     // translate table to cursor id
-    pub fn resolve_cursor_id(
-        &self,
-        table_identifier: &str,
-        cursor_hint: Option<CursorID>,
-    ) -> CursorID {
-        if let Some(cursor_hint) = cursor_hint {
-            return cursor_hint;
-        }
+    pub fn resolve_cursor_id(&self, table_identifier: &str) -> CursorID {
         self.cursor_ref
             .iter()
             .position(|(t_ident, _)| {
@@ -359,10 +352,6 @@ impl ProgramBuilder {
                     .is_some_and(|ident| ident == table_identifier)
             })
             .unwrap()
-    }
-
-    pub fn resolve_cursor_to_table(&self, cursor_id: CursorID) -> Option<Table> {
-        self.cursor_ref[cursor_id].1.clone()
     }
 
     pub fn resolve_deferred_labels(&mut self) {

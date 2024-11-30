@@ -17,11 +17,6 @@ pub fn translate_select(
     connection: Weak<Connection>,
 ) -> Result<Program> {
     let select_plan = prepare_select_plan(schema, select)?;
-    let (optimized_plan, expr_result_cache) = optimize_plan(select_plan)?;
-    emit_program(
-        database_header,
-        optimized_plan,
-        expr_result_cache,
-        connection,
-    )
+    let optimized_plan = optimize_plan(select_plan)?;
+    emit_program(database_header, optimized_plan, connection)
 }

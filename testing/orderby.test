@@ -116,3 +116,24 @@ Whitney|Walker|1
 Robert|Villanueva|1
 Cynthia|Thomas|1
 Brandon|Tate|1}
+
+do_execsql_test order-by-case-insensitive-aggregate {
+  select u.first_name, sum(u.age) from users u group by u.first_name order by SUM(u.aGe) desc limit 10;
+} {Michael|11204
+David|8758
+Robert|8109
+Jennifer|7700
+John|7299
+Christopher|6397
+James|5921
+Joseph|5711
+Brian|5059
+William|5047}
+
+do_execsql_test order-by-agg-not-mentioned-in-select {
+  select u.first_name, length(group_concat(u.last_name)) from users u group by u.first_name order by max(u.email) desc limit 5;
+} {Louis|65
+Carolyn|118
+Katelyn|40
+Erik|88
+Collin|15}
