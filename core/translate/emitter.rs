@@ -996,7 +996,10 @@ fn close_loop(
 
             if *outer {
                 let lj_meta = metadata.left_joins.get(id).unwrap();
-                // If the left join match flag has been set to 1, we jump to the next row on the outer table.
+                // The left join match flag is set to 1 when there is any match on the right table
+                // (e.g. SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a).
+                // If the left join match flag has been set to 1, we jump to the next row on the outer table,
+                // i.e. continue to the next row of t1 in our example.
                 program.resolve_label(lj_meta.check_match_flag_label, program.offset());
                 let jump_offset = program.offset() + 3;
                 program.emit_insn(Insn::IfPos {
@@ -1004,7 +1007,9 @@ fn close_loop(
                     target_pc: jump_offset,
                     decrement_by: 0,
                 });
-                // If not, we go to the routine that emits NULLs for the right table.
+                // If the left join match flag is still 0, it means there was no match on the right table,
+                // but since it's a LEFT JOIN, we still need to emit a row with NULLs for the right table.
+                // In that case, we now enter the routine that does exactly that.
                 // First we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
                 let right_cursor_id = match right.as_ref() {
                     SourceOperator::Scan {
