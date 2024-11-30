@@ -32,8 +32,6 @@ pub struct LeftJoinMetadata {
     pub set_match_flag_true_label: BranchOffset,
     // label for the instruction that checks if the match flag is true
     pub check_match_flag_label: BranchOffset,
-    // label for the instruction where the program jumps to if the current row has a match for the left join
-    pub on_match_jump_to_label: BranchOffset,
 }
 
 // Metadata for handling ORDER BY operations
@@ -382,7 +380,6 @@ fn init_source(
                     match_flag_register: program.alloc_register(),
                     set_match_flag_true_label: program.allocate_label(),
                     check_match_flag_label: program.allocate_label(),
-                    on_match_jump_to_label: program.allocate_label(),
                 };
                 metadata.left_joins.insert(*id, lj_metadata);
             }
@@ -424,10 +421,7 @@ fn init_source(
 
             let next_row_label = program.allocate_label();
 
-            if !matches!(search, Search::PrimaryKeyEq { .. }) {
-                // Primary key equality search is handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
-                metadata.next_row_labels.insert(*id, next_row_label);
-            }
+            metadata.next_row_labels.insert(*id, next_row_label);
 
             let scan_loop_body_label = program.allocate_label();
             metadata.scan_loop_body_labels.push(scan_loop_body_label);
@@ -735,10 +729,7 @@ fn open_loop(
                 }
             }
 
-            let jump_label = metadata
-                .next_row_labels
-                .get(id)
-                .unwrap_or(metadata.termination_label_stack.last().unwrap());
+            let jump_label = metadata.next_row_labels.get(id).unwrap();
 
             if let Search::PrimaryKeyEq { cmp_expr } = search {
                 let src_reg = program.alloc_register();
@@ -1005,17 +996,16 @@ fn close_loop(
 
             if *outer {
                 let lj_meta = metadata.left_joins.get(id).unwrap();
-                // If the left join match flag has been set to 1, we jump to the next row on the outer table (result row has been emitted already)
+                // If the left join match flag has been set to 1, we jump to the next row on the outer table.
                 program.resolve_label(lj_meta.check_match_flag_label, program.offset());
-                program.emit_insn_with_label_dependency(
-                    Insn::IfPos {
-                        reg: lj_meta.match_flag_register,
-                        target_pc: lj_meta.on_match_jump_to_label,
-                        decrement_by: 0,
-                    },
-                    lj_meta.on_match_jump_to_label,
-                );
-                // If not, we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
+                let jump_offset = program.offset() + 3;
+                program.emit_insn(Insn::IfPos {
+                    reg: lj_meta.match_flag_register,
+                    target_pc: jump_offset,
+                    decrement_by: 0,
+                });
+                // If not, we go to the routine that emits NULLs for the right table.
+                // First we set the right table cursor's "pseudo null bit" on, which means any Insn::Column will return NULL
                 let right_cursor_id = match right.as_ref() {
                     SourceOperator::Scan {
                         table_reference, ..
@@ -1028,21 +1018,22 @@ fn close_loop(
                 program.emit_insn(Insn::NullRow {
                     cursor_id: right_cursor_id,
                 });
-                // Jump to setting the left join match flag to 1 again, but this time the right table cursor will set everything to null
+                // Then we jump to setting the left join match flag to 1 again,
+                // but this time the right table cursor will set everything to null.
+                // This leads to emitting a row with cols from the left + nulls from the right,
+                // and we will end up back in the IfPos instruction above, which will then
+                // check the match flag again, and since it is now 1, we will jump to the
+                // next row in the left table.
                 program.emit_insn_with_label_dependency(
                     Insn::Goto {
                         target_pc: lj_meta.set_match_flag_true_label,
                     },
                     lj_meta.set_match_flag_true_label,
                 );
+
+                assert!(program.offset() == jump_offset);
             }
-            let next_row_label = if *outer {
-                metadata.left_joins.get(id).unwrap().on_match_jump_to_label
-            } else {
-                *metadata.next_row_labels.get(&right.id()).unwrap()
-            };
-            // This points to the NextAsync instruction of the left table
-            program.resolve_label(next_row_label, program.offset());
+
             close_loop(program, left, metadata, referenced_tables)?;
 
             Ok(())
@@ -1093,6 +1084,7 @@ fn close_loop(
             search,
             ..
         } => {
+            program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
             if matches!(search, Search::PrimaryKeyEq { .. }) {
                 // Primary key equality search is handled with a SeekRowid instruction which does not loop, so there is no need to emit a NextAsync instruction.
                 return Ok(());
@@ -1104,7 +1096,7 @@ fn close_loop(
                 }
                 Search::PrimaryKeyEq { .. } => unreachable!(),
             };
-            program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
+
             program.emit_insn(Insn::NextAsync { cursor_id });
             let jump_label = metadata.scan_loop_body_labels.pop().unwrap();
             program.emit_insn_with_label_dependency(

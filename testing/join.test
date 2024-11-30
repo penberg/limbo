@@ -170,6 +170,13 @@ do_execsql_test four-way-inner-join {
   select u1.first_name, u2.first_name, u3.first_name, u4.first_name from users u1 join users u2 on u1.id = u2.id join users u3 on u2.id = u3.id + 1 join users u4 on u3.id = u4.id + 1 limit 1;
 } {Tommy|Tommy|Cindy|Jamie}
 
+# regression test for case where 3-way join that used 1 scan and 2 seeks (point lookups) was buggy due to incorrect jump opcodes
+do_execsql_test three-way-inner-join-with-two-seeks {
+    select * from users u join users u2 on u.id=u2.id join products p on u2.id = p.id limit 3;
+} {"1|Jamie|Foster|dylan00@example.com|496-522-9493|62375 Johnson Rest Suite 322|West Lauriestad|IL|35865|94|1|Jamie|Foster|dylan00@example.com|496-522-9493|62375 Johnson Rest Suite 322|West Lauriestad|IL|35865|94|1|hat|79.0
+2|Cindy|Salazar|williamsrebecca@example.com|287-934-1135|75615 Stacey Shore|South Stephanie|NC|85181|37|2|Cindy|Salazar|williamsrebecca@example.com|287-934-1135|75615 Stacey Shore|South Stephanie|NC|85181|37|2|cap|82.0
+3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|3|shirt|18.0"}
+
 do_execsql_test leftjoin-innerjoin-where {
   select u.first_name, p.name, p2.name from users u left join products p on p.name = u.first_name join products p2 on length(p2.name) > 8 where u.first_name = 'Franklin';
 } {Franklin||sweatshirt
