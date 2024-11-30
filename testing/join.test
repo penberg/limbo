@@ -221,3 +221,10 @@ do_execsql_test join-using {
 } {"1|Jamie|Foster|dylan00@example.com|496-522-9493|62375 Johnson Rest Suite 322|West Lauriestad|IL|35865|94|hat|79.0
 2|Cindy|Salazar|williamsrebecca@example.com|287-934-1135|75615 Stacey Shore|South Stephanie|NC|85181|37|cap|82.0
 3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|shirt|18.0"}
+
+# NATURAL JOIN desugars to JOIN USING (common_column1, common_column2...)
+do_execsql_test join-using {
+    select * from users natural join products limit 3;
+} {"1|Jamie|Foster|dylan00@example.com|496-522-9493|62375 Johnson Rest Suite 322|West Lauriestad|IL|35865|94|hat|79.0
+2|Cindy|Salazar|williamsrebecca@example.com|287-934-1135|75615 Stacey Shore|South Stephanie|NC|85181|37|cap|82.0
+3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|shirt|18.0"}

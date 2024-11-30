@@ -62,6 +62,7 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... INNER JOIN        | Partial |         |
 | SELECT ... OUTER JOIN        | Partial |         |
 | SELECT ... JOIN USING        | Yes     |         |
+| SELECT ... NATURAL JOIN      | Yes     |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |

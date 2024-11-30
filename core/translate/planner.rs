@@ -582,19 +582,54 @@ fn parse_join(
 
     tables.push(table.clone());
 
-    let outer = match operator {
+    let (outer, natural) = match operator {
         ast::JoinOperator::TypedJoin(Some(join_type)) => {
-            if join_type == JoinType::LEFT | JoinType::OUTER {
-                true
-            } else {
-                join_type == JoinType::RIGHT | JoinType::OUTER
-            }
+            let is_outer = join_type.contains(JoinType::OUTER);
+            let is_natural = join_type.contains(JoinType::NATURAL);
+            (is_outer, is_natural)
         }
-        _ => false,
+        _ => (false, false),
     };
 
     let mut using = None;
     let mut predicates = None;
+
+    if natural && constraint.is_some() {
+        crate::bail_parse_error!("NATURAL JOIN cannot be combined with ON or USING clause");
+    }
+
+    let constraint = if natural {
+        // NATURAL JOIN is first transformed into a USING join with the common columns
+        let left_table = &tables[table_index - 1];
+        let right_table = &tables[table_index];
+        let left_cols = &left_table.table.columns;
+        let right_cols = &right_table.table.columns;
+        let mut distinct_names = None;
+        // TODO: O(n^2) maybe not great for large tables
+        for left_col in left_cols.iter() {
+            for right_col in right_cols.iter() {
+                if left_col.name == right_col.name {
+                    if distinct_names.is_none() {
+                        distinct_names =
+                            Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
+                    } else {
+                        distinct_names
+                            .as_mut()
+                            .unwrap()
+                            .insert(ast::Name(left_col.name.clone()))
+                            .unwrap();
+                    }
+                }
+            }
+        }
+        if distinct_names.is_none() {
+            crate::bail_parse_error!("No columns found to NATURAL join on");
+        }
+        Some(ast::JoinConstraint::Using(distinct_names.unwrap()))
+    } else {
+        constraint
+    };
+
     if let Some(constraint) = constraint {
         match constraint {
             ast::JoinConstraint::On(expr) => {
