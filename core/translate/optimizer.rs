@@ -260,16 +260,24 @@ fn eliminate_constants(
 
 /**
   Recursively pushes predicates down the tree, as far as possible.
+  Where a predicate is pushed determines at which loop level it will be evaluated.
+  For example, in SELECT * FROM t1 JOIN t2 JOIN t3 WHERE t1.a = t2.a AND t2.b = t3.b AND t1.c = 1
+  the predicate t1.c = 1 can be pushed to t1 and will be evaluated in the first (outermost) loop,
+  the predicate t1.a = t2.a can be pushed to t2 and will be evaluated in the second loop
+  while t2.b = t3.b will be evaluated in the third loop.
 */
 fn push_predicates(
     operator: &mut SourceOperator,
     where_clause: &mut Option<Vec<ast::Expr>>,
     referenced_tables: &Vec<BTreeTableReference>,
 ) -> Result<()> {
+    // First try to push down any predicates from the WHERE clause
     if let Some(predicates) = where_clause {
         let mut i = 0;
         while i < predicates.len() {
+            // Take ownership of predicate to try pushing it down
             let predicate = predicates[i].take_ownership();
+            // If predicate was successfully pushed (None returned), remove it from WHERE
             let Some(predicate) = push_predicate(operator, predicate, referenced_tables)? else {
                 predicates.remove(i);
                 continue;
@@ -277,10 +285,12 @@ fn push_predicates(
             predicates[i] = predicate;
             i += 1;
         }
+        // Clean up empty WHERE clause
         if predicates.is_empty() {
             *where_clause = None;
         }
     }
+
     match operator {
         SourceOperator::Join {
             left,
@@ -289,6 +299,7 @@ fn push_predicates(
             outer,
             ..
         } => {
+            // Recursively push predicates down both sides of join
             push_predicates(left, where_clause, referenced_tables)?;
             push_predicates(right, where_clause, referenced_tables)?;
 
@@ -300,34 +311,41 @@ fn push_predicates(
 
             let mut i = 0;
             while i < predicates.len() {
-                // try to push the predicate to the left side first, then to the right side
-
-                // temporarily take ownership of the predicate
                 let predicate_owned = predicates[i].take_ownership();
-                // left join predicates cant be pushed to the left side
+
+                // For a join like SELECT * FROM left INNER JOIN right ON left.id = right.id AND left.name = 'foo'
+                // the predicate 'left.name = 'foo' can already be evaluated in the outer loop (left side of join)
+                // because the row can immediately be skipped if left.name != 'foo'.
+                // But for a LEFT JOIN, we can't do this since we need to ensure that all rows from the left table are included,
+                // even if there are no matching rows from the right table. This is why we can't push LEFT JOIN predicates to the left side.
                 let push_result = if *outer {
                     Some(predicate_owned)
                 } else {
                     push_predicate(left, predicate_owned, referenced_tables)?
                 };
-                // if the predicate was pushed to a child, remove it from the list
+
+                // Try pushing to left side first (see comment above for reasoning)
                 let Some(predicate) = push_result else {
                     predicates.remove(i);
                     continue;
                 };
-                // otherwise try to push it to the right side
-                // if it was pushed to the right side, remove it from the list
+
+                // Then try right side
                 let Some(predicate) = push_predicate(right, predicate, referenced_tables)? else {
                     predicates.remove(i);
                     continue;
                 };
-                // otherwise keep the predicate in the list
+
+                // If neither side could take it, keep in join predicates (not sure if this actually happens in practice)
+                // this is effectively the same as pushing to the right side, so maybe it could be removed and assert here
+                // that we don't reach this code
                 predicates[i] = predicate;
                 i += 1;
             }
 
             Ok(())
         }
+        // Base cases - nowhere else to push to
         SourceOperator::Scan { .. } => Ok(()),
         SourceOperator::Search { .. } => Ok(()),
         SourceOperator::Nothing => Ok(()),
@@ -349,24 +367,29 @@ fn push_predicate(
             table_reference,
             ..
         } => {
+            // Find position of this table in referenced_tables array
             let table_index = referenced_tables
                 .iter()
                 .position(|t| t.table_identifier == table_reference.table_identifier)
                 .unwrap();
 
+            // Get bitmask showing which tables this predicate references
             let predicate_bitmask =
                 get_table_ref_bitmask_for_ast_expr(referenced_tables, &predicate)?;
 
-            // the expression is allowed to refer to tables on its left, i.e. the righter bits in the mask
-            // e.g. if this table is 0010, and the table on its right in the join is 0100:
-            // if predicate_bitmask is 0011, the predicate can be pushed (refers to this table and the table on its left)
-            // if predicate_bitmask is 0001, the predicate can be pushed (refers to the table on its left)
-            // if predicate_bitmask is 0101, the predicate can't be pushed (refers to this table and a table on its right)
+            // Each table has a bit position based on join order from left to right
+            // e.g. in SELECT * FROM t1 JOIN t2 JOIN t3
+            // t1 is position 0 (001), t2 is position 1 (010), t3 is position 2 (100)
+            // To push a predicate to a given table, it can only reference that table and tables to its left
+            // Example: For table t2 at position 1 (bit 010):
+            // - Can push: 011 (t2 + t1), 001 (just t1), 010 (just t2)
+            // - Can't push: 110 (t2 + t3)
             let next_table_on_the_right_in_join_bitmask = 1 << (table_index + 1);
             if predicate_bitmask >= next_table_on_the_right_in_join_bitmask {
                 return Ok(Some(predicate));
             }
 
+            // Add predicate to this table's filters
             if predicates.is_none() {
                 predicates.replace(vec![predicate]);
             } else {
@@ -375,7 +398,8 @@ fn push_predicate(
 
             Ok(None)
         }
-        SourceOperator::Search { .. } => Ok(Some(predicate)),
+        // Search nodes don't exist yet at this point; Scans are transformed to Search in use_indexes()
+        SourceOperator::Search { .. } => unreachable!(),
         SourceOperator::Join {
             left,
             right,
@@ -383,31 +407,36 @@ fn push_predicate(
             outer,
             ..
         } => {
+            // Try pushing to left side first
             let push_result_left = push_predicate(left, predicate, referenced_tables)?;
             if push_result_left.is_none() {
                 return Ok(None);
             }
+            // Then try right side
             let push_result_right =
                 push_predicate(right, push_result_left.unwrap(), referenced_tables)?;
             if push_result_right.is_none() {
                 return Ok(None);
             }
 
+            // For LEFT JOIN, predicates must stay at join level
             if *outer {
                 return Ok(Some(push_result_right.unwrap()));
             }
 
             let pred = push_result_right.unwrap();
 
+            // Get bitmasks for tables referenced in predicate and both sides of join
             let table_refs_bitmask = get_table_ref_bitmask_for_ast_expr(referenced_tables, &pred)?;
-
             let left_bitmask = get_table_ref_bitmask_for_operator(referenced_tables, left)?;
             let right_bitmask = get_table_ref_bitmask_for_operator(referenced_tables, right)?;
 
+            // If predicate doesn't reference tables from both sides, it can't be a join condition
             if table_refs_bitmask & left_bitmask == 0 || table_refs_bitmask & right_bitmask == 0 {
                 return Ok(Some(pred));
             }
 
+            // Add as join predicate since it references both sides
             if join_on_preds.is_none() {
                 join_on_preds.replace(vec![pred]);
             } else {
