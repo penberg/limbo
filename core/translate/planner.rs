@@ -600,25 +600,33 @@ fn parse_join(
 
     let constraint = if natural {
         // NATURAL JOIN is first transformed into a USING join with the common columns
-        let left_table = &tables[table_index - 1];
+        let left_tables = &tables[..table_index];
+        assert!(!left_tables.is_empty());
         let right_table = &tables[table_index];
-        let left_cols = &left_table.table.columns;
         let right_cols = &right_table.table.columns;
         let mut distinct_names = None;
-        // TODO: O(n^2) maybe not great for large tables
-        for left_col in left_cols.iter() {
-            for right_col in right_cols.iter() {
-                if left_col.name == right_col.name {
-                    if distinct_names.is_none() {
-                        distinct_names =
-                            Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
-                    } else {
-                        distinct_names
-                            .as_mut()
-                            .unwrap()
-                            .insert(ast::Name(left_col.name.clone()))
-                            .unwrap();
+        // TODO: O(n^2) maybe not great for large tables or big multiway joins
+        for right_col in right_cols.iter() {
+            let mut found_match = false;
+            for left_table in left_tables.iter() {
+                for left_col in left_table.table.columns.iter() {
+                    if left_col.name == right_col.name {
+                        if distinct_names.is_none() {
+                            distinct_names =
+                                Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
+                        } else {
+                            distinct_names
+                                .as_mut()
+                                .unwrap()
+                                .insert(ast::Name(left_col.name.clone()))
+                                .unwrap();
+                        }
+                        found_match = true;
+                        break;
                     }
+                }
+                if found_match {
+                    break;
                 }
             }
         }
@@ -645,18 +653,25 @@ fn parse_join(
                 let mut using_predicates = vec![];
                 for distinct_name in distinct_names.iter() {
                     let name_normalized = normalize_ident(distinct_name.0.as_str());
-                    let left_table = &tables[table_index - 1];
+                    let left_tables = &tables[..table_index];
+                    assert!(!left_tables.is_empty());
                     let right_table = &tables[table_index];
-                    let left_col = left_table
-                        .table
-                        .columns
-                        .iter()
-                        .enumerate()
-                        .find(|(_, col)| col.name == name_normalized);
+                    let mut left_col = None;
+                    for (left_table_idx, left_table) in left_tables.iter().enumerate() {
+                        left_col = left_table
+                            .table
+                            .columns
+                            .iter()
+                            .enumerate()
+                            .find(|(_, col)| col.name == name_normalized)
+                            .map(|(idx, col)| (left_table_idx, idx, col));
+                        if left_col.is_some() {
+                            break;
+                        }
+                    }
                     if left_col.is_none() {
                         crate::bail_parse_error!(
-                            "Column {}.{} not found",
-                            left_table.table_identifier,
+                            "cannot join using column {} - column not present in all tables",
                             distinct_name.0
                         );
                     }
@@ -668,17 +683,16 @@ fn parse_join(
                         .find(|(_, col)| col.name == name_normalized);
                     if right_col.is_none() {
                         crate::bail_parse_error!(
-                            "Column {}.{} not found",
-                            right_table.table_identifier,
+                            "cannot join using column {} - column not present in all tables",
                             distinct_name.0
                         );
                     }
-                    let (left_col_idx, left_col) = left_col.unwrap();
+                    let (left_table_idx, left_col_idx, left_col) = left_col.unwrap();
                     let (right_col_idx, right_col) = right_col.unwrap();
                     using_predicates.push(ast::Expr::Binary(
                         Box::new(ast::Expr::Column {
                             database: None,
-                            table: left_table.table_index,
+                            table: left_table_idx,
                             column: left_col_idx,
                             is_rowid_alias: left_col.primary_key,
                         }),

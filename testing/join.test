@@ -236,7 +236,14 @@ do_execsql_test join-using {
 3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|shirt|18.0"}
 
 do_execsql_test natural-join-multiple {
-    select u.first_name, u.last_name, p.name from users u natural join users u2 natural join products p limit 3;
+    select u.first_name, u2.last_name, p.name from users u natural join users u2 natural join products p limit 3;
 } {"Jamie|Foster|hat
 Cindy|Salazar|cap
 Tommy|Perry|shirt"}
+
+# have to be able to join between 1st table and 3rd table as well
+do_execsql_test natural-join-and-using-join {
+    select u.id, u2.id, p.id from users u natural join products p join users u2 using (first_name) limit 3;
+} {"1|1|1
+1|1204|1
+1|1261|1"}
