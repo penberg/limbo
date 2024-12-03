@@ -222,9 +222,21 @@ do_execsql_test join-using {
 2|Cindy|Salazar|williamsrebecca@example.com|287-934-1135|75615 Stacey Shore|South Stephanie|NC|85181|37|cap|82.0
 3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|shirt|18.0"}
 
+do_execsql_test join-using-multiple {
+    select u.first_name, u.last_name, p.name from users u join users u2 using(id) join products p using(id) limit 3;
+} {"Jamie|Foster|hat
+Cindy|Salazar|cap
+Tommy|Perry|shirt"}
+
 # NATURAL JOIN desugars to JOIN USING (common_column1, common_column2...)
 do_execsql_test join-using {
     select * from users natural join products limit 3;
 } {"1|Jamie|Foster|dylan00@example.com|496-522-9493|62375 Johnson Rest Suite 322|West Lauriestad|IL|35865|94|hat|79.0
 2|Cindy|Salazar|williamsrebecca@example.com|287-934-1135|75615 Stacey Shore|South Stephanie|NC|85181|37|cap|82.0
 3|Tommy|Perry|warechristopher@example.org|001-288-554-8139x0276|2896 Paul Fall Apt. 972|Michaelborough|VA|15691|18|shirt|18.0"}
+
+do_execsql_test natural-join-multiple {
+    select u.first_name, u.last_name, p.name from users u natural join users u2 natural join products p limit 3;
+} {"Jamie|Foster|hat
+Cindy|Salazar|cap
+Tommy|Perry|shirt"}
