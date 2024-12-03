@@ -871,7 +871,6 @@ pub fn translate_expr(
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
                                 start_reg = Some(start_reg.unwrap_or(reg));
-
                                 translate_expr(
                                     program,
                                     referenced_tables,

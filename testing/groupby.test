@@ -131,3 +131,34 @@ do_execsql_test group_by_function_expression_ridiculous {
 do_execsql_test group_by_count_star {
   select u.first_name, count(*) from users u group by u.first_name limit 1;
 } {Aaron|41}
+
+do_execsql_test having {
+  select u.first_name, round(avg(u.age)) from users u group by u.first_name having avg(u.age) > 97 order by avg(u.age) desc limit 5;
+} {Nina|100.0
+Kurt|99.0
+Selena|98.0}
+
+do_execsql_test having_with_binary_cond {
+  select u.first_name, sum(u.age) from users u group by u.first_name having sum(u.age) + 1000 = 9109;
+} {Robert|8109}
+
+do_execsql_test having_with_scalar_fn_over_aggregate {
+  select u.first_name, concat(count(1), ' people with this name') from users u group by u.first_name having count(1) > 50 order by count(1) asc limit 5;
+} {"Angela|51 people with this name
+Justin|51 people with this name
+Rachel|52 people with this name
+Susan|52 people with this name
+Jeffrey|54 people with this name"}
+
+do_execsql_test having_with_multiple_conditions {
+  select u.first_name, count(*), round(avg(u.age)) as avg_age 
+  from users u 
+  group by u.first_name 
+  having count(*) > 40 and avg(u.age) > 40
+  order by count(*) desc, avg(u.age) desc
+  limit 5;
+} {Michael|228|49.0
+David|165|53.0
+Robert|159|51.0
+Jennifer|151|51.0
+John|145|50.0}

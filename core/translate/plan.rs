@@ -20,6 +20,13 @@ pub struct ResultSetColumn {
 }
 
 #[derive(Debug)]
+pub struct GroupBy {
+    pub exprs: Vec<ast::Expr>,
+    /// having clause split into a vec at 'AND' boundaries.
+    pub having: Option<Vec<ast::Expr>>,
+}
+
+#[derive(Debug)]
 pub struct Plan {
     /// A tree of sources (tables).
     pub source: SourceOperator,
@@ -28,7 +35,7 @@ pub struct Plan {
     /// where clause split into a vec at 'AND' boundaries.
     pub where_clause: Option<Vec<ast::Expr>>,
     /// group by clause
-    pub group_by: Option<Vec<ast::Expr>>,
+    pub group_by: Option<GroupBy>,
     /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// all the aggregates collected from the result columns, order by, and (TODO) having clauses
