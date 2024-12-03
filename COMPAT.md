@@ -2,11 +2,16 @@
 
 This document describes the SQLite compatibility status of Limbo:
 
-* [Limitations](#limitations)
-* [SQL statements](#sql-statements)
-* [SQL functions](#sql-functions)
-* [SQLite API](#sqlite-api)
-* [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+- [SQLite Compatibility](#sqlite-compatibility)
+  - [Limitations](#limitations)
+  - [SQL statements](#sql-statements)
+  - [SQL functions](#sql-functions)
+    - [Scalar functions](#scalar-functions)
+    - [Aggregate functions](#aggregate-functions)
+    - [Date and time functions](#date-and-time-functions)
+    - [JSON functions](#json-functions)
+  - [SQLite API](#sqlite-api)
+  - [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
 
 ## Limitations
 
@@ -55,6 +60,8 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... CROSS JOIN        | Partial |         |
 | SELECT ... INNER JOIN        | Partial |         |
 | SELECT ... OUTER JOIN        | Partial |         |
+| SELECT ... JOIN USING        | Yes     |         |
+| SELECT ... NATURAL JOIN      | Yes     |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |
