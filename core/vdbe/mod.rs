@@ -2105,6 +2105,7 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}
+                            ScalarFunc::Iif => {}
                             ScalarFunc::Instr => {
                                 let reg_value = &state.registers[*start_reg];
                                 let pattern_value = &state.registers[*start_reg + 1];
