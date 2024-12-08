@@ -599,6 +599,7 @@ impl ProgramState {
     }
 }
 
+#[derive(Debug)]
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,

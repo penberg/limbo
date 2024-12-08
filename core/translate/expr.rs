@@ -698,7 +698,92 @@ pub fn translate_expr(
             }
             Ok(target_register)
         }
-        ast::Expr::Case { .. } => todo!(),
+        ast::Expr::Case {
+            base,
+            when_then_pairs,
+            else_expr,
+        } => {
+            // There's two forms of CASE, one which does quality against the then values:
+            //   CASE [expr] WHEN [value] ELSE [value] END
+            // And one which evaluates a series of boolean predicates:
+            //   CASE (WHEN [bool_expr] THEN [value])+ END
+            let return_label = program.allocate_label();
+            let mut next_case_label = program.allocate_label();
+            let base_reg = base.as_ref().map(|_| program.alloc_register());
+            let expr_reg = program.alloc_register();
+            if let Some(base_expr) = base {
+                translate_expr(
+                    program,
+                    referenced_tables,
+                    base_expr,
+                    base_reg.unwrap(),
+                    precomputed_exprs_to_registers,
+                )?;
+            };
+            for (when_expr, then_expr) in when_then_pairs {
+                translate_expr(
+                    program,
+                    referenced_tables,
+                    when_expr,
+                    expr_reg,
+                    precomputed_exprs_to_registers,
+                )?;
+                match base_reg {
+                    Some(base_reg) => program.emit_insn_with_label_dependency(
+                        Insn::Ne {
+                            lhs: base_reg,
+                            rhs: expr_reg,
+                            target_pc: next_case_label,
+                        },
+                        next_case_label,
+                    ),
+                    None => program.emit_insn_with_label_dependency(
+                        Insn::IfNot {
+                            reg: expr_reg,
+                            target_pc: next_case_label,
+                            null_reg: 1,
+                        },
+                        next_case_label,
+                    ),
+                };
+                translate_expr(
+                    program,
+                    referenced_tables,
+                    then_expr,
+                    target_register,
+                    precomputed_exprs_to_registers,
+                )?;
+                program.emit_insn_with_label_dependency(
+                    Insn::Goto {
+                        target_pc: return_label,
+                    },
+                    return_label,
+                );
+                program.preassign_label_to_next_insn(next_case_label);
+                next_case_label = program.allocate_label();
+            }
+            match else_expr {
+                Some(expr) => {
+                    translate_expr(
+                        program,
+                        referenced_tables,
+                        expr,
+                        target_register,
+                        precomputed_exprs_to_registers,
+                    )?;
+                }
+                // If ELSE isn't specified, it means ELSE null
+                None => {
+                    program.emit_insn(Insn::Null {
+                        dest: target_register,
+                        dest_end: None,
+                    });
+                }
+            };
+            program.mark_last_insn_constant();
+            program.preassign_label_to_next_insn(return_label);
+            Ok(target_register)
+        }
         ast::Expr::Cast { expr, type_name } => {
             let type_name = type_name.as_ref().unwrap(); // TODO: why is this optional?
             let reg_expr = program.alloc_register();
