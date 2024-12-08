@@ -780,7 +780,6 @@ pub fn translate_expr(
                     });
                 }
             };
-            program.mark_last_insn_constant();
             program.preassign_label_to_next_insn(return_label);
             Ok(target_register)
         }
