@@ -968,14 +968,12 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::Iif => {
-                            let args = if args.as_ref().map(|args| args.len() != 3).unwrap_or(true)
-                            {
-                                crate::bail_parse_error!(
+                            let args = match args {
+                                Some(args) if args.len() == 3 => args,
+                                _ => crate::bail_parse_error!(
                                     "{} requires exactly 3 arguments",
                                     srf.to_string()
-                                );
-                            } else {
-                                args.as_ref().unwrap()
+                                ),
                             };
                             let temp_reg = program.alloc_register();
                             translate_expr(
