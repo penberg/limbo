@@ -60,6 +60,33 @@ This document describes the SQLite compatibility status of Limbo:
 | VACUUM                       | No      |         |
 | WITH clause                  | No      |         |
 
+### SELECT Expressions
+
+Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
+
+| Syntax                       | Status  | Comment |
+|------------------------------|---------|---------|
+| literals                     | Yes     |         |
+| schema.table.column          | Partial | Schemas aren't supported |
+| unary operator               | Partial | `-` supported, `+~` aren't |
+| binary operator              | Partial | Only `%`, `!<`, and `!>` are unsupported |
+| agg() FILTER (WHERE ...)     | No      | Is incorrectly ignored |
+| ... OVER (...)               | No      | Is incorrectly ignored |
+| (expr)                       | Yes     |         |
+| CAST (expr AS type)          | Yes     |         |
+| COLLATE                      | No      |         |
+| (NOT) LIKE                   | No      |         |
+| (NOT) GLOB                   | No      |         |
+| (NOT) REGEXP                 | No      |         |
+| (NOT) MATCH                  | No      |         |
+| IS (NOT)                     | No      |         |
+| IS (NOT) DISTINCT FROM       | No      |         |
+| (NOT) BETWEEN ... AND ...    | No      |         |
+| (NOT) IN (subquery)          | No      |         |
+| (NOT) EXISTS (subquery)      | No      |         |
+| CASE WHEN THEN ELSE END      | Yes     |         |
+| RAISE                        | No      |         |
+
 ## SQL functions
 
 ### Scalar functions
@@ -138,7 +165,6 @@ This document describes the SQLite compatibility status of Limbo:
 | min(X)                       | Yes     |         |
 | sum(X)                       | Yes     |         |
 | total(X)                     | Yes     |         |
-
 
 ### Date and time functions
 

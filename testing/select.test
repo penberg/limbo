@@ -58,3 +58,19 @@ do_execsql_test seekrowid {
 do_execsql_test select_parenthesized {
   select (price + 100) from products limit 1;
 } {179.0}
+
+do_execsql_test select_case_base_else {
+  select case when 0 then 0 when 1 then 1 else 2 end;
+} {1}
+
+do_execsql_test select_case_noelse_null {
+  select case when 0 then 0 end;
+} {}
+
+do_execsql_test select_base_case_else {
+  select case 1 when 0 then 0 when 1 then 1 else 2 end;
+} {1}
+
+do_execsql_test select_base_case_noelse_null {
+  select case 4 when 0 then 0 when 1 then 1 end;
+} {}
