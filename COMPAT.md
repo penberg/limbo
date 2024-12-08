@@ -76,7 +76,7 @@ This document describes the SQLite compatibility status of Limbo:
 | glob(X,Y)                    | Yes    |         |
 | hex(X)                       | Yes    |         |
 | ifnull(X,Y)                  | Yes    |         |
-| iif(X,Y,Z)                   | No     |         |
+| iif(X,Y,Z)                   | Yes    |         |
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | No     |         |
 | length(X)                    | Yes    |         |

@@ -75,6 +75,14 @@ do_execsql_test ifnull-2 {
   select ifnull(null, 2);
 } {2}
 
+do_execsql_test iif-1 {
+  select iif(1, 1, 0);
+} {1}
+
+do_execsql_test iif-2 {
+  select iif(0, 1, 0);
+} {0}
+
 do_execsql_test instr-str {
   select instr('limbo', 'im');
 } {2}
