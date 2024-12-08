@@ -703,10 +703,12 @@ pub fn translate_expr(
             when_then_pairs,
             else_expr,
         } => {
-            // There's two forms of CASE, one which does quality against the then values:
+            // There's two forms of CASE, one which does quality against the when values:
             //   CASE [expr] WHEN [value] ELSE [value] END
             // And one which evaluates a series of boolean predicates:
             //   CASE (WHEN [bool_expr] THEN [value])+ END
+            // This just changes which sort of branching instruction to issue, after we
+            // generate the expression if needed.
             let return_label = program.allocate_label();
             let mut next_case_label = program.allocate_label();
             let base_reg = base.as_ref().map(|_| program.alloc_register());
