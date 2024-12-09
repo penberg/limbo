@@ -20,6 +20,7 @@ use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
+use std::cell::Cell;
 use std::rc::Weak;
 use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
@@ -105,6 +106,7 @@ impl Database {
             schema: bootstrap_schema.clone(),
             header: db_header.clone(),
             db: Weak::new(),
+            last_insert_rowid: Cell::new(0),
         });
         let mut schema = Schema::new();
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
@@ -125,6 +127,7 @@ impl Database {
             schema: self.schema.clone(),
             header: self.header.clone(),
             db: Rc::downgrade(self),
+            last_insert_rowid: Cell::new(0),
         })
     }
 }
@@ -175,6 +178,7 @@ pub struct Connection {
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     db: Weak<Database>, // backpointer to the database holding this connection
+    last_insert_rowid: Cell<u64>,
 }
 
 impl Connection {
@@ -309,6 +313,14 @@ impl Connection {
                 }
             };
         }
+    }
+
+    pub fn last_insert_rowid(&self) -> u64 {
+        self.last_insert_rowid.get()
+    }
+
+    fn update_last_rowid(&self, rowid: u64) {
+        self.last_insert_rowid.set(rowid);
     }
 }
 

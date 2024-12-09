@@ -858,6 +858,16 @@ pub fn translate_expr(
 
                             Ok(target_register)
                         }
+                        ScalarFunc::LastInsertRowid => {
+                            let regs = program.alloc_register();
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: regs,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::Concat => {
                             let args = if let Some(args) = args {
                                 args

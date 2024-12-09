@@ -26,6 +26,10 @@ impl Cursor for Sorter {
         self.current.borrow().is_none()
     }
 
+    fn root_page(&self) -> usize {
+        unreachable!()
+    }
+
     // We do the sorting here since this is what is called by the SorterSort instruction
     fn rewind(&mut self) -> Result<CursorResult<()>> {
         self.records.sort_by(|a, b| {
