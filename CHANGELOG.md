@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+* Add `get()` and `iterate()` to JavaScript/Wasm API (Jean Arhancet)
+
 ## 0.0.8 - 2024-11-20
 
 ### Added
