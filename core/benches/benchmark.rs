@@ -1,18 +1,52 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use fallible_iterator::FallibleIterator;
+use limbo_core::parser::parse_sql_statement;
 use limbo_core::{Database, PlatformIO, IO};
 use pprof::criterion::{Output, PProfProfiler};
+use sqlite3_parser::lexer::sql::Parser;
 use std::sync::Arc;
 
 fn bench(c: &mut Criterion) {
-    limbo_bench(c);
-
+    if std::env::var("DISABLE_PARSER_BENCHMARK").is_err() {
+        parser_bench(c);
+    }
+    if std::env::var("DISABLE_LIMBO_BENCHMARK").is_err() {
+        limbo_bench(c);
+    }
     // https://github.com/penberg/limbo/issues/174
     // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
-    if std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_ok() {
-        return;
+    if std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_err() {
+        rusqlite_bench(c);
+    }
+}
+
+fn parser_bench(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("parser");
+    group.throughput(Throughput::Elements(1));
+
+    let sql_statements = vec![
+        ("SELECT_STAR_LIMIT_1".to_string(), "SELECT * FROM users LIMIT 1".to_string()),
+        ("MULTIPLE_JOINS".to_string(), "SELECT foo,bar,baz,bad FROM users LEFT OUTER JOIN products INNER JOIN gizmos LIMIT 100".to_string()),
+        ("MULTIPLE_JOINS_WITH_WHERE".to_string(), "SELECT foo,bar,baz,bad FROM users LEFT OUTER JOIN products INNER JOIN gizmos WHERE foo = 1 AND bar = 2 OR baz < 3 AND bad = 4 LIMIT 100".to_string()),
+        ("MULTIPLE_JOINS_WITH_WHERE_GROUPBY_AND_ORDERBY".to_string(), "SELECT foo,bar,baz,bad FROM users LEFT OUTER JOIN products INNER JOIN gizmos WHERE foo = 1 AND bar = 2 OR baz < 3 AND bad = 4 GROUP BY foo,bar ORDER BY baz DESC, bad ASC LIMIT 100".to_string()),
+    ];
+
+    for (i, (test_name, sql)) in sql_statements.into_iter().enumerate() {
+        group.bench_function(format!("Parse SQL, sqlite3_parser: '{}'", test_name), |b| {
+            b.iter(|| {
+                let mut p = Parser::new(sql.as_bytes());
+                p.next().unwrap();
+            });
+        });
+        let mut sql2 = sql.clone();
+        group.bench_function(format!("Parse SQL, limbo: '{}'", test_name), |b| {
+            b.iter(|| {
+                parse_sql_statement(&mut sql2).unwrap();
+            });
+        });
     }
 
-    rusqlite_bench(c)
+    group.finish();
 }
 
 fn limbo_bench(criterion: &mut Criterion) {
