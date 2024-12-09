@@ -2321,10 +2321,12 @@ impl Program {
                 Insn::InsertAwait { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
-                    if let Some(rowid) = cursor.rowid()? {
-                        if let Some(conn) = self.connection.upgrade() {
-                            println!("rowid: {}", rowid);
-                            conn.update_last_rowid(rowid);
+                    // Only update last_insert_rowid for regular table inserts, not schema modifications
+                    if cursor.root_page() != 1 {
+                        if let Some(rowid) = cursor.rowid()? {
+                            if let Some(conn) = self.connection.upgrade() {
+                                conn.update_last_rowid(rowid);
+                            }
                         }
                     }
                     state.pc += 1;
@@ -3240,6 +3242,10 @@ mod tests {
     }
 
     impl Cursor for MockCursor {
+        fn root_page(&self) -> usize {
+            unreachable!()
+        }
+
         fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
             self.seek_to_last()
         }
