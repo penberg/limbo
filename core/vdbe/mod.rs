@@ -2107,11 +2107,12 @@ impl Program {
                             ScalarFunc::IfNull => {}
                             ScalarFunc::LastInsertRowid => {
                                 if let Some(conn) = self.connection.upgrade() {
-                                    state.registers[*dest] = OwnedValue::Integer(conn.last_insert_rowid() as i64);
+                                    state.registers[*dest] =
+                                        OwnedValue::Integer(conn.last_insert_rowid() as i64);
                                 } else {
                                     state.registers[*dest] = OwnedValue::Null;
                                 }
-                            }                        
+                            }
                             ScalarFunc::Instr => {
                                 let reg_value = &state.registers[*start_reg];
                                 let pattern_value = &state.registers[*start_reg + 1];

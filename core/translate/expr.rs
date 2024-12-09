@@ -867,7 +867,7 @@ pub fn translate_expr(
                                 func: func_ctx,
                             });
                             Ok(target_register)
-                        }                    
+                        }
                         ScalarFunc::Concat => {
                             let args = if let Some(args) = args {
                                 args
