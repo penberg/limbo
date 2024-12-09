@@ -124,7 +124,9 @@ impl PartialOrd<OwnedValue> for OwnedValue {
             (OwnedValue::Null, _) => Some(std::cmp::Ordering::Less),
             (_, OwnedValue::Null) => Some(std::cmp::Ordering::Greater),
             (OwnedValue::Agg(a), OwnedValue::Agg(b)) => a.partial_cmp(b),
-            _ => None,
+            (OwnedValue::Agg(a), other) => a.final_value().partial_cmp(other),
+            (other, OwnedValue::Agg(b)) => other.partial_cmp(b.final_value()),
+            other => todo!("{:?}", other),
         }
     }
 }
