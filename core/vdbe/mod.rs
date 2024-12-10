@@ -2133,6 +2133,7 @@ impl Program {
                             | ScalarFunc::Lower
                             | ScalarFunc::Upper
                             | ScalarFunc::Length
+                            | ScalarFunc::OctetLength
                             | ScalarFunc::Typeof
                             | ScalarFunc::Unicode
                             | ScalarFunc::Quote
@@ -2146,6 +2147,7 @@ impl Program {
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
                                     ScalarFunc::Length => Some(exec_length(reg_value)),
+                                    ScalarFunc::OctetLength => Some(exec_octet_length(reg_value)),
                                     ScalarFunc::Typeof => Some(exec_typeof(reg_value)),
                                     ScalarFunc::Unicode => Some(exec_unicode(reg_value)),
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
@@ -2541,6 +2543,17 @@ fn exec_length(reg: &OwnedValue) -> OwnedValue {
         }
         OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
         OwnedValue::Agg(aggctx) => exec_length(aggctx.final_value()),
+        _ => reg.to_owned(),
+    }
+}
+
+fn exec_octet_length(reg: &OwnedValue) -> OwnedValue {
+    match reg {
+        OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
+            OwnedValue::Integer(reg.to_string().into_bytes().len() as i64)
+        }
+        OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
+        OwnedValue::Agg(aggctx) => exec_octet_length(aggctx.final_value()),
         _ => reg.to_owned(),
     }
 }
