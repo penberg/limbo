@@ -469,7 +469,7 @@ pub trait Optimizable {
 impl Optimizable for ast::Expr {
     fn is_rowid_alias_of(&self, table_index: usize) -> bool {
         match self {
-            ast::Expr::Column {
+            Self::Column {
                 table,
                 is_rowid_alias,
                 ..
@@ -484,7 +484,7 @@ impl Optimizable for ast::Expr {
         available_indexes: &[Rc<Index>],
     ) -> Result<Option<usize>> {
         match self {
-            ast::Expr::Column { table, column, .. } => {
+            Self::Column { table, column, .. } => {
                 for (idx, index) in available_indexes.iter().enumerate() {
                     if index.table_name == referenced_tables[*table].table.name {
                         let column = referenced_tables[*table]
@@ -499,7 +499,7 @@ impl Optimizable for ast::Expr {
                 }
                 Ok(None)
             }
-            ast::Expr::Binary(lhs, op, rhs) => {
+            Self::Binary(lhs, op, rhs) => {
                 let lhs_index =
                     lhs.check_index_scan(table_index, referenced_tables, available_indexes)?;
                 if lhs_index.is_some() {
@@ -511,7 +511,7 @@ impl Optimizable for ast::Expr {
                     // swap lhs and rhs
                     let lhs_new = rhs.take_ownership();
                     let rhs_new = lhs.take_ownership();
-                    *self = ast::Expr::Binary(Box::new(lhs_new), *op, Box::new(rhs_new));
+                    *self = Self::Binary(Box::new(lhs_new), *op, Box::new(rhs_new));
                     return Ok(rhs_index);
                 }
                 Ok(None)
@@ -521,7 +521,7 @@ impl Optimizable for ast::Expr {
     }
     fn check_constant(&self) -> Result<Option<ConstantPredicate>> {
         match self {
-            ast::Expr::Literal(lit) => match lit {
+            Self::Literal(lit) => match lit {
                 ast::Literal::Null => Ok(Some(ConstantPredicate::AlwaysFalse)),
                 ast::Literal::Numeric(b) => {
                     if let Ok(int_value) = b.parse::<i64>() {
@@ -563,7 +563,7 @@ impl Optimizable for ast::Expr {
                 }
                 _ => Ok(None),
             },
-            ast::Expr::Unary(op, expr) => {
+            Self::Unary(op, expr) => {
                 if *op == ast::UnaryOperator::Not {
                     let trivial = expr.check_constant()?;
                     return Ok(trivial.map(|t| match t {
@@ -579,7 +579,7 @@ impl Optimizable for ast::Expr {
 
                 Ok(None)
             }
-            ast::Expr::InList { lhs: _, not, rhs } => {
+            Self::InList { lhs: _, not, rhs } => {
                 if rhs.is_none() {
                     return Ok(Some(if *not {
                         ConstantPredicate::AlwaysTrue
@@ -598,7 +598,7 @@ impl Optimizable for ast::Expr {
 
                 Ok(None)
             }
-            ast::Expr::Binary(lhs, op, rhs) => {
+            Self::Binary(lhs, op, rhs) => {
                 let lhs_trivial = lhs.check_constant()?;
                 let rhs_trivial = rhs.check_constant()?;
                 match op {

@@ -14,8 +14,8 @@ pub struct Sorter {
 impl Sorter {
     pub fn new(order: Vec<bool>) -> Self {
         Self {
-            records: Vec::new(),
-            current: RefCell::new(None),
+            records: vec![],
+            current: None.into(),
             order,
         }
     }

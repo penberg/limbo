@@ -78,18 +78,18 @@ impl From<ParserError> for Error {
 
 impl ScanError for Error {
     fn position(&mut self, line: u64, column: usize) {
-        match *self {
-            Self::Io(_) => {}
-            Self::UnrecognizedToken(ref mut pos) => *pos = Some((line, column)),
-            Self::UnterminatedLiteral(ref mut pos) => *pos = Some((line, column)),
-            Self::UnterminatedBracket(ref mut pos) => *pos = Some((line, column)),
-            Self::UnterminatedBlockComment(ref mut pos) => *pos = Some((line, column)),
-            Self::BadVariableName(ref mut pos) => *pos = Some((line, column)),
-            Self::BadNumber(ref mut pos) => *pos = Some((line, column)),
-            Self::ExpectedEqualsSign(ref mut pos) => *pos = Some((line, column)),
-            Self::MalformedBlobLiteral(ref mut pos) => *pos = Some((line, column)),
-            Self::MalformedHexInteger(ref mut pos) => *pos = Some((line, column)),
-            Self::ParserError(_, ref mut pos) => *pos = Some((line, column)),
-        }
+        *match *self {
+            Self::Io(_) => return,
+            Self::UnrecognizedToken(ref mut pos)
+            | Self::UnterminatedLiteral(ref mut pos)
+            | Self::UnterminatedBracket(ref mut pos)
+            | Self::UnterminatedBlockComment(ref mut pos)
+            | Self::BadVariableName(ref mut pos)
+            | Self::BadNumber(ref mut pos)
+            | Self::ExpectedEqualsSign(ref mut pos)
+            | Self::MalformedBlobLiteral(ref mut pos)
+            | Self::MalformedHexInteger(ref mut pos)
+            | Self::ParserError(_, ref mut pos) => pos,
+        } = Some((line, column))
     }
 }

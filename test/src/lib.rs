@@ -179,7 +179,7 @@ mod tests {
         let conn = tmp_db.connect_limbo();
         let iterations = 10_usize;
 
-        let mut huge_texts = Vec::new();
+        let mut huge_texts = vec![];
         for i in 0..iterations {
             let mut huge_text = String::new();
             for _j in 0..8192 {

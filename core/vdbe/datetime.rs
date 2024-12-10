@@ -317,23 +317,21 @@ fn parse_modifier_time(s: &str) -> Result<NaiveTime> {
 fn parse_modifier(modifier: &str) -> Result<Modifier> {
     let modifier = modifier.trim().to_lowercase();
 
-    match modifier.as_str() {
-        s if s.ends_with(" days") => Ok(Modifier::Days(parse_modifier_number(&s[..s.len() - 5])?)),
-        s if s.ends_with(" hours") => {
-            Ok(Modifier::Hours(parse_modifier_number(&s[..s.len() - 6])?))
-        }
+    Ok(match modifier.as_str() {
+        s if s.ends_with(" days") => Modifier::Days(parse_modifier_number(&s[..s.len() - 5])?),
+        s if s.ends_with(" hours") => Modifier::Hours(parse_modifier_number(&s[..s.len() - 6])?),
         s if s.ends_with(" minutes") => {
-            Ok(Modifier::Minutes(parse_modifier_number(&s[..s.len() - 8])?))
+            Modifier::Minutes(parse_modifier_number(&s[..s.len() - 8])?)
         }
         s if s.ends_with(" seconds") => {
-            Ok(Modifier::Seconds(parse_modifier_number(&s[..s.len() - 8])?))
+            Modifier::Seconds(parse_modifier_number(&s[..s.len() - 8])?)
         }
-        s if s.ends_with(" months") => Ok(Modifier::Months(
-            parse_modifier_number(&s[..s.len() - 7])? as i32,
-        )),
-        s if s.ends_with(" years") => Ok(Modifier::Years(
-            parse_modifier_number(&s[..s.len() - 6])? as i32,
-        )),
+        s if s.ends_with(" months") => {
+            Modifier::Months(parse_modifier_number(&s[..s.len() - 7])? as i32)
+        }
+        s if s.ends_with(" years") => {
+            Modifier::Years(parse_modifier_number(&s[..s.len() - 6])? as i32)
+        }
         s if s.starts_with('+') || s.starts_with('-') => {
             // Parse as DateOffset or DateTimeOffset
             let parts: Vec<&str> = s[1..].split(' ').collect();
@@ -342,7 +340,7 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                     // first part can be either date ±YYYY-MM-DD or 3 types of time modifiers
                     let date = parse_modifier_date(parts[0]);
                     if let Ok(date) = date {
-                        Ok(Modifier::DateTimeOffset { date, time: None })
+                        Modifier::DateTimeOffset { date, time: None }
                     } else {
                         // try to parse time if error parsing date
                         let time = parse_modifier_time(parts[0])?;
@@ -352,45 +350,47 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                         } else {
                             TimeDelta::seconds(time.num_seconds_from_midnight() as i64)
                         };
-                        Ok(Modifier::TimeOffset(time_delta))
+                        Modifier::TimeOffset(time_delta)
                     }
                 }
                 2 => {
                     let date = parse_modifier_date(parts[0])?;
                     let time = parse_modifier_time(parts[1])?;
-                    Ok(Modifier::DateTimeOffset {
+                    Modifier::DateTimeOffset {
                         date,
                         time: Some(time),
-                    })
+                    }
                 }
-                _ => Err(InvalidModifier(
-                    "Invalid date/time offset format".to_string(),
-                )),
+                _ => {
+                    return Err(InvalidModifier(
+                        "Invalid date/time offset format".to_string(),
+                    ))
+                }
             }
         }
-        "ceiling" => Ok(Modifier::Ceiling),
-        "floor" => Ok(Modifier::Floor),
-        "start of month" => Ok(Modifier::StartOfMonth),
-        "start of year" => Ok(Modifier::StartOfYear),
-        "start of day" => Ok(Modifier::StartOfDay),
+        "ceiling" => Modifier::Ceiling,
+        "floor" => Modifier::Floor,
+        "start of month" => Modifier::StartOfMonth,
+        "start of year" => Modifier::StartOfYear,
+        "start of day" => Modifier::StartOfDay,
         s if s.starts_with("weekday ") => {
             let day = parse_modifier_number(&s[8..])?;
             if !(0..=6).contains(&day) {
-                Err(InvalidModifier(
+                return Err(InvalidModifier(
                     "Weekday must be between 0 and 6".to_string(),
-                ))
+                ));
             } else {
-                Ok(Modifier::Weekday(day as u32))
+                Modifier::Weekday(day as u32)
             }
         }
-        "unixepoch" => Ok(Modifier::UnixEpoch),
-        "julianday" => Ok(Modifier::JulianDay),
-        "auto" => Ok(Modifier::Auto),
-        "localtime" => Ok(Modifier::Localtime),
-        "utc" => Ok(Modifier::Utc),
-        "subsec" | "subsecond" => Ok(Modifier::Subsec),
-        _ => Err(InvalidModifier(format!("Unknown modifier: {}", modifier))),
-    }
+        "unixepoch" => Modifier::UnixEpoch,
+        "julianday" => Modifier::JulianDay,
+        "auto" => Modifier::Auto,
+        "localtime" => Modifier::Localtime,
+        "utc" => Modifier::Utc,
+        "subsec" | "subsecond" => Modifier::Subsec,
+        _ => return Err(InvalidModifier(format!("Unknown modifier: {}", modifier))),
+    })
 }
 
 #[cfg(test)]

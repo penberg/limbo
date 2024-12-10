@@ -36,12 +36,12 @@ impl ProgramBuilder {
             next_free_register: 1,
             next_free_label: 0,
             next_free_cursor_id: 0,
-            insns: Vec::new(),
-            unresolved_labels: Vec::new(),
+            insns: vec![],
+            unresolved_labels: vec![],
             next_insn_label: None,
-            cursor_ref: Vec::new(),
-            constant_insns: Vec::new(),
-            deferred_label_resolutions: Vec::new(),
+            cursor_ref: vec![],
+            constant_insns: vec![],
+            deferred_label_resolutions: vec![],
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
         }
@@ -114,7 +114,7 @@ impl ProgramBuilder {
 
     pub fn allocate_label(&mut self) -> BranchOffset {
         self.next_free_label -= 1;
-        self.unresolved_labels.push(Vec::new());
+        self.unresolved_labels.push(vec![]);
         self.next_free_label
     }
 

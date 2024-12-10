@@ -68,7 +68,7 @@ pub struct Context<'input> {
 
 impl<'input> Context<'input> {
     pub fn new(input: &'input [u8]) -> Self {
-        Context {
+        Self {
             input,
             explain: None,
             stmt: None,

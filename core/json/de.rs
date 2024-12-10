@@ -163,11 +163,11 @@ impl<'de> Deserializer<'de> {
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(input: &'de str) -> Result<Self> {
         let pair = Parser::parse(Rule::text, input)?.next().unwrap();
-        Ok(Deserializer::from_pair(pair))
+        Ok(Self::from_pair(pair))
     }
 
     fn from_pair(pair: Pair<'de, Rule>) -> Self {
-        Deserializer { pair: Some(pair) }
+        Self { pair: Some(pair) }
     }
 }
 

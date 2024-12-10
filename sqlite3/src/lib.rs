@@ -63,7 +63,7 @@ pub struct sqlite3_stmt<'a> {
 
 impl<'a> sqlite3_stmt<'a> {
     pub fn new(stmt: limbo_core::Statement) -> Self {
-        let row = RefCell::new(None);
+        let row = None.into();
         Self { stmt, row }
     }
 }

@@ -7,9 +7,7 @@ impl Cmd {
     /// Statement accessor
     pub fn stmt(&self) -> &Stmt {
         match self {
-            Self::Explain(stmt) => stmt,
-            Self::ExplainQueryPlan(stmt) => stmt,
-            Self::Stmt(stmt) => stmt,
+            Self::Explain(stmt) | Self::ExplainQueryPlan(stmt) | Self::Stmt(stmt) => stmt,
         }
     }
     /// Like `sqlite3_column_count` but more limited

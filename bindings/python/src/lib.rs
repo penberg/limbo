@@ -145,7 +145,7 @@ impl Cursor {
     }
 
     pub fn fetchall(&mut self, py: Python) -> Result<Vec<PyObject>> {
-        let mut results = Vec::new();
+        let mut results = vec![];
 
         if let Some(smt) = &self.smt {
             let mut smt_lock = smt.lock().map_err(|_| {

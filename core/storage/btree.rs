@@ -121,17 +121,17 @@ impl BTreeCursor {
         Self {
             pager,
             root_page,
-            rowid: RefCell::new(None),
-            record: RefCell::new(None),
+            rowid: None.into(),
+            record: None.into(),
             null_flag: false,
             database_header,
             going_upwards: false,
             write_info: WriteInfo {
                 state: WriteState::Start,
                 new_pages: RefCell::new(Vec::with_capacity(4)),
-                scratch_cells: RefCell::new(Vec::new()),
-                rightmost_pointer: RefCell::new(None),
-                page_copy: RefCell::new(None),
+                scratch_cells: RefCell::new(vec![]),
+                rightmost_pointer: None.into(),
+                page_copy: None.into(),
             },
             stack: PageStack {
                 current_page: RefCell::new(-1),
@@ -674,7 +674,7 @@ impl BTreeCursor {
 
                     // insert cell
 
-                    let mut cell_payload: Vec<u8> = Vec::new();
+                    let mut cell_payload: Vec<u8> = vec![];
                     self.fill_cell_payload(page_type, Some(int_key), &mut cell_payload, record);
 
                     // insert
@@ -996,7 +996,7 @@ impl BTreeCursor {
                 let new_pages_len = new_pages.len();
                 let cells_per_page = scratch_cells.len() / new_pages.len();
                 let mut current_cell_index = 0_usize;
-                let mut divider_cells_index = Vec::new(); /* index to scratch cells that will be used as dividers in order */
+                let mut divider_cells_index = vec![]; /* index to scratch cells that will be used as dividers in order */
 
                 debug!(
                     "balance_leaf::distribute(cells={}, cells_per_page={})",
@@ -1097,7 +1097,7 @@ impl BTreeCursor {
                             BTreeCell::TableLeafCell(leaf) => leaf._rowid,
                             _ => unreachable!(),
                         };
-                        let mut divider_cell = Vec::new();
+                        let mut divider_cell = vec![];
                         divider_cell.extend_from_slice(&(page.id as u32).to_be_bytes());
                         divider_cell.extend(std::iter::repeat(0).take(9));
                         let n = write_varint(&mut divider_cell.as_mut_slice()[4..], key);
@@ -1437,7 +1437,7 @@ impl BTreeCursor {
             PageType::TableLeaf | PageType::IndexLeaf
         ));
         // TODO: make record raw from start, having to serialize is not good
-        let mut record_buf = Vec::new();
+        let mut record_buf = vec![];
         record.serialize(&mut record_buf);
 
         // fill in header
@@ -1478,7 +1478,7 @@ impl BTreeCursor {
         cell_payload.resize(prev_size + space_left + 4, 0);
         let mut pointer = unsafe { cell_payload.as_mut_ptr().add(prev_size) };
         let mut pointer_to_next = unsafe { cell_payload.as_mut_ptr().add(prev_size + space_left) };
-        let mut overflow_pages = Vec::new();
+        let mut overflow_pages = vec![];
 
         loop {
             let to_copy = space_left.min(to_copy_buffer.len());

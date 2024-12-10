@@ -183,9 +183,7 @@ impl FallibleIterator for Parser<'_> {
                 (start, Some(tuple), end) => (start, tuple, end),
             };
             let token = if token_type >= TK_WINDOW {
-                debug_assert!(
-                    token_type == TK_OVER || token_type == TK_FILTER || token_type == TK_WINDOW
-                );
+                debug_assert!(matches!(token_type, TK_OVER | TK_FILTER | TK_WINDOW));
                 self.scanner.mark();
                 if token_type == TK_WINDOW {
                     token_type = analyze_window_keyword(&mut self.scanner, self.input)?;
@@ -542,7 +540,7 @@ fn number(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
 
 fn hex_integer(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
     debug_assert_eq!(data[0], b'0');
-    debug_assert!(data[1] == b'x' || data[1] == b'X');
+    debug_assert!(matches!(data[1], b'x' | b'X'));
     if let Some((i, b)) = find_end_of_number(data, 2, u8::is_ascii_hexdigit)? {
         // Must not be empty (Ox is invalid)
         if i == 2 || is_identifier_start(b) {
@@ -573,7 +571,7 @@ fn fractional_part(data: &[u8], i: usize) -> Result<(Option<Token<'_>>, usize), 
 }
 
 fn exponential_part(data: &[u8], i: usize) -> Result<(Option<Token<'_>>, usize), Error> {
-    debug_assert!(data[i] == b'e' || data[i] == b'E');
+    debug_assert!(matches!(data[i], b'e' | b'E'));
     // data[i] == 'e'|'E'
     if let Some(b) = data.get(i + 1) {
         let i = if *b == b'+' || *b == b'-' { i + 1 } else { i };

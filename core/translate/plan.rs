@@ -136,10 +136,8 @@ pub enum Search {
 impl SourceOperator {
     pub fn id(&self) -> usize {
         match self {
-            SourceOperator::Join { id, .. } => *id,
-            SourceOperator::Scan { id, .. } => *id,
-            SourceOperator::Search { id, .. } => *id,
-            SourceOperator::Nothing => unreachable!(),
+            Self::Join { id, .. } | Self::Scan { id, .. } | Self::Search { id, .. } => *id,
+            Self::Nothing => unreachable!(),
         }
     }
 }
@@ -153,8 +151,8 @@ pub enum Direction {
 impl Display for Direction {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Direction::Ascending => write!(f, "ASC"),
-            Direction::Descending => write!(f, "DESC"),
+            Self::Ascending => write!(f, "ASC"),
+            Self::Descending => write!(f, "DESC"),
         }
     }
 }

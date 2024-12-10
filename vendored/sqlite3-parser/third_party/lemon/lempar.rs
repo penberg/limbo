@@ -285,7 +285,7 @@ impl yyParser<'_> {
             yyidx: 0,
             #[cfg(feature = "YYTRACKMAXSTACKDEPTH")]
             yyhwm: 0,
-            yystack: Vec::new(),
+            yystack: vec![],
             //#[cfg(not(feature = "YYNOERRORRECOVERY"))]
             yyerrcnt: -1,
 %%               /* Optional %extra_context store */

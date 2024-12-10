@@ -267,7 +267,7 @@ fn init_order_by(
         sort_cursor,
         sorter_data_register: program.alloc_register(),
     });
-    let mut order = Vec::new();
+    let mut order = vec![];
     for (_, direction) in order_by.iter() {
         order.push(OwnedValue::Integer(*direction as i64));
     }
@@ -302,7 +302,7 @@ fn init_group_by(
     let subroutine_accumulator_clear_label = program.allocate_label();
     let subroutine_accumulator_output_label = program.allocate_label();
 
-    let mut order = Vec::new();
+    let mut order = vec![];
     const ASCENDING: i64 = 0;
     for _ in group_by.exprs.iter() {
         order.push(OwnedValue::Integer(ASCENDING));

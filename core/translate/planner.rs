@@ -277,7 +277,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 plan.where_clause = Some(predicates);
             }
 
-            let mut aggregate_expressions = Vec::new();
+            let mut aggregate_expressions = vec![];
             for column in columns.clone() {
                 match column {
                     ast::ResultColumn::Star => {
@@ -438,7 +438,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
 
             // Parse the ORDER BY clause
             if let Some(order_by) = select.order_by {
-                let mut key = Vec::new();
+                let mut key = vec![];
 
                 for o in order_by {
                     // if the ORDER BY expression is a number, interpret it as an 1-indexed column number

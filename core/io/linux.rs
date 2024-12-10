@@ -21,7 +21,7 @@ enum LinuxIOError {
 impl fmt::Display for LinuxIOError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LinuxIOError::IOUringCQError(code) => write!(
+            Self::IOUringCQError(code) => write!(
                 f,
                 "IOUring completion queue error occurred with code {}",
                 code

@@ -10,7 +10,7 @@ pub struct BufferPool {
 impl BufferPool {
     pub fn new(page_size: usize) -> Self {
         Self {
-            free_buffers: RefCell::new(Vec::new()),
+            free_buffers: vec![].into(),
             page_size,
         }
     }

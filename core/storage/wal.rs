@@ -247,8 +247,8 @@ impl WalFile {
         Self {
             io,
             wal_path,
-            file: RefCell::new(None),
-            wal_header: RefCell::new(None),
+            file: None.into(),
+            wal_header: None.into(),
             frame_cache: RefCell::new(HashMap::new()),
             min_frame: RefCell::new(0),
             max_frame: RefCell::new(0),

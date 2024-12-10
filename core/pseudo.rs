@@ -13,7 +13,7 @@ pub struct PseudoCursor {
 impl PseudoCursor {
     pub fn new() -> Self {
         Self {
-            current: RefCell::new(None),
+            current: None.into(),
         }
     }
 }

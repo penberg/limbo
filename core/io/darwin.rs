@@ -1,18 +1,12 @@
-use crate::error::LimboError;
-use crate::io::common;
-use crate::Result;
+use crate::{io::common, Result, error::LimboError};
 
 use super::{Completion, File, OpenFlags, IO};
 use libc::{c_short, fcntl, flock, F_SETLK};
 use log::trace;
 use polling::{Event, Events, Poller};
-use rustix::fd::{AsFd, AsRawFd};
-use rustix::fs::OpenOptionsExt;
-use rustix::io::Errno;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::io::{Read, Seek, Write};
-use std::rc::Rc;
+use rustix::{fd::{AsFd, AsRawFd}, io::Errno, fs::OpenOptionsExt};
+use std::{collections::HashMap, cell::RefCell};
+use std::{rc::Rc, io::{Read, Seek, Write}};
 
 pub struct DarwinIO {
     poller: Rc<RefCell<Poller>>,
@@ -24,8 +18,8 @@ impl DarwinIO {
     pub fn new() -> Result<Self> {
         Ok(Self {
             poller: Rc::new(RefCell::new(Poller::new()?)),
-            events: Rc::new(RefCell::new(Events::new())),
-            callbacks: Rc::new(RefCell::new(HashMap::new())),
+            events: <_>::default(),
+            callbacks: <_>::default(),
         })
     }
 }

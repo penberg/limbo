@@ -66,9 +66,9 @@ pub enum Func {
 impl Display for Func {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            Func::Scalar(scalar_func) => scalar_func.to_string(),
+            Self::Scalar(scalar_func) => scalar_func.to_string(),
             #[cfg(feature = "json")]
-            Func::Json(json_func) => json_func.to_string(),
+            Self::Json(json_func) => json_func.to_string(),
         };
         write!(f, "{}", str)
     }
