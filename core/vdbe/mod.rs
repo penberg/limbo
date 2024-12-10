@@ -2537,7 +2537,7 @@ fn exec_lower(reg: &OwnedValue) -> Option<OwnedValue> {
 fn exec_length(reg: &OwnedValue) -> OwnedValue {
     match reg {
         OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
-            OwnedValue::Integer(reg.to_string().len() as i64)
+            OwnedValue::Integer(reg.to_string().chars().count() as i64)
         }
         OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
         OwnedValue::Agg(aggctx) => exec_length(aggctx.final_value()),
