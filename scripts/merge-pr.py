@@ -72,6 +72,7 @@ def get_pr_info(g, repo, pr_number):
         'title': pr.title,
         'author': author_name,
         'head': pr.head.ref,
+        'head_sha': pr.head.sha,
         'body': pr.body.strip() if pr.body else '',
         'reviewed_by': reviewed_by
     }
@@ -123,35 +124,34 @@ def merge_pr(pr_number):
         temp_file.write(commit_message)
         temp_file_path = temp_file.name
 
-    # Fetch the PR branch
-    cmd = f"git fetch origin pull/{pr_number}/head:{pr_info['head']}"
-    output, error, returncode = run_command(cmd)
-    if returncode != 0:
-        print(f"Error fetching PR branch: {error}")
+    try:
+        # Instead of fetching to a branch, fetch the specific commit
+        cmd = f"git fetch origin pull/{pr_number}/head"
+        output, error, returncode = run_command(cmd)
+        if returncode != 0:
+            print(f"Error fetching PR: {error}")
+            sys.exit(1)
+
+        # Checkout main branch
+        cmd = "git checkout main"
+        output, error, returncode = run_command(cmd)
+        if returncode != 0:
+            print(f"Error checking out main branch: {error}")
+            sys.exit(1)
+
+        # Merge using the commit SHA instead of branch name
+        cmd = f"git merge --no-ff {pr_info['head_sha']} -F {temp_file_path}"
+        output, error, returncode = run_command(cmd)
+        if returncode != 0:
+            print(f"Error merging PR: {error}")
+            sys.exit(1)
+
+        print("Pull request merged successfully!")
+        print(f"Merge commit message:\n{commit_message}")
+
+    finally:
+        # Clean up the temporary file
         os.unlink(temp_file_path)
-        sys.exit(1)
-
-    # Checkout main branch
-    cmd = "git checkout main"
-    output, error, returncode = run_command(cmd)
-    if returncode != 0:
-        print(f"Error checking out main branch: {error}")
-        os.unlink(temp_file_path)
-        sys.exit(1)
-
-    # Merge the PR
-    cmd = f"git merge --no-ff {pr_info['head']} -F {temp_file_path}"
-    output, error, returncode = run_command(cmd)
-    if returncode != 0:
-        print(f"Error merging PR: {error}")
-        os.unlink(temp_file_path)
-        sys.exit(1)
-
-    # Clean up the temporary file
-    os.unlink(temp_file_path)
-
-    print("Pull request merged successfully!")
-    print(f"Merge commit message:\n{commit_message}")
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
