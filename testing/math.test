@@ -283,10 +283,6 @@ do_execsql_test bitwise-and-float-int-rev {
   SELECT 261.8 & 660
 } {4}
 
-do_execsql_test bitwise-and-float-int-rev {
-  SELECT SUM(id) from products 
-} {66}
-
 do_execsql_test bitwise-and-int-agg-int {
    SELECT 8261 & sum(id) from products
 } {64}
