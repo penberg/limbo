@@ -70,6 +70,11 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
             contains_aggregates |= resolve_aggregates(rhs, aggs);
             contains_aggregates
         }
+        ast::Expr::Unary(_, expr) => {
+            let mut contains_aggregates = false;
+            contains_aggregates |= resolve_aggregates(expr, aggs);
+            contains_aggregates
+        }
         // TODO: handle other expressions that may contain aggregates
         _ => false,
     }

@@ -261,3 +261,107 @@ do_execsql_test divide-agg-int-agg-float {
 do_execsql_test divide-agg-float-agg-int {
   SELECT min(price) / min(id) from products
 } {1.0}
+
+
+do_execsql_test bitwise-and-int-null {
+  SELECT 1234 & NULL
+} {}
+
+do_execsql_test bitwise-and-int-int {
+  SELECT 1234 & 1234
+} {1234}
+
+do_execsql_test bitwise-and-int-float {
+  SELECT 660 & 261.8
+} {4}
+
+do_execsql_test bitwise-and-float-float {
+  SELECT 660.63 & 261.8
+} {4}
+
+do_execsql_test bitwise-and-float-int-rev {
+  SELECT 261.8 & 660
+} {4}
+
+do_execsql_test bitwise-and-float-int-rev {
+  SELECT SUM(id) from products 
+} {66}
+
+do_execsql_test bitwise-and-int-agg-int {
+   SELECT 8261 & sum(id) from products
+} {64}
+
+do_execsql_test bitwise-and-int-agg-float {
+    SELECT 1036.6 & sum(id) from products
+} {0}
+
+do_execsql_test bitwise-and-int-agg-int-agg {
+    SELECT sum(id) & sum(id) from products
+} {66}
+
+
+do_execsql_test bitwise-or-int-null {
+    SELECT 1234 | NULL
+} {}
+
+do_execsql_test bitwise-or-null-int {
+    SELECT NULL | 1234
+} {}
+
+do_execsql_test bitwise-or-int-int {
+    SELECT 4321 | 1234
+} {5363}
+
+do_execsql_test bitwise-or-int-float {
+    SELECT 660 | 1234.0
+} {1750}
+
+do_execsql_test bitwise-or-int-agg {
+    SELECT 18823 | sum(id) from products
+} {18887}
+
+do_execsql_test bitwise-or-float-float {
+    SELECT 1234.6 | 5432.2
+} {5626}
+
+do_execsql_test bitwise-and-int-agg-int-agg {
+    SELECT sum(id) | sum(id) from products
+} {66}
+
+
+do_execsql_test bitwise-not-null {
+	SELECT ~NULL
+} {}
+
+do_execsql_test bitwise-not-int {
+	SELECT ~1234
+} {-1235}
+
+do_execsql_test bitwise-not-float {
+	SELECT ~823.34
+} {-824}
+
+do_execsql_test bitwise-not-scalar-float {
+	SELECT ~abs(693.9)
+} {-694}
+
+do_execsql_test bitwise-not-scalar-int {
+	SELECT ~abs(7566)
+} {-7567}
+
+do_execsql_test bitwise-not-agg-int {
+	SELECT ~sum(693)
+} {-694}
+
+do_execsql_test bitwise-not-agg-and-agg {
+	SELECT ~sum(693) & sum(-302)
+} {-958}
+
+do_execsql_test bitwise-not-agg-int {
+	SELECT ~sum(693)
+} {-694}
+
+do_execsql_test bitwise-not-zero {
+	SELECT ~0
+} {-1}
+

@@ -119,6 +119,23 @@ pub enum Insn {
         start_reg_b: usize,
         count: usize,
     },
+    // Place the result of rhs bitwise AND lhs in third register.
+    BitAnd {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    // Place the result of rhs bitwise OR lhs in third register.
+    BitOr {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    // Place the result of bitwise NOT register P1 in dest register.
+    BitNot {
+        reg: usize,
+        dest: usize,
+    },
     // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
     Jump {
         target_pc_lt: BranchOffset,
@@ -838,7 +855,7 @@ impl Program {
                         }
                         (OwnedValue::Integer(i), OwnedValue::Float(f))
                         | (OwnedValue::Float(f), OwnedValue::Integer(i)) => {
-                            state.registers[dest] = OwnedValue::Float(*i as f64 * *f as f64);
+                            state.registers[dest] = OwnedValue::Float(*i as f64 * { *f });
                         }
                         (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
                             state.registers[dest] = OwnedValue::Null;
@@ -1007,6 +1024,196 @@ impl Program {
                         },
                         others => {
                             todo!("{:?}", others);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::BitAnd { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        // handle 0 and null cases
+                        (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        (_, OwnedValue::Integer(0))
+                        | (OwnedValue::Integer(0), _)
+                        | (_, OwnedValue::Float(0.0))
+                        | (OwnedValue::Float(0.0), _) => {
+                            state.registers[dest] = OwnedValue::Integer(0);
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh & rh);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 & *rh as i64);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 & rh);
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh & *rh as i64);
+                        }
+                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
+                            match other {
+                                OwnedValue::Agg(aggctx2) => {
+                                    match (aggctx.final_value(), aggctx2.final_value()) {
+                                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] = OwnedValue::Integer(lh & rh);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 & *rh as i64);
+                                        }
+                                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(lh & *rh as i64);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 & rh);
+                                        }
+                                        _ => {
+                                            unimplemented!(
+                                                "{:?} {:?}",
+                                                aggctx.final_value(),
+                                                aggctx2.final_value()
+                                            );
+                                        }
+                                    }
+                                }
+                                other => match (aggctx.final_value(), other) {
+                                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                                        state.registers[dest] = OwnedValue::Null;
+                                    }
+                                    (_, OwnedValue::Integer(0))
+                                    | (OwnedValue::Integer(0), _)
+                                    | (_, OwnedValue::Float(0.0))
+                                    | (OwnedValue::Float(0.0), _) => {
+                                        state.registers[dest] = OwnedValue::Integer(0);
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] = OwnedValue::Integer(lh & rh);
+                                    }
+                                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(*lh as i64 & rh);
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(lh & *rh as i64);
+                                    }
+                                    _ => {
+                                        unimplemented!("{:?} {:?}", aggctx.final_value(), other);
+                                    }
+                                },
+                            }
+                        }
+                        _ => {
+                            unimplemented!("{:?} {:?}", state.registers[lhs], state.registers[rhs]);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::BitOr { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh | rh);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 | rh);
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh | *rh as i64);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 | *rh as i64);
+                        }
+                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
+                            match other {
+                                OwnedValue::Agg(aggctx2) => {
+                                    let final_lhs = aggctx.final_value();
+                                    let final_rhs = aggctx2.final_value();
+                                    match (final_lhs, final_rhs) {
+                                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] = OwnedValue::Integer(lh | rh);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 | *rh as i64);
+                                        }
+                                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(lh | *rh as i64);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 | rh);
+                                        }
+                                        _ => {
+                                            unimplemented!("{:?} {:?}", final_lhs, final_rhs);
+                                        }
+                                    }
+                                }
+                                other => match (aggctx.final_value(), other) {
+                                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                                        state.registers[dest] = OwnedValue::Null;
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] = OwnedValue::Integer(lh | rh);
+                                    }
+                                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(*lh as i64 | rh);
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(lh | *rh as i64);
+                                    }
+                                    _ => {
+                                        unimplemented!("{:?} {:?}", aggctx.final_value(), other);
+                                    }
+                                },
+                            }
+                        }
+                        _ => {
+                            unimplemented!("{:?} {:?}", state.registers[lhs], state.registers[rhs]);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::BitNot { reg, dest } => {
+                    let reg = *reg;
+                    let dest = *dest;
+                    match &state.registers[reg] {
+                        OwnedValue::Integer(i) => state.registers[dest] = OwnedValue::Integer(!i),
+                        OwnedValue::Float(f) => {
+                            state.registers[dest] = OwnedValue::Integer(!{ *f as i64 })
+                        }
+                        OwnedValue::Null => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        OwnedValue::Agg(aggctx) => match aggctx.final_value() {
+                            OwnedValue::Integer(i) => {
+                                state.registers[dest] = OwnedValue::Integer(!i);
+                            }
+                            OwnedValue::Float(f) => {
+                                state.registers[dest] = OwnedValue::Integer(!{ *f as i64 });
+                            }
+                            OwnedValue::Null => {
+                                state.registers[dest] = OwnedValue::Null;
+                            }
+                            _ => unimplemented!("{:?}", aggctx),
+                        },
+                        _ => {
+                            unimplemented!("{:?}", state.registers[reg]);
                         }
                     }
                     state.pc += 1;

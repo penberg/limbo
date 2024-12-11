@@ -583,6 +583,8 @@ pub enum Operator {
     BitwiseAnd,
     /// `|`
     BitwiseOr,
+    /// `~`
+    BitwiseNot,
     /// String concatenation (`||`)
     Concat,
     /// `=` or `==`
@@ -630,6 +632,7 @@ impl From<YYCODETYPE> for Operator {
             x if x == TK_NE as YYCODETYPE => Self::NotEquals,
             x if x == TK_BITAND as YYCODETYPE => Self::BitwiseAnd,
             x if x == TK_BITOR as YYCODETYPE => Self::BitwiseOr,
+            x if x == TK_BITNOT as YYCODETYPE => Self::BitwiseNot,
             x if x == TK_LSHIFT as YYCODETYPE => Self::LeftShift,
             x if x == TK_RSHIFT as YYCODETYPE => Self::RightShift,
             x if x == TK_PLUS as YYCODETYPE => Self::Add,
