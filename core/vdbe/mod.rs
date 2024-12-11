@@ -4282,13 +4282,14 @@ mod tests {
             expected_str
         );
 
-        // let input_str = OwnedValue::Text(Rc::new(String::from("tes3")));
-        // let pattern_str = OwnedValue::Integer(3);
-        // let replace_str = OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.1 + 0.2))));
-        // let expected_str = OwnedValue::Text(Rc::new(String::from("tes0.3")));
-        // assert_eq!(
-        //     exec_replace(&input_str, &pattern_str, &replace_str),
-        //     expected_str
-        // );
+        // todo: change this test to use (0.1 + 0.2) instead of 0.3 when decimals are implemented.
+        let input_str = OwnedValue::Text(Rc::new(String::from("tes3")));
+        let pattern_str = OwnedValue::Integer(3);
+        let replace_str = OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.3))));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("tes0.3")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
     }
 }

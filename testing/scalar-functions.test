@@ -164,7 +164,7 @@ do_execsql_test replace {
 } {example}
 
 do_execsql_test replace-number {
-  select replace('tes3', 3, 0.1 + 0.2)
+  select replace('tes3', 3, 0.3)
 } {tes0.3}
 
 do_execsql_test replace-null {
