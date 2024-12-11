@@ -4,6 +4,8 @@
 
 ### Added
 
+* Add suport for last_insert_rowid() function (Krishna Vishal)
+
 * Add support JOIN USING and NATURAL JOIN (Jussi Saurio)
 
 * Add support for more scalar functions (Kacper Kołodziej)
