@@ -1006,7 +1006,7 @@ pub fn translate_expr(
                                 },
                                 jump_target_result,
                             );
-                            program.preassign_label_to_next_insn(jump_target_when_false);
+                            program.resolve_label(jump_target_when_false, program.offset());
                             translate_expr(
                                 program,
                                 referenced_tables,
@@ -1014,7 +1014,7 @@ pub fn translate_expr(
                                 target_register,
                                 precomputed_exprs_to_registers,
                             )?;
-                            program.preassign_label_to_next_insn(jump_target_result);
+                            program.resolve_label(jump_target_result, program.offset());
                             Ok(target_register)
                         }
                         ScalarFunc::Glob | ScalarFunc::Like => {
