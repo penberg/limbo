@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+* Add support JOIN USING and NATURAL JOIN (Jussi Saurio)
+
+* Add support for more scalar functions (Kacper Kołodziej)
+
 * Add support for `HAVING` clause (Jussi Saurio)
 
 * Add `get()` and `iterate()` to JavaScript/Wasm API (Jean Arhancet)
