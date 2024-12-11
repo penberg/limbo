@@ -148,7 +148,7 @@ fn bind_column_references(
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx.unwrap(),
-                is_rowid_alias: col.primary_key,
+                is_rowid_alias: col.is_rowid_alias,
             };
             Ok(())
         }
@@ -314,7 +314,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     database: None, // TODO: support different databases
                                     table: table_reference.table_index,
                                     column: idx,
-                                    is_rowid_alias: col.primary_key,
+                                    is_rowid_alias: col.is_rowid_alias,
                                 },
                                 contains_aggregates: false,
                             });
@@ -708,14 +708,14 @@ fn parse_join(
                             database: None,
                             table: left_table_idx,
                             column: left_col_idx,
-                            is_rowid_alias: left_col.primary_key,
+                            is_rowid_alias: left_col.is_rowid_alias,
                         }),
                         ast::Operator::Equals,
                         Box::new(ast::Expr::Column {
                             database: None,
                             table: right_table.table_index,
                             column: right_col_idx,
-                            is_rowid_alias: right_col.primary_key,
+                            is_rowid_alias: right_col.is_rowid_alias,
                         }),
                     ));
                 }

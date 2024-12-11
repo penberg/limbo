@@ -55,10 +55,8 @@ fn _operator_is_already_ordered_by(
             search,
             ..
         } => match search {
-            Search::PrimaryKeyEq { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
-            Search::PrimaryKeySearch { .. } => {
-                Ok(key.is_rowid_alias_of(table_reference.table_index))
-            }
+            Search::RowidEq { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
+            Search::RowidSearch { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
             Search::IndexSearch { index, .. } => {
                 let index_idx = key.check_index_scan(
                     table_reference.table_index,
@@ -730,13 +728,13 @@ pub fn try_extract_index_search_expression(
             if lhs.is_rowid_alias_of(table_index) {
                 match operator {
                     ast::Operator::Equals => {
-                        return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *rhs }));
+                        return Ok(Either::Right(Search::RowidEq { cmp_expr: *rhs }));
                     }
                     ast::Operator::Greater
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(Search::PrimaryKeySearch {
+                        return Ok(Either::Right(Search::RowidSearch {
                             cmp_op: operator,
                             cmp_expr: *rhs,
                         }));
@@ -748,13 +746,13 @@ pub fn try_extract_index_search_expression(
             if rhs.is_rowid_alias_of(table_index) {
                 match operator {
                     ast::Operator::Equals => {
-                        return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *lhs }));
+                        return Ok(Either::Right(Search::RowidEq { cmp_expr: *lhs }));
                     }
                     ast::Operator::Greater
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(Search::PrimaryKeySearch {
+                        return Ok(Either::Right(Search::RowidSearch {
                             cmp_op: operator,
                             cmp_expr: *lhs,
                         }));

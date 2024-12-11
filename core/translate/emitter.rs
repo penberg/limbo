@@ -610,8 +610,8 @@ fn open_loop(
             let table_cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
 
             // Open the loop for the index search.
-            // Primary key equality search is handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
-            if !matches!(search, Search::PrimaryKeyEq { .. }) {
+            // Rowid equality point lookups are handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
+            if !matches!(search, Search::RowidEq { .. }) {
                 let index_cursor_id = if let Search::IndexSearch { index, .. } = search {
                     Some(program.resolve_cursor_id(&index.name))
                 } else {
@@ -623,8 +623,8 @@ fn open_loop(
                     Search::IndexSearch {
                         cmp_expr, cmp_op, ..
                     } => (cmp_expr, cmp_op),
-                    Search::PrimaryKeySearch { cmp_expr, cmp_op } => (cmp_expr, cmp_op),
-                    Search::PrimaryKeyEq { .. } => unreachable!(),
+                    Search::RowidSearch { cmp_expr, cmp_op } => (cmp_expr, cmp_op),
+                    Search::RowidEq { .. } => unreachable!(),
                 };
                 // TODO this only handles ascending indexes
                 match cmp_op {
@@ -750,7 +750,7 @@ fn open_loop(
 
             let jump_label = metadata.next_row_labels.get(id).unwrap();
 
-            if let Search::PrimaryKeyEq { cmp_expr } = search {
+            if let Search::RowidEq { cmp_expr } = search {
                 let src_reg = program.alloc_register();
                 translate_expr(program, Some(referenced_tables), cmp_expr, src_reg, None)?;
                 program.emit_insn_with_label_dependency(
@@ -1096,16 +1096,16 @@ fn close_loop(
             ..
         } => {
             program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
-            if matches!(search, Search::PrimaryKeyEq { .. }) {
-                // Primary key equality search is handled with a SeekRowid instruction which does not loop, so there is no need to emit a NextAsync instruction.
+            if matches!(search, Search::RowidEq { .. }) {
+                // Rowid equality point lookups are handled with a SeekRowid instruction which does not loop, so there is no need to emit a NextAsync instruction.
                 return Ok(());
             }
             let cursor_id = match search {
                 Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
-                Search::PrimaryKeySearch { .. } => {
+                Search::RowidSearch { .. } => {
                     program.resolve_cursor_id(&table_reference.table_identifier)
                 }
-                Search::PrimaryKeyEq { .. } => unreachable!(),
+                Search::RowidEq { .. } => unreachable!(),
             };
 
             program.emit_insn(Insn::NextAsync { cursor_id });
@@ -1166,6 +1166,7 @@ fn group_by_emit(
             name: i.to_string(),
             primary_key: false,
             ty: crate::schema::Type::Null,
+            is_rowid_alias: false,
         })
         .collect::<Vec<_>>();
 
@@ -1534,6 +1535,7 @@ fn order_by_emit(
             name: format!("sort_key_{}", i),
             primary_key: false,
             ty: crate::schema::Type::Null,
+            is_rowid_alias: false,
         });
     }
     for (i, rc) in result_columns.iter().enumerate() {
@@ -1547,6 +1549,7 @@ fn order_by_emit(
             name: rc.expr.to_string(),
             primary_key: false,
             ty: crate::schema::Type::Null,
+            is_rowid_alias: false,
         });
     }
 
