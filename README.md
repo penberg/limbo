@@ -37,7 +37,7 @@
 
 ### CLI
 
-Instal `limbo` with:
+Install `limbo` with:
 
 ```
 curl --proto '=https' --tlsv1.2 -LsSf \
