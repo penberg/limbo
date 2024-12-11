@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.4.2", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 env_logger = "0.11.0"
 hdrhistogram = "7.5.2"
 limbo_core = { path = "../../../core" }
