@@ -414,11 +414,13 @@ mod tests {
     #[test]
     fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
-        let tmp_db = TempDatabase::new("CREATE TABLE test_rowid (id INTEGER PRIMARY KEY, val TEXT);");
+        let tmp_db =
+            TempDatabase::new("CREATE TABLE test_rowid (id INTEGER PRIMARY KEY, val TEXT);");
         let conn = tmp_db.connect_limbo();
 
         // Simple insert
-        let mut insert_query = conn.query("INSERT INTO test_rowid (id, val) VALUES (NULL, 'test1')")?;
+        let mut insert_query =
+            conn.query("INSERT INTO test_rowid (id, val) VALUES (NULL, 'test1')")?;
         if let Some(ref mut rows) = insert_query {
             loop {
                 match rows.next_row()? {
@@ -449,7 +451,7 @@ mod tests {
             }
         }
 
-            // Test explicit rowid
+        // Test explicit rowid
         match conn.query("INSERT INTO test_rowid (id, val) VALUES (5, 'test2')") {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
@@ -486,5 +488,5 @@ mod tests {
         assert_eq!(last_id, 5, "Explicit insert should have rowid 5");
         do_flush(&conn, &tmp_db)?;
         Ok(())
-    }    
+    }
 }
