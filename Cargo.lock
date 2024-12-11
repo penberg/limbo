@@ -40,6 +40,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aligned-vec"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e0966165eaf052580bd70eb1b32cb3d6245774c0104d1b2793e9650bf83b52a"
+dependencies = [
+ "equator",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -625,6 +634,26 @@ checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
 dependencies = [
  "env_filter",
  "log",
+]
+
+[[package]]
+name = "equator"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c35da53b5a021d2484a7cc49b2ac7f2d840f8236a286f84202369bd338d761ea"
+dependencies = [
+ "equator-macro",
+]
+
+[[package]]
+name = "equator-macro"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bf679796c0322556351f287a51b49e48f7c4986e727b5dd78c972d30e2e16cc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -1544,10 +1573,11 @@ checksum = "cc9c68a3f6da06753e9335d63e27f6b9754dd1920d941135b7ea8224f141adb2"
 
 [[package]]
 name = "pprof"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978385d59daf9269189d052ca8a84c1acfd0715c0599a5d5188d4acc078ca46a"
+checksum = "ebbe2f8898beba44815fdc9e5a4ae9c929e21c5dc29b0c774a15555f7f58d6d0"
 dependencies = [
+ "aligned-vec",
  "backtrace",
  "cfg-if",
  "criterion",
