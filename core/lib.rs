@@ -3,6 +3,7 @@ mod function;
 mod io;
 #[cfg(feature = "json")]
 mod json;
+pub mod parser;
 mod pseudo;
 mod schema;
 mod storage;
