@@ -703,14 +703,18 @@ pub fn translate_expr(
             when_then_pairs,
             else_expr,
         } => {
-            // There's two forms of CASE, one which does quality against the when values:
-            //   CASE [expr] WHEN [value] ELSE [value] END
+            // There's two forms of CASE, one which checks a base expression for equality
+            // against the WHEN values, and returns the corresponding THEN value if it matches:
+            //   CASE 2 WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END
             // And one which evaluates a series of boolean predicates:
-            //   CASE (WHEN [bool_expr] THEN [value])+ END
+            //   CASE WHEN is_good THEN 'good' WHEN is_bad THEN 'bad' ELSE 'okay' END
             // This just changes which sort of branching instruction to issue, after we
             // generate the expression if needed.
             let return_label = program.allocate_label();
             let mut next_case_label = program.allocate_label();
+            // Only allocate a reg to hold the base expression if one was provided.
+            // And base_reg then becomes the flag we check to see which sort of
+            // case statement we're processing.
             let base_reg = base.as_ref().map(|_| program.alloc_register());
             let expr_reg = program.alloc_register();
             if let Some(base_expr) = base {
@@ -731,6 +735,7 @@ pub fn translate_expr(
                     precomputed_exprs_to_registers,
                 )?;
                 match base_reg {
+                    // CASE 1 WHEN 0 THEN 0 ELSE 1 becomes 1==0, Ne branch to next clause
                     Some(base_reg) => program.emit_insn_with_label_dependency(
                         Insn::Ne {
                             lhs: base_reg,
@@ -739,6 +744,7 @@ pub fn translate_expr(
                         },
                         next_case_label,
                     ),
+                    // CASE WHEN 0 THEN 0 ELSE 1 becomes ifnot 0 branch to next clause
                     None => program.emit_insn_with_label_dependency(
                         Insn::IfNot {
                             reg: expr_reg,
@@ -748,6 +754,7 @@ pub fn translate_expr(
                         next_case_label,
                     ),
                 };
+                // THEN...
                 translate_expr(
                     program,
                     referenced_tables,
@@ -761,6 +768,8 @@ pub fn translate_expr(
                     },
                     return_label,
                 );
+                // This becomes either the next WHEN, or in the last WHEN/THEN, we're
+                // assured to have at least one instruction corresponding to the ELSE immediately follow.
                 program.preassign_label_to_next_insn(next_case_label);
                 next_case_label = program.allocate_label();
             }
@@ -774,7 +783,7 @@ pub fn translate_expr(
                         precomputed_exprs_to_registers,
                     )?;
                 }
-                // If ELSE isn't specified, it means ELSE null
+                // If ELSE isn't specified, it means ELSE null.
                 None => {
                     program.emit_insn(Insn::Null {
                         dest: target_register,
@@ -782,7 +791,7 @@ pub fn translate_expr(
                     });
                 }
             };
-            program.preassign_label_to_next_insn(return_label);
+            program.resolve_label(return_label, program.offset());
             Ok(target_register)
         }
         ast::Expr::Cast { expr, type_name } => {

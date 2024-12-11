@@ -60,17 +60,17 @@ do_execsql_test select_parenthesized {
 } {179.0}
 
 do_execsql_test select_case_base_else {
-  select case when 0 then 0 when 1 then 1 else 2 end;
-} {1}
+  select case when 0 then 'false' when 1 then 'true' else 'null' end;
+} {true}
 
 do_execsql_test select_case_noelse_null {
   select case when 0 then 0 end;
 } {}
 
 do_execsql_test select_base_case_else {
-  select case 1 when 0 then 0 when 1 then 1 else 2 end;
-} {1}
+  select case 1 when 0 then 'zero' when 1 then 'one' else 'two' end;
+} {one}
 
 do_execsql_test select_base_case_noelse_null {
-  select case 4 when 0 then 0 when 1 then 1 end;
+  select case 'null else' when 0 then 0 when 1 then 1 end;
 } {}
