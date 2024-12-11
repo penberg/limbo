@@ -343,6 +343,10 @@ do_execsql_test length-text {
   SELECT length('limbo');
 } {5}
 
+do_execsql_test lenght-text-utf8-chars {
+  SELECT length('ąłóżźć');
+} {6}
+
 do_execsql_test length-integer {
   SELECT length(12345);
 } {5}
