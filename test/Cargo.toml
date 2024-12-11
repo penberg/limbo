@@ -14,7 +14,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.75"
-clap = { version = "4.4.0", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0.1"
 env_logger = "0.10.1"
 limbo_core = { path = "../core" }
