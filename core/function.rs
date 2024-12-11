@@ -85,6 +85,7 @@ pub enum ScalarFunc {
     Hex,
     Unhex,
     ZeroBlob,
+    LastInsertRowid,
 }
 
 impl Display for ScalarFunc {
@@ -126,6 +127,7 @@ impl Display for ScalarFunc {
             ScalarFunc::Hex => "hex".to_string(),
             ScalarFunc::Unhex => "unhex".to_string(),
             ScalarFunc::ZeroBlob => "zeroblob".to_string(),
+            ScalarFunc::LastInsertRowid => "last_insert_rowid".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -195,6 +197,7 @@ impl Func {
             "date" => Ok(Func::Scalar(ScalarFunc::Date)),
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "typeof" => Ok(Func::Scalar(ScalarFunc::Typeof)),
+            "last_insert_rowid" => Ok(Func::Scalar(ScalarFunc::LastInsertRowid)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),

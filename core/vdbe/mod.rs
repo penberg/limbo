@@ -2105,6 +2105,14 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}
+                            ScalarFunc::LastInsertRowid => {
+                                if let Some(conn) = self.connection.upgrade() {
+                                    state.registers[*dest] =
+                                        OwnedValue::Integer(conn.last_insert_rowid() as i64);
+                                } else {
+                                    state.registers[*dest] = OwnedValue::Null;
+                                }
+                            }
                             ScalarFunc::Instr => {
                                 let reg_value = &state.registers[*start_reg];
                                 let pattern_value = &state.registers[*start_reg + 1];
@@ -2321,6 +2329,14 @@ impl Program {
                 Insn::InsertAwait { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
+                    // Only update last_insert_rowid for regular table inserts, not schema modifications
+                    if cursor.root_page() != 1 {
+                        if let Some(rowid) = cursor.rowid()? {
+                            if let Some(conn) = self.connection.upgrade() {
+                                conn.update_last_rowid(rowid);
+                            }
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::NewRowid {
@@ -3255,6 +3271,10 @@ mod tests {
     }
 
     impl Cursor for MockCursor {
+        fn root_page(&self) -> usize {
+            unreachable!()
+        }
+
         fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
             self.seek_to_last()
         }
