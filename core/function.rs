@@ -86,6 +86,7 @@ pub enum ScalarFunc {
     Unhex,
     ZeroBlob,
     LastInsertRowid,
+    Replace,
 }
 
 impl Display for ScalarFunc {
@@ -128,6 +129,7 @@ impl Display for ScalarFunc {
             ScalarFunc::Unhex => "unhex".to_string(),
             ScalarFunc::ZeroBlob => "zeroblob".to_string(),
             ScalarFunc::LastInsertRowid => "last_insert_rowid".to_string(),
+            ScalarFunc::Replace => "replace".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -201,6 +203,7 @@ impl Func {
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),
+            "replace" => Ok(Func::Scalar(ScalarFunc::Replace)),
             #[cfg(feature = "json")]
             "json" => Ok(Func::Json(JsonFunc::Json)),
             "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),

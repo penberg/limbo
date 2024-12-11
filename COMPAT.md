@@ -5,6 +5,7 @@ This document describes the SQLite compatibility status of Limbo:
 - [SQLite Compatibility](#sqlite-compatibility)
   - [Limitations](#limitations)
   - [SQL statements](#sql-statements)
+    - [SELECT Expressions](#select-expressions)
   - [SQL functions](#sql-functions)
     - [Scalar functions](#scalar-functions)
     - [Aggregate functions](#aggregate-functions)
@@ -132,7 +133,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | quote(X)                     | Yes    |         |
 | random()                     | Yes    |         |
 | randomblob(N)                | Yes    |         |
-| replace(X,Y,Z)               | No     |         |
+| replace(X,Y,Z)               | Yes    |         |
 | round(X)                     | Yes    |         |
 | round(X,Y)                   | Yes    |         |
 | rtrim(X)                     | Yes    |         |

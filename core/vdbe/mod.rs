@@ -2273,6 +2273,13 @@ impl Program {
                                 let version = execute_sqlite_version(version_integer);
                                 state.registers[*dest] = OwnedValue::Text(Rc::new(version));
                             }
+                            ScalarFunc::Replace => {
+                                assert!(arg_count == 3);
+                                let source = &state.registers[*start_reg];
+                                let pattern = &state.registers[*start_reg + 1];
+                                let replacement = &state.registers[*start_reg + 2];
+                                state.registers[*dest] = exec_replace(source, pattern, replacement);
+                            }
                         },
                         crate::function::Func::Agg(_) => {
                             unreachable!("Aggregate functions should not be handled here")
@@ -3122,6 +3129,37 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
     }
 }
 
+fn exec_replace(source: &OwnedValue, pattern: &OwnedValue, replacement: &OwnedValue) -> OwnedValue {
+    // The replace(X,Y,Z) function returns a string formed by substituting string Z for every occurrence of
+    // string Y in string X. The BINARY collating sequence is used for comparisons. If Y is an empty string
+    // then return X unchanged. If Z is not initially a string, it is cast to a UTF-8 string prior to processing.
+
+    // If any of the arguments is NULL, the result is NULL.
+    if matches!(source, OwnedValue::Null)
+        || matches!(pattern, OwnedValue::Null)
+        || matches!(replacement, OwnedValue::Null)
+    {
+        return OwnedValue::Null;
+    }
+
+    let source = exec_cast(source, "TEXT");
+    let pattern = exec_cast(pattern, "TEXT");
+    let replacement = exec_cast(replacement, "TEXT");
+
+    // If any of the casts failed, return NULL
+    match (&source, &pattern, &replacement) {
+        (OwnedValue::Text(source), OwnedValue::Text(pattern), OwnedValue::Text(replacement)) => {
+            if pattern.is_empty() {
+                return OwnedValue::Text(source.clone());
+            }
+
+            let result = source.replace(pattern.as_str(), replacement);
+            OwnedValue::Text(Rc::new(result))
+        }
+        _ => unreachable!("text cast should never fail"),
+    }
+}
+
 enum Affinity {
     Integer,
     Text,
@@ -3249,7 +3287,10 @@ fn execute_sqlite_version(version_integer: i64) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::types::{SeekKey, SeekOp};
+    use crate::{
+        types::{SeekKey, SeekOp},
+        vdbe::exec_replace,
+    };
 
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_instr, exec_length, exec_like, exec_lower,
@@ -4147,5 +4188,107 @@ mod tests {
         let version_integer = 3046001;
         let expected = "3.46.1";
         assert_eq!(execute_sqlite_version(version_integer), expected);
+    }
+
+    #[test]
+    fn test_replace() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("b")));
+        let replace_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("aoa")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("b")));
+        let replace_str = OwnedValue::Text(Rc::new(String::from("")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("o")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("b")));
+        let replace_str = OwnedValue::Text(Rc::new(String::from("abc")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("abcoabc")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let replace_str = OwnedValue::Text(Rc::new(String::from("b")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let pattern_str = OwnedValue::Text(Rc::new(String::from("")));
+        let replace_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bob")));
+        let pattern_str = OwnedValue::Null;
+        let replace_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let expected_str = OwnedValue::Null;
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bo5")));
+        let pattern_str = OwnedValue::Integer(5);
+        let replace_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("boa")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bo5.0")));
+        let pattern_str = OwnedValue::Float(5.0);
+        let replace_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("boa")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bo5")));
+        let pattern_str = OwnedValue::Float(5.0);
+        let replace_str = OwnedValue::Text(Rc::new(String::from("a")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("bo5")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("bo5.0")));
+        let pattern_str = OwnedValue::Float(5.0);
+        let replace_str = OwnedValue::Float(6.0);
+        let expected_str = OwnedValue::Text(Rc::new(String::from("bo6.0")));
+        assert_eq!(
+            exec_replace(&input_str, &pattern_str, &replace_str),
+            expected_str
+        );
+
+        // let input_str = OwnedValue::Text(Rc::new(String::from("tes3")));
+        // let pattern_str = OwnedValue::Integer(3);
+        // let replace_str = OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.1 + 0.2))));
+        // let expected_str = OwnedValue::Text(Rc::new(String::from("tes0.3")));
+        // assert_eq!(
+        //     exec_replace(&input_str, &pattern_str, &replace_str),
+        //     expected_str
+        // );
     }
 }
