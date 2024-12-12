@@ -4,6 +4,8 @@
 
 ### Added
 
+* Improve CLI (Preston Thorpe)
+
 * Add support for iif() function (Alex Miller)
 
 * Add suport for last_insert_rowid() function (Krishna Vishal)
