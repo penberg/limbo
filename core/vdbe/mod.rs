@@ -2492,6 +2492,10 @@ impl Program {
                             }
                         },
                         crate::function::Func::Math(math_func) => match math_func.arity() {
+                            MathFuncArity::Nullary => {
+                                state.registers[*dest] = OwnedValue::Float(std::f64::consts::PI);
+                            }
+
                             MathFuncArity::Unary => {
                                 let reg_value = &state.registers[*start_reg];
                                 let result = exec_math_unary(reg_value, math_func);
@@ -2504,6 +2508,7 @@ impl Program {
                                 let result = exec_math_binary(lhs, rhs, math_func);
                                 state.registers[*dest] = result;
                             }
+
                             _ => unimplemented!(),
                         },
                         crate::function::Func::Agg(_) => {

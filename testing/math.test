@@ -364,6 +364,11 @@ do_execsql_test bitwise-not-zero {
 
 set tolerance 1e-13
 
+do_execsql_test_tolerance pi {
+  SELECT pi()
+} {3.14159265358979} $tolerance
+
+
 do_execsql_test_tolerance acos-int {
   SELECT acos(1)
 } {0.0} $tolerance

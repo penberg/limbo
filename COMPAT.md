@@ -184,7 +184,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | log10(X)   | Yes    |         |
 | log2(X)    | Yes    |         |
 | mod(X,Y)   | Yes    |         |
-| pi()       | No     |         |
+| pi()       | Yes    |         |
 | pow(X,Y)   | Yes    |         |
 | power(X,Y) | Yes    |         |
 | radians(X) | Yes    |         |

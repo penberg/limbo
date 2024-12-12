@@ -1604,6 +1604,20 @@ pub fn translate_expr(
                     }
                 }
                 Func::Math(math_func) => match math_func.arity() {
+                    MathFuncArity::Nullary => {
+                        if args.is_some() {
+                            crate::bail_parse_error!("{} function with arguments", math_func);
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: 0,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
                     MathFuncArity::Unary => {
                         let args = if let Some(args) = args {
                             if args.len() != 1 {
