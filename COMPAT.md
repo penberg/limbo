@@ -252,9 +252,9 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | AggStep         | Yes    |
 | And             | No     |
 | AutoCommit      | No     |
-| BitAnd          | No     |
-| BitNot          | No     |
-| BitOr           | No     |
+| BitAnd          | Yes    |
+| BitNot          | Yes    |
+| BitOr           | Yes    |
 | Blob            | Yes    |
 | Checkpoint      | No     |
 | Clear           | No     |

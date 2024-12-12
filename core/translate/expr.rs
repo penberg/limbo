@@ -694,6 +694,20 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::BitwiseAnd => {
+                    program.emit_insn(Insn::BitAnd {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
+                ast::Operator::BitwiseOr => {
+                    program.emit_insn(Insn::BitOr {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 other_unimplemented => todo!("{:?}", other_unimplemented),
             }
             Ok(target_register)
@@ -1663,6 +1677,69 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                program.mark_last_insn_constant();
+                Ok(target_register)
+            }
+            (UnaryOperator::Negative, _) => {
+                let reg = program.alloc_register();
+                translate_expr(
+                    program,
+                    referenced_tables,
+                    expr,
+                    reg,
+                    precomputed_exprs_to_registers,
+                )?;
+                let zero_reg = program.alloc_register();
+                program.emit_insn(Insn::Integer {
+                    value: -1,
+                    dest: zero_reg,
+                });
+                program.mark_last_insn_constant();
+                program.emit_insn(Insn::Multiply {
+                    lhs: zero_reg,
+                    rhs: reg,
+                    dest: target_register,
+                });
+                Ok(target_register)
+            }
+            (UnaryOperator::BitwiseNot, ast::Expr::Literal(ast::Literal::Numeric(num_val))) => {
+                let maybe_int = num_val.parse::<i64>();
+                if let Ok(val) = maybe_int {
+                    program.emit_insn(Insn::Integer {
+                        value: !val,
+                        dest: target_register,
+                    });
+                } else {
+                    let num_val = num_val.parse::<f64>()? as i64;
+                    program.emit_insn(Insn::Integer {
+                        value: !num_val,
+                        dest: target_register,
+                    });
+                }
+                program.mark_last_insn_constant();
+                Ok(target_register)
+            }
+            (UnaryOperator::BitwiseNot, ast::Expr::Literal(ast::Literal::Null)) => {
+                program.emit_insn(Insn::Null {
+                    dest: target_register,
+                    dest_end: None,
+                });
+                program.mark_last_insn_constant();
+                Ok(target_register)
+            }
+            (UnaryOperator::BitwiseNot, _) => {
+                let reg = program.alloc_register();
+                translate_expr(
+                    program,
+                    referenced_tables,
+                    expr,
+                    reg,
+                    precomputed_exprs_to_registers,
+                )?;
+                program.emit_insn(Insn::BitNot {
+                    reg,
+                    dest: target_register,
+                });
                 Ok(target_register)
             }
             _ => todo!(),
