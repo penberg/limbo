@@ -1554,14 +1554,14 @@ pub fn translate_expr(
                             let args = if let Some(args) = args {
                                 if !args.len() == 3 {
                                     crate::bail_parse_error!(
-                                        "{} function with wrong number of arguments",
+                                        "function {}() requires exactly 3 arguments",
                                         srf.to_string()
                                     )
                                 }
                                 args
                             } else {
                                 crate::bail_parse_error!(
-                                    "{} function with no arguments",
+                                    "function {}() requires exactly 3 arguments",
                                     srf.to_string()
                                 );
                             };
