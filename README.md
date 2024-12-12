@@ -39,7 +39,7 @@
 
 Install `limbo` with:
 
-```
+```shell 
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/penberg/limbo/releases/latest/download/limbo-installer.sh | sh
 ```
@@ -95,6 +95,12 @@ print(res.fetchone())
 ```
 
 ## Developing
+
+Build and run `limbo` cli: 
+
+```shell 
+cargo run --package limbo --bin limbo database.db
+```
 
 Run tests:
 
