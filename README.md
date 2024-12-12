@@ -96,7 +96,7 @@ print(res.fetchone())
 
 ## Developing
 
-Build `limbo`: 
+Build and run `limbo` cli: 
 
 ```shell 
 cargo run --package limbo --bin limbo database.db
