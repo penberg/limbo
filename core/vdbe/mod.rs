@@ -2106,6 +2106,13 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}
+                            ScalarFunc::Iif => {}
+                            ScalarFunc::Instr => {
+                                let reg_value = &state.registers[*start_reg];
+                                let pattern_value = &state.registers[*start_reg + 1];
+                                let result = exec_instr(reg_value, pattern_value);
+                                state.registers[*dest] = result;
+                            }
                             ScalarFunc::LastInsertRowid => {
                                 if let Some(conn) = self.connection.upgrade() {
                                     state.registers[*dest] =
@@ -2113,12 +2120,6 @@ impl Program {
                                 } else {
                                     state.registers[*dest] = OwnedValue::Null;
                                 }
-                            }
-                            ScalarFunc::Instr => {
-                                let reg_value = &state.registers[*start_reg];
-                                let pattern_value = &state.registers[*start_reg + 1];
-                                let result = exec_instr(reg_value, pattern_value);
-                                state.registers[*dest] = result;
                             }
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];

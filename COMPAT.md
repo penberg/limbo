@@ -111,7 +111,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | glob(X,Y)                    | Yes    |         |
 | hex(X)                       | Yes    |         |
 | ifnull(X,Y)                  | Yes    |         |
-| iif(X,Y,Z)                   | No     |         |
+| iif(X,Y,Z)                   | Yes    |         |
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
