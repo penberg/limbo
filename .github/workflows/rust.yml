@@ -53,6 +53,13 @@ jobs:
   test-limbo:
     runs-on: ubuntu-latest
     steps:
+    - name: Install cargo-c
+      env:
+        LINK: https://github.com/lu-zero/cargo-c/releases/download/v0.10.7
+        CARGO_C_FILE: cargo-c-x86_64-unknown-linux-musl.tar.gz
+      run: |
+        curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
+
     - uses: actions/checkout@v2
     - name: Test
       run: make test
