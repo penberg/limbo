@@ -3446,7 +3446,7 @@ fn exec_replace(source: &OwnedValue, pattern: &OwnedValue, replacement: &OwnedVa
     let pattern = exec_cast(pattern, "TEXT");
     let replacement = exec_cast(replacement, "TEXT");
 
-    // If any of the casts failed, return NULL
+    // If any of the casts failed, panic as text casting is not expected to fail.
     match (&source, &pattern, &replacement) {
         (OwnedValue::Text(source), OwnedValue::Text(pattern), OwnedValue::Text(replacement)) => {
             if pattern.is_empty() {
