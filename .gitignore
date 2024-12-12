@@ -19,5 +19,8 @@ env
 dist/
 .tmp/
 
+
+/testing/testing.db-wal
+
 # OS
 .DS_Store

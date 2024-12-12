@@ -792,6 +792,7 @@ impl ToTokens for Operator {
             Self::ArrowRightShift => s.append(TK_PTR, Some("->>")),
             Self::BitwiseAnd => s.append(TK_BITAND, None),
             Self::BitwiseOr => s.append(TK_BITOR, None),
+            Self::BitwiseNot => s.append(TK_BITNOT, None),
             Self::Concat => s.append(TK_CONCAT, None),
             Self::Equals => s.append(TK_EQ, None),
             Self::Divide => s.append(TK_SLASH, None),

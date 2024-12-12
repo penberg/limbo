@@ -112,7 +112,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | glob(X,Y)                    | Yes    |         |
 | hex(X)                       | Yes    |         |
 | ifnull(X,Y)                  | Yes    |         |
-| iif(X,Y,Z)                   | No     |         |
+| iif(X,Y,Z)                   | Yes    |         |
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
@@ -128,7 +128,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | max(X,Y,...)                 | Yes    |         |
 | min(X,Y,...)                 | Yes    |         |
 | nullif(X,Y)                  | Yes    |         |
-| octet_length(X)              | No     |         |
+| octet_length(X)              | Yes    |         |
 | printf(FORMAT,...)           | No     |         |
 | quote(X)                     | Yes    |         |
 | random()                     | Yes    |         |
@@ -139,7 +139,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | rtrim(X)                     | Yes    |         |
 | rtrim(X,Y)                   | Yes    |         |
 | sign(X)                      | Yes    |         |
-| soundex(X)                   | No     |         |
+| soundex(X)                   | Yes    |         |
 | sqlite_compileoption_get(N)  | No     |         |
 | sqlite_compileoption_used(X) | No     |         |
 | sqlite_offset(X)             | No     |         |
@@ -253,9 +253,9 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | AggStep         | Yes    |
 | And             | No     |
 | AutoCommit      | No     |
-| BitAnd          | No     |
-| BitNot          | No     |
-| BitOr           | No     |
+| BitAnd          | Yes    |
+| BitNot          | Yes    |
+| BitOr           | Yes    |
 | Blob            | Yes    |
 | Checkpoint      | No     |
 | Clear           | No     |

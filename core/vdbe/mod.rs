@@ -119,6 +119,23 @@ pub enum Insn {
         start_reg_b: usize,
         count: usize,
     },
+    // Place the result of rhs bitwise AND lhs in third register.
+    BitAnd {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    // Place the result of rhs bitwise OR lhs in third register.
+    BitOr {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    // Place the result of bitwise NOT register P1 in dest register.
+    BitNot {
+        reg: usize,
+        dest: usize,
+    },
     // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
     Jump {
         target_pc_lt: BranchOffset,
@@ -838,7 +855,7 @@ impl Program {
                         }
                         (OwnedValue::Integer(i), OwnedValue::Float(f))
                         | (OwnedValue::Float(f), OwnedValue::Integer(i)) => {
-                            state.registers[dest] = OwnedValue::Float(*i as f64 * *f as f64);
+                            state.registers[dest] = OwnedValue::Float(*i as f64 * { *f });
                         }
                         (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
                             state.registers[dest] = OwnedValue::Null;
@@ -1007,6 +1024,196 @@ impl Program {
                         },
                         others => {
                             todo!("{:?}", others);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::BitAnd { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        // handle 0 and null cases
+                        (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        (_, OwnedValue::Integer(0))
+                        | (OwnedValue::Integer(0), _)
+                        | (_, OwnedValue::Float(0.0))
+                        | (OwnedValue::Float(0.0), _) => {
+                            state.registers[dest] = OwnedValue::Integer(0);
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh & rh);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 & *rh as i64);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 & rh);
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh & *rh as i64);
+                        }
+                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
+                            match other {
+                                OwnedValue::Agg(aggctx2) => {
+                                    match (aggctx.final_value(), aggctx2.final_value()) {
+                                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] = OwnedValue::Integer(lh & rh);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 & *rh as i64);
+                                        }
+                                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(lh & *rh as i64);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 & rh);
+                                        }
+                                        _ => {
+                                            unimplemented!(
+                                                "{:?} {:?}",
+                                                aggctx.final_value(),
+                                                aggctx2.final_value()
+                                            );
+                                        }
+                                    }
+                                }
+                                other => match (aggctx.final_value(), other) {
+                                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                                        state.registers[dest] = OwnedValue::Null;
+                                    }
+                                    (_, OwnedValue::Integer(0))
+                                    | (OwnedValue::Integer(0), _)
+                                    | (_, OwnedValue::Float(0.0))
+                                    | (OwnedValue::Float(0.0), _) => {
+                                        state.registers[dest] = OwnedValue::Integer(0);
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] = OwnedValue::Integer(lh & rh);
+                                    }
+                                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(*lh as i64 & rh);
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(lh & *rh as i64);
+                                    }
+                                    _ => {
+                                        unimplemented!("{:?} {:?}", aggctx.final_value(), other);
+                                    }
+                                },
+                            }
+                        }
+                        _ => {
+                            unimplemented!("{:?} {:?}", state.registers[lhs], state.registers[rhs]);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::BitOr { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh | rh);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 | rh);
+                        }
+                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(lh | *rh as i64);
+                        }
+                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                            state.registers[dest] = OwnedValue::Integer(*lh as i64 | *rh as i64);
+                        }
+                        (OwnedValue::Agg(aggctx), other) | (other, OwnedValue::Agg(aggctx)) => {
+                            match other {
+                                OwnedValue::Agg(aggctx2) => {
+                                    let final_lhs = aggctx.final_value();
+                                    let final_rhs = aggctx2.final_value();
+                                    match (final_lhs, final_rhs) {
+                                        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] = OwnedValue::Integer(lh | rh);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 | *rh as i64);
+                                        }
+                                        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(lh | *rh as i64);
+                                        }
+                                        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                            state.registers[dest] =
+                                                OwnedValue::Integer(*lh as i64 | rh);
+                                        }
+                                        _ => {
+                                            unimplemented!("{:?} {:?}", final_lhs, final_rhs);
+                                        }
+                                    }
+                                }
+                                other => match (aggctx.final_value(), other) {
+                                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => {
+                                        state.registers[dest] = OwnedValue::Null;
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] = OwnedValue::Integer(lh | rh);
+                                    }
+                                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(*lh as i64 | rh);
+                                    }
+                                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                                        state.registers[dest] =
+                                            OwnedValue::Integer(lh | *rh as i64);
+                                    }
+                                    _ => {
+                                        unimplemented!("{:?} {:?}", aggctx.final_value(), other);
+                                    }
+                                },
+                            }
+                        }
+                        _ => {
+                            unimplemented!("{:?} {:?}", state.registers[lhs], state.registers[rhs]);
+                        }
+                    }
+                    state.pc += 1;
+                }
+                Insn::BitNot { reg, dest } => {
+                    let reg = *reg;
+                    let dest = *dest;
+                    match &state.registers[reg] {
+                        OwnedValue::Integer(i) => state.registers[dest] = OwnedValue::Integer(!i),
+                        OwnedValue::Float(f) => {
+                            state.registers[dest] = OwnedValue::Integer(!{ *f as i64 })
+                        }
+                        OwnedValue::Null => {
+                            state.registers[dest] = OwnedValue::Null;
+                        }
+                        OwnedValue::Agg(aggctx) => match aggctx.final_value() {
+                            OwnedValue::Integer(i) => {
+                                state.registers[dest] = OwnedValue::Integer(!i);
+                            }
+                            OwnedValue::Float(f) => {
+                                state.registers[dest] = OwnedValue::Integer(!{ *f as i64 });
+                            }
+                            OwnedValue::Null => {
+                                state.registers[dest] = OwnedValue::Null;
+                            }
+                            _ => unimplemented!("{:?}", aggctx),
+                        },
+                        _ => {
+                            unimplemented!("{:?}", state.registers[reg]);
                         }
                     }
                     state.pc += 1;
@@ -2106,6 +2313,13 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::IfNull => {}
+                            ScalarFunc::Iif => {}
+                            ScalarFunc::Instr => {
+                                let reg_value = &state.registers[*start_reg];
+                                let pattern_value = &state.registers[*start_reg + 1];
+                                let result = exec_instr(reg_value, pattern_value);
+                                state.registers[*dest] = result;
+                            }
                             ScalarFunc::LastInsertRowid => {
                                 if let Some(conn) = self.connection.upgrade() {
                                     state.registers[*dest] =
@@ -2113,12 +2327,6 @@ impl Program {
                                 } else {
                                     state.registers[*dest] = OwnedValue::Null;
                                 }
-                            }
-                            ScalarFunc::Instr => {
-                                let reg_value = &state.registers[*start_reg];
-                                let pattern_value = &state.registers[*start_reg + 1];
-                                let result = exec_instr(reg_value, pattern_value);
-                                state.registers[*dest] = result;
                             }
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
@@ -2148,6 +2356,7 @@ impl Program {
                             | ScalarFunc::Quote
                             | ScalarFunc::RandomBlob
                             | ScalarFunc::Sign
+                            | ScalarFunc::Soundex
                             | ScalarFunc::ZeroBlob => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
@@ -2162,6 +2371,7 @@ impl Program {
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
                                     ScalarFunc::RandomBlob => Some(exec_randomblob(reg_value)),
                                     ScalarFunc::ZeroBlob => Some(exec_zeroblob(reg_value)),
+                                    ScalarFunc::Soundex => Some(exec_soundex(reg_value)),
                                     _ => unreachable!(),
                                 };
                                 state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
@@ -2670,6 +2880,96 @@ fn exec_sign(reg: &OwnedValue) -> Option<OwnedValue> {
     };
 
     Some(OwnedValue::Integer(sign))
+}
+
+/// Generates the Soundex code for a given word
+pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
+    let s = match reg {
+        OwnedValue::Null => return OwnedValue::Text(Rc::new("?000".to_string())),
+        OwnedValue::Text(s) => {
+            // return ?000 if non ASCII alphabet character is found
+            if !s.chars().all(|c| c.is_ascii_alphabetic()) {
+                return OwnedValue::Text(Rc::new("?000".to_string()));
+            }
+            s.clone()
+        }
+        _ => return OwnedValue::Text(Rc::new("?000".to_string())), // For unsupported types, return NULL
+    };
+
+    // Remove numbers and spaces
+    let word: String = s
+        .chars()
+        .filter(|c| !c.is_digit(10))
+        .collect::<String>()
+        .replace(" ", "");
+    if word.is_empty() {
+        return OwnedValue::Text(Rc::new("0000".to_string()));
+    }
+
+    let soundex_code = |c| match c {
+        'b' | 'f' | 'p' | 'v' => Some('1'),
+        'c' | 'g' | 'j' | 'k' | 'q' | 's' | 'x' | 'z' => Some('2'),
+        'd' | 't' => Some('3'),
+        'l' => Some('4'),
+        'm' | 'n' => Some('5'),
+        'r' => Some('6'),
+        _ => None,
+    };
+
+    // Convert the word to lowercase for consistent lookups
+    let word = word.to_lowercase();
+    let first_letter = word.chars().next().unwrap();
+
+    // Remove all occurrences of 'h' and 'w' except the first letter
+    let code: String = word
+        .chars()
+        .skip(1)
+        .filter(|&ch| ch != 'h' && ch != 'w')
+        .fold(first_letter.to_string(), |mut acc, ch| {
+            acc.push(ch);
+            acc
+        });
+
+    // Replace consonants with digits based on Soundex mapping
+    let tmp: String = code
+        .chars()
+        .map(|ch| match soundex_code(ch) {
+            Some(code) => code.to_string(),
+            None => ch.to_string(),
+        })
+        .collect();
+
+    // Remove adjacent same digits
+    let tmp = tmp.chars().fold(String::new(), |mut acc, ch| {
+        if acc.chars().last() != Some(ch) {
+            acc.push(ch);
+        }
+        acc
+    });
+
+    // Remove all occurrences of a, e, i, o, u, y except the first letter
+    let mut result = tmp
+        .chars()
+        .enumerate()
+        .filter(|(i, ch)| *i == 0 || !matches!(ch, 'a' | 'e' | 'i' | 'o' | 'u' | 'y'))
+        .map(|(_, ch)| ch)
+        .collect::<String>();
+
+    // If the first symbol is a digit, replace it with the saved first letter
+    if let Some(first_digit) = result.chars().next() {
+        if first_digit.is_digit(10) {
+            result.replace_range(0..1, &first_letter.to_string());
+        }
+    }
+
+    // Append zeros if the result contains less than 4 characters
+    while result.len() < 4 {
+        result.push('0');
+    }
+
+    // Retain the first 4 characters and convert to uppercase
+    result.truncate(4);
+    OwnedValue::Text(Rc::new(result.to_uppercase()))
 }
 
 fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
@@ -3295,9 +3595,9 @@ mod tests {
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_instr, exec_length, exec_like, exec_lower,
         exec_ltrim, exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob,
-        exec_round, exec_rtrim, exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex,
-        exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext,
-        Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_round, exec_rtrim, exec_sign, exec_soundex, exec_substring, exec_trim, exec_typeof,
+        exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid,
+        AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -3625,6 +3925,53 @@ mod tests {
         let pattern_str = OwnedValue::Text(Rc::new(String::from("and Alice")));
         let expected_str = OwnedValue::Text(Rc::new(String::from("     Bob")));
         assert_eq!(exec_rtrim(&input_str, Some(pattern_str)), expected_str);
+    }
+
+    #[test]
+    fn test_soundex() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("Pfister")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("P236")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("husobee")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("H210")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Tymczak")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("T522")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Ashcraft")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("A261")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Robert")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("R163")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Rupert")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("R163")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Rubin")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("R150")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Kant")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("K530")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Knuth")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("K530")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("x")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("X000")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("闪电五连鞭")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("?000")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
     }
 
     #[test]

@@ -75,6 +75,14 @@ do_execsql_test ifnull-2 {
   select ifnull(null, 2);
 } {2}
 
+do_execsql_test iif-true {
+  select iif(1, 'pass', 'fail');
+} {pass}
+
+do_execsql_test iif-false {
+  select iif(0, 'fail', 'pass');
+} {pass}
+
 do_execsql_test instr-str {
   select instr('limbo', 'im');
 } {2}
@@ -771,3 +779,7 @@ do_execsql_test cast-in-where {
   select age from users where age = cast('45' as integer) limit 1;
 } {45}
 
+# TODO: sqlite seems not enable soundex() by default unless build it with SQLITE_SOUNDEX enabled.
+# do_execsql_test soundex-text {
+#  select soundex('Pfister'), soundex('husobee'), soundex('Tymczak'), soundex('Ashcraft'), soundex('Robert'), soundex('Rupert'), soundex('Rubin'), soundex('Kant'), soundex('Knuth'), soundex('x'), soundex('');
+# } {P236|H210|T522|A261|R163|R163|R150|K530|K530|X000|0000}

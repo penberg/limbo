@@ -71,23 +71,49 @@ fn main() -> anyhow::Result<()> {
     }
     println!("Limbo v{}", env!("CARGO_PKG_VERSION"));
     println!("Enter \".help\" for usage hints.");
+    const PROMPT: &str = "limbo> ";
+    let mut input_buff = String::new();
+    let mut prompt = PROMPT.to_string();
     loop {
-        let readline = rl.readline("limbo> ");
+        let readline = rl.readline(&prompt);
         match readline {
             Ok(line) => {
+                let line = line.trim();
+                if input_buff.is_empty() {
+                    if line.is_empty() {
+                        continue;
+                    } else if line.starts_with('.') {
+                        if let Err(e) = handle_dot_command(io.clone(), &conn, line) {
+                            eprintln!("{}", e);
+                        }
+                        rl.add_history_entry(line.to_owned())?;
+                        interrupt_count.store(0, Ordering::SeqCst);
+                        continue;
+                    }
+                }
+                if line.ends_with(';') {
+                    input_buff.push_str(line);
+                    input_buff.split(';').for_each(|stmt| {
+                        if let Err(e) =
+                            query(io.clone(), &conn, stmt, &opts.output_mode, &interrupt_count)
+                        {
+                            eprintln!("{}", e);
+                        }
+                    });
+                    input_buff.clear();
+                    prompt = PROMPT.to_string();
+                } else {
+                    input_buff.push_str(line);
+                    input_buff.push(' ');
+                    prompt = match calc_parens_offset(&input_buff) {
+                        n if n < 0 => String::from(")x!...>"),
+                        0 => String::from("   ...> "),
+                        n if n < 10 => format!("(x{}...> ", n),
+                        _ => String::from("(.....> "),
+                    };
+                }
                 rl.add_history_entry(line.to_owned())?;
                 interrupt_count.store(0, Ordering::SeqCst);
-                if line.trim().starts_with('.') {
-                    handle_dot_command(io.clone(), &conn, &line)?;
-                } else {
-                    query(
-                        io.clone(),
-                        &conn,
-                        &line,
-                        &opts.output_mode,
-                        &interrupt_count,
-                    )?;
-                }
             }
             Err(ReadlineError::Interrupted) => {
                 // At prompt, increment interrupt count
@@ -97,6 +123,7 @@ fn main() -> anyhow::Result<()> {
                     break;
                 }
                 println!("Use .quit to exit or press Ctrl-C again to force quit.");
+                input_buff.clear();
                 continue;
             }
             Err(ReadlineError::Eof) => {
@@ -111,6 +138,14 @@ fn main() -> anyhow::Result<()> {
     }
     rl.save_history(history_file.as_path())?;
     Ok(())
+}
+
+fn calc_parens_offset(input: &str) -> i32 {
+    input.chars().fold(0, |acc, c| match c {
+        '(' => acc + 1,
+        ')' => acc - 1,
+        _ => acc,
+    })
 }
 
 fn display_help_message() {
