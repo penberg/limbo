@@ -127,7 +127,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | max(X,Y,...)                 | Yes    |         |
 | min(X,Y,...)                 | Yes    |         |
 | nullif(X,Y)                  | Yes    |         |
-| octet_length(X)              | No     |         |
+| octet_length(X)              | Yes    |         |
 | printf(FORMAT,...)           | No     |         |
 | quote(X)                     | Yes    |         |
 | random()                     | Yes    |         |
