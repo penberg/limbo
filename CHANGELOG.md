@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+* Add suport for last_insert_rowid() function (Krishna Vishal)
+
+* Add support JOIN USING and NATURAL JOIN (Jussi Saurio)
+
+* Add support for more scalar functions (Kacper Kołodziej)
+
+* Add support for `HAVING` clause (Jussi Saurio)
+
+* Add `get()` and `iterate()` to JavaScript/Wasm API (Jean Arhancet)
+
 ## 0.0.8 - 2024-11-20
 
 ### Added

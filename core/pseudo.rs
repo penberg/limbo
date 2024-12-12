@@ -23,6 +23,10 @@ impl Cursor for PseudoCursor {
         self.current.borrow().is_none()
     }
 
+    fn root_page(&self) -> usize {
+        unreachable!()
+    }
+
     fn rewind(&mut self) -> Result<CursorResult<()>> {
         *self.current.borrow_mut() = None;
         Ok(CursorResult::Ok(()))

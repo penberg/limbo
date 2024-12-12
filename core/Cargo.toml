@@ -54,7 +54,7 @@ pest_derive = { version = "2.0", optional = true }
 rand = "0.8.5"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
-pprof = { version = "0.12.1", features = ["criterion", "flamegraph"] }
+pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = [

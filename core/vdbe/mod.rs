@@ -599,6 +599,7 @@ impl ProgramState {
     }
 }
 
+#[derive(Debug)]
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
@@ -2112,6 +2113,14 @@ impl Program {
                                 let result = exec_instr(reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::LastInsertRowid => {
+                                if let Some(conn) = self.connection.upgrade() {
+                                    state.registers[*dest] =
+                                        OwnedValue::Integer(conn.last_insert_rowid() as i64);
+                                } else {
+                                    state.registers[*dest] = OwnedValue::Null;
+                                }
+                            }
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
                                 let text = &state.registers[*start_reg + 1];
@@ -2134,6 +2143,7 @@ impl Program {
                             | ScalarFunc::Lower
                             | ScalarFunc::Upper
                             | ScalarFunc::Length
+                            | ScalarFunc::OctetLength
                             | ScalarFunc::Typeof
                             | ScalarFunc::Unicode
                             | ScalarFunc::Quote
@@ -2147,6 +2157,7 @@ impl Program {
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
                                     ScalarFunc::Length => Some(exec_length(reg_value)),
+                                    ScalarFunc::OctetLength => Some(exec_octet_length(reg_value)),
                                     ScalarFunc::Typeof => Some(exec_typeof(reg_value)),
                                     ScalarFunc::Unicode => Some(exec_unicode(reg_value)),
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
@@ -2190,7 +2201,12 @@ impl Program {
                             }
                             ScalarFunc::Round => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let precision_value = state.registers.get(*start_reg + 1).cloned();
+                                assert!(arg_count == 1 || arg_count == 2);
+                                let precision_value = if arg_count > 1 {
+                                    Some(state.registers[*start_reg + 1].clone())
+                                } else {
+                                    None
+                                };
                                 let result = exec_round(&reg_value, precision_value);
                                 state.registers[*dest] = result;
                             }
@@ -2315,6 +2331,14 @@ impl Program {
                 Insn::InsertAwait { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
+                    // Only update last_insert_rowid for regular table inserts, not schema modifications
+                    if cursor.root_page() != 1 {
+                        if let Some(rowid) = cursor.rowid()? {
+                            if let Some(conn) = self.connection.upgrade() {
+                                conn.update_last_rowid(rowid);
+                            }
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::NewRowid {
@@ -2533,10 +2557,21 @@ fn exec_lower(reg: &OwnedValue) -> Option<OwnedValue> {
 fn exec_length(reg: &OwnedValue) -> OwnedValue {
     match reg {
         OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
-            OwnedValue::Integer(reg.to_string().len() as i64)
+            OwnedValue::Integer(reg.to_string().chars().count() as i64)
         }
         OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
         OwnedValue::Agg(aggctx) => exec_length(aggctx.final_value()),
+        _ => reg.to_owned(),
+    }
+}
+
+fn exec_octet_length(reg: &OwnedValue) -> OwnedValue {
+    match reg {
+        OwnedValue::Text(_) | OwnedValue::Integer(_) | OwnedValue::Float(_) => {
+            OwnedValue::Integer(reg.to_string().into_bytes().len() as i64)
+        }
+        OwnedValue::Blob(blob) => OwnedValue::Integer(blob.len() as i64),
+        OwnedValue::Agg(aggctx) => exec_octet_length(aggctx.final_value()),
         _ => reg.to_owned(),
     }
 }
@@ -2555,7 +2590,10 @@ fn exec_concat(registers: &[OwnedValue]) -> OwnedValue {
             OwnedValue::Text(text) => result.push_str(text),
             OwnedValue::Integer(i) => result.push_str(&i.to_string()),
             OwnedValue::Float(f) => result.push_str(&f.to_string()),
-            _ => continue,
+            OwnedValue::Agg(aggctx) => result.push_str(&aggctx.final_value().to_string()),
+            OwnedValue::Null => continue,
+            OwnedValue::Blob(_) => todo!("TODO concat blob"),
+            OwnedValue::Record(_) => unreachable!(),
         }
     }
     OwnedValue::Text(Rc::new(result))
@@ -2910,20 +2948,27 @@ fn exec_unicode(reg: &OwnedValue) -> OwnedValue {
     }
 }
 
+fn _to_float(reg: &OwnedValue) -> f64 {
+    match reg {
+        OwnedValue::Text(x) => x.parse().unwrap_or(0.0),
+        OwnedValue::Integer(x) => *x as f64,
+        OwnedValue::Float(x) => *x,
+        _ => 0.0,
+    }
+}
+
 fn exec_round(reg: &OwnedValue, precision: Option<OwnedValue>) -> OwnedValue {
     let precision = match precision {
         Some(OwnedValue::Text(x)) => x.parse().unwrap_or(0.0),
         Some(OwnedValue::Integer(x)) => x as f64,
         Some(OwnedValue::Float(x)) => x,
-        None => 0.0,
-        _ => return OwnedValue::Null,
+        Some(OwnedValue::Null) => return OwnedValue::Null,
+        _ => 0.0,
     };
 
     let reg = match reg {
-        OwnedValue::Text(x) => x.parse().unwrap_or(0.0),
-        OwnedValue::Integer(x) => *x as f64,
-        OwnedValue::Float(x) => *x,
-        _ => return reg.to_owned(),
+        OwnedValue::Agg(ctx) => _to_float(ctx.final_value()),
+        _ => _to_float(reg),
     };
 
     let precision = if precision < 1.0 { 0.0 } else { precision };
@@ -3228,6 +3273,10 @@ mod tests {
     }
 
     impl Cursor for MockCursor {
+        fn root_page(&self) -> usize {
+            unreachable!()
+        }
+
         fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
             self.seek_to_last()
         }
@@ -3764,6 +3813,14 @@ mod tests {
         let precision_val = OwnedValue::Integer(1);
         let expected_val = OwnedValue::Float(123.0);
         assert_eq!(exec_round(&input_val, Some(precision_val)), expected_val);
+
+        let input_val = OwnedValue::Float(100.123);
+        let expected_val = OwnedValue::Float(100.0);
+        assert_eq!(exec_round(&input_val, None), expected_val);
+
+        let input_val = OwnedValue::Float(100.123);
+        let expected_val = OwnedValue::Null;
+        assert_eq!(exec_round(&input_val, Some(OwnedValue::Null)), expected_val);
     }
 
     #[test]

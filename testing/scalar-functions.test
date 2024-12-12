@@ -351,6 +351,10 @@ do_execsql_test length-text {
   SELECT length('limbo');
 } {5}
 
+do_execsql_test lenght-text-utf8-chars {
+  SELECT length('ąłóżźć');
+} {6}
+
 do_execsql_test length-integer {
   SELECT length(12345);
 } {5}
@@ -367,8 +371,32 @@ do_execsql_test length-empty-text {
   SELECT length('');
 } {0}
 
-do_execsql_test length-date-binary-expr {
-  select length(date('now')) = 10;
+do_execsql_test octet-length-text {
+  SELECT length('limbo');
+} {5}
+
+do_execsql_test octet-lenght-text-utf8-chars {
+  SELECT octet_length('ąłóżźć');
+} {12}
+
+do_execsql_test octet-length-integer {
+  SELECT octet_length(12345);
+} {5}
+
+do_execsql_test octet-length-float {
+  SELECT octet_length(123.456);
+} {7}
+
+do_execsql_test octet-length-null {
+  SELECT octet_length(NULL);
+} {}
+
+do_execsql_test octet-length-empty-text {
+  SELECT octet_length('');
+} {0}
+
+do_execsql_test octet-length-date-binary-expr {
+  select octet_length(date('now')) = 10;
 } {1}
 
 do_execsql_test min-number {

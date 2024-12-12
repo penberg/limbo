@@ -69,6 +69,7 @@ pub enum ScalarFunc {
     RTrim,
     Round,
     Length,
+    OctetLength,
     Min,
     Max,
     Nullif,
@@ -85,6 +86,7 @@ pub enum ScalarFunc {
     Hex,
     Unhex,
     ZeroBlob,
+    LastInsertRowid,
 }
 
 impl Display for ScalarFunc {
@@ -110,6 +112,7 @@ impl Display for ScalarFunc {
             ScalarFunc::RTrim => "rtrim".to_string(),
             ScalarFunc::Round => "round".to_string(),
             ScalarFunc::Length => "length".to_string(),
+            ScalarFunc::OctetLength => "octet_length".to_string(),
             ScalarFunc::Min => "min".to_string(),
             ScalarFunc::Max => "max".to_string(),
             ScalarFunc::Nullif => "nullif".to_string(),
@@ -126,6 +129,7 @@ impl Display for ScalarFunc {
             ScalarFunc::Hex => "hex".to_string(),
             ScalarFunc::Unhex => "unhex".to_string(),
             ScalarFunc::ZeroBlob => "zeroblob".to_string(),
+            ScalarFunc::LastInsertRowid => "last_insert_rowid".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -189,12 +193,14 @@ impl Func {
             "rtrim" => Ok(Func::Scalar(ScalarFunc::RTrim)),
             "round" => Ok(Func::Scalar(ScalarFunc::Round)),
             "length" => Ok(Func::Scalar(ScalarFunc::Length)),
+            "octet_length" => Ok(Func::Scalar(ScalarFunc::OctetLength)),
             "sign" => Ok(Func::Scalar(ScalarFunc::Sign)),
             "substr" => Ok(Func::Scalar(ScalarFunc::Substr)),
             "substring" => Ok(Func::Scalar(ScalarFunc::Substring)),
             "date" => Ok(Func::Scalar(ScalarFunc::Date)),
             "time" => Ok(Func::Scalar(ScalarFunc::Time)),
             "typeof" => Ok(Func::Scalar(ScalarFunc::Typeof)),
+            "last_insert_rowid" => Ok(Func::Scalar(ScalarFunc::LastInsertRowid)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),

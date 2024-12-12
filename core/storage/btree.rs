@@ -1703,6 +1703,10 @@ impl Cursor for BTreeCursor {
         self.record.borrow().is_none()
     }
 
+    fn root_page(&self) -> usize {
+        self.root_page
+    }
+
     fn rewind(&mut self) -> Result<CursorResult<()>> {
         self.move_to_root();
 
@@ -1772,6 +1776,7 @@ impl Cursor for BTreeCursor {
         }
 
         return_if_io!(self.insert_into_page(key, _record));
+        self.rowid.replace(Some(*int_key as u64));
         Ok(CursorResult::Ok(()))
     }
 

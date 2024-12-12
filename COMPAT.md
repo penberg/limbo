@@ -2,11 +2,16 @@
 
 This document describes the SQLite compatibility status of Limbo:
 
-* [Limitations](#limitations)
-* [SQL statements](#sql-statements)
-* [SQL functions](#sql-functions)
-* [SQLite API](#sqlite-api)
-* [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+- [SQLite Compatibility](#sqlite-compatibility)
+  - [Limitations](#limitations)
+  - [SQL statements](#sql-statements)
+  - [SQL functions](#sql-functions)
+    - [Scalar functions](#scalar-functions)
+    - [Aggregate functions](#aggregate-functions)
+    - [Date and time functions](#date-and-time-functions)
+    - [JSON functions](#json-functions)
+  - [SQLite API](#sqlite-api)
+  - [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
 
 ## Limitations
 
@@ -51,14 +56,44 @@ This document describes the SQLite compatibility status of Limbo:
 | SELECT ... LIMIT             | Yes     |         |
 | SELECT ... ORDER BY          | Partial |         |
 | SELECT ... GROUP BY          | Partial |         |
+| SELECT ... HAVING            | Partial |         |
 | SELECT ... JOIN              | Partial |         |
 | SELECT ... CROSS JOIN        | Partial |         |
 | SELECT ... INNER JOIN        | Partial |         |
 | SELECT ... OUTER JOIN        | Partial |         |
+| SELECT ... JOIN USING        | Yes     |         |
+| SELECT ... NATURAL JOIN      | Yes     |         |
 | UPDATE                       | No      |         |
 | UPSERT                       | No      |         |
 | VACUUM                       | No      |         |
 | WITH clause                  | No      |         |
+
+### SELECT Expressions
+
+Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
+
+| Syntax                       | Status  | Comment |
+|------------------------------|---------|---------|
+| literals                     | Yes     |         |
+| schema.table.column          | Partial | Schemas aren't supported |
+| unary operator               | Partial | `-` supported, `+~` aren't |
+| binary operator              | Partial | Only `%`, `!<`, and `!>` are unsupported |
+| agg() FILTER (WHERE ...)     | No      | Is incorrectly ignored |
+| ... OVER (...)               | No      | Is incorrectly ignored |
+| (expr)                       | Yes     |         |
+| CAST (expr AS type)          | Yes     |         |
+| COLLATE                      | No      |         |
+| (NOT) LIKE                   | No      |         |
+| (NOT) GLOB                   | No      |         |
+| (NOT) REGEXP                 | No      |         |
+| (NOT) MATCH                  | No      |         |
+| IS (NOT)                     | No      |         |
+| IS (NOT) DISTINCT FROM       | No      |         |
+| (NOT) BETWEEN ... AND ...    | No      |         |
+| (NOT) IN (subquery)          | No      |         |
+| (NOT) EXISTS (subquery)      | No      |         |
+| CASE WHEN THEN ELSE END      | Yes     |         |
+| RAISE                        | No      |         |
 
 ## SQL functions
 
@@ -78,7 +113,7 @@ This document describes the SQLite compatibility status of Limbo:
 | ifnull(X,Y)                  | Yes    |         |
 | iif(X,Y,Z)                   | Yes    |         |
 | instr(X,Y)                   | Yes    |         |
-| last_insert_rowid()          | No     |         |
+| last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
 | like(X,Y)                    | No     |         |
 | like(X,Y,Z)                  | No     |         |
@@ -138,7 +173,6 @@ This document describes the SQLite compatibility status of Limbo:
 | min(X)                       | Yes     |         |
 | sum(X)                       | Yes     |         |
 | total(X)                     | Yes     |         |
-
 
 ### Date and time functions
 
