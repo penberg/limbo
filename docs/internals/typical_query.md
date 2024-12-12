@@ -1,4 +1,4 @@
-The following sequence diagram shows the typical flow of a query from the CLI to the VDBE.
+The following sequence diagram shows the typical flow of a query from the CLI to the [VDBE](https://www.sqlite.org/opcode.html).
 
 ```mermaid
 sequenceDiagram
