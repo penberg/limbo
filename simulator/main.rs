@@ -431,7 +431,10 @@ impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Query::Create { table } => write!(f, "{}", table.to_create_str()),
-            Query::Select { table, predicate: guard } => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
+            Query::Select {
+                table,
+                predicate: guard,
+            } => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
             Query::Insert { table, values } => {
                 write!(f, "INSERT INTO {} VALUES (", table)?;
                 for (i, v) in values.iter().enumerate() {
@@ -442,7 +445,10 @@ impl Display for Query {
                 }
                 write!(f, ")")
             }
-            Query::Delete { table, predicate: guard } => write!(f, "DELETE FROM {} WHERE {}", table, guard),
+            Query::Delete {
+                table,
+                predicate: guard,
+            } => write!(f, "DELETE FROM {} WHERE {}", table, guard),
         }
     }
 }
