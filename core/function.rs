@@ -76,6 +76,7 @@ pub enum ScalarFunc {
     Sign,
     Substr,
     Substring,
+    Soundex,
     Date,
     Time,
     Typeof,
@@ -119,6 +120,7 @@ impl Display for ScalarFunc {
             ScalarFunc::Sign => "sign".to_string(),
             ScalarFunc::Substr => "substr".to_string(),
             ScalarFunc::Substring => "substring".to_string(),
+            ScalarFunc::Soundex => "soundex".to_string(),
             ScalarFunc::Date => "date".to_string(),
             ScalarFunc::Time => "time".to_string(),
             ScalarFunc::Typeof => "typeof".to_string(),
@@ -210,6 +212,7 @@ impl Func {
             "hex" => Ok(Func::Scalar(ScalarFunc::Hex)),
             "unhex" => Ok(Func::Scalar(ScalarFunc::Unhex)),
             "zeroblob" => Ok(Func::Scalar(ScalarFunc::ZeroBlob)),
+            "soundex" => Ok(Func::Scalar(ScalarFunc::Soundex)),
             _ => Err(()),
         }
     }

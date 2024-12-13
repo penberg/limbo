@@ -5,6 +5,7 @@ This document describes the SQLite compatibility status of Limbo:
 - [SQLite Compatibility](#sqlite-compatibility)
   - [Limitations](#limitations)
   - [SQL statements](#sql-statements)
+    - [SELECT Expressions](#select-expressions)
   - [SQL functions](#sql-functions)
     - [Scalar functions](#scalar-functions)
     - [Aggregate functions](#aggregate-functions)
@@ -138,7 +139,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | rtrim(X)                     | Yes    |         |
 | rtrim(X,Y)                   | Yes    |         |
 | sign(X)                      | Yes    |         |
-| soundex(X)                   | No     |         |
+| soundex(X)                   | Yes    |         |
 | sqlite_compileoption_get(N)  | No     |         |
 | sqlite_compileoption_used(X) | No     |         |
 | sqlite_offset(X)             | No     |         |

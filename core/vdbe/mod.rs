@@ -2149,6 +2149,7 @@ impl Program {
                             | ScalarFunc::Quote
                             | ScalarFunc::RandomBlob
                             | ScalarFunc::Sign
+                            | ScalarFunc::Soundex
                             | ScalarFunc::ZeroBlob => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
@@ -2163,6 +2164,7 @@ impl Program {
                                     ScalarFunc::Quote => Some(exec_quote(reg_value)),
                                     ScalarFunc::RandomBlob => Some(exec_randomblob(reg_value)),
                                     ScalarFunc::ZeroBlob => Some(exec_zeroblob(reg_value)),
+                                    ScalarFunc::Soundex => Some(exec_soundex(reg_value)),
                                     _ => unreachable!(),
                                 };
                                 state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
@@ -2664,6 +2666,96 @@ fn exec_sign(reg: &OwnedValue) -> Option<OwnedValue> {
     };
 
     Some(OwnedValue::Integer(sign))
+}
+
+/// Generates the Soundex code for a given word
+pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
+    let s = match reg {
+        OwnedValue::Null => return OwnedValue::Text(Rc::new("?000".to_string())),
+        OwnedValue::Text(s) => {
+            // return ?000 if non ASCII alphabet character is found
+            if !s.chars().all(|c| c.is_ascii_alphabetic()) {
+                return OwnedValue::Text(Rc::new("?000".to_string()));
+            }
+            s.clone()
+        }
+        _ => return OwnedValue::Text(Rc::new("?000".to_string())), // For unsupported types, return NULL
+    };
+
+    // Remove numbers and spaces
+    let word: String = s
+        .chars()
+        .filter(|c| !c.is_digit(10))
+        .collect::<String>()
+        .replace(" ", "");
+    if word.is_empty() {
+        return OwnedValue::Text(Rc::new("0000".to_string()));
+    }
+
+    let soundex_code = |c| match c {
+        'b' | 'f' | 'p' | 'v' => Some('1'),
+        'c' | 'g' | 'j' | 'k' | 'q' | 's' | 'x' | 'z' => Some('2'),
+        'd' | 't' => Some('3'),
+        'l' => Some('4'),
+        'm' | 'n' => Some('5'),
+        'r' => Some('6'),
+        _ => None,
+    };
+
+    // Convert the word to lowercase for consistent lookups
+    let word = word.to_lowercase();
+    let first_letter = word.chars().next().unwrap();
+
+    // Remove all occurrences of 'h' and 'w' except the first letter
+    let code: String = word
+        .chars()
+        .skip(1)
+        .filter(|&ch| ch != 'h' && ch != 'w')
+        .fold(first_letter.to_string(), |mut acc, ch| {
+            acc.push(ch);
+            acc
+        });
+
+    // Replace consonants with digits based on Soundex mapping
+    let tmp: String = code
+        .chars()
+        .map(|ch| match soundex_code(ch) {
+            Some(code) => code.to_string(),
+            None => ch.to_string(),
+        })
+        .collect();
+
+    // Remove adjacent same digits
+    let tmp = tmp.chars().fold(String::new(), |mut acc, ch| {
+        if acc.chars().last() != Some(ch) {
+            acc.push(ch);
+        }
+        acc
+    });
+
+    // Remove all occurrences of a, e, i, o, u, y except the first letter
+    let mut result = tmp
+        .chars()
+        .enumerate()
+        .filter(|(i, ch)| *i == 0 || !matches!(ch, 'a' | 'e' | 'i' | 'o' | 'u' | 'y'))
+        .map(|(_, ch)| ch)
+        .collect::<String>();
+
+    // If the first symbol is a digit, replace it with the saved first letter
+    if let Some(first_digit) = result.chars().next() {
+        if first_digit.is_digit(10) {
+            result.replace_range(0..1, &first_letter.to_string());
+        }
+    }
+
+    // Append zeros if the result contains less than 4 characters
+    while result.len() < 4 {
+        result.push('0');
+    }
+
+    // Retain the first 4 characters and convert to uppercase
+    result.truncate(4);
+    OwnedValue::Text(Rc::new(result.to_uppercase()))
 }
 
 fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
@@ -3255,9 +3347,9 @@ mod tests {
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_instr, exec_length, exec_like, exec_lower,
         exec_ltrim, exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob,
-        exec_round, exec_rtrim, exec_sign, exec_substring, exec_trim, exec_typeof, exec_unhex,
-        exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid, AggContext,
-        Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_round, exec_rtrim, exec_sign, exec_soundex, exec_substring, exec_trim, exec_typeof,
+        exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid,
+        AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
     };
     use mockall::{mock, predicate};
     use rand::{rngs::mock::StepRng, thread_rng};
@@ -3585,6 +3677,53 @@ mod tests {
         let pattern_str = OwnedValue::Text(Rc::new(String::from("and Alice")));
         let expected_str = OwnedValue::Text(Rc::new(String::from("     Bob")));
         assert_eq!(exec_rtrim(&input_str, Some(pattern_str)), expected_str);
+    }
+
+    #[test]
+    fn test_soundex() {
+        let input_str = OwnedValue::Text(Rc::new(String::from("Pfister")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("P236")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("husobee")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("H210")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Tymczak")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("T522")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Ashcraft")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("A261")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Robert")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("R163")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Rupert")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("R163")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Rubin")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("R150")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Kant")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("K530")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("Knuth")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("K530")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("x")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("X000")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
+
+        let input_str = OwnedValue::Text(Rc::new(String::from("闪电五连鞭")));
+        let expected_str = OwnedValue::Text(Rc::new(String::from("?000")));
+        assert_eq!(exec_soundex(&input_str), expected_str);
     }
 
     #[test]

@@ -1169,6 +1169,7 @@ pub fn translate_expr(
                         | ScalarFunc::Quote
                         | ScalarFunc::RandomBlob
                         | ScalarFunc::Sign
+                        | ScalarFunc::Soundex
                         | ScalarFunc::ZeroBlob => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
