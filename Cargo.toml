@@ -51,6 +51,10 @@ codegen-units = 1
 panic = "abort"
 lto = true
 
+[profile.bench-profile]
+inherits = "release"
+debug = true
+
 [profile.dist]
 inherits = "release"
 lto = "thin"
