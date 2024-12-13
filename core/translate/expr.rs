@@ -1550,6 +1550,57 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::Replace => {
+                            let args = if let Some(args) = args {
+                                if !args.len() == 3 {
+                                    crate::bail_parse_error!(
+                                        "function {}() requires exactly 3 arguments",
+                                        srf.to_string()
+                                    )
+                                }
+                                args
+                            } else {
+                                crate::bail_parse_error!(
+                                    "function {}() requires exactly 3 arguments",
+                                    srf.to_string()
+                                );
+                            };
+
+                            let str_reg = program.alloc_register();
+                            let pattern_reg = program.alloc_register();
+                            let replacement_reg = program.alloc_register();
+
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                str_reg,
+                                precomputed_exprs_to_registers,
+                            )?;
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[1],
+                                pattern_reg,
+                                precomputed_exprs_to_registers,
+                            )?;
+
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[2],
+                                replacement_reg,
+                                precomputed_exprs_to_registers,
+                            )?;
+
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: str_reg,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
                     }
                 }
             }

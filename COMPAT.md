@@ -133,7 +133,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | quote(X)                     | Yes    |         |
 | random()                     | Yes    |         |
 | randomblob(N)                | Yes    |         |
-| replace(X,Y,Z)               | No     |         |
+| replace(X,Y,Z)               | Yes    |         |
 | round(X)                     | Yes    |         |
 | round(X,Y)                   | Yes    |         |
 | rtrim(X)                     | Yes    |         |

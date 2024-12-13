@@ -167,6 +167,18 @@ do_execsql_test lower-null {
   select lower(null)
 } {}
 
+do_execsql_test replace {
+  select replace('test', 'test', 'example')
+} {example}
+
+do_execsql_test replace-number {
+  select replace('tes3', 3, 0.3)
+} {tes0.3}
+
+do_execsql_test replace-null {
+  select replace('test', null, 'example')
+} {}
+
 do_execsql_test hex {
   select hex('limbo')
 } {6C696D626F}
