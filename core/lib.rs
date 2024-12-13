@@ -179,8 +179,17 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 file.pwrite(0, contents.buffer.clone(), Rc::new(completion))
                     .unwrap();
             }
-            io.run_once()?;
-            assert!(*flag_complete.borrow());
+            let mut limit = 100;
+            loop {
+                io.run_once()?;
+                if *flag_complete.borrow() {
+                    break;
+                }
+                limit -= 1;
+                if limit == 0 {
+                    panic!("Database file couldn't be initialized, io loop run for {} iterations and write didn't finish", limit);
+                }
+            }
         }
     };
     Ok(())
