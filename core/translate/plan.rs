@@ -46,6 +46,8 @@ pub struct Plan {
     pub referenced_tables: Vec<BTreeTableReference>,
     /// all the indexes available
     pub available_indexes: Vec<Rc<Index>>,
+    /// query contains a constant condition that is always false
+    pub contains_constant_false_condition: bool,
 }
 
 impl Display for Plan {
