@@ -215,6 +215,46 @@ do_execsql_test unhex-null {
   SELECT unhex(NULL);
 } {}
 
+do_execsql_test unhex-x-y-prefix {
+  SELECT unhex('x2E', 'x');
+} {.}
+
+do_execsql_test unhex-x-y-suffix {
+  SELECT unhex('2Ex', 'x');
+} {.}
+
+do_execsql_test unhex-x-y-prefix-suffix {
+  SELECT unhex('x2Ex', 'x');
+} {.}
+
+do_execsql_test unhex-x-y-incorrect-suffix {
+  SELECT unhex('x2Ey', 'x');
+} {}
+
+do_execsql_test unhex-x-y-long-prefix {
+  SELECT unhex('xyz2E', 'xyz');
+} {.}
+
+do_execsql_test unhex-x-y-shorter-suffix {
+  SELECT unhex('xyz2Exy', 'xyz');
+} {.}
+
+do_execsql_test unhex-x-y-shorter-prefix {
+  SELECT unhex('xy2Exyz', 'xyz');
+} {.};
+
+do_execsql_test unhex-x-y-random-order {
+  SELECT unhex('yx2Ezyx', 'xyz');
+} {.};
+
+do_execsql_test unhex-x-y-char-in-the-middle {
+  SELECT unhex('yx2xEzyx', 'xyz');
+} {};
+
+do_execsql_test unhex-x-y-character-outside-set {
+  SELECT unhex('yxn2Ezyx', 'xyz');
+} {};
+
 do_execsql_test trim {
   SELECT trim('   Limbo    ');
 } {Limbo}
