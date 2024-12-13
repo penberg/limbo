@@ -53,7 +53,7 @@ pub enum Command {
     Help,
     /// Display schema for a table
     Schema,
-    /// Set output file (stdout or file)
+    /// Set output file (or stdout if empty)
     SetOutput,
     /// Set output display mode
     OutputMode,
@@ -63,13 +63,20 @@ pub enum Command {
     Cwd,
     /// Display information about settings
     ShowInfo,
+    /// Set the value of NULL to be printedin 'raw' mode
+    NullValue,
 }
 
 impl Command {
     fn min_args(&self) -> usize {
         (match self {
-            Self::Quit | Self::Help | Self::Opcodes | Self::ShowInfo | Self::SetOutput => 0,
-            Self::Open | Self::Schema | Self::OutputMode | Self::Cwd => 1,
+            Self::Quit
+            | Self::Schema
+            | Self::Help
+            | Self::Opcodes
+            | Self::ShowInfo
+            | Self::SetOutput => 0,
+            Self::Open | Self::OutputMode | Self::Cwd | Self::NullValue => 1,
         } + 1) // argv0
     }
 
@@ -78,12 +85,13 @@ impl Command {
             Self::Quit => ".quit",
             Self::Open => ".open <file>",
             Self::Help => ".help",
-            Self::Schema => ".schema <table>",
+            Self::Schema => ".schema ?<table>?",
             Self::Opcodes => ".opcodes",
             Self::OutputMode => ".mode <mode>",
-            Self::SetOutput => ".output <file>",
+            Self::SetOutput => ".output ?file?",
             Self::Cwd => ".cd <directory>",
             Self::ShowInfo => ".show",
+            Self::NullValue => ".nullvalue <string>",
         }
     }
 }
@@ -101,6 +109,7 @@ impl FromStr for Command {
             ".output" => Ok(Self::SetOutput),
             ".cd" => Ok(Self::Cwd),
             ".show" => Ok(Self::ShowInfo),
+            ".nullvalue" => Ok(Self::NullValue),
             _ => Err("Unknown command".to_string()),
         }
     }
@@ -118,6 +127,7 @@ pub struct Limbo {
     output_mode: OutputMode,
     is_stdout: bool,
     input_buff: String,
+    null_value: String,
 }
 
 impl Limbo {
@@ -139,17 +149,36 @@ impl Limbo {
         } else {
             Box::new(io::stdout())
         };
+        let output = if opts.output.is_empty() {
+            "STDOUT"
+        } else {
+            &opts.output
+        };
         Ok(Self {
             prompt: PROMPT.to_string(),
             io,
             writer,
-            output_filename: opts.output.clone(),
+            output_filename: output.to_string(),
             conn,
             db_file,
             output_mode: opts.output_mode,
             is_stdout: true,
             input_buff: String::new(),
+            null_value: String::new(),
         })
+    }
+
+    fn set_multiline_prompt(&mut self) {
+        self.prompt = match self.input_buff.chars().fold(0, |acc, c| match c {
+            '(' => acc + 1,
+            ')' => acc - 1,
+            _ => acc,
+        }) {
+            n if n < 0 => String::from(")x!...>"),
+            0 => String::from("   ...> "),
+            n if n < 10 => format!("(x{}...> ", n),
+            _ => String::from("(.....> "),
+        };
     }
 
     fn show_info(&mut self) -> std::io::Result<()> {
@@ -164,6 +193,12 @@ impl Limbo {
             "CWD: {}",
             std::env::current_dir().unwrap().display()
         ))?;
+        let null_value = if self.null_value.is_empty() {
+            "\'\'".to_string()
+        } else {
+            self.null_value.clone()
+        };
+        self.writeln(format!("Null value: {}", null_value))?;
         self.writer.flush()
     }
 
@@ -177,22 +212,27 @@ impl Limbo {
     }
 
     fn open_db(&mut self, path: &str) -> anyhow::Result<()> {
-        let db = Database::open_file(self.io.clone(), path)?;
         if self.conn.is_some() {
+            // close existing connection if open
             self.conn.as_mut().unwrap().close()?;
         }
+        let db = Database::open_file(self.io.clone(), path)?;
         self.conn = Some(db.connect());
         self.db_file = Some(path.to_string());
         Ok(())
     }
 
-    fn set_output_file(&mut self, path: &str) -> io::Result<()> {
-        if let Ok(file) = std::fs::File::create(path) {
-            self.writer = Box::new(file);
-            self.is_stdout = false;
-            return Ok(());
+    fn set_output_file(&mut self, path: &str) -> Result<(), String> {
+        match std::fs::File::create(path) {
+            Ok(file) => {
+                self.writer = Box::new(file);
+                self.is_stdout = false;
+                return Ok(());
+            }
+            Err(e) => {
+                return Err(e.to_string());
+            }
         }
-        Err(io::Error::new(io::ErrorKind::NotFound, "File not found"))
     }
 
     fn set_output_stdout(&mut self) {
@@ -205,17 +245,9 @@ impl Limbo {
         self.output_mode = mode;
     }
 
-    fn write<D: AsRef<[u8]>>(&mut self, data: D) -> io::Result<()> {
-        self.writer.write_all(data.as_ref())
-    }
-
     fn writeln<D: AsRef<[u8]>>(&mut self, data: D) -> io::Result<()> {
         self.writer.write_all(data.as_ref())?;
         self.writer.write_all(b"\n")
-    }
-
-    fn is_first_input(&self) -> bool {
-        self.input_buff.is_empty()
     }
 
     fn buffer_input(&mut self, line: &str) {
@@ -229,7 +261,7 @@ impl Limbo {
         interrupt_count: &Arc<AtomicUsize>,
         rl: &mut rustyline::DefaultEditor,
     ) -> anyhow::Result<()> {
-        if self.is_first_input() {
+        if self.input_buff.is_empty() {
             if line.is_empty() {
                 return Ok(());
             }
@@ -248,18 +280,13 @@ impl Limbo {
                 .filter(|s| !s.is_empty())
                 .for_each(|stmt| {
                     if let Err(e) = self.query(stmt, interrupt_count) {
-                        eprintln!("{}", e);
+                        let _ = self.writeln(e.to_string());
                     }
                 });
             self.reset_input();
         } else {
             self.buffer_input(line);
-            self.prompt = match calc_parens_offset(&self.input_buff) {
-                n if n < 0 => String::from(")x!...>"),
-                0 => String::from("   ...> "),
-                n if n < 10 => format!("(x{}...> ", n),
-                _ => String::from("(.....> "),
-            };
+            self.set_multiline_prompt();
         }
         rl.add_history_entry(line.to_owned())?;
         interrupt_count.store(0, Ordering::SeqCst);
@@ -294,7 +321,7 @@ impl Limbo {
                     }
                     let table_name = args.get(1).copied();
                     if let Err(e) = self.display_schema(table_name) {
-                        let _ = self.writeln(format!("{}", e));
+                        let _ = self.writeln(e.to_string());
                     }
                 }
                 Command::Opcodes => {
@@ -309,6 +336,9 @@ impl Limbo {
                             let _ = self.writeln(format!("{}\n", op));
                         }
                     }
+                }
+                Command::NullValue => {
+                    self.null_value = args[1].to_string();
                 }
                 Command::OutputMode => match OutputMode::from_str(args[1], true) {
                     Ok(mode) => {
@@ -328,10 +358,6 @@ impl Limbo {
                     }
                 }
                 Command::Cwd => {
-                    if args.len() < 2 {
-                        println!("USAGE: .cd <directory>");
-                        return;
-                    }
                     let _ = std::env::set_current_dir(args[1]);
                 }
                 Command::ShowInfo => {
@@ -369,9 +395,9 @@ impl Limbo {
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
                                 }
-                                self.write(
+                                let _ = self.writer.write(
                                     match value {
-                                        Value::Null => "".to_string(),
+                                        Value::Null => self.null_value.clone(),
                                         Value::Integer(i) => format!("{}", i),
                                         Value::Float(f) => format!("{:?}", f),
                                         Value::Text(s) => s.to_string(),
@@ -391,7 +417,7 @@ impl Limbo {
                             break;
                         }
                         Err(err) => {
-                            eprintln!("{}", err);
+                            let _ = self.writeln(err.to_string());
                             break;
                         }
                     }
@@ -409,7 +435,7 @@ impl Limbo {
                                     row.values
                                         .iter()
                                         .map(|value| match value {
-                                            Value::Null => "".cell(),
+                                            Value::Null => self.null_value.clone().cell(),
                                             Value::Integer(i) => i.to_string().cell(),
                                             Value::Float(f) => f.to_string().cell(),
                                             Value::Text(s) => s.cell(),
@@ -433,13 +459,13 @@ impl Limbo {
                     if let Ok(table) = table_rows.table().display() {
                         let _ = self.writeln(format!("{}", table));
                     } else {
-                        eprintln!("Error displaying table.");
+                        let _ = self.writeln("Error displaying table.");
                     }
                 }
             },
             Ok(None) => {}
             Err(err) => {
-                self.writeln(format!("{}", err));
+                let _ = self.writeln(format!("{}", err));
             }
         }
         // for now let's cache flush always
@@ -484,7 +510,7 @@ impl Limbo {
                 }
             }
             Ok(None) => {
-                println!("No results returned from the query.");
+                let _ = self.writeln("No results returned from the query.");
             }
             Err(err) => {
                 if err.to_string().contains("no such table: sqlite_schema") {
@@ -515,6 +541,7 @@ Special Commands:
 .schema <table_name>       Show the schema of the specified table.
 .opcodes                   Display all the opcodes defined by the virtual machine
 .cd <directory>            Change the current working directory.
+.nullvalue <string>        Set the value to be displayed for null values.
 .help                      Display this help message.
 
 Usage Examples:
@@ -543,17 +570,12 @@ Usage Examples:
 8. Show the current values of settings:
    .show
 
+9. Set the value 'NULL' to be displayed for null values instead of empty string:
+   .nullvalue "NULL"
+
 Note:
 -----
 - All SQL commands must end with a semicolon (;).
 - Special commands do not require a semicolon.
 
 "#;
-
-fn calc_parens_offset(input: &str) -> i32 {
-    input.chars().fold(0, |acc, c| match c {
-        '(' => acc + 1,
-        ')' => acc - 1,
-        _ => acc,
-    })
-}
