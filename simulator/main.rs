@@ -3,6 +3,7 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
 use std::fmt::Display;
+use std::ops::Deref;
 use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -53,8 +54,10 @@ struct Table {
 
 impl Arbitrary for Table {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
-        let name = gen_random_name(rng);
-        let columns = gen_columns(rng);
+        let name = Name::arbitrary(rng).0;
+        let columns = (1..rng.gen_range(1..128))
+            .map(|_| Column::arbitrary(rng))
+            .collect();
         Table {
             rows: Vec::new(),
             name,
@@ -73,7 +76,7 @@ struct Column {
 
 impl Arbitrary for Column {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
-        let name = gen_random_name(rng);
+        let name = Name::arbitrary(rng).0;
         let column_type = ColumnType::arbitrary(rng);
         Column {
             name,
@@ -374,28 +377,48 @@ impl ArbitraryOf<Table> for Predicate {
     }
 }
 
+impl ArbitraryOf<(&str, &Value)> for Predicate {
+    fn arbitrary_of<R: Rng>(rng: &mut R, (c, t): &(&str, &Value)) -> Self {
+        match rng.gen_range(0..3) {
+            0 => Predicate::Eq(c.to_string(), (*t).clone()),
+            1 => Predicate::Gt(c.to_string(), LTValue::arbitrary_of(rng, *t).0),
+            2 => Predicate::Lt(c.to_string(), LTValue::arbitrary_of(rng, *t).0),
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl Display for Predicate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Predicate::And(predicates) => {
-                write!(f, "(")?;
-                for (i, p) in predicates.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, " AND ")?;
+                if predicates.is_empty() {
+                    // todo: Make this TRUE when the bug is fixed
+                    write!(f, "1 = 1")
+                } else {
+                    write!(f, "(")?;
+                    for (i, p) in predicates.iter().enumerate() {
+                        if i != 0 {
+                            write!(f, " AND ")?;
+                        }
+                        write!(f, "{}", p)?;
                     }
-                    write!(f, "{}", p)?;
+                    write!(f, ")")
                 }
-                write!(f, ")")
             }
             Predicate::Or(predicates) => {
-                write!(f, "(")?;
-                for (i, p) in predicates.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, " OR ")?;
+                if predicates.is_empty() {
+                    write!(f, "FALSE")
+                } else {
+                    write!(f, "(")?;
+                    for (i, p) in predicates.iter().enumerate() {
+                        if i != 0 {
+                            write!(f, " OR ")?;
+                        }
+                        write!(f, "{}", p)?;
                     }
-                    write!(f, "{}", p)?;
+                    write!(f, ")")
                 }
-                write!(f, ")")
             }
             Predicate::Eq(name, value) => write!(f, "{} = {}", name, value),
             Predicate::Gt(name, value) => write!(f, "{} > {}", name, value),
@@ -509,73 +532,94 @@ fn main() {
     env.io.print_stats();
 }
 
-fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
-    let management = env.rng.gen_ratio(1, 100);
-    if management {
-        // for now create table only
-        maybe_add_table(env, conn)?;
-    } else if env.tables.is_empty() {
-        maybe_add_table(env, conn)?;
-    } else {
-        let query = Query::arbitrary_of(&mut env.rng, &env.tables[0]);
-        log::info!("running query '{}'", query);
-        let rows = get_all_rows(env, conn, query.to_string().as_str())?;
-        log::debug!("{:?}", rows);
-        // let roll = env.rng.gen_range(0..100);
-        // if roll < env.opts.read_percent {
-        //     // read
-        //     do_select(env, conn)?;
-        // } else if roll < env.opts.read_percent + env.opts.write_percent {
-        //     // write
-        //     do_write(env, conn)?;
-        // } else {
-        //     // delete
-        //     // TODO
-        // }
-    }
-    Ok(())
-}
-
-fn do_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
+fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
+    // Get a random table
     let table = env.rng.gen_range(0..env.tables.len());
-    let table_name = {
-        let table = &env.tables[table];
-        table.name.clone()
-    };
-    let rows = get_all_rows(env, conn, format!("SELECT * FROM {}", table_name).as_str())?;
 
-    let table = &env.tables[table];
-    compare_equal_rows(&table.rows, &rows);
-    Ok(())
-}
+    // let table = &env.tables[table];
 
-fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
-    let mut query = String::new();
-    let table = env.rng.gen_range(0..env.tables.len());
-    {
-        let table = &env.tables[table];
-        query.push_str(format!("INSERT INTO {} VALUES (", table.name).as_str());
-    }
+    // Pick a random column
+    let column_index = env.rng.gen_range(0..env.tables[table].columns.len());
+    let column = &env.tables[table].columns[column_index].clone();
 
-    let columns = env.tables[table].columns.clone();
+    let mut rng = env.rng.clone();
+
+    // Generate a random value of the column type
+    let value = Value::arbitrary_of(&mut rng, &column.column_type);
+
+    // Create a whole new row
     let mut row = Vec::new();
-
-    // gen insert query
-    for column in &columns {
-        let value = Value::arbitrary_of(&mut env.rng, &column.column_type);
-
-        query.push_str(value.to_string().as_str());
-        query.push(',');
-        row.push(value);
+    for (i, column) in env.tables[table].columns.iter().enumerate() {
+        if i == column_index {
+            row.push(value.clone());
+        } else {
+            let value = Value::arbitrary_of(&mut rng, &column.column_type);
+            row.push(value);
+        }
     }
 
-    let table = &mut env.tables[table];
-    table.rows.push(row);
+    // Insert the row
+    let query = Query::Insert {
+        table: env.tables[table].name.clone(),
+        values: row.clone(),
+    };
+    let _ = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
+    // Shadow operation on the table
+    env.tables[table].rows.push(row.clone());
 
-    query.pop();
-    query.push_str(");");
+    // Create a query that selects the row
+    let query = Query::Select {
+        table: env.tables[table].name.clone(),
+        guard: Predicate::Eq(column.name.clone(), value),
+    };
 
-    let _ = get_all_rows(env, conn, query.as_str())?;
+    // Get all rows
+    let rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
+
+    // Check that the row is there
+    assert!(rows.iter().any(|r| r == &row));
+}
+
+fn property_select_all(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
+    // Get a random table
+    let table = env.rng.gen_range(0..env.tables.len());
+
+    // Create a query that selects all rows
+    let query = Query::Select {
+        table: env.tables[table].name.clone(),
+        guard: Predicate::And(Vec::new()),
+    };
+
+    // Get all rows
+    let rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
+
+    // Check that all rows are there
+    assert_eq!(rows.len(), env.tables[table].rows.len());
+    for row in &env.tables[table].rows {
+        assert!(rows.iter().any(|r| r == row));
+    }
+}
+
+fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
+    if env.tables.is_empty() {
+        maybe_add_table(env, conn)?;
+    }
+
+    match env.rng.gen_range(0..2) {
+        // Randomly insert a value and check that the select result contains it.
+        0 => property_insert_select(env, conn),
+        // Check that the current state of the in-memory table is the same as the one in the
+        // database.
+        1 => property_select_all(env, conn),
+        // Perform a random query, update the in-memory table with the result.
+        2 => {
+            let table_index = env.rng.gen_range(0..env.tables.len());
+            let query = Query::arbitrary_of(&mut env.rng, &env.tables[table_index]);
+            let rows = get_all_rows(env, conn, query.to_string().as_str())?;
+            env.tables[table_index].rows = rows;
+        }
+        _ => unreachable!(),
+    }
 
     Ok(())
 }
@@ -593,8 +637,10 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
     if env.tables.len() < env.opts.max_tables {
         let table = Table {
             rows: Vec::new(),
-            name: gen_random_name(&mut env.rng),
-            columns: gen_columns(&mut env.rng),
+            name: Name::arbitrary(&mut env.rng).0,
+            columns: (1..env.rng.gen_range(1..128))
+                .map(|_| Column::arbitrary(&mut env.rng))
+                .collect(),
         };
         let rows = get_all_rows(env, conn, table.to_create_str().as_str())?;
         log::debug!("{:?}", rows);
@@ -622,9 +668,21 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
     Ok(())
 }
 
-fn gen_random_name<T: Rng>(rng: &mut T) -> String {
-    let name = readable_name_custom("_", rng);
-    name.replace("-", "_")
+struct Name(String);
+
+impl Arbitrary for Name {
+    fn arbitrary<R: Rng>(rng: &mut R) -> Self {
+        let name = readable_name_custom("_", rng);
+        Name(name.replace("-", "_"))
+    }
+}
+
+impl Deref for Name {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 fn gen_random_text<T: Rng>(rng: &mut T) -> String {
@@ -641,29 +699,6 @@ fn gen_random_text<T: Rng>(rng: &mut T) -> String {
         let name = readable_name_custom("_", rng);
         name.replace("-", "_")
     }
-}
-
-fn gen_columns<T: Rng>(rng: &mut T) -> Vec<Column> {
-    let mut column_range = rng.gen_range(1..128);
-    let mut columns = Vec::new();
-    while column_range > 0 {
-        let column_type = match rng.gen_range(0..4) {
-            0 => ColumnType::Integer,
-            1 => ColumnType::Float,
-            2 => ColumnType::Text,
-            3 => ColumnType::Blob,
-            _ => unreachable!(),
-        };
-        let column = Column {
-            name: gen_random_name(rng),
-            column_type,
-            primary: false,
-            unique: false,
-        };
-        columns.push(column);
-        column_range -= 1;
-    }
-    columns
 }
 
 fn get_all_rows(
