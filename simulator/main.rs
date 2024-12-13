@@ -42,8 +42,8 @@ trait Arbitrary {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self;
 }
 
-trait ArbitraryOf<T> {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &T) -> Self;
+trait ArbitraryFrom<T> {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &T) -> Self;
 }
 
 struct Table {
@@ -116,8 +116,8 @@ enum Value {
     Blob(Vec<u8>),
 }
 
-impl ArbitraryOf<Vec<&Value>> for Value {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
+impl ArbitraryFrom<Vec<&Value>> for Value {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
         if t.is_empty() {
             return Value::Null;
         }
@@ -127,8 +127,8 @@ impl ArbitraryOf<Vec<&Value>> for Value {
     }
 }
 
-impl ArbitraryOf<ColumnType> for Value {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &ColumnType) -> Self {
+impl ArbitraryFrom<ColumnType> for Value {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &ColumnType) -> Self {
         match t {
             ColumnType::Integer => Value::Integer(rng.gen_range(i64::MIN..i64::MAX)),
             ColumnType::Float => Value::Float(rng.gen_range(-1e10..1e10)),
@@ -140,19 +140,19 @@ impl ArbitraryOf<ColumnType> for Value {
 
 struct LTValue(Value);
 
-impl ArbitraryOf<Vec<&Value>> for LTValue {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
+impl ArbitraryFrom<Vec<&Value>> for LTValue {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
         if t.is_empty() {
             return LTValue(Value::Null);
         }
 
         let index = rng.gen_range(0..t.len());
-        LTValue::arbitrary_of(rng, t[index])
+        LTValue::arbitrary_from(rng, t[index])
     }
 }
 
-impl ArbitraryOf<Value> for LTValue {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Value) -> Self {
+impl ArbitraryFrom<Value> for LTValue {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Value) -> Self {
         match t {
             Value::Integer(i) => LTValue(Value::Integer(rng.gen_range(i64::MIN..*i - 1))),
             Value::Float(f) => LTValue(Value::Float(rng.gen_range(-1e10..*f - 1.0))),
@@ -181,19 +181,19 @@ impl ArbitraryOf<Value> for LTValue {
 
 struct GTValue(Value);
 
-impl ArbitraryOf<Vec<&Value>> for GTValue {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
+impl ArbitraryFrom<Vec<&Value>> for GTValue {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
         if t.is_empty() {
             return GTValue(Value::Null);
         }
 
         let index = rng.gen_range(0..t.len());
-        GTValue::arbitrary_of(rng, t[index])
+        GTValue::arbitrary_from(rng, t[index])
     }
 }
 
-impl ArbitraryOf<Value> for GTValue {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Value) -> Self {
+impl ArbitraryFrom<Value> for GTValue {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Value) -> Self {
         match t {
             Value::Integer(i) => GTValue(Value::Integer(rng.gen_range(*i..i64::MAX))),
             Value::Float(f) => GTValue(Value::Float(rng.gen_range(*f..1e10))),
@@ -230,32 +230,32 @@ enum Predicate {
 
 enum Query {
     Create { table: Table },
-    Select { table: String, guard: Predicate },
+    Select { table: String, predicate: Predicate },
     Insert { table: String, values: Vec<Value> },
-    Delete { table: String, guard: Predicate },
+    Delete { table: String, predicate: Predicate },
 }
 
-impl ArbitraryOf<Table> for Query {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Table) -> Self {
+impl ArbitraryFrom<Table> for Query {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
         match rng.gen_range(0..=200) {
             0 => Query::Create {
                 table: Table::arbitrary(rng),
             },
             1..=100 => Query::Select {
                 table: t.name.clone(),
-                guard: Predicate::arbitrary_of(rng, t),
+                predicate: Predicate::arbitrary_from(rng, t),
             },
             101..=200 => Query::Insert {
                 table: t.name.clone(),
                 values: t
                     .columns
                     .iter()
-                    .map(|c| Value::arbitrary_of(rng, &c.column_type))
+                    .map(|c| Value::arbitrary_from(rng, &c.column_type))
                     .collect(),
             },
             201..=300 => Query::Delete {
                 table: t.name.clone(),
-                guard: Predicate::arbitrary_of(rng, t),
+                predicate: Predicate::arbitrary_from(rng, t),
             },
             _ => unreachable!(),
         }
@@ -265,8 +265,8 @@ impl ArbitraryOf<Table> for Query {
 struct CompoundPredicate(Predicate);
 struct SimplePredicate(Predicate);
 
-impl ArbitraryOf<(&Table, bool)> for SimplePredicate {
-    fn arbitrary_of<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
+impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
         // Pick a random column
         let column_index = rng.gen_range(0..t.columns.len());
         let column = &t.columns[column_index];
@@ -277,27 +277,27 @@ impl ArbitraryOf<(&Table, bool)> for SimplePredicate {
                 if *b {
                     Predicate::Eq(
                         column.name.clone(),
-                        Value::arbitrary_of(rng, &column_values),
+                        Value::arbitrary_from(rng, &column_values),
                     )
                 } else {
                     Predicate::Eq(
                         column.name.clone(),
-                        Value::arbitrary_of(rng, &column.column_type),
+                        Value::arbitrary_from(rng, &column.column_type),
                     )
                 }
             }
             1 => Predicate::Gt(
                 column.name.clone(),
                 match b {
-                    true => GTValue::arbitrary_of(rng, &column_values).0,
-                    false => LTValue::arbitrary_of(rng, &column_values).0,
+                    true => GTValue::arbitrary_from(rng, &column_values).0,
+                    false => LTValue::arbitrary_from(rng, &column_values).0,
                 },
             ),
             2 => Predicate::Lt(
                 column.name.clone(),
                 match b {
-                    true => LTValue::arbitrary_of(rng, &column_values).0,
-                    false => GTValue::arbitrary_of(rng, &column_values).0,
+                    true => LTValue::arbitrary_from(rng, &column_values).0,
+                    false => GTValue::arbitrary_from(rng, &column_values).0,
                 },
             ),
             _ => unreachable!(),
@@ -307,8 +307,8 @@ impl ArbitraryOf<(&Table, bool)> for SimplePredicate {
     }
 }
 
-impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
-    fn arbitrary_of<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
+impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
         // Decide if you want to create an AND or an OR
         CompoundPredicate(if rng.gen_bool(0.7) {
             // An AND for true requires each of its children to be true
@@ -316,7 +316,7 @@ impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
             if *b {
                 Predicate::And(
                     (0..rng.gen_range(1..=3))
-                        .map(|_| SimplePredicate::arbitrary_of(rng, &(*t, true)).0)
+                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*t, true)).0)
                         .collect(),
                 )
             } else {
@@ -335,7 +335,7 @@ impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
                 Predicate::And(
                     booleans
                         .iter()
-                        .map(|b| SimplePredicate::arbitrary_of(rng, &(*t, *b)).0)
+                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*t, *b)).0)
                         .collect(),
                 )
             }
@@ -356,13 +356,13 @@ impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
                 Predicate::Or(
                     booleans
                         .iter()
-                        .map(|b| SimplePredicate::arbitrary_of(rng, &(*t, *b)).0)
+                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*t, *b)).0)
                         .collect(),
                 )
             } else {
                 Predicate::Or(
                     (0..rng.gen_range(1..=3))
-                        .map(|_| SimplePredicate::arbitrary_of(rng, &(*t, false)).0)
+                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*t, false)).0)
                         .collect(),
                 )
             }
@@ -370,19 +370,19 @@ impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
     }
 }
 
-impl ArbitraryOf<Table> for Predicate {
-    fn arbitrary_of<R: Rng>(rng: &mut R, t: &Table) -> Self {
+impl ArbitraryFrom<Table> for Predicate {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
         let b = rng.gen_bool(0.5);
-        CompoundPredicate::arbitrary_of(rng, &(t, b)).0
+        CompoundPredicate::arbitrary_from(rng, &(t, b)).0
     }
 }
 
-impl ArbitraryOf<(&str, &Value)> for Predicate {
-    fn arbitrary_of<R: Rng>(rng: &mut R, (c, t): &(&str, &Value)) -> Self {
+impl ArbitraryFrom<(&str, &Value)> for Predicate {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (c, t): &(&str, &Value)) -> Self {
         match rng.gen_range(0..3) {
             0 => Predicate::Eq(c.to_string(), (*t).clone()),
-            1 => Predicate::Gt(c.to_string(), LTValue::arbitrary_of(rng, *t).0),
-            2 => Predicate::Lt(c.to_string(), LTValue::arbitrary_of(rng, *t).0),
+            1 => Predicate::Gt(c.to_string(), LTValue::arbitrary_from(rng, *t).0),
+            2 => Predicate::Lt(c.to_string(), LTValue::arbitrary_from(rng, *t).0),
             _ => unreachable!(),
         }
     }
@@ -431,7 +431,7 @@ impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Query::Create { table } => write!(f, "{}", table.to_create_str()),
-            Query::Select { table, guard } => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
+            Query::Select { table, predicate: guard } => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
             Query::Insert { table, values } => {
                 write!(f, "INSERT INTO {} VALUES (", table)?;
                 for (i, v) in values.iter().enumerate() {
@@ -442,7 +442,7 @@ impl Display for Query {
                 }
                 write!(f, ")")
             }
-            Query::Delete { table, guard } => write!(f, "DELETE FROM {} WHERE {}", table, guard),
+            Query::Delete { table, predicate: guard } => write!(f, "DELETE FROM {} WHERE {}", table, guard),
         }
     }
 }
@@ -545,7 +545,7 @@ fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     let mut rng = env.rng.clone();
 
     // Generate a random value of the column type
-    let value = Value::arbitrary_of(&mut rng, &column.column_type);
+    let value = Value::arbitrary_from(&mut rng, &column.column_type);
 
     // Create a whole new row
     let mut row = Vec::new();
@@ -553,7 +553,7 @@ fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
         if i == column_index {
             row.push(value.clone());
         } else {
-            let value = Value::arbitrary_of(&mut rng, &column.column_type);
+            let value = Value::arbitrary_from(&mut rng, &column.column_type);
             row.push(value);
         }
     }
@@ -570,7 +570,7 @@ fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     // Create a query that selects the row
     let query = Query::Select {
         table: env.tables[table].name.clone(),
-        guard: Predicate::Eq(column.name.clone(), value),
+        predicate: Predicate::Eq(column.name.clone(), value),
     };
 
     // Get all rows
@@ -587,7 +587,7 @@ fn property_select_all(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     // Create a query that selects all rows
     let query = Query::Select {
         table: env.tables[table].name.clone(),
-        guard: Predicate::And(Vec::new()),
+        predicate: Predicate::And(Vec::new()),
     };
 
     // Get all rows
@@ -614,7 +614,7 @@ fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Resu
         // Perform a random query, update the in-memory table with the result.
         2 => {
             let table_index = env.rng.gen_range(0..env.tables.len());
-            let query = Query::arbitrary_of(&mut env.rng, &env.tables[table_index]);
+            let query = Query::arbitrary_from(&mut env.rng, &env.tables[table_index]);
             let rows = get_all_rows(env, conn, query.to_string().as_str())?;
             env.tables[table_index].rows = rows;
         }
