@@ -391,12 +391,12 @@ impl Pager {
     }
 
     pub fn begin_read_tx(&self) -> Result<()> {
-        self.wal.borrow().begin_read_tx()?;
+        self.wal.borrow_mut().begin_read_tx()?;
         Ok(())
     }
 
     pub fn begin_write_tx(&self) -> Result<()> {
-        self.wal.borrow().begin_read_tx()?;
+        self.wal.borrow_mut().begin_write_tx()?;
         Ok(())
     }
 
