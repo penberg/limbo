@@ -137,7 +137,6 @@ impl ArbitraryOf<ColumnType> for Value {
 
 struct LTValue(Value);
 
-
 impl ArbitraryOf<Vec<&Value>> for LTValue {
     fn arbitrary_of<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
         if t.is_empty() {
@@ -165,7 +164,7 @@ impl ArbitraryOf<Value> for LTValue {
                     let mut t = t.into_bytes();
                     t[index] -= 1;
                     // Mutate the rest of the string
-                    for i in (index+1)..t.len() {
+                    for i in (index + 1)..t.len() {
                         t[i] = rng.gen_range(0..=255);
                     }
                     LTValue(Value::Text(String::from_utf8(t).unwrap()))
@@ -176,7 +175,6 @@ impl ArbitraryOf<Value> for LTValue {
         }
     }
 }
-
 
 struct GTValue(Value);
 
@@ -207,7 +205,7 @@ impl ArbitraryOf<Value> for GTValue {
                     let mut t = t.into_bytes();
                     t[index] += 1;
                     // Mutate the rest of the string
-                    for i in (index+1)..t.len() {
+                    for i in (index + 1)..t.len() {
                         t[i] = rng.gen_range(0..=255);
                     }
                     GTValue(Value::Text(String::from_utf8(t).unwrap()))
@@ -218,7 +216,6 @@ impl ArbitraryOf<Value> for GTValue {
         }
     }
 }
-
 
 enum Predicate {
     And(Vec<Predicate>),
@@ -275,29 +272,37 @@ impl ArbitraryOf<(&Table, bool)> for SimplePredicate {
         let operator = match rng.gen_range(0..3) {
             0 => {
                 if *b {
-                    Predicate::Eq(column.name.clone(), Value::arbitrary_of(rng, &column_values))
+                    Predicate::Eq(
+                        column.name.clone(),
+                        Value::arbitrary_of(rng, &column_values),
+                    )
                 } else {
-                    Predicate::Eq(column.name.clone(), Value::arbitrary_of(rng, &column.column_type))
+                    Predicate::Eq(
+                        column.name.clone(),
+                        Value::arbitrary_of(rng, &column.column_type),
+                    )
                 }
             }
-            1 => Predicate::Gt(column.name.clone(), 
+            1 => Predicate::Gt(
+                column.name.clone(),
                 match b {
                     true => GTValue::arbitrary_of(rng, &column_values).0,
                     false => LTValue::arbitrary_of(rng, &column_values).0,
-                }),
-            2 => Predicate::Lt(column.name.clone(), 
+                },
+            ),
+            2 => Predicate::Lt(
+                column.name.clone(),
                 match b {
                     true => LTValue::arbitrary_of(rng, &column_values).0,
                     false => GTValue::arbitrary_of(rng, &column_values).0,
-                }),
+                },
+            ),
             _ => unreachable!(),
         };
 
         SimplePredicate(operator)
     }
 }
-
-
 
 impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
     fn arbitrary_of<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
@@ -364,7 +369,7 @@ impl ArbitraryOf<(&Table, bool)> for CompoundPredicate {
 
 impl ArbitraryOf<Table> for Predicate {
     fn arbitrary_of<R: Rng>(rng: &mut R, t: &Table) -> Self {
-        let b= rng.gen_bool(0.5);
+        let b = rng.gen_bool(0.5);
         CompoundPredicate::arbitrary_of(rng, &(t, b)).0
     }
 }
