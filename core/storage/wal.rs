@@ -20,10 +20,10 @@ use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
 /// Write-ahead log (WAL).
 pub trait Wal {
     /// Begin a read transaction.
-    fn begin_read_tx(&self) -> Result<()>;
+    fn begin_read_tx(&mut self) -> Result<()>;
 
     /// Begin a write transaction.
-    fn begin_write_tx(&self) -> Result<()>;
+    fn begin_write_tx(&mut self) -> Result<()>;
 
     /// End a read transaction.
     fn end_read_tx(&self) -> Result<()>;
@@ -64,6 +64,9 @@ pub struct WalFile {
     ongoing_checkpoint: HashSet<usize>,
     shared: Arc<RwLock<WalFileShared>>,
     checkpoint_threshold: usize,
+    // min and max frames for this connection
+    max_frame: u64,
+    min_frame: u64,
 }
 
 pub struct WalFileShared {
@@ -84,9 +87,10 @@ pub enum CheckpointStatus {
 
 impl Wal for WalFile {
     /// Begin a read transaction.
-    fn begin_read_tx(&self) -> Result<()> {
-        let mut shared = self.shared.write().unwrap();
-        shared.min_frame = shared.nbackfills + 1;
+    fn begin_read_tx(&mut self) -> Result<()> {
+        let shared = self.shared.read().unwrap();
+        self.min_frame = shared.nbackfills + 1;
+        self.max_frame = shared.max_frame;
         Ok(())
     }
 
@@ -104,7 +108,7 @@ impl Wal for WalFile {
         }
         let frames = frames.unwrap();
         for frame in frames.iter().rev() {
-            if *frame <= shared.max_frame {
+            if *frame <= self.max_frame {
                 return Ok(Some(*frame));
             }
         }
@@ -170,7 +174,7 @@ impl Wal for WalFile {
     }
 
     /// Begin a write transaction
-    fn begin_write_tx(&self) -> Result<()> {
+    fn begin_write_tx(&mut self) -> Result<()> {
         Ok(())
     }
 
@@ -211,6 +215,7 @@ impl Wal for WalFile {
         // TODO: only clear checkpointed frames
         shared.frame_cache.clear();
         shared.max_frame = 0;
+        shared.nbackfills = 0;
         self.ongoing_checkpoint.clear();
         Ok(CheckpointStatus::Done)
     }
@@ -244,6 +249,8 @@ impl WalFile {
             syncing: Rc::new(RefCell::new(false)),
             checkpoint_threshold: 1000,
             page_size,
+            max_frame: 0,
+            min_frame: 0,
         }
     }
 
