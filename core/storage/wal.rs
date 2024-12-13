@@ -8,12 +8,13 @@ use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
-use crate::Completion;
 use crate::Result;
+use crate::{Completion, Page};
 
 use self::sqlite3_ondisk::{checksum_wal, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
 use super::buffer_pool::BufferPool;
+use super::page_cache::PageCacheKey;
 use super::pager::{PageRef, Pager};
 use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
 
@@ -53,16 +54,27 @@ pub trait Wal {
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<CheckpointStatus>;
     fn sync(&mut self) -> Result<CheckpointStatus>;
+    fn get_max_frame(&self) -> u64;
+    fn get_min_frame(&self) -> u64;
+}
+
+struct OngoingCheckpoint {
+    page: PageRef,
+    state: CheckpointState,
+    min_frame: u64,
+    max_frame: u64,
+    current_page: u64,
 }
 
 pub struct WalFile {
     io: Arc<dyn crate::io::IO>,
+    buffer_pool: Rc<BufferPool>,
 
     syncing: Rc<RefCell<bool>>,
     page_size: usize,
 
-    ongoing_checkpoint: HashSet<usize>,
     shared: Arc<RwLock<WalFileShared>>,
+    ongoing_checkpoint: OngoingCheckpoint,
     checkpoint_threshold: usize,
     // min and max frames for this connection
     max_frame: u64,
@@ -75,9 +87,20 @@ pub struct WalFileShared {
     max_frame: u64,
     nbackfills: u64,
     // Maps pgno to frame id and offset in wal file
-    frame_cache: HashMap<u64, Vec<u64>>, // FIXME: for now let's use a simple hashmap instead of a shm file
+    frame_cache: HashMap<u64, Vec<u64>>, // we will avoid shm files because we are not
+    // multiprocess
+    pages_in_frames: Vec<u64>,
     last_checksum: (u32, u32), // Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
     file: Rc<dyn File>,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum CheckpointState {
+    Start,
+    ReadFrame,
+    WaitReadFrame,
+    WritePage,
+    Done,
 }
 
 pub enum CheckpointStatus {
@@ -167,6 +190,7 @@ impl Wal for WalFile {
                 Some(frames) => frames.push(frame_id),
                 None => {
                     shared.frame_cache.insert(page_id as u64, vec![frame_id]);
+                    shared.pages_in_frames.push(page_id as u64);
                 }
             }
         }
@@ -194,30 +218,88 @@ impl Wal for WalFile {
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<CheckpointStatus> {
-        let mut shared = self.shared.write().unwrap();
-        for (page_id, _frames) in shared.frame_cache.iter() {
-            // move page from WAL to database file
-            // TODO(Pere): use splice syscall in linux to do zero-copy file page movements to improve perf
-            let page_id = *page_id as usize;
-            if self.ongoing_checkpoint.contains(&page_id) {
-                continue;
-            }
+        'checkpoint_loop: loop {
+            let state = self.ongoing_checkpoint.state;
+            log::debug!("checkpoint(state={:?})", state);
+            match state {
+                CheckpointState::Start => {
+                    // TODO(pere): check what frames are safe to checkpoint between many readers!
+                    self.ongoing_checkpoint.min_frame = self.min_frame;
+                    self.ongoing_checkpoint.max_frame = self.max_frame;
+                    self.ongoing_checkpoint.current_page = 0;
+                    self.ongoing_checkpoint.state = CheckpointState::ReadFrame;
+                }
+                CheckpointState::ReadFrame => {
+                    let shared = self.shared.read().unwrap();
+                    for page in shared
+                        .pages_in_frames
+                        .iter()
+                        .skip(self.ongoing_checkpoint.current_page as usize)
+                    {
+                        let frames = shared
+                            .frame_cache
+                            .get(page)
+                            .expect("page must be in frame cache if it's in list");
 
-            let page = pager.read_page(page_id)?;
-            if page.is_locked() {
-                return Ok(CheckpointStatus::IO);
+                        for frame in frames.iter().rev() {
+                            if *frame <= self.ongoing_checkpoint.max_frame {
+                                log::debug!(
+                                    "checkpoint page(state={:?}, page={}, frame={})",
+                                    state,
+                                    *page,
+                                    *frame
+                                );
+                                self.ongoing_checkpoint.page.get().id = *page as usize;
+                                self.read_frame(
+                                    *frame,
+                                    self.ongoing_checkpoint.page.clone(),
+                                    self.buffer_pool.clone(),
+                                );
+                                self.ongoing_checkpoint.state = CheckpointState::WaitReadFrame;
+                                self.ongoing_checkpoint.current_page += 1;
+                                continue 'checkpoint_loop;
+                            }
+                        }
+                        self.ongoing_checkpoint.current_page += 1;
+                    }
+                    self.ongoing_checkpoint.state = CheckpointState::Done;
+                }
+                CheckpointState::WaitReadFrame => {
+                    if self.ongoing_checkpoint.page.is_locked() {
+                        return Ok(CheckpointStatus::IO);
+                    } else {
+                        self.ongoing_checkpoint.state = CheckpointState::WritePage;
+                    }
+                }
+                CheckpointState::WritePage => {
+                    begin_write_btree_page(
+                        pager,
+                        &self.ongoing_checkpoint.page,
+                        write_counter.clone(),
+                    )?;
+                    let shared = self.shared.read().unwrap();
+                    if (self.ongoing_checkpoint.current_page as usize)
+                        < shared.pages_in_frames.len()
+                    {
+                        self.ongoing_checkpoint.state = CheckpointState::ReadFrame;
+                    } else {
+                        self.ongoing_checkpoint.state = CheckpointState::Done;
+                    }
+                }
+                CheckpointState::Done => {
+                    if *write_counter.borrow() > 0 {
+                        return Ok(CheckpointStatus::IO);
+                    }
+                    let mut shared = self.shared.write().unwrap();
+                    shared.frame_cache.clear();
+                    shared.pages_in_frames.clear();
+                    shared.max_frame = 0;
+                    shared.nbackfills = 0;
+                    self.ongoing_checkpoint.state = CheckpointState::Start;
+                    return Ok(CheckpointStatus::Done);
+                }
             }
-
-            begin_write_btree_page(pager, &page, write_counter.clone())?;
-            self.ongoing_checkpoint.insert(page_id);
         }
-
-        // TODO: only clear checkpointed frames
-        shared.frame_cache.clear();
-        shared.max_frame = 0;
-        shared.nbackfills = 0;
-        self.ongoing_checkpoint.clear();
-        Ok(CheckpointStatus::Done)
     }
 
     fn sync(&mut self) -> Result<CheckpointStatus> {
@@ -238,19 +320,39 @@ impl Wal for WalFile {
             Ok(CheckpointStatus::Done)
         }
     }
+
+    fn get_max_frame(&self) -> u64 {
+        self.max_frame
+    }
+
+    fn get_min_frame(&self) -> u64 {
+        self.min_frame
+    }
 }
 
 impl WalFile {
-    pub fn new(io: Arc<dyn IO>, page_size: usize, shared: Arc<RwLock<WalFileShared>>) -> Self {
+    pub fn new(
+        io: Arc<dyn IO>,
+        page_size: usize,
+        shared: Arc<RwLock<WalFileShared>>,
+        buffer_pool: Rc<BufferPool>,
+    ) -> Self {
         Self {
             io,
             shared,
-            ongoing_checkpoint: HashSet::new(),
+            ongoing_checkpoint: OngoingCheckpoint {
+                page: Arc::new(Page::new(0)),
+                state: CheckpointState::Start,
+                min_frame: 0,
+                max_frame: 0,
+                current_page: 0,
+            },
             syncing: Rc::new(RefCell::new(false)),
             checkpoint_threshold: 1000,
             page_size,
             max_frame: 0,
             min_frame: 0,
+            buffer_pool,
         }
     }
 
@@ -322,6 +424,7 @@ impl WalFileShared {
             frame_cache: HashMap::new(),
             last_checksum: checksum,
             file,
+            pages_in_frames: Vec::new(),
         };
         Ok(Arc::new(RwLock::new(shared)))
     }

@@ -581,6 +581,7 @@ pub fn begin_write_btree_page(
     page: &PageRef,
     write_counter: Rc<RefCell<usize>>,
 ) -> Result<()> {
+    log::trace!("begin_write_btree_page(page={})", page.get().id);
     let page_source = &pager.page_io;
     let page_finish = page.clone();
 
@@ -1039,6 +1040,11 @@ pub fn begin_read_wal_frame(
     buffer_pool: Rc<BufferPool>,
     page: PageRef,
 ) -> Result<()> {
+    log::trace!(
+        "begin_read_wal_frame(offset={}, page={})",
+        offset,
+        page.get().id
+    );
     let buf = buffer_pool.get();
     let drop_fn = Rc::new(move |buf| {
         let buffer_pool = buffer_pool.clone();

@@ -4,15 +4,13 @@ use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::Wal;
 use crate::{Buffer, Result};
 use log::{debug, trace};
-use sieve_cache::SieveCache;
 use std::cell::{RefCell, UnsafeCell};
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
-use std::ptr::{drop_in_place, NonNull};
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use super::page_cache::{DumbLruPageCache, PageCacheKey};
 use super::wal::CheckpointStatus;
 
 pub struct PageInner {
@@ -117,198 +115,6 @@ impl Page {
     }
 }
 
-#[allow(dead_code)]
-struct PageCacheEntry {
-    key: usize,
-    page: PageRef,
-    prev: Option<NonNull<PageCacheEntry>>,
-    next: Option<NonNull<PageCacheEntry>>,
-}
-
-impl PageCacheEntry {
-    fn as_non_null(&mut self) -> NonNull<PageCacheEntry> {
-        NonNull::new(&mut *self).unwrap()
-    }
-}
-
-pub struct DumbLruPageCache {
-    capacity: usize,
-    map: RefCell<HashMap<usize, NonNull<PageCacheEntry>>>,
-    head: RefCell<Option<NonNull<PageCacheEntry>>>,
-    tail: RefCell<Option<NonNull<PageCacheEntry>>>,
-}
-unsafe impl Send for DumbLruPageCache {}
-unsafe impl Sync for DumbLruPageCache {}
-
-impl DumbLruPageCache {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            map: RefCell::new(HashMap::new()),
-            head: RefCell::new(None),
-            tail: RefCell::new(None),
-        }
-    }
-
-    pub fn contains_key(&mut self, key: usize) -> bool {
-        self.map.borrow().contains_key(&key)
-    }
-
-    pub fn insert(&mut self, key: usize, value: PageRef) {
-        self._delete(key, false);
-        debug!("cache_insert(key={})", key);
-        let mut entry = Box::new(PageCacheEntry {
-            key,
-            next: None,
-            prev: None,
-            page: value,
-        });
-        self.touch(&mut entry);
-
-        if self.map.borrow().len() >= self.capacity {
-            self.pop_if_not_dirty();
-        }
-        let b = Box::into_raw(entry);
-        let as_non_null = NonNull::new(b).unwrap();
-        self.map.borrow_mut().insert(key, as_non_null);
-    }
-
-    pub fn delete(&mut self, key: usize) {
-        self._delete(key, true)
-    }
-
-    pub fn _delete(&mut self, key: usize, clean_page: bool) {
-        debug!("cache_delete(key={}, clean={})", key, clean_page);
-        let ptr = self.map.borrow_mut().remove(&key);
-        if ptr.is_none() {
-            return;
-        }
-        let mut ptr = ptr.unwrap();
-        {
-            let ptr = unsafe { ptr.as_mut() };
-            self.detach(ptr, clean_page);
-        }
-        unsafe { drop_in_place(ptr.as_ptr()) };
-    }
-
-    fn get_ptr(&mut self, key: usize) -> Option<NonNull<PageCacheEntry>> {
-        let m = self.map.borrow_mut();
-        let ptr = m.get(&key);
-        ptr.copied()
-    }
-
-    pub fn get(&mut self, key: &usize) -> Option<PageRef> {
-        debug!("cache_get(key={})", key);
-        let ptr = self.get_ptr(*key);
-        ptr?;
-        let ptr = unsafe { ptr.unwrap().as_mut() };
-        let page = ptr.page.clone();
-        //self.detach(ptr);
-        self.touch(ptr);
-        Some(page)
-    }
-
-    pub fn resize(&mut self, capacity: usize) {
-        let _ = capacity;
-        todo!();
-    }
-
-    fn detach(&mut self, entry: &mut PageCacheEntry, clean_page: bool) {
-        let mut current = entry.as_non_null();
-
-        if clean_page {
-            // evict buffer
-            let page = &entry.page;
-            page.clear_loaded();
-            debug!("cleaning up page {}", page.get().id);
-            let _ = page.get().contents.take();
-        }
-
-        let (next, prev) = unsafe {
-            let c = current.as_mut();
-            let next = c.next;
-            let prev = c.prev;
-            c.prev = None;
-            c.next = None;
-            (next, prev)
-        };
-
-        // detach
-        match (prev, next) {
-            (None, None) => {}
-            (None, Some(_)) => todo!(),
-            (Some(p), None) => {
-                self.tail = RefCell::new(Some(p));
-            }
-            (Some(mut p), Some(mut n)) => unsafe {
-                let p_mut = p.as_mut();
-                p_mut.next = Some(n);
-                let n_mut = n.as_mut();
-                n_mut.prev = Some(p);
-            },
-        };
-    }
-
-    fn touch(&mut self, entry: &mut PageCacheEntry) {
-        let mut current = entry.as_non_null();
-        unsafe {
-            let c = current.as_mut();
-            c.next = *self.head.borrow();
-        }
-
-        if let Some(mut head) = *self.head.borrow_mut() {
-            unsafe {
-                let head = head.as_mut();
-                head.prev = Some(current);
-            }
-        }
-    }
-
-    fn pop_if_not_dirty(&mut self) {
-        let tail = *self.tail.borrow();
-        if tail.is_none() {
-            return;
-        }
-        let tail = unsafe { tail.unwrap().as_mut() };
-        if tail.page.is_dirty() {
-            // TODO: drop from another clean entry?
-            return;
-        }
-        self.detach(tail, true);
-    }
-
-    fn clear(&mut self) {
-        let to_remove: Vec<usize> = self.map.borrow().iter().map(|v| *v.0).collect();
-        for key in to_remove {
-            self.delete(key);
-        }
-    }
-}
-
-#[allow(dead_code)]
-pub struct PageCache<K: Eq + Hash + Clone, V> {
-    cache: SieveCache<K, V>,
-}
-
-#[allow(dead_code)]
-impl<K: Eq + Hash + Clone, V> PageCache<K, V> {
-    pub fn new(cache: SieveCache<K, V>) -> Self {
-        Self { cache }
-    }
-
-    pub fn insert(&mut self, key: K, value: V) {
-        self.cache.insert(key, value);
-    }
-
-    pub fn get(&mut self, key: &K) -> Option<&V> {
-        self.cache.get(key)
-    }
-
-    pub fn resize(&mut self, capacity: usize) {
-        self.cache = SieveCache::new(capacity).unwrap();
-    }
-}
-
 #[derive(Clone)]
 enum FlushState {
     Start,
@@ -368,14 +174,11 @@ impl Pager {
         wal: Rc<RefCell<dyn Wal>>,
         io: Arc<dyn crate::io::IO>,
         page_cache: Arc<RwLock<DumbLruPageCache>>,
+        buffer_pool: Rc<BufferPool>,
     ) -> Result<Self> {
-        let db_header = RefCell::borrow(&db_header_ref);
-        let page_size = db_header.page_size as usize;
-        let buffer_pool = Rc::new(BufferPool::new(page_size));
         Ok(Self {
             page_io,
             wal,
-            buffer_pool,
             page_cache,
             io,
             dirty_pages: Rc::new(RefCell::new(HashSet::new())),
@@ -387,6 +190,7 @@ impl Pager {
             syncing: Rc::new(RefCell::new(false)),
             checkpoint_state: RefCell::new(CheckpointState::Checkpoint),
             checkpoint_inflight: Rc::new(RefCell::new(0)),
+            buffer_pool,
         })
     }
 
@@ -413,7 +217,8 @@ impl Pager {
     pub fn read_page(&self, page_idx: usize) -> crate::Result<PageRef> {
         trace!("read_page(page_idx = {})", page_idx);
         let mut page_cache = self.page_cache.write().unwrap();
-        if let Some(page) = page_cache.get(&page_idx) {
+        let page_key = PageCacheKey::new(page_idx, Some(self.wal.borrow().get_max_frame()));
+        if let Some(page) = page_cache.get(&page_key) {
             trace!("read_page(page_idx = {}) = cached", page_idx);
             return Ok(page.clone());
         }
@@ -429,7 +234,7 @@ impl Pager {
             }
             // TODO(pere) ensure page is inserted, we should probably first insert to page cache
             // and if successful, read frame or page
-            page_cache.insert(page_idx, page.clone());
+            page_cache.insert(page_key, page.clone());
             return Ok(page);
         }
         sqlite3_ondisk::begin_read_page(
@@ -439,7 +244,7 @@ impl Pager {
             page_idx,
         )?;
         // TODO(pere) ensure page is inserted
-        page_cache.insert(page_idx, page.clone());
+        page_cache.insert(page_key, page.clone());
         Ok(page)
     }
 
@@ -449,6 +254,7 @@ impl Pager {
         trace!("load_page(page_idx = {})", id);
         let mut page_cache = self.page_cache.write().unwrap();
         page.set_locked();
+        let page_key = PageCacheKey::new(id, Some(self.wal.borrow().get_max_frame()));
         if let Some(frame_id) = self.wal.borrow().find_frame(id as u64)? {
             self.wal
                 .borrow()
@@ -457,8 +263,8 @@ impl Pager {
                 page.set_uptodate();
             }
             // TODO(pere) ensure page is inserted
-            if !page_cache.contains_key(id) {
-                page_cache.insert(id, page.clone());
+            if !page_cache.contains_key(&page_key) {
+                page_cache.insert(page_key, page.clone());
             }
             return Ok(());
         }
@@ -469,8 +275,8 @@ impl Pager {
             id,
         )?;
         // TODO(pere) ensure page is inserted
-        if !page_cache.contains_key(id) {
-            page_cache.insert(id, page.clone());
+        if !page_cache.contains_key(&page_key) {
+            page_cache.insert(page_key, page.clone());
         }
         Ok(())
     }
@@ -500,9 +306,11 @@ impl Pager {
                     let db_size = self.db_header.borrow().database_size;
                     for page_id in self.dirty_pages.borrow().iter() {
                         let mut cache = self.page_cache.write().unwrap();
-                        let page = cache.get(page_id).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
+                        let page_key =
+                            PageCacheKey::new(*page_id, Some(self.wal.borrow().get_max_frame()));
+                        let page = cache.get(&page_key).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
                         let page_type = page.get().contents.as_ref().unwrap().maybe_page_type();
-                        debug!("appending frame {} {:?}", page_id, page_type);
+                        log::trace!("cacheflush(page={}, page_type={:?}", page_id, page_type);
                         self.wal.borrow_mut().append_frame(
                             page.clone(),
                             db_size,
@@ -565,7 +373,7 @@ impl Pager {
     pub fn checkpoint(&self) -> Result<CheckpointStatus> {
         loop {
             let state = self.checkpoint_state.borrow().clone();
-            log::trace!("checkpoint(state={:?})", state);
+            log::trace!("pager_checkpoint(state={:?})", state);
             match state {
                 CheckpointState::Checkpoint => {
                     let in_flight = self.checkpoint_inflight.clone();
@@ -641,7 +449,9 @@ impl Pager {
             page.set_dirty();
             self.add_dirty(page.get().id);
             let mut cache = self.page_cache.write().unwrap();
-            cache.insert(page.get().id, page.clone());
+            let page_key =
+                PageCacheKey::new(page.get().id, Some(self.wal.borrow().get_max_frame()));
+            cache.insert(page_key, page.clone());
         }
         Ok(page)
     }
@@ -649,7 +459,8 @@ impl Pager {
     pub fn put_loaded_page(&self, id: usize, page: PageRef) {
         let mut cache = self.page_cache.write().unwrap();
         // cache insert invalidates previous page
-        cache.insert(id, page.clone());
+        let page_key = PageCacheKey::new(id, Some(self.wal.borrow().get_max_frame()));
+        cache.insert(page_key, page.clone());
         page.set_loaded();
     }
 
@@ -682,7 +493,9 @@ pub fn allocate_page(page_id: usize, buffer_pool: &Rc<BufferPool>, offset: usize
 mod tests {
     use std::sync::{Arc, RwLock};
 
-    use super::{DumbLruPageCache, Page};
+    use crate::storage::page_cache::{DumbLruPageCache, PageCacheKey};
+
+    use super::Page;
 
     #[test]
     fn test_shared_cache() {
@@ -693,12 +506,14 @@ mod tests {
             let cache = cache.clone();
             std::thread::spawn(move || {
                 let mut cache = cache.write().unwrap();
-                cache.insert(1, Arc::new(Page::new(1)));
+                let page_key = PageCacheKey::new(1, None);
+                cache.insert(page_key, Arc::new(Page::new(1)));
             })
         };
         let _ = thread.join();
         let mut cache = cache.write().unwrap();
-        let page = cache.get(&1);
+        let page_key = PageCacheKey::new(1, None);
+        let page = cache.get(&page_key);
         assert_eq!(page.unwrap().get().id, 1);
     }
 }
