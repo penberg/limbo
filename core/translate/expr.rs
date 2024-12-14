@@ -1716,23 +1716,37 @@ pub fn translate_expr(
         ast::Expr::Raise(_, _) => todo!(),
         ast::Expr::Subquery(_) => todo!(),
         ast::Expr::Unary(op, expr) => match (op, expr.as_ref()) {
-            (UnaryOperator::Negative, ast::Expr::Literal(ast::Literal::Numeric(numeric_value))) => {
+            (
+                UnaryOperator::Negative | UnaryOperator::Positive,
+                ast::Expr::Literal(ast::Literal::Numeric(numeric_value)),
+            ) => {
                 let maybe_int = numeric_value.parse::<i64>();
+                let multiplier = if let UnaryOperator::Negative = op {
+                    -1
+                } else {
+                    1
+                };
                 if let Ok(value) = maybe_int {
                     program.emit_insn(Insn::Integer {
-                        value: -value,
+                        value: value * multiplier,
                         dest: target_register,
                     });
                 } else {
                     program.emit_insn(Insn::Real {
-                        value: -numeric_value.parse::<f64>()?,
+                        value: multiplier as f64 * numeric_value.parse::<f64>()?,
                         dest: target_register,
                     });
                 }
                 program.mark_last_insn_constant();
                 Ok(target_register)
             }
-            (UnaryOperator::Negative, _) => {
+            (UnaryOperator::Negative | UnaryOperator::Positive, _) => {
+                let value = if let UnaryOperator::Negative = op {
+                    -1
+                } else {
+                    1
+                };
+
                 let reg = program.alloc_register();
                 translate_expr(
                     program,
@@ -1743,7 +1757,7 @@ pub fn translate_expr(
                 )?;
                 let zero_reg = program.alloc_register();
                 program.emit_insn(Insn::Integer {
-                    value: -1,
+                    value,
                     dest: zero_reg,
                 });
                 program.mark_last_insn_constant();

@@ -19,7 +19,6 @@ use super::expr::{
     translate_aggregation, translate_aggregation_groupby, translate_condition_expr, translate_expr,
     ConditionMetadata,
 };
-use super::optimizer::Optimizable;
 use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, Plan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
@@ -177,6 +176,22 @@ pub fn emit_program(
         }
     }
 
+    // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
+    // however an aggregation might still happen,
+    // e.g. SELECT COUNT(*) WHERE 0 returns a row with 0, not an empty result set
+    let skip_loops_label = if plan.contains_constant_false_condition {
+        let skip_loops_label = program.allocate_label();
+        program.emit_insn_with_label_dependency(
+            Insn::Goto {
+                target_pc: skip_loops_label,
+            },
+            skip_loops_label,
+        );
+        Some(skip_loops_label)
+    } else {
+        None
+    };
+
     // Initialize cursors and other resources needed for query execution
     if let Some(ref mut order_by) = plan.order_by {
         init_order_by(&mut program, order_by, &mut metadata)?;
@@ -207,7 +222,11 @@ pub fn emit_program(
         &plan.referenced_tables,
     )?;
 
-    let mut order_by_necessary = plan.order_by.is_some();
+    if let Some(skip_loops_label) = skip_loops_label {
+        program.resolve_label(skip_loops_label, program.offset());
+    }
+
+    let mut order_by_necessary = plan.order_by.is_some() && !plan.contains_constant_false_condition;
 
     // Handle GROUP BY and aggregation processing
     if let Some(ref mut group_by) = plan.group_by {
@@ -797,19 +816,6 @@ fn inner_loop_emit(
     plan: &mut Plan,
     metadata: &mut Metadata,
 ) -> Result<()> {
-    if let Some(wc) = &plan.where_clause {
-        for predicate in wc.iter() {
-            if predicate.is_always_false()? {
-                return Ok(());
-            } else if predicate.is_always_true()? {
-                // do nothing
-            } else {
-                unreachable!(
-                    "all WHERE clause terms that are not trivially true or false should have been pushed down to the source"
-                );
-            }
-        }
-    }
     // if we have a group by, we emit a record into the group by sorter.
     if let Some(group_by) = &plan.group_by {
         return inner_loop_source_emit(

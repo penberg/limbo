@@ -39,6 +39,14 @@ do_execsql_test select-count {
   SELECT count(*) FROM users;
 } {10000}
 
+do_execsql_test select-count-constant-true {
+  SELECT count(*) FROM users WHERE true;
+} {10000}
+
+do_execsql_test select-count-constant-false {
+  SELECT count(*) FROM users WHERE false;
+} {0}
+
 do_execsql_test select-max {
   SELECT max(age) FROM users;
 } {100}
@@ -75,11 +83,18 @@ do_execsql_test select-string-agg-with-column-delimiter {
   SELECT string_agg(name, id) FROM products;
 } {hat2cap3shirt4sweater5sweatshirt6shorts7jeans8sneakers9boots10coat11accessories}
 
-do_execsql_test select-agg-unary {
+do_execsql_test select-agg-unary-negative {
   SELECT -max(age) FROM users;
 } {-100}
 
-do_execsql_test select-agg-binary-unary {
+do_execsql_test select-agg-unary-positive {
+  SELECT +max(age) FROM users;
+} {100}
+
+do_execsql_test select-agg-binary-unary-negative {
   SELECT min(age) + -max(age) FROM users;
 } {-99}
 
+do_execsql_test select-agg-binary-unary-positive {
+  SELECT min(age) + +max(age) FROM users;
+} {101}

@@ -21,15 +21,16 @@ use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
-use std::rc::Weak;
-use std::sync::{Arc, OnceLock};
+use std::sync::Weak;
+use std::sync::{Arc, OnceLock, RwLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
-use storage::pager::allocate_page;
+use storage::pager::{allocate_page, DumbLruPageCache};
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
+pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
 use translate::optimizer::optimize_plan;
@@ -64,41 +65,52 @@ pub struct Database {
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     transaction_state: RefCell<TransactionState>,
+    // Shared structures of a Database are the parts that are common to multiple threads that might
+    // create DB connections.
+    shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
+    shared_wal: Arc<RwLock<WalFileShared>>,
 }
 
 impl Database {
     #[cfg(feature = "fs")]
-    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Rc<Database>> {
+    pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Arc<Database>> {
+        use storage::wal::WalFileShared;
+
         let file = io.open_file(path, io::OpenFlags::Create, true)?;
         maybe_init_database_file(&file, &io)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
+        let wal_shared =
+            WalFileShared::open_shared(&io, wal_path.as_str(), db_header.borrow().page_size)?;
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
-            wal_path,
             db_header.borrow().page_size as usize,
+            wal_shared.clone(),
         )));
-        Self::open(io, page_io, wal)
+        Self::open(io, page_io, wal, wal_shared)
     }
 
     pub fn open(
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<RefCell<dyn Wal>>,
-    ) -> Result<Rc<Database>> {
+        shared_wal: Arc<RwLock<WalFileShared>>,
+    ) -> Result<Arc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
         DATABASE_VERSION.get_or_init(|| {
             let version = db_header.borrow().version_number;
             version.to_string()
         });
+        let shared_page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
         let pager = Rc::new(Pager::finish_open(
             db_header.clone(),
             page_io,
             wal,
             io.clone(),
+            shared_page_cache.clone(),
         )?);
         let bootstrap_schema = Rc::new(RefCell::new(Schema::new()));
         let conn = Rc::new(Connection {
@@ -113,21 +125,23 @@ impl Database {
         parse_schema_rows(rows, &mut schema, io)?;
         let schema = Rc::new(RefCell::new(schema));
         let header = db_header;
-        Ok(Rc::new(Database {
+        Ok(Arc::new(Database {
             pager,
             schema,
             header,
             transaction_state: RefCell::new(TransactionState::None),
+            shared_page_cache,
+            shared_wal,
         }))
     }
 
-    pub fn connect(self: &Rc<Database>) -> Rc<Connection> {
+    pub fn connect(self: &Arc<Database>) -> Rc<Connection> {
         Rc::new(Connection {
             pager: self.pager.clone(),
             schema: self.schema.clone(),
             header: self.header.clone(),
-            db: Rc::downgrade(self),
             last_insert_rowid: Cell::new(0),
+            db: Arc::downgrade(self),
         })
     }
 }
@@ -153,8 +167,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 DATABASE_HEADER_SIZE,
             );
 
-            let mut page = page1.borrow_mut();
-            let contents = page.contents.as_mut().unwrap();
+            let contents = page1.get().contents.as_mut().unwrap();
             contents.write_database_header(&db_header);
             // write the first page to disk synchronously
             let flag_complete = Rc::new(RefCell::new(false));
@@ -166,8 +179,17 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 file.pwrite(0, contents.buffer.clone(), Rc::new(completion))
                     .unwrap();
             }
-            io.run_once()?;
-            assert!(*flag_complete.borrow());
+            let mut limit = 100;
+            loop {
+                io.run_once()?;
+                if *flag_complete.borrow() {
+                    break;
+                }
+                limit -= 1;
+                if limit == 0 {
+                    panic!("Database file couldn't be initialized, io loop run for {} iterations and write didn't finish", limit);
+                }
+            }
         }
     };
     Ok(())

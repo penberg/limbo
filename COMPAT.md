@@ -154,7 +154,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | trim(X,Y)                    | Yes    |         |
 | typeof(X)                    | Yes    |         |
 | unhex(X)                     | Yes    |         |
-| unhex(X,Y)                   | No     |         |
+| unhex(X,Y)                   | Yes    |         |
 | unicode(X)                   | Yes    |         |
 | unlikely(X)                  | No     |         |
 | upper(X)                     | Yes    |         |

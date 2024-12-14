@@ -106,6 +106,18 @@ Jamie|coat
 Jamie|accessories
 Cindy|}
 
+do_execsql_test left-join-constant-condition-true {
+    select u.first_name, p.name from users u left join products as p on true limit 1;
+} {Jamie|hat}
+
+do_execsql_test left-join-constant-condition-false {
+    select u.first_name, p.name from users u left join products as p on false limit 1;
+} {Jamie|}
+
+do_execsql_test left-join-constant-condition-where-false {
+    select u.first_name, p.name from users u left join products as p where false limit 1;
+} {}
+
 do_execsql_test left-join-non-pk {
     select users.first_name as user_name, products.name as product_name from users left join products on users.first_name = products.name limit 3;
 } {Jamie|
