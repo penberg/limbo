@@ -25,6 +25,12 @@ enum SimConnection {
     Disconnected,
 }
 
+#[derive(Debug, Copy, Clone)]
+enum SimulatorMode {
+    Random,
+    Workload,
+}
+
 #[derive(Debug)]
 struct SimulatorOpts {
     ticks: usize,
@@ -35,6 +41,7 @@ struct SimulatorOpts {
     read_percent: usize,
     write_percent: usize,
     delete_percent: usize,
+    mode: SimulatorMode,
     page_size: usize,
 }
 
@@ -164,16 +171,32 @@ impl ArbitraryFrom<Value> for LTValue {
                     LTValue(Value::Text(t))
                 } else {
                     let index = rng.gen_range(0..t.len());
-                    let mut t = t.into_bytes();
+                    let mut t = t.chars().map(|c| c as u32).collect::<Vec<_>>();
                     t[index] -= 1;
                     // Mutate the rest of the string
                     for i in (index + 1)..t.len() {
                         t[i] = rng.gen_range(0..=255);
                     }
-                    LTValue(Value::Text(String::from_utf8(t).unwrap()))
+                    let t = t.into_iter().map(|c| c as u8 as char).collect::<String>();
+                    LTValue(Value::Text(t))
                 }
             }
-            Value::Blob(b) => todo!(),
+            Value::Blob(b) => {
+                // Either shorten the blob, or make at least one byte smaller and mutate the rest
+                let mut b = b.clone();
+                if rng.gen_bool(0.01) {
+                    b.pop();
+                    LTValue(Value::Blob(b))
+                } else {
+                    let index = rng.gen_range(0..b.len());
+                    b[index] -= 1;
+                    // Mutate the rest of the blob
+                    for i in (index + 1)..b.len() {
+                        b[i] = rng.gen_range(0..=255);
+                    }
+                    LTValue(Value::Blob(b))
+                }
+            }
             _ => unreachable!(),
         }
     }
@@ -205,16 +228,32 @@ impl ArbitraryFrom<Value> for GTValue {
                     GTValue(Value::Text(t))
                 } else {
                     let index = rng.gen_range(0..t.len());
-                    let mut t = t.into_bytes();
+                    let mut t = t.chars().map(|c| c as u32).collect::<Vec<_>>();
                     t[index] += 1;
                     // Mutate the rest of the string
                     for i in (index + 1)..t.len() {
                         t[i] = rng.gen_range(0..=255);
                     }
-                    GTValue(Value::Text(String::from_utf8(t).unwrap()))
+                    let t = t.into_iter().map(|c| c as u8 as char).collect::<String>();
+                    GTValue(Value::Text(t))
                 }
             }
-            Value::Blob(b) => todo!(),
+            Value::Blob(b) => {
+                // Either lengthen the blob, or make at least one byte smaller and mutate the rest
+                let mut b = b.clone();
+                if rng.gen_bool(0.01) {
+                    b.push(rng.gen_range(0..=255));
+                    GTValue(Value::Blob(b))
+                } else {
+                    let index = rng.gen_range(0..b.len());
+                    b[index] += 1;
+                    // Mutate the rest of the blob
+                    for i in (index + 1)..b.len() {
+                        b[i] = rng.gen_range(0..=255);
+                    }
+                    GTValue(Value::Blob(b))
+                }
+            }
             _ => unreachable!(),
         }
     }
@@ -229,34 +268,91 @@ enum Predicate {
 }
 
 enum Query {
-    Create { table: Table },
-    Select { table: String, predicate: Predicate },
-    Insert { table: String, values: Vec<Value> },
-    Delete { table: String, predicate: Predicate },
+    Create(Create),
+    Select(Select),
+    Insert(Insert),
+    Delete(Delete),
+}
+
+struct Create {
+    table: Table,
+}
+
+impl Arbitrary for Create {
+    fn arbitrary<R: Rng>(rng: &mut R) -> Self {
+        Create {
+            table: Table::arbitrary(rng),
+        }
+    }
+}
+
+struct Select {
+    table: String,
+    predicate: Predicate,
+}
+
+impl ArbitraryFrom<Vec<Table>> for Select {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<Table>) -> Self {
+        let table = rng.gen_range(0..t.len());
+        Select {
+            table: t[table].name.clone(),
+            predicate: Predicate::arbitrary_from(rng, &t[table]),
+        }
+    }
+}
+
+impl ArbitraryFrom<Vec<&Table>> for Select {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Table>) -> Self {
+        let table = rng.gen_range(0..t.len());
+        Select {
+            table: t[table].name.clone(),
+            predicate: Predicate::arbitrary_from(rng, t[table]),
+        }
+    }
+}
+
+struct Insert {
+    table: String,
+    values: Vec<Value>,
+}
+
+impl ArbitraryFrom<Table> for Insert {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
+        let values = t
+            .columns
+            .iter()
+            .map(|c| Value::arbitrary_from(rng, &c.column_type))
+            .collect();
+        Insert {
+            table: t.name.clone(),
+            values,
+        }
+    }
+}
+
+struct Delete {
+    table: String,
+    predicate: Predicate,
+}
+
+impl ArbitraryFrom<Table> for Delete {
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
+        Delete {
+            table: t.name.clone(),
+            predicate: Predicate::arbitrary_from(rng, t),
+        }
+    }
 }
 
 impl ArbitraryFrom<Table> for Query {
     fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
         match rng.gen_range(0..=200) {
-            0 => Query::Create {
-                table: Table::arbitrary(rng),
-            },
-            1..=100 => Query::Select {
-                table: t.name.clone(),
-                predicate: Predicate::arbitrary_from(rng, t),
-            },
-            101..=200 => Query::Insert {
-                table: t.name.clone(),
-                values: t
-                    .columns
-                    .iter()
-                    .map(|c| Value::arbitrary_from(rng, &c.column_type))
-                    .collect(),
-            },
-            201..=300 => Query::Delete {
-                table: t.name.clone(),
-                predicate: Predicate::arbitrary_from(rng, t),
-            },
+            0 => Query::Create(Create::arbitrary(rng)),
+            1..=100 => Query::Select(Select::arbitrary_from(rng, &vec![t])),
+            101..=200 => Query::Insert(Insert::arbitrary_from(rng, t)),
+            // todo: This branch is currently never taken, as DELETE is not yet implemented.
+            //       Change this when DELETE is implemented.
+            201..=300 => Query::Delete(Delete::arbitrary_from(rng, t)),
             _ => unreachable!(),
         }
     }
@@ -394,7 +490,7 @@ impl Display for Predicate {
             Predicate::And(predicates) => {
                 if predicates.is_empty() {
                     // todo: Make this TRUE when the bug is fixed
-                    write!(f, "1 = 1")
+                    write!(f, "TRUE")
                 } else {
                     write!(f, "(")?;
                     for (i, p) in predicates.iter().enumerate() {
@@ -430,12 +526,12 @@ impl Display for Predicate {
 impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Query::Create { table } => write!(f, "{}", table.to_create_str()),
-            Query::Select {
+            Query::Create(Create { table }) => write!(f, "{}", table.to_create_str()),
+            Query::Select(Select {
                 table,
                 predicate: guard,
-            } => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
-            Query::Insert { table, values } => {
+            }) => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
+            Query::Insert(Insert { table, values }) => {
                 write!(f, "INSERT INTO {} VALUES (", table)?;
                 for (i, v) in values.iter().enumerate() {
                     if i != 0 {
@@ -445,10 +541,10 @@ impl Display for Query {
                 }
                 write!(f, ")")
             }
-            Query::Delete {
+            Query::Delete(Delete {
                 table,
                 predicate: guard,
-            } => write!(f, "DELETE FROM {} WHERE {}", table, guard),
+            }) => write!(f, "DELETE FROM {} WHERE {}", table, guard),
         }
     }
 }
@@ -481,6 +577,7 @@ fn main() {
         read_percent,
         write_percent,
         delete_percent,
+        mode: SimulatorMode::Workload,
         page_size: 4096, // TODO: randomize this too
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
@@ -542,8 +639,6 @@ fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     // Get a random table
     let table = env.rng.gen_range(0..env.tables.len());
 
-    // let table = &env.tables[table];
-
     // Pick a random column
     let column_index = env.rng.gen_range(0..env.tables[table].columns.len());
     let column = &env.tables[table].columns[column_index].clone();
@@ -565,19 +660,19 @@ fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     }
 
     // Insert the row
-    let query = Query::Insert {
+    let query = Query::Insert(Insert {
         table: env.tables[table].name.clone(),
         values: row.clone(),
-    };
+    });
     let _ = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
     // Shadow operation on the table
     env.tables[table].rows.push(row.clone());
 
     // Create a query that selects the row
-    let query = Query::Select {
+    let query = Query::Select(Select {
         table: env.tables[table].name.clone(),
         predicate: Predicate::Eq(column.name.clone(), value),
-    };
+    });
 
     // Get all rows
     let rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
@@ -591,10 +686,10 @@ fn property_select_all(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     let table = env.rng.gen_range(0..env.tables.len());
 
     // Create a query that selects all rows
-    let query = Query::Select {
+    let query = Query::Select(Select {
         table: env.tables[table].name.clone(),
         predicate: Predicate::And(Vec::new()),
-    };
+    });
 
     // Get all rows
     let rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
@@ -611,20 +706,65 @@ fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Resu
         maybe_add_table(env, conn)?;
     }
 
-    match env.rng.gen_range(0..2) {
-        // Randomly insert a value and check that the select result contains it.
-        0 => property_insert_select(env, conn),
-        // Check that the current state of the in-memory table is the same as the one in the
-        // database.
-        1 => property_select_all(env, conn),
-        // Perform a random query, update the in-memory table with the result.
-        2 => {
-            let table_index = env.rng.gen_range(0..env.tables.len());
-            let query = Query::arbitrary_from(&mut env.rng, &env.tables[table_index]);
-            let rows = get_all_rows(env, conn, query.to_string().as_str())?;
-            env.tables[table_index].rows = rows;
+    match env.opts.mode {
+        SimulatorMode::Random => {
+            match env.rng.gen_range(0..2) {
+                // Randomly insert a value and check that the select result contains it.
+                0 => property_insert_select(env, conn),
+                // Check that the current state of the in-memory table is the same as the one in the
+                // database.
+                1 => property_select_all(env, conn),
+                // Perform a random query, update the in-memory table with the result.
+                2 => {
+                    let table_index = env.rng.gen_range(0..env.tables.len());
+                    let query = Query::arbitrary_from(&mut env.rng, &env.tables[table_index]);
+                    let rows = get_all_rows(env, conn, query.to_string().as_str())?;
+                    env.tables[table_index].rows = rows;
+                }
+                _ => unreachable!(),
+            }
         }
-        _ => unreachable!(),
+        SimulatorMode::Workload => {
+            let picked = env.rng.gen_range(0..100);
+
+            if env.rng.gen_ratio(1, 100) {
+                maybe_add_table(env, conn)?;
+            }
+
+            if picked < env.opts.read_percent {
+                let query = Select::arbitrary_from(&mut env.rng, &env.tables);
+
+                let _ = get_all_rows(env, conn, Query::Select(query).to_string().as_str())?;
+            } else if picked < env.opts.read_percent + env.opts.write_percent {
+                let table_index = env.rng.gen_range(0..env.tables.len());
+                let column_index = env.rng.gen_range(0..env.tables[table_index].columns.len());
+                let column = &env.tables[table_index].columns[column_index].clone();
+                let mut rng = env.rng.clone();
+                let value = Value::arbitrary_from(&mut rng, &column.column_type);
+                let mut row = Vec::new();
+                for (i, column) in env.tables[table_index].columns.iter().enumerate() {
+                    if i == column_index {
+                        row.push(value.clone());
+                    } else {
+                        let value = Value::arbitrary_from(&mut rng, &column.column_type);
+                        row.push(value);
+                    }
+                }
+                let query = Query::Insert(Insert {
+                    table: env.tables[table_index].name.clone(),
+                    values: row.clone(),
+                });
+                let _ = get_all_rows(env, conn, query.to_string().as_str())?;
+                env.tables[table_index].rows.push(row.clone());
+            } else {
+                let table_index = env.rng.gen_range(0..env.tables.len());
+                let query = Query::Select(Select {
+                    table: env.tables[table_index].name.clone(),
+                    predicate: Predicate::And(Vec::new()),
+                });
+                let _ = get_all_rows(env, conn, query.to_string().as_str())?;
+            }
+        }
     }
 
     Ok(())
