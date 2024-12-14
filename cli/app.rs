@@ -1,6 +1,6 @@
 use crate::opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use cli_table::{Cell, Table};
-use limbo_core::{Database, RowResult, Value};
+use limbo_core::{Database, LimboError, RowResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -121,9 +121,9 @@ pub struct Limbo {
     pub prompt: String,
     io: Arc<dyn limbo_core::IO>,
     writer: Box<dyn Write>,
-    conn: Option<Rc<limbo_core::Connection>>,
+    conn: Rc<limbo_core::Connection>,
     output_filename: String,
-    db_file: Option<String>,
+    db_file: String,
     output_mode: OutputMode,
     is_stdout: bool,
     input_buff: String,
@@ -133,17 +133,16 @@ pub struct Limbo {
 impl Limbo {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new(opts: &Opts) -> anyhow::Result<Self> {
-        let io = Arc::new(limbo_core::PlatformIO::new()?);
-        let mut db_file = None;
-        let conn = if let Some(path) = &opts.database {
-            let path = path.to_str().unwrap();
-            db_file = Some(path.to_string());
-            let db = Database::open_file(io.clone(), path)?;
-            Some(db.connect())
-        } else {
-            println!("No database file specified: Use .open <file> to open a database.");
-            None
+        let io: Arc<dyn limbo_core::IO> = match opts.database {
+            Some(ref path) if path.exists() => Arc::new(limbo_core::PlatformIO::new()?),
+            _ => Arc::new(limbo_core::MemoryIO::new()?),
         };
+        let db_file = opts
+            .database
+            .as_ref()
+            .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string());
+        let db = Database::open_file(io.clone(), &db_file)?;
+        let conn = db.connect();
         let writer: Box<dyn Write> = if !opts.output.is_empty() {
             Box::new(std::fs::File::create(&opts.output)?)
         } else {
@@ -184,10 +183,7 @@ impl Limbo {
     fn show_info(&mut self) -> std::io::Result<()> {
         self.writeln("------------------------------\nCurrent settings:")?;
         self.writeln(format!("Output mode: {}", self.output_mode))?;
-        self.writeln(format!(
-            "DB filename: {}",
-            self.db_file.clone().unwrap_or(":none:".to_string())
-        ))?;
+        self.writeln(format!("DB filename: {}", self.db_file))?;
         self.writeln(format!("Output: {}", self.output_filename))?;
         self.writeln(format!(
             "CWD: {}",
@@ -207,19 +203,27 @@ impl Limbo {
         self.input_buff.clear();
     }
 
-    pub fn close_conn(&mut self) {
-        self.conn.as_mut().map(|c| c.close());
+    pub fn close_conn(&mut self) -> Result<(), LimboError> {
+        self.conn.close()
     }
 
     fn open_db(&mut self, path: &str) -> anyhow::Result<()> {
-        if self.conn.is_some() {
-            // close existing connection if open
-            self.conn.as_mut().unwrap().close()?;
+        self.conn.close()?;
+        match path {
+            ":memory:" => {
+                let io = Arc::new(limbo_core::MemoryIO::new()?);
+                let db = Database::open_file(io.clone(), path)?;
+                self.conn = db.connect();
+                self.db_file = ":memory:".to_string();
+                return Ok(());
+            }
+            path => {
+                let db = Database::open_file(self.io.clone(), path)?;
+                self.conn = db.connect();
+                self.db_file = path.to_string();
+                return Ok(());
+            }
         }
-        let db = Database::open_file(self.io.clone(), path)?;
-        self.conn = Some(db.connect());
-        self.db_file = Some(path.to_string());
-        Ok(())
     }
 
     fn set_output_file(&mut self, path: &str) -> Result<(), String> {
@@ -306,7 +310,7 @@ impl Limbo {
             match cmd {
                 Command::Quit => {
                     let _ = self.writeln("Exiting Limbo SQL Shell.");
-                    self.close_conn();
+                    let _ = self.close_conn();
                     std::process::exit(0)
                 }
                 Command::Open => {
@@ -315,10 +319,6 @@ impl Limbo {
                     }
                 }
                 Command::Schema => {
-                    if self.conn.is_none() {
-                        let _ = self.writeln("Error: no database currently open");
-                        return;
-                    }
                     let table_name = args.get(1).copied();
                     if let Err(e) = self.display_schema(table_name) {
                         let _ = self.writeln(e.to_string());
@@ -376,12 +376,7 @@ impl Limbo {
     }
 
     pub fn query(&mut self, sql: &str, interrupt_count: &Arc<AtomicUsize>) -> anyhow::Result<()> {
-        if self.conn.is_none() {
-            let _ = self.writeln("Error: No database file specified.");
-            return Ok(());
-        }
-        let conn = self.conn.as_ref().unwrap().clone();
-        match conn.query(sql) {
+        match self.conn.query(sql) {
             Ok(Some(ref mut rows)) => match self.output_mode {
                 OutputMode::Raw => loop {
                     if interrupt_count.load(Ordering::SeqCst) > 0 {
@@ -469,7 +464,7 @@ impl Limbo {
             }
         }
         // for now let's cache flush always
-        conn.cacheflush()?;
+        self.conn.cacheflush()?;
         Ok(())
     }
 
@@ -484,7 +479,7 @@ impl Limbo {
         ),
     };
 
-        match self.conn.as_ref().unwrap().query(&sql) {
+        match self.conn.query(&sql) {
             Ok(Some(ref mut rows)) => {
                 let mut found = false;
                 loop {
