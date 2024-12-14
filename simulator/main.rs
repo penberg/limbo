@@ -170,14 +170,14 @@ impl ArbitraryFrom<Value> for LTValue {
                     t.pop();
                     LTValue(Value::Text(t))
                 } else {
-                    let index = rng.gen_range(0..t.len());
                     let mut t = t.chars().map(|c| c as u32).collect::<Vec<_>>();
+                    let index = rng.gen_range(0..t.len());
                     t[index] -= 1;
                     // Mutate the rest of the string
                     for i in (index + 1)..t.len() {
-                        t[i] = rng.gen_range(0..=255);
+                        t[i] = rng.gen_range('a' as u32..='z' as u32);
                     }
-                    let t = t.into_iter().map(|c| c as u8 as char).collect::<String>();
+                    let t = t.into_iter().map(|c| char::from_u32(c).unwrap_or('z')).collect::<String>();
                     LTValue(Value::Text(t))
                 }
             }
@@ -227,14 +227,14 @@ impl ArbitraryFrom<Value> for GTValue {
                     t.push(rng.gen_range(0..=255) as u8 as char);
                     GTValue(Value::Text(t))
                 } else {
-                    let index = rng.gen_range(0..t.len());
                     let mut t = t.chars().map(|c| c as u32).collect::<Vec<_>>();
+                    let index = rng.gen_range(0..t.len());
                     t[index] += 1;
                     // Mutate the rest of the string
                     for i in (index + 1)..t.len() {
-                        t[i] = rng.gen_range(0..=255);
+                        t[i] = rng.gen_range('a' as u32..='z' as u32);
                     }
-                    let t = t.into_iter().map(|c| c as u8 as char).collect::<String>();
+                    let t = t.into_iter().map(|c| char::from_u32(c).unwrap_or('a')).collect::<String>();
                     GTValue(Value::Text(t))
                 }
             }
