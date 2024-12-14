@@ -700,7 +700,7 @@ impl BTreeCursor {
         }
     }
 
-    /* insert to postion and shift other pointers */
+    /* insert to position and shift other pointers */
     fn insert_into_cell(&self, page: &mut PageContent, payload: &[u8], cell_idx: usize) {
         let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
         let enough_space = payload.len() + 2 <= free as usize;
