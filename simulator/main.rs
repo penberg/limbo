@@ -124,19 +124,19 @@ enum Value {
 }
 
 impl ArbitraryFrom<Vec<&Value>> for Value {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
-        if t.is_empty() {
+    fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
+        if values.is_empty() {
             return Value::Null;
         }
 
-        let index = rng.gen_range(0..t.len());
-        t[index].clone()
+        let index = rng.gen_range(0..values.len());
+        values[index].clone()
     }
 }
 
 impl ArbitraryFrom<ColumnType> for Value {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &ColumnType) -> Self {
-        match t {
+    fn arbitrary_from<R: Rng>(rng: &mut R, column_type: &ColumnType) -> Self {
+        match column_type {
             ColumnType::Integer => Value::Integer(rng.gen_range(i64::MIN..i64::MAX)),
             ColumnType::Float => Value::Float(rng.gen_range(-1e10..1e10)),
             ColumnType::Text => Value::Text(gen_random_text(rng)),
@@ -148,19 +148,19 @@ impl ArbitraryFrom<ColumnType> for Value {
 struct LTValue(Value);
 
 impl ArbitraryFrom<Vec<&Value>> for LTValue {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
-        if t.is_empty() {
+    fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
+        if values.is_empty() {
             return LTValue(Value::Null);
         }
 
-        let index = rng.gen_range(0..t.len());
-        LTValue::arbitrary_from(rng, t[index])
+        let index = rng.gen_range(0..values.len());
+        LTValue::arbitrary_from(rng, values[index])
     }
 }
 
 impl ArbitraryFrom<Value> for LTValue {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Value) -> Self {
-        match t {
+    fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
+        match value {
             Value::Integer(i) => LTValue(Value::Integer(rng.gen_range(i64::MIN..*i - 1))),
             Value::Float(f) => LTValue(Value::Float(rng.gen_range(-1e10..*f - 1.0))),
             Value::Text(t) => {
@@ -205,19 +205,19 @@ impl ArbitraryFrom<Value> for LTValue {
 struct GTValue(Value);
 
 impl ArbitraryFrom<Vec<&Value>> for GTValue {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Value>) -> Self {
-        if t.is_empty() {
+    fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
+        if values.is_empty() {
             return GTValue(Value::Null);
         }
 
-        let index = rng.gen_range(0..t.len());
-        GTValue::arbitrary_from(rng, t[index])
+        let index = rng.gen_range(0..values.len());
+        GTValue::arbitrary_from(rng, values[index])
     }
 }
 
 impl ArbitraryFrom<Value> for GTValue {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Value) -> Self {
-        match t {
+    fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
+        match value {
             Value::Integer(i) => GTValue(Value::Integer(rng.gen_range(*i..i64::MAX))),
             Value::Float(f) => GTValue(Value::Float(rng.gen_range(*f..1e10))),
             Value::Text(t) => {
@@ -260,13 +260,14 @@ impl ArbitraryFrom<Value> for GTValue {
 }
 
 enum Predicate {
-    And(Vec<Predicate>),
-    Or(Vec<Predicate>),
-    Eq(String, Value),
-    Gt(String, Value),
-    Lt(String, Value),
+    And(Vec<Predicate>),        // p1 AND p2 AND p3... AND pn
+    Or(Vec<Predicate>),         // p1 OR p2 OR p3... OR pn
+    Eq(String, Value),          // column = Value
+    Gt(String, Value),          // column > Value
+    Lt(String, Value),          // column < Value
 }
 
+// This type represents the potential queries on the database.
 enum Query {
     Create(Create),
     Select(Select),
@@ -292,21 +293,21 @@ struct Select {
 }
 
 impl ArbitraryFrom<Vec<Table>> for Select {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<Table>) -> Self {
-        let table = rng.gen_range(0..t.len());
+    fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<Table>) -> Self {
+        let table = rng.gen_range(0..tables.len());
         Select {
-            table: t[table].name.clone(),
-            predicate: Predicate::arbitrary_from(rng, &t[table]),
+            table: tables[table].name.clone(),
+            predicate: Predicate::arbitrary_from(rng, &tables[table]),
         }
     }
 }
 
 impl ArbitraryFrom<Vec<&Table>> for Select {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Vec<&Table>) -> Self {
-        let table = rng.gen_range(0..t.len());
+    fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<&Table>) -> Self {
+        let table = rng.gen_range(0..tables.len());
         Select {
-            table: t[table].name.clone(),
-            predicate: Predicate::arbitrary_from(rng, t[table]),
+            table: tables[table].name.clone(),
+            predicate: Predicate::arbitrary_from(rng, tables[table]),
         }
     }
 }
@@ -317,14 +318,14 @@ struct Insert {
 }
 
 impl ArbitraryFrom<Table> for Insert {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
-        let values = t
+    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
+        let values = table
             .columns
             .iter()
             .map(|c| Value::arbitrary_from(rng, &c.column_type))
             .collect();
         Insert {
-            table: t.name.clone(),
+            table: table.name.clone(),
             values,
         }
     }
@@ -336,23 +337,23 @@ struct Delete {
 }
 
 impl ArbitraryFrom<Table> for Delete {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         Delete {
-            table: t.name.clone(),
-            predicate: Predicate::arbitrary_from(rng, t),
+            table: table.name.clone(),
+            predicate: Predicate::arbitrary_from(rng, table),
         }
     }
 }
 
 impl ArbitraryFrom<Table> for Query {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         match rng.gen_range(0..=200) {
             0 => Query::Create(Create::arbitrary(rng)),
-            1..=100 => Query::Select(Select::arbitrary_from(rng, &vec![t])),
-            101..=200 => Query::Insert(Insert::arbitrary_from(rng, t)),
+            1..=100 => Query::Select(Select::arbitrary_from(rng, &vec![table])),
+            101..=200 => Query::Insert(Insert::arbitrary_from(rng, table)),
             // todo: This branch is currently never taken, as DELETE is not yet implemented.
             //       Change this when DELETE is implemented.
-            201..=300 => Query::Delete(Delete::arbitrary_from(rng, t)),
+            201..=300 => Query::Delete(Delete::arbitrary_from(rng, table)),
             _ => unreachable!(),
         }
     }
@@ -362,15 +363,15 @@ struct CompoundPredicate(Predicate);
 struct SimplePredicate(Predicate);
 
 impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): &(&Table, bool)) -> Self {
         // Pick a random column
-        let column_index = rng.gen_range(0..t.columns.len());
-        let column = &t.columns[column_index];
-        let column_values = t.rows.iter().map(|r| &r[column_index]).collect::<Vec<_>>();
+        let column_index = rng.gen_range(0..table.columns.len());
+        let column = &table.columns[column_index];
+        let column_values = table.rows.iter().map(|r| &r[column_index]).collect::<Vec<_>>();
         // Pick an operator
         let operator = match rng.gen_range(0..3) {
             0 => {
-                if *b {
+                if *predicate_value {
                     Predicate::Eq(
                         column.name.clone(),
                         Value::arbitrary_from(rng, &column_values),
@@ -384,14 +385,14 @@ impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
             }
             1 => Predicate::Gt(
                 column.name.clone(),
-                match b {
+                match predicate_value {
                     true => GTValue::arbitrary_from(rng, &column_values).0,
                     false => LTValue::arbitrary_from(rng, &column_values).0,
                 },
             ),
             2 => Predicate::Lt(
                 column.name.clone(),
-                match b {
+                match predicate_value {
                     true => LTValue::arbitrary_from(rng, &column_values).0,
                     false => GTValue::arbitrary_from(rng, &column_values).0,
                 },
@@ -404,15 +405,15 @@ impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
 }
 
 impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (t, b): &(&Table, bool)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): &(&Table, bool)) -> Self {
         // Decide if you want to create an AND or an OR
         CompoundPredicate(if rng.gen_bool(0.7) {
             // An AND for true requires each of its children to be true
             // An AND for false requires at least one of its children to be false
-            if *b {
+            if *predicate_value {
                 Predicate::And(
                     (0..rng.gen_range(1..=3))
-                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*t, true)).0)
+                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*table, true)).0)
                         .collect(),
                 )
             } else {
@@ -431,14 +432,14 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                 Predicate::And(
                     booleans
                         .iter()
-                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*t, *b)).0)
+                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*table, *b)).0)
                         .collect(),
                 )
             }
         } else {
             // An OR for true requires at least one of its children to be true
             // An OR for false requires each of its children to be false
-            if *b {
+            if *predicate_value {
                 // Create a vector of random booleans
                 let mut booleans = (0..rng.gen_range(1..=3))
                     .map(|_| rng.gen_bool(0.5))
@@ -452,13 +453,13 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                 Predicate::Or(
                     booleans
                         .iter()
-                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*t, *b)).0)
+                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*table, *b)).0)
                         .collect(),
                 )
             } else {
                 Predicate::Or(
                     (0..rng.gen_range(1..=3))
-                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*t, false)).0)
+                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*table, false)).0)
                         .collect(),
                 )
             }
@@ -467,18 +468,18 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
 }
 
 impl ArbitraryFrom<Table> for Predicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &Table) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         let b = rng.gen_bool(0.5);
-        CompoundPredicate::arbitrary_from(rng, &(t, b)).0
+        CompoundPredicate::arbitrary_from(rng, &(table, b)).0
     }
 }
 
 impl ArbitraryFrom<(&str, &Value)> for Predicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (c, t): &(&str, &Value)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
         match rng.gen_range(0..3) {
-            0 => Predicate::Eq(c.to_string(), (*t).clone()),
-            1 => Predicate::Gt(c.to_string(), LTValue::arbitrary_from(rng, *t).0),
-            2 => Predicate::Lt(c.to_string(), LTValue::arbitrary_from(rng, *t).0),
+            0 => Predicate::Eq(column_name.to_string(), (*value).clone()),
+            1 => Predicate::Gt(column_name.to_string(), LTValue::arbitrary_from(rng, *value).0),
+            2 => Predicate::Lt(column_name.to_string(), LTValue::arbitrary_from(rng, *value).0),
             _ => unreachable!(),
         }
     }
@@ -694,11 +695,8 @@ fn property_select_all(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {
     // Get all rows
     let rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
 
-    // Check that all rows are there
-    assert_eq!(rows.len(), env.tables[table].rows.len());
-    for row in &env.tables[table].rows {
-        assert!(rows.iter().any(|r| r == row));
-    }
+    // Make sure the rows are the same
+    compare_equal_rows(&rows, &env.tables[table].rows);
 }
 
 fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
@@ -733,7 +731,6 @@ fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Resu
 
             if picked < env.opts.read_percent {
                 let query = Select::arbitrary_from(&mut env.rng, &env.tables);
-
                 let _ = get_all_rows(env, conn, Query::Select(query).to_string().as_str())?;
             } else if picked < env.opts.read_percent + env.opts.write_percent {
                 let table_index = env.rng.gen_range(0..env.tables.len());
