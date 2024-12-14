@@ -185,4 +185,6 @@ cfg_block! {
     }
 }
 
+mod memory;
+pub use memory::MemoryIO;
 mod common;
