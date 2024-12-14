@@ -26,12 +26,13 @@
 ## Features
 
 * In-process OLTP database engine library
-* Asynchronous I/O support with `io_uring`
+* Asynchronous I/O support on Linux with `io_uring`
 * SQLite compatibility ([status](COMPAT.md))
   * SQL dialect support
   * File format support
   * SQLite C API
 * JavaScript/WebAssembly bindings (_wip_)
+* Support for Linux, macOS, and Windows
 
 ## Getting Started
 
