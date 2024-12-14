@@ -549,6 +549,9 @@ impl Optimizable for ast::Expr {
     ) -> Result<Option<usize>> {
         match self {
             ast::Expr::Column { table, column, .. } => {
+                if *table != table_index {
+                    return Ok(None);
+                }
                 for (idx, index) in available_indexes.iter().enumerate() {
                     if index.table_name == referenced_tables[*table].table.name {
                         let column = referenced_tables[*table]
