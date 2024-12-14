@@ -3224,15 +3224,28 @@ fn exec_hex(reg: &OwnedValue) -> OwnedValue {
 }
 
 fn exec_unhex(reg: &OwnedValue, ignored_chars: Option<&OwnedValue>) -> OwnedValue {
-    if ignored_chars.is_some() {
-        unimplemented!("unhex(X,Y) is not implemented");
-    }
-
     match reg {
         OwnedValue::Null => OwnedValue::Null,
-        _ => match hex::decode(reg.to_string()) {
-            Ok(bytes) => OwnedValue::Blob(Rc::new(bytes)),
-            Err(_) => OwnedValue::Null,
+        _ => match ignored_chars {
+            None => match hex::decode(reg.to_string()) {
+                Ok(bytes) => OwnedValue::Blob(Rc::new(bytes)),
+                Err(_) => OwnedValue::Null,
+            },
+            Some(ignore) => match ignore {
+                OwnedValue::Text(_) => {
+                    let pat = ignore.to_string();
+                    let trimmed = reg
+                        .to_string()
+                        .trim_start_matches(|x| pat.contains(x))
+                        .trim_end_matches(|x| pat.contains(x))
+                        .to_string();
+                    match hex::decode(trimmed) {
+                        Ok(bytes) => OwnedValue::Blob(Rc::new(bytes)),
+                        Err(_) => OwnedValue::Null,
+                    }
+                }
+                _ => OwnedValue::Null,
+            },
         },
     }
 }
