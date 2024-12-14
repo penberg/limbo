@@ -442,8 +442,6 @@ fn init_source(
 
             metadata.next_row_labels.insert(*id, next_row_label);
 
-            let scan_loop_body_label = program.allocate_label();
-            metadata.scan_loop_body_labels.push(scan_loop_body_label);
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id: table_cursor_id,
                 root_page: table_reference.table.root_page,
@@ -608,7 +606,6 @@ fn open_loop(
             ..
         } => {
             let table_cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
-
             // Open the loop for the index search.
             // Rowid equality point lookups are handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
             if !matches!(search, Search::RowidEq { .. }) {
@@ -617,7 +614,8 @@ fn open_loop(
                 } else {
                     None
                 };
-                let scan_loop_body_label = *metadata.scan_loop_body_labels.last().unwrap();
+                let scan_loop_body_label = program.allocate_label();
+                metadata.scan_loop_body_labels.push(scan_loop_body_label);
                 let cmp_reg = program.alloc_register();
                 let (cmp_expr, cmp_op) = match search {
                     Search::IndexSearch {
