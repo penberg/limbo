@@ -39,6 +39,14 @@ do_execsql_test select-count {
   SELECT count(*) FROM users;
 } {10000}
 
+do_execsql_test select-count-constant-true {
+  SELECT count(*) FROM users WHERE true;
+} {10000}
+
+do_execsql_test select-count-constant-false {
+  SELECT count(*) FROM users WHERE false;
+} {0}
+
 do_execsql_test select-max {
   SELECT max(age) FROM users;
 } {100}

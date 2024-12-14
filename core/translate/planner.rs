@@ -1,5 +1,8 @@
-use super::plan::{
-    Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
+use super::{
+    optimizer::Optimizable,
+    plan::{
+        Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
+    },
 };
 use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
 use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
@@ -88,6 +91,11 @@ fn bind_column_references(
 ) -> Result<()> {
     match expr {
         ast::Expr::Id(id) => {
+            // true and false are special constants that are effectively aliases for 1 and 0
+            // and not identifiers of columns
+            if id.0.eq_ignore_ascii_case("true") || id.0.eq_ignore_ascii_case("false") {
+                return Ok(());
+            }
             let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
                 let col_idx = table
@@ -270,6 +278,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 limit: None,
                 referenced_tables,
                 available_indexes: schema.indexes.clone().into_values().flatten().collect(),
+                contains_constant_false_condition: false,
             };
 
             // Parse the WHERE clause

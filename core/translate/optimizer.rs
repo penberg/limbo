@@ -15,12 +15,17 @@ use super::plan::{
  * but having them separate makes them easier to understand
  */
 pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
+    if let ConstantConditionEliminationResult::ImpossibleCondition =
+        eliminate_constants(&mut select_plan.source, &mut select_plan.where_clause)?
+    {
+        select_plan.contains_constant_false_condition = true;
+        return Ok(select_plan);
+    }
     push_predicates(
         &mut select_plan.source,
         &mut select_plan.where_clause,
         &select_plan.referenced_tables,
     )?;
-    eliminate_constants(&mut select_plan.source)?;
     use_indexes(
         &mut select_plan.source,
         &select_plan.referenced_tables,
@@ -177,7 +182,24 @@ enum ConstantConditionEliminationResult {
 // returns a ConstantEliminationResult indicating whether any predicates are always false
 fn eliminate_constants(
     operator: &mut SourceOperator,
+    where_clause: &mut Option<Vec<ast::Expr>>,
 ) -> Result<ConstantConditionEliminationResult> {
+    if let Some(predicates) = where_clause {
+        let mut i = 0;
+        while i < predicates.len() {
+            let predicate = &predicates[i];
+            if predicate.is_always_true()? {
+                // true predicates can be removed since they don't affect the result
+                predicates.remove(i);
+            } else if predicate.is_always_false()? {
+                // any false predicate in a list of conjuncts (AND-ed predicates) will make the whole list false
+                predicates.truncate(0);
+                return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
+            } else {
+                i += 1;
+            }
+        }
+    }
     match operator {
         SourceOperator::Join {
             left,
@@ -186,11 +208,12 @@ fn eliminate_constants(
             outer,
             ..
         } => {
-            if eliminate_constants(left)? == ConstantConditionEliminationResult::ImpossibleCondition
+            if eliminate_constants(left, where_clause)?
+                == ConstantConditionEliminationResult::ImpossibleCondition
             {
                 return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
             }
-            if eliminate_constants(right)?
+            if eliminate_constants(right, where_clause)?
                 == ConstantConditionEliminationResult::ImpossibleCondition
                 && !*outer
             {
@@ -205,11 +228,19 @@ fn eliminate_constants(
 
             let mut i = 0;
             while i < predicates.len() {
-                let predicate = &predicates[i];
+                let predicate = &mut predicates[i];
                 if predicate.is_always_true()? {
                     predicates.remove(i);
-                } else if predicate.is_always_false()? && !*outer {
-                    return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
+                } else if predicate.is_always_false()? {
+                    if !*outer {
+                        predicates.truncate(0);
+                        return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
+                    }
+                    // in an outer join, we can't skip rows, so just replace all constant false predicates with 0
+                    // so we don't later have to evaluate anything more complex or special-case the identifiers true and false
+                    // which are just aliases for 1 and 0
+                    *predicate = ast::Expr::Literal(ast::Literal::Numeric("0".to_string()));
+                    i += 1;
                 } else {
                     i += 1;
                 }
@@ -223,8 +254,11 @@ fn eliminate_constants(
                 while i < ps.len() {
                     let predicate = &ps[i];
                     if predicate.is_always_true()? {
+                        // true predicates can be removed since they don't affect the result
                         ps.remove(i);
                     } else if predicate.is_always_false()? {
+                        // any false predicate in a list of conjuncts (AND-ed predicates) will make the whole list false
+                        ps.truncate(0);
                         return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
                     } else {
                         i += 1;
@@ -243,8 +277,11 @@ fn eliminate_constants(
                 while i < predicates.len() {
                     let predicate = &predicates[i];
                     if predicate.is_always_true()? {
+                        // true predicates can be removed since they don't affect the result
                         predicates.remove(i);
                     } else if predicate.is_always_false()? {
+                        // any false predicate in a list of conjuncts (AND-ed predicates) will make the whole list false
+                        predicates.truncate(0);
                         return Ok(ConstantConditionEliminationResult::ImpossibleCondition);
                     } else {
                         i += 1;
@@ -550,6 +587,16 @@ impl Optimizable for ast::Expr {
     }
     fn check_constant(&self) -> Result<Option<ConstantPredicate>> {
         match self {
+            ast::Expr::Id(id) => {
+                // true and false are special constants that are effectively aliases for 1 and 0
+                if id.0.eq_ignore_ascii_case("true") {
+                    return Ok(Some(ConstantPredicate::AlwaysTrue));
+                }
+                if id.0.eq_ignore_ascii_case("false") {
+                    return Ok(Some(ConstantPredicate::AlwaysFalse));
+                }
+                return Ok(None);
+            }
             ast::Expr::Literal(lit) => match lit {
                 ast::Literal::Null => Ok(Some(ConstantPredicate::AlwaysFalse)),
                 ast::Literal::Numeric(b) => {
