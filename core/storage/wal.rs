@@ -254,7 +254,7 @@ impl Wal for WalFile {
                                     *frame,
                                     self.ongoing_checkpoint.page.clone(),
                                     self.buffer_pool.clone(),
-                                );
+                                )?;
                                 self.ongoing_checkpoint.state = CheckpointState::WaitReadFrame;
                                 self.ongoing_checkpoint.current_page += 1;
                                 continue 'checkpoint_loop;
