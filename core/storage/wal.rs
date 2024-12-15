@@ -8,10 +8,10 @@ use crate::io::{File, SyncCompletion, IO};
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
-use crate::Result;
+use crate::{Buffer, Result};
 use crate::{Completion, Page};
 
-use self::sqlite3_ondisk::{checksum_wal, WAL_MAGIC_BE, WAL_MAGIC_LE};
+use self::sqlite3_ondisk::{checksum_wal, PageContent, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
 use super::buffer_pool::BufferPool;
 use super::page_cache::PageCacheKey;
@@ -337,11 +337,24 @@ impl WalFile {
         shared: Arc<RwLock<WalFileShared>>,
         buffer_pool: Rc<BufferPool>,
     ) -> Self {
+        let checkpoint_page = Arc::new(Page::new(0));
+        let buffer = buffer_pool.get();
+        {
+            let buffer_pool = buffer_pool.clone();
+            let drop_fn = Rc::new(move |buf| {
+                buffer_pool.put(buf);
+            });
+            checkpoint_page.get().contents = Some(PageContent {
+                offset: 0,
+                buffer: Rc::new(RefCell::new(Buffer::new(buffer, drop_fn))),
+                overflow_cells: Vec::new(),
+            });
+        }
         Self {
             io,
             shared,
             ongoing_checkpoint: OngoingCheckpoint {
-                page: Arc::new(Page::new(0)),
+                page: checkpoint_page,
                 state: CheckpointState::Start,
                 min_frame: 0,
                 max_frame: 0,
