@@ -57,11 +57,11 @@ limbo-wasm:
 	cargo build --package limbo-wasm --target wasm32-wasi
 .PHONY: limbo-wasm
 
-test: limbo test-compat test-sqlite3
+test: limbo test-compat test-sqlite3 test-shell
 .PHONY: test
 
 test-shell: limbo
-	./testing/memory-repl.tcl
+	./testing/shelltests.py
 .PHONY: test-shell
 
 test-compat:

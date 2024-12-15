@@ -18,9 +18,9 @@ use std::{
 #[command(name = "limbo")]
 #[command(author, version, about, long_about = None)]
 pub struct Opts {
-    #[clap(index = 1)]
+    #[clap(index = 1, help = "SQLite database file", default_value = ":memory:")]
     pub database: Option<PathBuf>,
-    #[clap(index = 2)]
+    #[clap(index = 2, help = "Optional SQL command to execute")]
     pub sql: Option<String>,
     #[clap(short = 'm', long, default_value_t = OutputMode::Raw)]
     pub output_mode: OutputMode,
@@ -190,21 +190,14 @@ impl Limbo {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> anyhow::Result<Self> {
         let opts = Opts::parse();
-        let io: Arc<dyn limbo_core::IO> = match opts.database {
-            Some(ref path) if path.exists() => Arc::new(limbo_core::PlatformIO::new()?),
-            _ => Arc::new(limbo_core::MemoryIO::new()?),
-        };
         let db_file = opts
             .database
             .as_ref()
             .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string());
+
+        let io = get_io(&db_file)?;
         let db = Database::open_file(io.clone(), &db_file)?;
         let conn = db.connect();
-        let writer: Box<dyn Write> = if !opts.output.is_empty() {
-            Box::new(std::fs::File::create(&opts.output)?)
-        } else {
-            Box::new(io::stdout())
-        };
         let interrupt_count = Arc::new(AtomicUsize::new(0));
         {
             let interrupt_count: Arc<AtomicUsize> = Arc::clone(&interrupt_count);
@@ -217,7 +210,7 @@ impl Limbo {
         let mut app = Self {
             prompt: PROMPT.to_string(),
             io,
-            writer,
+            writer: get_writer(&opts.output),
             conn,
             interrupt_count,
             input_buff: String::new(),
@@ -309,7 +302,7 @@ impl Limbo {
     }
 
     fn set_output_file(&mut self, path: &str) -> Result<(), String> {
-        if path.is_empty() || path.eq_ignore_ascii_case("stdout") {
+        if path.is_empty() || path.trim().eq_ignore_ascii_case("stdout") {
             self.set_output_stdout();
             return Ok(());
         }
@@ -317,6 +310,7 @@ impl Limbo {
             Ok(file) => {
                 self.writer = Box::new(file);
                 self.opts.is_stdout = false;
+                self.opts.output_mode = OutputMode::Raw;
                 self.opts.output_filename = path.to_string();
                 return Ok(());
             }
@@ -332,8 +326,13 @@ impl Limbo {
         self.opts.is_stdout = true;
     }
 
-    fn set_mode(&mut self, mode: OutputMode) {
-        self.opts.output_mode = mode;
+    fn set_mode(&mut self, mode: OutputMode) -> Result<(), String> {
+        if mode == OutputMode::Pretty && !self.opts.is_stdout {
+            return Err("pretty output can only be written to a tty".to_string());
+        } else {
+            self.opts.output_mode = mode;
+            Ok(())
+        }
     }
 
     fn write_fmt(&mut self, fmt: std::fmt::Arguments) -> io::Result<()> {
@@ -440,7 +439,9 @@ impl Limbo {
                 }
                 Command::OutputMode => match OutputMode::from_str(args[1], true) {
                     Ok(mode) => {
-                        self.set_mode(mode);
+                        if let Err(e) = self.set_mode(mode) {
+                            let _ = self.write_fmt(format_args!("Error: {}", e));
+                        }
                     }
                     Err(e) => {
                         let _ = self.writeln(e);
@@ -620,6 +621,26 @@ impl Limbo {
 
         Ok(())
     }
+}
+
+fn get_writer(output: &str) -> Box<dyn Write> {
+    match output {
+        "" => Box::new(io::stdout()),
+        _ => match std::fs::File::create(output) {
+            Ok(file) => Box::new(file),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                Box::new(io::stdout())
+            }
+        },
+    }
+}
+
+fn get_io(db: &str) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
+    Ok(match db {
+        ":memory:" => Arc::new(limbo_core::MemoryIO::new()?),
+        _ => Arc::new(limbo_core::PlatformIO::new()?),
+    })
 }
 
 const HELP_MSG: &str = r#"
