@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+* In-memory mode (Preston Thorpe)
+
+* More CLI improvements (Preston Thorpe)
+
+* Add support for replace() function (Alperen Keleş)
+
+* Unary operator improvements (Jean Arhancet)
+
+* Add support for unex(x, y) function (Kacper Kołodziej)
+
 ## 0.0.9 - 2024-12-12
 
 ### Added
