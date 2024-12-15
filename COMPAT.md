@@ -20,54 +20,54 @@ This document describes the SQLite compatibility status of Limbo:
 
 ## SQL statements
 
-| Statement                    | Status  | Comment |
-|------------------------------|---------|---------|
-| ALTER TABLE                  | No      |         |
-| ANALYZE                      | No      |         |
-| ATTACH DATABASE              | No      |         |
-| BEGIN TRANSACTION            | No      |         |
-| COMMIT TRANSACTION           | No      |         |
-| CREATE INDEX                 | No      |         |
-| CREATE TABLE                 | Partial |         |
-| CREATE TRIGGER               | No      |         |
-| CREATE VIEW                  | No      |         |
-| CREATE VIRTUAL TABLE         | No      |         |
-| DELETE                       | No      |         |
-| DETACH DATABASE              | No      |         |
-| DROP INDEX                   | No      |         |
-| DROP TABLE                   | No      |         |
-| DROP TRIGGER                 | No      |         |
-| DROP VIEW                    | No      |         |
-| END TRANSACTION              | No      |         |
-| EXPLAIN                      | Yes     |         |
-| INDEXED BY                   | No      |         |
-| INSERT                       | Partial |         |
-| ON CONFLICT clause           | No      |         |
-| PRAGMA                       | Partial |         |
-| PRAGMA cache_size            | Yes     |         |
-| REINDEX                      | No      |         |
-| RELEASE SAVEPOINT            | No      |         |
-| REPLACE                      | No      |         |
-| RETURNING clause             | No      |         |
-| ROLLBACK TRANSACTION         | No      |         |
-| SAVEPOINT                    | No      |         |
-| SELECT                       | Partial |         |
-| SELECT ... WHERE             | Partial |         |
-| SELECT ... WHERE ... LIKE    | Yes     |         |
-| SELECT ... LIMIT             | Yes     |         |
-| SELECT ... ORDER BY          | Partial |         |
-| SELECT ... GROUP BY          | Partial |         |
-| SELECT ... HAVING            | Partial |         |
-| SELECT ... JOIN              | Partial |         |
-| SELECT ... CROSS JOIN        | Partial |         |
-| SELECT ... INNER JOIN        | Partial |         |
-| SELECT ... OUTER JOIN        | Partial |         |
-| SELECT ... JOIN USING        | Yes     |         |
-| SELECT ... NATURAL JOIN      | Yes     |         |
-| UPDATE                       | No      |         |
-| UPSERT                       | No      |         |
-| VACUUM                       | No      |         |
-| WITH clause                  | No      |         |
+| Statement                 | Status  | Comment |
+| ------------------------- | ------- | ------- |
+| ALTER TABLE               | No      |         |
+| ANALYZE                   | No      |         |
+| ATTACH DATABASE           | No      |         |
+| BEGIN TRANSACTION         | No      |         |
+| COMMIT TRANSACTION        | No      |         |
+| CREATE INDEX              | No      |         |
+| CREATE TABLE              | Partial |         |
+| CREATE TRIGGER            | No      |         |
+| CREATE VIEW               | No      |         |
+| CREATE VIRTUAL TABLE      | No      |         |
+| DELETE                    | No      |         |
+| DETACH DATABASE           | No      |         |
+| DROP INDEX                | No      |         |
+| DROP TABLE                | No      |         |
+| DROP TRIGGER              | No      |         |
+| DROP VIEW                 | No      |         |
+| END TRANSACTION           | No      |         |
+| EXPLAIN                   | Yes     |         |
+| INDEXED BY                | No      |         |
+| INSERT                    | Partial |         |
+| ON CONFLICT clause        | No      |         |
+| PRAGMA                    | Partial |         |
+| PRAGMA cache_size         | Yes     |         |
+| REINDEX                   | No      |         |
+| RELEASE SAVEPOINT         | No      |         |
+| REPLACE                   | No      |         |
+| RETURNING clause          | No      |         |
+| ROLLBACK TRANSACTION      | No      |         |
+| SAVEPOINT                 | No      |         |
+| SELECT                    | Yes     |         |
+| SELECT ... WHERE          | Yes     |         |
+| SELECT ... WHERE ... LIKE | Yes     |         |
+| SELECT ... LIMIT          | Yes     |         |
+| SELECT ... ORDER BY       | Yes     |         |
+| SELECT ... GROUP BY       | Yes     |         |
+| SELECT ... HAVING         | Yes     |         |
+| SELECT ... JOIN           | Yes     |         |
+| SELECT ... CROSS JOIN     | Yes     | SQLite CROSS JOIN means "do not reorder joins". We don't support that yet anyway. |
+| SELECT ... INNER JOIN     | Yes     |         |
+| SELECT ... OUTER JOIN     | Partial | no RIGHT JOIN |
+| SELECT ... JOIN USING     | Yes     |         |
+| SELECT ... NATURAL JOIN   | Yes     |         |
+| UPDATE                    | No      |         |
+| UPSERT                    | No      |         |
+| VACUUM                    | No      |         |
+| WITH clause               | No      |         |
 
 ### SELECT Expressions
 
@@ -77,7 +77,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 |------------------------------|---------|---------|
 | literals                     | Yes     |         |
 | schema.table.column          | Partial | Schemas aren't supported |
-| unary operator               | Partial | `-` supported, `+~` aren't |
+| unary operator               | Partial | `+-` supported, `~` isn't |
 | binary operator              | Partial | Only `%`, `!<`, and `!>` are unsupported |
 | agg() FILTER (WHERE ...)     | No      | Is incorrectly ignored |
 | ... OVER (...)               | No      | Is incorrectly ignored |
@@ -262,7 +262,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Close           | No     |
 | CollSeq         | No     |
 | Column          | Yes    |
-| Compare         | No     |
+| Compare         | Yes    |
 | Concat          | No     |
 | Copy            | Yes    |
 | Count           | No     |
@@ -284,13 +284,13 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Found           | No     |
 | Function        | Yes    |
 | Ge              | Yes    |
-| Gosub           | No     |
+| Gosub           | Yes    |
 | Goto            | Yes    |
 | Gt              | Yes    |
 | Halt            | Yes    |
 | HaltIfNull      | No     |
 | IdxDelete       | No     |
-| IdxGE           | No     |
+| IdxGE           | Yes    |
 | IdxInsert       | No     |
 | IdxLT           | No     |
 | IdxRowid        | No     |
@@ -309,10 +309,10 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Int64           | No     |
 | Integer         | Yes    |
 | IntegrityCk     | No     |
-| IsNull          | No     |
+| IsNull          | Yes    |
 | IsUnique        | No     |
 | JournalMode     | No     |
-| Jump            | No     |
+| Jump            | Yes    |
 | Last            | No     |
 | Le              | Yes    |
 | LoadAnalysis    | No     |
@@ -350,6 +350,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | ParseSchema     | No     |
 | Permutation     | No     |
 | Prev            | No     |
+| PrevAsync       | Yes    |
+| PrevAwait       | Yes    |
 | Program         | No     |
 | ReadCookie      | No     |
 | Real            | Yes    |
@@ -357,7 +359,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Remainder       | No     |
 | ResetCount      | No     |
 | ResultRow       | Yes    |
-| Return          | No     |
+| Return          | Yes    |
 | Rewind          | Yes    |
 | RewindAsync     | Yes    |
 | RewindAwait     | Yes    |
@@ -371,8 +373,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | SCopy           | No     |
 | Savepoint       | No     |
 | Seek            | No     |
-| SeekGe          | No     |
-| SeekGt          | No     |
+| SeekGe          | Yes    |
+| SeekGt          | Yes    |
 | SeekLe          | No     |
 | SeekLt          | No     |
 | SeekRowid       | Yes    |
@@ -398,7 +400,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | ToReal          | No     |
 | ToText          | No     |
 | Trace           | No     |
-| Transaction     | No     |
+| Transaction     | Yes    |
 | VBegin          | No     |
 | VColumn         | No     |
 | VCreate         | No     |
