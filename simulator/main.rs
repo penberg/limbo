@@ -469,8 +469,8 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
 
 impl ArbitraryFrom<Table> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        let b = rng.gen_bool(0.5);
-        CompoundPredicate::arbitrary_from(rng, &(table, b)).0
+        let predicate_value = rng.gen_bool(0.5);
+        CompoundPredicate::arbitrary_from(rng, &(table, predicate_value)).0
     }
 }
 
