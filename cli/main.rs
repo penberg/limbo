@@ -33,6 +33,7 @@ fn main() -> anyhow::Result<()> {
     }
     println!("Limbo v{}", env!("CARGO_PKG_VERSION"));
     println!("Enter \".help\" for usage hints.");
+    let _ = app.display_in_memory();
     let mut rl = DefaultEditor::new()?;
     let home = dirs::home_dir().expect("Could not determine home directory");
     let history_file = home.join(".limbo_history");
