@@ -80,7 +80,7 @@ pub enum CheckpointStatus {
     IO,
 }
 
-// Checkpointing is a machine state the has multiple steps. Since there are multiple steps we save
+// Checkpointing is a state machine that has multiple steps. Since there are multiple steps we save
 // in flight information of the checkpoint in OngoingCheckpoint. page is just a helper Page to do
 // page operations like reading a frame to a page, and writing a page to disk. This page should not
 // be placed back in pager page cache or anything, it's just a helper.
