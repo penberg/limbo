@@ -180,6 +180,14 @@ impl Limbo {
         };
     }
 
+    pub fn display_in_memory(&mut self) -> std::io::Result<()> {
+        if self.db_file == ":memory:" {
+            self.writeln("Connected to a transient in-memory database.")?;
+            self.writeln("Use \".open FILENAME\" to reopen on a persistent database")?;
+        }
+        Ok(())
+    }
+
     fn show_info(&mut self) -> std::io::Result<()> {
         self.writeln("------------------------------\nCurrent settings:")?;
         let output = format!(
