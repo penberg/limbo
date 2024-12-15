@@ -177,7 +177,10 @@ impl ArbitraryFrom<Value> for LTValue {
                     for i in (index + 1)..t.len() {
                         t[i] = rng.gen_range('a' as u32..='z' as u32);
                     }
-                    let t = t.into_iter().map(|c| char::from_u32(c).unwrap_or('z')).collect::<String>();
+                    let t = t
+                        .into_iter()
+                        .map(|c| char::from_u32(c).unwrap_or('z'))
+                        .collect::<String>();
                     LTValue(Value::Text(t))
                 }
             }
@@ -234,7 +237,10 @@ impl ArbitraryFrom<Value> for GTValue {
                     for i in (index + 1)..t.len() {
                         t[i] = rng.gen_range('a' as u32..='z' as u32);
                     }
-                    let t = t.into_iter().map(|c| char::from_u32(c).unwrap_or('a')).collect::<String>();
+                    let t = t
+                        .into_iter()
+                        .map(|c| char::from_u32(c).unwrap_or('a'))
+                        .collect::<String>();
                     GTValue(Value::Text(t))
                 }
             }
@@ -260,11 +266,11 @@ impl ArbitraryFrom<Value> for GTValue {
 }
 
 enum Predicate {
-    And(Vec<Predicate>),        // p1 AND p2 AND p3... AND pn
-    Or(Vec<Predicate>),         // p1 OR p2 OR p3... OR pn
-    Eq(String, Value),          // column = Value
-    Gt(String, Value),          // column > Value
-    Lt(String, Value),          // column < Value
+    And(Vec<Predicate>), // p1 AND p2 AND p3... AND pn
+    Or(Vec<Predicate>),  // p1 OR p2 OR p3... OR pn
+    Eq(String, Value),   // column = Value
+    Gt(String, Value),   // column > Value
+    Lt(String, Value),   // column < Value
 }
 
 // This type represents the potential queries on the database.
@@ -367,7 +373,11 @@ impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
         // Pick a random column
         let column_index = rng.gen_range(0..table.columns.len());
         let column = &table.columns[column_index];
-        let column_values = table.rows.iter().map(|r| &r[column_index]).collect::<Vec<_>>();
+        let column_values = table
+            .rows
+            .iter()
+            .map(|r| &r[column_index])
+            .collect::<Vec<_>>();
         // Pick an operator
         let operator = match rng.gen_range(0..3) {
             0 => {
@@ -478,8 +488,14 @@ impl ArbitraryFrom<(&str, &Value)> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
         match rng.gen_range(0..3) {
             0 => Predicate::Eq(column_name.to_string(), (*value).clone()),
-            1 => Predicate::Gt(column_name.to_string(), LTValue::arbitrary_from(rng, *value).0),
-            2 => Predicate::Lt(column_name.to_string(), LTValue::arbitrary_from(rng, *value).0),
+            1 => Predicate::Gt(
+                column_name.to_string(),
+                LTValue::arbitrary_from(rng, *value).0,
+            ),
+            2 => Predicate::Lt(
+                column_name.to_string(),
+                LTValue::arbitrary_from(rng, *value).0,
+            ),
             _ => unreachable!(),
         }
     }
