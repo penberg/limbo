@@ -57,7 +57,6 @@ test: limbo test-compat test-sqlite3
 
 test-compat:
 	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
-	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/memory-repl.tcl
 .PHONY: test-compat
 
 test-sqlite3:

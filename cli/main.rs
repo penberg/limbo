@@ -3,12 +3,9 @@ mod opcodes_dictionary;
 
 use clap::Parser;
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::{
-    io::IsTerminal,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 #[allow(clippy::arc_with_non_send_sync)]

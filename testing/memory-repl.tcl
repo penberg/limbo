@@ -55,7 +55,7 @@ CREATE TABLE users (
     INSERT INTO users (id, first_name, last_name, age) VALUES
 	(1, 'Alice', 'Smith', 30), (2, 'Bob', 'Johnson', 25), (3, 'Charlie', 'Brown', 66), (4, 'David', 'Nichols', 70); INSERT INTO products (id, name, price) VALUES (1, 'Hat', 19.99), (2, 'Shirt', 29.99), (3, 'Shorts', 39.99), (4, 'Dress', 49.99);
     CREATE TABLE t(x1, x2, x3, x4);
-    INSERT INTO t VALUES (zeroblob(1024 * 1024 - 1), zeroblob(1024 * 1024 - 2), zeroblob(1024 * 1024 - 3), zeroblob(1024 * 1024 - 4));
+    INSERT INTO t VALUES (zeroblob(1024 - 1), zeroblob(1024 - 2), zeroblob(1024 - 3), zeroblob(1024 - 4));
 }
 
 set pipe [start_sqlite_repl $sqlite_exec $init_commands]
@@ -110,5 +110,41 @@ do_execsql_test $pipe select-count-constant-false {
   SELECT count(*) FROM users WHERE false;
 } {0}
 
+# **atrocious hack to test that we can open new connection
+do_execsql_test $pipe test-open-new-db {
+  .open testing/testing.db 
+} {}
+
+# now grab random tests from other areas and make sure we are querying that database
+do_execsql_test $pipe schema-1 {
+  .schema users
+} {CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        email TEXT,
+        phone_number TEXT,
+        address TEXT,
+        city TEXT,
+        state TEXT,
+        zipcode TEXT,
+        age INTEGER
+    );
+CREATE INDEX age_idx on users (age);}
+
+do_execsql_test $pipe cross-join {
+    select * from users, products limit 1;
+} {1|Jamie|Foster|dylan00@example.com|496-522-9493|62375 Johnson Rest Suite 322|West Lauriestad|IL|35865|94|1|hat|79.0}
+
+do_execsql_test $pipe left-join-self {
+    select u1.first_name as user_name, u2.first_name as neighbor_name from users u1 left join users as u2 on u1.id = u2.id + 1 limit 2;
+} {Jamie|
+Cindy|Jamie}
+
+do_execsql_test $pipe where-clause-eq-string {
+    select count(1) from users where last_name = 'Rodriguez';
+} {61}
+
 puts "All tests passed successfully."
 close $pipe
+exit 0

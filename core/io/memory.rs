@@ -25,10 +25,10 @@ impl MemoryIO {
     }
 
     fn get_or_allocate_page(&self, page_no: usize) -> RefMut<Vec<u8>> {
-        let mut pages = self.pages.borrow_mut();
-        pages.entry(page_no).or_insert_with(|| vec![0; PAGE_SIZE]);
-
-        RefMut::map(pages, |p| p.get_mut(&page_no).unwrap())
+        let pages = self.pages.borrow_mut();
+        RefMut::map(pages, |p| {
+            p.entry(page_no).or_insert_with(|| vec![0; PAGE_SIZE])
+        })
     }
 
     fn get_page(&self, page_no: usize) -> Option<RefMut<Vec<u8>>> {
