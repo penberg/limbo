@@ -3,8 +3,10 @@ mod opcodes_dictionary;
 
 use clap::Parser;
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() -> anyhow::Result<()> {
@@ -29,8 +31,6 @@ fn main() -> anyhow::Result<()> {
         }
         return Ok(());
     }
-    println!("Limbo v{}", env!("CARGO_PKG_VERSION"));
-    println!("Enter \".help\" for usage hints.");
     let mut rl = DefaultEditor::new()?;
     let home = dirs::home_dir().expect("Could not determine home directory");
     let history_file = home.join(".limbo_history");
@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
                 // At prompt, increment interrupt count
                 if interrupt_count.fetch_add(1, Ordering::SeqCst) >= 1 {
                     eprintln!("Interrupted. Exiting...");
-                    app.close_conn();
+                    let _ = app.close_conn();
                     break;
                 }
                 println!("Use .quit to exit or press Ctrl-C again to force quit.");
@@ -58,11 +58,11 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
             Err(ReadlineError::Eof) => {
-                app.close_conn();
+                let _ = app.close_conn();
                 break;
             }
             Err(err) => {
-                app.close_conn();
+                let _ = app.close_conn();
                 anyhow::bail!(err)
             }
         }
