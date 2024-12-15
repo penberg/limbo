@@ -16,6 +16,19 @@ Alan|551
 Albert|369
 Alec|247}
 
+do_execsql_test group_by_without_aggs {
+  select u.first_name from users u group by u.first_name limit 10;
+} {Aaron
+Abigail
+Adam
+Adrian
+Adriana
+Adrienne
+Aimee
+Alan
+Albert
+Alec}
+
 do_execsql_test group_by_two_joined_columns {
   select u.first_name, p.name, sum(u.age) from users u join products p on u.id = p.id group by u.first_name, p.name limit 10;
 } {Aimee|jeans|24

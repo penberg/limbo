@@ -39,7 +39,7 @@ pub struct Plan {
     /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// all the aggregates collected from the result columns, order by, and (TODO) having clauses
-    pub aggregates: Option<Vec<Aggregate>>,
+    pub aggregates: Vec<Aggregate>,
     /// limit clause
     pub limit: Option<usize>,
     /// all the tables referenced in the query
