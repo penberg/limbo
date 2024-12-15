@@ -9,19 +9,20 @@ license.workspace = true
 repository.workspace = true
 
 [features]
+capi = []
 lfs = []
 
 [package.metadata.dist]
 dist = true
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
 doc = false
-
-[build-dependencies]
-cbindgen = "0.27.0"
 
 [dependencies]
 env_logger = { version = "0.11.3", default-features = false }
 limbo_core = { path = "../core" }
 log = "0.4.22"
+
+
+[package.metadata.capi.header]
+name = "sqlite3.h"
