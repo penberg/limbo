@@ -28,6 +28,11 @@ pub const SQLITE_STATE_OPEN: u8 = 0x76;
 pub const SQLITE_STATE_SICK: u8 = 0xba;
 pub const SQLITE_STATE_BUSY: u8 = 0x6d;
 
+pub const SQLITE_CHECKPOINT_PASSIVE: ffi::c_int = 0;
+pub const SQLITE_CHECKPOINT_FULL: ffi::c_int = 1;
+pub const SQLITE_CHECKPOINT_RESTART: ffi::c_int = 2;
+pub const SQLITE_CHECKPOINT_TRUNCATE: ffi::c_int = 3;
+
 pub mod util;
 
 use util::sqlite3_safety_check_sick_or_ok;
@@ -917,4 +922,37 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
             }
         }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_wal_checkpoint(
+    _db: *mut sqlite3,
+    _db_name: *const std::ffi::c_char,
+) -> ffi::c_int {
+    sqlite3_wal_checkpoint_v2(
+        _db,
+        _db_name,
+        SQLITE_CHECKPOINT_PASSIVE,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_wal_checkpoint_v2(
+    db: *mut sqlite3,
+    _db_name: *const std::ffi::c_char,
+    _mode: ffi::c_int,
+    _log_size: *mut ffi::c_int,
+    _checkpoint_count: *mut ffi::c_int,
+) -> ffi::c_int {
+    if db.is_null() {
+        return SQLITE_MISUSE;
+    }
+    let db: &mut sqlite3 = &mut *db;
+    // TODO: Checkpointing modes and reporting back log size and checkpoint count to caller.
+    if let Err(e) = db.conn.checkpoint() {
+        return SQLITE_ERROR;
+    }
+    SQLITE_OK
 }
