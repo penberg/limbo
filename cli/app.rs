@@ -26,6 +26,15 @@ pub struct Opts {
     pub output_mode: OutputMode,
     #[clap(short, long, default_value = "")]
     pub output: String,
+    #[clap(
+        short,
+        long,
+        help = "don't display program information on start",
+        default_value_t = false
+    )]
+    pub quiet: bool,
+    #[clap(short, long, help = "Print commands before exection")]
+    pub echo: bool,
 }
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
@@ -65,6 +74,8 @@ pub enum Command {
     ShowInfo,
     /// Set the value of NULL to be printedin 'raw' mode
     NullValue,
+    /// Toggle 'echo' mode to repeat commands before execution
+    Echo,
 }
 
 impl Command {
@@ -76,7 +87,7 @@ impl Command {
             | Self::Opcodes
             | Self::ShowInfo
             | Self::SetOutput => 0,
-            Self::Open | Self::OutputMode | Self::Cwd | Self::NullValue => 1,
+            Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
         } + 1) // argv0
     }
 
@@ -87,11 +98,12 @@ impl Command {
             Self::Help => ".help",
             Self::Schema => ".schema ?<table>?",
             Self::Opcodes => ".opcodes",
-            Self::OutputMode => ".mode <mode>",
+            Self::OutputMode => ".mode raw|pretty",
             Self::SetOutput => ".output ?file?",
             Self::Cwd => ".cd <directory>",
             Self::ShowInfo => ".show",
             Self::NullValue => ".nullvalue <string>",
+            Self::Echo => ".echo on|off",
         }
     }
 }
@@ -110,6 +122,7 @@ impl FromStr for Command {
             ".cd" => Ok(Self::Cwd),
             ".show" => Ok(Self::ShowInfo),
             ".nullvalue" => Ok(Self::NullValue),
+            ".echo" => Ok(Self::Echo),
             _ => Err("Unknown command".to_string()),
         }
     }
@@ -122,17 +135,61 @@ pub struct Limbo {
     io: Arc<dyn limbo_core::IO>,
     writer: Box<dyn Write>,
     conn: Rc<limbo_core::Connection>,
+    pub interrupt_count: Arc<AtomicUsize>,
+    input_buff: String,
+    opts: Settings,
+}
+
+pub struct Settings {
     output_filename: String,
     db_file: String,
-    output_mode: OutputMode,
-    is_stdout: bool,
-    input_buff: String,
     null_value: String,
+    output_mode: OutputMode,
+    echo: bool,
+    is_stdout: bool,
+}
+
+impl From<&Opts> for Settings {
+    fn from(opts: &Opts) -> Self {
+        Self {
+            null_value: String::new(),
+            output_mode: opts.output_mode,
+            echo: false,
+            is_stdout: opts.output == "",
+            output_filename: opts.output.clone(),
+            db_file: opts
+                .database
+                .as_ref()
+                .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Settings:\nOutput mode: {}\nDB: {}\nOutput: {}\nNull value: {}\nCWD: {}\nEcho: {}",
+            self.output_mode,
+            self.db_file,
+            match self.is_stdout {
+                true => "STDOUT",
+                false => &self.output_filename,
+            },
+            self.null_value,
+            std::env::current_dir().unwrap().display(),
+            match self.echo {
+                true => "on",
+                false => "off",
+            }
+        )
+    }
 }
 
 impl Limbo {
     #[allow(clippy::arc_with_non_send_sync)]
-    pub fn new(opts: &Opts) -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
+        let opts = Opts::parse();
         let io: Arc<dyn limbo_core::IO> = match opts.database {
             Some(ref path) if path.exists() => Arc::new(limbo_core::PlatformIO::new()?),
             _ => Arc::new(limbo_core::MemoryIO::new()?),
@@ -148,23 +205,42 @@ impl Limbo {
         } else {
             Box::new(io::stdout())
         };
-        let output = if opts.output.is_empty() {
-            "STDOUT"
-        } else {
-            &opts.output
-        };
-        Ok(Self {
+        let interrupt_count = Arc::new(AtomicUsize::new(0));
+        {
+            let interrupt_count: Arc<AtomicUsize> = Arc::clone(&interrupt_count);
+            ctrlc::set_handler(move || {
+                // Increment the interrupt count on Ctrl-C
+                interrupt_count.fetch_add(1, Ordering::SeqCst);
+            })
+            .expect("Error setting Ctrl-C handler");
+        }
+        let mut app = Self {
             prompt: PROMPT.to_string(),
             io,
             writer,
-            output_filename: output.to_string(),
             conn,
-            db_file,
-            output_mode: opts.output_mode,
-            is_stdout: true,
+            interrupt_count,
             input_buff: String::new(),
-            null_value: String::new(),
-        })
+            opts: Settings::from(&opts),
+        };
+        if opts.sql.is_some() {
+            app.handle_first_input(opts.sql.as_ref().unwrap());
+        }
+        if !opts.quiet {
+            app.write_fmt(format_args!("Limbo v{}", env!("CARGO_PKG_VERSION")))?;
+            app.writeln("Enter \".help\" for usage hints.")?;
+            app.display_in_memory()?;
+        }
+        return Ok(app);
+    }
+
+    fn handle_first_input(&mut self, cmd: &str) {
+        if cmd.trim().starts_with('.') {
+            self.handle_dot_command(&cmd);
+        } else if let Err(e) = self.query(&cmd) {
+            eprintln!("{}", e);
+        }
+        std::process::exit(0);
     }
 
     fn set_multiline_prompt(&mut self) {
@@ -180,8 +256,8 @@ impl Limbo {
         };
     }
 
-    pub fn display_in_memory(&mut self) -> std::io::Result<()> {
-        if self.db_file == ":memory:" {
+    fn display_in_memory(&mut self) -> std::io::Result<()> {
+        if self.opts.db_file == ":memory:" {
             self.writeln("Connected to a transient in-memory database.")?;
             self.writeln("Use \".open FILENAME\" to reopen on a persistent database")?;
         }
@@ -189,19 +265,8 @@ impl Limbo {
     }
 
     fn show_info(&mut self) -> std::io::Result<()> {
-        self.writeln("------------------------------\nCurrent settings:")?;
-        let output = format!(
-            "Output mode: {}\nDB: {}\nOutput: {}\nCWD: {}\nNull value: {}",
-            self.output_mode,
-            self.db_file,
-            self.output_filename,
-            std::env::current_dir().unwrap().display(),
-            match self.null_value.is_empty() {
-                true => "\'\'".to_string(),
-                false => self.null_value.clone(),
-            }
-        );
-        self.writeln(output)
+        let opts = format!("{}", self.opts);
+        self.writeln(opts)
     }
 
     pub fn reset_input(&mut self) {
@@ -213,6 +278,14 @@ impl Limbo {
         self.conn.close()
     }
 
+    fn toggle_echo(&mut self, arg: &str) {
+        match arg.trim().to_lowercase().as_str() {
+            "on" => self.opts.echo = true,
+            "off" => self.opts.echo = false,
+            _ => {}
+        }
+    }
+
     fn open_db(&mut self, path: &str) -> anyhow::Result<()> {
         self.conn.close()?;
         match path {
@@ -221,7 +294,7 @@ impl Limbo {
                 self.io = Arc::clone(&io);
                 let db = Database::open_file(self.io.clone(), path)?;
                 self.conn = db.connect();
-                self.db_file = ":memory:".to_string();
+                self.opts.db_file = ":memory:".to_string();
                 return Ok(());
             }
             path => {
@@ -229,17 +302,22 @@ impl Limbo {
                 self.io = Arc::clone(&io);
                 let db = Database::open_file(self.io.clone(), path)?;
                 self.conn = db.connect();
-                self.db_file = path.to_string();
+                self.opts.db_file = path.to_string();
                 return Ok(());
             }
         }
     }
 
     fn set_output_file(&mut self, path: &str) -> Result<(), String> {
+        if path.is_empty() || path.eq_ignore_ascii_case("stdout") {
+            self.set_output_stdout();
+            return Ok(());
+        }
         match std::fs::File::create(path) {
             Ok(file) => {
                 self.writer = Box::new(file);
-                self.is_stdout = false;
+                self.opts.is_stdout = false;
+                self.opts.output_filename = path.to_string();
                 return Ok(());
             }
             Err(e) => {
@@ -251,11 +329,11 @@ impl Limbo {
     fn set_output_stdout(&mut self) {
         let _ = self.writer.flush();
         self.writer = Box::new(io::stdout());
-        self.is_stdout = true;
+        self.opts.is_stdout = true;
     }
 
     fn set_mode(&mut self, mode: OutputMode) {
-        self.output_mode = mode;
+        self.opts.output_mode = mode;
     }
 
     fn write_fmt(&mut self, fmt: std::fmt::Arguments) -> io::Result<()> {
@@ -276,7 +354,6 @@ impl Limbo {
     pub fn handle_input_line(
         &mut self,
         line: &str,
-        interrupt_count: &Arc<AtomicUsize>,
         rl: &mut rustyline::DefaultEditor,
     ) -> anyhow::Result<()> {
         if self.input_buff.is_empty() {
@@ -286,18 +363,22 @@ impl Limbo {
             if line.starts_with('.') {
                 self.handle_dot_command(line);
                 rl.add_history_entry(line.to_owned())?;
-                interrupt_count.store(0, Ordering::SeqCst);
+                self.interrupt_count.store(0, Ordering::SeqCst);
                 return Ok(());
             }
         }
         if line.ends_with(';') {
             self.buffer_input(line);
             let buff = self.input_buff.clone();
+            let echo = self.opts.echo;
             buff.split(';')
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .for_each(|stmt| {
-                    if let Err(e) = self.query(stmt, interrupt_count) {
+                    if echo {
+                        let _ = self.writeln(stmt);
+                    }
+                    if let Err(e) = self.query(stmt) {
                         let _ = self.writeln(e.to_string());
                     }
                 });
@@ -307,7 +388,7 @@ impl Limbo {
             self.set_multiline_prompt();
         }
         rl.add_history_entry(line.to_owned())?;
-        interrupt_count.store(0, Ordering::SeqCst);
+        self.interrupt_count.store(0, Ordering::SeqCst);
         Ok(())
     }
 
@@ -355,7 +436,7 @@ impl Limbo {
                     }
                 }
                 Command::NullValue => {
-                    self.null_value = args[1].to_string();
+                    self.opts.null_value = args[1].to_string();
                 }
                 Command::OutputMode => match OutputMode::from_str(args[1], true) {
                     Ok(mode) => {
@@ -373,6 +454,9 @@ impl Limbo {
                     } else {
                         self.set_output_stdout();
                     }
+                }
+                Command::Echo => {
+                    self.toggle_echo(args[1]);
                 }
                 Command::Cwd => {
                     let _ = std::env::set_current_dir(args[1]);
@@ -392,11 +476,11 @@ impl Limbo {
         }
     }
 
-    pub fn query(&mut self, sql: &str, interrupt_count: &Arc<AtomicUsize>) -> anyhow::Result<()> {
+    pub fn query(&mut self, sql: &str) -> anyhow::Result<()> {
         match self.conn.query(sql) {
-            Ok(Some(ref mut rows)) => match self.output_mode {
+            Ok(Some(ref mut rows)) => match self.opts.output_mode {
                 OutputMode::Raw => loop {
-                    if interrupt_count.load(Ordering::SeqCst) > 0 {
+                    if self.interrupt_count.load(Ordering::SeqCst) > 0 {
                         println!("Query interrupted.");
                         return Ok(());
                     }
@@ -409,7 +493,7 @@ impl Limbo {
                                 }
                                 let _ = self.writer.write(
                                     match value {
-                                        Value::Null => self.null_value.clone(),
+                                        Value::Null => self.opts.null_value.clone(),
                                         Value::Integer(i) => format!("{}", i),
                                         Value::Float(f) => format!("{:?}", f),
                                         Value::Text(s) => s.to_string(),
@@ -435,7 +519,7 @@ impl Limbo {
                     }
                 },
                 OutputMode::Pretty => {
-                    if interrupt_count.load(Ordering::SeqCst) > 0 {
+                    if self.interrupt_count.load(Ordering::SeqCst) > 0 {
                         println!("Query interrupted.");
                         return Ok(());
                     }
@@ -447,7 +531,7 @@ impl Limbo {
                                     row.values
                                         .iter()
                                         .map(|value| match value {
-                                            Value::Null => self.null_value.clone().cell(),
+                                            Value::Null => self.opts.null_value.clone().cell(),
                                             Value::Integer(i) => i.to_string().cell(),
                                             Value::Float(f) => f.to_string().cell(),
                                             Value::Text(s) => s.cell(),
@@ -555,6 +639,7 @@ Special Commands:
 .opcodes                   Display all the opcodes defined by the virtual machine
 .cd <directory>            Change the current working directory.
 .nullvalue <string>        Set the value to be displayed for null values.
+.echo on|off               Toggle echo mode to repeat commands before execution.
 .help                      Display this help message.
 
 Usage Examples:
