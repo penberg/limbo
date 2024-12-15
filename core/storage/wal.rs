@@ -57,12 +57,37 @@ pub trait Wal {
     fn get_min_frame(&self) -> u64;
 }
 
+// Syncing requires a state machine because we need to schedule a sync and then wait until it is
+// finished. If we don't wait there will be undefined behaviour that no one wants to debug.
 #[derive(Copy, Clone)]
 enum SyncState {
-    Start,
-    Wait,
+    NotSyncing,
+    Syncing,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum CheckpointState {
+    Start,
+    ReadFrame,
+    WaitReadFrame,
+    WritePage,
+    WaitWritePage,
+    Done,
+}
+
+pub enum CheckpointStatus {
+    Done,
+    IO,
+}
+
+// Checkpointing is a machine state the has multiple steps. Since there are multiple steps we save
+// in flight information of the checkpoint in OngoingCheckpoint. page is just a helper Page to do
+// page operations like reading a frame to a page, and writing a page to disk. This page should not
+// be placed back in pager page cache or anything, it's just a helper.
+// min_frame and max_frame is the range of frames that can be safely transferred from WAL to db
+// file.
+// current_page is a helper to iterate through all the pages that might have a frame in the safe
+// range. This is inneficient for now.
 struct OngoingCheckpoint {
     page: PageRef,
     state: CheckpointState,
@@ -87,32 +112,24 @@ pub struct WalFile {
     min_frame: u64,
 }
 
+/// WalFileShared is the part of a WAL that will be shared between threads. A wal has information
+/// that needs to be communicated between threads so this struct does the job.
 pub struct WalFileShared {
     wal_header: Arc<RwLock<sqlite3_ondisk::WalHeader>>,
     min_frame: u64,
     max_frame: u64,
     nbackfills: u64,
-    // Maps pgno to frame id and offset in wal file
-    frame_cache: HashMap<u64, Vec<u64>>, // we will avoid shm files because we are not
-    // multiprocess
+    // Frame cache maps a Page to all the frames it has stored in WAL in ascending order.
+    // This is do to easily find the frame it must checkpoint each connection if a checkpoint is
+    // necessary.
+    // One difference between SQLite and limbo is that we will never support multi process, meaning
+    // we don't need WAL's index file. So we can do stuff like this without shared memory.
+    // TODO: this will need refactoring because this is incredible memory inneficient.
+    frame_cache: HashMap<u64, Vec<u64>>,
+    // Another memory inneficient array made to just keep track of pages that are in frame_cache.
     pages_in_frames: Vec<u64>,
     last_checksum: (u32, u32), // Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
     file: Rc<dyn File>,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum CheckpointState {
-    Start,
-    ReadFrame,
-    WaitReadFrame,
-    WritePage,
-    WaitWritePage,
-    Done,
-}
-
-pub enum CheckpointStatus {
-    Done,
-    IO,
 }
 
 impl Wal for WalFile {
@@ -238,7 +255,11 @@ impl Wal for WalFile {
                 }
                 CheckpointState::ReadFrame => {
                     let shared = self.shared.read().unwrap();
-                    if self.ongoing_checkpoint.current_page as usize >= shared.pages_in_frames.len()
+                    assert!(
+                        self.ongoing_checkpoint.current_page as usize
+                            <= shared.pages_in_frames.len()
+                    );
+                    if self.ongoing_checkpoint.current_page as usize == shared.pages_in_frames.len()
                     {
                         self.ongoing_checkpoint.state = CheckpointState::Done;
                         continue 'checkpoint_loop;
@@ -321,7 +342,7 @@ impl Wal for WalFile {
     fn sync(&mut self) -> Result<CheckpointStatus> {
         let state = *self.sync_state.borrow();
         match state {
-            SyncState::Start => {
+            SyncState::NotSyncing => {
                 let shared = self.shared.write().unwrap();
                 log::debug!("wal_sync");
                 {
@@ -335,14 +356,14 @@ impl Wal for WalFile {
                     });
                     shared.file.sync(Rc::new(completion))?;
                 }
-                self.sync_state.replace(SyncState::Wait);
+                self.sync_state.replace(SyncState::Syncing);
                 Ok(CheckpointStatus::IO)
             }
-            SyncState::Wait => {
+            SyncState::Syncing => {
                 if *self.syncing.borrow() {
                     Ok(CheckpointStatus::IO)
                 } else {
-                    self.sync_state.replace(SyncState::Start);
+                    self.sync_state.replace(SyncState::NotSyncing);
                     Ok(CheckpointStatus::Done)
                 }
             }
@@ -394,7 +415,7 @@ impl WalFile {
             max_frame: 0,
             min_frame: 0,
             buffer_pool,
-            sync_state: RefCell::new(SyncState::Start),
+            sync_state: RefCell::new(SyncState::NotSyncing),
         }
     }
 
