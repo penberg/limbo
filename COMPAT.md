@@ -179,8 +179,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | exp(X)     | Yes    |         |
 | floor(X)   | Yes    |         |
 | ln(X)      | Yes    |         |
-| log(B,X)   | No     |         |
-| log(X)     | No     |         |
+| log(B,X)   | Yes    |         |
+| log(X)     | Yes    |         |
 | log10(X)   | Yes    |         |
 | log2(X)    | Yes    |         |
 | mod(X,Y)   | Yes    |         |

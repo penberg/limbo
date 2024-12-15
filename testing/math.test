@@ -976,3 +976,68 @@ do_execsql_test power-null-int {
 do_execsql_test power-int-null {
   SELECT power(5, null)
 } {}
+
+
+do_execsql_test_tolerance log-int {
+  SELECT log(1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance log-float {
+  SELECT log(1.5)
+} {0.176091259055681} $tolerance
+
+do_execsql_test_tolerance log-str {
+  SELECT log('1.5')
+} {0.176091259055681} $tolerance
+
+do_execsql_test log-negative {
+  SELECT log(-1.5)
+} {}
+
+do_execsql_test log-null {
+  SELECT log(null)
+} {}
+
+do_execsql_test_tolerance log-int-int {
+  SELECT log(5, 1)
+} {0.0} $tolerance
+
+do_execsql_test_tolerance log-int-float {
+  SELECT log(5, 1.5)
+} {0.251929636412592} $tolerance
+
+do_execsql_test_tolerance log-int-str {
+  SELECT log(5, '1.5')
+} {0.251929636412592} $tolerance
+
+do_execsql_test_tolerance log-float-int {
+  SELECT log(5.5, 10)
+} {1.35068935021985} $tolerance
+
+do_execsql_test_tolerance log-float-float {
+  SELECT log(5.5, 1.5)
+} {0.237844588273313} $tolerance
+
+do_execsql_test_tolerance log-float-str {
+  SELECT log(5.5, '1.5')
+} {0.237844588273313} $tolerance
+
+do_execsql_test_tolerance log-str-str {
+  SELECT log('5.5', '1.5')
+} {0.237844588273313} $tolerance
+
+do_execsql_test log-negative-negative {
+  SELECT log(-1.5, -1.5)
+} {}
+
+do_execsql_test log-float-negative {
+  SELECT log(1.5, -1.5)
+} {}
+
+do_execsql_test log-null-int {
+  SELECT log(null, 5)
+} {}
+
+do_execsql_test log-int-null {
+  SELECT log(5, null)
+} {}

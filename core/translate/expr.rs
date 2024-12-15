@@ -1696,7 +1696,40 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
-                    _ => unimplemented!(),
+
+                    MathFuncArity::UnaryOrBinary => {
+                        let args = if let Some(args) = args {
+                            if args.len() > 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with more than 2 arguments",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let regs = program.alloc_registers(args.len());
+
+                        for (i, arg) in args.iter().enumerate() {
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                arg,
+                                regs + i,
+                                precomputed_exprs_to_registers,
+                            )?;
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: regs,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
             }
         }
