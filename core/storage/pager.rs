@@ -413,6 +413,7 @@ impl Pager {
                 Err(err) => panic!("error while clearing cache {}", err),
             }
         }
+        // TODO: only clear cache of things that are really invalidated
         self.page_cache.write().unwrap().clear();
     }
 
