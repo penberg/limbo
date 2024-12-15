@@ -8,12 +8,14 @@ use std::{
     sync::Arc,
 };
 
-const PAGE_SIZE: usize = 4 * 1024;
-
 pub struct MemoryIO {
-    pages: RefCell<BTreeMap<usize, Vec<u8>>>,
+    pages: RefCell<BTreeMap<usize, MemPage>>,
     size: RefCell<usize>,
 }
+
+// TODO: page size flag
+const PAGE_SIZE: usize = 4096;
+type MemPage = Box<[u8; PAGE_SIZE]>;
 
 impl MemoryIO {
     #[allow(clippy::arc_with_non_send_sync)]
@@ -24,19 +26,17 @@ impl MemoryIO {
         }))
     }
 
-    fn get_or_allocate_page(&self, page_no: usize) -> RefMut<Vec<u8>> {
+    fn get_or_allocate_page(&self, page_no: usize) -> RefMut<MemPage> {
         let pages = self.pages.borrow_mut();
         RefMut::map(pages, |p| {
-            p.entry(page_no).or_insert_with(|| vec![0; PAGE_SIZE])
+            p.entry(page_no).or_insert_with(|| Box::new([0; PAGE_SIZE]))
         })
     }
 
-    fn get_page(&self, page_no: usize) -> Option<RefMut<Vec<u8>>> {
-        let pages = self.pages.borrow_mut();
-        if pages.contains_key(&page_no) {
-            Some(RefMut::map(pages, |p| p.get_mut(&page_no).unwrap()))
-        } else {
-            None
+    fn get_page(&self, page_no: usize) -> Option<RefMut<MemPage>> {
+        match RefMut::filter_map(self.pages.borrow_mut(), |pages| pages.get_mut(&page_no)) {
+            Ok(page) => Some(page),
+            Err(_) => None,
         }
     }
 }
@@ -95,33 +95,33 @@ impl File for MemoryFile {
         }
 
         let read_len = buf_len.min(file_size - pos);
-        let mut read_buf = r.buf_mut();
+        {
+            let mut read_buf = r.buf_mut();
+            let mut offset = pos;
+            let mut remaining = read_len;
+            let mut buf_offset = 0;
 
-        let mut offset = pos;
-        let mut remaining = read_len;
-        let mut buf_offset = 0;
+            while remaining > 0 {
+                let page_no = offset / PAGE_SIZE;
+                let page_offset = offset % PAGE_SIZE;
+                let bytes_to_read = remaining.min(PAGE_SIZE - page_offset);
+                if let Some(page) = self.io.get_page(page_no) {
+                    {
+                        let page_data = &*page;
+                        read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read]
+                            .copy_from_slice(&page_data[page_offset..page_offset + bytes_to_read]);
+                    }
+                } else {
+                    for b in &mut read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read] {
+                        *b = 0;
+                    }
+                }
 
-        while remaining > 0 {
-            let page_no = offset / PAGE_SIZE;
-            let page_offset = offset % PAGE_SIZE;
-            let bytes_to_read = remaining.min(PAGE_SIZE - page_offset);
-            if let Some(page) = self.io.get_page(page_no) {
-                {
-                    let page_data = &*page;
-                    read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read]
-                        .copy_from_slice(&page_data[page_offset..page_offset + bytes_to_read]);
-                }
-            } else {
-                for b in &mut read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read] {
-                    *b = 0;
-                }
+                offset += bytes_to_read;
+                buf_offset += bytes_to_read;
+                remaining -= bytes_to_read;
             }
-
-            offset += bytes_to_read;
-            buf_offset += bytes_to_read;
-            remaining -= bytes_to_read;
         }
-        drop(read_buf);
         c.complete(read_len as i32);
         Ok(())
     }
