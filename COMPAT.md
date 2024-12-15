@@ -77,7 +77,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 |------------------------------|---------|---------|
 | literals                     | Yes     |         |
 | schema.table.column          | Partial | Schemas aren't supported |
-| unary operator               | Partial | `+-` supported, `~` isn't |
+| unary operator               | Yes     | |
 | binary operator              | Partial | Only `%`, `!<`, and `!>` are unsupported |
 | agg() FILTER (WHERE ...)     | No      | Is incorrectly ignored |
 | ... OVER (...)               | No      | Is incorrectly ignored |
