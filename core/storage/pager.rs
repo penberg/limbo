@@ -128,6 +128,8 @@ enum FlushState {
 #[derive(Clone, Debug)]
 enum CheckpointState {
     Checkpoint,
+    SyncDbFile,
+    WaitSyncDbFile,
     CheckpointDone,
 }
 
@@ -314,7 +316,6 @@ impl Pager {
                         self.wal.borrow_mut().append_frame(
                             page.clone(),
                             db_size,
-                            self,
                             self.flush_info.borrow().in_flight_writes.clone(),
                         )?;
                     }
@@ -380,10 +381,22 @@ impl Pager {
                     match self.wal.borrow_mut().checkpoint(self, in_flight)? {
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
                         CheckpointStatus::Done => {
-                            self.checkpoint_state
-                                .replace(CheckpointState::CheckpointDone);
+                            self.checkpoint_state.replace(CheckpointState::SyncDbFile);
                         }
                     };
+                }
+                CheckpointState::SyncDbFile => {
+                    sqlite3_ondisk::begin_sync(self.page_io.clone(), self.syncing.clone())?;
+                    self.checkpoint_state
+                        .replace(CheckpointState::WaitSyncDbFile);
+                }
+                CheckpointState::WaitSyncDbFile => {
+                    if *self.syncing.borrow() {
+                        return Ok(CheckpointStatus::IO);
+                    } else {
+                        self.checkpoint_state
+                            .replace(CheckpointState::CheckpointDone);
+                    }
                 }
                 CheckpointState::CheckpointDone => {
                     let in_flight = self.checkpoint_inflight.clone();
@@ -406,7 +419,9 @@ impl Pager {
                 .borrow_mut()
                 .checkpoint(self, Rc::new(RefCell::new(0)))
             {
-                Ok(CheckpointStatus::IO) => {}
+                Ok(CheckpointStatus::IO) => {
+                    self.io.run_once();
+                }
                 Ok(CheckpointStatus::Done) => {
                     break;
                 }
