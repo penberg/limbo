@@ -60,6 +60,10 @@ limbo-wasm:
 test: limbo test-compat test-sqlite3
 .PHONY: test
 
+test-shell: limbo
+	./testing/memory-repl.tcl
+.PHONY: test-shell
+
 test-compat:
 	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
 .PHONY: test-compat
