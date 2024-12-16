@@ -2520,15 +2520,21 @@ impl Program {
 
                             MathFuncArity::UnaryOrBinary => match math_func {
                                 MathFunc::Log => {
-                                    let lhs = &state.registers[*start_reg];
-                                    let rhs = state.registers.get(*start_reg + 1);
-
-                                    let result = if let Some(arg) = rhs {
-                                        exec_math_log(arg, Some(lhs))
-                                    } else {
-                                        exec_math_log(lhs, None)
+                                    let result = match arg_count {
+                                        1 => {
+                                            let arg = &state.registers[*start_reg];
+                                            exec_math_log(arg, None)
+                                        }
+                                        2 => {
+                                            let base = &state.registers[*start_reg];
+                                            let arg = &state.registers[*start_reg + 1];
+                                            exec_math_log(arg, Some(base))
+                                        }
+                                        _ => unreachable!(
+                                            "{:?} function with unexpected number of arguments",
+                                            math_func
+                                        ),
                                     };
-
                                     state.registers[*dest] = result;
                                 }
                                 _ => unreachable!(
