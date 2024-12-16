@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use sqlite3_parser::ast;
+use sqlite3_parser::ast::{self, exprs_are_equivalent};
 
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -1766,13 +1766,10 @@ fn order_by_deduplicate_result_columns(
 ) -> Option<Vec<(usize, usize)>> {
     let mut result_column_remapping: Option<Vec<(usize, usize)>> = None;
     for (i, rc) in result_columns.iter().enumerate() {
-        // TODO: implement a custom equality check for expressions
-        // there are lots of examples where this breaks, even simple ones like
-        // sum(x) != SUM(x)
         let found = order_by
             .iter()
             .enumerate()
-            .find(|(_, (expr, _))| expr == &rc.expr);
+            .find(|(_, (expr, _))| exprs_are_equivalent(expr, &rc.expr));
         if let Some((j, _)) = found {
             if let Some(ref mut v) = result_column_remapping {
                 v.push((i, j));
