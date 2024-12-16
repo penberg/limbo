@@ -37,6 +37,8 @@ proc within_tolerance {actual expected tolerance} {
     expr {abs($actual - $expected) <= $tolerance}
 }
 
+# This function is used to test floating point values within a tolerance
+# FIXME: When Limbo's floating point presentation matches to SQLite, this could/should be removed
 proc do_execsql_test_tolerance {test_name sql_statements expected_outputs tolerance} {
     puts "Running test: $test_name"
     set combined_sql [string trim $sql_statements]

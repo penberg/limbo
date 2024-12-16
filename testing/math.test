@@ -3,6 +3,10 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+# Tolerance for floating point comparisons
+# FIXME: When Limbo's floating point presentation matches to SQLite, this could/should be removed
+set tolerance 1e-13
+
 do_execsql_test add-int {
   SELECT 10 + 1
 } {11}
@@ -361,8 +365,6 @@ do_execsql_test bitwise-not-zero {
 	SELECT ~0
 } {-1}
 
-
-set tolerance 1e-13
 
 do_execsql_test_tolerance pi {
   SELECT pi()
