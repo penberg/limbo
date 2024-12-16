@@ -15,6 +15,7 @@ use super::plan::{
  * but having them separate makes them easier to understand
  */
 pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
+    eliminate_between(&mut select_plan.source, &mut select_plan.where_clause)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constants(&mut select_plan.source, &mut select_plan.where_clause)?
     {
@@ -500,6 +501,46 @@ fn push_scan_direction(operator: &mut SourceOperator, direction: &Direction) {
     }
 }
 
+fn eliminate_between(
+    operator: &mut SourceOperator,
+    where_clauses: &mut Option<Vec<ast::Expr>>,
+) -> Result<()> {
+    if let Some(predicates) = where_clauses {
+        *predicates = predicates.drain(..).map(convert_between_expr).collect();
+    }
+
+    match operator {
+        SourceOperator::Join {
+            left,
+            right,
+            predicates,
+            ..
+        } => {
+            eliminate_between(left, where_clauses)?;
+            eliminate_between(right, where_clauses)?;
+
+            if let Some(predicates) = predicates {
+                *predicates = predicates.drain(..).map(convert_between_expr).collect();
+            }
+        }
+        SourceOperator::Scan {
+            predicates: Some(preds),
+            ..
+        } => {
+            *preds = preds.drain(..).map(convert_between_expr).collect();
+        }
+        SourceOperator::Search {
+            predicates: Some(preds),
+            ..
+        } => {
+            *preds = preds.drain(..).map(convert_between_expr).collect();
+        }
+        _ => (),
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstantPredicate {
     AlwaysTrue,
@@ -804,6 +845,59 @@ pub fn try_extract_index_search_expression(
             Ok(Either::Left(ast::Expr::Binary(lhs, operator, rhs)))
         }
         _ => Ok(Either::Left(expr)),
+    }
+}
+
+fn convert_between_expr(expr: ast::Expr) -> ast::Expr {
+    match expr {
+        ast::Expr::Between {
+            lhs,
+            not,
+            start,
+            end,
+        } => {
+            let lower_bound = ast::Expr::Binary(start, ast::Operator::LessEquals, lhs.clone());
+            let upper_bound = ast::Expr::Binary(lhs, ast::Operator::LessEquals, end);
+
+            if not {
+                // Convert NOT BETWEEN to NOT (x <= start AND y <= end)
+                ast::Expr::Unary(
+                    ast::UnaryOperator::Not,
+                    Box::new(ast::Expr::Binary(
+                        Box::new(lower_bound),
+                        ast::Operator::And,
+                        Box::new(upper_bound),
+                    )),
+                )
+            } else {
+                // Convert BETWEEN to (start <= y AND y <= end)
+                ast::Expr::Binary(
+                    Box::new(lower_bound),
+                    ast::Operator::And,
+                    Box::new(upper_bound),
+                )
+            }
+        }
+        // Process other expressions recursively
+        ast::Expr::Binary(lhs, op, rhs) => ast::Expr::Binary(
+            Box::new(convert_between_expr(*lhs)),
+            op,
+            Box::new(convert_between_expr(*rhs)),
+        ),
+        ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args,
+            order_by,
+            filter_over,
+        } => ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args: args.map(|args| args.into_iter().map(convert_between_expr).collect()),
+            order_by,
+            filter_over,
+        },
+        _ => expr,
     }
 }
 
