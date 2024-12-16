@@ -274,7 +274,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 where_clause: None,
                 group_by: None,
                 order_by: None,
-                aggregates: None,
+                aggregates: vec![],
                 limit: None,
                 referenced_tables,
                 available_indexes: schema.indexes.clone().into_values().flatten().collect(),
@@ -432,11 +432,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 });
             }
 
-            plan.aggregates = if aggregate_expressions.is_empty() {
-                None
-            } else {
-                Some(aggregate_expressions)
-            };
+            plan.aggregates = aggregate_expressions;
 
             // Parse the ORDER BY clause
             if let Some(order_by) = select.order_by {
@@ -463,9 +459,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     };
 
                     bind_column_references(&mut expr, &plan.referenced_tables)?;
-                    if let Some(aggs) = &mut plan.aggregates {
-                        resolve_aggregates(&expr, aggs);
-                    }
+                    resolve_aggregates(&expr, &mut plan.aggregates);
 
                     key.push((
                         expr,

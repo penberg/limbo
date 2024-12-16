@@ -198,8 +198,7 @@ pub fn emit_program(
     }
 
     if let Some(ref mut group_by) = plan.group_by {
-        let aggregates = plan.aggregates.as_mut().unwrap();
-        init_group_by(&mut program, group_by, aggregates, &mut metadata)?;
+        init_group_by(&mut program, group_by, &plan.aggregates, &mut metadata)?;
     }
     init_source(&mut program, &plan.source, &mut metadata)?;
 
@@ -235,18 +234,18 @@ pub fn emit_program(
             &plan.result_columns,
             group_by,
             plan.order_by.as_ref(),
-            &plan.aggregates.as_ref().unwrap(),
+            &plan.aggregates,
             plan.limit.clone(),
             &plan.referenced_tables,
             &mut metadata,
         )?;
-    } else if let Some(ref mut aggregates) = plan.aggregates {
+    } else if !plan.aggregates.is_empty() {
         // Handle aggregation without GROUP BY
         agg_without_group_by_emit(
             &mut program,
             &plan.referenced_tables,
             &plan.result_columns,
-            aggregates,
+            &plan.aggregates,
             &mut metadata,
         )?;
         // Single row result for aggregates without GROUP BY, so ORDER BY not needed
@@ -825,14 +824,14 @@ fn inner_loop_emit(
             metadata,
             InnerLoopEmitTarget::GroupBySorter {
                 group_by,
-                aggregates: &plan.aggregates.as_ref().unwrap(),
+                aggregates: &plan.aggregates,
             },
             &plan.referenced_tables,
         );
     }
     // if we DONT have a group by, but we have aggregates, we emit without ResultRow.
     // we also do not need to sort because we are emitting a single row.
-    if plan.aggregates.is_some() {
+    if !plan.aggregates.is_empty() {
         return inner_loop_source_emit(
             program,
             &plan.result_columns,
@@ -870,7 +869,7 @@ fn inner_loop_emit(
 fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
     result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Option<Vec<Aggregate>>,
+    aggregates: &Vec<Aggregate>,
     metadata: &mut Metadata,
     emit_target: InnerLoopEmitTarget,
     referenced_tables: &[BTreeTableReference],
@@ -936,7 +935,6 @@ fn inner_loop_source_emit(
             Ok(())
         }
         InnerLoopEmitTarget::AggStep => {
-            let aggregates = aggregates.as_ref().unwrap();
             let agg_final_label = program.allocate_label();
             metadata.termination_label_stack.push(agg_final_label);
             let num_aggs = aggregates.len();
@@ -965,7 +963,7 @@ fn inner_loop_source_emit(
         }
         InnerLoopEmitTarget::ResultRow { limit } => {
             assert!(
-                aggregates.is_none(),
+                aggregates.is_empty(),
                 "We should not get here with aggregates"
             );
             emit_select_result(
