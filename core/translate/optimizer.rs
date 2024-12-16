@@ -856,21 +856,24 @@ fn convert_between_expr(expr: ast::Expr) -> ast::Expr {
             start,
             end,
         } => {
-            let lower_bound = ast::Expr::Binary(start, ast::Operator::LessEquals, lhs.clone());
-            let upper_bound = ast::Expr::Binary(lhs, ast::Operator::LessEquals, end);
+            // Convert `y NOT BETWEEN x AND z` to `x > y OR y > z`
+            let (lower_op, upper_op) = if not {
+                (ast::Operator::Greater, ast::Operator::Greater)
+            } else {
+                // Convert `y BETWEEN x AND z` to `x <= y AND y <= z`
+                (ast::Operator::LessEquals, ast::Operator::LessEquals)
+            };
+
+            let lower_bound = ast::Expr::Binary(start, lower_op, lhs.clone());
+            let upper_bound = ast::Expr::Binary(lhs, upper_op, end);
 
             if not {
-                // Convert NOT BETWEEN to NOT (x <= start AND y <= end)
-                ast::Expr::Unary(
-                    ast::UnaryOperator::Not,
-                    Box::new(ast::Expr::Binary(
-                        Box::new(lower_bound),
-                        ast::Operator::And,
-                        Box::new(upper_bound),
-                    )),
+                ast::Expr::Binary(
+                    Box::new(lower_bound),
+                    ast::Operator::Or,
+                    Box::new(upper_bound),
                 )
             } else {
-                // Convert BETWEEN to (start <= y AND y <= end)
                 ast::Expr::Binary(
                     Box::new(lower_bound),
                     ast::Operator::And,
