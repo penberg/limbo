@@ -2492,9 +2492,18 @@ impl Program {
                             }
                         },
                         crate::function::Func::Math(math_func) => match math_func.arity() {
-                            MathFuncArity::Nullary => {
-                                state.registers[*dest] = OwnedValue::Float(std::f64::consts::PI);
-                            }
+                            MathFuncArity::Nullary => match math_func {
+                                MathFunc::Pi => {
+                                    state.registers[*dest] =
+                                        OwnedValue::Float(std::f64::consts::PI);
+                                }
+                                _ => {
+                                    unreachable!(
+                                        "Unexpected mathematical Nullary function {:?}",
+                                        math_func
+                                    );
+                                }
+                            },
 
                             MathFuncArity::Unary => {
                                 let reg_value = &state.registers[*start_reg];
