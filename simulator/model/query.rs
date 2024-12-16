@@ -2,7 +2,6 @@ use std::fmt::Display;
 
 use crate::model::table::{Table, Value};
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Predicate {
     And(Vec<Predicate>), // p1 AND p2 AND p3... AND pn
@@ -108,4 +107,3 @@ impl Display for Query {
         }
     }
 }
-

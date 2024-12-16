@@ -1,11 +1,9 @@
-
+use crate::generation::table::{GTValue, LTValue};
 use crate::generation::{Arbitrary, ArbitraryFrom};
-use crate::generation::table::{LTValue, GTValue};
 
 use crate::model::query::{Create, Delete, Insert, Predicate, Query, Select};
 use crate::model::table::{Table, Value};
 use rand::Rng;
-
 
 impl Arbitrary for Create {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
@@ -14,7 +12,6 @@ impl Arbitrary for Create {
         }
     }
 }
-
 
 impl ArbitraryFrom<Vec<Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<Table>) -> Self {
@@ -36,7 +33,6 @@ impl ArbitraryFrom<Vec<&Table>> for Select {
     }
 }
 
-
 impl ArbitraryFrom<Table> for Insert {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         let values = table
@@ -50,7 +46,6 @@ impl ArbitraryFrom<Table> for Insert {
         }
     }
 }
-
 
 impl ArbitraryFrom<Table> for Delete {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
@@ -74,7 +69,6 @@ impl ArbitraryFrom<Table> for Query {
         }
     }
 }
-
 
 struct CompoundPredicate(Predicate);
 struct SimplePredicate(Predicate);

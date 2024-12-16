@@ -1,7 +1,7 @@
 use generation::{Arbitrary, ArbitraryFrom};
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
-use model::table::{Column, Name, Table, Value};
 use model::query::{Insert, Predicate, Query, Select};
+use model::table::{Column, Name, Table, Value};
 use properties::{property_insert_select, property_select_all};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -11,8 +11,8 @@ use std::sync::Arc;
 use tempfile::TempDir;
 
 mod generation;
-mod properties;
 mod model;
+mod properties;
 
 struct SimulatorEnv {
     opts: SimulatorOpts,
@@ -48,8 +48,6 @@ struct SimulatorOpts {
     mode: SimulatorMode,
     page_size: usize,
 }
-
-
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() {
@@ -136,7 +134,6 @@ fn main() {
 
     env.io.print_stats();
 }
-
 
 fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
     if env.tables.is_empty() {
@@ -249,8 +246,6 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
     }
     Ok(())
 }
-
-
 
 fn get_all_rows(
     env: &mut SimulatorEnv,
@@ -477,4 +472,3 @@ impl Drop for SimulatorFile {
         self.inner.unlock_file().expect("Failed to unlock file");
     }
 }
-

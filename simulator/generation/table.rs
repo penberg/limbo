@@ -1,7 +1,6 @@
-
 use rand::Rng;
 
-use crate::generation::{Arbitrary, ArbitraryFrom, readable_name_custom, gen_random_text};
+use crate::generation::{gen_random_text, readable_name_custom, Arbitrary, ArbitraryFrom};
 use crate::model::table::{Column, ColumnType, Name, Table, Value};
 
 impl Arbitrary for Name {
@@ -10,7 +9,6 @@ impl Arbitrary for Name {
         Name(name.replace("-", "_"))
     }
 }
-
 
 impl Arbitrary for Table {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
@@ -38,7 +36,6 @@ impl Arbitrary for Column {
         }
     }
 }
-
 
 impl Arbitrary for ColumnType {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
@@ -193,4 +190,3 @@ impl ArbitraryFrom<Value> for GTValue {
         }
     }
 }
-

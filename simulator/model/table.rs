@@ -1,4 +1,3 @@
-
 use std::{fmt::Display, ops::Deref};
 
 pub(crate) struct Name(pub(crate) String);
@@ -88,4 +87,3 @@ impl Display for Value {
         }
     }
 }
-
