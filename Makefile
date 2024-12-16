@@ -57,8 +57,12 @@ limbo-wasm:
 	cargo build --package limbo-wasm --target wasm32-wasi
 .PHONY: limbo-wasm
 
-test: limbo test-compat test-sqlite3
+test: limbo test-compat test-sqlite3 test-shell
 .PHONY: test
+
+test-shell: limbo
+	./testing/shelltests.py
+.PHONY: test-shell
 
 test-compat:
 	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
