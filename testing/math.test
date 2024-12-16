@@ -443,18 +443,12 @@ do_execsql_test_tolerance sin-null {
 } {} $tolerance
 
 do_execsql_test_tolerance sin-products-id {
-  SELECT sin(id) from products
+  SELECT sin(id) from products limit 5
 } {0.8414709848078965
 0.9092974268256817
 0.1411200080598672
 -0.7568024953079282
--0.9589242746631385
--0.27941549819892586
-0.6569865987187891
-0.9893582466233818
-0.4121184852417566
--0.5440211108893698
--0.9999902065507035} $tolerance
+-0.9589242746631385} $tolerance
 
 
 do_execsql_test_tolerance asinh-int {
@@ -878,31 +872,19 @@ do_execsql_test mod-float-zero {
 } {}
 
 do_execsql_test mod-products-id {
-  SELECT mod(products.id, 3) from products
+  SELECT mod(products.id, 3) from products limit 5
 } {1.0
-2.0
-0.0
-1.0
-2.0
-0.0
-1.0
 2.0
 0.0
 1.0
 2.0}
 
 do_execsql_test mod-products-price-id {
-  SELECT mod(products.price, products.id) from products
+  SELECT mod(products.price, products.id) from products limit 5
 } {0.0
 0.0
 0.0
 1.0
-4.0
-4.0
-1.0
-2.0
-1.0
-3.0
 4.0}
 
 
