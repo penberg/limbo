@@ -14,6 +14,10 @@
 
 * Add support for unex(x, y) function (Kacper Kołodziej)
 
+### Fixed
+
+* Fix primary key handling when there's rowid and PK is not alias (Jussi Saurio)
+
 ## 0.0.9 - 2024-12-12
 
 ### Added
