@@ -1611,11 +1611,11 @@ pub fn translate_expr(
             database: _,
             table,
             column,
-            is_rowid_alias: is_primary_key,
+            is_rowid_alias,
         } => {
             let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
             let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
-            if *is_primary_key {
+            if *is_rowid_alias {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
                     dest: target_register,
