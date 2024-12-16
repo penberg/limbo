@@ -216,7 +216,7 @@ pub fn emit_program(
     // Clean up and close the main execution loop
     close_loop(
         &mut program,
-        &mut plan.source,
+        &plan.source,
         &mut metadata,
         &plan.referenced_tables,
     )?;
@@ -235,7 +235,7 @@ pub fn emit_program(
             group_by,
             plan.order_by.as_ref(),
             &plan.aggregates,
-            plan.limit.clone(),
+            plan.limit,
             &plan.referenced_tables,
             &mut metadata,
         )?;
@@ -259,7 +259,7 @@ pub fn emit_program(
                 &mut program,
                 order_by,
                 &plan.result_columns,
-                plan.limit.clone(),
+                plan.limit,
                 &mut metadata,
             )?;
         }
@@ -274,7 +274,7 @@ pub fn emit_program(
 /// Initialize resources needed for ORDER BY processing
 fn init_order_by(
     program: &mut ProgramBuilder,
-    order_by: &Vec<(ast::Expr, Direction)>,
+    order_by: &[(ast::Expr, Direction)],
     metadata: &mut Metadata,
 ) -> Result<()> {
     metadata
@@ -301,7 +301,7 @@ fn init_order_by(
 fn init_group_by(
     program: &mut ProgramBuilder,
     group_by: &GroupBy,
-    aggregates: &Vec<Aggregate>,
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_final_label = program.allocate_label();
@@ -866,8 +866,8 @@ fn inner_loop_emit(
 /// See the InnerLoopEmitTarget enum for more details.
 fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
-    result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Vec<Aggregate>,
+    result_columns: &[ResultSetColumn],
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
     emit_target: InnerLoopEmitTarget,
     referenced_tables: &[BTreeTableReference],
@@ -927,7 +927,7 @@ fn inner_loop_source_emit(
                 order_by,
                 result_columns,
                 &mut metadata.result_column_indexes_in_orderby_sorter,
-                &metadata.sort_metadata.as_ref().unwrap(),
+                metadata.sort_metadata.as_ref().unwrap(),
                 None,
             )?;
             Ok(())
@@ -1123,12 +1123,13 @@ fn close_loop(
 /// Emits the bytecode for processing a GROUP BY clause.
 /// This is called when the main query execution loop has finished processing,
 /// and we now have data in the GROUP BY sorter.
+#[allow(clippy::too_many_arguments)]
 fn group_by_emit(
     program: &mut ProgramBuilder,
-    result_columns: &Vec<ResultSetColumn>,
+    result_columns: &[ResultSetColumn],
     group_by: &GroupBy,
     order_by: Option<&Vec<(ast::Expr, Direction)>>,
-    aggregates: &Vec<Aggregate>,
+    aggregates: &[Aggregate],
     limit: Option<usize>,
     referenced_tables: &[BTreeTableReference],
     metadata: &mut Metadata,
@@ -1437,7 +1438,7 @@ fn group_by_emit(
                 order_by,
                 result_columns,
                 &mut metadata.result_column_indexes_in_orderby_sorter,
-                &metadata.sort_metadata.as_ref().unwrap(),
+                metadata.sort_metadata.as_ref().unwrap(),
                 Some(&precomputed_exprs_to_register),
             )?;
         }
@@ -1474,9 +1475,9 @@ fn group_by_emit(
 /// and we can now materialize the aggregate results.
 fn agg_without_group_by_emit(
     program: &mut ProgramBuilder,
-    referenced_tables: &Vec<BTreeTableReference>,
-    result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Vec<Aggregate>,
+    referenced_tables: &[BTreeTableReference],
+    result_columns: &[ResultSetColumn],
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_start_reg = metadata.aggregation_start_register.unwrap();
@@ -1513,8 +1514,8 @@ fn agg_without_group_by_emit(
 /// and we can now emit rows from the ORDER BY sorter.
 fn order_by_emit(
     program: &mut ProgramBuilder,
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
     limit: Option<usize>,
     metadata: &mut Metadata,
 ) -> Result<()> {
@@ -1693,8 +1694,8 @@ fn sorter_insert(
 fn order_by_sorter_insert(
     program: &mut ProgramBuilder,
     referenced_tables: &[BTreeTableReference],
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
     result_column_indexes_in_orderby_sorter: &mut HashMap<usize, usize>,
     sort_metadata: &SortMetadata,
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
@@ -1760,8 +1761,8 @@ fn order_by_sorter_insert(
 ///
 /// If any result columns can be skipped, this returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
 fn order_by_deduplicate_result_columns(
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
 ) -> Option<Vec<(usize, usize)>> {
     let mut result_column_remapping: Option<Vec<(usize, usize)>> = None;
     for (i, rc) in result_columns.iter().enumerate() {
@@ -1781,5 +1782,5 @@ fn order_by_deduplicate_result_columns(
         }
     }
 
-    return result_column_remapping;
+    result_column_remapping
 }
