@@ -646,7 +646,6 @@ fn get_io(db: &str) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
 const HELP_MSG: &str = r#"
 Limbo SQL Shell Help
 ==============
-
 Welcome to the Limbo SQL Shell! You can execute any standard SQL command here.
 In addition to standard SQL commands, the following special commands are available:
 
@@ -689,12 +688,6 @@ Usage Examples:
 8. Show the current values of settings:
    .show
 
-9. Set the value 'NULL' to be displayed for null values instead of empty string:
-   .nullvalue "NULL"
-
 Note:
------
 - All SQL commands must end with a semicolon (;).
-- Special commands do not require a semicolon.
-
-"#;
+- Special commands do not require a semicolon."#;

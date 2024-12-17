@@ -648,6 +648,21 @@ impl From<YYCODETYPE> for Operator {
     }
 }
 
+impl Operator {
+    /// returns whether order of operations can be ignored
+    pub fn is_commutative(&self) -> bool {
+        matches!(
+            self,
+            Operator::Add
+                | Operator::Multiply
+                | Operator::BitwiseAnd
+                | Operator::BitwiseOr
+                | Operator::Equals
+                | Operator::NotEquals
+        )
+    }
+}
+
 /// Unary operators
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnaryOperator {
