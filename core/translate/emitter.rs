@@ -5,12 +5,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use sqlite3_parser::ast::{self, exprs_are_equivalent};
+use sqlite3_parser::ast::{self};
 
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::plan::{IterationDirection, Search};
 use crate::types::{OwnedRecord, OwnedValue};
+use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{BranchOffset, Insn, Program};
 use crate::{Connection, Result};
