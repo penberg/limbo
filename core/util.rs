@@ -217,6 +217,8 @@ pub fn exprs_are_equivalent(expr1: &Expr, expr2: &Expr) -> bool {
                     _ => false,
                 }
         }
+        (Expr::NotNull(expr1), Expr::NotNull(expr2)) => exprs_are_equivalent(expr1, expr2),
+        (Expr::IsNull(expr1), Expr::IsNull(expr2)) => exprs_are_equivalent(expr1, expr2),
         (Expr::Literal(lit1), Expr::Literal(lit2)) => check_literal_equivalency(lit1, lit2),
         (Expr::Id(id1), Expr::Id(id2)) => check_ident_equivalency(&id1.0, &id2.0),
         (Expr::Unary(op1, expr1), Expr::Unary(op2, expr2)) => {
@@ -232,6 +234,14 @@ pub fn exprs_are_equivalent(expr1: &Expr, expr2: &Expr) -> bool {
         }
         (Expr::Parenthesized(exprs1), exprs2) | (exprs2, Expr::Parenthesized(exprs1)) => {
             exprs1.len() == 1 && exprs_are_equivalent(&exprs1[0], exprs2)
+        }
+        (Expr::Qualified(tn1, cn1), Expr::Qualified(tn2, cn2)) => {
+            check_ident_equivalency(&tn1.0, &tn2.0) && check_ident_equivalency(&cn1.0, &cn2.0)
+        }
+        (Expr::DoublyQualified(sn1, tn1, cn1), Expr::DoublyQualified(sn2, tn2, cn2)) => {
+            check_ident_equivalency(&sn1.0, &sn2.0)
+                && check_ident_equivalency(&tn1.0, &tn2.0)
+                && check_ident_equivalency(&cn1.0, &cn2.0)
         }
         (
             Expr::InList {

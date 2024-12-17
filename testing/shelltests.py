@@ -3,7 +3,7 @@ import os
 import subprocess
 
 # Configuration
-sqlite_exec = "./target/debug/limbo"
+sqlite_exec = os.getenv("SQLITE_EXEC", "./target/debug/limbo")
 cwd = os.getcwd()
 
 # Initial setup commands
