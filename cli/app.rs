@@ -33,7 +33,7 @@ pub struct Opts {
         default_value_t = false
     )]
     pub quiet: bool,
-    #[clap(short, long, help = "Print commands before exection")]
+    #[clap(short, long, help = "Print commands before execution")]
     pub echo: bool,
 }
 
@@ -91,7 +91,7 @@ impl Command {
         } + 1) // argv0
     }
 
-    fn useage(&self) -> &str {
+    fn usage(&self) -> &str {
         match self {
             Self::Quit => ".quit",
             Self::Open => ".open <file>",
@@ -400,7 +400,7 @@ impl Limbo {
             if args.len() < cmd.min_args() {
                 let _ = self.write_fmt(format_args!(
                     "Insufficient arguments: USAGE: {}",
-                    cmd.useage()
+                    cmd.usage()
                 ));
                 return;
             }
