@@ -28,7 +28,9 @@ impl Display for InteractionPlan {
         for interaction in &self.plan {
             match interaction {
                 Interaction::Query(query) => write!(f, "{};\n", query)?,
-                Interaction::Assertion(assertion) => write!(f, "-- ASSERT: {};\n", assertion.message)?,
+                Interaction::Assertion(assertion) => {
+                    write!(f, "-- ASSERT: {};\n", assertion.message)?
+                }
             }
         }
 

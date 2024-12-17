@@ -146,15 +146,16 @@ fn main() {
                 env.connections[connection_index] = SimConnection::Connected(env.db.connect());
             }
         }
-
-        
     }
-
 
     env.io.print_stats();
 }
 
-fn process_connection(conn: &mut Rc<Connection>, interaction: &Interaction, stack: &mut Vec<ResultSet>) -> Result<()> {
+fn process_connection(
+    conn: &mut Rc<Connection>,
+    interaction: &Interaction,
+    stack: &mut Vec<ResultSet>,
+) -> Result<()> {
     match interaction {
         generation::plan::Interaction::Query(_) => {
             log::debug!("{}", interaction);

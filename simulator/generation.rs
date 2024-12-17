@@ -1,8 +1,8 @@
 use anarchist_readable_name_generator_lib::readable_name_custom;
 use rand::Rng;
 
-pub mod query;
 pub mod plan;
+pub mod query;
 pub mod table;
 
 pub trait Arbitrary {
@@ -13,7 +13,10 @@ pub trait ArbitraryFrom<T> {
     fn arbitrary_from<R: Rng>(rng: &mut R, t: &T) -> Self;
 }
 
-pub(crate) fn frequency<'a, T, R: rand::Rng>(choices: Vec<(usize, Box<dyn FnOnce(&mut R) -> T + 'a>)>, rng: &mut R) -> T {
+pub(crate) fn frequency<'a, T, R: rand::Rng>(
+    choices: Vec<(usize, Box<dyn FnOnce(&mut R) -> T + 'a>)>,
+    rng: &mut R,
+) -> T {
     let total = choices.iter().map(|(weight, _)| weight).sum::<usize>();
     let mut choice = rng.gen_range(0..total);
 
