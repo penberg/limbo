@@ -2,7 +2,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
-use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
+use crate::function::{AggFunc, Func, FuncCtx, MathFuncArity, ScalarFunc};
 use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
@@ -1603,6 +1603,134 @@ pub fn translate_expr(
                         }
                     }
                 }
+                Func::Math(math_func) => match math_func.arity() {
+                    MathFuncArity::Nullary => {
+                        if args.is_some() {
+                            crate::bail_parse_error!("{} function with arguments", math_func);
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: 0,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
+                    MathFuncArity::Unary => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 1 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 1 argument",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let reg = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            reg,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
+                    MathFuncArity::Binary => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 2 arguments",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let reg1 = program.alloc_register();
+                        let reg2 = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            reg1,
+                            precomputed_exprs_to_registers,
+                        )?;
+                        if let ast::Expr::Literal(_) = &args[0] {
+                            program.mark_last_insn_constant();
+                        }
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[1],
+                            reg2,
+                            precomputed_exprs_to_registers,
+                        )?;
+                        if let ast::Expr::Literal(_) = &args[1] {
+                            program.mark_last_insn_constant();
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: target_register + 1,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
+                    MathFuncArity::UnaryOrBinary => {
+                        let args = if let Some(args) = args {
+                            if args.len() > 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with more than 2 arguments",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let regs = program.alloc_registers(args.len());
+
+                        for (i, arg) in args.iter().enumerate() {
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                arg,
+                                regs + i,
+                                precomputed_exprs_to_registers,
+                            )?;
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: regs,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+                },
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),

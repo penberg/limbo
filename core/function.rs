@@ -139,10 +139,126 @@ impl Display for ScalarFunc {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum MathFunc {
+    Acos,
+    Acosh,
+    Asin,
+    Asinh,
+    Atan,
+    Atan2,
+    Atanh,
+    Ceil,
+    Ceiling,
+    Cos,
+    Cosh,
+    Degrees,
+    Exp,
+    Floor,
+    Ln,
+    Log,
+    Log10,
+    Log2,
+    Mod,
+    Pi,
+    Pow,
+    Power,
+    Radians,
+    Sin,
+    Sinh,
+    Sqrt,
+    Tan,
+    Tanh,
+    Trunc,
+}
+
+pub enum MathFuncArity {
+    Nullary,
+    Unary,
+    Binary,
+    UnaryOrBinary,
+}
+
+impl MathFunc {
+    pub fn arity(&self) -> MathFuncArity {
+        match self {
+            MathFunc::Pi => MathFuncArity::Nullary,
+
+            MathFunc::Acos
+            | MathFunc::Acosh
+            | MathFunc::Asin
+            | MathFunc::Asinh
+            | MathFunc::Atan
+            | MathFunc::Atanh
+            | MathFunc::Ceil
+            | MathFunc::Ceiling
+            | MathFunc::Cos
+            | MathFunc::Cosh
+            | MathFunc::Degrees
+            | MathFunc::Exp
+            | MathFunc::Floor
+            | MathFunc::Ln
+            | MathFunc::Log10
+            | MathFunc::Log2
+            | MathFunc::Radians
+            | MathFunc::Sin
+            | MathFunc::Sinh
+            | MathFunc::Sqrt
+            | MathFunc::Tan
+            | MathFunc::Tanh
+            | MathFunc::Trunc => MathFuncArity::Unary,
+
+            MathFunc::Atan2 | MathFunc::Mod | MathFunc::Pow | MathFunc::Power => {
+                MathFuncArity::Binary
+            }
+
+            MathFunc::Log => MathFuncArity::UnaryOrBinary,
+        }
+    }
+}
+
+impl Display for MathFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            MathFunc::Acos => "acos".to_string(),
+            MathFunc::Acosh => "acosh".to_string(),
+            MathFunc::Asin => "asin".to_string(),
+            MathFunc::Asinh => "asinh".to_string(),
+            MathFunc::Atan => "atan".to_string(),
+            MathFunc::Atan2 => "atan2".to_string(),
+            MathFunc::Atanh => "atanh".to_string(),
+            MathFunc::Ceil => "ceil".to_string(),
+            MathFunc::Ceiling => "ceiling".to_string(),
+            MathFunc::Cos => "cos".to_string(),
+            MathFunc::Cosh => "cosh".to_string(),
+            MathFunc::Degrees => "degrees".to_string(),
+            MathFunc::Exp => "exp".to_string(),
+            MathFunc::Floor => "floor".to_string(),
+            MathFunc::Ln => "ln".to_string(),
+            MathFunc::Log => "log".to_string(),
+            MathFunc::Log10 => "log10".to_string(),
+            MathFunc::Log2 => "log2".to_string(),
+            MathFunc::Mod => "mod".to_string(),
+            MathFunc::Pi => "pi".to_string(),
+            MathFunc::Pow => "pow".to_string(),
+            MathFunc::Power => "power".to_string(),
+            MathFunc::Radians => "radians".to_string(),
+            MathFunc::Sin => "sin".to_string(),
+            MathFunc::Sinh => "sinh".to_string(),
+            MathFunc::Sqrt => "sqrt".to_string(),
+            MathFunc::Tan => "tan".to_string(),
+            MathFunc::Tanh => "tanh".to_string(),
+            MathFunc::Trunc => "trunc".to_string(),
+        };
+        write!(f, "{}", str)
+    }
+}
+
 #[derive(Debug)]
 pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
+    Math(MathFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
 }
@@ -152,6 +268,7 @@ impl Display for Func {
         match self {
             Func::Agg(agg_func) => write!(f, "{}", agg_func.to_string()),
             Func::Scalar(scalar_func) => write!(f, "{}", scalar_func),
+            Func::Math(math_func) => write!(f, "{}", math_func),
             #[cfg(feature = "json")]
             Func::Json(json_func) => write!(f, "{}", json_func),
         }
@@ -216,6 +333,35 @@ impl Func {
             "unhex" => Ok(Func::Scalar(ScalarFunc::Unhex)),
             "zeroblob" => Ok(Func::Scalar(ScalarFunc::ZeroBlob)),
             "soundex" => Ok(Func::Scalar(ScalarFunc::Soundex)),
+            "acos" => Ok(Func::Math(MathFunc::Acos)),
+            "acosh" => Ok(Func::Math(MathFunc::Acosh)),
+            "asin" => Ok(Func::Math(MathFunc::Asin)),
+            "asinh" => Ok(Func::Math(MathFunc::Asinh)),
+            "atan" => Ok(Func::Math(MathFunc::Atan)),
+            "atan2" => Ok(Func::Math(MathFunc::Atan2)),
+            "atanh" => Ok(Func::Math(MathFunc::Atanh)),
+            "ceil" => Ok(Func::Math(MathFunc::Ceil)),
+            "ceiling" => Ok(Func::Math(MathFunc::Ceiling)),
+            "cos" => Ok(Func::Math(MathFunc::Cos)),
+            "cosh" => Ok(Func::Math(MathFunc::Cosh)),
+            "degrees" => Ok(Func::Math(MathFunc::Degrees)),
+            "exp" => Ok(Func::Math(MathFunc::Exp)),
+            "floor" => Ok(Func::Math(MathFunc::Floor)),
+            "ln" => Ok(Func::Math(MathFunc::Ln)),
+            "log" => Ok(Func::Math(MathFunc::Log)),
+            "log10" => Ok(Func::Math(MathFunc::Log10)),
+            "log2" => Ok(Func::Math(MathFunc::Log2)),
+            "mod" => Ok(Func::Math(MathFunc::Mod)),
+            "pi" => Ok(Func::Math(MathFunc::Pi)),
+            "pow" => Ok(Func::Math(MathFunc::Pow)),
+            "power" => Ok(Func::Math(MathFunc::Power)),
+            "radians" => Ok(Func::Math(MathFunc::Radians)),
+            "sin" => Ok(Func::Math(MathFunc::Sin)),
+            "sinh" => Ok(Func::Math(MathFunc::Sinh)),
+            "sqrt" => Ok(Func::Math(MathFunc::Sqrt)),
+            "tan" => Ok(Func::Math(MathFunc::Tan)),
+            "tanh" => Ok(Func::Math(MathFunc::Tanh)),
+            "trunc" => Ok(Func::Math(MathFunc::Trunc)),
             _ => Err(()),
         }
     }

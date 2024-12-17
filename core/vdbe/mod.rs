@@ -24,7 +24,7 @@ pub mod sorter;
 mod datetime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
-use crate::function::{AggFunc, FuncCtx, ScalarFunc};
+use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -2491,6 +2491,58 @@ impl Program {
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
                         },
+                        crate::function::Func::Math(math_func) => match math_func.arity() {
+                            MathFuncArity::Nullary => match math_func {
+                                MathFunc::Pi => {
+                                    state.registers[*dest] =
+                                        OwnedValue::Float(std::f64::consts::PI);
+                                }
+                                _ => {
+                                    unreachable!(
+                                        "Unexpected mathematical Nullary function {:?}",
+                                        math_func
+                                    );
+                                }
+                            },
+
+                            MathFuncArity::Unary => {
+                                let reg_value = &state.registers[*start_reg];
+                                let result = exec_math_unary(reg_value, math_func);
+                                state.registers[*dest] = result;
+                            }
+
+                            MathFuncArity::Binary => {
+                                let lhs = &state.registers[*start_reg];
+                                let rhs = &state.registers[*start_reg + 1];
+                                let result = exec_math_binary(lhs, rhs, math_func);
+                                state.registers[*dest] = result;
+                            }
+
+                            MathFuncArity::UnaryOrBinary => match math_func {
+                                MathFunc::Log => {
+                                    let result = match arg_count {
+                                        1 => {
+                                            let arg = &state.registers[*start_reg];
+                                            exec_math_log(arg, None)
+                                        }
+                                        2 => {
+                                            let base = &state.registers[*start_reg];
+                                            let arg = &state.registers[*start_reg + 1];
+                                            exec_math_log(arg, Some(base))
+                                        }
+                                        _ => unreachable!(
+                                            "{:?} function with unexpected number of arguments",
+                                            math_func
+                                        ),
+                                    };
+                                    state.registers[*dest] = result;
+                                }
+                                _ => unreachable!(
+                                    "Unexpected mathematical UnaryOrBinary function {:?}",
+                                    math_func
+                                ),
+                            },
+                        },
                         crate::function::Func::Agg(_) => {
                             unreachable!("Aggregate functions should not be handled here")
                         }
@@ -3595,6 +3647,109 @@ fn execute_sqlite_version(version_integer: i64) -> String {
     let release = version_integer % 1_000;
 
     format!("{}.{}.{}", major, minor, release)
+}
+
+fn to_f64(reg: &OwnedValue) -> Option<f64> {
+    match reg {
+        OwnedValue::Integer(i) => Some(*i as f64),
+        OwnedValue::Float(f) => Some(*f),
+        OwnedValue::Text(t) => t.parse::<f64>().ok(),
+        OwnedValue::Agg(ctx) => to_f64(ctx.final_value()),
+        _ => None,
+    }
+}
+
+fn exec_math_unary(reg: &OwnedValue, function: &MathFunc) -> OwnedValue {
+    // In case of some functions and integer input, return the input as is
+    if let OwnedValue::Integer(_) = reg {
+        if matches! { function, MathFunc::Ceil | MathFunc::Ceiling | MathFunc::Floor | MathFunc::Trunc }
+        {
+            return reg.clone();
+        }
+    }
+
+    let f = match to_f64(reg) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let result = match function {
+        MathFunc::Acos => f.acos(),
+        MathFunc::Acosh => f.acosh(),
+        MathFunc::Asin => f.asin(),
+        MathFunc::Asinh => f.asinh(),
+        MathFunc::Atan => f.atan(),
+        MathFunc::Atanh => f.atanh(),
+        MathFunc::Ceil | MathFunc::Ceiling => f.ceil(),
+        MathFunc::Cos => f.cos(),
+        MathFunc::Cosh => f.cosh(),
+        MathFunc::Degrees => f.to_degrees(),
+        MathFunc::Exp => f.exp(),
+        MathFunc::Floor => f.floor(),
+        MathFunc::Ln => f.ln(),
+        MathFunc::Log10 => f.log10(),
+        MathFunc::Log2 => f.log2(),
+        MathFunc::Radians => f.to_radians(),
+        MathFunc::Sin => f.sin(),
+        MathFunc::Sinh => f.sinh(),
+        MathFunc::Sqrt => f.sqrt(),
+        MathFunc::Tan => f.tan(),
+        MathFunc::Tanh => f.tanh(),
+        MathFunc::Trunc => f.trunc(),
+        _ => unreachable!("Unexpected mathematical unary function {:?}", function),
+    };
+
+    if result.is_nan() {
+        OwnedValue::Null
+    } else {
+        OwnedValue::Float(result)
+    }
+}
+
+fn exec_math_binary(lhs: &OwnedValue, rhs: &OwnedValue, function: &MathFunc) -> OwnedValue {
+    let lhs = match to_f64(lhs) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let rhs = match to_f64(rhs) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let result = match function {
+        MathFunc::Atan2 => lhs.atan2(rhs),
+        MathFunc::Mod => lhs % rhs,
+        MathFunc::Pow | MathFunc::Power => lhs.powf(rhs),
+        _ => unreachable!("Unexpected mathematical binary function {:?}", function),
+    };
+
+    if result.is_nan() {
+        OwnedValue::Null
+    } else {
+        OwnedValue::Float(result)
+    }
+}
+
+fn exec_math_log(arg: &OwnedValue, base: Option<&OwnedValue>) -> OwnedValue {
+    let f = match to_f64(arg) {
+        Some(f) => f,
+        None => return OwnedValue::Null,
+    };
+
+    let base = match base {
+        Some(base) => match to_f64(base) {
+            Some(f) => f,
+            None => return OwnedValue::Null,
+        },
+        None => 10.0,
+    };
+
+    if f <= 0.0 || base <= 0.0 || base == 1.0 {
+        return OwnedValue::Null;
+    }
+
+    OwnedValue::Float(f.log(base))
 }
 
 #[cfg(test)]

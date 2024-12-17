@@ -160,6 +160,41 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | upper(X)                     | Yes    |         |
 | zeroblob(N)                  | Yes    |         |
 
+### Mathematical functions
+
+| Function   | Status | Comment |
+| ---------- | ------ | ------- |
+| acos(X)    | Yes    |         |
+| acosh(X)   | Yes    |         |
+| asin(X)    | Yes    |         |
+| asinh(X)   | Yes    |         |
+| atan(X)    | Yes    |         |
+| atan2(Y,X) | Yes    |         |
+| atanh(X)   | Yes    |         |
+| ceil(X)    | Yes    |         |
+| ceiling(X) | Yes    |         |
+| cos(X)     | Yes    |         |
+| cosh(X)    | Yes    |         |
+| degrees(X) | Yes    |         |
+| exp(X)     | Yes    |         |
+| floor(X)   | Yes    |         |
+| ln(X)      | Yes    |         |
+| log(B,X)   | Yes    |         |
+| log(X)     | Yes    |         |
+| log10(X)   | Yes    |         |
+| log2(X)    | Yes    |         |
+| mod(X,Y)   | Yes    |         |
+| pi()       | Yes    |         |
+| pow(X,Y)   | Yes    |         |
+| power(X,Y) | Yes    |         |
+| radians(X) | Yes    |         |
+| sin(X)     | Yes    |         |
+| sinh(X)    | Yes    |         |
+| sqrt(X)    | Yes    |         |
+| tan(X)     | Yes    |         |
+| tanh(X)    | Yes    |         |
+| trunc(X)   | Yes    |         |
+
 ### Aggregate functions
 
 | Function                     | Status  | Comment |
