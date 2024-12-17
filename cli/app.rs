@@ -760,9 +760,6 @@ Usage Examples:
 9. Show the current values of settings:
    .show
 
-10. Set the value 'NULL' to be displayed for null values instead of empty string:
-   .nullvalue "NULL"
-
 Note:
 - All SQL commands must end with a semicolon (;).
 - Special commands do not require a semicolon."#;
