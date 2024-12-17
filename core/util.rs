@@ -7,12 +7,19 @@ use crate::{
     Result, RowResult, Rows, IO,
 };
 
-pub fn normalize_ident(ident: &str) -> String {
-    (if ident.starts_with('"') && ident.ends_with('"') {
-        &ident[1..ident.len() - 1]
+// https://sqlite.org/lang_keywords.html
+const QUOTE_PAIRS: &[(char, char)] = &[('"', '"'), ('[', ']'), ('`', '`')];
+
+pub fn normalize_ident(identifier: &str) -> String {
+    let quote_pair = QUOTE_PAIRS
+        .iter()
+        .find(|&(start, end)| identifier.starts_with(*start) && identifier.ends_with(*end));
+
+    if let Some(&(start, end)) = quote_pair {
+        &identifier[1..identifier.len() - 1]
     } else {
-        ident
-    })
+        identifier
+    }
     .to_lowercase()
 }
 
@@ -65,7 +72,6 @@ fn cmp_numeric_strings(num_str: &str, other: &str) -> bool {
     }
 }
 
-const QUOTE_PAIRS: &[(char, char)] = &[('"', '"'), ('[', ']'), ('`', '`')];
 pub fn check_ident_equivalency(ident1: &str, ident2: &str) -> bool {
     fn strip_quotes(identifier: &str) -> &str {
         for &(start, end) in QUOTE_PAIRS {
@@ -276,7 +282,17 @@ pub fn exprs_are_equivalent(expr1: &Expr, expr2: &Expr) -> bool {
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
     use sqlite3_parser::ast::{self, Expr, Id, Literal, Operator::*, Type};
+
+    #[test]
+    fn test_normalize_ident() {
+        assert_eq!(normalize_ident("foo"), "foo");
+        assert_eq!(normalize_ident("`foo`"), "foo");
+        assert_eq!(normalize_ident("[foo]"), "foo");
+        assert_eq!(normalize_ident("\"foo\""), "foo");
+    }
+
     #[test]
     fn test_basic_addition_exprs_are_equivalent() {
         let expr1 = Expr::Binary(
