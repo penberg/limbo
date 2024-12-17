@@ -13,7 +13,7 @@ impl Arbitrary for Name {
 impl Arbitrary for Table {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
         let name = Name::arbitrary(rng).0;
-        let columns = (1..rng.gen_range(1..128))
+        let columns = (1..=rng.gen_range(1..10))
             .map(|_| Column::arbitrary(rng))
             .collect();
         Table {

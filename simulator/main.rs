@@ -1,4 +1,5 @@
-use generation::{Arbitrary, ArbitraryFrom};
+use generation::plan::{Interaction, ResultSet};
+use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
 use model::query::{Insert, Predicate, Query, Select};
 use model::table::{Column, Name, Table, Value};
@@ -6,6 +7,7 @@ use properties::{property_insert_select, property_select_all};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
+use std::io::Write;
 use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -29,13 +31,7 @@ enum SimConnection {
     Disconnected,
 }
 
-#[derive(Debug, Copy, Clone)]
-enum SimulatorMode {
-    Random,
-    Workload,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SimulatorOpts {
     ticks: usize,
     max_connections: usize,
@@ -45,7 +41,7 @@ struct SimulatorOpts {
     read_percent: usize,
     write_percent: usize,
     delete_percent: usize,
-    mode: SimulatorMode,
+    max_interactions: usize,
     page_size: usize,
 }
 
@@ -77,8 +73,8 @@ fn main() {
         read_percent,
         write_percent,
         delete_percent,
-        mode: SimulatorMode::Workload,
         page_size: 4096, // TODO: randomize this too
+        max_interactions: rng.gen_range(0..10000),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
@@ -104,9 +100,19 @@ fn main() {
 
     println!("Initial opts {:?}", env.opts);
 
-    for _ in 0..env.opts.ticks {
-        let connection_index = env.rng.gen_range(0..env.opts.max_connections);
+    log::info!("Generating database interaction plan...");
+    let mut plan = generation::plan::InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env);
+
+    log::info!("{}", plan.stats());
+
+    for interaction in &plan.plan {
+        let connection_index = pick_index(env.connections.len(), &mut env.rng);
         let mut connection = env.connections[connection_index].clone();
+
+        if matches!(connection, SimConnection::Disconnected) {
+            connection = SimConnection::Connected(env.db.connect());
+            env.connections[connection_index] = connection.clone();
+        }
 
         match &mut connection {
             SimConnection::Connected(conn) => {
@@ -116,10 +122,20 @@ fn main() {
                     let _ = conn.close();
                     env.connections[connection_index] = SimConnection::Disconnected;
                 } else {
-                    match process_connection(&mut env, conn) {
-                        Ok(_) => {}
+                    match process_connection(conn, interaction, &mut plan.stack) {
+                        Ok(_) => {
+                            log::info!("connection {} processed", connection_index);
+                        }
                         Err(err) => {
                             log::error!("error {}", err);
+                            log::debug!("db is at {:?}", path);
+                            // save the interaction plan
+                            let mut path = TempDir::new().unwrap().into_path();
+                            path.push("simulator.plan");
+                            let mut f = std::fs::File::create(path.clone()).unwrap();
+                            f.write(plan.to_string().as_bytes()).unwrap();
+                            log::debug!("plan saved at {:?}", path);
+                            log::debug!("seed was {}", seed);
                             break;
                         }
                     }
@@ -130,73 +146,24 @@ fn main() {
                 env.connections[connection_index] = SimConnection::Connected(env.db.connect());
             }
         }
+
+        
     }
+
 
     env.io.print_stats();
 }
 
-fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
-    if env.tables.is_empty() {
-        maybe_add_table(env, conn)?;
-    }
-
-    match env.opts.mode {
-        SimulatorMode::Random => {
-            match env.rng.gen_range(0..2) {
-                // Randomly insert a value and check that the select result contains it.
-                0 => property_insert_select(env, conn),
-                // Check that the current state of the in-memory table is the same as the one in the
-                // database.
-                1 => property_select_all(env, conn),
-                // Perform a random query, update the in-memory table with the result.
-                2 => {
-                    let table_index = env.rng.gen_range(0..env.tables.len());
-                    let query = Query::arbitrary_from(&mut env.rng, &env.tables[table_index]);
-                    let rows = get_all_rows(env, conn, query.to_string().as_str())?;
-                    env.tables[table_index].rows = rows;
-                }
-                _ => unreachable!(),
-            }
+fn process_connection(conn: &mut Rc<Connection>, interaction: &Interaction, stack: &mut Vec<ResultSet>) -> Result<()> {
+    match interaction {
+        generation::plan::Interaction::Query(_) => {
+            log::debug!("{}", interaction);
+            let results = interaction.execute_query(conn)?;
+            log::debug!("{:?}", results);
+            stack.push(results);
         }
-        SimulatorMode::Workload => {
-            let picked = env.rng.gen_range(0..100);
-
-            if env.rng.gen_ratio(1, 100) {
-                maybe_add_table(env, conn)?;
-            }
-
-            if picked < env.opts.read_percent {
-                let query = Select::arbitrary_from(&mut env.rng, &env.tables);
-                let _ = get_all_rows(env, conn, Query::Select(query).to_string().as_str())?;
-            } else if picked < env.opts.read_percent + env.opts.write_percent {
-                let table_index = env.rng.gen_range(0..env.tables.len());
-                let column_index = env.rng.gen_range(0..env.tables[table_index].columns.len());
-                let column = &env.tables[table_index].columns[column_index].clone();
-                let mut rng = env.rng.clone();
-                let value = Value::arbitrary_from(&mut rng, &column.column_type);
-                let mut row = Vec::new();
-                for (i, column) in env.tables[table_index].columns.iter().enumerate() {
-                    if i == column_index {
-                        row.push(value.clone());
-                    } else {
-                        let value = Value::arbitrary_from(&mut rng, &column.column_type);
-                        row.push(value);
-                    }
-                }
-                let query = Query::Insert(Insert {
-                    table: env.tables[table_index].name.clone(),
-                    values: row.clone(),
-                });
-                let _ = get_all_rows(env, conn, query.to_string().as_str())?;
-                env.tables[table_index].rows.push(row.clone());
-            } else {
-                let table_index = env.rng.gen_range(0..env.tables.len());
-                let query = Query::Select(Select {
-                    table: env.tables[table_index].name.clone(),
-                    predicate: Predicate::And(Vec::new()),
-                });
-                let _ = get_all_rows(env, conn, query.to_string().as_str())?;
-            }
+        generation::plan::Interaction::Assertion(_) => {
+            interaction.execute_assertion(stack)?;
         }
     }
 

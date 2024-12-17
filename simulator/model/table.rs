@@ -10,7 +10,7 @@ impl Deref for Name {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Table {
     pub(crate) rows: Vec<Vec<Value>>,
     pub(crate) name: String,
