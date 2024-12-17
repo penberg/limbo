@@ -95,3 +95,12 @@ do_execsql_test_on_specific_db testing/testing.db schema-2 {
 #        name TEXT,
 #        price REAL
 #    );"}
+
+# FIXME sqlite uses multicolumn output mode for display resulting in different spacing
+# do_execsql_test_on_specific_db testing/testing.db schema-1 {
+#   .tables
+# } {"products users"}
+
+do_execsql_test_on_specific_db testing/testing.db schema-1 {
+  .tables us%
+} {"users"}
