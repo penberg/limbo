@@ -1,9 +1,11 @@
 use crate::generation::table::{GTValue, LTValue};
-use crate::generation::{Arbitrary, ArbitraryFrom};
+use crate::generation::{one_of, Arbitrary, ArbitraryFrom};
 
 use crate::model::query::{Create, Delete, Insert, Predicate, Query, Select};
 use crate::model::table::{Table, Value};
 use rand::Rng;
+
+use super::{frequency, pick};
 
 impl Arbitrary for Create {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
@@ -15,20 +17,20 @@ impl Arbitrary for Create {
 
 impl ArbitraryFrom<Vec<Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<Table>) -> Self {
-        let table = rng.gen_range(0..tables.len());
+        let table = pick(tables, rng);
         Select {
-            table: tables[table].name.clone(),
-            predicate: Predicate::arbitrary_from(rng, &tables[table]),
+            table: table.name.clone(),
+            predicate: Predicate::arbitrary_from(rng, table),
         }
     }
 }
 
 impl ArbitraryFrom<Vec<&Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<&Table>) -> Self {
-        let table = rng.gen_range(0..tables.len());
+        let table = pick(tables, rng);
         Select {
-            table: tables[table].name.clone(),
-            predicate: Predicate::arbitrary_from(rng, tables[table]),
+            table: table.name.clone(),
+            predicate: Predicate::arbitrary_from(rng, *table),
         }
     }
 }
@@ -58,15 +60,24 @@ impl ArbitraryFrom<Table> for Delete {
 
 impl ArbitraryFrom<Table> for Query {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        match rng.gen_range(0..=200) {
-            0 => Query::Create(Create::arbitrary(rng)),
-            1..=100 => Query::Select(Select::arbitrary_from(rng, &vec![table])),
-            101..=200 => Query::Insert(Insert::arbitrary_from(rng, table)),
-            // todo: This branch is currently never taken, as DELETE is not yet implemented.
-            //       Change this when DELETE is implemented.
-            201..=300 => Query::Delete(Delete::arbitrary_from(rng, table)),
-            _ => unreachable!(),
-        }
+        frequency(
+            vec![
+                (1, Box::new(|rng| Query::Create(Create::arbitrary(rng)))),
+                (
+                    100,
+                    Box::new(|rng| Query::Select(Select::arbitrary_from(rng, &vec![table]))),
+                ),
+                (
+                    100,
+                    Box::new(|rng| Query::Insert(Insert::arbitrary_from(rng, table))),
+                ),
+                (
+                    0,
+                    Box::new(|rng| Query::Delete(Delete::arbitrary_from(rng, table))),
+                ),
+            ],
+            rng,
+        )
     }
 }
 
@@ -84,35 +95,53 @@ impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
             .map(|r| &r[column_index])
             .collect::<Vec<_>>();
         // Pick an operator
-        let operator = match rng.gen_range(0..3) {
-            0 => {
-                if *predicate_value {
-                    Predicate::Eq(
-                        column.name.clone(),
-                        Value::arbitrary_from(rng, &column_values),
-                    )
-                } else {
-                    Predicate::Eq(
-                        column.name.clone(),
-                        Value::arbitrary_from(rng, &column.column_type),
-                    )
-                }
-            }
-            1 => Predicate::Gt(
-                column.name.clone(),
-                match predicate_value {
-                    true => GTValue::arbitrary_from(rng, &column_values).0,
-                    false => LTValue::arbitrary_from(rng, &column_values).0,
-                },
+        let operator = match predicate_value {
+            true => one_of(
+                vec![
+                    Box::new(|rng| {
+                        Predicate::Eq(
+                            column.name.clone(),
+                            Value::arbitrary_from(rng, &column_values),
+                        )
+                    }),
+                    Box::new(|rng| {
+                        Predicate::Gt(
+                            column.name.clone(),
+                            GTValue::arbitrary_from(rng, &column_values).0,
+                        )
+                    }),
+                    Box::new(|rng| {
+                        Predicate::Lt(
+                            column.name.clone(),
+                            LTValue::arbitrary_from(rng, &column_values).0,
+                        )
+                    }),
+                ],
+                rng,
             ),
-            2 => Predicate::Lt(
-                column.name.clone(),
-                match predicate_value {
-                    true => LTValue::arbitrary_from(rng, &column_values).0,
-                    false => GTValue::arbitrary_from(rng, &column_values).0,
-                },
+            false => one_of(
+                vec![
+                    Box::new(|rng| {
+                        Predicate::Neq(
+                            column.name.clone(),
+                            Value::arbitrary_from(rng, &column.column_type),
+                        )
+                    }),
+                    Box::new(|rng| {
+                        Predicate::Gt(
+                            column.name.clone(),
+                            LTValue::arbitrary_from(rng, &column_values).0,
+                        )
+                    }),
+                    Box::new(|rng| {
+                        Predicate::Lt(
+                            column.name.clone(),
+                            GTValue::arbitrary_from(rng, &column_values).0,
+                        )
+                    }),
+                ],
+                rng,
             ),
-            _ => unreachable!(),
         };
 
         SimplePredicate(operator)
@@ -191,17 +220,10 @@ impl ArbitraryFrom<Table> for Predicate {
 
 impl ArbitraryFrom<(&str, &Value)> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
-        match rng.gen_range(0..3) {
-            0 => Predicate::Eq(column_name.to_string(), (*value).clone()),
-            1 => Predicate::Gt(
-                column_name.to_string(),
-                LTValue::arbitrary_from(rng, *value).0,
-            ),
-            2 => Predicate::Lt(
-                column_name.to_string(),
-                LTValue::arbitrary_from(rng, *value).0,
-            ),
-            _ => unreachable!(),
-        }
+        one_of(vec![
+            Box::new(|rng| Predicate::Eq(column_name.to_string(), (*value).clone())),
+            Box::new(|rng| Predicate::Gt(column_name.to_string(), GTValue::arbitrary_from(rng, *value).0)),
+            Box::new(|rng| Predicate::Lt(column_name.to_string(), LTValue::arbitrary_from(rng, *value).0)),
+        ], rng)
     }
 }

@@ -17,24 +17,6 @@ pub(crate) struct Table {
     pub(crate) columns: Vec<Column>,
 }
 
-impl Table {
-    pub fn to_create_str(&self) -> String {
-        let mut out = String::new();
-
-        out.push_str(format!("CREATE TABLE {} (", self.name).as_str());
-
-        assert!(!self.columns.is_empty());
-        for column in &self.columns {
-            out.push_str(format!("{} {},", column.name, column.column_type.as_str()).as_str());
-        }
-        // remove last comma
-        out.pop();
-
-        out.push_str(");");
-        out
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct Column {
     pub(crate) name: String,
@@ -51,13 +33,13 @@ pub(crate) enum ColumnType {
     Blob,
 }
 
-impl ColumnType {
-    pub fn as_str(&self) -> &str {
+impl Display for ColumnType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ColumnType::Integer => "INTEGER",
-            ColumnType::Float => "FLOAT",
-            ColumnType::Text => "TEXT",
-            ColumnType::Blob => "BLOB",
+            ColumnType::Integer => write!(f, "INTEGER"),
+            ColumnType::Float => write!(f, "REAL"),
+            ColumnType::Text => write!(f, "TEXT"),
+            ColumnType::Blob => write!(f, "BLOB"),
         }
     }
 }

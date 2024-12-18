@@ -1,7 +1,7 @@
 use generation::plan::{Interaction, ResultSet};
 use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
-use model::query::{Insert, Predicate, Query, Select};
+use model::query::{Create, Insert, Predicate, Query, Select};
 use model::table::{Column, Name, Table, Value};
 use properties::{property_insert_select, property_select_all};
 use rand::prelude::*;
@@ -189,7 +189,12 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
                 .map(|_| Column::arbitrary(&mut env.rng))
                 .collect(),
         };
-        let rows = get_all_rows(env, conn, table.to_create_str().as_str())?;
+        let query = Query::Create(Create { table: table.clone() });
+        let rows = get_all_rows(
+            env,
+            conn,
+            query.to_string().as_str(),
+        )?;
         log::debug!("{:?}", rows);
         let rows = get_all_rows(
             env,
@@ -207,7 +212,7 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
             _ => unreachable!(),
         };
         assert!(
-            *as_text != table.to_create_str(),
+            *as_text != query.to_string(),
             "table was not inserted correctly"
         );
         env.tables.push(table);

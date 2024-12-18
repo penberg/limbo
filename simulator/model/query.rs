@@ -7,6 +7,7 @@ pub(crate) enum Predicate {
     And(Vec<Predicate>), // p1 AND p2 AND p3... AND pn
     Or(Vec<Predicate>),  // p1 OR p2 OR p3... OR pn
     Eq(String, Value),   // column = Value
+    Neq(String, Value),  // column != Value
     Gt(String, Value),   // column > Value
     Lt(String, Value),   // column < Value
 }
@@ -44,6 +45,7 @@ impl Display for Predicate {
                 }
             }
             Predicate::Eq(name, value) => write!(f, "{} = {}", name, value),
+            Predicate::Neq(name, value) => write!(f, "{} != {}", name, value),
             Predicate::Gt(name, value) => write!(f, "{} > {}", name, value),
             Predicate::Lt(name, value) => write!(f, "{} < {}", name, value),
         }
@@ -85,7 +87,18 @@ pub(crate) struct Delete {
 impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Query::Create(Create { table }) => write!(f, "{}", table.to_create_str()),
+            Query::Create(Create { table }) => {
+                write!(f, "CREATE TABLE {} (", table.name)?;
+
+                for (i, column) in table.columns.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, "{} {}", column.name, column.column_type)?;
+                }
+
+                write!(f, ")")
+            },
             Query::Select(Select {
                 table,
                 predicate: guard,

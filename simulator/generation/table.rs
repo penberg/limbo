@@ -1,6 +1,6 @@
 use rand::Rng;
 
-use crate::generation::{gen_random_text, readable_name_custom, Arbitrary, ArbitraryFrom};
+use crate::generation::{pick_index, gen_random_text, pick, readable_name_custom, Arbitrary, ArbitraryFrom};
 use crate::model::table::{Column, ColumnType, Name, Table, Value};
 
 impl Arbitrary for Name {
@@ -13,7 +13,7 @@ impl Arbitrary for Name {
 impl Arbitrary for Table {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
         let name = Name::arbitrary(rng).0;
-        let columns = (1..=rng.gen_range(1..10))
+        let columns = (1..=rng.gen_range(1..5))
             .map(|_| Column::arbitrary(rng))
             .collect();
         Table {
@@ -39,13 +39,16 @@ impl Arbitrary for Column {
 
 impl Arbitrary for ColumnType {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
-        match rng.gen_range(0..4) {
-            0 => ColumnType::Integer,
-            1 => ColumnType::Float,
-            2 => ColumnType::Text,
-            3 => ColumnType::Blob,
-            _ => unreachable!(),
-        }
+        pick(
+            &vec![
+                ColumnType::Integer,
+                ColumnType::Float,
+                ColumnType::Text,
+                ColumnType::Blob,
+            ],
+            rng,
+        )
+        .to_owned()
     }
 }
 
@@ -55,8 +58,7 @@ impl ArbitraryFrom<Vec<&Value>> for Value {
             return Value::Null;
         }
 
-        let index = rng.gen_range(0..values.len());
-        values[index].clone()
+        pick(values, rng).to_owned().clone()
     }
 }
 
@@ -78,8 +80,8 @@ impl ArbitraryFrom<Vec<&Value>> for LTValue {
         if values.is_empty() {
             return LTValue(Value::Null);
         }
-
-        let index = rng.gen_range(0..values.len());
+        
+        let index = pick_index(values.len(), rng);
         LTValue::arbitrary_from(rng, values[index])
     }
 }
@@ -139,7 +141,7 @@ impl ArbitraryFrom<Vec<&Value>> for GTValue {
             return GTValue(Value::Null);
         }
 
-        let index = rng.gen_range(0..values.len());
+        let index = pick_index(values.len(), rng);
         GTValue::arbitrary_from(rng, values[index])
     }
 }
