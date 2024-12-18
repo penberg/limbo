@@ -76,6 +76,8 @@ pub enum Command {
     NullValue,
     /// Toggle 'echo' mode to repeat commands before execution
     Echo,
+    /// Display tables
+    Tables,
 }
 
 impl Command {
@@ -86,6 +88,7 @@ impl Command {
             | Self::Help
             | Self::Opcodes
             | Self::ShowInfo
+            | Self::Tables
             | Self::SetOutput => 0,
             Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
         } + 1) // argv0
@@ -104,6 +107,7 @@ impl Command {
             Self::ShowInfo => ".show",
             Self::NullValue => ".nullvalue <string>",
             Self::Echo => ".echo on|off",
+            Self::Tables => ".tables",
         }
     }
 }
@@ -116,6 +120,7 @@ impl FromStr for Command {
             ".open" => Ok(Self::Open),
             ".help" => Ok(Self::Help),
             ".schema" => Ok(Self::Schema),
+            ".tables" => Ok(Self::Tables),
             ".opcodes" => Ok(Self::Opcodes),
             ".mode" => Ok(Self::OutputMode),
             ".output" => Ok(Self::SetOutput),
@@ -421,6 +426,12 @@ impl Limbo {
                         let _ = self.writeln(e.to_string());
                     }
                 }
+                Command::Tables => {
+                    let pattern = args.get(1).copied();
+                    if let Err(e) = self.display_tables(pattern) {
+                        let _ = self.writeln(e.to_string());
+                    }
+                }
                 Command::Opcodes => {
                     if args.len() > 1 {
                         for op in &OPCODE_DESCRIPTIONS {
@@ -621,6 +632,63 @@ impl Limbo {
 
         Ok(())
     }
+
+    fn display_tables(&mut self, pattern: Option<&str>) -> anyhow::Result<()> {
+        let sql = match pattern {
+            Some(pattern) => format!(
+                "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name LIKE '{}' ORDER BY 1",
+                pattern
+            ),
+            None => String::from(
+                "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY 1"
+            ),
+        };
+
+        match self.conn.query(&sql) {
+            Ok(Some(ref mut rows)) => {
+                let mut tables = String::new();
+                loop {
+                    match rows.next_row()? {
+                        RowResult::Row(row) => {
+                            if let Some(Value::Text(table)) = row.values.first() {
+                                tables.push_str(table);
+                                tables.push(' ');
+                            }
+                        }
+                        RowResult::IO => {
+                            self.io.run_once()?;
+                        }
+                        RowResult::Done => break,
+                    }
+                }
+
+                if tables.len() > 0 {
+                    let _ = self.writeln(tables.trim_end());
+                } else {
+                    if let Some(pattern) = pattern {
+                        let _ = self.write_fmt(format_args!(
+                            "Error: Tables with pattern '{}' not found.",
+                            pattern
+                        ));
+                    } else {
+                        let _ = self.writeln("No tables found in the database.");
+                    }
+                }
+            }
+            Ok(None) => {
+                let _ = self.writeln("No results returned from the query.");
+            }
+            Err(err) => {
+                if err.to_string().contains("no such table: sqlite_schema") {
+                    return Err(anyhow::anyhow!("Unable to access database schema. The database may be using an older SQLite version or may not be properly initialized."));
+                } else {
+                    return Err(anyhow::anyhow!("Error querying schema: {}", err));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn get_writer(output: &str) -> Box<dyn Write> {
@@ -656,6 +724,7 @@ Special Commands:
 .open <database_file>      Open and connect to a database file.
 .output <mode>             Change the output mode. Available modes are 'raw' and 'pretty'.
 .schema <table_name>       Show the schema of the specified table.
+.tables <pattern>          List names of tables matching LIKE pattern TABLE
 .opcodes                   Display all the opcodes defined by the virtual machine
 .cd <directory>            Change the current working directory.
 .nullvalue <string>        Set the value to be displayed for null values.
@@ -673,19 +742,22 @@ Usage Examples:
 3. To view the schema of a table named 'employees':
    .schema employees
 
-4. To list all available SQL opcodes:
+4. To list all tables:
+   .tables
+
+5. To list all available SQL opcodes:
    .opcodes
 
-5. To change the current output mode to 'pretty':
+6. To change the current output mode to 'pretty':
    .mode pretty
 
-6. Send output to STDOUT if no file is specified:
+7. Send output to STDOUT if no file is specified:
    .output
 
-7. To change the current working directory to '/tmp':
+8. To change the current working directory to '/tmp':
    .cd /tmp
 
-8. Show the current values of settings:
+9. Show the current values of settings:
    .show
 
 Note:
