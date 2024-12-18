@@ -307,7 +307,7 @@ fn translate_pragma(
     match body {
         None => {
             let pragma_name = &name.name.0;
-            query_pragma(pragma_name, database_header.clone(), &mut program);
+            query_pragma(pragma_name, database_header.clone(), &mut program)?;
         }
         Some(ast::PragmaBody::Equals(value)) => {
             write = true;
@@ -317,7 +317,7 @@ fn translate_pragma(
                 database_header.clone(),
                 pager,
                 &mut program,
-            );
+            )?;
         }
         Some(ast::PragmaBody::Call(_)) => {
             todo!()
@@ -343,8 +343,11 @@ fn update_pragma(
     header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
     program: &mut ProgramBuilder,
-) {
-    let pragma = PragmaName::from_str(name).expect("provided pragma not valid");
+) -> Result<()> {
+    let pragma = match PragmaName::from_str(name) {
+        Ok(pragma) => pragma,
+        Err(()) => bail_parse_error!("Not a valid pragma name"),
+    };
     match pragma {
         PragmaName::CacheSize => {
             let cache_size = match value {
@@ -355,15 +358,16 @@ fn update_pragma(
                     ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
                         -numeric_value.parse::<i64>().unwrap()
                     }
-                    _ => 0,
+                    _ => bail_parse_error!("Not a valid value"),
                 },
-                _ => 0,
+                _ => bail_parse_error!("Not a valid value"),
             };
-
             update_cache_size(cache_size, header, pager);
+            Ok(())
         }
         PragmaName::JournalMode => {
-            query_pragma("journal_mode", header, program);
+            query_pragma("journal_mode", header, program)?;
+            Ok(())
         }
         _ => todo!("pragma `{name}`"),
     }
@@ -373,8 +377,11 @@ fn query_pragma(
     name: &str,
     database_header: Rc<RefCell<DatabaseHeader>>,
     program: &mut ProgramBuilder,
-) {
-    let pragma = PragmaName::from_str(name).expect("provided pragma not valid");
+) -> Result<()> {
+    let pragma = match PragmaName::from_str(name) {
+        Ok(pragma) => pragma,
+        Err(()) => bail_parse_error!("Not a valid pragma name"),
+    };
     let register = program.alloc_register();
     match pragma {
         PragmaName::CacheSize => {
@@ -394,11 +401,11 @@ fn query_pragma(
         }
     }
 
-    let next_register = program.next_free_register();
     program.emit_insn(Insn::ResultRow {
         start_reg: register,
-        count: next_register - register,
+        count: 1,
     });
+    Ok(())
 }
 
 fn update_cache_size(value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {
