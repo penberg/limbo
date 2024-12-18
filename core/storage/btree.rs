@@ -6,8 +6,9 @@ use crate::storage::sqlite3_ondisk::{
     TableInteriorCell, TableLeafCell,
 };
 use crate::types::{Cursor, CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp};
-use crate::Result;
+use crate::{LimboError, Page, Result};
 
+use std::borrow::BorrowMut;
 use std::cell::{Ref, RefCell};
 use std::pin::Pin;
 use std::rc::Rc;
@@ -1542,6 +1543,180 @@ impl BTreeCursor {
         }
         cell_idx
     }
+
+    fn delete_record(&mut self) -> Result<CursorResult<()>> {
+        let mut page_rc = self.stack.top();
+        let page = page_rc.borrow_mut();
+        return_if_locked!(page);
+
+        let contents = page.get().contents.as_mut().unwrap();
+        let cell_idx = self.stack.current_index() as usize;
+        println!("cell_idx={}", cell_idx);
+        println!("cell_count={}", contents.cell_count());
+        if cell_idx >= contents.cell_count() {
+            return Err(LimboError::InternalError(
+                "Delete: invalid cell index".to_string(),
+            ));
+        }
+
+        self.drop_cell(contents, cell_idx);
+
+        page.set_dirty();
+        self.pager.add_dirty(page.get().id);
+
+        return_if_io!(self.balance_after_delete());
+
+        Ok(CursorResult::Ok(()))
+    }
+
+    fn balance_after_delete(&mut self) -> Result<CursorResult<()>> {
+        let mut page_rc = self.stack.top();
+        let page = page_rc.borrow_mut();
+        let contents = page.get().contents.as_ref().unwrap();
+
+        let space_used = self.compute_space_used(contents);
+        let total_space = self.usable_space();
+
+        if space_used < total_space * 4 / 10 {
+            if !self.stack.has_parent() {
+                // Root page - only remove if empty
+                if contents.cell_count() == 0 {
+                    // TODO: handle removing empty root page
+                    // Need to promote child page as new root
+                }
+                return Ok(CursorResult::Ok(()));
+            }
+
+            // Try to merge with siblings
+            return_if_io!(self.merge_with_siblings());
+        }
+
+        Ok(CursorResult::Ok(()))
+    }
+
+    fn compute_space_used(&self, page: &PageContent) -> usize {
+        let mut space = 0;
+
+        space += page.cell_count() * 2;
+
+        for idx in 0..page.cell_count() {
+            let (_, len) = page.cell_get_raw_region(
+                idx,
+                self.max_local(page.page_type()),
+                self.min_local(page.page_type()),
+                self.usable_space(),
+            );
+            space += len;
+        }
+
+        space
+    }
+
+    fn merge_with_siblings(&mut self) -> Result<CursorResult<()>> {
+        let mut parent_rc = self.stack.parent();
+        let parent = parent_rc.borrow_mut();
+        let parent_contents = parent.get().contents.as_ref().unwrap();
+        let mut curr_page_rc = self.stack.top();
+        let curr_page = curr_page_rc.borrow_mut();
+
+        let mut our_idx = 0;
+        for idx in 0..parent_contents.cell_count() {
+            match parent_contents.cell_get(
+                idx,
+                self.pager.clone(),
+                self.max_local(parent_contents.page_type()),
+                self.min_local(parent_contents.page_type()),
+                self.usable_space(),
+            )? {
+                BTreeCell::TableInteriorCell(TableInteriorCell {
+                    _left_child_page, ..
+                }) => {
+                    if _left_child_page as usize == curr_page.get().id {
+                        our_idx = idx;
+                        break;
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        if our_idx > 0 {
+            let mut left_sibling = self.get_sibling_page(our_idx - 1, &parent_contents)?;
+            if self.can_merge_pages(&curr_page, &left_sibling.borrow_mut()) {
+                return_if_io!(self.merge_pages(&left_sibling, &curr_page_rc));
+                return Ok(CursorResult::Ok(()));
+            }
+        }
+
+        if our_idx < parent_contents.cell_count() - 1 {
+            let mut right_sibling = self.get_sibling_page(our_idx + 1, &parent_contents)?;
+            if self.can_merge_pages(&curr_page, &right_sibling.borrow_mut()) {
+                return_if_io!(self.merge_pages(&curr_page_rc, &right_sibling));
+                return Ok(CursorResult::Ok(()));
+            }
+        }
+
+        Ok(CursorResult::Ok(()))
+    }
+
+    fn get_sibling_page(&self, idx: usize, parent_contents: &PageContent) -> Result<PageRef> {
+        match parent_contents.cell_get(
+            idx,
+            self.pager.clone(),
+            self.max_local(parent_contents.page_type()),
+            self.min_local(parent_contents.page_type()),
+            self.usable_space(),
+        )? {
+            BTreeCell::TableInteriorCell(TableInteriorCell {
+                _left_child_page, ..
+            }) => Ok(self.pager.read_page(_left_child_page as usize)?),
+            _ => unreachable!(),
+        }
+    }
+
+    fn can_merge_pages(&self, page1: &Page, page2: &Page) -> bool {
+        let contents1 = page1.get().contents.as_ref().unwrap();
+        let contents2 = page2.get().contents.as_ref().unwrap();
+
+        let space1 = self.compute_space_used(contents1);
+        let space2 = self.compute_space_used(contents2);
+
+        // Can merge if combined space is less than 90% of page
+        (space1 + space2) < (self.usable_space() * 9 / 10)
+    }
+
+    fn merge_pages(
+        &mut self,
+        mut target: &PageRef,
+        mut source: &PageRef,
+    ) -> Result<CursorResult<()>> {
+        let target_page = target.borrow_mut();
+        let source_page = source.borrow_mut();
+
+        let target_contents = target_page.get().contents.as_mut().unwrap();
+        let source_contents = source_page.get().contents.as_ref().unwrap();
+
+        // Copy all cells from source to target
+        for idx in 0..source_contents.cell_count() {
+            let (start, len) = source_contents.cell_get_raw_region(
+                idx,
+                self.max_local(source_contents.page_type()),
+                self.min_local(source_contents.page_type()),
+                self.usable_space(),
+            );
+
+            let cell_data = &source_contents.as_ptr()[start..start + len];
+            self.insert_into_cell(target_contents, cell_data, target_contents.cell_count());
+        }
+
+        target_page.set_dirty();
+        self.pager.add_dirty(target_page.get().id);
+
+        // Delete the source page
+        // TODO: add to freelist
+
+        Ok(CursorResult::Ok(()))
+    }
 }
 
 impl PageStack {
@@ -1659,6 +1834,11 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
 }
 
 impl Cursor for BTreeCursor {
+    fn delete_record(&mut self) -> Result<CursorResult<()>> {
+        return_if_io!(self.delete_record());
+        Ok(CursorResult::Ok(()))
+    }
+
     fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
         return_if_io!(self.move_to_rightmost());
         let (rowid, record) = return_if_io!(self.get_next_record(None));

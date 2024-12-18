@@ -85,7 +85,7 @@ fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
 
 /// Recursively resolve column references in an expression.
 /// Id, Qualified and DoublyQualified are converted to Column.
-fn bind_column_references(
+pub fn bind_column_references(
     expr: &mut ast::Expr,
     referenced_tables: &[BTreeTableReference],
 ) -> Result<()> {
@@ -732,7 +732,7 @@ fn parse_join(
     ))
 }
 
-fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {
+pub fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {
     match predicate {
         ast::Expr::Binary(left, ast::Operator::And, right) => {
             break_predicate_at_and_boundaries(*left, out_predicates);

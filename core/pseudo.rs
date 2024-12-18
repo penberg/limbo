@@ -19,6 +19,10 @@ impl PseudoCursor {
 }
 
 impl Cursor for PseudoCursor {
+    fn delete_record(&mut self) -> Result<CursorResult<()>> {
+        unimplemented!()
+    }
+
     fn is_empty(&self) -> bool {
         self.current.borrow().is_none()
     }

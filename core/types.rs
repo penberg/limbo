@@ -443,6 +443,7 @@ pub trait Cursor {
         record: &OwnedRecord,
         moved_before: bool, /* Tells inserter that it doesn't need to traverse in order to find leaf page */
     ) -> Result<CursorResult<()>>; //
+    fn delete_record(&mut self) -> Result<CursorResult<()>>;
     fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
     fn set_null_flag(&mut self, flag: bool);
     fn get_null_flag(&self) -> bool;
