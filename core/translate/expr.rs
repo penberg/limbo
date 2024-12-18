@@ -899,7 +899,7 @@ pub fn translate_expr(
                         Ok(target_register)
                     }
                     JsonFunc::JsonArray => {
-                        allocate_registers(
+                        let start_reg = translate_variable_sized_function_parameter_list(
                             program,
                             args,
                             referenced_tables,
@@ -908,7 +908,7 @@ pub fn translate_expr(
 
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
-                            start_reg: target_register + 1,
+                            start_reg,
                             dest: target_register,
                             func: func_ctx,
                         });
@@ -921,7 +921,7 @@ pub fn translate_expr(
                             unreachable!("this is always ast::Expr::Cast")
                         }
                         ScalarFunc::Char => {
-                            allocate_registers(
+                            let start_reg = translate_variable_sized_function_parameter_list(
                                 program,
                                 args,
                                 referenced_tables,
@@ -930,7 +930,7 @@ pub fn translate_expr(
 
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1952,26 +1952,32 @@ pub fn translate_expr(
     }
 }
 
-fn allocate_registers(
+// Returns the starting register for the function.
+// TODO: Use this function for all functions with variable number of parameters in `translate_expr`
+fn translate_variable_sized_function_parameter_list(
     program: &mut ProgramBuilder,
     args: &Option<Vec<ast::Expr>>,
     referenced_tables: Option<&[BTreeTableReference]>,
     precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
-) -> Result<()> {
-    let args = args.clone().unwrap_or_else(Vec::new);
+) -> Result<usize> {
+    let args = args.as_deref().unwrap_or_default();
+
+    let reg = program.alloc_registers(args.len());
+    let mut current_reg = reg;
 
     for arg in args.iter() {
-        let reg = program.alloc_register();
         translate_expr(
             program,
             referenced_tables,
             arg,
-            reg,
+            current_reg,
             precomputed_exprs_to_registers,
         )?;
+
+        current_reg += 1;
     }
 
-    Ok(())
+    Ok(reg)
 }
 
 fn wrap_eval_jump_expr(
