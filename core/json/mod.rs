@@ -50,13 +50,13 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
     }
 }
 
-pub fn json_array(values: Vec<OwnedValue>) -> crate::Result<OwnedValue> {
+pub fn json_array(values: Vec<&OwnedValue>) -> crate::Result<OwnedValue> {
     let mut s = String::new();
     s.push('[');
 
     for (idx, value) in values.iter().enumerate() {
         match value {
-            OwnedValue::Blob(_) => crate::bail_parse_error!("JSON cannot hold BLOB values"),
+            OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
             OwnedValue::Text(t) => {
                 if t.subtype == TextSubtype::Json {
                     s.push_str(&t.value);
@@ -67,8 +67,15 @@ pub fn json_array(values: Vec<OwnedValue>) -> crate::Result<OwnedValue> {
                     }
                 }
             }
-            OwnedValue::Integer(i) => s.push_str(&i.to_string()),
-            OwnedValue::Float(f) => s.push_str(&f.to_string()),
+            OwnedValue::Integer(i) => match crate::json::to_string(&i) {
+                Ok(json) => s.push_str(&json),
+                Err(_) => crate::bail_parse_error!("malformed JSON"),
+            },
+            OwnedValue::Float(f) => match crate::json::to_string(&f) {
+                Ok(json) => s.push_str(&json),
+                Err(_) => crate::bail_parse_error!("malformed JSON"),
+            },
+            OwnedValue::Null => s.push_str("null"),
             _ => unreachable!(),
         }
 
@@ -78,7 +85,7 @@ pub fn json_array(values: Vec<OwnedValue>) -> crate::Result<OwnedValue> {
     }
 
     s.push(']');
-    Ok(OwnedValue::build_text(Rc::new(s)))
+    Ok(OwnedValue::Text(LimboText::json(Rc::new(s))))
 }
 
 #[cfg(test)]
@@ -92,6 +99,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"key\":\"value\""));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -103,6 +111,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"key\":\"value\""));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -114,6 +123,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("{\"key\":9e999}"));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -125,6 +135,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("{\"key\":-9e999}"));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -136,6 +147,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("{\"key\":null}"));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -157,6 +169,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"key\":\"value\""));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -179,6 +192,7 @@ mod tests {
         let result = get_json(&input).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"asd\":\"adf\""));
+            assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -210,11 +224,17 @@ mod tests {
     fn test_json_array_simple() {
         let text = OwnedValue::build_text(Rc::new("value1".to_string()));
         let json = OwnedValue::Text(LimboText::json(Rc::new("\"value2\"".to_string())));
-        let input = vec![text, json, OwnedValue::Integer(1), OwnedValue::Float(1.1)];
+        let input = vec![
+            &text,
+            &json,
+            &OwnedValue::Integer(1),
+            &OwnedValue::Float(1.1),
+        ];
 
         let result = json_array(input).unwrap();
         if let OwnedValue::Text(res) = result {
             assert_eq!(res.value.as_str(), "[\"value1\",\"value2\",1,1.1]");
+            assert_eq!(res.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -227,6 +247,7 @@ mod tests {
         let result = json_array(input).unwrap();
         if let OwnedValue::Text(res) = result {
             assert_eq!(res.value.as_str(), "[]");
+            assert_eq!(res.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
         }
@@ -236,7 +257,7 @@ mod tests {
     fn test_json_array_blob_invalid() {
         let blob = OwnedValue::Blob(Rc::new("1".as_bytes().to_vec()));
 
-        let input = vec![blob];
+        let input = vec![&blob];
 
         let result = json_array(input);
 

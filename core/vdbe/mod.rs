@@ -2267,8 +2267,9 @@ impl Program {
                         }
                         #[cfg(feature = "json")]
                         crate::function::Func::Json(JsonFunc::JsonArray) => {
-                            let reg_values =
-                                state.registers[*start_reg..*start_reg + arg_count].to_vec();
+                            let reg_values = state.registers[*start_reg..*start_reg + arg_count]
+                                .iter()
+                                .collect();
 
                             let json_array = json_array(reg_values);
 
