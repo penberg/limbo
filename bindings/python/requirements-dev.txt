@@ -4,6 +4,8 @@ coverage==7.6.1
     #   pytest-cov
 iniconfig==2.0.0
     # via pytest
+maturin==1.7.8
+    # via pylimbo (pyproject.toml)
 mypy==1.11.0
     # via pylimbo (pyproject.toml)
 mypy-extensions==1.0.0
