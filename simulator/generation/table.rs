@@ -1,6 +1,8 @@
 use rand::Rng;
 
-use crate::generation::{pick_index, gen_random_text, pick, readable_name_custom, Arbitrary, ArbitraryFrom};
+use crate::generation::{
+    gen_random_text, pick, pick_index, readable_name_custom, Arbitrary, ArbitraryFrom,
+};
 use crate::model::table::{Column, ColumnType, Name, Table, Value};
 
 impl Arbitrary for Name {
@@ -80,7 +82,7 @@ impl ArbitraryFrom<Vec<&Value>> for LTValue {
         if values.is_empty() {
             return LTValue(Value::Null);
         }
-        
+
         let index = pick_index(values.len(), rng);
         LTValue::arbitrary_from(rng, values[index])
     }

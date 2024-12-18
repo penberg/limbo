@@ -98,7 +98,7 @@ impl Display for Query {
                 }
 
                 write!(f, ")")
-            },
+            }
             Query::Select(Select {
                 table,
                 predicate: guard,

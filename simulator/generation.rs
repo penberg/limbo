@@ -30,7 +30,10 @@ pub(crate) fn frequency<'a, T, R: rand::Rng>(
     unreachable!()
 }
 
-pub(crate) fn one_of<'a, T, R: rand::Rng>(choices: Vec<Box<dyn Fn(&mut R) -> T + 'a>>, rng: &mut R) -> T {
+pub(crate) fn one_of<'a, T, R: rand::Rng>(
+    choices: Vec<Box<dyn Fn(&mut R) -> T + 'a>>,
+    rng: &mut R,
+) -> T {
     let index = rng.gen_range(0..choices.len());
     choices[index](rng)
 }

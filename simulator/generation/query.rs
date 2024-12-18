@@ -220,10 +220,23 @@ impl ArbitraryFrom<Table> for Predicate {
 
 impl ArbitraryFrom<(&str, &Value)> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
-        one_of(vec![
-            Box::new(|rng| Predicate::Eq(column_name.to_string(), (*value).clone())),
-            Box::new(|rng| Predicate::Gt(column_name.to_string(), GTValue::arbitrary_from(rng, *value).0)),
-            Box::new(|rng| Predicate::Lt(column_name.to_string(), LTValue::arbitrary_from(rng, *value).0)),
-        ], rng)
+        one_of(
+            vec![
+                Box::new(|rng| Predicate::Eq(column_name.to_string(), (*value).clone())),
+                Box::new(|rng| {
+                    Predicate::Gt(
+                        column_name.to_string(),
+                        GTValue::arbitrary_from(rng, *value).0,
+                    )
+                }),
+                Box::new(|rng| {
+                    Predicate::Lt(
+                        column_name.to_string(),
+                        LTValue::arbitrary_from(rng, *value).0,
+                    )
+                }),
+            ],
+            rng,
+        )
     }
 }

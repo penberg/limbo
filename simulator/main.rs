@@ -189,12 +189,10 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
                 .map(|_| Column::arbitrary(&mut env.rng))
                 .collect(),
         };
-        let query = Query::Create(Create { table: table.clone() });
-        let rows = get_all_rows(
-            env,
-            conn,
-            query.to_string().as_str(),
-        )?;
+        let query = Query::Create(Create {
+            table: table.clone(),
+        });
+        let rows = get_all_rows(env, conn, query.to_string().as_str())?;
         log::debug!("{:?}", rows);
         let rows = get_all_rows(
             env,
