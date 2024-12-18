@@ -934,7 +934,7 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
             }
             let bytes = buf[0..n].to_vec();
             let value = unsafe { String::from_utf8_unchecked(bytes) };
-            Ok((OwnedValue::Text(value.into()), n))
+            Ok((OwnedValue::build_text(value.into()), n))
         }
     }
 }
@@ -1271,7 +1271,7 @@ mod tests {
     #[case(&[], SerialType::ConstInt0, OwnedValue::Integer(0))]
     #[case(&[], SerialType::ConstInt1, OwnedValue::Integer(1))]
     #[case(&[1, 2, 3], SerialType::Blob(3), OwnedValue::Blob(vec![1, 2, 3].into()))]
-    #[case(&[65, 66, 67], SerialType::String(3), OwnedValue::Text("ABC".to_string().into()))]
+    #[case(&[65, 66, 67], SerialType::String(3), OwnedValue::build_text("ABC".to_string().into()))]
     fn test_read_value(
         #[case] buf: &[u8],
         #[case] serial_type: SerialType,

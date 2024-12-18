@@ -55,3 +55,15 @@ do_execsql_test json5-multi-comment {
    SELECT json(' /* abc */ { /*def*/ aaa /* xyz */ : // to the end of line
           123 /* xyz */ , /* 123 */ }')
 } {{{"aaa":123}}}
+
+do_execsql_test json_array_str {
+   SELECT json_array('a')
+} {{["a"]}}
+
+do_execsql_test json_array_not_json {
+   SELECT json_array('{"a":1}');
+} {{["{\"a\":1}"]}}
+
+do_execsql_test json_array_json {
+   SELECT json_array(json('{"a":1}'));
+} {{[{"a":1}]}}
