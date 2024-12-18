@@ -27,6 +27,10 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - uses: Swatinem/rust-cache@v2
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
     - name: Build
       run: cargo build --verbose
     - name: Test
@@ -53,6 +57,8 @@ jobs:
   test-limbo:
     runs-on: ubuntu-latest
     steps:
+    - name: Install sqlite
+      run: sudo apt update && sudo apt install -y sqlite3 libsqlite3-dev
     - name: Install cargo-c
       env:
         LINK: https://github.com/lu-zero/cargo-c/releases/download/v0.10.7
@@ -68,13 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - name: Install
-      run: |
-        set -euo pipefail
-        mkdir download && cd download
-        # apt contains an old version of sqlite3 that does not support e.g. string_agg(), so we download 3.46.0 manually
-        wget https://www.sqlite.org/2024/sqlite-tools-linux-x64-3460000.zip
-        unzip sqlite-tools-linux-x64-3460000.zip
-
+    - name: Install sqlite
+      run: sudo apt update && sudo apt install -y sqlite3 libsqlite3-dev
     - name: Test
-      run: SQLITE_EXEC="$(pwd)/download/sqlite3" make test-compat
+      run: SQLITE_EXEC="sqlite3" make test-compat
