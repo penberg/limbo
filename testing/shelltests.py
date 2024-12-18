@@ -182,6 +182,11 @@ Null value: LIMBO
 CWD: {cwd}/testing
 Echo: off""",
 )
+
+do_execshell_test(pipe, "test-show-tables", ".tables", "products users")
+
+do_execshell_test(pipe, "test-show-tables-with-pattern", ".tables us%", "users")
+
 # test we can set the null value
 
 write_to_pipe(".open :memory:")
