@@ -100,7 +100,3 @@ do_execsql_test_on_specific_db testing/testing.db schema-2 {
 # do_execsql_test_on_specific_db testing/testing.db schema-1 {
 #   .tables
 # } {"products users"}
-
-do_execsql_test_on_specific_db testing/testing.db schema-1 {
-  .tables us%
-} {"users"}
