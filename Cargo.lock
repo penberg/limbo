@@ -386,7 +386,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core_tester"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -1100,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "limbo-wasm"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_core"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bumpalo",
  "cfg_block",
@@ -1160,7 +1160,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sim"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anarchist-readable-name-generator-lib",
  "env_logger 0.10.2",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sqlite3"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "env_logger 0.11.5",
  "limbo_core",
@@ -1616,7 +1616,7 @@ dependencies = [
 
 [[package]]
 name = "py-limbo"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "limbo_core",
