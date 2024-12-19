@@ -54,5 +54,12 @@ macro_rules! bail_corrupt_error {
     };
 }
 
+#[macro_export]
+macro_rules! bail_constraint_error {
+    ($($arg:tt)*) => {
+        return Err($crate::error::LimboError::Constraint(format!($($arg)*)))
+    };
+}
+
 pub const SQLITE_CONSTRAINT: usize = 19;
 pub const SQLITE_CONSTRAINT_PRIMARYKEY: usize = SQLITE_CONSTRAINT | (6 << 8);

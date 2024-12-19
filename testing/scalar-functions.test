@@ -39,6 +39,10 @@ do_execsql_test char {
   select char(108, 105)
 } {li}
 
+do_execsql_test char-nested {
+  select char(106 + 2, 105)
+} {li}
+
 do_execsql_test char-empty {
   select char()
 } {}
