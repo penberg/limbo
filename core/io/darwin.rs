@@ -190,7 +190,7 @@ impl File for DarwinFile {
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
         let file = self.file.borrow();
         let result = {
-            let r = match &(*c) {
+            let r = match c.as_ref() {
                 Completion::Read(r) => r,
                 _ => unreachable!(),
             };
