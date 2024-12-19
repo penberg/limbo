@@ -2420,6 +2420,24 @@ impl Program {
                                 };
                                 state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
                             }
+                            ScalarFunc::Uuid7Str | ScalarFunc::Uuid7 => match arg_count {
+                                0 => {
+                                    state.registers[*dest] =
+                                        exec_uuid(scalar_func, None).unwrap_or(OwnedValue::Null);
+                                }
+                                1 => {
+                                    let reg_value = state.registers[*start_reg].borrow_mut();
+                                    state.registers[*dest] =
+                                        exec_uuid(scalar_func, Some(reg_value))
+                                            .unwrap_or(OwnedValue::Null);
+                                }
+                                _ => {
+                                    return Err(LimboError::ParseError(format!(
+                                        "Invalid number of arguments for Uuid7 function: {}",
+                                        arg_count
+                                    )));
+                                }
+                            },
                             ScalarFunc::Hex => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = exec_hex(reg_value);
@@ -2435,7 +2453,7 @@ impl Program {
                                 state.registers[*dest] = exec_random();
                             }
                             ScalarFunc::Uuid4 | ScalarFunc::Uuid4Str => {
-                                state.registers[*dest] = exec_uuid(scalar_func);
+                                state.registers[*dest] = exec_uuid(scalar_func, None)?;
                             }
                             ScalarFunc::Trim => {
                                 let reg_value = state.registers[*start_reg].clone();
@@ -3109,38 +3127,29 @@ enum UuidType {
     V7Str,
 }
 
-fn exec_uuid(var: &ScalarFunc, time: Option<&OwnedValue>) -> OwnedValue {
+fn exec_uuid(var: &ScalarFunc, time: Option<&OwnedValue>) -> Result<OwnedValue> {
     match var {
-        ScalarFunc::Uuid4Str => OwnedValue::Text(Rc::new(Uuid::new_v4().to_string())),
-        ScalarFunc::Uuid4 => OwnedValue::Blob(Rc::new(Uuid::new_v4().into_bytes().to_vec())),
-        ScalarFunc::Uuid7 | ScalarFunc::Uuid7Str => match time {
-            Some(OwnedValue::Integer(i)) => {
+        ScalarFunc::Uuid4Str => Ok(OwnedValue::Text(Rc::new(Uuid::new_v4().to_string()))),
+        ScalarFunc::Uuid4 => Ok(OwnedValue::Blob(Rc::new(
+            Uuid::new_v4().into_bytes().to_vec(),
+        ))),
+        ScalarFunc::Uuid7 | ScalarFunc::Uuid7Str => {
+            let uuid = if let Some(OwnedValue::Integer(ref i)) = time {
                 let ctx = ContextV7::new();
                 if *i < 0 {
-                    // not valid unix timestamp
-                    return OwnedValue::Null;
+                    // not valid unix timestamp, error or null?
+                    return Ok(OwnedValue::Null);
                 }
-                let uuid = Uuid::new_v7(Timestamp::from_unix(ctx, *i as u64, 0));
-                match var {
-                    ScalarFunc::Uuid7Str => OwnedValue::Text(Rc::new(uuid.to_string())),
-                    ScalarFunc::Uuid7 => OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())),
-                    _ => unreachable!(),
-                }
-            }
-            Some(OwnedValue::Text(t)) => {
-                let uuid = Uuid::new_v7();
-                match var {
-                    ScalarFunc::Uuid7Str => OwnedValue::Text(Rc::new(uuid.to_string())),
-                    ScalarFunc::Uuid7 => OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())),
-                    _ => unreachable!(),
-                }
-            }
-            _ => match var {
-                ScalarFunc::Uuid7Str => OwnedValue::Text(Rc::new(Uuid::now_v7().to_string())),
-                ScalarFunc::Uuid7 => OwnedValue::Blob(Rc::new(Uuid::now_v7().as_bytes().to_vec())),
+                Uuid::new_v7(Timestamp::from_unix(ctx, *i as u64, 0))
+            } else {
+                Uuid::now_v7()
+            };
+            return match var {
+                ScalarFunc::Uuid7Str => Ok(OwnedValue::Text(Rc::new(uuid.to_string()))),
+                ScalarFunc::Uuid7 => Ok(OwnedValue::Blob(Rc::new(uuid.into_bytes().to_vec()))),
                 _ => unreachable!(),
-            },
-        },
+            };
+        }
         _ => unreachable!(),
     }
 }
