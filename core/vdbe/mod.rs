@@ -48,6 +48,8 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
+
+use uuid::{ContextV7, Timestamp, Uuid};
 pub type BranchOffset = i64;
 use macros::Description;
 pub type CursorID = usize;
@@ -2395,7 +2397,9 @@ impl Program {
                             | ScalarFunc::RandomBlob
                             | ScalarFunc::Sign
                             | ScalarFunc::Soundex
-                            | ScalarFunc::ZeroBlob => {
+                            | ScalarFunc::ZeroBlob
+                            | ScalarFunc::UuidStr
+                            | ScalarFunc::UuidBlob => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
                                     ScalarFunc::Sign => exec_sign(reg_value),
@@ -2410,6 +2414,8 @@ impl Program {
                                     ScalarFunc::RandomBlob => Some(exec_randomblob(reg_value)),
                                     ScalarFunc::ZeroBlob => Some(exec_zeroblob(reg_value)),
                                     ScalarFunc::Soundex => Some(exec_soundex(reg_value)),
+                                    ScalarFunc::UuidStr => Some(exec_uuidstr(reg_value)?),
+                                    ScalarFunc::UuidBlob => Some(exec_uuidblob(reg_value)?),
                                     _ => unreachable!(),
                                 };
                                 state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
@@ -2427,6 +2433,9 @@ impl Program {
                             }
                             ScalarFunc::Random => {
                                 state.registers[*dest] = exec_random();
+                            }
+                            ScalarFunc::Uuid4 | ScalarFunc::Uuid4Str => {
+                                state.registers[*dest] = exec_uuid(scalar_func);
                             }
                             ScalarFunc::Trim => {
                                 let reg_value = state.registers[*start_reg].clone();
@@ -3091,6 +3100,83 @@ fn exec_random() -> OwnedValue {
     getrandom::getrandom(&mut buf).unwrap();
     let random_number = i64::from_ne_bytes(buf);
     OwnedValue::Integer(random_number)
+}
+
+enum UuidType {
+    V4Blob,
+    V4Str,
+    V7Blob,
+    V7Str,
+}
+
+fn exec_uuid(var: &ScalarFunc, time: Option<&OwnedValue>) -> OwnedValue {
+    match var {
+        ScalarFunc::Uuid4Str => OwnedValue::Text(Rc::new(Uuid::new_v4().to_string())),
+        ScalarFunc::Uuid4 => OwnedValue::Blob(Rc::new(Uuid::new_v4().into_bytes().to_vec())),
+        ScalarFunc::Uuid7 | ScalarFunc::Uuid7Str => match time {
+            Some(OwnedValue::Integer(i)) => {
+                let ctx = ContextV7::new();
+                if *i < 0 {
+                    // not valid unix timestamp
+                    return OwnedValue::Null;
+                }
+                let uuid = Uuid::new_v7(Timestamp::from_unix(ctx, *i as u64, 0));
+                match var {
+                    ScalarFunc::Uuid7Str => OwnedValue::Text(Rc::new(uuid.to_string())),
+                    ScalarFunc::Uuid7 => OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())),
+                    _ => unreachable!(),
+                }
+            }
+            Some(OwnedValue::Text(t)) => {
+                let uuid = Uuid::new_v7();
+                match var {
+                    ScalarFunc::Uuid7Str => OwnedValue::Text(Rc::new(uuid.to_string())),
+                    ScalarFunc::Uuid7 => OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())),
+                    _ => unreachable!(),
+                }
+            }
+            _ => match var {
+                ScalarFunc::Uuid7Str => OwnedValue::Text(Rc::new(Uuid::now_v7().to_string())),
+                ScalarFunc::Uuid7 => OwnedValue::Blob(Rc::new(Uuid::now_v7().as_bytes().to_vec())),
+                _ => unreachable!(),
+            },
+        },
+        _ => unreachable!(),
+    }
+}
+
+fn exec_uuidstr(reg: &OwnedValue) -> Result<OwnedValue> {
+    match reg {
+        OwnedValue::Blob(blob) => {
+            let uuid = Uuid::from_slice(blob).map_err(|e| LimboError::ParseError(e.to_string()))?;
+            Ok(OwnedValue::Text(Rc::new(uuid.to_string())))
+        }
+        OwnedValue::Text(val) => {
+            let uuid = Uuid::parse_str(val).map_err(|e| LimboError::ParseError(e.to_string()))?;
+            Ok(OwnedValue::Text(Rc::new(uuid.to_string())))
+        }
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Err(LimboError::ParseError(
+            "Invalid argument type for UUID function".to_string(),
+        )),
+    }
+}
+
+fn exec_uuidblob(reg: &OwnedValue) -> Result<OwnedValue> {
+    match reg {
+        OwnedValue::Text(val) => {
+            let uuid = Uuid::parse_str(val).map_err(|e| LimboError::ParseError(e.to_string()))?;
+            Ok(OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())))
+        }
+        OwnedValue::Blob(blob) => {
+            let uuid = Uuid::from_slice(blob).map_err(|e| LimboError::ParseError(e.to_string()))?;
+            Ok(OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())))
+        }
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Err(LimboError::ParseError(
+            "Invalid argument type for UUID function".to_string(),
+        )),
+    }
 }
 
 fn exec_randomblob(reg: &OwnedValue) -> OwnedValue {

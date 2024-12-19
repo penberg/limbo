@@ -91,6 +91,12 @@ pub enum ScalarFunc {
     ZeroBlob,
     LastInsertRowid,
     Replace,
+    Uuid4,
+    Uuid4Str,
+    UuidStr,
+    UuidBlob,
+    Uuid7,
+    Uuid7Str,
 }
 
 impl Display for ScalarFunc {
@@ -136,6 +142,12 @@ impl Display for ScalarFunc {
             ScalarFunc::ZeroBlob => "zeroblob".to_string(),
             ScalarFunc::LastInsertRowid => "last_insert_rowid".to_string(),
             ScalarFunc::Replace => "replace".to_string(),
+            ScalarFunc::Uuid4 => "uuid4".to_string(),
+            ScalarFunc::UuidStr => "uuid_str".to_string(),
+            ScalarFunc::UuidBlob => "uuid_blob".to_string(),
+            ScalarFunc::Uuid7 => "uuid7".to_string(),
+            ScalarFunc::Uuid7Str => "uuid7_str".to_string(),
+            ScalarFunc::Uuid4Str => "uuid4_str".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -325,6 +337,12 @@ impl Func {
             "typeof" => Ok(Func::Scalar(ScalarFunc::Typeof)),
             "last_insert_rowid" => Ok(Func::Scalar(ScalarFunc::LastInsertRowid)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
+            "uuid4" => Ok(Func::Scalar(ScalarFunc::Uuid4)),
+            "uuid7" => Ok(Func::Scalar(ScalarFunc::Uuid7)),
+            "uuid4_str" => Ok(Func::Scalar(ScalarFunc::Uuid4Str)),
+            "uuid7_str" => Ok(Func::Scalar(ScalarFunc::Uuid7Str)),
+            "uuid_str" => Ok(Func::Scalar(ScalarFunc::UuidStr)),
+            "uuid_blob" => Ok(Func::Scalar(ScalarFunc::UuidBlob)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),
             "replace" => Ok(Func::Scalar(ScalarFunc::Replace)),

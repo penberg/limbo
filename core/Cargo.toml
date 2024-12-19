@@ -14,8 +14,9 @@ name = "limbo_core"
 path = "lib.rs"
 
 [features]
-default = ["fs", "json"]
+default = ["fs", "json", "uuid"]
 fs = []
+uuid = ["dep:uuid"]
 json = [
     "dep:jsonb",
     "dep:pest",
@@ -54,6 +55,7 @@ pest_derive = { version = "2.0", optional = true }
 rand = "0.8.5"
 bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
 macros = { path = "../macros" }
+uuid = { version = "1.11.0", features = ["v4", "v7"], optional = true }
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }

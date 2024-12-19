@@ -1194,7 +1194,9 @@ pub fn translate_expr(
                         | ScalarFunc::RandomBlob
                         | ScalarFunc::Sign
                         | ScalarFunc::Soundex
-                        | ScalarFunc::ZeroBlob => {
+                        | ScalarFunc::ZeroBlob
+                        | ScalarFunc::UuidStr
+                        | ScalarFunc::UuidBlob => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     crate::bail_parse_error!(
@@ -1226,7 +1228,36 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Random => {
+                        ScalarFunc::Uuid7 | ScalarFunc::Uuid7Str => {
+                            if let Some(args) = args {
+                                // can take optional time arg
+                                if args.len() > 1 {
+                                    crate::bail_parse_error!(
+                                        "{} function with more than 1 argument",
+                                        srf.to_string()
+                                    );
+                                }
+                                if let Some(arg) = args.first() {
+                                    let regs = program.alloc_register();
+                                    translate_expr(
+                                        program,
+                                        referenced_tables,
+                                        arg,
+                                        regs,
+                                        precomputed_exprs_to_registers,
+                                    )?;
+                                }
+                            }
+                            let regs = program.alloc_register();
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: regs,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
+                        ScalarFunc::Random | ScalarFunc::Uuid4 | ScalarFunc::Uuid4Str => {
                             if args.is_some() {
                                 crate::bail_parse_error!(
                                     "{} function with arguments",
