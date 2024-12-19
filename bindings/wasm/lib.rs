@@ -267,7 +267,7 @@ impl DatabaseStorage {
 
 impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        let r = match &(*c) {
+        let r = match c.as_ref() {
             limbo_core::Completion::Read(r) => r,
             _ => unreachable!(),
         };
