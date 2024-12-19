@@ -367,12 +367,17 @@ impl Statement {
         }
     }
 
+    pub fn interrupt(&mut self) {
+        self.state.interrupt();
+    }
+
     pub fn step(&mut self) -> Result<RowResult<'_>> {
         let result = self.program.step(&mut self.state, self.pager.clone())?;
         match result {
             vdbe::StepResult::Row(row) => Ok(RowResult::Row(Row { values: row.values })),
             vdbe::StepResult::IO => Ok(RowResult::IO),
             vdbe::StepResult::Done => Ok(RowResult::Done),
+            vdbe::StepResult::Interrupt => Ok(RowResult::Interrupt),
         }
     }
 
@@ -388,6 +393,7 @@ pub enum RowResult<'a> {
     Row(Row<'a>),
     IO,
     Done,
+    Interrupt,
 }
 
 pub struct Row<'a> {

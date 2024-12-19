@@ -83,7 +83,9 @@ impl Statement {
                 }
                 JsValue::from(row_array)
             }
-            Ok(limbo_core::RowResult::IO) | Ok(limbo_core::RowResult::Done) => JsValue::UNDEFINED,
+            Ok(limbo_core::RowResult::IO)
+            | Ok(limbo_core::RowResult::Done)
+            | Ok(limbo_core::RowResult::Interrupt) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
@@ -101,6 +103,7 @@ impl Statement {
                     array.push(&row_array);
                 }
                 Ok(limbo_core::RowResult::IO) => {}
+                Ok(limbo_core::RowResult::Interrupt) => break,
                 Ok(limbo_core::RowResult::Done) => break,
                 Err(e) => panic!("Error: {:?}", e),
             }

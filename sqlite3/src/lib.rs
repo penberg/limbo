@@ -19,6 +19,7 @@ pub const SQLITE_ERROR: ffi::c_int = 1;
 pub const SQLITE_ABORT: ffi::c_int = 4;
 pub const SQLITE_BUSY: ffi::c_int = 5;
 pub const SQLITE_NOMEM: ffi::c_int = 7;
+pub const SQLITE_INTERRUPT: ffi::c_int = 9;
 pub const SQLITE_NOTFOUND: ffi::c_int = 14;
 pub const SQLITE_MISUSE: ffi::c_int = 21;
 pub const SQLITE_ROW: ffi::c_int = 100;
@@ -235,6 +236,7 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
         match result {
             limbo_core::RowResult::IO => SQLITE_BUSY,
             limbo_core::RowResult::Done => SQLITE_DONE,
+            limbo_core::RowResult::Interrupt => SQLITE_INTERRUPT,
             limbo_core::RowResult::Row(row) => {
                 stmt.row.replace(Some(row));
                 SQLITE_ROW

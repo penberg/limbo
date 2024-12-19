@@ -134,6 +134,9 @@ impl Cursor {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
                     }
+                    limbo_core::RowResult::Interrupt => {
+                        return Ok(None);
+                    }
                     limbo_core::RowResult::Done => {
                         return Ok(None);
                     }
@@ -164,6 +167,9 @@ impl Cursor {
                         self.conn.io.run_once().map_err(|e| {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
+                    }
+                    limbo_core::RowResult::Interrupt => {
+                        return Ok(results);
                     }
                     limbo_core::RowResult::Done => {
                         return Ok(results);

@@ -521,6 +521,7 @@ impl Limbo {
                         Ok(RowResult::IO) => {
                             self.io.run_once()?;
                         }
+                        Ok(RowResult::Interrupt) => break,
                         Ok(RowResult::Done) => {
                             break;
                         }
@@ -557,6 +558,7 @@ impl Limbo {
                             Ok(RowResult::IO) => {
                                 self.io.run_once()?;
                             }
+                            Ok(RowResult::Interrupt) => break,
                             Ok(RowResult::Done) => break,
                             Err(err) => {
                                 let _ = self.write_fmt(format_args!("{}", err));
@@ -606,6 +608,7 @@ impl Limbo {
                         RowResult::IO => {
                             self.io.run_once()?;
                         }
+                        RowResult::Interrupt => break,
                         RowResult::Done => break,
                     }
                 }
@@ -658,6 +661,7 @@ impl Limbo {
                         RowResult::IO => {
                             self.io.run_once()?;
                         }
+                        RowResult::Interrupt => break,
                         RowResult::Done => break,
                     }
                 }
