@@ -1,2 +1,2 @@
 typing-extensions==4.12.2
-    # via limbo (pyproject.toml)
+    # via pylimbo (pyproject.toml)

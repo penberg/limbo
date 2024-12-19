@@ -51,6 +51,14 @@ do_execsql_test table-star-2 {
     select p.*, u.first_name from users u join products p on u.id = p.id limit 1;
 } {1|hat|79.0|Jamie}
 
+do_execsql_test select_with_quoting {
+  select `users`.id from [users] where users.[id] = 5;
+} {5}
+
+do_execsql_test select_with_quoting_2 {
+  select "users".`id` from users where `users`.[id] = 5;
+} {5}
+
 do_execsql_test seekrowid {
     select * from users u where u.id = 5;
 } {"5|Edward|Miller|christiankramer@example.com|725-281-1033|08522 English Plain|Lake Keith|ID|23283|15"}

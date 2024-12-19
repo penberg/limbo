@@ -241,7 +241,7 @@ impl File for LinuxFile {
     }
 
     fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
-        let r = match &(*c) {
+        let r = match c.as_ref() {
             Completion::Read(r) => r,
             _ => unreachable!(),
         };

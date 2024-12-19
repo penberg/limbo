@@ -57,7 +57,7 @@ impl File for WindowsFile {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         {
-            let r = match &(*c) {
+            let r = match c.as_ref() {
                 Completion::Read(r) => r,
                 _ => unreachable!(),
             };
