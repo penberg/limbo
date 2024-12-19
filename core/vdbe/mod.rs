@@ -554,6 +554,7 @@ pub enum StepResult<'a> {
     Done,
     IO,
     Row(Record<'a>),
+    Interrupt,
 }
 
 /// If there is I/O, the instruction is restarted.
@@ -589,6 +590,7 @@ pub struct ProgramState {
     deferred_seek: Option<(CursorID, CursorID)>,
     ended_coroutine: bool, // flag to notify yield coroutine finished
     regex_cache: RegexCache,
+    interrupted: bool,
 }
 
 impl ProgramState {
@@ -604,6 +606,7 @@ impl ProgramState {
             deferred_seek: None,
             ended_coroutine: false,
             regex_cache: RegexCache::new(),
+            interrupted: false,
         }
     }
 
@@ -613,6 +616,14 @@ impl ProgramState {
 
     pub fn column(&self, i: usize) -> Option<String> {
         Some(format!("{:?}", self.registers[i]))
+    }
+
+    pub fn interrupt(&mut self) {
+        self.interrupted = true;
+    }
+
+    pub fn is_interrupted(&self) -> bool {
+        self.interrupted
     }
 }
 
@@ -652,6 +663,9 @@ impl Program {
         pager: Rc<Pager>,
     ) -> Result<StepResult<'a>> {
         loop {
+            if state.is_interrupted() {
+                return Ok(StepResult::Interrupt);
+            }
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
             let mut cursors = state.cursors.borrow_mut();

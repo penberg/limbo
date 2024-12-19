@@ -51,6 +51,7 @@ pub fn parse_schema_rows(rows: Option<Rows>, schema: &mut Schema, io: Arc<dyn IO
                     // read the schema is actually complete?
                     io.run_once()?;
                 }
+                RowResult::Interrupt => break,
                 RowResult::Done => break,
             }
         }

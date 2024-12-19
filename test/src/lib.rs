@@ -93,6 +93,7 @@ mod tests {
                         RowResult::IO => {
                             tmp_db.io.run_once()?;
                         }
+                        RowResult::Interrupt => break,
                         RowResult::Done => break,
                     }
                 },
@@ -160,6 +161,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
@@ -233,6 +235,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
@@ -295,6 +298,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
@@ -355,6 +359,7 @@ mod tests {
                             RowResult::IO => {
                                 tmp_db.io.run_once()?;
                             }
+                            RowResult::Interrupt => break,
                             RowResult::Done => break,
                         }
                     }
@@ -446,6 +451,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             }
@@ -479,6 +485,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
