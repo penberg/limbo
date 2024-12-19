@@ -22,6 +22,60 @@
 </p>
 
 ---
+<details>
+  <summary>What is OLTP? </summary>
+  
+  **OLTP (Online Transaction Processing)** systems are designed to handle real-time transactional data, typically in applications requiring high-volume, short, and fast transactions. These systems support operations such as inserting, updating, and deleting data records in real-time.
+
+  ### Key Characteristics of OLTP:
+  - **High Transaction Throughput**: Optimized to handle a large number of quick transactions.
+  - **Real-Time Processing**: Transactions are processed instantly.
+  - **ACID Properties**: Ensures data consistency and reliability.
+  - **Relational Databases**: Typically uses relational databases to maintain integrity.
+
+  ### Where OLTP Systems Shine:
+  OLTP systems are ideal for applications that need quick, reliable data processing and integrity. They are commonly used in:
+  - **Financial Systems** (e.g., banks, stock trading)
+  - **Retail Systems** (e.g., point-of-sale)
+  - **Reservation Systems** (e.g., airlines, hotel bookings)
+  - **E-commerce** (e.g., order management)
+  - **Supply Chain** (e.g., inventory updates)
+
+  ### Real-World Example: Bank Transaction System
+  - **Deposit**: User deposits money; the system immediately updates the balance.
+  - **Withdrawal**: The system checks funds and deducts money in real-time.
+  - **Fund Transfer**: Money is moved between accounts instantly, ensuring consistency.
+
+  These operations must be fast, consistent, and reliable, making them typical of OLTP systems.
+
+</details>
+
+<details>
+  <summary>How Does SQLite Fit Into OLTP? </summary>
+
+  **SQLite** is a lightweight, self-contained relational database that is fully compatible with OLTP systems, particularly for smaller-scale, embedded, or mobile applications.
+
+  ### Why SQLite Works for OLTP:
+  - **Lightweight and Embeddable**: SQLite doesn’t require a separate server; it is embedded directly into the application.
+  - **Fast for Small-Scale Transactions**: It’s optimized for quick, small-scale read/write operations, ideal for mobile apps and smaller systems.
+  - **ACID Compliant**: Ensures data integrity even in case of failure, making it ideal for transaction systems.
+  - **Zero Configuration**: Easy to deploy with no need for complex setups, making it suitable for small applications.
+  - **Concurrency Control**: While SQLite uses a simpler locking mechanism, it is sufficient for smaller-scale applications.
+  - **Portability**: SQLite databases are stored in a single file, making them portable and easy to back up.
+
+  ### Real-World Example: Mobile Banking App
+  - **User Actions**: Check balances, make payments, view transaction history.
+  - **Local Database**: SQLite stores user data and transaction records on the device.
+  - **Transaction Integrity**: When a transaction happens (e.g., money transfer), SQLite ensures consistency and reliability.
+  - **Offline Support**: The app can continue working offline, syncing with the central server once connected again.
+
+  ### When to Use SQLite for OLTP:
+  - **Small-Scale Applications**: Great for light to medium transaction volumes.
+  - **Mobile Apps**: Ideal for apps requiring local transactional data storage.
+  - **Embedded Systems**: For IoT or devices with limited resources needing local databases.
+
+</details>
+
 
 ## Features
 
@@ -33,6 +87,7 @@
   * SQLite C API
 * JavaScript/WebAssembly bindings (_wip_)
 * Support for Linux, macOS, and Windows
+
 
 ## Getting Started
 
