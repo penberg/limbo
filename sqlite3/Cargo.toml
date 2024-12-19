@@ -17,6 +17,7 @@ dist = true
 
 [lib]
 doc = false
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
 env_logger = { version = "0.11.3", default-features = false }
