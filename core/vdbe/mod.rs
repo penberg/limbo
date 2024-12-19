@@ -33,9 +33,9 @@ use crate::types::{
     AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
 };
 use crate::util::parse_schema_rows;
+use crate::{enum_with_docs, Connection, Result, TransactionState};
 #[cfg(feature = "json")]
 use crate::{function::JsonFunc, json::get_json};
-use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
@@ -54,6 +54,8 @@ pub type BranchOffset = i64;
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
+
+mod enum_with_docs;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -74,477 +76,553 @@ impl Display for Func {
     }
 }
 
-#[derive(Debug)]
-pub enum Insn {
-    // Initialize the program state and jump to the given PC.
-    Init {
-        target_pc: BranchOffset,
-    },
-    // Write a NULL into register dest. If dest_end is Some, then also write NULL into register dest_end and every register in between dest and dest_end. If dest_end is not set, then only register dest is set to NULL.
-    Null {
-        dest: usize,
-        dest_end: Option<usize>,
-    },
-    // Move the cursor P1 to a null row. Any Column operations that occur while the cursor is on the null row will always write a NULL.
-    NullRow {
+enum_with_docs! {
+    Insn {
+        // Initialize the program state and jump to the given PC.
+        #[description = "Programs contain a single instance of this opcode as the very first opcode. If tracing is enabled (by the sqlite3_trace()) interface, then the UTF-8 string contained in P4 is emitted on the trace callback. Or if P4 is blank, use the string returned by sqlite3_sql(). If P2 is not zero, jump to instruction P2. Increment the value of P1 so that Once opcodes will jump the first time they are evaluated for this run. If P3 is not zero, then it is an address to jump to if an SQLITE_CORRUPT error is encountered."]
+        Init {
+            target_pc: BranchOffset,
+        },
+        // Write a NULL into register dest. If dest_end is Some, then also write NULL into register dest_end and every register in between dest and dest_end. If dest_end is not set, then only register dest is set to NULL.
+        #[description = "Write a NULL into registers P2. If P3 greater than P2, then also write NULL into register P3 and every register in between P2 and P3. If P3 is less than P2 (typically P3 is zero) then only register P2 is set to NULL. If the P1 value is non-zero, then also set the MEM_Cleared flag so that NULL values will not compare equal even if SQLITE_NULLEQ is set on Ne or Eq."]
+        Null {
+            dest: usize,
+            dest_end: Option<usize>,
+        },
+        // Move the cursor P1 to a null row. Any Column operations that occur while the cursor is on the null row will always write a NULL.
+        #[description = "Move the cursor P1 to a null row. Any Column operations that occur while the cursor is on the null row will always write a NULL. If cursor P1 is not previously opened, open it now to a special pseudo-cursor that always returns NULL for every column."]
+        NullRow {
+            cursor_id: CursorID,
+        },
+        // Add two registers and store the result in a third register.
+        #[description = "Add the value in register P1 to the value in register P2 and store the result in register P3. If either input is NULL, the result is NULL."]
+        Add {
+            lhs: usize,
+            rhs: usize,
+            dest: usize,
+        },
+        // Subtract rhs from lhs and store in dest
+        #[description = "Subtract the value in register P1 from the value in register P2 and store the result in register P3. If either input is NULL, the result is NULL."]
+        Subtract {
+            lhs: usize,
+            rhs: usize,
+            dest: usize,
+        },
+        // Multiply two registers and store the result in a third register.
+        #[description = "Multiply the value in register P1 by the value in register P2 and store the result in register P3. If either input is NULL, the result is NULL."]
+        Multiply {
+            lhs: usize,
+            rhs: usize,
+            dest: usize,
+        },
+        // Divide lhs by rhs and store the result in a third register.
+        #[description =  "Divide the value in register P1 by the value in register P2 and store the result in register P3 (P3=P2/P1). If the value in register P1 is zero, then the result is NULL. If either input is NULL, the result is NULL."]
+        Divide {
+            lhs: usize,
+            rhs: usize,
+            dest: usize,
+        },
+        // Compare two vectors of registers in reg(P1)..reg(P1+P3-1) (call this vector "A") and in reg(P2)..reg(P2+P3-1) ("B"). Save the result of the comparison for use by the next Jump instruct.
+        #[description = "Compare two vectors of registers in reg(P1)..reg(P1+P3-1) (call this vector \"A\") and in reg(P2)..reg(P2+P3-1) (\"B\"). Save the result of the comparison for use by the next Jump instruct. If P5 has the OPFLAG_PERMUTE bit set, then the order of comparison is determined by the most recent Permutation operator. If the OPFLAG_PERMUTE bit is clear, then register are compared in sequential order. P4 is a KeyInfo structure that defines collating sequences and sort orders for the comparison. The permutation applies to registers only. The KeyInfo elements are used sequentially. The comparison is a sort comparison, so NULLs compare equal, NULLs are less than numbers, numbers are less than strings, and strings are less than blobs. This opcode must be immediately followed by an Jump opcode."]
+        Compare {
+            start_reg_a: usize,
+            start_reg_b: usize,
+            count: usize,
+        },
+        // Place the result of rhs bitwise AND lhs in third register.
+        #[description = "Take the bit-wise AND of the values in register P1 and P2 and store the result in register P3. If either input is NULL, the result is NULL."]
+        BitAnd {
+            lhs: usize,
+            rhs: usize,
+            dest: usize,
+        },
+        // Place the result of rhs bitwise OR lhs in third register.
+        #[description = "Take the bit-wise OR of the values in register P1 and P2 and store the result in register P3. If either input is NULL, the result is NULL."]
+        BitOr {
+            lhs: usize,
+            rhs: usize,
+            dest: usize,
+        },
+        // Place the result of bitwise NOT register P1 in dest register.
+        #[description = "Interpret the content of register P1 as an integer. Store the ones-complement of the P1 value into register P2. If P1 holds a NULL then store a NULL in P2."]
+        BitNot {
+            reg: usize,
+            dest: usize,
+        },
+        // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
+        #[description = "Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively. This opcode must immediately follow an Compare opcode."]
+        Jump {
+            target_pc_lt: BranchOffset,
+            target_pc_eq: BranchOffset,
+            target_pc_gt: BranchOffset,
+        },
+        // Move the P3 values in register P1..P1+P3-1 over into registers P2..P2+P3-1. Registers P1..P1+P3-1 are left holding a NULL. It is an error for register ranges P1..P1+P3-1 and P2..P2+P3-1 to overlap. It is an error for P3 to be less than 1.
+        #[description = "Move the P3 values in register P1..P1+P3-1 over into registers P2..P2+P3-1. Registers P1..P1+P3-1 are left holding a NULL. It is an error for register ranges P1..P1+P3-1 and P2..P2+P3-1 to overlap. It is an error for P3 to be less than 1."]
+        Move {
+            source_reg: usize,
+            dest_reg: usize,
+            count: usize,
+        },
+        // If the given register is a positive integer, decrement it by decrement_by and jump to the given PC.
+        #[description = "Register P1 must contain an integer. If the value of register P1 is 1 or greater, subtract P3 from the value in P1 and jump to P2. If the initial value of register P1 is less than 1, then the value is unchanged and control passes through to the next instruction."]
+        IfPos {
+            reg: usize,
+            target_pc: BranchOffset,
+            decrement_by: usize,
+        },
+        // If the given register is not NULL, jump to the given PC.
+        #[description = "Jump to P2 if the value in register P1 is not NULL."]
+        NotNull {
+            reg: usize,
+            target_pc: BranchOffset,
+        },
+        // Compare two registers and jump to the given PC if they are equal.
+        #[description = "Compare the values in register P1 and P3. If reg(P3)==reg(P1) then jump to address P2. The SQLITE_AFF_MASK portion of P5 must be an affinity character - SQLITE_AFF_TEXT, SQLITE_AFF_INTEGER, and so forth. An attempt is made to coerce both inputs according to this affinity before the comparison is made. If the SQLITE_AFF_MASK is 0x00, then numeric affinity is used. Note that the affinity conversions are stored back into the input registers P1 and P3. So this opcode can cause persistent changes to registers P1 and P3. Once any conversions have taken place, and neither value is NULL, the values are compared. If both values are blobs then memcmp() is used to determine the results of the comparison. If both values are text, then the appropriate collating function specified in P4 is used to do the comparison. If P4 is not specified then memcmp() is used to compare text string. If both values are numeric, then a numeric comparison is used. If the two values are of different types, then numbers are considered less than strings and strings are considered less than blobs. If SQLITE_NULLEQ is set in P5 then the result of comparison is always either true or false and is never NULL. If both operands are NULL then the result of comparison is true. If either operand is NULL then the result is false. If neither operand is NULL the result is the same as it would be if the SQLITE_NULLEQ flag were omitted from P5. This opcode saves the result of comparison for use by the new Jump opcode."]
+        Eq {
+            lhs: usize,
+            rhs: usize,
+            target_pc: BranchOffset,
+        },
+        // Compare two registers and jump to the given PC if they are not equal.
+        #[description = "This works just like the Eq opcode except that the jump is taken if the operands in registers P1 and P3 are not equal. See the Eq opcode for additional information."]
+        Ne {
+            lhs: usize,
+            rhs: usize,
+            target_pc: BranchOffset,
+        },
+        // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
+        #[description = "Compare the values in register P1 and P3. If reg(P3)<reg(P1) then jump to address P2. If the SQLITE_JUMPIFNULL bit of P5 is set and either reg(P1) or reg(P3) is NULL then the take the jump. If the SQLITE_JUMPIFNULL bit is clear then fall through if either operand is NULL. The SQLITE_AFF_MASK portion of P5 must be an affinity character - SQLITE_AFF_TEXT, SQLITE_AFF_INTEGER, and so forth. An attempt is made to coerce both inputs according to this affinity before the comparison is made. If the SQLITE_AFF_MASK is 0x00, then numeric affinity is used. Note that the affinity conversions are stored back into the input registers P1 and P3. So this opcode can cause persistent changes to registers P1 and P3. Once any conversions have taken place, and neither value is NULL, the values are compared. If both values are blobs then memcmp() is used to determine the results of the comparison. If both values are text, then the appropriate collating function specified in P4 is used to do the comparison. If P4 is not specified then memcmp() is used to compare text string. If both values are numeric, then a numeric comparison is used. If the two values are of different types, then numbers are considered less than strings and strings are considered less than blobs. This opcode saves the result of comparison for use by the new Jump opcode."]
+        Lt {
+            lhs: usize,
+            rhs: usize,
+            target_pc: BranchOffset,
+        },
+        // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
+        #[description = "This works just like the Lt opcode except that the jump is taken if the content of register P3 is less than or equal to the content of register P1. See the Lt opcode for additional information."]
+        Le {
+            lhs: usize,
+            rhs: usize,
+            target_pc: BranchOffset,
+        },
+        // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
+        #[description = "This works just like the Lt opcode except that the jump is taken if the content of register P3 is greater than the content of register P1. See the Lt opcode for additional information."]
+        Gt {
+            lhs: usize,
+            rhs: usize,
+            target_pc: BranchOffset,
+        },
+        // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
+        #[description =  "This works just like the Lt opcode except that the jump is taken if the content of register P3 is greater than or equal to the content of register P1. See the Lt opcode for additional information."]
+        Ge {
+            lhs: usize,
+            rhs: usize,
+            target_pc: BranchOffset,
+        },
+        // Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
+        #[description = "Jump to P2 if the value in register P1 is true. The value is considered true if it is numeric and non-zero. If the value in P1 is NULL then take the jump if and only if P3 is non-zero."]
+        If {
+            reg: usize,              // P1
+            target_pc: BranchOffset, // P2
+            // P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
+            null_reg: usize,
+        },
+        // Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
+        #[description = "Jump to P2 if the value in register P1 is False. The value is considered false if it has a numeric value of zero. If the value in P1 is NULL then take the jump if and only if P3 is non-zero."]
+        IfNot {
+            reg: usize,              // P1
+            target_pc: BranchOffset, // P2
+            // P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
+            null_reg: usize,
+        },
+        // Open a cursor for reading.
+        #[description = "Opens a cursor for reading."]
+        OpenReadAsync {
+            cursor_id: CursorID,
+            root_page: PageIdx,
+        },
+
+        // Await for the completion of open cursor.
+        #[description = "Awaits for the completion of open cursor."]
+        OpenReadAwait,
+
+        // Open a cursor for a pseudo-table that contains a single row.
+        #[description = "Open a new cursor that points to a fake table that contains a single row of data. The content of that one row is the content of memory register P2. In other words, cursor P1 becomes an alias for the MEM_Blob content contained in register P2. A pseudo-table created by this opcode is used to hold a single row output from the sorter so that the row can be decomposed into individual columns using the Column opcode. The Column opcode is the only cursor opcode that works with a pseudo-table. P3 is the number of fields in the records that will be stored by the pseudo-table. If P2 is 0 or negative then the pseudo-cursor will return NULL for every column."]
+        OpenPseudo {
+            cursor_id: CursorID,
+            content_reg: usize,
+            num_fields: usize,
+        },
+
+        // Rewind the cursor to the beginning of the B-Tree.
+        #[description = "Rewind the cursor to the beginning of the B-Tree."]
+        RewindAsync {
         cursor_id: CursorID,
-    },
-    // Add two registers and store the result in a third register.
-    Add {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Subtract rhs from lhs and store in dest
-    Subtract {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Multiply two registers and store the result in a third register.
-    Multiply {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Divide lhs by rhs and store the result in a third register.
-    Divide {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Compare two vectors of registers in reg(P1)..reg(P1+P3-1) (call this vector "A") and in reg(P2)..reg(P2+P3-1) ("B"). Save the result of the comparison for use by the next Jump instruct.
-    Compare {
-        start_reg_a: usize,
-        start_reg_b: usize,
-        count: usize,
-    },
-    // Place the result of rhs bitwise AND lhs in third register.
-    BitAnd {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Place the result of rhs bitwise OR lhs in third register.
-    BitOr {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Place the result of bitwise NOT register P1 in dest register.
-    BitNot {
-        reg: usize,
-        dest: usize,
-    },
-    // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
-    Jump {
-        target_pc_lt: BranchOffset,
-        target_pc_eq: BranchOffset,
-        target_pc_gt: BranchOffset,
-    },
-    // Move the P3 values in register P1..P1+P3-1 over into registers P2..P2+P3-1. Registers P1..P1+P3-1 are left holding a NULL. It is an error for register ranges P1..P1+P3-1 and P2..P2+P3-1 to overlap. It is an error for P3 to be less than 1.
-    Move {
-        source_reg: usize,
-        dest_reg: usize,
-        count: usize,
-    },
-    // If the given register is a positive integer, decrement it by decrement_by and jump to the given PC.
-    IfPos {
-        reg: usize,
-        target_pc: BranchOffset,
-        decrement_by: usize,
-    },
-    // If the given register is not NULL, jump to the given PC.
-    NotNull {
-        reg: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if they are equal.
-    Eq {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if they are not equal.
-    Ne {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
-    Lt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
-    Le {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
-    Gt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
-    Ge {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
-    If {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
-        null_reg: usize,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
-    IfNot {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
-        null_reg: usize,
-    },
-    // Open a cursor for reading.
-    OpenReadAsync {
+        },
+
+        // Await for the completion of cursor rewind.
+        #[description = "Await for the completion of cursor rewind."]
+        RewindAwait {
+            cursor_id: CursorID,
+            pc_if_empty: BranchOffset,
+        },
+
+        #[description = "Represents an asynchronous operation with a cursor tracking the current position in the sequence."]
+        LastAsync {
         cursor_id: CursorID,
-        root_page: PageIdx,
-    },
+        },
 
-    // Await for the completion of open cursor.
-    OpenReadAwait,
+        #[description = "Represents a waiting state with a cursor tracking the current position and an offset for conditional branching if empty."]
+        LastAwait {
+            cursor_id: CursorID,
+            pc_if_empty: BranchOffset,
+        },
 
-    // Open a cursor for a pseudo-table that contains a single row.
-    OpenPseudo {
-        cursor_id: CursorID,
-        content_reg: usize,
-        num_fields: usize,
-    },
+        // Read a column from the current row of the cursor.
+        #[description = "Interpret the data that cursor P1 points to as a structure built using the MakeRecord instruction. (See the MakeRecord opcode for additional information about the format of the data.) Extract the P2-th column from this record. If there are less than (P2+1) values in the record, extract a NULL. The value extracted is stored in register P3. If the record contains fewer than P2 fields, then extract a NULL. Or, if the P4 argument is a P4_MEM use the value of the P4 argument as the result. If the OPFLAG_LENGTHARG bit is set in P5 then the result is guaranteed to only be used by the length() function or the equivalent. The content of large blobs is not loaded, thus saving CPU cycles. If the OPFLAG_TYPEOFARG bit is set then the result will only be used by the typeof() function or the IS NULL or IS NOT NULL operators or the equivalent. In this case, all content loading can be omitted."]
+        Column {
+            cursor_id: CursorID,
+            column: usize,
+            dest: usize,
+        },
 
-    // Rewind the cursor to the beginning of the B-Tree.
-    RewindAsync {
-        cursor_id: CursorID,
-    },
+        // Make a record and write it to destination register.
+        #[description = "Convert P2 registers beginning with P1 into the record format use as a data record in a database table or as a key in an index. The Column opcode can decode the record later. P4 may be a string that is P2 characters long. The N-th character of the string indicates the column affinity that should be used for the N-th field of the index key. The mapping from character to affinity is given by the SQLITE_AFF_ macros defined in sqliteInt.h. If P4 is NULL then all index fields have the affinity BLOB. The meaning of P5 depends on whether or not the SQLITE_ENABLE_NULL_TRIM compile-time option is enabled: * If SQLITE_ENABLE_NULL_TRIM is enabled, then the P5 is the index of the right-most table that can be null-trimmed. * If SQLITE_ENABLE_NULL_TRIM is omitted, then P5 has the value OPFLAG_NOCHNG_MAGIC if the MakeRecord opcode is allowed to accept no-change records with serial_type 10. This value is only used inside an assert() and does not affect the end result."]
+        MakeRecord {
+            start_reg: usize, // P1
+            count: usize,     // P2
+            dest_reg: usize,  // P3
+        },
 
-    // Await for the completion of cursor rewind.
-    RewindAwait {
-        cursor_id: CursorID,
-        pc_if_empty: BranchOffset,
-    },
+        // Emit a row of results.
+        #[description = "The registers P1 through P1+P2-1 contain a single row of results. This opcode causes the sqlite3_step() call to terminate with an SQLITE_ROW return code and it sets up the sqlite3_stmt structure to provide access to the r(P1)..r(P1+P2-1) values as the result row."]
+        ResultRow {
+            start_reg: usize, // P1
+            count: usize,     // P2
+        },
 
-    LastAsync {
-        cursor_id: CursorID,
-    },
+        // Advance the cursor to the next row.
+        #[description = "Advance the cursor to the next row."]
+        NextAsync {
+            cursor_id: CursorID,
+        },
 
-    LastAwait {
-        cursor_id: CursorID,
-        pc_if_empty: BranchOffset,
-    },
+        // Await for the completion of cursor advance.
+        #[description = "Await for the completion of cursor advance."]
+        NextAwait {
+            cursor_id: CursorID,
+            pc_if_next: BranchOffset,
+        },
 
-    // Read a column from the current row of the cursor.
-    Column {
-        cursor_id: CursorID,
-        column: usize,
-        dest: usize,
-    },
+        #[description = "Advance the cursor to the previous row."]
+        PrevAsync {
+            cursor_id: CursorID,
+        },
 
-    // Make a record and write it to destination register.
-    MakeRecord {
-        start_reg: usize, // P1
-        count: usize,     // P2
-        dest_reg: usize,  // P3
-    },
+        #[description = "Await for the completion of cursor to go back"]
+        PrevAwait {
+            cursor_id: CursorID,
+            pc_if_next: BranchOffset,
+        },
 
-    // Emit a row of results.
-    ResultRow {
-        start_reg: usize, // P1
-        count: usize,     // P2
-    },
+        // Halt the program.
+        #[description = "Exit immediately. All open cursors, etc are closed automatically. P1 is the result code returned by sqlite3_exec(), sqlite3_reset(), or sqlite3_finalize(). For a normal halt, this should be SQLITE_OK (0). For errors, it can be some other value. If P1!=0 then P2 will determine whether or not to rollback the current transaction. Do not rollback if P2==OE_Fail. Do the rollback if P2==OE_Rollback. If P2==OE_Abort, then back out all changes that have occurred during this execution of the VDBE, but do not rollback the transaction. If P4 is not null then it is an error message string. P5 is a value between 0 and 4, inclusive, that modifies the P4 string. 0: (no change) 1: NOT NULL constraint failed: P4 2: UNIQUE constraint failed: P4 3: CHECK constraint failed: P4 4: FOREIGN KEY constraint failed: P4 If P5 is not zero and P4 is NULL, then everything after the \":\" is omitted. There is an implied \"Halt 0 0 0\" instruction inserted at the very end of every program. So a jump past the last instruction of the program is the same as executing Halt."]
+        Halt {
+            err_code: usize,
+            description: String,
+        },
 
-    // Advance the cursor to the next row.
-    NextAsync {
-        cursor_id: CursorID,
-    },
+        // Start a transaction.
+        #[description = "Begin a transaction on database P1 if a transaction is not already active. If P2 is non-zero, then a write-transaction is started, or if a read-transaction is already active, it is upgraded to a write-transaction. If P2 is zero, then a read-transaction is started. If P2 is 2 or more then an exclusive transaction is started. P1 is the index of the database file on which the transaction is started. Index 0 is the main database file and index 1 is the file used for temporary tables. Indices of 2 or more are used for attached databases. If a write-transaction is started and the Vdbe.usesStmtJournal flag is true (this flag is set if the Vdbe may modify more than one row and may throw an ABORT exception), a statement transaction may also be opened. More specifically, a statement transaction is opened iff the database connection is currently not in autocommit mode, or if there are other active statements. A statement transaction allows the changes made by this VDBE to be rolled back after an error without having to roll back the entire transaction. If no error is encountered, the statement transaction will automatically commit when the VDBE halts. If P5!=0 then this opcode also checks the schema cookie against P3 and the schema generation counter against P4. The cookie changes its value whenever the database schema changes. This operation is used to detect when that the cookie has changed and that the current process needs to reread the schema. If the schema cookie in P3 differs from the schema cookie in the database header or if the schema generation counter in P4 differs from the current generation counter, then an SQLITE_SCHEMA error is raised and execution halts. The sqlite3_step() wrapper function might then reprepare the statement and rerun it from the beginning."]
+        Transaction {
+            write: bool,
+        },
 
-    // Await for the completion of cursor advance.
-    NextAwait {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-    },
+        // Branch to the given PC.
+        #[description = "An unconditional jump to address P2. The next instruction executed will be the one at index P2 from the beginning of the program. The P1 parameter is not actually used by this opcode. However, it is sometimes set to 1 instead of 0 as a hint to the command-line shell that this Goto is the bottom of a loop and that the lines from P2 down to the current line should be indented for EXPLAIN output."]
+        Goto {
+            target_pc: BranchOffset,
+        },
 
-    PrevAsync {
-        cursor_id: CursorID,
-    },
+        // Stores the current program counter into register 'return_reg' then jumps to address target_pc.
+        #[description = "Write the current address onto register P1 and then jump to address P2."]
+        Gosub {
+            target_pc: BranchOffset,
+            return_reg: usize,
+        },
 
-    PrevAwait {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-    },
+        // Returns to the program counter stored in register 'return_reg'.
+        #[description = "Jump to the address stored in register P1. If P1 is a return address register, then this accomplishes a return from a subroutine. If P3 is 1, then the jump is only taken if register P1 holds an integer values, otherwise execution falls through to the next opcode, and the Return becomes a no-op. If P3 is 0, then register P1 must hold an integer or else an assert() is raised. P3 should be set to 1 when this opcode is used in combination with BeginSubrtn, and set to 0 otherwise. The value in register P1 is unchanged by this opcode. P2 is not used by the byte-code engine. However, if P2 is positive and also less than the current address, then the \"EXPLAIN\" output formatter in the CLI will indent all opcodes from the P2 opcode up to be not including the current Return. P2 should be the first opcode in the subroutine from which this opcode is returning. Thus the P2 value is a byte-code indentation hint. See tag-20220407a in wherecode.c and shell.c."]
+        Return {
+            return_reg: usize,
+        },
 
-    // Halt the program.
-    Halt {
-        err_code: usize,
-        description: String,
-    },
+        // Write an integer value into a register.
+        #[description = "The 32-bit integer value P1 is written into register P2."]
+        Integer {
+            value: i64,
+            dest: usize,
+        },
 
-    // Start a transaction.
-    Transaction {
-        write: bool,
-    },
+        // Write a float value into a register
+        #[description = "P4 is a pointer to a 64-bit floating point value. Write that value into register P2."]
+        Real {
+            value: f64,
+            dest: usize,
+        },
 
-    // Branch to the given PC.
-    Goto {
-        target_pc: BranchOffset,
-    },
+        // If register holds an integer, transform it to a float
+        #[description = "If register P1 holds an integer convert it to a real value. This opcode is used when extracting information from a column that has REAL affinity. Such column values may still be stored as integers, for space efficiency, but after extraction we want them to have only a real value."]
+        RealAffinity {
+            register: usize,
+        },
 
-    // Stores the current program counter into register 'return_reg' then jumps to address target_pc.
-    Gosub {
-        target_pc: BranchOffset,
-        return_reg: usize,
-    },
+        // Write a string value into a register.
+        #[description =  "P4 points to a nul terminated UTF-8 string. This opcode is transformed into a String opcode before it is executed for the first time. During this transformation, the length of string P4 is computed and stored as the P1 parameter."]
+        String8 {
+            value: String,
+            dest: usize,
+        },
 
-    // Returns to the program counter stored in register 'return_reg'.
-    Return {
-        return_reg: usize,
-    },
+        // Write a blob value into a register.
+        #[description = "P4 points to a blob of data P1 bytes long. Store this blob in register P2. If P4 is a NULL pointer, then construct a zero-filled blob that is P1 bytes long in P2."]
+        Blob {
+            value: Vec<u8>,
+            dest: usize,
+        },
 
-    // Write an integer value into a register.
-    Integer {
-        value: i64,
-        dest: usize,
-    },
+        // Read the rowid of the current row.
+        #[description = "Store in register P2 an integer which is the key of the table entry that P1 is currently point to. P1 can be either an ordinary table or a virtual table. There used to be a separate OP_VRowid opcode for use with virtual tables, but this one opcode now works for both table types."]
+        RowId {
+            cursor_id: CursorID,
+            dest: usize,
+        },
 
-    // Write a float value into a register
-    Real {
-        value: f64,
-        dest: usize,
-    },
+        // Seek to a rowid in the cursor. If not found, jump to the given PC. Otherwise, continue to the next instruction.
+        #[description = "P1 is the index of a cursor open on an SQL table btree (with integer keys). If register P3 does not contain an integer or if P1 does not contain a record with rowid P3 then jump immediately to P2. Or, if P2 is 0, raise an SQLITE_CORRUPT error. If P1 does contain a record with rowid P3 then leave the cursor pointing at that record and fall through to the next instruction. The NotExists opcode performs the same operation, but with NotExists the P3 register must be guaranteed to contain an integer value. With this opcode, register P3 might not contain an integer. The NotFound opcode performs the same operation on index btrees (with arbitrary multi-value keys). This opcode leaves the cursor in a state where it cannot be advanced in either direction. In other words, the Next and Prev opcodes will not work following this opcode. See also: Found, NotFound, NoConflict, SeekRowid"]
+        SeekRowid {
+            cursor_id: CursorID,
+            src_reg: usize,
+            target_pc: BranchOffset,
+        },
 
-    // If register holds an integer, transform it to a float
-    RealAffinity {
-        register: usize,
-    },
+        // P1 is an open index cursor and P3 is a cursor on the corresponding table. This opcode does a deferred seek of the P3 table cursor to the row that corresponds to the current row of P1.
+        // This is a deferred seek. Nothing actually happens until the cursor is used to read a record. That way, if no reads occur, no unnecessary I/O happens.
+        #[description = "P1 is an open index cursor and P3 is a cursor on the corresponding table. This opcode does a deferred seek of the P3 table cursor to the row that corresponds to the current row of P1. This is a deferred seek. Nothing actually happens until the cursor is used to read a record. That way, if no reads occur, no unnecessary I/O happens. P4 may be an array of integers (type P4_INTARRAY) containing one entry for each column in the P3 table. If array entry a(i) is non-zero, then reading column a(i)-1 from cursor P3 is equivalent to performing the deferred seek and then reading column i from P1. This information is stored in P3 and used to redirect reads against P3 over to P1, thus possibly avoiding the need to seek and read cursor P3."]
+        DeferredSeek {
+            index_cursor_id: CursorID,
+            table_cursor_id: CursorID,
+        },
 
-    // Write a string value into a register.
-    String8 {
-        value: String,
-        dest: usize,
-    },
+        // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
+        // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
+        // Seek to the first index entry that is greater than or equal to the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
+        #[description = "If cursor P1 refers to an SQL table (B-Tree that uses integer keys), use the value in register P3 as the key. If cursor P1 refers to an SQL index, then P3 is the first in an array of P4 registers that are used as an unpacked index key. Reposition cursor P1 so that it points to the smallest entry that is greater than or equal to the key value. If there are no records greater than or equal to the key and P2 is not zero, then jump to P2. If the cursor P1 was opened using the OPFLAG_SEEKEQ flag, then this opcode will either land on a record that exactly matches the key, or else it will cause a jump to P2. When the cursor is OPFLAG_SEEKEQ, this opcode must be followed by an IdxLE opcode with the same arguments. The IdxGT opcode will be skipped if this opcode succeeds, but the IdxGT opcode will be used on subsequent loop iterations. The OPFLAG_SEEKEQ flags is a hint to the btree layer to say that this is an equality search. This opcode leaves the cursor configured to move in forward order, from the beginning toward the end. In other words, the cursor is configured to use Next, not Prev. See also: Found, NotFound, SeekLt, SeekGt, SeekLe"]
+        SeekGE {
+            is_index: bool,
+            cursor_id: CursorID,
+            start_reg: usize,
+            num_regs: usize,
+            target_pc: BranchOffset,
+        },
 
-    // Write a blob value into a register.
-    Blob {
-        value: Vec<u8>,
-        dest: usize,
-    },
+        // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
+        // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
+        // Seek to the first index entry that is greater than the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
+        #[description = "If cursor P1 refers to an SQL table (B-Tree that uses integer keys), use the value in register P3 as a key. If cursor P1 refers to an SQL index, then P3 is the first in an array of P4 registers that are used as an unpacked index key. Reposition cursor P1 so that it points to the smallest entry that is greater than the key value. If there are no records greater than the key and P2 is not zero, then jump to P2. This opcode leaves the cursor configured to move in forward order, from the beginning toward the end. In other words, the cursor is configured to use Next, not Prev. See also: Found, NotFound, SeekLt, SeekGe, SeekLe"]
+        SeekGT {
+            is_index: bool,
+            cursor_id: CursorID,
+            start_reg: usize,
+            num_regs: usize,
+            target_pc: BranchOffset,
+        },
 
-    // Read the rowid of the current row.
-    RowId {
-        cursor_id: CursorID,
-        dest: usize,
-    },
+        // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
+        // If the P1 index entry is greater or equal than the key value then jump to P2. Otherwise fall through to the next instruction.
+        #[description = "The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end. If the P1 index entry is greater than or equal to the key value then jump to P2. Otherwise fall through to the next instruction."]
+        IdxGE {
+            cursor_id: CursorID,
+            start_reg: usize,
+            num_regs: usize,
+            target_pc: BranchOffset,
+        },
 
-    // Seek to a rowid in the cursor. If not found, jump to the given PC. Otherwise, continue to the next instruction.
-    SeekRowid {
-        cursor_id: CursorID,
-        src_reg: usize,
-        target_pc: BranchOffset,
-    },
+        // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
+        // If the P1 index entry is greater than the key value then jump to P2. Otherwise fall through to the next instruction.
+        #[description = "The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end. If the P1 index entry is greater than the key value then jump to P2. Otherwise fall through to the next instruction."]
+        IdxGT {
+            cursor_id: CursorID,
+            start_reg: usize,
+            num_regs: usize,
+            target_pc: BranchOffset,
+        },
 
-    // P1 is an open index cursor and P3 is a cursor on the corresponding table. This opcode does a deferred seek of the P3 table cursor to the row that corresponds to the current row of P1.
-    // This is a deferred seek. Nothing actually happens until the cursor is used to read a record. That way, if no reads occur, no unnecessary I/O happens.
-    DeferredSeek {
-        index_cursor_id: CursorID,
-        table_cursor_id: CursorID,
-    },
+        // Decrement the given register and jump to the given PC if the result is zero.
+        #[description = "Register P1 must hold an integer. Decrement the value in P1 and jump to P2 if the new value is exactly zero."]
+        DecrJumpZero {
+            reg: usize,
+            target_pc: BranchOffset,
+        },
 
-    // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
-    // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
-    // Seek to the first index entry that is greater than or equal to the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
-    SeekGE {
-        is_index: bool,
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
+        #[description = "Execute the xStep function for an aggregate. The function has P5 arguments. P4 is a pointer to the FuncDef structure that specifies the function. Register P3 is the accumulator. The P5 arguments are taken from register P2 and its successors."]
+        AggStep {
+            acc_reg: usize,
+            col: usize,
+            delimiter: usize,
+            func: AggFunc,
+        },
 
-    // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
-    // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
-    // Seek to the first index entry that is greater than the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
-    SeekGT {
-        is_index: bool,
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
+        #[description = "P1 is the memory location that is the accumulator for an aggregate or window function. Execute the finalizer function for an aggregate and store the result in P1. P2 is the number of arguments that the step function takes and P4 is a pointer to the FuncDef for this function. The P2 argument is not used by this opcode. It is only there to disambiguate functions that can take varying numbers of arguments. The P4 argument is only needed for the case where the step function was not previously called."]
+        AggFinal {
+            register: usize,
+            func: AggFunc,
+        },
 
-    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
-    // If the P1 index entry is greater or equal than the key value then jump to P2. Otherwise fall through to the next instruction.
-    IdxGE {
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
+        // Open a sorter.
+        #[description =  "This opcode works like OpenEphemeral except that it opens a transient index that is specifically designed to sort large tables using an external merge-sort algorithm. If argument P3 is non-zero, then it indicates that the sorter may assume that a stable sort considering the first P3 fields of each key is sufficient to produce the required results."]
+        SorterOpen {
+            cursor_id: CursorID, // P1
+            columns: usize,      // P2
+            order: OwnedRecord,  // P4. 0 if ASC and 1 if DESC
+        },
 
-    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
-    // If the P1 index entry is greater than the key value then jump to P2. Otherwise fall through to the next instruction.
-    IdxGT {
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
+        // Insert a row into the sorter.
+        #[description = "Register P2 holds an SQL index key made using the MakeRecord instructions. This opcode writes that key into the sorter P1. Data for the entry is nil."]
+        SorterInsert {
+            cursor_id: CursorID,
+            record_reg: usize,
+        },
 
-    // Decrement the given register and jump to the given PC if the result is zero.
-    DecrJumpZero {
-        reg: usize,
-        target_pc: BranchOffset,
-    },
+        // Sort the rows in the sorter.
+        #[description = "After all records have been inserted into the Sorter object identified by P1, invoke this opcode to actually do the sorting. Jump to P2 if there are no records to be sorted. This opcode is an alias for Sort and Rewind that is used for Sorter objects."]
+        SorterSort {
+            cursor_id: CursorID,
+            pc_if_empty: BranchOffset,
+        },
 
-    AggStep {
-        acc_reg: usize,
-        col: usize,
-        delimiter: usize,
-        func: AggFunc,
-    },
+        // Retrieve the next row from the sorter.
+        #[description = "Write into register P2 the current sorter data for sorter cursor P1. Then clear the column header cache on cursor P3. This opcode is normally used to move a record out of the sorter and into a register that is the source for a pseudo-table cursor created using OpenPseudo. That pseudo-table cursor is the one that is identified by parameter P3. Clearing the P3 column cache as part of this opcode saves us from having to issue a separate NullRow instruction to clear that cache."]
+        SorterData {
+            cursor_id: CursorID,  // P1
+            dest_reg: usize,      // P2
+            pseudo_cursor: usize, // P3
+        },
 
-    AggFinal {
-        register: usize,
-        func: AggFunc,
-    },
+        // Advance to the next row in the sorter.
+        #[description = "This opcode works just like Next except that P1 must be a sorter object for which the SorterSort opcode has been invoked. This opcode advances the cursor to the next sorted record, or jumps to P2 if there are no more sorted records."]
+        SorterNext {
+            cursor_id: CursorID,
+            pc_if_next: BranchOffset,
+        },
 
-    // Open a sorter.
-    SorterOpen {
-        cursor_id: CursorID, // P1
-        columns: usize,      // P2
-        order: OwnedRecord,  // P4. 0 if ASC and 1 if DESC
-    },
+        // Function
+        #[description = "Invoke a user function (P4 is a pointer to an sqlite3_context object that contains a pointer to the function to be run) with arguments taken from register P2 and successors. The number of arguments is in the sqlite3_context object that P4 points to. The result of the function is stored in register P3. Register P3 must not be one of the function inputs. P1 is a 32-bit bitmask indicating whether or not each argument to the function was determined to be constant at compile time. If the first argument was constant then bit 0 of P1 is set. This is used to determine whether meta data associated with a user function argument using the sqlite3_set_auxdata() API may be safely retained until the next invocation of this opcode. See also: AggStep, AggFinal, PureFunc"]
+        Function {
+            constant_mask: i32, // P1
+            start_reg: usize,   // P2, start of argument registers
+            dest: usize,        // P3
+            func: FuncCtx,      // P4
+        },
 
-    // Insert a row into the sorter.
-    SorterInsert {
-        cursor_id: CursorID,
-        record_reg: usize,
-    },
+        #[description = "Set up register P1 so that it will Yield to the coroutine located at address P3. If P2!=0 then the coroutine implementation immediately follows this opcode. So jump over the coroutine implementation to address P2. See also: EndCoroutine"]
+        InitCoroutine {
+            yield_reg: usize,
+            jump_on_definition: BranchOffset,
+            start_offset: BranchOffset,
+        },
 
-    // Sort the rows in the sorter.
-    SorterSort {
-        cursor_id: CursorID,
-        pc_if_empty: BranchOffset,
-    },
+        #[description = "The instruction at the address in register P1 is a Yield. Jump to the P2 parameter of that Yield. After the jump, the value register P1 is left with a value such that subsequent OP_Yields go back to the this same EndCoroutine instruction. See also: InitCoroutine"]
+        EndCoroutine {
+            yield_reg: usize,
+        },
 
-    // Retrieve the next row from the sorter.
-    SorterData {
-        cursor_id: CursorID,  // P1
-        dest_reg: usize,      // P2
-        pseudo_cursor: usize, // P3
-    },
+        #[description = "Swap the program counter with the value in register P1. This has the effect of yielding to a coroutine. If the coroutine that is launched by this instruction ends with Yield or Return then continue to the next instruction. But if the coroutine launched by this instruction ends with EndCoroutine, then jump to P2 rather than continuing with the next instruction. See also: InitCoroutine"]
+        Yield {
+            yield_reg: usize,
+            end_offset: BranchOffset,
+        },
 
-    // Advance to the next row in the sorter.
-    SorterNext {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-    },
+        #[description = "Insert at CursorID"]
+        InsertAsync {
+            cursor: CursorID,
+            key_reg: usize,    // Must be int.
+            record_reg: usize, // Blob of record data.
+            flag: usize,       // Flags used by insert, for now not used.
+        },
+        #[description = "Await to Insert at CursorID"]
+        InsertAwait {
+            cursor_id: usize,
+        },
 
-    // Function
-    Function {
-        constant_mask: i32, // P1
-        start_reg: usize,   // P2, start of argument registers
-        dest: usize,        // P3
-        func: FuncCtx,      // P4
-    },
+        #[description = "Get a new integer record number (a.k.a \"rowid\") used as the key to a table. The record number is not previously used as a key in the database table that cursor P1 points to. The new record number is written written to register P2. If P3>0 then P3 is a register in the root frame of this VDBE that holds the largest previously generated record number. No new record numbers are allowed to be less than this value. When this value reaches its maximum, an SQLITE_FULL error is generated. The P3 register is updated with the ' generated record number. This P3 mechanism is used to help implement the AUTOINCREMENT feature."]
+        NewRowid {
+            cursor: CursorID,        // P1
+            rowid_reg: usize,        // P2  Destination register to store the new rowid
+            prev_largest_reg: usize, // P3 Previous largest rowid in the table (Not used for now)
+        },
+        #[description = "Force the value in register P1 to be an integer. If the value in P1 is not an integer and cannot be converted into an integer without data loss, then jump immediately to P2, or if P2==0 raise an SQLITE_MISMATCH exception."]
+        MustBeInt {
+            reg: usize,
+        },
 
-    InitCoroutine {
-        yield_reg: usize,
-        jump_on_definition: BranchOffset,
-        start_offset: BranchOffset,
-    },
+        #[description = "Set register P1 to have the value NULL as seen by the MakeRecord instruction, but do not free any string or blob memory associated with the register, so that if the value was a string or blob that was previously copied using SCopy, the copies will continue to be valid."]
+        SoftNull {
+            reg: usize,
+        },
 
-    EndCoroutine {
-        yield_reg: usize,
-    },
+        #[description = "P1 is the index of a cursor open on an SQL table btree (with integer keys). P3 is an integer rowid. If P1 does not contain a record with rowid P3 then jump immediately to P2. Or, if P2 is 0, raise an SQLITE_CORRUPT error. If P1 does contain a record with rowid P3 then leave the cursor pointing at that record and fall through to the next instruction. The SeekRowid opcode performs the same operation but also allows the P3 register to contain a non-integer value, in which case the jump is always taken. This opcode requires that P3 always contain an integer. The NotFound opcode performs the same operation on index btrees (with arbitrary multi-value keys). This opcode leaves the cursor in a state where it cannot be advanced in either direction. In other words, the Next and Prev opcodes will not work following this opcode. See also: Found, NotFound, NoConflict, SeekRowid"]
+        NotExists {
+            cursor: CursorID,
+            rowid_reg: usize,
+            target_pc: BranchOffset,
+        },
+        #[description = "Open write at CursorID"]
+        OpenWriteAsync {
+            cursor_id: CursorID,
+            root_page: PageIdx,
+        },
+        #[description = "Await to open write"]
+        OpenWriteAwait {},
 
-    Yield {
-        yield_reg: usize,
-        end_offset: BranchOffset,
-    },
+        #[description = "Make a copy of registers P1..P1+P3 into registers P2..P2+P3. If the 0x0002 bit of P5 is set then also clear the MEM_Subtype flag in the destination. The 0x0001 bit of P5 indicates that this Copy opcode cannot be merged. The 0x0001 bit is used by the query planner and does not come into play during query execution. This instruction makes a deep copy of the value. A duplicate is made of any string or blob constant. See also SCopy."]
+        Copy {
+            src_reg: usize,
+            dst_reg: usize,
+            amount: usize, // 0 amount means we include src_reg, dst_reg..=dst_reg+amount = src_reg..=src_reg+amount
+        },
 
-    InsertAsync {
-        cursor: CursorID,
-        key_reg: usize,    // Must be int.
-        record_reg: usize, // Blob of record data.
-        flag: usize,       // Flags used by insert, for now not used.
-    },
+        // Allocate a new b-tree.
+        #[description = "Allocate a new b-tree in the main database file if P1==0 or in the TEMP database file if P1==1 or in an attached database if P1>1. The P3 argument must be 1 (BTREE_INTKEY) for a rowid table it must be 2 (BTREE_BLOBKEY) for an index or WITHOUT ROWID table. The root page number of the new b-tree is stored in register P2."]
+        CreateBtree {
+            // Allocate b-tree in main database if zero or in temp database if non-zero (P1).
+            db: usize,
+            // The root page of the new b-tree (P2).
+            root: usize,
+            // Flags (P3).
+            flags: usize,
+        },
 
-    InsertAwait {
-        cursor_id: usize,
-    },
+        // Close a cursor.
+        #[description = "Close a cursor previously opened as P1. If P1 is not currently open, this instruction is a no-op."]
+        Close {
+            cursor_id: CursorID,
+        },
 
-    NewRowid {
-        cursor: CursorID,        // P1
-        rowid_reg: usize,        // P2  Destination register to store the new rowid
-        prev_largest_reg: usize, // P3 Previous largest rowid in the table (Not used for now)
-    },
+        // Check if the register is null.
+        #[description = "Jump to P2 if the value in register P1 is NULL."]
+        IsNull {
+            // Source register (P1).
+            src: usize,
 
-    MustBeInt {
-        reg: usize,
-    },
-
-    SoftNull {
-        reg: usize,
-    },
-
-    NotExists {
-        cursor: CursorID,
-        rowid_reg: usize,
-        target_pc: BranchOffset,
-    },
-
-    OpenWriteAsync {
-        cursor_id: CursorID,
-        root_page: PageIdx,
-    },
-
-    OpenWriteAwait {},
-
-    Copy {
-        src_reg: usize,
-        dst_reg: usize,
-        amount: usize, // 0 amount means we include src_reg, dst_reg..=dst_reg+amount = src_reg..=src_reg+amount
-    },
-
-    /// Allocate a new b-tree.
-    CreateBtree {
-        /// Allocate b-tree in main database if zero or in temp database if non-zero (P1).
-        db: usize,
-        /// The root page of the new b-tree (P2).
-        root: usize,
-        /// Flags (P3).
-        flags: usize,
-    },
-
-    /// Close a cursor.
-    Close {
-        cursor_id: CursorID,
-    },
-
-    /// Check if the register is null.
-    IsNull {
-        /// Source register (P1).
-        src: usize,
-
-        /// Jump to this PC if the register is null (P2).
-        target_pc: BranchOffset,
-    },
-    ParseSchema {
-        db: usize,
-        where_clause: String,
-    },
+            // Jump to this PC if the register is null (P2).
+            target_pc: BranchOffset,
+        },
+        #[description = "Read and parse all entries from the schema table of database P1 that match the WHERE clause P4. If P4 is a NULL pointer, then the entire schema for P1 is reparsed. This opcode invokes the parser to create a new virtual machine, then runs the new virtual machine. It is thus a re-entrant opcode."]
+        ParseSchema {
+            db: usize,
+            where_clause: String,
+        }
+    }
 }
 
 // Index of insn in list of insns
