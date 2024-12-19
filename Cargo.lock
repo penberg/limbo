@@ -1119,6 +1119,7 @@ dependencies = [
  "console_error_panic_hook",
  "js-sys",
  "limbo_core",
+ "limbo_sqlite3",
  "wasm-bindgen",
 ]
 
