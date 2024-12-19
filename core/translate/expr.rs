@@ -898,6 +898,22 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+                    JsonFunc::JsonArray => {
+                        let start_reg = allocate_registers(
+                            program,
+                            args,
+                            referenced_tables,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
@@ -905,22 +921,16 @@ pub fn translate_expr(
                             unreachable!("this is always ast::Expr::Cast")
                         }
                         ScalarFunc::Char => {
-                            let args = args.clone().unwrap_or_else(Vec::new);
-
-                            for arg in args.iter() {
-                                let reg = program.alloc_register();
-                                translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                )?;
-                            }
+                            let start_reg = allocate_registers(
+                                program,
+                                args,
+                                referenced_tables,
+                                precomputed_exprs_to_registers,
+                            )?;
 
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1940,6 +1950,32 @@ pub fn translate_expr(
         },
         ast::Expr::Variable(_) => todo!(),
     }
+}
+
+fn allocate_registers(
+    program: &mut ProgramBuilder,
+    args: &Option<Vec<ast::Expr>>,
+    referenced_tables: Option<&[BTreeTableReference]>,
+    precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
+) -> Result<(usize)> {
+    let args = args.clone().unwrap_or_else(Vec::new);
+
+    let reg = program.alloc_registers(args.len());
+    let mut current_reg = reg.clone();
+
+    for arg in args.iter() {
+        translate_expr(
+            program,
+            referenced_tables,
+            arg,
+            current_reg,
+            precomputed_exprs_to_registers,
+        )?;
+
+        current_reg += 1;
+    }
+
+    Ok(reg)
 }
 
 fn wrap_eval_jump_expr(
