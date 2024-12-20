@@ -39,7 +39,7 @@ pub struct Plan {
     /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// all the aggregates collected from the result columns, order by, and (TODO) having clauses
-    pub aggregates: Option<Vec<Aggregate>>,
+    pub aggregates: Vec<Aggregate>,
     /// limit clause
     pub limit: Option<usize>,
     /// all the tables referenced in the query
@@ -70,7 +70,7 @@ impl SourceOperator {
                     database: None,
                     table: table_ref.table_index,
                     column: idx,
-                    is_rowid_alias: col.primary_key,
+                    is_rowid_alias: col.is_rowid_alias,
                 },
                 contains_aggregates: false,
             });
@@ -178,11 +178,10 @@ pub struct BTreeTableReference {
 /// (i.e. a primary key or a secondary index)
 #[derive(Clone, Debug)]
 pub enum Search {
-    /// A primary key equality search. This is a special case of the primary key search
-    /// that uses the SeekRowid bytecode instruction.
-    PrimaryKeyEq { cmp_expr: ast::Expr },
-    /// A primary key search. Uses bytecode instructions like SeekGT, SeekGE etc.
-    PrimaryKeySearch {
+    /// A rowid equality point lookup. This is a special case that uses the SeekRowid bytecode instruction and does not loop.
+    RowidEq { cmp_expr: ast::Expr },
+    /// A rowid search. Uses bytecode instructions like SeekGT, SeekGE etc.
+    RowidSearch {
         cmp_op: ast::Operator,
         cmp_expr: ast::Expr,
     },
@@ -318,7 +317,7 @@ impl Display for SourceOperator {
                     ..
                 } => {
                     match search {
-                        Search::PrimaryKeyEq { .. } | Search::PrimaryKeySearch { .. } => {
+                        Search::RowidEq { .. } | Search::RowidSearch { .. } => {
                             writeln!(
                                 f,
                                 "{}SEARCH {} USING INTEGER PRIMARY KEY (rowid=?)",

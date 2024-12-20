@@ -27,7 +27,8 @@ use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
 use storage::database::FileStorage;
-use storage::pager::{allocate_page, DumbLruPageCache};
+use storage::page_cache::DumbLruPageCache;
+use storage::pager::allocate_page;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
@@ -42,7 +43,7 @@ pub type Result<T> = std::result::Result<T, error::LimboError>;
 pub use io::OpenFlags;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
-pub use io::{Buffer, Completion, File, WriteCompletion, IO};
+pub use io::{Buffer, Completion, File, MemoryIO, WriteCompletion, IO};
 pub use storage::buffer_pool::BufferPool;
 pub use storage::database::DatabaseStorage;
 pub use storage::pager::Page;
@@ -82,14 +83,16 @@ impl Database {
         let wal_path = format!("{}-wal", path);
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
-        let wal_shared =
-            WalFileShared::open_shared(&io, wal_path.as_str(), db_header.borrow().page_size)?;
+        let page_size = db_header.borrow().page_size;
+        let wal_shared = WalFileShared::open_shared(&io, wal_path.as_str(), page_size)?;
+        let buffer_pool = Rc::new(BufferPool::new(page_size as usize));
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
             db_header.borrow().page_size as usize,
             wal_shared.clone(),
+            buffer_pool.clone(),
         )));
-        Self::open(io, page_io, wal, wal_shared)
+        Self::open(io, page_io, wal, wal_shared, buffer_pool)
     }
 
     pub fn open(
@@ -97,6 +100,7 @@ impl Database {
         page_io: Rc<dyn DatabaseStorage>,
         wal: Rc<RefCell<dyn Wal>>,
         shared_wal: Arc<RwLock<WalFileShared>>,
+        buffer_pool: Rc<BufferPool>,
     ) -> Result<Arc<Database>> {
         let db_header = Pager::begin_open(page_io.clone())?;
         io.run_once()?;
@@ -111,6 +115,7 @@ impl Database {
             wal,
             io.clone(),
             shared_page_cache.clone(),
+            buffer_pool,
         )?);
         let bootstrap_schema = Rc::new(RefCell::new(Schema::new()));
         let conn = Rc::new(Connection {
@@ -362,12 +367,17 @@ impl Statement {
         }
     }
 
+    pub fn interrupt(&mut self) {
+        self.state.interrupt();
+    }
+
     pub fn step(&mut self) -> Result<RowResult<'_>> {
         let result = self.program.step(&mut self.state, self.pager.clone())?;
         match result {
             vdbe::StepResult::Row(row) => Ok(RowResult::Row(Row { values: row.values })),
             vdbe::StepResult::IO => Ok(RowResult::IO),
             vdbe::StepResult::Done => Ok(RowResult::Done),
+            vdbe::StepResult::Interrupt => Ok(RowResult::Interrupt),
         }
     }
 
@@ -383,6 +393,7 @@ pub enum RowResult<'a> {
     Row(Row<'a>),
     IO,
     Done,
+    Interrupt,
 }
 
 pub struct Row<'a> {

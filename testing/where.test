@@ -317,3 +317,20 @@ do_execsql_test where-age-index-seek-regression-test {
 do_execsql_test where-age-index-seek-regression-test-2 {
     select count(1) from users where age > 0;
 } {10000}
+
+do_execsql_test where-simple-between {
+    SELECT * FROM products WHERE price BETWEEN 70 AND 100;
+} {1|hat|79.0
+2|cap|82.0
+5|sweatshirt|74.0
+6|shorts|70.0
+7|jeans|78.0
+8|sneakers|82.0
+11|accessories|81.0}
+
+do_execsql_test between-price-range-with-names {
+    SELECT * FROM products 
+    WHERE (price BETWEEN 70 AND 100) 
+    AND (name = 'sweatshirt' OR name = 'sneakers');
+} {5|sweatshirt|74.0
+8|sneakers|82.0}

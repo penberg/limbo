@@ -5,12 +5,13 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use sqlite3_parser::ast;
+use sqlite3_parser::ast::{self};
 
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::plan::{IterationDirection, Search};
 use crate::types::{OwnedRecord, OwnedValue};
+use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{BranchOffset, Insn, Program};
 use crate::{Connection, Result};
@@ -198,8 +199,7 @@ pub fn emit_program(
     }
 
     if let Some(ref mut group_by) = plan.group_by {
-        let aggregates = plan.aggregates.as_mut().unwrap();
-        init_group_by(&mut program, group_by, aggregates, &mut metadata)?;
+        init_group_by(&mut program, group_by, &plan.aggregates, &mut metadata)?;
     }
     init_source(&mut program, &plan.source, &mut metadata)?;
 
@@ -217,7 +217,7 @@ pub fn emit_program(
     // Clean up and close the main execution loop
     close_loop(
         &mut program,
-        &mut plan.source,
+        &plan.source,
         &mut metadata,
         &plan.referenced_tables,
     )?;
@@ -235,18 +235,18 @@ pub fn emit_program(
             &plan.result_columns,
             group_by,
             plan.order_by.as_ref(),
-            &plan.aggregates.as_ref().unwrap(),
-            plan.limit.clone(),
+            &plan.aggregates,
+            plan.limit,
             &plan.referenced_tables,
             &mut metadata,
         )?;
-    } else if let Some(ref mut aggregates) = plan.aggregates {
+    } else if !plan.aggregates.is_empty() {
         // Handle aggregation without GROUP BY
         agg_without_group_by_emit(
             &mut program,
             &plan.referenced_tables,
             &plan.result_columns,
-            aggregates,
+            &plan.aggregates,
             &mut metadata,
         )?;
         // Single row result for aggregates without GROUP BY, so ORDER BY not needed
@@ -260,7 +260,7 @@ pub fn emit_program(
                 &mut program,
                 order_by,
                 &plan.result_columns,
-                plan.limit.clone(),
+                plan.limit,
                 &mut metadata,
             )?;
         }
@@ -275,7 +275,7 @@ pub fn emit_program(
 /// Initialize resources needed for ORDER BY processing
 fn init_order_by(
     program: &mut ProgramBuilder,
-    order_by: &Vec<(ast::Expr, Direction)>,
+    order_by: &[(ast::Expr, Direction)],
     metadata: &mut Metadata,
 ) -> Result<()> {
     metadata
@@ -302,7 +302,7 @@ fn init_order_by(
 fn init_group_by(
     program: &mut ProgramBuilder,
     group_by: &GroupBy,
-    aggregates: &Vec<Aggregate>,
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_final_label = program.allocate_label();
@@ -442,8 +442,6 @@ fn init_source(
 
             metadata.next_row_labels.insert(*id, next_row_label);
 
-            let scan_loop_body_label = program.allocate_label();
-            metadata.scan_loop_body_labels.push(scan_loop_body_label);
             program.emit_insn(Insn::OpenReadAsync {
                 cursor_id: table_cursor_id,
                 root_page: table_reference.table.root_page,
@@ -608,23 +606,23 @@ fn open_loop(
             ..
         } => {
             let table_cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
-
             // Open the loop for the index search.
-            // Primary key equality search is handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
-            if !matches!(search, Search::PrimaryKeyEq { .. }) {
+            // Rowid equality point lookups are handled with a SeekRowid instruction which does not loop, since it is a single row lookup.
+            if !matches!(search, Search::RowidEq { .. }) {
                 let index_cursor_id = if let Search::IndexSearch { index, .. } = search {
                     Some(program.resolve_cursor_id(&index.name))
                 } else {
                     None
                 };
-                let scan_loop_body_label = *metadata.scan_loop_body_labels.last().unwrap();
+                let scan_loop_body_label = program.allocate_label();
+                metadata.scan_loop_body_labels.push(scan_loop_body_label);
                 let cmp_reg = program.alloc_register();
                 let (cmp_expr, cmp_op) = match search {
                     Search::IndexSearch {
                         cmp_expr, cmp_op, ..
                     } => (cmp_expr, cmp_op),
-                    Search::PrimaryKeySearch { cmp_expr, cmp_op } => (cmp_expr, cmp_op),
-                    Search::PrimaryKeyEq { .. } => unreachable!(),
+                    Search::RowidSearch { cmp_expr, cmp_op } => (cmp_expr, cmp_op),
+                    Search::RowidEq { .. } => unreachable!(),
                 };
                 // TODO this only handles ascending indexes
                 match cmp_op {
@@ -750,7 +748,7 @@ fn open_loop(
 
             let jump_label = metadata.next_row_labels.get(id).unwrap();
 
-            if let Search::PrimaryKeyEq { cmp_expr } = search {
+            if let Search::RowidEq { cmp_expr } = search {
                 let src_reg = program.alloc_register();
                 translate_expr(program, Some(referenced_tables), cmp_expr, src_reg, None)?;
                 program.emit_insn_with_label_dependency(
@@ -825,14 +823,14 @@ fn inner_loop_emit(
             metadata,
             InnerLoopEmitTarget::GroupBySorter {
                 group_by,
-                aggregates: &plan.aggregates.as_ref().unwrap(),
+                aggregates: &plan.aggregates,
             },
             &plan.referenced_tables,
         );
     }
     // if we DONT have a group by, but we have aggregates, we emit without ResultRow.
     // we also do not need to sort because we are emitting a single row.
-    if plan.aggregates.is_some() {
+    if !plan.aggregates.is_empty() {
         return inner_loop_source_emit(
             program,
             &plan.result_columns,
@@ -869,8 +867,8 @@ fn inner_loop_emit(
 /// See the InnerLoopEmitTarget enum for more details.
 fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
-    result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Option<Vec<Aggregate>>,
+    result_columns: &[ResultSetColumn],
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
     emit_target: InnerLoopEmitTarget,
     referenced_tables: &[BTreeTableReference],
@@ -930,13 +928,12 @@ fn inner_loop_source_emit(
                 order_by,
                 result_columns,
                 &mut metadata.result_column_indexes_in_orderby_sorter,
-                &metadata.sort_metadata.as_ref().unwrap(),
+                metadata.sort_metadata.as_ref().unwrap(),
                 None,
             )?;
             Ok(())
         }
         InnerLoopEmitTarget::AggStep => {
-            let aggregates = aggregates.as_ref().unwrap();
             let agg_final_label = program.allocate_label();
             metadata.termination_label_stack.push(agg_final_label);
             let num_aggs = aggregates.len();
@@ -965,7 +962,7 @@ fn inner_loop_source_emit(
         }
         InnerLoopEmitTarget::ResultRow { limit } => {
             assert!(
-                aggregates.is_none(),
+                aggregates.is_empty(),
                 "We should not get here with aggregates"
             );
             emit_select_result(
@@ -1096,16 +1093,16 @@ fn close_loop(
             ..
         } => {
             program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
-            if matches!(search, Search::PrimaryKeyEq { .. }) {
-                // Primary key equality search is handled with a SeekRowid instruction which does not loop, so there is no need to emit a NextAsync instruction.
+            if matches!(search, Search::RowidEq { .. }) {
+                // Rowid equality point lookups are handled with a SeekRowid instruction which does not loop, so there is no need to emit a NextAsync instruction.
                 return Ok(());
             }
             let cursor_id = match search {
                 Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
-                Search::PrimaryKeySearch { .. } => {
+                Search::RowidSearch { .. } => {
                     program.resolve_cursor_id(&table_reference.table_identifier)
                 }
-                Search::PrimaryKeyEq { .. } => unreachable!(),
+                Search::RowidEq { .. } => unreachable!(),
             };
 
             program.emit_insn(Insn::NextAsync { cursor_id });
@@ -1127,12 +1124,13 @@ fn close_loop(
 /// Emits the bytecode for processing a GROUP BY clause.
 /// This is called when the main query execution loop has finished processing,
 /// and we now have data in the GROUP BY sorter.
+#[allow(clippy::too_many_arguments)]
 fn group_by_emit(
     program: &mut ProgramBuilder,
-    result_columns: &Vec<ResultSetColumn>,
+    result_columns: &[ResultSetColumn],
     group_by: &GroupBy,
     order_by: Option<&Vec<(ast::Expr, Direction)>>,
-    aggregates: &Vec<Aggregate>,
+    aggregates: &[Aggregate],
     limit: Option<usize>,
     referenced_tables: &[BTreeTableReference],
     metadata: &mut Metadata,
@@ -1166,6 +1164,7 @@ fn group_by_emit(
             name: i.to_string(),
             primary_key: false,
             ty: crate::schema::Type::Null,
+            is_rowid_alias: false,
         })
         .collect::<Vec<_>>();
 
@@ -1440,7 +1439,7 @@ fn group_by_emit(
                 order_by,
                 result_columns,
                 &mut metadata.result_column_indexes_in_orderby_sorter,
-                &metadata.sort_metadata.as_ref().unwrap(),
+                metadata.sort_metadata.as_ref().unwrap(),
                 Some(&precomputed_exprs_to_register),
             )?;
         }
@@ -1477,9 +1476,9 @@ fn group_by_emit(
 /// and we can now materialize the aggregate results.
 fn agg_without_group_by_emit(
     program: &mut ProgramBuilder,
-    referenced_tables: &Vec<BTreeTableReference>,
-    result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Vec<Aggregate>,
+    referenced_tables: &[BTreeTableReference],
+    result_columns: &[ResultSetColumn],
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_start_reg = metadata.aggregation_start_register.unwrap();
@@ -1516,8 +1515,8 @@ fn agg_without_group_by_emit(
 /// and we can now emit rows from the ORDER BY sorter.
 fn order_by_emit(
     program: &mut ProgramBuilder,
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
     limit: Option<usize>,
     metadata: &mut Metadata,
 ) -> Result<()> {
@@ -1534,6 +1533,7 @@ fn order_by_emit(
             name: format!("sort_key_{}", i),
             primary_key: false,
             ty: crate::schema::Type::Null,
+            is_rowid_alias: false,
         });
     }
     for (i, rc) in result_columns.iter().enumerate() {
@@ -1547,6 +1547,7 @@ fn order_by_emit(
             name: rc.expr.to_string(),
             primary_key: false,
             ty: crate::schema::Type::Null,
+            is_rowid_alias: false,
         });
     }
 
@@ -1694,8 +1695,8 @@ fn sorter_insert(
 fn order_by_sorter_insert(
     program: &mut ProgramBuilder,
     referenced_tables: &[BTreeTableReference],
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
     result_column_indexes_in_orderby_sorter: &mut HashMap<usize, usize>,
     sort_metadata: &SortMetadata,
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
@@ -1761,18 +1762,15 @@ fn order_by_sorter_insert(
 ///
 /// If any result columns can be skipped, this returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
 fn order_by_deduplicate_result_columns(
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
 ) -> Option<Vec<(usize, usize)>> {
     let mut result_column_remapping: Option<Vec<(usize, usize)>> = None;
     for (i, rc) in result_columns.iter().enumerate() {
-        // TODO: implement a custom equality check for expressions
-        // there are lots of examples where this breaks, even simple ones like
-        // sum(x) != SUM(x)
         let found = order_by
             .iter()
             .enumerate()
-            .find(|(_, (expr, _))| expr == &rc.expr);
+            .find(|(_, (expr, _))| exprs_are_equivalent(expr, &rc.expr));
         if let Some((j, _)) = found {
             if let Some(ref mut v) = result_column_remapping {
                 v.push((i, j));
@@ -1782,5 +1780,5 @@ fn order_by_deduplicate_result_columns(
         }
     }
 
-    return result_column_remapping;
+    result_column_remapping
 }

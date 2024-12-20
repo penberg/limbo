@@ -93,6 +93,7 @@ mod tests {
                         RowResult::IO => {
                             tmp_db.io.run_once()?;
                         }
+                        RowResult::Interrupt => break,
                         RowResult::Done => break,
                     }
                 },
@@ -160,6 +161,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
@@ -233,6 +235,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
@@ -257,7 +260,7 @@ mod tests {
         for i in 0..iterations {
             let insert_query = format!("INSERT INTO test VALUES ({})", i);
             do_flush(&conn, &tmp_db)?;
-            conn.clear_page_cache().unwrap();
+            conn.checkpoint().unwrap();
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
                     match rows.next_row()? {
@@ -295,6 +298,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },
@@ -355,6 +359,7 @@ mod tests {
                             RowResult::IO => {
                                 tmp_db.io.run_once()?;
                             }
+                            RowResult::Interrupt => break,
                             RowResult::Done => break,
                         }
                     }
@@ -446,6 +451,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             }
@@ -479,6 +485,7 @@ mod tests {
                     RowResult::IO => {
                         tmp_db.io.run_once()?;
                     }
+                    RowResult::Interrupt => break,
                     RowResult::Done => break,
                 }
             },

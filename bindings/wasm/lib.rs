@@ -1,4 +1,6 @@
-use limbo_core::{maybe_init_database_file, OpenFlags, Pager, Result, WalFile, WalFileShared};
+use limbo_core::{
+    maybe_init_database_file, BufferPool, OpenFlags, Pager, Result, WalFile, WalFileShared,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -26,17 +28,19 @@ impl Database {
         // ensure db header is there
         io.run_once().unwrap();
 
+        let page_size = db_header.borrow().page_size;
+
         let wal_path = format!("{}-wal", path);
-        let wal_shared =
-            WalFileShared::open_shared(&io, wal_path.as_str(), db_header.borrow().page_size)
-                .unwrap();
+        let wal_shared = WalFileShared::open_shared(&io, wal_path.as_str(), page_size).unwrap();
+        let buffer_pool = Rc::new(BufferPool::new(page_size as usize));
         let wal = Rc::new(RefCell::new(WalFile::new(
             io.clone(),
             db_header.borrow().page_size as usize,
             wal_shared.clone(),
+            buffer_pool.clone(),
         )));
 
-        let db = limbo_core::Database::open(io, page_io, wal, wal_shared).unwrap();
+        let db = limbo_core::Database::open(io, page_io, wal, wal_shared, buffer_pool).unwrap();
         let conn = db.connect();
         Database { db, conn }
     }
@@ -79,7 +83,9 @@ impl Statement {
                 }
                 JsValue::from(row_array)
             }
-            Ok(limbo_core::RowResult::IO) | Ok(limbo_core::RowResult::Done) => JsValue::UNDEFINED,
+            Ok(limbo_core::RowResult::IO)
+            | Ok(limbo_core::RowResult::Done)
+            | Ok(limbo_core::RowResult::Interrupt) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
@@ -97,6 +103,7 @@ impl Statement {
                     array.push(&row_array);
                 }
                 Ok(limbo_core::RowResult::IO) => {}
+                Ok(limbo_core::RowResult::Interrupt) => break,
                 Ok(limbo_core::RowResult::Done) => break,
                 Err(e) => panic!("Error: {:?}", e),
             }
@@ -258,12 +265,9 @@ impl DatabaseStorage {
     }
 }
 
-#[allow(dead_code)]
-struct BufferPool {}
-
 impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        let r = match &(*c) {
+        let r = match c.as_ref() {
             limbo_core::Completion::Read(r) => r,
             _ => unreachable!(),
         };

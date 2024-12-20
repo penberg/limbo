@@ -1,5 +1,6 @@
 MINIMUM_RUST_VERSION := 1.73.0
 CURRENT_RUST_VERSION := $(shell rustc -V | sed -E 's/rustc ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+CURRENT_RUST_TARGET := $(shell rustc -vV | grep host | cut -d ' ' -f 2)
 RUSTUP := $(shell command -v rustup 2> /dev/null)
 UNAME_S := $(shell uname -s)
 
@@ -7,7 +8,7 @@ UNAME_S := $(shell uname -s)
 SQLITE_EXEC ?= ./target/debug/limbo
 
 # Static library to use for SQLite C API compatibility tests.
-BASE_SQLITE_LIB = ./target/debug/liblimbo_sqlite3.a
+BASE_SQLITE_LIB = ./target/$(CURRENT_RUST_TARGET)/debug/liblimbo_sqlite3.a
 
 # On darwin link core foundation
 ifeq ($(UNAME_S),Darwin)
@@ -47,18 +48,26 @@ limbo:
 	cargo build
 .PHONY: limbo
 
+limbo-c:
+	cargo cbuild
+.PHONY: limbo-c
+
 limbo-wasm:
 	rustup target add wasm32-wasi
 	cargo build --package limbo-wasm --target wasm32-wasi
 .PHONY: limbo-wasm
 
-test: limbo test-compat test-sqlite3
+test: limbo test-compat test-sqlite3 test-shell
 .PHONY: test
+
+test-shell: limbo
+	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/shelltests.py
+.PHONY: test-shell
 
 test-compat:
 	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/all.test
 .PHONY: test-compat
 
-test-sqlite3:
+test-sqlite3: limbo-c
 	LIBS="$(SQLITE_LIB)" make -C sqlite3/tests test
 .PHONY: test-sqlite3

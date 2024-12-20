@@ -46,6 +46,9 @@ fn limbo_bench(criterion: &mut Criterion) {
                 limbo_core::RowResult::IO => {
                     io.run_once().unwrap();
                 }
+                limbo_core::RowResult::Interrupt => {
+                    unreachable!();
+                }
                 limbo_core::RowResult::Done => {
                     unreachable!();
                 }
@@ -67,6 +70,9 @@ fn limbo_bench(criterion: &mut Criterion) {
                     }
                     limbo_core::RowResult::IO => {
                         io.run_once().unwrap();
+                    }
+                    limbo_core::RowResult::Interrupt => {
+                        unreachable!();
                     }
                     limbo_core::RowResult::Done => {
                         unreachable!();
@@ -90,6 +96,9 @@ fn limbo_bench(criterion: &mut Criterion) {
                     }
                     limbo_core::RowResult::IO => {
                         io.run_once().unwrap();
+                    }
+                    limbo_core::RowResult::Interrupt => {
+                        unreachable!();
                     }
                     limbo_core::RowResult::Done => {
                         unreachable!();

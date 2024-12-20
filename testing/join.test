@@ -240,6 +240,12 @@ do_execsql_test join-using-multiple {
 Cindy|Salazar|cap
 Tommy|Perry|shirt"}
 
+do_execsql_test join-using-multiple-with-quoting {
+    select u.first_name, u.last_name, p.name from users u join users u2 using(id) join [products] p using(`id`) limit 3;
+} {"Jamie|Foster|hat
+Cindy|Salazar|cap
+Tommy|Perry|shirt"}
+
 # NATURAL JOIN desugars to JOIN USING (common_column1, common_column2...)
 do_execsql_test join-using {
     select * from users natural join products limit 3;

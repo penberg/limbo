@@ -97,12 +97,13 @@ fn bind_column_references(
                 return Ok(());
             }
             let mut match_result = None;
+            let normalized_id = normalize_ident(id.0.as_str());
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
                 let col_idx = table
                     .table
                     .columns
                     .iter()
-                    .position(|c| c.name.eq_ignore_ascii_case(&id.0));
+                    .position(|c| c.name.eq_ignore_ascii_case(&normalized_id));
                 if col_idx.is_some() {
                     if match_result.is_some() {
                         crate::bail_parse_error!("Column {} is ambiguous", id.0);
@@ -124,20 +125,23 @@ fn bind_column_references(
             Ok(())
         }
         ast::Expr::Qualified(tbl, id) => {
-            let matching_tbl_idx = referenced_tables
-                .iter()
-                .position(|t| t.table_identifier.eq_ignore_ascii_case(&tbl.0));
+            let normalized_table_name = normalize_ident(tbl.0.as_str());
+            let matching_tbl_idx = referenced_tables.iter().position(|t| {
+                t.table_identifier
+                    .eq_ignore_ascii_case(&normalized_table_name)
+            });
             if matching_tbl_idx.is_none() {
-                crate::bail_parse_error!("Table {} not found", tbl.0);
+                crate::bail_parse_error!("Table {} not found", normalized_table_name);
             }
             let tbl_idx = matching_tbl_idx.unwrap();
+            let normalized_id = normalize_ident(id.0.as_str());
             let col_idx = referenced_tables[tbl_idx]
                 .table
                 .columns
                 .iter()
-                .position(|c| c.name.eq_ignore_ascii_case(&id.0));
+                .position(|c| c.name.eq_ignore_ascii_case(&normalized_id));
             if col_idx.is_none() {
-                crate::bail_parse_error!("Column {} not found", id.0);
+                crate::bail_parse_error!("Column {} not found", normalized_id);
             }
             let col = referenced_tables[tbl_idx]
                 .table
@@ -148,7 +152,7 @@ fn bind_column_references(
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx.unwrap(),
-                is_rowid_alias: col.primary_key,
+                is_rowid_alias: col.is_rowid_alias,
             };
             Ok(())
         }
@@ -274,7 +278,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 where_clause: None,
                 group_by: None,
                 order_by: None,
-                aggregates: None,
+                aggregates: vec![],
                 limit: None,
                 referenced_tables,
                 available_indexes: schema.indexes.clone().into_values().flatten().collect(),
@@ -314,7 +318,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                                     database: None, // TODO: support different databases
                                     table: table_reference.table_index,
                                     column: idx,
-                                    is_rowid_alias: col.primary_key,
+                                    is_rowid_alias: col.is_rowid_alias,
                                 },
                                 contains_aggregates: false,
                             });
@@ -432,11 +436,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                 });
             }
 
-            plan.aggregates = if aggregate_expressions.is_empty() {
-                None
-            } else {
-                Some(aggregate_expressions)
-            };
+            plan.aggregates = aggregate_expressions;
 
             // Parse the ORDER BY clause
             if let Some(order_by) = select.order_by {
@@ -463,9 +463,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
                     };
 
                     bind_column_references(&mut expr, &plan.referenced_tables)?;
-                    if let Some(aggs) = &mut plan.aggregates {
-                        resolve_aggregates(&expr, aggs);
-                    }
+                    resolve_aggregates(&expr, &mut plan.aggregates);
 
                     key.push((
                         expr,
@@ -510,8 +508,9 @@ fn parse_from(
 
     let first_table = match *from.select.unwrap() {
         ast::SelectTable::Table(qualified_name, maybe_alias, _) => {
-            let Some(table) = schema.get_table(&qualified_name.name.0) else {
-                crate::bail_parse_error!("Table {} not found", qualified_name.name.0);
+            let normalized_qualified_name = normalize_ident(qualified_name.name.0.as_str());
+            let Some(table) = schema.get_table(&normalized_qualified_name) else {
+                crate::bail_parse_error!("Table {} not found", normalized_qualified_name);
             };
             let alias = maybe_alias
                 .map(|a| match a {
@@ -522,7 +521,7 @@ fn parse_from(
 
             BTreeTableReference {
                 table: table.clone(),
-                table_identifier: alias.unwrap_or(qualified_name.name.0),
+                table_identifier: alias.unwrap_or(normalized_qualified_name),
                 table_index: 0,
             }
         }
@@ -576,8 +575,9 @@ fn parse_join(
 
     let table = match table {
         ast::SelectTable::Table(qualified_name, maybe_alias, _) => {
-            let Some(table) = schema.get_table(&qualified_name.name.0) else {
-                crate::bail_parse_error!("Table {} not found", qualified_name.name.0);
+            let normalized_name = normalize_ident(qualified_name.name.0.as_str());
+            let Some(table) = schema.get_table(&normalized_name) else {
+                crate::bail_parse_error!("Table {} not found", normalized_name);
             };
             let alias = maybe_alias
                 .map(|a| match a {
@@ -587,7 +587,7 @@ fn parse_join(
                 .map(|a| a.0);
             BTreeTableReference {
                 table: table.clone(),
-                table_identifier: alias.unwrap_or(qualified_name.name.0),
+                table_identifier: alias.unwrap_or(normalized_name),
                 table_index,
             }
         }
@@ -708,14 +708,14 @@ fn parse_join(
                             database: None,
                             table: left_table_idx,
                             column: left_col_idx,
-                            is_rowid_alias: left_col.primary_key,
+                            is_rowid_alias: left_col.is_rowid_alias,
                         }),
                         ast::Operator::Equals,
                         Box::new(ast::Expr::Column {
                             database: None,
                             table: right_table.table_index,
                             column: right_col_idx,
-                            is_rowid_alias: right_col.primary_key,
+                            is_rowid_alias: right_col.is_rowid_alias,
                         }),
                     ));
                 }

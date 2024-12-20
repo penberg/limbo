@@ -2,7 +2,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
-use crate::function::{AggFunc, Func, FuncCtx, ScalarFunc};
+use crate::function::{AggFunc, Func, FuncCtx, MathFuncArity, ScalarFunc};
 use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
@@ -898,6 +898,22 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+                    JsonFunc::JsonArray => {
+                        let start_reg = translate_variable_sized_function_parameter_list(
+                            program,
+                            args,
+                            referenced_tables,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
@@ -905,22 +921,16 @@ pub fn translate_expr(
                             unreachable!("this is always ast::Expr::Cast")
                         }
                         ScalarFunc::Char => {
-                            let args = args.clone().unwrap_or_else(Vec::new);
-
-                            for arg in args.iter() {
-                                let reg = program.alloc_register();
-                                translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                )?;
-                            }
+                            let start_reg = translate_variable_sized_function_parameter_list(
+                                program,
+                                args,
+                                referenced_tables,
+                                precomputed_exprs_to_registers,
+                            )?;
 
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1603,6 +1613,134 @@ pub fn translate_expr(
                         }
                     }
                 }
+                Func::Math(math_func) => match math_func.arity() {
+                    MathFuncArity::Nullary => {
+                        if args.is_some() {
+                            crate::bail_parse_error!("{} function with arguments", math_func);
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: 0,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
+                    MathFuncArity::Unary => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 1 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 1 argument",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let reg = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            reg,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
+                    MathFuncArity::Binary => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 2 arguments",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let reg1 = program.alloc_register();
+                        let reg2 = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            reg1,
+                            precomputed_exprs_to_registers,
+                        )?;
+                        if let ast::Expr::Literal(_) = &args[0] {
+                            program.mark_last_insn_constant();
+                        }
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[1],
+                            reg2,
+                            precomputed_exprs_to_registers,
+                        )?;
+                        if let ast::Expr::Literal(_) = &args[1] {
+                            program.mark_last_insn_constant();
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: target_register + 1,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+
+                    MathFuncArity::UnaryOrBinary => {
+                        let args = if let Some(args) = args {
+                            if args.len() > 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with more than 2 arguments",
+                                    math_func
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!("{} function with no arguments", math_func);
+                        };
+
+                        let regs = program.alloc_registers(args.len());
+
+                        for (i, arg) in args.iter().enumerate() {
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                arg,
+                                regs + i,
+                                precomputed_exprs_to_registers,
+                            )?;
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: regs,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+                },
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
@@ -1611,11 +1749,11 @@ pub fn translate_expr(
             database: _,
             table,
             column,
-            is_rowid_alias: is_primary_key,
+            is_rowid_alias,
         } => {
             let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
             let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
-            if *is_primary_key {
+            if *is_rowid_alias {
                 program.emit_insn(Insn::RowId {
                     cursor_id,
                     dest: target_register,
@@ -1812,6 +1950,34 @@ pub fn translate_expr(
         },
         ast::Expr::Variable(_) => todo!(),
     }
+}
+
+// Returns the starting register for the function.
+// TODO: Use this function for all functions with variable number of parameters in `translate_expr`
+fn translate_variable_sized_function_parameter_list(
+    program: &mut ProgramBuilder,
+    args: &Option<Vec<ast::Expr>>,
+    referenced_tables: Option<&[BTreeTableReference]>,
+    precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
+) -> Result<usize> {
+    let args = args.as_deref().unwrap_or_default();
+
+    let reg = program.alloc_registers(args.len());
+    let mut current_reg = reg;
+
+    for arg in args.iter() {
+        translate_expr(
+            program,
+            referenced_tables,
+            arg,
+            current_reg,
+            precomputed_exprs_to_registers,
+        )?;
+
+        current_reg += 1;
+    }
+
+    Ok(reg)
 }
 
 fn wrap_eval_jump_expr(

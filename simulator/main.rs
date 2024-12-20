@@ -291,6 +291,9 @@ fn get_all_rows(
                     break 'rows_loop;
                 }
             }
+            RowResult::Interrupt => {
+                break;
+            }
             RowResult::Done => {
                 break;
             }

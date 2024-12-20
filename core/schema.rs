@@ -160,10 +160,7 @@ impl BTreeTable {
     }
 
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
-        col.primary_key
-            && col.ty == Type::Integer
-            && self.primary_key_column_names.len() == 1
-            && self.has_rowid
+        col.is_rowid_alias
     }
 
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
@@ -219,6 +216,7 @@ impl PseudoTable {
             name: normalize_ident(name),
             ty,
             primary_key,
+            is_rowid_alias: false,
         });
     }
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
@@ -275,10 +273,21 @@ fn create_table(
             }
             for (col_name, col_def) in columns {
                 let name = col_name.0.to_string();
+                // Regular sqlite tables have an integer rowid that uniquely identifies a row.
+                // Even if you create a table with a column e.g. 'id INT PRIMARY KEY', there will still
+                // be a separate hidden rowid, and the 'id' column will have a separate index built for it.
+                //
+                // However:
+                // A column defined as exactly INTEGER PRIMARY KEY is a rowid alias, meaning that the rowid
+                // and the value of this column are the same.
+                // https://www.sqlite.org/lang_createtable.html#rowids_and_the_integer_primary_key
+                let mut typename_exactly_integer = false;
                 let ty = match col_def.col_type {
                     Some(data_type) => {
+                        // https://www.sqlite.org/datatype3.html
                         let type_name = data_type.name.as_str().to_uppercase();
-                        if type_name.contains("INTEGER") {
+                        if type_name.contains("INT") {
+                            typename_exactly_integer = type_name == "INTEGER";
                             Type::Integer
                         } else if type_name.contains("CHAR")
                             || type_name.contains("CLOB")
@@ -313,6 +322,7 @@ fn create_table(
                     name: normalize_ident(&name),
                     ty,
                     primary_key,
+                    is_rowid_alias: typename_exactly_integer && primary_key,
                 });
             }
             if options.contains(TableOptions::WITHOUT_ROWID) {
@@ -321,6 +331,13 @@ fn create_table(
         }
         CreateTableBody::AsSelect(_) => todo!(),
     };
+    // flip is_rowid_alias back to false if the table has multiple primary keys
+    // or if the table has no rowid
+    if !has_rowid || primary_key_column_names.len() > 1 {
+        for col in cols.iter_mut() {
+            col.is_rowid_alias = false;
+        }
+    }
     Ok(BTreeTable {
         root_page,
         name: table_name,
@@ -353,6 +370,7 @@ pub struct Column {
     pub name: String,
     pub ty: Type,
     pub primary_key: bool,
+    pub is_rowid_alias: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -390,26 +408,31 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 name: "type".to_string(),
                 ty: Type::Text,
                 primary_key: false,
+                is_rowid_alias: false,
             },
             Column {
                 name: "name".to_string(),
                 ty: Type::Text,
                 primary_key: false,
+                is_rowid_alias: false,
             },
             Column {
                 name: "tbl_name".to_string(),
                 ty: Type::Text,
                 primary_key: false,
+                is_rowid_alias: false,
             },
             Column {
                 name: "rootpage".to_string(),
                 ty: Type::Integer,
                 primary_key: false,
+                is_rowid_alias: false,
             },
             Column {
                 name: "sql".to_string(),
                 ty: Type::Text,
                 primary_key: false,
+                is_rowid_alias: false,
             },
         ],
     }

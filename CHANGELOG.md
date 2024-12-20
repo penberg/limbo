@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.10 - 2024-12-18
+
+### Added
+
+* In-memory mode (Preston Thorpe)
+
+* More CLI improvements (Preston Thorpe)
+
+* Add support for replace() function (Alperen Keleş)
+
+* Unary operator improvements (Jean Arhancet)
+
+* Add support for unex(x, y) function (Kacper Kołodziej)
+
+### Fixed
+
+* Fix primary key handling when there's rowid and PK is not alias (Jussi Saurio)
+
 ## 0.0.9 - 2024-12-12
 
 ### Added

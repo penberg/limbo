@@ -28,14 +28,49 @@ impl<'a> Display for Value<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum TextSubtype {
+    Text,
+    Json,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimboText {
+    pub value: Rc<String>,
+    pub subtype: TextSubtype,
+}
+
+impl LimboText {
+    pub fn new(value: Rc<String>) -> Self {
+        Self {
+            value,
+            subtype: TextSubtype::Text,
+        }
+    }
+
+    pub fn json(value: Rc<String>) -> Self {
+        Self {
+            value,
+            subtype: TextSubtype::Json,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum OwnedValue {
     Null,
     Integer(i64),
     Float(f64),
-    Text(Rc<String>),
+    Text(LimboText),
     Blob(Rc<Vec<u8>>),
     Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
     Record(OwnedRecord),
+}
+
+impl OwnedValue {
+    // A helper function that makes building a text OwnedValue easier.
+    pub fn build_text(text: Rc<String>) -> Self {
+        OwnedValue::Text(LimboText::new(text))
+    }
 }
 
 impl Display for OwnedValue {
@@ -44,7 +79,7 @@ impl Display for OwnedValue {
             OwnedValue::Null => write!(f, "NULL"),
             OwnedValue::Integer(i) => write!(f, "{}", i),
             OwnedValue::Float(fl) => write!(f, "{:?}", fl),
-            OwnedValue::Text(s) => write!(f, "{}", s),
+            OwnedValue::Text(s) => write!(f, "{}", s.value),
             OwnedValue::Blob(b) => write!(f, "{}", String::from_utf8_lossy(b)),
             OwnedValue::Agg(a) => match a.as_ref() {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
@@ -111,7 +146,7 @@ impl PartialOrd<OwnedValue> for OwnedValue {
             ) => Some(std::cmp::Ordering::Greater),
 
             (OwnedValue::Text(text_left), OwnedValue::Text(text_right)) => {
-                text_left.partial_cmp(text_right)
+                text_left.value.partial_cmp(&text_right.value)
             }
             // Text vs Blob
             (OwnedValue::Text(_), OwnedValue::Blob(_)) => Some(std::cmp::Ordering::Less),
@@ -171,21 +206,27 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
                 OwnedValue::Float(float_left + float_right)
             }
             (OwnedValue::Text(string_left), OwnedValue::Text(string_right)) => {
-                OwnedValue::Text(Rc::new(string_left.to_string() + &string_right.to_string()))
+                OwnedValue::build_text(Rc::new(
+                    string_left.value.to_string() + &string_right.value.to_string(),
+                ))
             }
             (OwnedValue::Text(string_left), OwnedValue::Integer(int_right)) => {
-                OwnedValue::Text(Rc::new(string_left.to_string() + &int_right.to_string()))
+                OwnedValue::build_text(Rc::new(
+                    string_left.value.to_string() + &int_right.to_string(),
+                ))
             }
             (OwnedValue::Integer(int_left), OwnedValue::Text(string_right)) => {
-                OwnedValue::Text(Rc::new(int_left.to_string() + &string_right.to_string()))
+                OwnedValue::build_text(Rc::new(
+                    int_left.to_string() + &string_right.value.to_string(),
+                ))
             }
             (OwnedValue::Text(string_left), OwnedValue::Float(float_right)) => {
                 let string_right = OwnedValue::Float(float_right).to_string();
-                OwnedValue::Text(Rc::new(string_left.to_string() + &string_right))
+                OwnedValue::build_text(Rc::new(string_left.value.to_string() + &string_right))
             }
             (OwnedValue::Float(float_left), OwnedValue::Text(string_right)) => {
                 let string_left = OwnedValue::Float(float_left).to_string();
-                OwnedValue::Text(Rc::new(string_left + &string_right.to_string()))
+                OwnedValue::build_text(Rc::new(string_left + &string_right.value.to_string()))
             }
             (lhs, OwnedValue::Null) => lhs,
             (OwnedValue::Null, rhs) => rhs,
@@ -269,7 +310,7 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
         OwnedValue::Null => Value::Null,
         OwnedValue::Integer(i) => Value::Integer(*i),
         OwnedValue::Float(f) => Value::Float(*f),
-        OwnedValue::Text(s) => Value::Text(s),
+        OwnedValue::Text(s) => Value::Text(&s.value),
         OwnedValue::Blob(b) => Value::Blob(b),
         OwnedValue::Agg(a) => match a.as_ref() {
             AggContext::Avg(acc, _count) => match acc {
@@ -359,7 +400,7 @@ impl OwnedRecord {
                 OwnedValue::Null => 0,
                 OwnedValue::Integer(_) => 6, // for now let's only do i64
                 OwnedValue::Float(_) => 7,
-                OwnedValue::Text(t) => (t.len() * 2 + 13) as u64,
+                OwnedValue::Text(t) => (t.value.len() * 2 + 13) as u64,
                 OwnedValue::Blob(b) => (b.len() * 2 + 12) as u64,
                 // not serializable values
                 OwnedValue::Agg(_) => unreachable!(),
@@ -380,7 +421,7 @@ impl OwnedRecord {
                 OwnedValue::Null => {}
                 OwnedValue::Integer(i) => buf.extend_from_slice(&i.to_be_bytes()),
                 OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
-                OwnedValue::Text(t) => buf.extend_from_slice(t.as_bytes()),
+                OwnedValue::Text(t) => buf.extend_from_slice(t.value.as_bytes()),
                 OwnedValue::Blob(b) => buf.extend_from_slice(b),
                 // non serializable
                 OwnedValue::Agg(_) => unreachable!(),

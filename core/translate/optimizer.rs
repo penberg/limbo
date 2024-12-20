@@ -15,6 +15,7 @@ use super::plan::{
  * but having them separate makes them easier to understand
  */
 pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
+    eliminate_between(&mut select_plan.source, &mut select_plan.where_clause)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constants(&mut select_plan.source, &mut select_plan.where_clause)?
     {
@@ -55,10 +56,8 @@ fn _operator_is_already_ordered_by(
             search,
             ..
         } => match search {
-            Search::PrimaryKeyEq { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
-            Search::PrimaryKeySearch { .. } => {
-                Ok(key.is_rowid_alias_of(table_reference.table_index))
-            }
+            Search::RowidEq { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
+            Search::RowidSearch { .. } => Ok(key.is_rowid_alias_of(table_reference.table_index)),
             Search::IndexSearch { index, .. } => {
                 let index_idx = key.check_index_scan(
                     table_reference.table_index,
@@ -500,6 +499,46 @@ fn push_scan_direction(operator: &mut SourceOperator, direction: &Direction) {
     }
 }
 
+fn eliminate_between(
+    operator: &mut SourceOperator,
+    where_clauses: &mut Option<Vec<ast::Expr>>,
+) -> Result<()> {
+    if let Some(predicates) = where_clauses {
+        *predicates = predicates.drain(..).map(convert_between_expr).collect();
+    }
+
+    match operator {
+        SourceOperator::Join {
+            left,
+            right,
+            predicates,
+            ..
+        } => {
+            eliminate_between(left, where_clauses)?;
+            eliminate_between(right, where_clauses)?;
+
+            if let Some(predicates) = predicates {
+                *predicates = predicates.drain(..).map(convert_between_expr).collect();
+            }
+        }
+        SourceOperator::Scan {
+            predicates: Some(preds),
+            ..
+        } => {
+            *preds = preds.drain(..).map(convert_between_expr).collect();
+        }
+        SourceOperator::Search {
+            predicates: Some(preds),
+            ..
+        } => {
+            *preds = preds.drain(..).map(convert_between_expr).collect();
+        }
+        _ => (),
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstantPredicate {
     AlwaysTrue,
@@ -551,6 +590,9 @@ impl Optimizable for ast::Expr {
     ) -> Result<Option<usize>> {
         match self {
             ast::Expr::Column { table, column, .. } => {
+                if *table != table_index {
+                    return Ok(None);
+                }
                 for (idx, index) in available_indexes.iter().enumerate() {
                     if index.table_name == referenced_tables[*table].table.name {
                         let column = referenced_tables[*table]
@@ -730,13 +772,13 @@ pub fn try_extract_index_search_expression(
             if lhs.is_rowid_alias_of(table_index) {
                 match operator {
                     ast::Operator::Equals => {
-                        return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *rhs }));
+                        return Ok(Either::Right(Search::RowidEq { cmp_expr: *rhs }));
                     }
                     ast::Operator::Greater
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(Search::PrimaryKeySearch {
+                        return Ok(Either::Right(Search::RowidSearch {
                             cmp_op: operator,
                             cmp_expr: *rhs,
                         }));
@@ -748,13 +790,13 @@ pub fn try_extract_index_search_expression(
             if rhs.is_rowid_alias_of(table_index) {
                 match operator {
                     ast::Operator::Equals => {
-                        return Ok(Either::Right(Search::PrimaryKeyEq { cmp_expr: *lhs }));
+                        return Ok(Either::Right(Search::RowidEq { cmp_expr: *lhs }));
                     }
                     ast::Operator::Greater
                     | ast::Operator::GreaterEquals
                     | ast::Operator::Less
                     | ast::Operator::LessEquals => {
-                        return Ok(Either::Right(Search::PrimaryKeySearch {
+                        return Ok(Either::Right(Search::RowidSearch {
                             cmp_op: operator,
                             cmp_expr: *lhs,
                         }));
@@ -804,6 +846,65 @@ pub fn try_extract_index_search_expression(
             Ok(Either::Left(ast::Expr::Binary(lhs, operator, rhs)))
         }
         _ => Ok(Either::Left(expr)),
+    }
+}
+
+fn convert_between_expr(expr: ast::Expr) -> ast::Expr {
+    match expr {
+        ast::Expr::Between {
+            lhs,
+            not,
+            start,
+            end,
+        } => {
+            // Convert `y NOT BETWEEN x AND z` to `x > y OR y > z`
+            let (lower_op, upper_op) = if not {
+                (ast::Operator::Greater, ast::Operator::Greater)
+            } else {
+                // Convert `y BETWEEN x AND z` to `x <= y AND y <= z`
+                (ast::Operator::LessEquals, ast::Operator::LessEquals)
+            };
+
+            let lower_bound = ast::Expr::Binary(start, lower_op, lhs.clone());
+            let upper_bound = ast::Expr::Binary(lhs, upper_op, end);
+
+            if not {
+                ast::Expr::Binary(
+                    Box::new(lower_bound),
+                    ast::Operator::Or,
+                    Box::new(upper_bound),
+                )
+            } else {
+                ast::Expr::Binary(
+                    Box::new(lower_bound),
+                    ast::Operator::And,
+                    Box::new(upper_bound),
+                )
+            }
+        }
+        ast::Expr::Parenthesized(mut exprs) => {
+            ast::Expr::Parenthesized(exprs.drain(..).map(convert_between_expr).collect())
+        }
+        // Process other expressions recursively
+        ast::Expr::Binary(lhs, op, rhs) => ast::Expr::Binary(
+            Box::new(convert_between_expr(*lhs)),
+            op,
+            Box::new(convert_between_expr(*rhs)),
+        ),
+        ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args,
+            order_by,
+            filter_over,
+        } => ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args: args.map(|args| args.into_iter().map(convert_between_expr).collect()),
+            order_by,
+            filter_over,
+        },
+        _ => expr,
     }
 }
 
