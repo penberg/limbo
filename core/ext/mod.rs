@@ -20,11 +20,11 @@ impl std::fmt::Display for ExtFunc {
 }
 
 impl ExtFunc {
-    pub fn resolve_function(name: &str, num_args: usize) -> Result<ExtFunc, ()> {
+    pub fn resolve_function(name: &str, num_args: usize) -> Option<ExtFunc> {
         match name {
             #[cfg(feature = "uuid")]
             name => UuidFunc::resolve_function(name, num_args),
-            _ => Err(()),
+            _ => None,
         }
     }
 }

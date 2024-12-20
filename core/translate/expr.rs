@@ -1615,7 +1615,7 @@ pub fn translate_expr(
                         }
                     }
                 }
-                Func::Extention(ext_func) => match ext_func {
+                Func::Extension(ext_func) => match ext_func {
                     #[cfg(feature = "uuid")]
                     ExtFunc::Uuid(ref uuid_fn) => match uuid_fn {
                         UuidFunc::UuidStr | UuidFunc::UuidBlob | UuidFunc::Uuid7TS => {

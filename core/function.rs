@@ -263,7 +263,7 @@ pub enum Func {
     Math(MathFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
-    Extention(ExtFunc),
+    Extension(ExtFunc),
 }
 
 impl Display for Func {
@@ -274,7 +274,7 @@ impl Display for Func {
             Func::Math(math_func) => write!(f, "{}", math_func),
             #[cfg(feature = "json")]
             Func::Json(json_func) => write!(f, "{}", json_func),
-            Func::Extention(ext_func) => write!(f, "{}", ext_func),
+            Func::Extension(ext_func) => write!(f, "{}", ext_func),
         }
     }
 }
@@ -369,8 +369,8 @@ impl Func {
             "tanh" => Ok(Func::Math(MathFunc::Tanh)),
             "trunc" => Ok(Func::Math(MathFunc::Trunc)),
             _ => match ExtFunc::resolve_function(name, arg_count) {
-                Ok(ext_func) => Ok(Func::Extention(ext_func)),
-                Err(_) => Err(()),
+                Some(ext_func) => Ok(Func::Extension(ext_func)),
+                None => Err(()),
             },
         }
     }

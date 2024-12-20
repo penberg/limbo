@@ -26,7 +26,7 @@ mod datetime;
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 #[cfg(feature = "uuid")]
 use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
-use crate::function::{AggFunc, Func, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -39,6 +39,7 @@ use crate::util::parse_schema_rows;
 use crate::{function::JsonFunc, json::get_json, json::json_array};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
+use macros::Description;
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
@@ -50,32 +51,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 
-use uuid::{ContextV7, Timestamp, Uuid};
-
 pub type BranchOffset = i64;
-use macros::Description;
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum Func {
-    Scalar(ScalarFunc),
-    #[cfg(feature = "json")]
-    Json(JsonFunc),
-}
-
-impl Display for Func {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            Func::Scalar(scalar_func) => scalar_func.to_string(),
-            #[cfg(feature = "json")]
-            Func::Json(json_func) => json_func.to_string(),
-        };
-        write!(f, "{}", str)
-    }
-}
 
 #[derive(Description, Debug)]
 pub enum Insn {
@@ -2535,7 +2514,7 @@ impl Program {
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
                         },
-                        Func::Extention(extfn) => match extfn {
+                        crate::function::Func::Extension(extfn) => match extfn {
                             #[cfg(feature = "uuid")]
                             ExtFunc::Uuid(uuidfn) => match uuidfn {
                                 UuidFunc::Uuid4 | UuidFunc::Uuid4Str => {

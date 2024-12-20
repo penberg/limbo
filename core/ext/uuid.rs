@@ -1,5 +1,8 @@
 use super::ExtFunc;
-use crate::{types::OwnedValue, LimboError};
+use crate::{
+    types::{LimboText, OwnedValue},
+    LimboError,
+};
 use std::rc::Rc;
 use uuid::{ContextV7, Timestamp, Uuid};
 
@@ -14,17 +17,17 @@ pub enum UuidFunc {
 }
 
 impl UuidFunc {
-    pub fn resolve_function(name: &str, num_args: usize) -> Result<ExtFunc, ()> {
+    pub fn resolve_function(name: &str, num_args: usize) -> Option<ExtFunc> {
         match name {
-            "uuid4_str" => Ok(ExtFunc::Uuid(UuidFunc::Uuid4Str)),
-            "uuid4" => Ok(ExtFunc::Uuid(UuidFunc::Uuid4)),
-            "uuid7" if num_args < 2 => Ok(ExtFunc::Uuid(UuidFunc::Uuid7)),
-            "uuid_str" if num_args == 1 => Ok(ExtFunc::Uuid(UuidFunc::UuidStr)),
-            "uuid_blob" if num_args == 1 => Ok(ExtFunc::Uuid(UuidFunc::UuidBlob)),
-            "uuid7_timestamp_ms" if num_args == 1 => Ok(ExtFunc::Uuid(UuidFunc::Uuid7TS)),
+            "uuid4_str" => Some(ExtFunc::Uuid(UuidFunc::Uuid4Str)),
+            "uuid4" => Some(ExtFunc::Uuid(UuidFunc::Uuid4)),
+            "uuid7" if num_args < 2 => Some(ExtFunc::Uuid(UuidFunc::Uuid7)),
+            "uuid_str" if num_args == 1 => Some(ExtFunc::Uuid(UuidFunc::UuidStr)),
+            "uuid_blob" if num_args == 1 => Some(ExtFunc::Uuid(UuidFunc::UuidBlob)),
+            "uuid7_timestamp_ms" if num_args == 1 => Some(ExtFunc::Uuid(UuidFunc::Uuid7TS)),
             // postgres_compatability
-            "gen_random_uuid" => Ok(ExtFunc::Uuid(UuidFunc::Uuid4Str)),
-            _ => Err(()),
+            "gen_random_uuid" => Some(ExtFunc::Uuid(UuidFunc::Uuid4Str)),
+            _ => None,
         }
     }
 }
@@ -47,7 +50,9 @@ pub fn exec_uuid(var: &UuidFunc, sec: Option<&OwnedValue>) -> crate::Result<Owne
         UuidFunc::Uuid4 => Ok(OwnedValue::Blob(Rc::new(
             Uuid::new_v4().into_bytes().to_vec(),
         ))),
-        UuidFunc::Uuid4Str => Ok(OwnedValue::Text(Rc::new(Uuid::new_v4().to_string()))),
+        UuidFunc::Uuid4Str => Ok(OwnedValue::Text(LimboText::new(Rc::new(
+            Uuid::new_v4().to_string(),
+        )))),
         UuidFunc::Uuid7 => {
             let uuid = match sec {
                 Some(OwnedValue::Integer(ref seconds)) => {
@@ -70,11 +75,12 @@ pub fn exec_uuidstr(reg: &OwnedValue) -> crate::Result<OwnedValue> {
     match reg {
         OwnedValue::Blob(blob) => {
             let uuid = Uuid::from_slice(blob).map_err(|e| LimboError::ParseError(e.to_string()))?;
-            Ok(OwnedValue::Text(Rc::new(uuid.to_string())))
+            Ok(OwnedValue::Text(LimboText::new(Rc::new(uuid.to_string()))))
         }
-        OwnedValue::Text(val) => {
-            let uuid = Uuid::parse_str(val).map_err(|e| LimboError::ParseError(e.to_string()))?;
-            Ok(OwnedValue::Text(Rc::new(uuid.to_string())))
+        OwnedValue::Text(ref val) => {
+            let uuid =
+                Uuid::parse_str(&val.value).map_err(|e| LimboError::ParseError(e.to_string()))?;
+            Ok(OwnedValue::Text(LimboText::new(Rc::new(uuid.to_string()))))
         }
         OwnedValue::Null => Ok(OwnedValue::Null),
         _ => Err(LimboError::ParseError(
@@ -86,7 +92,8 @@ pub fn exec_uuidstr(reg: &OwnedValue) -> crate::Result<OwnedValue> {
 pub fn exec_uuidblob(reg: &OwnedValue) -> crate::Result<OwnedValue> {
     match reg {
         OwnedValue::Text(val) => {
-            let uuid = Uuid::parse_str(val).map_err(|e| LimboError::ParseError(e.to_string()))?;
+            let uuid =
+                Uuid::parse_str(&val.value).map_err(|e| LimboError::ParseError(e.to_string()))?;
             Ok(OwnedValue::Blob(Rc::new(uuid.as_bytes().to_vec())))
         }
         OwnedValue::Blob(blob) => {
@@ -106,7 +113,7 @@ pub fn exec_ts_from_uuid7(reg: &OwnedValue) -> OwnedValue {
             Uuid::from_slice(blob).map_err(|e| LimboError::ParseError(e.to_string()))
         }
         OwnedValue::Text(val) => {
-            Uuid::parse_str(val).map_err(|e| LimboError::ParseError(e.to_string()))
+            Uuid::parse_str(&val.value).map_err(|e| LimboError::ParseError(e.to_string()))
         }
         _ => Err(LimboError::ParseError(
             "Invalid argument type for UUID function".to_string(),
@@ -159,8 +166,8 @@ pub mod test {
         let owned_val = exec_uuid(&func, None);
         match owned_val {
             Ok(OwnedValue::Text(v4str)) => {
-                assert_eq!(v4str.len(), 36);
-                let uuid = Uuid::parse_str(&v4str);
+                assert_eq!(v4str.value.len(), 36);
+                let uuid = Uuid::parse_str(&v4str.value);
                 assert!(uuid.is_ok());
                 assert_eq!(uuid.unwrap().get_version_num(), 4);
             }
@@ -303,8 +310,8 @@ pub mod test {
             exec_uuidstr(&exec_uuid(&UuidFunc::Uuid4, None).expect("uuid v7 blob to generate"));
         match owned_val {
             Ok(OwnedValue::Text(v4str)) => {
-                assert_eq!(v4str.len(), 36);
-                let uuid = Uuid::parse_str(&v4str);
+                assert_eq!(v4str.value.len(), 36);
+                let uuid = Uuid::parse_str(&v4str.value);
                 assert!(uuid.is_ok());
                 assert_eq!(uuid.unwrap().get_version_num(), 4);
             }
@@ -323,8 +330,8 @@ pub mod test {
         );
         match owned_val {
             Ok(OwnedValue::Text(v7str)) => {
-                assert_eq!(v7str.len(), 36);
-                let uuid = Uuid::parse_str(&v7str);
+                assert_eq!(v7str.value.len(), 36);
+                let uuid = Uuid::parse_str(&v7str.value);
                 assert!(uuid.is_ok());
                 assert_eq!(uuid.unwrap().get_version_num(), 7);
             }
