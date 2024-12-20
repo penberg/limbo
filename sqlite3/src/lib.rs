@@ -782,6 +782,14 @@ pub unsafe extern "C" fn sqlite3_get_table(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn sqlite3_free_table(
+    paz_result: *mut *mut *mut std::ffi::c_char,
+) {
+    let res = &mut *(paz_result as *mut TabResult);
+    res.free();
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_null(_context: *mut std::ffi::c_void) {
     stub!();
 }
