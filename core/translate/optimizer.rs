@@ -881,6 +881,9 @@ fn convert_between_expr(expr: ast::Expr) -> ast::Expr {
                 )
             }
         }
+        ast::Expr::Parenthesized(mut exprs) => {
+            ast::Expr::Parenthesized(exprs.drain(..).map(convert_between_expr).collect())
+        }
         // Process other expressions recursively
         ast::Expr::Binary(lhs, op, rhs) => ast::Expr::Binary(
             Box::new(convert_between_expr(*lhs)),
