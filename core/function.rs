@@ -1,6 +1,6 @@
+use crate::ext::ExtFunc;
 use std::fmt;
 use std::fmt::Display;
-
 #[cfg(feature = "json")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonFunc {
@@ -91,12 +91,6 @@ pub enum ScalarFunc {
     ZeroBlob,
     LastInsertRowid,
     Replace,
-    Uuid4,
-    Uuid4Str,
-    UuidStr,
-    UuidBlob,
-    Uuid7,
-    Uuid7TS,
 }
 
 impl Display for ScalarFunc {
@@ -142,12 +136,6 @@ impl Display for ScalarFunc {
             ScalarFunc::ZeroBlob => "zeroblob".to_string(),
             ScalarFunc::LastInsertRowid => "last_insert_rowid".to_string(),
             ScalarFunc::Replace => "replace".to_string(),
-            ScalarFunc::Uuid4 => "uuid4".to_string(),
-            ScalarFunc::UuidStr => "uuid_str".to_string(),
-            ScalarFunc::UuidBlob => "uuid_blob".to_string(),
-            ScalarFunc::Uuid7 => "uuid7".to_string(),
-            ScalarFunc::Uuid4Str => "uuid4_str".to_string(),
-            ScalarFunc::Uuid7TS => "uuid7_timestamp_ms".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -268,13 +256,14 @@ impl Display for MathFunc {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
     Math(MathFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
+    Extention(ExtFunc),
 }
 
 impl Display for Func {
@@ -285,6 +274,7 @@ impl Display for Func {
             Func::Math(math_func) => write!(f, "{}", math_func),
             #[cfg(feature = "json")]
             Func::Json(json_func) => write!(f, "{}", json_func),
+            Func::Extention(ext_func) => write!(f, "{}", ext_func),
         }
     }
 }
@@ -337,14 +327,6 @@ impl Func {
             "typeof" => Ok(Func::Scalar(ScalarFunc::Typeof)),
             "last_insert_rowid" => Ok(Func::Scalar(ScalarFunc::LastInsertRowid)),
             "unicode" => Ok(Func::Scalar(ScalarFunc::Unicode)),
-            "uuid4_str" => Ok(Func::Scalar(ScalarFunc::Uuid4Str)),
-            "uuid4" => Ok(Func::Scalar(ScalarFunc::Uuid4)),
-            "uuid7" => Ok(Func::Scalar(ScalarFunc::Uuid7)),
-            "uuid_str" => Ok(Func::Scalar(ScalarFunc::UuidStr)),
-            "uuid_blob" => Ok(Func::Scalar(ScalarFunc::UuidBlob)),
-            "uuid7_timestamp_ms" => Ok(Func::Scalar(ScalarFunc::Uuid7TS)),
-            // postgres_compatability
-            "gen_random_uuid" => Ok(Func::Scalar(ScalarFunc::Uuid4Str)),
             "quote" => Ok(Func::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Func::Scalar(ScalarFunc::SqliteVersion)),
             "replace" => Ok(Func::Scalar(ScalarFunc::Replace)),
@@ -386,7 +368,10 @@ impl Func {
             "tan" => Ok(Func::Math(MathFunc::Tan)),
             "tanh" => Ok(Func::Math(MathFunc::Tanh)),
             "trunc" => Ok(Func::Math(MathFunc::Trunc)),
-            _ => Err(()),
+            _ => match ExtFunc::resolve_function(name, arg_count) {
+                Ok(ext_func) => Ok(Func::Extention(ext_func)),
+                Err(_) => Err(()),
+            },
         }
     }
 }
