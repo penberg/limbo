@@ -1,4 +1,4 @@
-use std::{f32::consts::E, fmt::Display, os::macos::raw::stat, rc::Rc};
+use std::{fmt::Display, rc::Rc};
 
 use limbo_core::{Connection, Result, RowResult};
 use rand::SeedableRng;
@@ -231,6 +231,7 @@ impl Interaction {
                             out.push(r);
                         }
                         RowResult::IO => {}
+                        RowResult::Interrupt => {}
                         RowResult::Done => {
                             break;
                         }
