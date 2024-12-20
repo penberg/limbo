@@ -1231,17 +1231,17 @@ pub fn translate_expr(
                         }
                         ScalarFunc::Uuid7 => {
                             let args = match args {
-                                Some(args) if args.len() > 3 => crate::bail_parse_error!(
-                                    "{} function with more than 2 arguments",
+                                Some(args) if args.len() > 1 => crate::bail_parse_error!(
+                                    "{} function with more than 1 argument",
                                     srf.to_string()
                                 ),
                                 Some(args) => args,
                                 None => &vec![],
                             };
                             let mut start_reg = None;
-                            for arg in args.iter() {
+                            if let Some(arg) = args.first() {
                                 let reg = program.alloc_register();
-                                start_reg = Some(start_reg.unwrap_or(reg));
+                                start_reg = Some(reg);
                                 translate_expr(
                                     program,
                                     referenced_tables,
@@ -1249,6 +1249,9 @@ pub fn translate_expr(
                                     reg,
                                     precomputed_exprs_to_registers,
                                 )?;
+                                if let ast::Expr::Literal(_) = arg {
+                                    program.mark_last_insn_constant()
+                                }
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
