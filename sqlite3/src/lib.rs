@@ -3,7 +3,7 @@
 
 use log::trace;
 use std::cell::RefCell;
-use std::ffi;
+use std::ffi::{self, CStr, CString};
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -247,11 +247,20 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
     }
 }
 
+type exec_callback = Option<
+    unsafe extern "C" fn(
+        context: *mut std::ffi::c_void,
+        n_column: std::ffi::c_int,
+        argv: *mut *mut std::ffi::c_char,
+        colv: *mut *mut std::ffi::c_char,
+    ) -> ffi::c_int,
+>;
+
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_exec(
     db: *mut sqlite3,
     sql: *const ffi::c_char,
-    _callback: Option<unsafe extern "C" fn() -> ffi::c_int>,
+    _callback: exec_callback,
     _context: *mut std::ffi::c_void,
     _err: *mut *mut std::ffi::c_char,
 ) -> ffi::c_int {
@@ -640,6 +649,131 @@ pub unsafe extern "C" fn sqlite3_column_text(
         Some(limbo_core::Value::Text(text)) => text.as_bytes().as_ptr(),
         _ => std::ptr::null(),
     }
+}
+
+pub struct TabResult {
+    az_result: Vec<*mut std::ffi::c_char>,
+    n_row: usize,
+    n_column: usize,
+    z_err_msg: Option<CString>,
+    rc: std::ffi::c_int,
+}
+
+impl TabResult {
+    fn new(initial_capacity: usize) -> Self {
+        Self {
+            az_result: Vec::with_capacity(initial_capacity),
+            n_row: 0,
+            n_column: 0,
+            z_err_msg: None,
+            rc: SQLITE_OK,
+        }
+    }
+
+    fn free(&mut self) {
+        for &ptr in &self.az_result {
+            if !ptr.is_null() {
+                unsafe {
+                    sqlite3_free(ptr as *mut _);
+                }
+            }
+        }
+        self.az_result.clear();
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn sqlite_get_table_cb(
+    context: *mut std::ffi::c_void,
+    n_column: std::ffi::c_int,
+    argv: *mut *mut std::ffi::c_char,
+    colv: *mut *mut std::ffi::c_char,
+) -> std::ffi::c_int {
+    let res = &mut *(context as *mut TabResult);
+
+    if res.n_row == 0 {
+        res.n_column = n_column as usize;
+        for i in 0..n_column {
+            let col_name = *colv.add(i as usize);
+            let col_name_cstring = if !col_name.is_null() {
+                CStr::from_ptr(col_name).to_owned()
+            } else {
+                CString::new("NULL").unwrap()
+            };
+            res.az_result.push(col_name_cstring.into_raw());
+        }
+    } else if res.n_column != n_column as usize {
+        res.z_err_msg = Some(
+            CString::new("sqlite3_get_table() called with two or more incompatible queries")
+                .unwrap(),
+        );
+        res.rc = SQLITE_ERROR;
+        return SQLITE_ERROR;
+    }
+
+    for i in 0..n_column {
+        let value = *argv.add(i as usize);
+        let value_cstring = if !value.is_null() {
+            let len = libc::strlen(value);
+            let mut buf = Vec::with_capacity(len + 1);
+            libc::strncpy(buf.as_mut_ptr() as *mut std::ffi::c_char, value, len);
+            buf.set_len(len + 1);
+            CString::from_vec_with_nul(buf).unwrap()
+        } else {
+            CString::new("NULL").unwrap()
+        };
+        res.az_result.push(value_cstring.into_raw());
+    }
+
+    res.n_row += 1;
+    SQLITE_OK
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_get_table(
+    db: *mut sqlite3,
+    sql: *const std::ffi::c_char,
+    paz_result: *mut *mut *mut std::ffi::c_char,
+    pn_row: *mut std::ffi::c_int,
+    pn_column: *mut std::ffi::c_int,
+    pz_err_msg: *mut *mut std::ffi::c_char,
+) -> std::ffi::c_int {
+    if db.is_null() || sql.is_null() || paz_result.is_null() {
+        return SQLITE_ERROR;
+    }
+
+    let mut res = TabResult::new(20);
+
+    let rc = sqlite3_exec(
+        db,
+        sql,
+        Some(sqlite_get_table_cb),
+        &mut res as *mut _ as *mut _,
+        pz_err_msg,
+    );
+
+    if rc != SQLITE_OK {
+        res.free();
+        if let Some(err_msg) = res.z_err_msg {
+            if !pz_err_msg.is_null() {
+                *pz_err_msg = err_msg.into_raw();
+            }
+        }
+        return rc;
+    }
+
+    let total_results = res.az_result.len();
+    if res.az_result.capacity() > total_results {
+        res.az_result.shrink_to_fit();
+    }
+
+    *paz_result = res.az_result.as_mut_ptr();
+    *pn_row = res.n_row as std::ffi::c_int;
+    *pn_column = res.n_column as std::ffi::c_int;
+
+    std::mem::forget(res);
+
+    SQLITE_OK
 }
 
 #[no_mangle]
