@@ -392,7 +392,10 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
                     remaining_write,
                     Box::new(|rng: &mut R| random_write(rng, env)),
                 ),
-                (1, Box::new(|rng: &mut R| create_table(rng, env))),
+                (
+                    remaining_write / 10,
+                    Box::new(|rng: &mut R| create_table(rng, env)),
+                ),
                 (1, Box::new(|rng: &mut R| random_fault(rng, env))),
             ],
             rng,

@@ -66,7 +66,7 @@ fn main() {
     };
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..1024),
+        ticks: rng.gen_range(0..10240),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -74,7 +74,7 @@ fn main() {
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(0..1024),
+        max_interactions: rng.gen_range(0..10240),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
@@ -175,6 +175,7 @@ fn execute_interaction(
     interaction: &Interaction,
     stack: &mut Vec<ResultSet>,
 ) -> Result<()> {
+    log::info!("executing: {}", interaction);
     match interaction {
         generation::plan::Interaction::Query(_) => {
             let conn = match &mut env.connections[connection_index] {
