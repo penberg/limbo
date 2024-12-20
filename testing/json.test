@@ -83,3 +83,49 @@ do_execsql_test json_array_json {
 do_execsql_test json_array_nested {
    SELECT json_array(json_array(1,2,3), json('[1,2,3]'), '[1,2,3]')
 } {{[[1,2,3],[1,2,3],"[1,2,3]"]}}
+
+
+do_execsql_test json_extract_null {
+    SELECT json_extract(null, '$')
+} {{}}
+
+do_execsql_test json_extract_empty {
+    SELECT json_extract()
+} {{}}
+
+do_execsql_test json_extract_single_param {
+    SELECT json_extract(1)
+} {{}}
+
+do_execsql_test json_extract_null_invalid_path {
+    SELECT json_extract(null, 1)
+} {{}}
+
+do_execsql_test json_extract_null_invalid_path_2 {
+    SELECT json_extract(null, CAST(1 AS BLOB))
+} {{}}
+
+do_execsql_test json_extract_multiple_nulls {
+    SELECT json_extract(null, CAST(1 AS BLOB), null, 1, 2, 3)
+} {{}}
+
+do_execsql_test json_extract_number {
+    SELECT json_extract(1, '$')
+} {{1}}
+
+// \x61 is the ASCII code for 'a', json_extract needs an exact match though
+do_execsql_test json_extract_with_escaping {
+    SELECT json_extract('{"\x61": 1}', 'a')
+} {{}}
+
+do_execsql_test json_extract_with_escaping_2 {
+    SELECT json_extract('{"\x61": 1}', '\x61')
+} {{1}}
+
+do_execsql_test json_extract_null_path {
+    SELECT json_extract(1, null)
+} {{}}
+
+do_execsql_test json_extract_multiple_null_paths {
+    SELECT json_extract(1, null, null, null)
+} {{[null, null, null]}}
