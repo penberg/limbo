@@ -160,6 +160,19 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | upper(X)                     | Yes    |         |
 | zeroblob(N)                  | Yes    |         |
 
+
+|-------------------------------------------------|
+| LibSql / sqlean Scalar       |        |         |
+| ---------------------------- | ------ | ------- |
+| uuid4()                      | Yes    | uuid version 4 **uuid's are `blob` by default** |
+| uuid4_str()                  | Yes    | uuid v4 string alias `gen_random_uuid()` for PG compatibility|
+| uuid7(X?)                    | Yes    | uuid version 7, Optional arg for seconds since epoch|
+| uuid7_timestamp_ms(X)        | Yes    | Convert a uuid v7 to milliseconds since epoch|
+| uuid_str(X)                  | Yes    | Convert a valid uuid to string|
+| uuid_blob(X)                 | Yes    | Convert a valid uuid to blob|
+
+
+
 ### Mathematical functions
 
 | Function   | Status | Comment |

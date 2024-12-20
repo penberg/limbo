@@ -1196,7 +1196,8 @@ pub fn translate_expr(
                         | ScalarFunc::Soundex
                         | ScalarFunc::ZeroBlob
                         | ScalarFunc::UuidStr
-                        | ScalarFunc::UuidBlob => {
+                        | ScalarFunc::UuidBlob
+                        | ScalarFunc::Uuid7TS => {
                             let args = if let Some(args) = args {
                                 if args.len() != 1 {
                                     crate::bail_parse_error!(
@@ -1228,30 +1229,30 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Uuid7 | ScalarFunc::Uuid7Str => {
-                            if let Some(args) = args {
-                                // can take optional time arg
-                                if args.len() > 1 {
-                                    crate::bail_parse_error!(
-                                        "{} function with more than 1 argument",
-                                        srf.to_string()
-                                    );
-                                }
-                                if let Some(arg) = args.first() {
-                                    let regs = program.alloc_register();
-                                    translate_expr(
-                                        program,
-                                        referenced_tables,
-                                        arg,
-                                        regs,
-                                        precomputed_exprs_to_registers,
-                                    )?;
-                                }
+                        ScalarFunc::Uuid7 => {
+                            let args = match args {
+                                Some(args) if args.len() > 3 => crate::bail_parse_error!(
+                                    "{} function with more than 2 arguments",
+                                    srf.to_string()
+                                ),
+                                Some(args) => args,
+                                None => &vec![],
+                            };
+                            let mut start_reg = None;
+                            for arg in args.iter() {
+                                let reg = program.alloc_register();
+                                start_reg = Some(start_reg.unwrap_or(reg));
+                                translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    reg,
+                                    precomputed_exprs_to_registers,
+                                )?;
                             }
-                            let regs = program.alloc_register();
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: regs,
+                                start_reg: start_reg.unwrap_or(target_register),
                                 dest: target_register,
                                 func: func_ctx,
                             });

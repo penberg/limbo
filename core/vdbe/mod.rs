@@ -43,7 +43,7 @@ use datetime::{exec_date, exec_time, exec_unixepoch};
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::Regex;
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
@@ -2399,7 +2399,8 @@ impl Program {
                             | ScalarFunc::Soundex
                             | ScalarFunc::ZeroBlob
                             | ScalarFunc::UuidStr
-                            | ScalarFunc::UuidBlob => {
+                            | ScalarFunc::UuidBlob
+                            | ScalarFunc::Uuid7TS => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
                                     ScalarFunc::Sign => exec_sign(reg_value),
@@ -2416,27 +2417,23 @@ impl Program {
                                     ScalarFunc::Soundex => Some(exec_soundex(reg_value)),
                                     ScalarFunc::UuidStr => Some(exec_uuidstr(reg_value)?),
                                     ScalarFunc::UuidBlob => Some(exec_uuidblob(reg_value)?),
+                                    ScalarFunc::Uuid7TS => Some(exec_ts_from_uuid7(reg_value)),
                                     _ => unreachable!(),
                                 };
                                 state.registers[*dest] = result.unwrap_or(OwnedValue::Null);
                             }
-                            ScalarFunc::Uuid7Str | ScalarFunc::Uuid7 => match arg_count {
+                            ScalarFunc::Uuid7 => match arg_count {
                                 0 => {
                                     state.registers[*dest] =
                                         exec_uuid(scalar_func, None).unwrap_or(OwnedValue::Null);
                                 }
                                 1 => {
-                                    let reg_value = state.registers[*start_reg].borrow_mut();
+                                    let reg_value = state.registers[*start_reg].borrow();
                                     state.registers[*dest] =
                                         exec_uuid(scalar_func, Some(reg_value))
                                             .unwrap_or(OwnedValue::Null);
                                 }
-                                _ => {
-                                    return Err(LimboError::ParseError(format!(
-                                        "Invalid number of arguments for Uuid7 function: {}",
-                                        arg_count
-                                    )));
-                                }
+                                _ => unreachable!(),
                             },
                             ScalarFunc::Hex => {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
@@ -3120,35 +3117,25 @@ fn exec_random() -> OwnedValue {
     OwnedValue::Integer(random_number)
 }
 
-enum UuidType {
-    V4Blob,
-    V4Str,
-    V7Blob,
-    V7Str,
-}
-
-fn exec_uuid(var: &ScalarFunc, time: Option<&OwnedValue>) -> Result<OwnedValue> {
+fn exec_uuid(var: &ScalarFunc, sec: Option<&OwnedValue>) -> Result<OwnedValue> {
     match var {
-        ScalarFunc::Uuid4Str => Ok(OwnedValue::Text(Rc::new(Uuid::new_v4().to_string()))),
         ScalarFunc::Uuid4 => Ok(OwnedValue::Blob(Rc::new(
             Uuid::new_v4().into_bytes().to_vec(),
         ))),
-        ScalarFunc::Uuid7 | ScalarFunc::Uuid7Str => {
-            let uuid = if let Some(OwnedValue::Integer(ref i)) = time {
-                let ctx = ContextV7::new();
-                if *i < 0 {
-                    // not valid unix timestamp, error or null?
-                    return Ok(OwnedValue::Null);
+        ScalarFunc::Uuid4Str => Ok(OwnedValue::Text(Rc::new(Uuid::new_v4().to_string()))),
+        ScalarFunc::Uuid7 => {
+            let uuid = match sec {
+                Some(OwnedValue::Integer(ref seconds)) => {
+                    let ctx = ContextV7::new();
+                    if *seconds < 0 {
+                        // not valid unix timestamp, error or null?
+                        return Ok(OwnedValue::Null);
+                    }
+                    Uuid::new_v7(Timestamp::from_unix(ctx, *seconds as u64, 0))
                 }
-                Uuid::new_v7(Timestamp::from_unix(ctx, *i as u64, 0))
-            } else {
-                Uuid::now_v7()
+                _ => Uuid::now_v7(),
             };
-            return match var {
-                ScalarFunc::Uuid7Str => Ok(OwnedValue::Text(Rc::new(uuid.to_string()))),
-                ScalarFunc::Uuid7 => Ok(OwnedValue::Blob(Rc::new(uuid.into_bytes().to_vec()))),
-                _ => unreachable!(),
-            };
+            Ok(OwnedValue::Blob(Rc::new(uuid.into_bytes().to_vec())))
         }
         _ => unreachable!(),
     }
@@ -3186,6 +3173,35 @@ fn exec_uuidblob(reg: &OwnedValue) -> Result<OwnedValue> {
             "Invalid argument type for UUID function".to_string(),
         )),
     }
+}
+
+fn exec_ts_from_uuid7(reg: &OwnedValue) -> OwnedValue {
+    let uuid = match reg {
+        OwnedValue::Blob(blob) => {
+            Uuid::from_slice(blob).map_err(|e| LimboError::ParseError(e.to_string()))
+        }
+        OwnedValue::Text(val) => {
+            Uuid::parse_str(val).map_err(|e| LimboError::ParseError(e.to_string()))
+        }
+        _ => Err(LimboError::ParseError(
+            "Invalid argument type for UUID function".to_string(),
+        )),
+    };
+    match uuid {
+        Ok(uuid) => OwnedValue::Integer(uuid_to_unix(uuid.as_bytes()) as i64),
+        // display error? sqlean seems to set value to null
+        Err(_) => OwnedValue::Null,
+    }
+}
+
+#[inline(always)]
+fn uuid_to_unix(uuid: &[u8; 16]) -> u64 {
+    ((uuid[0] as u64) << 40)
+        | ((uuid[1] as u64) << 32)
+        | ((uuid[2] as u64) << 24)
+        | ((uuid[3] as u64) << 16)
+        | ((uuid[4] as u64) << 8)
+        | (uuid[5] as u64)
 }
 
 fn exec_randomblob(reg: &OwnedValue) -> OwnedValue {
@@ -4953,5 +4969,203 @@ mod tests {
             exec_replace(&input_str, &pattern_str, &replace_str),
             expected_str
         );
+    }
+
+    #[test]
+    fn test_exec_uuid_v4blob() {
+        use super::{exec_uuid, ScalarFunc};
+        use uuid::Uuid;
+        let func = ScalarFunc::Uuid4;
+        let owned_val = exec_uuid(&func, None);
+        match owned_val {
+            Ok(OwnedValue::Blob(blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(&blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 4);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v4str() {
+        use super::{exec_uuid, ScalarFunc};
+        use uuid::Uuid;
+        let func = ScalarFunc::Uuid4Str;
+        let owned_val = exec_uuid(&func, None);
+        match owned_val {
+            Ok(OwnedValue::Text(v4str)) => {
+                assert_eq!(v4str.len(), 36);
+                let uuid = Uuid::parse_str(&v4str);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 4);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v7_now() {
+        use super::{exec_uuid, ScalarFunc};
+        use uuid::Uuid;
+        let func = ScalarFunc::Uuid7;
+        let owned_val = exec_uuid(&func, None);
+        match owned_val {
+            Ok(OwnedValue::Blob(blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(&blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 7);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v7_with_input() {
+        use super::{exec_uuid, ScalarFunc};
+        use uuid::Uuid;
+        let func = ScalarFunc::Uuid7;
+        let owned_val = exec_uuid(&func, Some(&OwnedValue::Integer(946702800)));
+        match owned_val {
+            Ok(OwnedValue::Blob(blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(&blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 7);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v7_now_to_timestamp() {
+        use super::{exec_ts_from_uuid7, exec_uuid, ScalarFunc};
+        use uuid::Uuid;
+        let func = ScalarFunc::Uuid7;
+        let owned_val = exec_uuid(&func, None);
+        match owned_val {
+            Ok(OwnedValue::Blob(ref blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 7);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+        let result = exec_ts_from_uuid7(&owned_val.expect("uuid7"));
+        if let OwnedValue::Integer(ref ts) = result {
+            let unixnow = (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                * 1000) as i64;
+            assert!(*ts >= unixnow - 1000);
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v7_to_timestamp() {
+        use super::{exec_ts_from_uuid7, exec_uuid, ScalarFunc};
+        use uuid::Uuid;
+        let func = ScalarFunc::Uuid7;
+        let owned_val = exec_uuid(&func, Some(&OwnedValue::Integer(946702800)));
+        match owned_val {
+            Ok(OwnedValue::Blob(ref blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 7);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+        let result = exec_ts_from_uuid7(&owned_val.expect("uuid7"));
+        assert_eq!(result, OwnedValue::Integer(946702800 * 1000));
+        if let OwnedValue::Integer(ts) = result {
+            let time = chrono::DateTime::from_timestamp(ts / 1000, 0);
+            assert_eq!(
+                time.unwrap(),
+                "2000-01-01T05:00:00Z"
+                    .parse::<chrono::DateTime<chrono::Utc>>()
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v4_str_to_blob() {
+        use super::{exec_uuid, exec_uuidblob, ScalarFunc};
+        use uuid::Uuid;
+        let owned_val = exec_uuidblob(
+            &exec_uuid(&ScalarFunc::Uuid4Str, None).expect("uuid v4 string to generate"),
+        );
+        match owned_val {
+            Ok(OwnedValue::Blob(blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(&blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 4);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v7_str_to_blob() {
+        use super::{exec_uuid, exec_uuidblob, exec_uuidstr, ScalarFunc};
+        use uuid::Uuid;
+        // convert a v7 blob to a string then back to a blob
+        let owned_val = exec_uuidblob(
+            &exec_uuidstr(&exec_uuid(&ScalarFunc::Uuid7, None).expect("uuid v7 blob to generate"))
+                .expect("uuid v7 string to generate"),
+        );
+        match owned_val {
+            Ok(OwnedValue::Blob(blob)) => {
+                assert_eq!(blob.len(), 16);
+                let uuid = Uuid::from_slice(&blob);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 7);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v4_blob_to_str() {
+        use super::{exec_uuid, exec_uuidstr, ScalarFunc};
+        use uuid::Uuid;
+        // convert a v4 blob to a string
+        let owned_val =
+            exec_uuidstr(&exec_uuid(&ScalarFunc::Uuid4, None).expect("uuid v7 blob to generate"));
+        match owned_val {
+            Ok(OwnedValue::Text(v4str)) => {
+                assert_eq!(v4str.len(), 36);
+                let uuid = Uuid::parse_str(&v4str);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 4);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
+    }
+
+    #[test]
+    fn test_exec_uuid_v7_blob_to_str() {
+        use super::{exec_uuid, exec_uuidstr, ScalarFunc};
+        use uuid::Uuid;
+        // convert a v7 blob to a string
+        let owned_val = exec_uuidstr(
+            &exec_uuid(&ScalarFunc::Uuid7, Some(&OwnedValue::Integer(123456789)))
+                .expect("uuid v7 blob to generate"),
+        );
+        match owned_val {
+            Ok(OwnedValue::Text(v7str)) => {
+                assert_eq!(v7str.len(), 36);
+                let uuid = Uuid::parse_str(&v7str);
+                assert!(uuid.is_ok());
+                assert_eq!(uuid.unwrap().get_version_num(), 7);
+            }
+            _ => panic!("exec_uuid did not return a Blob variant"),
+        }
     }
 }
