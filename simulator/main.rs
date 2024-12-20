@@ -1,4 +1,4 @@
-use generation::plan::{Interaction, ResultSet};
+use generation::plan::{Interaction, InteractionPlan, ResultSet};
 use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
 use model::query::{Create, Insert, Predicate, Query, Select};
@@ -66,7 +66,7 @@ fn main() {
     };
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..4096),
+        ticks: rng.gen_range(0..1024),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -74,7 +74,7 @@ fn main() {
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(0..10000),
+        max_interactions: rng.gen_range(0..1024),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
@@ -101,63 +101,87 @@ fn main() {
     println!("Initial opts {:?}", env.opts);
 
     log::info!("Generating database interaction plan...");
-    let mut plan = generation::plan::InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env);
+    let mut plans = (1..=env.opts.max_connections)
+        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
+        .collect::<Vec<_>>();
 
-    log::info!("{}", plan.stats());
+    log::info!("{}", plans[0].stats());
 
-    for interaction in &plan.plan {
-        let connection_index = pick_index(env.connections.len(), &mut env.rng);
-        let mut connection = env.connections[connection_index].clone();
+    log::info!("Executing database interaction plan...");
+    let result = execute_plans(&mut env, &mut plans);
 
-        if matches!(connection, SimConnection::Disconnected) {
-            connection = SimConnection::Connected(env.db.connect());
-            env.connections[connection_index] = connection.clone();
-        }
-
-        match &mut connection {
-            SimConnection::Connected(conn) => {
-                let disconnect = env.rng.gen_ratio(1, 100);
-                if disconnect {
-                    log::info!("disconnecting {}", connection_index);
-                    let _ = conn.close();
-                    env.connections[connection_index] = SimConnection::Disconnected;
-                } else {
-                    match process_connection(conn, interaction, &mut plan.stack) {
-                        Ok(_) => {
-                            log::info!("connection {} processed", connection_index);
-                        }
-                        Err(err) => {
-                            log::error!("error {}", err);
-                            log::debug!("db is at {:?}", path);
-                            // save the interaction plan
-                            let mut path = TempDir::new().unwrap().into_path();
-                            path.push("simulator.plan");
-                            let mut f = std::fs::File::create(path.clone()).unwrap();
-                            f.write(plan.to_string().as_bytes()).unwrap();
-                            log::debug!("plan saved at {:?}", path);
-                            log::debug!("seed was {}", seed);
-                            break;
-                        }
-                    }
-                }
-            }
-            SimConnection::Disconnected => {
-                log::info!("disconnecting {}", connection_index);
-                env.connections[connection_index] = SimConnection::Connected(env.db.connect());
-            }
-        }
+    if result.is_err() {
+        log::error!("error executing plans: {:?}", result.err());
     }
+    log::info!("db is at {:?}", path);
+    let mut path = TempDir::new().unwrap().into_path();
+    path.push("simulator.plan");
+    let mut f = std::fs::File::create(path.clone()).unwrap();
+    f.write(plans[0].to_string().as_bytes()).unwrap();
+    log::info!("plan saved at {:?}", path);
+    log::info!("seed was {}", seed);
 
     env.io.print_stats();
 }
 
-fn process_connection(
-    conn: &mut Rc<Connection>,
+fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Result<()> {
+    // todo: add history here by recording which interaction was executed at which tick
+    for _tick in 0..env.opts.ticks {
+        // Pick the connection to interact with
+        let connection_index = pick_index(env.connections.len(), &mut env.rng);
+        // Execute the interaction for the selected connection
+        execute_plan(env, connection_index, plans)?;
+    }
+
+    Ok(())
+}
+
+fn execute_plan(
+    env: &mut SimulatorEnv,
+    connection_index: usize,
+    plans: &mut Vec<InteractionPlan>,
+) -> Result<()> {
+    let connection = &env.connections[connection_index];
+    let plan = &mut plans[connection_index];
+
+    if plan.interaction_pointer >= plan.plan.len() {
+        return Ok(());
+    }
+
+    let interaction = &plan.plan[plan.interaction_pointer];
+
+    if let SimConnection::Disconnected = connection {
+        log::info!("connecting {}", connection_index);
+        env.connections[connection_index] = SimConnection::Connected(env.db.connect());
+    } else {
+        match execute_interaction(env, connection_index, interaction, &mut plan.stack) {
+            Ok(_) => {
+                log::debug!("connection {} processed", connection_index);
+                plan.interaction_pointer += 1;
+            }
+            Err(err) => {
+                log::error!("error {}", err);
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn execute_interaction(
+    env: &mut SimulatorEnv,
+    connection_index: usize,
     interaction: &Interaction,
     stack: &mut Vec<ResultSet>,
 ) -> Result<()> {
     match interaction {
         generation::plan::Interaction::Query(_) => {
+            let conn = match &mut env.connections[connection_index] {
+                SimConnection::Connected(conn) => conn,
+                SimConnection::Disconnected => unreachable!(),
+            };
+
             log::debug!("{}", interaction);
             let results = interaction.execute_query(conn)?;
             log::debug!("{:?}", results);
@@ -165,6 +189,10 @@ fn process_connection(
         }
         generation::plan::Interaction::Assertion(_) => {
             interaction.execute_assertion(stack)?;
+            stack.clear();
+        }
+        Interaction::Fault(_) => {
+            interaction.execute_fault(env, connection_index)?;
         }
     }
 

@@ -9,7 +9,7 @@ use crate::{
         query::{Create, Insert, Predicate, Query, Select},
         table::Value,
     },
-    SimulatorEnv, SimulatorOpts,
+    SimConnection, SimulatorEnv, SimulatorOpts,
 };
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
@@ -21,6 +21,7 @@ pub(crate) type ResultSet = Vec<Vec<Value>>;
 pub(crate) struct InteractionPlan {
     pub(crate) plan: Vec<Interaction>,
     pub(crate) stack: Vec<ResultSet>,
+    pub(crate) interaction_pointer: usize,
 }
 
 impl Display for InteractionPlan {
@@ -31,6 +32,7 @@ impl Display for InteractionPlan {
                 Interaction::Assertion(assertion) => {
                     write!(f, "-- ASSERT: {};\n", assertion.message)?
                 }
+                Interaction::Fault(fault) => write!(f, "-- FAULT: {};\n", fault)?,
             }
         }
 
@@ -58,6 +60,7 @@ impl Display for InteractionStats {
 pub(crate) enum Interaction {
     Query(Query),
     Assertion(Assertion),
+    Fault(Fault),
 }
 
 impl Display for Interaction {
@@ -65,6 +68,7 @@ impl Display for Interaction {
         match self {
             Interaction::Query(query) => write!(f, "{}", query),
             Interaction::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
+            Interaction::Fault(fault) => write!(f, "FAULT: {}", fault),
         }
     }
 }
@@ -72,6 +76,18 @@ impl Display for Interaction {
 pub(crate) struct Assertion {
     pub(crate) func: Box<dyn Fn(&Vec<ResultSet>) -> bool>,
     pub(crate) message: String,
+}
+
+pub(crate) enum Fault {
+    Disconnect,
+}
+
+impl Display for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Fault::Disconnect => write!(f, "DISCONNECT"),
+        }
+    }
 }
 
 pub(crate) struct Interactions(Vec<Interaction>);
@@ -96,6 +112,7 @@ impl Interactions {
                     Query::Select(_) => {}
                 },
                 Interaction::Assertion(_) => {}
+                Interaction::Fault(_) => {}
             }
         }
     }
@@ -106,6 +123,7 @@ impl InteractionPlan {
         InteractionPlan {
             plan: Vec::new(),
             stack: Vec::new(),
+            interaction_pointer: 0,
         }
     }
 
@@ -127,6 +145,7 @@ impl InteractionPlan {
                     Query::Create(_) => {}
                 },
                 Interaction::Assertion(_) => {}
+                Interaction::Fault(_) => {}
             }
         }
 
@@ -223,6 +242,9 @@ impl Interaction {
             Interaction::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
+            Interaction::Fault(fault) => {
+                unreachable!("unexpected: this function should only be called on queries")
+            }
         }
     }
 
@@ -236,6 +258,38 @@ impl Interaction {
                     return Err(limbo_core::LimboError::InternalError(
                         assertion.message.clone(),
                     ));
+                }
+                Ok(())
+            }
+            Interaction::Fault(_) => {
+                unreachable!("unexpected: this function should only be called on assertions")
+            }
+        }
+    }
+
+    pub(crate) fn execute_fault(&self, env: &mut SimulatorEnv, conn_index: usize) -> Result<()> {
+        match self {
+            Interaction::Query(_) => {
+                unreachable!("unexpected: this function should only be called on faults")
+            }
+            Interaction::Assertion(_) => {
+                unreachable!("unexpected: this function should only be called on faults")
+            }
+            Interaction::Fault(fault) => {
+                match fault {
+                    Fault::Disconnect => {
+                        match env.connections[conn_index] {
+                            SimConnection::Connected(ref mut conn) => {
+                                conn.close()?;
+                            }
+                            SimConnection::Disconnected => {
+                                return Err(limbo_core::LimboError::InternalError(
+                                    "Tried to disconnect a disconnected connection".to_string(),
+                                ));
+                            }
+                        }
+                        env.connections[conn_index] = SimConnection::Disconnected;
+                    }
                 }
                 Ok(())
             }
@@ -307,6 +361,11 @@ fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
     Interactions(vec![insert_query])
 }
 
+fn random_fault<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+    let fault = Interaction::Fault(Fault::Disconnect);
+    Interactions(vec![fault])
+}
+
 impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
     fn arbitrary_from<R: rand::Rng>(
         rng: &mut R,
@@ -334,6 +393,7 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
                     Box::new(|rng: &mut R| random_write(rng, env)),
                 ),
                 (1, Box::new(|rng: &mut R| create_table(rng, env))),
+                (1, Box::new(|rng: &mut R| random_fault(rng, env))),
             ],
             rng,
         )
