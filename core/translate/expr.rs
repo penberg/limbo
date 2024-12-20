@@ -914,6 +914,22 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+                    JsonFunc::JsonExtract => {
+                        let start_reg = translate_variable_sized_function_parameter_list(
+                            program,
+                            args,
+                            referenced_tables,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
