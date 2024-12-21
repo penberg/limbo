@@ -1,12 +1,20 @@
+use generation::plan::{Interaction, InteractionPlan, ResultSet};
+use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
+use model::query::{Create, Insert, Predicate, Query, Select};
+use model::table::{Column, Name, Table, Value};
+use properties::{property_insert_select, property_select_all};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
+use std::io::Write;
 use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-use anarchist_readable_name_generator_lib::readable_name_custom;
+mod generation;
+mod model;
+mod properties;
 
 struct SimulatorEnv {
     opts: SimulatorOpts,
@@ -23,7 +31,7 @@ enum SimConnection {
     Disconnected,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SimulatorOpts {
     ticks: usize,
     max_connections: usize,
@@ -33,38 +41,8 @@ struct SimulatorOpts {
     read_percent: usize,
     write_percent: usize,
     delete_percent: usize,
+    max_interactions: usize,
     page_size: usize,
-}
-
-struct Table {
-    rows: Vec<Vec<Value>>,
-    name: String,
-    columns: Vec<Column>,
-}
-
-#[derive(Clone)]
-struct Column {
-    name: String,
-    column_type: ColumnType,
-    primary: bool,
-    unique: bool,
-}
-
-#[derive(Clone)]
-enum ColumnType {
-    Integer,
-    Float,
-    Text,
-    Blob,
-}
-
-#[derive(Debug, PartialEq)]
-enum Value {
-    Null,
-    Integer(i64),
-    Float(f64),
-    Text(String),
-    Blob(Vec<u8>),
 }
 
 #[allow(clippy::arc_with_non_send_sync)]
@@ -88,7 +66,7 @@ fn main() {
     };
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..4096),
+        ticks: rng.gen_range(0..10240),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -96,6 +74,7 @@ fn main() {
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
+        max_interactions: rng.gen_range(0..10240),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
@@ -121,105 +100,102 @@ fn main() {
 
     println!("Initial opts {:?}", env.opts);
 
-    for _ in 0..env.opts.ticks {
-        let connection_index = env.rng.gen_range(0..env.opts.max_connections);
-        let mut connection = env.connections[connection_index].clone();
+    log::info!("Generating database interaction plan...");
+    let mut plans = (1..=env.opts.max_connections)
+        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
+        .collect::<Vec<_>>();
 
-        match &mut connection {
-            SimConnection::Connected(conn) => {
-                let disconnect = env.rng.gen_ratio(1, 100);
-                if disconnect {
-                    log::info!("disconnecting {}", connection_index);
-                    let _ = conn.close();
-                    env.connections[connection_index] = SimConnection::Disconnected;
-                } else {
-                    match process_connection(&mut env, conn) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            log::error!("error {}", err);
-                            break;
-                        }
-                    }
-                }
-            }
-            SimConnection::Disconnected => {
-                log::info!("disconnecting {}", connection_index);
-                env.connections[connection_index] = SimConnection::Connected(env.db.connect());
-            }
-        }
+    log::info!("{}", plans[0].stats());
+
+    log::info!("Executing database interaction plan...");
+    let result = execute_plans(&mut env, &mut plans);
+
+    if result.is_err() {
+        log::error!("error executing plans: {:?}", result.err());
     }
+    log::info!("db is at {:?}", path);
+    let mut path = TempDir::new().unwrap().into_path();
+    path.push("simulator.plan");
+    let mut f = std::fs::File::create(path.clone()).unwrap();
+    f.write(plans[0].to_string().as_bytes()).unwrap();
+    log::info!("plan saved at {:?}", path);
+    log::info!("seed was {}", seed);
 
     env.io.print_stats();
 }
 
-fn process_connection(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
-    let management = env.rng.gen_ratio(1, 100);
-    if management {
-        // for now create table only
-        maybe_add_table(env, conn)?;
-    } else if env.tables.is_empty() {
-        maybe_add_table(env, conn)?;
+fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Result<()> {
+    // todo: add history here by recording which interaction was executed at which tick
+    for _tick in 0..env.opts.ticks {
+        // Pick the connection to interact with
+        let connection_index = pick_index(env.connections.len(), &mut env.rng);
+        // Execute the interaction for the selected connection
+        execute_plan(env, connection_index, plans)?;
+    }
+
+    Ok(())
+}
+
+fn execute_plan(
+    env: &mut SimulatorEnv,
+    connection_index: usize,
+    plans: &mut Vec<InteractionPlan>,
+) -> Result<()> {
+    let connection = &env.connections[connection_index];
+    let plan = &mut plans[connection_index];
+
+    if plan.interaction_pointer >= plan.plan.len() {
+        return Ok(());
+    }
+
+    let interaction = &plan.plan[plan.interaction_pointer];
+
+    if let SimConnection::Disconnected = connection {
+        log::info!("connecting {}", connection_index);
+        env.connections[connection_index] = SimConnection::Connected(env.db.connect());
     } else {
-        let roll = env.rng.gen_range(0..100);
-        if roll < env.opts.read_percent {
-            // read
-            do_select(env, conn)?;
-        } else if roll < env.opts.read_percent + env.opts.write_percent {
-            // write
-            do_write(env, conn)?;
-        } else {
-            // delete
-            // TODO
+        match execute_interaction(env, connection_index, interaction, &mut plan.stack) {
+            Ok(_) => {
+                log::debug!("connection {} processed", connection_index);
+                plan.interaction_pointer += 1;
+            }
+            Err(err) => {
+                log::error!("error {}", err);
+                return Err(err);
+            }
         }
     }
+
     Ok(())
 }
 
-fn do_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
-    let table = env.rng.gen_range(0..env.tables.len());
-    let table_name = {
-        let table = &env.tables[table];
-        table.name.clone()
-    };
-    let rows = get_all_rows(env, conn, format!("SELECT * FROM {}", table_name).as_str())?;
+fn execute_interaction(
+    env: &mut SimulatorEnv,
+    connection_index: usize,
+    interaction: &Interaction,
+    stack: &mut Vec<ResultSet>,
+) -> Result<()> {
+    log::info!("executing: {}", interaction);
+    match interaction {
+        generation::plan::Interaction::Query(_) => {
+            let conn = match &mut env.connections[connection_index] {
+                SimConnection::Connected(conn) => conn,
+                SimConnection::Disconnected => unreachable!(),
+            };
 
-    let table = &env.tables[table];
-    compare_equal_rows(&table.rows, &rows);
-    Ok(())
-}
-
-fn do_write(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<()> {
-    let mut query = String::new();
-    let table = env.rng.gen_range(0..env.tables.len());
-    {
-        let table = &env.tables[table];
-        query.push_str(format!("INSERT INTO {} VALUES (", table.name).as_str());
+            log::debug!("{}", interaction);
+            let results = interaction.execute_query(conn)?;
+            log::debug!("{:?}", results);
+            stack.push(results);
+        }
+        generation::plan::Interaction::Assertion(_) => {
+            interaction.execute_assertion(stack)?;
+            stack.clear();
+        }
+        Interaction::Fault(_) => {
+            interaction.execute_fault(env, connection_index)?;
+        }
     }
-
-    let columns = env.tables[table].columns.clone();
-    let mut row = Vec::new();
-
-    // gen insert query
-    for column in &columns {
-        let value = match column.column_type {
-            ColumnType::Integer => Value::Integer(env.rng.gen_range(i64::MIN..i64::MAX)),
-            ColumnType::Float => Value::Float(env.rng.gen_range(-1e10..1e10)),
-            ColumnType::Text => Value::Text(gen_random_text(env)),
-            ColumnType::Blob => Value::Blob(gen_random_text(env).as_bytes().to_vec()),
-        };
-
-        query.push_str(value.to_string().as_str());
-        query.push(',');
-        row.push(value);
-    }
-
-    let table = &mut env.tables[table];
-    table.rows.push(row);
-
-    query.pop();
-    query.push_str(");");
-
-    let _ = get_all_rows(env, conn, query.as_str())?;
 
     Ok(())
 }
@@ -237,10 +213,15 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
     if env.tables.len() < env.opts.max_tables {
         let table = Table {
             rows: Vec::new(),
-            name: gen_random_name(env),
-            columns: gen_columns(env),
+            name: Name::arbitrary(&mut env.rng).0,
+            columns: (1..env.rng.gen_range(1..128))
+                .map(|_| Column::arbitrary(&mut env.rng))
+                .collect(),
         };
-        let rows = get_all_rows(env, conn, table.to_create_str().as_str())?;
+        let query = Query::Create(Create {
+            table: table.clone(),
+        });
+        let rows = get_all_rows(env, conn, query.to_string().as_str())?;
         log::debug!("{:?}", rows);
         let rows = get_all_rows(
             env,
@@ -258,56 +239,12 @@ fn maybe_add_table(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) -> Result<
             _ => unreachable!(),
         };
         assert!(
-            *as_text != table.to_create_str(),
+            *as_text != query.to_string(),
             "table was not inserted correctly"
         );
         env.tables.push(table);
     }
     Ok(())
-}
-
-fn gen_random_name(env: &mut SimulatorEnv) -> String {
-    let name = readable_name_custom("_", &mut env.rng);
-    name.replace("-", "_")
-}
-
-fn gen_random_text(env: &mut SimulatorEnv) -> String {
-    let big_text = env.rng.gen_ratio(1, 1000);
-    if big_text {
-        let max_size: u64 = 2 * 1024 * 1024 * 1024;
-        let size = env.rng.gen_range(1024..max_size);
-        let mut name = String::new();
-        for i in 0..size {
-            name.push(((i % 26) as u8 + b'A') as char);
-        }
-        name
-    } else {
-        let name = readable_name_custom("_", &mut env.rng);
-        name.replace("-", "_")
-    }
-}
-
-fn gen_columns(env: &mut SimulatorEnv) -> Vec<Column> {
-    let mut column_range = env.rng.gen_range(1..128);
-    let mut columns = Vec::new();
-    while column_range > 0 {
-        let column_type = match env.rng.gen_range(0..4) {
-            0 => ColumnType::Integer,
-            1 => ColumnType::Float,
-            2 => ColumnType::Text,
-            3 => ColumnType::Blob,
-            _ => unreachable!(),
-        };
-        let column = Column {
-            name: gen_random_name(env),
-            column_type,
-            primary: false,
-            unique: false,
-        };
-        columns.push(column);
-        column_range -= 1;
-    }
-    columns
 }
 
 fn get_all_rows(
@@ -537,50 +474,4 @@ impl Drop for SimulatorFile {
     fn drop(&mut self) {
         self.inner.unlock_file().expect("Failed to unlock file");
     }
-}
-
-impl ColumnType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            ColumnType::Integer => "INTEGER",
-            ColumnType::Float => "FLOAT",
-            ColumnType::Text => "TEXT",
-            ColumnType::Blob => "BLOB",
-        }
-    }
-}
-
-impl Table {
-    pub fn to_create_str(&self) -> String {
-        let mut out = String::new();
-
-        out.push_str(format!("CREATE TABLE {} (", self.name).as_str());
-
-        assert!(!self.columns.is_empty());
-        for column in &self.columns {
-            out.push_str(format!("{} {},", column.name, column.column_type.as_str()).as_str());
-        }
-        // remove last comma
-        out.pop();
-
-        out.push_str(");");
-        out
-    }
-}
-
-impl Value {
-    pub fn to_string(&self) -> String {
-        match self {
-            Value::Null => "NULL".to_string(),
-            Value::Integer(i) => i.to_string(),
-            Value::Float(f) => f.to_string(),
-            Value::Text(t) => format!("'{}'", t.clone()),
-            Value::Blob(vec) => to_sqlite_blob(vec),
-        }
-    }
-}
-
-fn to_sqlite_blob(bytes: &[u8]) -> String {
-    let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
-    format!("X'{}'", hex)
 }
