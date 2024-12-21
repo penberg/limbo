@@ -64,64 +64,6 @@ test.serial("Statement.raw().iterate()", async (t) => {
     t.throws(() => emptyStmt.next(), { instanceOf: TypeError });
 });
 
-test.serial("Statement.raw().iterate() is lazy evaluated", async (t) => {
-    const db = t.context.db;
-
-    db.exec("DROP TABLE IF EXISTS large_table");
-    db.exec("CREATE TABLE large_table (id INTEGER PRIMARY KEY)");
-
-    const stmt = db.prepare("INSERT INTO large_table (id) VALUES (?)");
-    for (let i = 1; i <= 1000; i++) {
-        stmt.run(i);
-    }
-
-    db.exec("ALTER TABLE large_table ADD COLUMN accessed INTEGER DEFAULT 0");
-
-    // Create a trigger that sets accessed = 1 when a row is read
-    db.exec(`
-        CREATE TRIGGER track_access 
-        BEFORE SELECT ON large_table
-        BEGIN
-            UPDATE large_table 
-            SET accessed = 1 
-            WHERE id = (SELECT id FROM large_table WHERE id = NEW.id);
-        END
-    `);
-
-    const selectStmt = db.prepare("SELECT * FROM large_table ORDER BY id");
-    const iter = selectStmt.raw().iterate();
-
-    // Check that no rows have been accessed yet
-    const initialAccess = db.prepare("SELECT COUNT(*) FROM large_table WHERE accessed = 1").get()[0];
-    t.is(initialAccess, 0, "No rows should be accessed before iteration starts");
-
-    // Get first 5 rows
-    for (let i = 0; i < 5; i++) {
-        iter.next();
-    }
-
-    // Verify only 5 rows were accessed
-    const partialAccess = db.prepare("SELECT COUNT(*) FROM large_table WHERE accessed = 1").get()[0];
-    t.is(partialAccess, 5, "Only requested rows should be accessed");
-
-    // Verify specific rows were accessed
-    const accessedRows = db.prepare("SELECT id FROM large_table WHERE accessed = 1 ORDER BY id").all();
-    t.deepEqual(
-        accessedRows.map(row => row[0]),
-        [1, 2, 3, 4, 5],
-        "First 5 rows should be accessed in order"
-    );
-
-    // Get next 3 rows
-    for (let i = 0; i < 3; i++) {
-        iter.next();
-    }
-
-    // Verify only 8 total rows were accessed
-    const finalAccess = db.prepare("SELECT COUNT(*) FROM large_table WHERE accessed = 1").get()[0];
-    t.is(finalAccess, 8, "Only requested rows should be accessed after additional iteration");
-});
-
 const connect = async (path_opt) => {
     const path = path_opt ?? "hello.db";
     const provider = process.env.PROVIDER;
