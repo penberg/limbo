@@ -59,17 +59,17 @@ impl Database {
 #[wasm_bindgen]
 pub struct RowIterator {
     inner: RefCell<limbo_core::Statement>,
-    raw: bool,
 }
 
 #[wasm_bindgen]
 impl RowIterator {
-    fn new(inner: RefCell<limbo_core::Statement>, raw: bool) -> Self {
-        Self { inner, raw }
+    fn new(inner: RefCell<limbo_core::Statement>) -> Self {
+        Self { inner }
     }
 
     #[wasm_bindgen]
     pub fn next(&mut self) -> JsValue {
+
         match self.inner.borrow_mut().step() {
             Ok(limbo_core::RowResult::Row(row)) => {
                 let row_array = Array::new();
@@ -148,7 +148,7 @@ impl Statement {
 
     #[wasm_bindgen]
     pub fn iterate(self) -> JsValue {
-        let iterator = RowIterator::new(self.inner, self.raw);
+        let iterator = RowIterator::new(self.inner);
         let iterator_obj = Object::new();
 
         // Define the next method that will be called by JavaScript
