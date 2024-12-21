@@ -113,6 +113,58 @@ fn resolve_columns_for_insert<'a>(
     Ok(mappings)
 }
 
+/// Populates the column registers with values for a single row
+fn populate_column_registers(
+    program: &mut ProgramBuilder,
+    value: &[Expr],
+    column_mappings: &[ColumnMapping],
+    column_registers_start: usize,
+    inserting_multiple_rows: bool,
+    rowid_reg: usize,
+) -> Result<()> {
+    for (i, mapping) in column_mappings.iter().enumerate() {
+        let target_reg = column_registers_start + i;
+
+        // Column has a value in the VALUES tuple
+        if let Some(value_index) = mapping.value_index {
+            // When inserting a single row, SQLite writes the value provided for the rowid alias column (INTEGER PRIMARY KEY)
+            // directly into the rowid register and writes a NULL into the rowid alias column. Not sure why this only happens
+            // in the single row case, but let's copy it.
+            let write_directly_to_rowid_reg =
+                mapping.column.is_rowid_alias && !inserting_multiple_rows;
+            let reg = if write_directly_to_rowid_reg {
+                rowid_reg
+            } else {
+                target_reg
+            };
+            translate_expr(
+                program,
+                None,
+                value.get(value_index).expect("value index out of bounds"),
+                reg,
+                None,
+            )?;
+            if write_directly_to_rowid_reg {
+                program.emit_insn(Insn::SoftNull { reg: target_reg });
+            }
+        } else {
+            // Column was not specified - use NULL if it is nullable, otherwise error
+            // Rowid alias columns can be NULL because we will autogenerate a rowid in that case.
+            let is_nullable = !mapping.column.primary_key || mapping.column.is_rowid_alias;
+            if is_nullable {
+                program.emit_insn(Insn::Null {
+                    dest: target_reg,
+                    dest_end: None,
+                });
+                program.mark_last_insn_constant();
+            } else {
+                crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
     schema: &Schema,
@@ -191,11 +243,16 @@ pub fn translate_insert(
         }
     };
 
-    let yield_reg = program.alloc_register();
-    let jump_on_definition_label = program.allocate_label();
-    {
-        // Coroutine for values
-        // TODO/efficiency: only use coroutine when there are multiple values to insert
+    let record_register = program.alloc_register();
+    let halt_label = program.allocate_label();
+    let mut loop_start_offset = 0;
+
+    let inserting_multiple_rows = values.len() > 1;
+
+    // Multiple rows - use coroutine for value population
+    if inserting_multiple_rows {
+        let yield_reg = program.alloc_register();
+        let jump_on_definition_label = program.allocate_label();
         program.emit_insn_with_label_dependency(
             Insn::InitCoroutine {
                 yield_reg,
@@ -206,72 +263,75 @@ pub fn translate_insert(
         );
 
         for value in values {
-            // Process each value according to resolved columns
-            for (i, mapping) in column_mappings.iter().enumerate() {
-                let target_reg = column_registers_start + i;
-
-                if let Some(value_index) = mapping.value_index {
-                    // Column has a value in the VALUES tuple
-                    translate_expr(
-                        &mut program,
-                        None,
-                        value.get(value_index).expect("value index out of bounds"),
-                        target_reg,
-                        None,
-                    )?;
-                } else {
-                    // Column was not specified - use NULL if it is nullable, otherwise error.
-                    // Rowid alias columns can be NULL because we will autogenerate a rowid in that case.
-                    let is_nullable = !mapping.column.primary_key || mapping.column.is_rowid_alias;
-                    if is_nullable {
-                        program.emit_insn(Insn::Null {
-                            dest: target_reg,
-                            dest_end: None,
-                        });
-                        program.mark_last_insn_constant();
-                    } else {
-                        crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
-                    }
-                }
-            }
+            populate_column_registers(
+                &mut program,
+                value,
+                &column_mappings,
+                column_registers_start,
+                true,
+                rowid_reg,
+            )?;
             program.emit_insn(Insn::Yield {
                 yield_reg,
                 end_offset: 0,
             });
         }
         program.emit_insn(Insn::EndCoroutine { yield_reg });
+        program.resolve_label(jump_on_definition_label, program.offset());
+
+        program.emit_insn(Insn::OpenWriteAsync {
+            cursor_id,
+            root_page,
+        });
+        program.emit_insn(Insn::OpenWriteAwait {});
+
+        // Main loop
+        // FIXME: rollback is not implemented. E.g. if you insert 2 rows and one fails to unique constraint violation,
+        // the other row will still be inserted.
+        loop_start_offset = program.offset();
+        program.emit_insn_with_label_dependency(
+            Insn::Yield {
+                yield_reg,
+                end_offset: halt_label,
+            },
+            halt_label,
+        );
+    } else {
+        // Single row - populate registers directly
+        program.emit_insn(Insn::OpenWriteAsync {
+            cursor_id,
+            root_page,
+        });
+        program.emit_insn(Insn::OpenWriteAwait {});
+
+        populate_column_registers(
+            &mut program,
+            &values[0],
+            &column_mappings,
+            column_registers_start,
+            false,
+            rowid_reg,
+        )?;
     }
 
-    program.resolve_label(jump_on_definition_label, program.offset());
-    program.emit_insn(Insn::OpenWriteAsync {
-        cursor_id,
-        root_page,
-    });
-    program.emit_insn(Insn::OpenWriteAwait {});
-
-    // Main loop
-    // FIXME: rollback is not implemented. E.g. if you insert 2 rows and one fails to unique constraint violation,
-    // the other row will still be inserted.
-    let record_register = program.alloc_register();
-    let halt_label = program.allocate_label();
-    let loop_start_offset = program.offset();
-    program.emit_insn_with_label_dependency(
-        Insn::Yield {
-            yield_reg,
-            end_offset: halt_label,
-        },
-        halt_label,
-    );
-
+    // Common record insertion logic for both single and multiple rows
     let check_rowid_is_integer_label = rowid_alias_reg.and(Some(program.allocate_label()));
     if let Some(reg) = rowid_alias_reg {
-        program.emit_insn(Insn::Copy {
-            src_reg: reg,
-            dst_reg: rowid_reg,
-            amount: 0, // TODO: rename 'amount' to something else; amount==0 means 1
-        });
-        // for the row record, the rowid alias column is always set to NULL
-        program.emit_insn(Insn::SoftNull { reg });
+        // for the row record, the rowid alias column (INTEGER PRIMARY KEY) is always set to NULL
+        // and its value is copied to the rowid register. in the case where a single row is inserted,
+        // the value is written directly to the rowid register (see populate_column_registers()).
+        // again, not sure why this only happens in the single row case, but let's mimic sqlite.
+        // in the single row case we save a Copy instruction, but in the multiple rows case we do
+        // it here in the loop.
+        if inserting_multiple_rows {
+            program.emit_insn(Insn::Copy {
+                src_reg: reg,
+                dst_reg: rowid_reg,
+                amount: 0, // TODO: rename 'amount' to something else; amount==0 means 1
+            });
+            // for the row record, the rowid alias column is always set to NULL
+            program.emit_insn(Insn::SoftNull { reg });
+        }
         // the user provided rowid value might itself be NULL. If it is, we create a new rowid on the next instruction.
         program.emit_insn_with_label_dependency(
             Insn::NotNull {
@@ -336,15 +396,19 @@ pub fn translate_insert(
     });
     program.emit_insn(Insn::InsertAwait { cursor_id });
 
-    program.emit_insn(Insn::Goto {
-        target_pc: loop_start_offset,
-    });
+    if inserting_multiple_rows {
+        // For multiple rows, loop back
+        program.emit_insn(Insn::Goto {
+            target_pc: loop_start_offset,
+        });
+    }
 
     program.resolve_label(halt_label, program.offset());
     program.emit_insn(Insn::Halt {
         err_code: 0,
         description: String::new(),
     });
+
     program.resolve_label(init_label, program.offset());
     program.emit_insn(Insn::Transaction { write: true });
     program.emit_constant_insns();
