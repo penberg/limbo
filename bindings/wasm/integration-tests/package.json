@@ -3,7 +3,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "PROVIDER=better-sqlite3 ava tests/test.js && PROVIDER=limbo-wasm ava tests/test.js"
+    "test": "PROVIDER=better-sqlite3 ava tests/test.js && PROVIDER=limbo-wasm ava tests/test.js && rm *.db *.db-wal"
   },
   "devDependencies": {
     "ava": "^6.2.0"
