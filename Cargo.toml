@@ -9,7 +9,7 @@ members = [
     "sqlite3",
     "core",
     "simulator",
-    "test",
+    "test", "macros",
 ]
 exclude = ["perf/latency/limbo"]
 
