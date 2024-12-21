@@ -69,7 +69,6 @@ impl RowIterator {
 
     #[wasm_bindgen]
     pub fn next(&mut self) -> JsValue {
-
         match self.inner.borrow_mut().step() {
             Ok(limbo_core::RowResult::Row(row)) => {
                 let row_array = Array::new();
@@ -154,10 +153,12 @@ impl Statement {
         // Define the next method that will be called by JavaScript
         let next_fn = js_sys::Function::new_with_args(
             "",
-            "return { 
-                value: this.iterator.next(),
-                done: this.value === undefined 
-            };",
+            "const value = this.iterator.next();
+             const done = value === undefined;
+             return {
+                value,
+                done
+             };",
         );
 
         js_sys::Reflect::set(&iterator_obj, &JsValue::from_str("next"), &next_fn).unwrap();
