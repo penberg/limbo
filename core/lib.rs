@@ -1,4 +1,5 @@
 mod error;
+mod ext;
 mod function;
 mod io;
 #[cfg(feature = "json")]

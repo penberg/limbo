@@ -1,6 +1,6 @@
+use crate::ext::ExtFunc;
 use std::fmt;
 use std::fmt::Display;
-
 #[cfg(feature = "json")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonFunc {
@@ -256,13 +256,14 @@ impl Display for MathFunc {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
     Math(MathFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
+    Extension(ExtFunc),
 }
 
 impl Display for Func {
@@ -273,6 +274,7 @@ impl Display for Func {
             Func::Math(math_func) => write!(f, "{}", math_func),
             #[cfg(feature = "json")]
             Func::Json(json_func) => write!(f, "{}", json_func),
+            Func::Extension(ext_func) => write!(f, "{}", ext_func),
         }
     }
 }
@@ -366,7 +368,10 @@ impl Func {
             "tan" => Ok(Func::Math(MathFunc::Tan)),
             "tanh" => Ok(Func::Math(MathFunc::Tanh)),
             "trunc" => Ok(Func::Math(MathFunc::Trunc)),
-            _ => Err(()),
+            _ => match ExtFunc::resolve_function(name, arg_count) {
+                Some(ext_func) => Ok(Func::Extension(ext_func)),
+                None => Err(()),
+            },
         }
     }
 }
