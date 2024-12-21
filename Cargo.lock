@@ -537,6 +537,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "description_derive"
+version = "0.0.0"
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1130,6 +1134,7 @@ dependencies = [
  "cfg_block",
  "chrono",
  "criterion",
+ "description_derive",
  "fallible-iterator 0.3.0",
  "getrandom",
  "hex",

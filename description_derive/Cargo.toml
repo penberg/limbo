@@ -1,0 +1,5 @@
+[package]
+name = "description_derive"
+
+[lib]
+proc-macro = true
