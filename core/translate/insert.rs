@@ -169,7 +169,7 @@ fn populate_column_registers(
 pub fn translate_insert(
     schema: &Schema,
     with: &Option<With>,
-    or_conflict: &Option<ResolveType>,
+    on_conflict: &Option<ResolveType>,
     tbl_name: &QualifiedName,
     columns: &Option<DistinctNames>,
     body: &InsertBody,
@@ -177,8 +177,12 @@ pub fn translate_insert(
     database_header: Rc<RefCell<DatabaseHeader>>,
     connection: Weak<Connection>,
 ) -> Result<Program> {
-    assert!(with.is_none());
-    assert!(or_conflict.is_none());
+    if with.is_some() {
+        crate::bail_parse_error!("WITH clause is not supported");
+    }
+    if on_conflict.is_some() {
+        crate::bail_parse_error!("ON CONFLICT clause is not supported");
+    }
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
     program.emit_insn_with_label_dependency(
