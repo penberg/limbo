@@ -1,9 +1,11 @@
 mod de;
 mod error;
+mod json_path;
 mod ser;
 
 use std::rc::Rc;
 
+use self::json_path::json_extract_single;
 pub use crate::json::de::from_str;
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
@@ -46,11 +48,13 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
                 crate::bail_parse_error!("malformed JSON");
             }
         }
-        _ => Ok(json_value.to_owned()),
+        _ => Ok(OwnedValue::Text(LimboText::json(Rc::new(
+            json_value.to_string(),
+        )))),
     }
 }
 
-pub fn json_array(values: Vec<&OwnedValue>) -> crate::Result<OwnedValue> {
+pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     let mut s = String::new();
     s.push('[');
 
@@ -86,6 +90,48 @@ pub fn json_array(values: Vec<&OwnedValue>) -> crate::Result<OwnedValue> {
 
     s.push(']');
     Ok(OwnedValue::Text(LimboText::json(Rc::new(s))))
+}
+
+pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<OwnedValue> {
+    if let OwnedValue::Null = value {
+        return Ok(OwnedValue::Null);
+    }
+
+    if paths.len() == 0 {
+        return Ok(OwnedValue::Null);
+    }
+
+    let value = get_json(value)?;
+
+    match value {
+        OwnedValue::Text(t) => {
+            let json = t.value.as_str();
+            let mut result = "".to_string();
+
+            if paths.len() > 1 {
+                result.push('[');
+            }
+
+            for path in paths {
+                if let OwnedValue::Text(t) = path {
+                    let extracted = json_extract_single(json, t.value.as_str())?;
+                    result.push_str(extracted);
+                    if paths.len() > 1 {
+                        result.push(',');
+                    }
+                } else {
+                    crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string());
+                }
+            }
+
+            if paths.len() > 1 {
+                result.push(']');
+            }
+
+            Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+        }
+        _ => unreachable!("Expected OwnedValue::Text"),
+    }
 }
 
 #[cfg(test)]
@@ -224,14 +270,9 @@ mod tests {
     fn test_json_array_simple() {
         let text = OwnedValue::build_text(Rc::new("value1".to_string()));
         let json = OwnedValue::Text(LimboText::json(Rc::new("\"value2\"".to_string())));
-        let input = vec![
-            &text,
-            &json,
-            &OwnedValue::Integer(1),
-            &OwnedValue::Float(1.1),
-        ];
+        let input = vec![text, json, OwnedValue::Integer(1), OwnedValue::Float(1.1)];
 
-        let result = json_array(input).unwrap();
+        let result = json_array(&input).unwrap();
         if let OwnedValue::Text(res) = result {
             assert_eq!(res.value.as_str(), "[\"value1\",\"value2\",1,1.1]");
             assert_eq!(res.subtype, TextSubtype::Json);
@@ -244,7 +285,7 @@ mod tests {
     fn test_json_array_empty() {
         let input = vec![];
 
-        let result = json_array(input).unwrap();
+        let result = json_array(&input).unwrap();
         if let OwnedValue::Text(res) = result {
             assert_eq!(res.value.as_str(), "[]");
             assert_eq!(res.subtype, TextSubtype::Json);
@@ -257,13 +298,51 @@ mod tests {
     fn test_json_array_blob_invalid() {
         let blob = OwnedValue::Blob(Rc::new("1".as_bytes().to_vec()));
 
-        let input = vec![&blob];
+        let input = vec![blob];
 
-        let result = json_array(input);
+        let result = json_array(&input);
 
         match result {
             Ok(_) => panic!("Expected error for blob input"),
             Err(e) => assert!(e.to_string().contains("JSON cannot hold BLOB values")),
+        }
+    }
+
+    #[test]
+    fn test_json_extract_missing_path() {
+        let result = json_extract(
+            &OwnedValue::build_text(Rc::new("{\"a\":2}".to_string())),
+            &[OwnedValue::build_text(Rc::new("$.x".to_string()))],
+        );
+
+        match result {
+            Ok(OwnedValue::Null) => (),
+            _ => panic!("Expected null result"),
+        }
+    }
+    #[test]
+    fn test_json_extract_null_path() {
+        let result = json_extract(
+            &OwnedValue::build_text(Rc::new("{\"a\":2}".to_string())),
+            &[OwnedValue::Null],
+        );
+
+        match result {
+            Ok(OwnedValue::Null) => (),
+            _ => panic!("Expected null result"),
+        }
+    }
+
+    #[test]
+    fn test_json_path_invalid() {
+        let result = json_extract(
+            &OwnedValue::build_text(Rc::new("{\"a\":2}".to_string())),
+            &[OwnedValue::Float(1.1)],
+        );
+
+        match result {
+            Ok(_) => panic!("expected error"),
+            Err(e) => assert!(e.to_string().contains("JSON path error")),
         }
     }
 }
