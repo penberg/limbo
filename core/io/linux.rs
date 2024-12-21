@@ -11,6 +11,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 const MAX_IOVECS: usize = 128;
+const SUBQ_ENTRYS: u32 = 256;
 
 #[derive(Debug, Error)]
 enum LinuxIOError {
@@ -49,7 +50,7 @@ struct InnerLinuxIO {
 
 impl LinuxIO {
     pub fn new() -> Result<Self> {
-        let ring = io_uring::IoUring::new(MAX_IOVECS as u32)?;
+        let ring = io_uring::IoUring::new(SUBQ_ENTRYS)?;
         let inner = InnerLinuxIO {
             ring: WrappedIOUring {
                 ring,
@@ -83,11 +84,14 @@ impl WrappedIOUring {
     fn submit_entry(&mut self, entry: &io_uring::squeue::Entry, c: Rc<Completion>) {
         log::trace!("submit_entry({:?})", entry);
         self.pending.insert(entry.get_user_data(), c);
-        unsafe {
-            self.ring
-                .submission()
-                .push(entry)
-                .expect("submission queue is full");
+        loop {
+            let res = unsafe { self.ring.submission().push(entry) };
+            match res {
+                Ok(_) => break,
+                Err(_) => {
+                    let _ = self.wait_for_completion();
+                }
+            }
         }
         self.pending_ops += 1;
     }
