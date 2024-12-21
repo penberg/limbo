@@ -2,17 +2,116 @@ use std::rc::Weak;
 use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use sqlite3_parser::ast::{
-    DistinctNames, InsertBody, QualifiedName, ResolveType, ResultColumn, With,
+    DistinctNames, Expr, InsertBody, QualifiedName, ResolveType, ResultColumn, With,
 };
 
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
+use crate::util::normalize_ident;
 use crate::{
-    schema::{Schema, Table},
+    schema::{Column, Schema, Table},
     storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
 use crate::{Connection, Result};
+
+#[derive(Debug)]
+/// Represents how a column should be populated during an INSERT.
+/// Contains both the column definition and optionally the index into the VALUES tuple.
+struct ColumnMapping<'a> {
+    /// Reference to the column definition from the table schema
+    column: &'a Column,
+    /// If Some(i), use the i-th value from the VALUES tuple
+    /// If None, use NULL (column was not specified in INSERT statement)
+    value_index: Option<usize>,
+}
+
+/// Resolves how each column in a table should be populated during an INSERT.
+/// Returns a Vec of ColumnMapping, one for each column in the table's schema.
+///
+/// For each column, specifies:
+/// 1. The column definition (type, constraints, etc)
+/// 2. Where to get the value from:
+///    - Some(i) -> use i-th value from the VALUES tuple
+///    - None -> use NULL (column wasn't specified in INSERT)
+///
+/// Two cases are handled:
+/// 1. No column list specified (INSERT INTO t VALUES ...):
+///    - Values are assigned to columns in table definition order
+///    - If fewer values than columns, remaining columns map to None
+/// 2. Column list specified (INSERT INTO t (col1, col3) VALUES ...):
+///    - Named columns map to their corresponding value index
+///    - Unspecified columns map to None
+fn resolve_columns_for_insert<'a>(
+    table: &'a Table,
+    columns: &Option<DistinctNames>,
+    values: &[Vec<Expr>],
+) -> Result<Vec<ColumnMapping<'a>>> {
+    if values.is_empty() {
+        crate::bail_parse_error!("no values to insert");
+    }
+
+    let table_columns = table.columns();
+
+    // Case 1: No columns specified - map values to columns in order
+    if columns.is_none() {
+        let num_values = values[0].len();
+        if num_values > table_columns.len() {
+            crate::bail_parse_error!(
+                "table {} has {} columns but {} values were supplied",
+                table.get_name(),
+                table_columns.len(),
+                num_values
+            );
+        }
+
+        // Verify all value tuples have same length
+        for value in values.iter().skip(1) {
+            if value.len() != num_values {
+                crate::bail_parse_error!("all VALUES must have the same number of terms");
+            }
+        }
+
+        // Map each column to either its corresponding value index or None
+        return Ok(table_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| ColumnMapping {
+                column: col,
+                value_index: if i < num_values { Some(i) } else { None },
+            })
+            .collect());
+    }
+
+    // Case 2: Columns specified - map named columns to their values
+    let mut mappings: Vec<_> = table_columns
+        .iter()
+        .map(|col| ColumnMapping {
+            column: col,
+            value_index: None,
+        })
+        .collect();
+
+    // Map each named column to its value index
+    for (value_index, column_name) in columns.as_ref().unwrap().iter().enumerate() {
+        let column_name = normalize_ident(column_name.0.as_str());
+        let table_index = table_columns
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(&column_name));
+
+        if table_index.is_none() {
+            crate::bail_parse_error!(
+                "table {} has no column named {}",
+                table.get_name(),
+                column_name
+            );
+        }
+
+        mappings[table_index.unwrap()].value_index = Some(value_index);
+    }
+
+    Ok(mappings)
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
@@ -20,7 +119,7 @@ pub fn translate_insert(
     with: &Option<With>,
     or_conflict: &Option<ResolveType>,
     tbl_name: &QualifiedName,
-    _columns: &Option<DistinctNames>,
+    columns: &Option<DistinctNames>,
     body: &InsertBody,
     _returning: &Option<Vec<ResultColumn>>,
     database_header: Rc<RefCell<DatabaseHeader>>,
@@ -46,6 +145,10 @@ pub fn translate_insert(
         None => crate::bail_corrupt_error!("Parse error: no such table: {}", table_name),
     };
     let table = Rc::new(Table::BTree(table));
+    if !table.has_rowid() {
+        crate::bail_parse_error!("INSERT into WITHOUT ROWID table is not supported");
+    }
+
     let cursor_id = program.alloc_cursor_id(
         Some(table_name.0.clone()),
         Some(table.clone().deref().clone()),
@@ -55,18 +158,44 @@ pub fn translate_insert(
         Table::Index(index) => index.root_page,
         Table::Pseudo(_) => todo!(),
     };
+    let values = match body {
+        InsertBody::Select(select, None) => match &select.body.select {
+            sqlite3_parser::ast::OneSelect::Values(values) => values,
+            _ => todo!(),
+        },
+        _ => todo!(),
+    };
 
-    let mut num_cols = table.columns().len();
-    if table.has_rowid() {
-        num_cols += 1;
-    }
-    // column_registers_start[0] == rowid if has rowid
-    let column_registers_start = program.alloc_registers(num_cols);
+    let column_mappings = resolve_columns_for_insert(&table, columns, values)?;
+    // Check if rowid was provided (through INTEGER PRIMARY KEY as a rowid alias)
+    let rowid_alias_index = table.columns().iter().position(|c| c.is_rowid_alias);
+    let has_user_provided_rowid = {
+        assert!(column_mappings.len() == table.columns().len());
+        if let Some(index) = rowid_alias_index {
+            column_mappings[index].value_index.is_some()
+        } else {
+            false
+        }
+    };
 
-    // Coroutine for values
+    // allocate a register for each column in the table. if not provided by user, they will simply be set as null.
+    // allocate an extra register for rowid regardless of whether user provided a rowid alias column.
+    let num_cols = table.columns().len();
+    let rowid_reg = program.alloc_registers(num_cols + 1);
+    let column_registers_start = rowid_reg + 1;
+    let rowid_alias_reg = {
+        if has_user_provided_rowid {
+            Some(column_registers_start + rowid_alias_index.unwrap())
+        } else {
+            None
+        }
+    };
+
     let yield_reg = program.alloc_register();
     let jump_on_definition_label = program.allocate_label();
     {
+        // Coroutine for values
+        // TODO/efficiency: only use coroutine when there are multiple values to insert
         program.emit_insn_with_label_dependency(
             Insn::InitCoroutine {
                 yield_reg,
@@ -75,40 +204,40 @@ pub fn translate_insert(
             },
             jump_on_definition_label,
         );
-        match body {
-            InsertBody::Select(select, None) => match &select.body.select {
-                sqlite3_parser::ast::OneSelect::Select {
-                    distinctness: _,
-                    columns: _,
-                    from: _,
-                    where_clause: _,
-                    group_by: _,
-                    window_clause: _,
-                } => todo!(),
-                sqlite3_parser::ast::OneSelect::Values(values) => {
-                    for value in values {
-                        for (col, expr) in value.iter().enumerate() {
-                            let mut col = col;
-                            if table.has_rowid() {
-                                col += 1;
-                            }
-                            translate_expr(
-                                &mut program,
-                                None,
-                                expr,
-                                column_registers_start + col,
-                                None,
-                            )?;
-                        }
-                        program.emit_insn(Insn::Yield {
-                            yield_reg,
-                            end_offset: 0,
+
+        for value in values {
+            // Process each value according to resolved columns
+            for (i, mapping) in column_mappings.iter().enumerate() {
+                let target_reg = column_registers_start + i;
+
+                if let Some(value_index) = mapping.value_index {
+                    // Column has a value in the VALUES tuple
+                    translate_expr(
+                        &mut program,
+                        None,
+                        value.get(value_index).expect("value index out of bounds"),
+                        target_reg,
+                        None,
+                    )?;
+                } else {
+                    // Column was not specified - use NULL if it is nullable, otherwise error.
+                    // Rowid alias columns can be NULL because we will autogenerate a rowid in that case.
+                    let is_nullable = !mapping.column.primary_key || mapping.column.is_rowid_alias;
+                    if is_nullable {
+                        program.emit_insn(Insn::Null {
+                            dest: target_reg,
+                            dest_end: None,
                         });
+                        program.mark_last_insn_constant();
+                    } else {
+                        crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
                     }
                 }
-            },
-            InsertBody::DefaultValues => todo!("default values not yet supported"),
-            _ => todo!(),
+            }
+            program.emit_insn(Insn::Yield {
+                yield_reg,
+                end_offset: 0,
+            });
         }
         program.emit_insn(Insn::EndCoroutine { yield_reg });
     }
@@ -121,6 +250,8 @@ pub fn translate_insert(
     program.emit_insn(Insn::OpenWriteAwait {});
 
     // Main loop
+    // FIXME: rollback is not implemented. E.g. if you insert 2 rows and one fails to unique constraint violation,
+    // the other row will still be inserted.
     let record_register = program.alloc_register();
     let halt_label = program.allocate_label();
     let loop_start_offset = program.offset();
@@ -132,67 +263,78 @@ pub fn translate_insert(
         halt_label,
     );
 
-    if table.has_rowid() {
-        let row_id_reg = column_registers_start;
-        if let Some(rowid_alias_column) = table.get_rowid_alias_column() {
-            let key_reg = column_registers_start + 1 + rowid_alias_column.0;
-            // copy key to rowid
-            program.emit_insn(Insn::Copy {
-                src_reg: key_reg,
-                dst_reg: row_id_reg,
-                amount: 0,
-            });
-            program.emit_insn(Insn::SoftNull { reg: key_reg });
-        }
-
-        let notnull_label = program.allocate_label();
+    let check_rowid_is_integer_label = rowid_alias_reg.and(Some(program.allocate_label()));
+    if let Some(reg) = rowid_alias_reg {
+        program.emit_insn(Insn::Copy {
+            src_reg: reg,
+            dst_reg: rowid_reg,
+            amount: 0, // TODO: rename 'amount' to something else; amount==0 means 1
+        });
+        // for the row record, the rowid alias column is always set to NULL
+        program.emit_insn(Insn::SoftNull { reg });
+        // the user provided rowid value might itself be NULL. If it is, we create a new rowid on the next instruction.
         program.emit_insn_with_label_dependency(
             Insn::NotNull {
-                reg: row_id_reg,
-                target_pc: notnull_label,
+                reg: rowid_reg,
+                target_pc: check_rowid_is_integer_label.unwrap(),
             },
-            notnull_label,
+            check_rowid_is_integer_label.unwrap(),
         );
-        program.emit_insn(Insn::NewRowid {
-            cursor: cursor_id,
-            rowid_reg: row_id_reg,
-            prev_largest_reg: 0,
-        });
+    }
 
-        program.resolve_label(notnull_label, program.offset());
-        program.emit_insn(Insn::MustBeInt { reg: row_id_reg });
+    // Create new rowid if a) not provided by user or b) provided by user but is NULL
+    program.emit_insn(Insn::NewRowid {
+        cursor: cursor_id,
+        rowid_reg: rowid_reg,
+        prev_largest_reg: 0,
+    });
+
+    if let Some(must_be_int_label) = check_rowid_is_integer_label {
+        program.resolve_label(must_be_int_label, program.offset());
+        // If the user provided a rowid, it must be an integer.
+        program.emit_insn(Insn::MustBeInt { reg: rowid_reg });
+    }
+
+    // Check uniqueness constraint for rowid if it was provided by user.
+    // When the DB allocates it there are no need for separate uniqueness checks.
+    if has_user_provided_rowid {
         let make_record_label = program.allocate_label();
         program.emit_insn_with_label_dependency(
             Insn::NotExists {
                 cursor: cursor_id,
-                rowid_reg: row_id_reg,
+                rowid_reg: rowid_reg,
                 target_pc: make_record_label,
             },
             make_record_label,
         );
-        // TODO: rollback
+        let rowid_column_name = if let Some(index) = rowid_alias_index {
+            table.column_index_to_name(index).unwrap()
+        } else {
+            "rowid"
+        };
+
         program.emit_insn(Insn::Halt {
             err_code: SQLITE_CONSTRAINT_PRIMARYKEY,
-            description: format!(
-                "{}.{}",
-                table.get_name(),
-                table.column_index_to_name(0).unwrap()
-            ),
+            description: format!("{}.{}", table.get_name(), rowid_column_name),
         });
+
         program.resolve_label(make_record_label, program.offset());
-        program.emit_insn(Insn::MakeRecord {
-            start_reg: column_registers_start + 1,
-            count: num_cols - 1,
-            dest_reg: record_register,
-        });
-        program.emit_insn(Insn::InsertAsync {
-            cursor: cursor_id,
-            key_reg: column_registers_start,
-            record_reg: record_register,
-            flag: 0,
-        });
-        program.emit_insn(Insn::InsertAwait { cursor_id });
     }
+
+    // Create and insert the record
+    program.emit_insn(Insn::MakeRecord {
+        start_reg: column_registers_start,
+        count: num_cols,
+        dest_reg: record_register,
+    });
+
+    program.emit_insn(Insn::InsertAsync {
+        cursor: cursor_id,
+        key_reg: rowid_reg,
+        record_reg: record_register,
+        flag: 0,
+    });
+    program.emit_insn(Insn::InsertAwait { cursor_id });
 
     program.emit_insn(Insn::Goto {
         target_pc: loop_start_offset,

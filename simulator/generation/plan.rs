@@ -106,7 +106,7 @@ impl Interactions {
                             .iter_mut()
                             .find(|t| t.name == insert.table)
                             .unwrap();
-                        table.rows.push(insert.values.clone());
+                        table.rows.extend(insert.values.clone());
                     }
                     Query::Delete(_) => todo!(),
                     Query::Select(_) => {}
@@ -319,7 +319,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
     // Insert the row
     let insert_query = Interaction::Query(Query::Insert(Insert {
         table: table.name.clone(),
-        values: row.clone(),
+        values: vec![row.clone()],
     }));
 
     // Select the row

@@ -28,24 +28,28 @@ pub fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>)
     let value = Value::arbitrary_from(&mut rng, &column.column_type);
 
     // Create a whole new row
-    let mut row = Vec::new();
-    for (i, column) in env.tables[table].columns.iter().enumerate() {
-        if i == column_index {
-            row.push(value.clone());
-        } else {
-            let value = Value::arbitrary_from(&mut rng, &column.column_type);
-            row.push(value);
+    let mut inserted_rows = Vec::new();
+    for _ in 0..env.rng.gen_range(1..10) {
+        let mut row = Vec::new();
+        for (i, column) in env.tables[table].columns.iter().enumerate() {
+            if i == column_index {
+                row.push(value.clone());
+            } else {
+                let value = Value::arbitrary_from(&mut rng, &column.column_type);
+                row.push(value);
+            }
         }
+        inserted_rows.push(row);
     }
 
-    // Insert the row
+    // Insert the rows
     let query = Query::Insert(Insert {
         table: env.tables[table].name.clone(),
-        values: row.clone(),
+        values: inserted_rows.clone(),
     });
     let _ = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
     // Shadow operation on the table
-    env.tables[table].rows.push(row.clone());
+    env.tables[table].rows.extend(inserted_rows.clone());
 
     // Create a query that selects the row
     let query = Query::Select(Select {
@@ -54,10 +58,12 @@ pub fn property_insert_select(env: &mut SimulatorEnv, conn: &mut Rc<Connection>)
     });
 
     // Get all rows
-    let rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
+    let selected_rows = get_all_rows(env, conn, query.to_string().as_str()).unwrap();
 
     // Check that the row is there
-    assert!(rows.iter().any(|r| r == &row));
+    for row in inserted_rows {
+        assert!(selected_rows.iter().any(|r| r == &row));
+    }
 }
 
 pub fn property_select_all(env: &mut SimulatorEnv, conn: &mut Rc<Connection>) {

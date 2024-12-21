@@ -75,7 +75,7 @@ pub(crate) struct Select {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Insert {
     pub(crate) table: String,
-    pub(crate) values: Vec<Value>,
+    pub(crate) values: Vec<Vec<Value>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,14 +104,21 @@ impl Display for Query {
                 predicate: guard,
             }) => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
             Query::Insert(Insert { table, values }) => {
-                write!(f, "INSERT INTO {} VALUES (", table)?;
-                for (i, v) in values.iter().enumerate() {
+                write!(f, "INSERT INTO {} VALUES ", table)?;
+                for (i, row) in values.iter().enumerate() {
                     if i != 0 {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}", v)?;
+                    write!(f, "(")?;
+                    for (j, value) in row.iter().enumerate() {
+                        if j != 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", value)?;
+                    }
+                    write!(f, ")")?;
                 }
-                write!(f, ")")
+                Ok(())
             }
             Query::Delete(Delete {
                 table,
