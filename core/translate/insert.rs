@@ -8,115 +8,109 @@ use sqlite3_parser::ast::{
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::util::normalize_ident;
 use crate::{
-    schema::{Schema, Table},
+    schema::{Column, Schema, Table},
     storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
     vdbe::{builder::ProgramBuilder, Insn, Program},
 };
 use crate::{Connection, Result};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// Helper enum to indicate how a column is being inserted.
-/// For example:
-/// CREATE TABLE t (a, b, c, d);
-/// INSERT INTO t (c, b) VALUES (1, 2);
-///
-/// resolve_columns_for_insert() returns [
-///   ColumnToInsert::AutomaticNull,
-///   ColumnToInsert::UserProvided { index_in_value_tuple: 1 },
-///   ColumnToInsert::UserProvided { index_in_value_tuple: 0 },
-///   ColumnToInsert::AutomaticNull,
-/// ]
-enum ColumnToInsert {
-    /// The column is provided by the user.
-    UserProvided { index_in_value_tuple: usize },
-    /// The column is automatically set to NULL since it was not provided by the user.
-    AutomaticNull,
+#[derive(Debug)]
+/// Represents how a column should be populated during an INSERT.
+/// Contains both the column definition and optionally the index into the VALUES tuple.
+struct ColumnMapping<'a> {
+    /// Reference to the column definition from the table schema
+    column: &'a Column,
+    /// If Some(i), use the i-th value from the VALUES tuple
+    /// If None, use NULL (column was not specified in INSERT statement)
+    value_index: Option<usize>,
 }
 
 /// Resolves how each column in a table should be populated during an INSERT.
-/// For each column, determines whether it will:
-/// 1. Use a user-provided value from the VALUES clause, or
-/// 2. Be automatically set to NULL
+/// Returns a Vec of ColumnMapping, one for each column in the table's schema.
+///
+/// For each column, specifies:
+/// 1. The column definition (type, constraints, etc)
+/// 2. Where to get the value from:
+///    - Some(i) -> use i-th value from the VALUES tuple
+///    - None -> use NULL (column wasn't specified in INSERT)
 ///
 /// Two cases are handled:
-/// 1. No column list specified in INSERT statement:
+/// 1. No column list specified (INSERT INTO t VALUES ...):
 ///    - Values are assigned to columns in table definition order
-///    - If fewer values than columns, remaining columns are NULL
-/// 2. Column list specified in INSERT statement:
-///    - For specified columns, a ColumnToInsert::UserProvided entry is created.
-///    - Any columns not listed are set to NULL, i.e. a ColumnToInsert::AutomaticNull entry is created.
-///
-/// Returns a Vec<ColumnToInsert> with an entry for each column in the table,
-/// indicating how that column should be populated.
-fn resolve_columns_for_insert(
-    table: Rc<Table>,
+///    - If fewer values than columns, remaining columns map to None
+/// 2. Column list specified (INSERT INTO t (col1, col3) VALUES ...):
+///    - Named columns map to their corresponding value index
+///    - Unspecified columns map to None
+fn resolve_columns_for_insert<'a>(
+    table: &'a Table,
     columns: &Option<DistinctNames>,
     values: &[Vec<Expr>],
-) -> Result<Vec<ColumnToInsert>> {
-    assert!(table.has_rowid());
+) -> Result<Vec<ColumnMapping<'a>>> {
     if values.is_empty() {
         crate::bail_parse_error!("no values to insert");
     }
 
-    let num_cols_in_table = table.columns().len();
+    let table_columns = table.columns();
 
+    // Case 1: No columns specified - map values to columns in order
     if columns.is_none() {
-        let num_cols = values[0].len();
-        // ensure value tuples dont have more columns than the table
-        if num_cols > num_cols_in_table {
+        let num_values = values[0].len();
+        if num_values > table_columns.len() {
             crate::bail_parse_error!(
                 "table {} has {} columns but {} values were supplied",
                 table.get_name(),
-                num_cols_in_table,
-                num_cols
+                table_columns.len(),
+                num_values
             );
         }
-        // ensure each value tuple has the same number of columns
+
+        // Verify all value tuples have same length
         for value in values.iter().skip(1) {
-            if value.len() != num_cols {
+            if value.len() != num_values {
                 crate::bail_parse_error!("all VALUES must have the same number of terms");
             }
         }
-        let columns: Vec<ColumnToInsert> = (0..num_cols_in_table)
-            .map(|i| {
-                if i < num_cols {
-                    ColumnToInsert::UserProvided {
-                        index_in_value_tuple: i,
-                    }
-                } else {
-                    ColumnToInsert::AutomaticNull
-                }
+
+        // Map each column to either its corresponding value index or None
+        return Ok(table_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| ColumnMapping {
+                column: col,
+                value_index: if i < num_values { Some(i) } else { None },
             })
-            .collect();
-        return Ok(columns);
+            .collect());
     }
 
-    // resolve the given columns to actual table column names and ensure they exist
-    let columns = columns.as_ref().unwrap();
-    let mut resolved_columns: Vec<ColumnToInsert> = (0..num_cols_in_table)
-        .map(|i| ColumnToInsert::AutomaticNull)
+    // Case 2: Columns specified - map named columns to their values
+    let mut mappings: Vec<_> = table_columns
+        .iter()
+        .map(|col| ColumnMapping {
+            column: col,
+            value_index: None,
+        })
         .collect();
-    for (index_in_value_tuple, column) in columns.iter().enumerate() {
-        let column_name = normalize_ident(column.0.as_str());
-        let column_idx = table
-            .columns()
+
+    // Map each named column to its value index
+    for (value_index, column_name) in columns.as_ref().unwrap().iter().enumerate() {
+        let column_name = normalize_ident(column_name.0.as_str());
+        let table_index = table_columns
             .iter()
             .position(|c| c.name.eq_ignore_ascii_case(&column_name));
-        if let Some(i) = column_idx {
-            resolved_columns[i] = ColumnToInsert::UserProvided {
-                index_in_value_tuple,
-            };
-        } else {
+
+        if table_index.is_none() {
             crate::bail_parse_error!(
                 "table {} has no column named {}",
                 table.get_name(),
                 column_name
             );
         }
+
+        mappings[table_index.unwrap()].value_index = Some(value_index);
     }
 
-    Ok(resolved_columns)
+    Ok(mappings)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -172,13 +166,13 @@ pub fn translate_insert(
         _ => todo!(),
     };
 
-    let columns = resolve_columns_for_insert(table.clone(), columns, values)?;
+    let column_mappings = resolve_columns_for_insert(&table, columns, values)?;
     // Check if rowid was provided (through INTEGER PRIMARY KEY as a rowid alias)
     let rowid_alias_index = table.columns().iter().position(|c| c.is_rowid_alias);
     let has_user_provided_rowid = {
-        assert!(columns.len() == table.columns().len());
+        assert!(column_mappings.len() == table.columns().len());
         if let Some(index) = rowid_alias_index {
-            matches!(columns[index], ColumnToInsert::UserProvided { .. })
+            column_mappings[index].value_index.is_some()
         } else {
             false
         }
@@ -213,31 +207,30 @@ pub fn translate_insert(
 
         for value in values {
             // Process each value according to resolved columns
-            for (i, column) in columns.iter().enumerate() {
-                match column {
-                    ColumnToInsert::UserProvided {
-                        index_in_value_tuple,
-                    } => {
-                        translate_expr(
-                            &mut program,
-                            None,
-                            value.get(*index_in_value_tuple).expect(
-                                format!(
-                                    "values tuple has no value for column {}",
-                                    table.column_index_to_name(i).unwrap()
-                                )
-                                .as_str(),
-                            ),
-                            column_registers_start + i,
-                            None,
-                        )?;
-                    }
-                    ColumnToInsert::AutomaticNull => {
+            for (i, mapping) in column_mappings.iter().enumerate() {
+                let target_reg = column_registers_start + i;
+
+                if let Some(value_index) = mapping.value_index {
+                    // Column has a value in the VALUES tuple
+                    translate_expr(
+                        &mut program,
+                        None,
+                        value.get(value_index).expect("value index out of bounds"),
+                        target_reg,
+                        None,
+                    )?;
+                } else {
+                    // Column was not specified - use NULL if it is nullable, otherwise error.
+                    // Rowid alias columns can be NULL because we will autogenerate a rowid in that case.
+                    let is_nullable = !mapping.column.primary_key || mapping.column.is_rowid_alias;
+                    if is_nullable {
                         program.emit_insn(Insn::Null {
-                            dest: column_registers_start + i,
+                            dest: target_reg,
                             dest_end: None,
                         });
                         program.mark_last_insn_constant();
+                    } else {
+                        crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
                     }
                 }
             }
