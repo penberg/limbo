@@ -49,7 +49,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
 pub type BranchOffset = i64;
-use description_derive::Description;
+use macros::Description;
 pub type CursorID = usize;
 
 pub type PageIdx = usize;

@@ -1,5 +1,5 @@
 [package]
-name = "description_derive"
+name = "macros"
 
 [lib]
 proc-macro = true
