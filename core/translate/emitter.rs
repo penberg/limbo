@@ -532,7 +532,7 @@ fn init_source_for_delete(
             let root_page = table_reference.table.root_page;
             let next_row_label = program.allocate_label();
             metadata.next_row_labels.insert(*id, next_row_label);
-            program.emit_insn(Insn::OpenWriteAsync{
+            program.emit_insn(Insn::OpenWriteAsync {
                 cursor_id,
                 root_page,
             });
@@ -573,9 +573,7 @@ fn init_source_for_delete(
 
             Ok(())
         }
-        SourceOperator::Nothing => {
-            Ok(())
-        }
+        SourceOperator::Nothing => Ok(()),
     }
 }
 

@@ -489,7 +489,7 @@ pub enum Insn {
     },
 
     DeleteAwait {
-        cursor_id: CursorID
+        cursor_id: CursorID,
     },
 
     NewRowid {
@@ -2656,17 +2656,17 @@ impl Program {
                         }
                     }
                     state.pc += 1;
-                },
+                }
                 Insn::DeleteAsync { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     return_if_io!(cursor.delete());
                     state.pc += 1;
-                },
+                }
                 Insn::DeleteAwait { cursor_id } => {
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     state.pc += 1;
-                },
+                }
                 Insn::NewRowid {
                     cursor, rowid_reg, ..
                 } => {
@@ -3897,7 +3897,7 @@ mod tests {
             unimplemented!()
         }
 
-        fn delete(&mut self, key: &OwnedValue) -> Result<CursorResult<()>> {
+        fn delete(&mut self) -> Result<CursorResult<()>> {
             unimplemented!()
         }
 

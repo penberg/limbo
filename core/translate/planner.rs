@@ -1,7 +1,5 @@
-use super::{
-    plan::{
-        Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
-    },
+use super::plan::{
+    Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
 };
 use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, QualifiedName, ResultColumn};
@@ -753,7 +751,7 @@ pub fn prepare_delete_plan(
     let table_ref = BTreeTableReference {
         table: table.clone(),
         table_identifier: table_name.clone(),
-        table_index: 0
+        table_index: 0,
     };
 
     // Parse and resolve the where_clause
@@ -772,7 +770,7 @@ pub fn prepare_delete_plan(
             id: 0,
             table_reference: table_ref.clone(),
             predicates: resolved_where_clause.clone(),
-            iter_dir: None
+            iter_dir: None,
         },
         result_columns: vec![],
         where_clause: resolved_where_clause,
@@ -782,7 +780,7 @@ pub fn prepare_delete_plan(
         limit: None,
         referenced_tables: vec![table_ref],
         available_indexes: vec![],
-        contains_constant_false_condition: false
+        contains_constant_false_condition: false,
     };
 
     Ok(plan)

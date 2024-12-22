@@ -1,11 +1,7 @@
 use crate::translate::emitter::emit_program_for_delete;
 use crate::translate::optimizer::optimize_delete_plan;
 use crate::translate::planner::prepare_delete_plan;
-use crate::{
-    schema::Schema,
-    storage::sqlite3_ondisk::DatabaseHeader,
-    vdbe::Program,
-};
+use crate::{schema::Schema, storage::sqlite3_ondisk::DatabaseHeader, vdbe::Program};
 use crate::{Connection, Result};
 use sqlite3_parser::ast::{Expr, QualifiedName, ResultColumn};
 use std::rc::Weak;
