@@ -1,73 +1,24 @@
-use clap::{command, Parser};
+use clap::Parser;
 use generation::plan::{Interaction, InteractionPlan, ResultSet};
-use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
-use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
-use model::query::{Create, Insert, Predicate, Query, Select};
+use generation::{pick_index, Arbitrary, ArbitraryFrom};
+use limbo_core::{Connection, Database, Result, RowResult, IO};
+use model::query::{Create, Query};
 use model::table::{Column, Name, Table, Value};
-use properties::{property_insert_select, property_select_all};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use std::cell::RefCell;
+use simulator::cli::SimulatorCLI;
+use simulator::env::{SimConnection, SimulatorEnv, SimulatorOpts};
+use simulator::io::SimulatorIO;
 use std::io::Write;
-use std::panic::UnwindSafe;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
 use tempfile::TempDir;
 
 mod generation;
 mod model;
 mod properties;
-
-struct SimulatorEnv {
-    opts: SimulatorOpts,
-    tables: Vec<Table>,
-    connections: Vec<SimConnection>,
-    io: Arc<SimulatorIO>,
-    db: Arc<Database>,
-    rng: ChaCha8Rng,
-}
-
-impl UnwindSafe for SimulatorEnv {}
-
-#[derive(Clone)]
-enum SimConnection {
-    Connected(Rc<Connection>),
-    Disconnected,
-}
-
-#[derive(Debug, Clone)]
-struct SimulatorOpts {
-    ticks: usize,
-    max_connections: usize,
-    max_tables: usize,
-    // this next options are the distribution of workload where read_percent + write_percent +
-    // delete_percent == 100%
-    read_percent: usize,
-    write_percent: usize,
-    delete_percent: usize,
-    max_interactions: usize,
-    page_size: usize,
-}
-
-#[derive(Parser)]
-#[command(name = "limbo-simulator")]
-#[command(author, version, about, long_about = None)]
-pub struct SimulatorCLI {
-    #[clap(short, long, help = "set seed for reproducible runs", default_value = None)]
-    pub seed: Option<u64>,
-    #[clap(short, long, help = "set custom output directory for produced files", default_value = None)]
-    pub output_dir: Option<String>,
-    #[clap(
-        short,
-        long,
-        help = "enable doublechecking, run the simulator with the plan twice and check output equality"
-    )]
-    pub doublecheck: bool,
-    #[clap(short, long, help = "change the maximum size of the randomly generated sequence of interactions", default_value_t = 1024)]
-    pub maximum_size: usize,
-}
+mod simulator;
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() {
@@ -339,177 +290,4 @@ fn get_all_rows(
         }
     }
     Ok(out)
-}
-
-struct SimulatorIO {
-    inner: Box<dyn IO>,
-    fault: RefCell<bool>,
-    files: RefCell<Vec<Rc<SimulatorFile>>>,
-    rng: RefCell<ChaCha8Rng>,
-    nr_run_once_faults: RefCell<usize>,
-    page_size: usize,
-}
-
-impl SimulatorIO {
-    fn new(seed: u64, page_size: usize) -> Result<Self> {
-        let inner = Box::new(PlatformIO::new()?);
-        let fault = RefCell::new(false);
-        let files = RefCell::new(Vec::new());
-        let rng = RefCell::new(ChaCha8Rng::seed_from_u64(seed));
-        let nr_run_once_faults = RefCell::new(0);
-        Ok(Self {
-            inner,
-            fault,
-            files,
-            rng,
-            nr_run_once_faults,
-            page_size,
-        })
-    }
-
-    fn inject_fault(&self, fault: bool) {
-        self.fault.replace(fault);
-        for file in self.files.borrow().iter() {
-            file.inject_fault(fault);
-        }
-    }
-
-    fn print_stats(&self) {
-        println!("run_once faults: {}", self.nr_run_once_faults.borrow());
-        for file in self.files.borrow().iter() {
-            file.print_stats();
-        }
-    }
-}
-
-impl IO for SimulatorIO {
-    fn open_file(
-        &self,
-        path: &str,
-        flags: OpenFlags,
-        _direct: bool,
-    ) -> Result<Rc<dyn limbo_core::File>> {
-        let inner = self.inner.open_file(path, flags, false)?;
-        let file = Rc::new(SimulatorFile {
-            inner,
-            fault: RefCell::new(false),
-            nr_pread_faults: RefCell::new(0),
-            nr_pwrite_faults: RefCell::new(0),
-            reads: RefCell::new(0),
-            writes: RefCell::new(0),
-            syncs: RefCell::new(0),
-            page_size: self.page_size,
-        });
-        self.files.borrow_mut().push(file.clone());
-        Ok(file)
-    }
-
-    fn run_once(&self) -> Result<()> {
-        if *self.fault.borrow() {
-            *self.nr_run_once_faults.borrow_mut() += 1;
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        self.inner.run_once().unwrap();
-        Ok(())
-    }
-
-    fn generate_random_number(&self) -> i64 {
-        self.rng.borrow_mut().next_u64() as i64
-    }
-
-    fn get_current_time(&self) -> String {
-        "2024-01-01 00:00:00".to_string()
-    }
-}
-
-struct SimulatorFile {
-    inner: Rc<dyn File>,
-    fault: RefCell<bool>,
-    nr_pread_faults: RefCell<usize>,
-    nr_pwrite_faults: RefCell<usize>,
-    writes: RefCell<usize>,
-    reads: RefCell<usize>,
-    syncs: RefCell<usize>,
-    page_size: usize,
-}
-
-impl SimulatorFile {
-    fn inject_fault(&self, fault: bool) {
-        self.fault.replace(fault);
-    }
-
-    fn print_stats(&self) {
-        println!(
-            "pread faults: {}, pwrite faults: {}, reads: {}, writes: {}, syncs: {}",
-            *self.nr_pread_faults.borrow(),
-            *self.nr_pwrite_faults.borrow(),
-            *self.reads.borrow(),
-            *self.writes.borrow(),
-            *self.syncs.borrow(),
-        );
-    }
-}
-
-impl limbo_core::File for SimulatorFile {
-    fn lock_file(&self, exclusive: bool) -> Result<()> {
-        if *self.fault.borrow() {
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        self.inner.lock_file(exclusive)
-    }
-
-    fn unlock_file(&self) -> Result<()> {
-        if *self.fault.borrow() {
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        self.inner.unlock_file()
-    }
-
-    fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        if *self.fault.borrow() {
-            *self.nr_pread_faults.borrow_mut() += 1;
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        *self.reads.borrow_mut() += 1;
-        self.inner.pread(pos, c)
-    }
-
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        c: Rc<limbo_core::Completion>,
-    ) -> Result<()> {
-        if *self.fault.borrow() {
-            *self.nr_pwrite_faults.borrow_mut() += 1;
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        *self.writes.borrow_mut() += 1;
-        self.inner.pwrite(pos, buffer, c)
-    }
-
-    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
-        *self.syncs.borrow_mut() += 1;
-        self.inner.sync(c)
-    }
-
-    fn size(&self) -> Result<u64> {
-        self.inner.size()
-    }
-}
-
-impl Drop for SimulatorFile {
-    fn drop(&mut self) {
-        self.inner.unlock_file().expect("Failed to unlock file");
-    }
 }
