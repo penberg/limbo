@@ -490,7 +490,6 @@ pub fn prepare_delete_plan(
     tbl_name: &QualifiedName,
     where_clause: Option<Expr>,
 ) -> Result<Plan> {
-    // let table_name = tbl_name.name.0.clone();
     let table = match schema.get_table(tbl_name.name.0.as_str()) {
         Some(table) => table,
         None => crate::bail_corrupt_error!("Parse error: no such table: {}", tbl_name),
