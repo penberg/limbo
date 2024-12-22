@@ -1164,6 +1164,7 @@ name = "limbo_sim"
 version = "0.0.10"
 dependencies = [
  "anarchist-readable-name-generator-lib",
+ "clap",
  "env_logger 0.10.2",
  "limbo_core",
  "log",

@@ -1,3 +1,4 @@
+use clap::{command, Parser};
 use generation::plan::{Interaction, InteractionPlan, ResultSet};
 use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
 use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
@@ -8,8 +9,11 @@ use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use std::cell::RefCell;
 use std::io::Write;
+use std::panic::UnwindSafe;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 use tempfile::TempDir;
 
 mod generation;
@@ -24,6 +28,8 @@ struct SimulatorEnv {
     db: Arc<Database>,
     rng: ChaCha8Rng,
 }
+
+impl UnwindSafe for SimulatorEnv {}
 
 #[derive(Clone)]
 enum SimConnection {
@@ -45,14 +51,48 @@ struct SimulatorOpts {
     page_size: usize,
 }
 
+#[derive(Parser)]
+#[command(name = "limbo-simulator")]
+#[command(author, version, about, long_about = None)]
+pub struct SimulatorCLI {
+    #[clap(short, long, help = "set seed for reproducible runs", default_value = None)]
+    pub seed: Option<u64>,
+    #[clap(short, long, help = "set custom output directory for produced files", default_value = None)]
+    pub output_dir: Option<String>,
+    #[clap(
+        short,
+        long,
+        help = "enable doublechecking, run the simulator with the plan twice and check output equality"
+    )]
+    pub doublecheck: bool,
+    #[clap(short, long, help = "change the maximum size of the randomly generated sequence of interactions", default_value_t = 1024)]
+    pub maximum_size: usize,
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() {
     let _ = env_logger::try_init();
-    let seed = match std::env::var("SEED") {
-        Ok(seed) => seed.parse::<u64>().unwrap(),
-        Err(_) => rand::thread_rng().next_u64(),
+
+    let opts = SimulatorCLI::parse();
+
+    let seed = match opts.seed {
+        Some(seed) => seed,
+        None => rand::thread_rng().next_u64(),
     };
-    println!("Seed: {}", seed);
+
+    let output_dir = match opts.output_dir {
+        Some(dir) => Path::new(&dir).to_path_buf(),
+        None => TempDir::new().unwrap().into_path(),
+    };
+
+    let db_path = output_dir.join("simulator.db");
+    let plan_path = output_dir.join("simulator.plan");
+
+    // Print the seed, the locations of the database and the plan file
+    log::info!("database path: {:?}", db_path);
+    log::info!("simulator plan path: {:?}", plan_path);
+    log::info!("seed: {}", seed);
+
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let (read_percent, write_percent, delete_percent) = {
@@ -66,7 +106,7 @@ fn main() {
     };
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..10240),
+        ticks: rng.gen_range(0..opts.maximum_size),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -74,21 +114,19 @@ fn main() {
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(0..10240),
+        max_interactions: rng.gen_range(0..opts.maximum_size),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
-    let mut path = TempDir::new().unwrap().into_path();
-    path.push("simulator.db");
-    println!("path to db '{:?}'", path);
-    let db = match Database::open_file(io.clone(), path.as_path().to_str().unwrap()) {
+    let db = match Database::open_file(io.clone(), db_path.to_str().unwrap()) {
         Ok(db) => db,
         Err(e) => {
-            panic!("error opening simulator test file {:?}: {:?}", path, e);
+            panic!("error opening simulator test file {:?}: {:?}", db_path, e);
         }
     };
 
     let connections = vec![SimConnection::Disconnected; opts.max_connections];
+
     let mut env = SimulatorEnv {
         opts,
         tables: Vec::new(),
@@ -98,30 +136,30 @@ fn main() {
         db,
     };
 
-    println!("Initial opts {:?}", env.opts);
-
     log::info!("Generating database interaction plan...");
     let mut plans = (1..=env.opts.max_connections)
         .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
         .collect::<Vec<_>>();
 
+    let mut f = std::fs::File::create(plan_path.clone()).unwrap();
+    // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
+    f.write(plans[0].to_string().as_bytes()).unwrap();
+
     log::info!("{}", plans[0].stats());
 
     log::info!("Executing database interaction plan...");
-    let result = execute_plans(&mut env, &mut plans);
 
+    let result = execute_plans(&mut env, &mut plans);
     if result.is_err() {
         log::error!("error executing plans: {:?}", result.err());
     }
-    log::info!("db is at {:?}", path);
-    let mut path = TempDir::new().unwrap().into_path();
-    path.push("simulator.plan");
-    let mut f = std::fs::File::create(path.clone()).unwrap();
-    f.write(plans[0].to_string().as_bytes()).unwrap();
-    log::info!("plan saved at {:?}", path);
-    log::info!("seed was {}", seed);
 
     env.io.print_stats();
+
+    // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
+    log::info!("database path: {:?}", db_path);
+    log::info!("simulator plan path: {:?}", plan_path);
+    log::info!("seed: {}", seed);
 }
 
 fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Result<()> {
