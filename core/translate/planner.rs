@@ -1,5 +1,6 @@
 use super::plan::{
-    Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
+    Aggregate, BTreeTableReference, DeletePlan, Direction, GroupBy, Plan, ResultSetColumn,
+    SelectPlan, SourceOperator,
 };
 use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, QualifiedName, ResultColumn};
@@ -269,7 +270,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             // Parse the FROM clause
             let (source, referenced_tables) = parse_from(schema, from, &mut operator_id_counter)?;
 
-            let mut plan = Plan {
+            let mut plan = SelectPlan {
                 source,
                 result_columns: vec![],
                 where_clause: None,
@@ -478,7 +479,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             }
 
             // Return the unoptimized query plan
-            Ok(plan)
+            Ok(Plan::Select(plan))
         }
         _ => todo!(),
     }
@@ -504,7 +505,7 @@ pub fn prepare_delete_plan(
     // Parse and resolve the where_clause
     let resolved_where_clauses = parse_where(where_clause, &[table_ref.clone()])?;
 
-    let plan = Plan {
+    let plan = DeletePlan {
         source: SourceOperator::Scan {
             id: 0,
             table_reference: table_ref.clone(),
@@ -513,16 +514,14 @@ pub fn prepare_delete_plan(
         },
         result_columns: vec![],
         where_clause: resolved_where_clauses,
-        group_by: None,
         order_by: None,
-        aggregates: vec![],
         limit: None, // TODO: add support for limit
         referenced_tables: vec![table_ref],
         available_indexes: vec![],
         contains_constant_false_condition: false,
     };
 
-    Ok(plan)
+    Ok(Plan::Delete(plan))
 }
 
 #[allow(clippy::type_complexity)]

@@ -1,5 +1,5 @@
-use crate::translate::emitter::emit_program_for_delete;
-use crate::translate::optimizer::optimize_delete_plan;
+use crate::translate::emitter::emit_program;
+use crate::translate::optimizer::optimize_plan;
 use crate::translate::planner::prepare_delete_plan;
 use crate::{schema::Schema, storage::sqlite3_ondisk::DatabaseHeader, vdbe::Program};
 use crate::{Connection, Result};
@@ -16,6 +16,6 @@ pub fn translate_delete(
     connection: Weak<Connection>,
 ) -> Result<Program> {
     let delete_plan = prepare_delete_plan(schema, tbl_name, where_clause)?;
-    let optimized_plan = optimize_delete_plan(delete_plan)?;
-    emit_program_for_delete(database_header, optimized_plan, connection)
+    let optimized_plan = optimize_plan(delete_plan)?;
+    emit_program(database_header, optimized_plan, connection)
 }

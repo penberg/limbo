@@ -9,7 +9,7 @@ use sqlite3_parser::ast::{self};
 
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
-use crate::translate::plan::{IterationDirection, Search};
+use crate::translate::plan::{DeletePlan, IterationDirection, Plan, Search};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
@@ -20,7 +20,7 @@ use super::expr::{
     translate_aggregation, translate_aggregation_groupby, translate_condition_expr, translate_expr,
     ConditionMetadata,
 };
-use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, Plan};
+use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, SelectPlan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
 // Metadata for handling LEFT JOIN operations
@@ -176,6 +176,17 @@ pub fn emit_program(
     mut plan: Plan,
     connection: Weak<Connection>,
 ) -> Result<Program> {
+    match plan {
+        Plan::Select(plan) => emit_program_for_select(database_header, plan, connection),
+        Plan::Delete(plan) => emit_program_for_delete(database_header, plan, connection),
+    }
+}
+
+fn emit_program_for_select(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: SelectPlan,
+    connection: Weak<Connection>,
+) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
 
     // Trivial exit on LIMIT 0
@@ -286,9 +297,9 @@ pub fn emit_program(
     Ok(program.build(database_header, connection))
 }
 
-pub fn emit_program_for_delete(
+fn emit_program_for_delete(
     database_header: Rc<RefCell<DatabaseHeader>>,
-    mut plan: Plan,
+    mut plan: DeletePlan,
     connection: Weak<Connection>,
 ) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
@@ -925,7 +936,7 @@ pub enum InnerLoopEmitTarget<'a> {
 /// At this point the cursors for all tables have been opened and rewound.
 fn inner_loop_emit(
     program: &mut ProgramBuilder,
-    plan: &mut Plan,
+    plan: &mut SelectPlan,
     metadata: &mut Metadata,
 ) -> Result<()> {
     // if we have a group by, we emit a record into the group by sorter.
