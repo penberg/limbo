@@ -482,7 +482,7 @@ impl Pager {
 
     pub fn usable_size(&self) -> usize {
         let db_header = self.db_header.borrow();
-        (db_header.page_size - db_header.unused_space as u16) as usize
+        (db_header.page_size - db_header.reserved_space as u16) as usize
     }
 }
 
