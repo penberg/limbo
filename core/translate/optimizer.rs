@@ -9,12 +9,25 @@ use super::plan::{
     Direction, IterationDirection, Plan, Search, SourceOperator,
 };
 
+pub fn optimize_select_plan(plan: Plan) -> Result<Plan> {
+    optimize_plan(plan, true, true, true)
+}
+
+pub fn optimize_delete_plan(plan: Plan) -> Result<Plan> {
+    optimize_plan(plan, false, true, false)
+}
+
 /**
  * Make a few passes over the plan to optimize it.
  * TODO: these could probably be done in less passes,
  * but having them separate makes them easier to understand
  */
-pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
+fn optimize_plan(
+    mut select_plan: Plan,
+    optimize_push_predicates: bool,
+    optimize_use_indexes: bool,
+    optimize_eliminate_unnecessary_order_by: bool,
+) -> Result<Plan> {
     eliminate_between(&mut select_plan.source, &mut select_plan.where_clause)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constants(&mut select_plan.source, &mut select_plan.where_clause)?
@@ -22,32 +35,32 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
         select_plan.contains_constant_false_condition = true;
         return Ok(select_plan);
     }
-    push_predicates(
-        &mut select_plan.source,
-        &mut select_plan.where_clause,
-        &select_plan.referenced_tables,
-    )?;
-    use_indexes(
-        &mut select_plan.source,
-        &select_plan.referenced_tables,
-        &select_plan.available_indexes,
-    )?;
-    eliminate_unnecessary_orderby(
-        &mut select_plan.source,
-        &mut select_plan.order_by,
-        &select_plan.referenced_tables,
-        &select_plan.available_indexes,
-    )?;
-    Ok(select_plan)
-}
 
-pub fn optimize_delete_plan(mut delete_plan: Plan) -> Result<Plan> {
-    use_indexes(
-        &mut delete_plan.source,
-        &delete_plan.referenced_tables,
-        &delete_plan.available_indexes,
-    )?;
-    Ok(delete_plan)
+    if optimize_push_predicates {
+        push_predicates(
+            &mut select_plan.source,
+            &mut select_plan.where_clause,
+            &select_plan.referenced_tables,
+        )?;
+    }
+
+    if optimize_use_indexes {
+        use_indexes(
+            &mut select_plan.source,
+            &select_plan.referenced_tables,
+            &select_plan.available_indexes,
+        )?;
+    }
+
+    if optimize_eliminate_unnecessary_order_by {
+        eliminate_unnecessary_orderby(
+            &mut select_plan.source,
+            &mut select_plan.order_by,
+            &select_plan.referenced_tables,
+            &select_plan.available_indexes,
+        )?;
+    }
+    Ok(select_plan)
 }
 
 fn _operator_is_already_ordered_by(

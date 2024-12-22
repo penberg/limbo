@@ -283,14 +283,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             };
 
             // Parse the WHERE clause
-            if let Some(w) = where_clause {
-                let mut predicates = vec![];
-                break_predicate_at_and_boundaries(w, &mut predicates);
-                for expr in predicates.iter_mut() {
-                    bind_column_references(expr, &plan.referenced_tables)?;
-                }
-                plan.where_clause = Some(predicates);
-            }
+            plan.where_clause = parse_where(where_clause, &plan.referenced_tables)?;
 
             let mut aggregate_expressions = Vec::new();
             for column in columns.clone() {
@@ -491,6 +484,49 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
     }
 }
 
+pub fn prepare_delete_plan(
+    schema: &Schema,
+    tbl_name: &QualifiedName,
+    where_clause: Option<Expr>,
+) -> Result<Plan> {
+    let table_name = tbl_name.name.0.clone();
+
+    let table = if let Some(table) = schema.get_table(&table_name) {
+        table
+    } else {
+        crate::bail_parse_error!("Table {} not found", table_name);
+    };
+
+    let table_ref = BTreeTableReference {
+        table: table.clone(),
+        table_identifier: table_name.clone(),
+        table_index: 0,
+    };
+
+    // Parse and resolve the where_clause
+    let resolved_where_clauses = parse_where(where_clause, &[table_ref.clone()])?;
+
+    let plan = Plan {
+        source: SourceOperator::Scan {
+            id: 0,
+            table_reference: table_ref.clone(),
+            predicates: resolved_where_clauses.clone(),
+            iter_dir: None,
+        },
+        result_columns: vec![],
+        where_clause: resolved_where_clauses,
+        group_by: None,
+        order_by: None,
+        aggregates: vec![],
+        limit: None, // TODO: add support for limit
+        referenced_tables: vec![table_ref],
+        available_indexes: vec![],
+        contains_constant_false_condition: false,
+    };
+
+    Ok(plan)
+}
+
 #[allow(clippy::type_complexity)]
 fn parse_from(
     schema: &Schema,
@@ -550,6 +586,22 @@ fn parse_from(
     }
 
     Ok((operator, tables))
+}
+
+fn parse_where(
+    where_clause: Option<Expr>,
+    referenced_tables: &[BTreeTableReference],
+) -> Result<Option<Vec<Expr>>> {
+    if let Some(where_expr) = where_clause {
+        let mut predicates = vec![];
+        break_predicate_at_and_boundaries(where_expr, &mut predicates);
+        for expr in predicates.iter_mut() {
+            bind_column_references(expr, referenced_tables)?;
+        }
+        Ok(Some(predicates))
+    } else {
+        Ok(None)
+    }
 }
 
 fn parse_join(
@@ -733,57 +785,6 @@ fn parse_join(
         using,
         predicates,
     ))
-}
-
-pub fn prepare_delete_plan(
-    schema: &Schema,
-    tbl_name: &QualifiedName,
-    where_clause: Option<Expr>,
-) -> Result<Plan> {
-    let table_name = tbl_name.name.0.clone();
-
-    let table = if let Some(table) = schema.get_table(&table_name) {
-        table
-    } else {
-        crate::bail_parse_error!("Table {} not found", table_name);
-    };
-
-    let table_ref = BTreeTableReference {
-        table: table.clone(),
-        table_identifier: table_name.clone(),
-        table_index: 0,
-    };
-
-    // Parse and resolve the where_clause
-    let mut resolved_where_clause = None;
-    if let Some(where_expr) = where_clause {
-        let mut predicates = vec![];
-        break_predicate_at_and_boundaries(where_expr, &mut predicates);
-        for expr in predicates.iter_mut() {
-            bind_column_references(expr, &[table_ref.clone()])?;
-        }
-        resolved_where_clause = Some(predicates);
-    }
-
-    let plan = Plan {
-        source: SourceOperator::Scan {
-            id: 0,
-            table_reference: table_ref.clone(),
-            predicates: resolved_where_clause.clone(),
-            iter_dir: None,
-        },
-        result_columns: vec![],
-        where_clause: resolved_where_clause,
-        group_by: None,
-        order_by: None,
-        aggregates: vec![],
-        limit: None,
-        referenced_tables: vec![table_ref],
-        available_indexes: vec![],
-        contains_constant_false_condition: false,
-    };
-
-    Ok(plan)
 }
 
 fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {
