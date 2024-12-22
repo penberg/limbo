@@ -1754,7 +1754,7 @@ impl Cursor for BTreeCursor {
     }
 
     fn delete(&mut self) -> Result<CursorResult<()>> {
-        debug!("rowid: {:?}", self.rowid.borrow());
+        println!("rowid: {:?}", self.rowid.borrow());
         Ok(CursorResult::Ok(()))
     }
 
