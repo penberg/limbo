@@ -41,6 +41,15 @@ pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
     Ok(select_plan)
 }
 
+pub fn optimize_delete_plan(mut delete_plan: Plan) -> Result<Plan> {
+    use_indexes(
+        &mut delete_plan.source,
+        &delete_plan.referenced_tables,
+        &delete_plan.available_indexes,
+    )?;
+    Ok(delete_plan)
+}
+
 fn _operator_is_already_ordered_by(
     operator: &mut SourceOperator,
     key: &mut ast::Expr,

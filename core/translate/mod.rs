@@ -14,6 +14,7 @@ pub(crate) mod optimizer;
 pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod select;
+pub(crate) mod delete;
 
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -29,6 +30,7 @@ use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast::fmt::ToTokens;
 use sqlite3_parser::ast::{self, PragmaName};
+use crate::translate::delete::translate_delete;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -68,7 +70,24 @@ pub fn translate(
         ast::Stmt::CreateVirtualTable { .. } => {
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
-        ast::Stmt::Delete { .. } => bail_parse_error!("DELETE not supported yet"),
+        ast::Stmt::Delete {
+            with,
+            tbl_name,
+            indexed,
+            where_clause,
+            returning,
+            order_by,
+            limit
+        } => {
+            translate_delete(
+                schema,
+                &tbl_name,
+                where_clause,
+                &returning,
+                database_header,
+                connection
+            )
+        }
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),

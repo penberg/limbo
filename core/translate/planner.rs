@@ -1,11 +1,10 @@
 use super::{
-    optimizer::Optimizable,
     plan::{
         Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
     },
 };
 use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
-use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
+use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, QualifiedName, ResultColumn};
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -736,6 +735,57 @@ fn parse_join(
         using,
         predicates,
     ))
+}
+
+pub fn prepare_delete_plan(
+    schema: &Schema,
+    tbl_name: &QualifiedName,
+    where_clause: Option<Expr>,
+) -> Result<Plan> {
+    let table_name = tbl_name.name.0.clone();
+
+    let table = if let Some(table) = schema.get_table(&table_name) {
+        table
+    } else {
+        crate::bail_parse_error!("Table {} not found", table_name);
+    };
+
+    let table_ref = BTreeTableReference {
+        table: table.clone(),
+        table_identifier: table_name.clone(),
+        table_index: 0
+    };
+
+    // Parse and resolve the where_clause
+    let mut resolved_where_clause = None;
+    if let Some(where_expr) = where_clause {
+        let mut predicates = vec![];
+        break_predicate_at_and_boundaries(where_expr, &mut predicates);
+        for expr in predicates.iter_mut() {
+            bind_column_references(expr, &[table_ref.clone()])?;
+        }
+        resolved_where_clause = Some(predicates);
+    }
+
+    let plan = Plan {
+        source: SourceOperator::Scan {
+            id: 0,
+            table_reference: table_ref.clone(),
+            predicates: resolved_where_clause.clone(),
+            iter_dir: None
+        },
+        result_columns: vec![],
+        where_clause: resolved_where_clause,
+        group_by: None,
+        order_by: None,
+        aggregates: vec![],
+        limit: None,
+        referenced_tables: vec![table_ref],
+        available_indexes: vec![],
+        contains_constant_false_condition: false
+    };
+
+    Ok(plan)
 }
 
 fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {

@@ -272,6 +272,51 @@ pub fn emit_program(
     Ok(program.build(database_header, connection))
 }
 
+pub fn emit_program_for_delete(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: Plan,
+    connection: Weak<Connection>,
+) -> Result<Program> {
+    let (mut program, mut metadata, init_label, start_offset) = prologue()?;
+
+    // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
+    let skip_loops_label = if plan.contains_constant_false_condition {
+        let skip_loops_label = program.allocate_label();
+        program.emit_insn_with_label_dependency(
+            Insn::Goto {
+                target_pc: skip_loops_label,
+            },
+            skip_loops_label,
+        );
+        Some(skip_loops_label)
+    } else {
+        None
+    };
+
+    // Initialize cursors and other resources needed for query execution
+    init_source_for_delete(&mut program, &plan.source, &mut metadata)?;
+
+    // Set up main query execution loop
+    open_loop(
+        &mut program,
+        &mut plan.source,
+        &plan.referenced_tables,
+        &mut metadata,
+    )?;
+
+    // Close the loop and handle deletion
+    close_loop_for_delete(&mut program, &plan.source, &mut metadata)?;
+
+    if let Some(skip_loops_label) = skip_loops_label {
+        program.resolve_label(skip_loops_label, program.offset());
+    }
+
+    // Finalize program
+    epilogue(&mut program, &mut metadata, init_label, start_offset)?;
+
+    Ok(program.build(database_header, connection))
+}
+
 /// Initialize resources needed for ORDER BY processing
 fn init_order_by(
     program: &mut ProgramBuilder,
@@ -462,6 +507,74 @@ fn init_source(
         }
         SourceOperator::Nothing => {
             return Ok(());
+        }
+    }
+}
+
+fn init_source_for_delete(
+    program: &mut ProgramBuilder,
+    source: &SourceOperator,
+    metadata: &mut Metadata,
+) -> Result<()> {
+    match source {
+        SourceOperator::Join { .. } => {
+            unreachable!()
+        }
+        SourceOperator::Scan {
+            id,
+            table_reference,
+            ..
+        } => {
+            let cursor_id = program.alloc_cursor_id(
+                Some(table_reference.table_identifier.clone()),
+                Some(Table::BTree(table_reference.table.clone())),
+            );
+            let root_page = table_reference.table.root_page;
+            let next_row_label = program.allocate_label();
+            metadata.next_row_labels.insert(*id, next_row_label);
+            program.emit_insn(Insn::OpenWriteAsync{
+                cursor_id,
+                root_page,
+            });
+            program.emit_insn(Insn::OpenWriteAwait {});
+
+            Ok(())
+        }
+        SourceOperator::Search {
+            id,
+            table_reference,
+            search,
+            ..
+        } => {
+            let table_cursor_id = program.alloc_cursor_id(
+                Some(table_reference.table_identifier.clone()),
+                Some(Table::BTree(table_reference.table.clone())),
+            );
+
+            let next_row_label = program.allocate_label();
+
+            metadata.next_row_labels.insert(*id, next_row_label);
+
+            program.emit_insn(Insn::OpenWriteAsync {
+                cursor_id: table_cursor_id,
+                root_page: table_reference.table.root_page,
+            });
+            program.emit_insn(Insn::OpenWriteAwait {});
+
+            if let Search::IndexSearch { index, .. } = search {
+                let index_cursor_id = program
+                    .alloc_cursor_id(Some(index.name.clone()), Some(Table::Index(index.clone())));
+                program.emit_insn(Insn::OpenWriteAsync {
+                    cursor_id: index_cursor_id,
+                    root_page: index.root_page,
+                });
+                program.emit_insn(Insn::OpenWriteAwait {});
+            }
+
+            Ok(())
+        }
+        SourceOperator::Nothing => {
+            Ok(())
         }
     }
 }
@@ -1118,6 +1231,109 @@ fn close_loop(
             Ok(())
         }
         SourceOperator::Nothing => Ok(()),
+    }
+}
+
+fn close_loop_for_delete(
+    program: &mut ProgramBuilder,
+    source: &SourceOperator,
+    metadata: &mut Metadata,
+) -> Result<()> {
+    match source {
+        SourceOperator::Scan {
+            id,
+            table_reference,
+            iter_dir,
+            ..
+        } => {
+            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
+
+            // Emit the instructions to delete the row
+            let key_reg = program.alloc_register();
+            program.emit_insn(Insn::RowId {
+                cursor_id,
+                dest: key_reg,
+            });
+            program.emit_insn(Insn::DeleteAsync { cursor_id });
+            program.emit_insn(Insn::DeleteAwait { cursor_id });
+
+            program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
+
+            // Emit the NextAsync or PrevAsync instruction to continue the loop
+            if iter_dir
+                .as_ref()
+                .is_some_and(|dir| *dir == IterationDirection::Backwards)
+            {
+                program.emit_insn(Insn::PrevAsync { cursor_id });
+            } else {
+                program.emit_insn(Insn::NextAsync { cursor_id });
+            }
+            let jump_label = metadata.scan_loop_body_labels.pop().unwrap();
+
+            // Emit the NextAwait or PrevAwait instruction with label dependency
+            if iter_dir
+                .as_ref()
+                .is_some_and(|dir| *dir == IterationDirection::Backwards)
+            {
+                program.emit_insn_with_label_dependency(
+                    Insn::PrevAwait {
+                        cursor_id,
+                        pc_if_next: jump_label,
+                    },
+                    jump_label,
+                );
+            } else {
+                program.emit_insn_with_label_dependency(
+                    Insn::NextAwait {
+                        cursor_id,
+                        pc_if_next: jump_label,
+                    },
+                    jump_label,
+                );
+            }
+            Ok(())
+        }
+        SourceOperator::Search {
+            id,
+            table_reference,
+            search,
+            ..
+        } => {
+            let cursor_id = match search {
+                Search::RowidEq { .. } | Search::RowidSearch { .. } => {
+                    program.resolve_cursor_id(&table_reference.table_identifier)
+                }
+                Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
+            };
+
+            // Emit the instructions to delete the row
+            let key_reg = program.alloc_register();
+            program.emit_insn(Insn::RowId {
+                cursor_id,
+                dest: key_reg,
+            });
+            program.emit_insn(Insn::DeleteAsync { cursor_id });
+            program.emit_insn(Insn::DeleteAwait { cursor_id });
+
+            // resolve labels after calling Delete opcodes
+            program.resolve_label(*metadata.next_row_labels.get(id).unwrap(), program.offset());
+
+            // Emit the NextAsync instruction to continue the loop
+            if !matches!(search, Search::RowidEq { .. }) {
+                program.emit_insn(Insn::NextAsync { cursor_id });
+                let jump_label = metadata.scan_loop_body_labels.pop().unwrap();
+                program.emit_insn_with_label_dependency(
+                    Insn::NextAwait {
+                        cursor_id,
+                        pc_if_next: jump_label,
+                    },
+                    jump_label,
+                );
+            }
+
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }
 

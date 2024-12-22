@@ -1753,6 +1753,12 @@ impl Cursor for BTreeCursor {
         Ok(CursorResult::Ok(()))
     }
 
+    fn delete(&mut self) -> Result<CursorResult<()>> {
+        println!("ROWID: {:?}", self.rowid.borrow());
+        return Ok(CursorResult::Ok(()));
+        unimplemented!()
+    }
+
     fn set_null_flag(&mut self, flag: bool) {
         self.null_flag = flag;
     }
