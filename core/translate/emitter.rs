@@ -325,7 +325,7 @@ pub fn emit_program_for_delete(
 
     emit_delete_insns(&mut program, &plan.source)?;
 
-    // Close the loop and handle deletion
+    // Clean up and close the main execution loop
     close_loop(
         &mut program,
         &plan.source,
