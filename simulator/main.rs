@@ -9,6 +9,7 @@ use rand_chacha::ChaCha8Rng;
 use simulator::cli::SimulatorCLI;
 use simulator::env::{SimConnection, SimulatorEnv, SimulatorOpts};
 use simulator::io::SimulatorIO;
+use std::backtrace::Backtrace;
 use std::io::Write;
 use std::path::Path;
 use std::rc::Rc;
@@ -24,15 +25,15 @@ mod simulator;
 fn main() {
     let _ = env_logger::try_init();
 
-    let opts = SimulatorCLI::parse();
+    let cli_opts = SimulatorCLI::parse();
 
-    let seed = match opts.seed {
+    let seed = match cli_opts.seed {
         Some(seed) => seed,
         None => rand::thread_rng().next_u64(),
     };
 
-    let output_dir = match opts.output_dir {
-        Some(dir) => Path::new(&dir).to_path_buf(),
+    let output_dir = match &cli_opts.output_dir {
+        Some(dir) => Path::new(dir).to_path_buf(),
         None => TempDir::new().unwrap().into_path(),
     };
 
@@ -44,6 +45,98 @@ fn main() {
     log::info!("simulator plan path: {:?}", plan_path);
     log::info!("seed: {}", seed);
 
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic occurred");
+
+        let payload = info.payload();
+        if let Some(s) = payload.downcast_ref::<&str>() {
+            log::error!("{}", s);
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            log::error!("{}", s);
+        } else {
+            log::error!("unknown panic payload");
+        }
+
+        let bt = Backtrace::force_capture();
+        log::error!("captured backtrace:\n{}", bt);
+    }));
+
+    let result = std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
+
+    if cli_opts.doublecheck {
+        // Move the old database and plan file to a new location
+        let old_db_path = db_path.with_extension("_old.db");
+        let old_plan_path = plan_path.with_extension("_old.plan");
+
+        std::fs::rename(&db_path, &old_db_path).unwrap();
+        std::fs::rename(&plan_path, &old_plan_path).unwrap();
+
+        // Run the simulation again
+        let result2 =
+            std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
+
+        match (result, result2) {
+            (Ok(Ok(_)), Err(_)) => {
+                log::error!("doublecheck failed! first run succeeded, but second run panicked.");
+            }
+            (Ok(Err(_)), Err(_)) => {
+                log::error!(
+                    "doublecheck failed! first run failed assertion, but second run panicked."
+                );
+            }
+            (Err(_), Ok(Ok(_))) => {
+                log::error!("doublecheck failed! first run panicked, but second run succeeded.");
+            }
+            (Err(_), Ok(Err(_))) => {
+                log::error!(
+                    "doublecheck failed! first run panicked, but second run failed assertion."
+                );
+            }
+            (Ok(Ok(_)), Ok(Err(_))) => {
+                log::error!(
+                    "doublecheck failed! first run succeeded, but second run failed assertion."
+                );
+            }
+            (Ok(Err(_)), Ok(Ok(_))) => {
+                log::error!(
+                    "doublecheck failed! first run failed assertion, but second run succeeded."
+                );
+            }
+            (Err(_), Err(_)) | (Ok(_), Ok(_)) => {
+                // Compare the two database files byte by byte
+                let old_db = std::fs::read(&old_db_path).unwrap();
+                let new_db = std::fs::read(&db_path).unwrap();
+                if old_db != new_db {
+                    log::error!("doublecheck failed! database files are different.");
+                } else {
+                    log::info!("doublecheck succeeded! database files are the same.");
+                }
+            }
+        }
+
+        // Move the new database and plan file to a new location
+        let new_db_path = db_path.with_extension("_double.db");
+        let new_plan_path = plan_path.with_extension("_double.plan");
+
+        std::fs::rename(&db_path, &new_db_path).unwrap();
+        std::fs::rename(&plan_path, &new_plan_path).unwrap();
+
+        // Move the old database and plan file back
+        std::fs::rename(&old_db_path, &db_path).unwrap();
+        std::fs::rename(&old_plan_path, &plan_path).unwrap();
+    }
+    // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
+    log::info!("database path: {:?}", db_path);
+    log::info!("simulator plan path: {:?}", plan_path);
+    log::info!("seed: {}", seed);
+}
+
+fn run_simulation(
+    seed: u64,
+    cli_opts: &SimulatorCLI,
+    db_path: &Path,
+    plan_path: &Path,
+) -> Result<()> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let (read_percent, write_percent, delete_percent) = {
@@ -57,7 +150,7 @@ fn main() {
     };
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..opts.maximum_size),
+        ticks: rng.gen_range(0..cli_opts.maximum_size),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -65,7 +158,7 @@ fn main() {
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(0..opts.maximum_size),
+        max_interactions: rng.gen_range(0..cli_opts.maximum_size),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
@@ -92,7 +185,7 @@ fn main() {
         .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
         .collect::<Vec<_>>();
 
-    let mut f = std::fs::File::create(plan_path.clone()).unwrap();
+    let mut f = std::fs::File::create(plan_path).unwrap();
     // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
     f.write(plans[0].to_string().as_bytes()).unwrap();
 
@@ -102,15 +195,14 @@ fn main() {
 
     let result = execute_plans(&mut env, &mut plans);
     if result.is_err() {
-        log::error!("error executing plans: {:?}", result.err());
+        log::error!("error executing plans: {:?}", result.as_ref().err());
     }
 
     env.io.print_stats();
 
-    // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
-    log::info!("database path: {:?}", db_path);
-    log::info!("simulator plan path: {:?}", plan_path);
-    log::info!("seed: {}", seed);
+    log::info!("Simulation completed");
+
+    result
 }
 
 fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Result<()> {
