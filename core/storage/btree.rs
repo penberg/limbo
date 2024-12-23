@@ -24,12 +24,22 @@ use super::sqlite3_ondisk::{
 /// type of btree page -> u8
 const PAGE_HEADER_OFFSET_PAGE_TYPE: usize = 0;
 /// pointer to first freeblock -> u16
-const PAGE_HEADER_OFFSET_FREEBLOCK: usize = 1;
+/// The second field of the b-tree page header is the offset of the first freeblock, or zero if there are no freeblocks on the page.
+/// A freeblock is a structure used to identify unallocated space within a b-tree page.
+/// Freeblocks are organized as a chain.
+///
+/// To be clear, freeblocks do not mean the regular unallocated free space to the left of the cell content area pointer, but instead
+/// blocks of at least 4 bytes WITHIN the cell content area that are not in use due to e.g. deletions.
+const PAGE_HEADER_OFFSET_FIRST_FREEBLOCK: usize = 1;
 /// number of cells in the page -> u16
 const PAGE_HEADER_OFFSET_CELL_COUNT: usize = 3;
 /// pointer to first byte of cell allocated content from top -> u16
+/// SQLite strives to place cells as far toward the end of the b-tree page as it can,
+/// in order to leave space for future growth of the cell pointer array.
+/// = the cell content area pointer moves leftward as cells are added to the page
 const PAGE_HEADER_OFFSET_CELL_CONTENT_AREA: usize = 5;
 /// number of fragmented bytes -> u8
+/// Fragments are isolated groups of 1, 2, or 3 unused bytes within the cell content area.
 const PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT: usize = 7;
 /// if internalnode, pointer right most pointer (saved separately from cells) -> u32
 const PAGE_HEADER_OFFSET_RIGHTMOST_PTR: usize = 8;
@@ -779,7 +789,7 @@ impl BTreeCursor {
         if page.first_freeblock() == 0 {
             page.write_u16(offset as usize, 0); // next freeblock = null
             page.write_u16(offset as usize + 2, len); // size of this freeblock
-            page.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, offset); // first freeblock in page = this block
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, offset); // first freeblock in page = this block
             return;
         }
         let first_block = page.first_freeblock();
@@ -789,7 +799,7 @@ impl BTreeCursor {
         if offset < first_block {
             page.write_u16(offset as usize, first_block); // next freeblock = previous first freeblock
             page.write_u16(offset as usize + 2, len); // size of this freeblock
-            page.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, offset); // first freeblock in page = this block
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, offset); // first freeblock in page = this block
             return;
         }
 
@@ -800,7 +810,7 @@ impl BTreeCursor {
         // and change this to if offset == page.cell_content_area()?
         if offset <= page.cell_content_area() {
             // FIXME: remove the line directly below this, it does not change anything.
-            page.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, page.first_freeblock());
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, page.first_freeblock());
             page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, offset + len);
             return;
         }
@@ -1015,7 +1025,7 @@ impl BTreeCursor {
                     assert!(page.is_dirty());
                     let contents = page.get().contents.as_mut().unwrap();
 
-                    contents.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, 0);
+                    contents.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
                     contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
 
                     let db_header = RefCell::borrow(&self.database_header);
@@ -1389,7 +1399,7 @@ impl BTreeCursor {
         // set new first byte of cell content
         page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, cbrk as u16);
         // set free block to 0, unused spaced can be retrieved from gap between cell pointer end and content start
-        page.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, 0);
+        page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
         // set unused space to 0
         let first_cell = cloned_page.cell_content_area() as u64;
         assert!(first_cell <= cbrk);
@@ -1426,12 +1436,16 @@ impl BTreeCursor {
         let child_pointer_size = if page.is_leaf() { 0 } else { 4 };
         let first_cell = (page.offset + 8 + child_pointer_size + (2 * ncell)) as u16;
 
+        // The amount of free space is the sum of:
+        // 1. 0..first_byte_in_cell_content (everything to the left of the cell content area pointer is unused free space)
+        // 2. fragmented_free_bytes.
         let mut nfree = fragmented_free_bytes as usize + first_byte_in_cell_content as usize;
 
         let mut pc = free_block_pointer as usize;
         if pc > 0 {
             if pc < first_byte_in_cell_content as usize {
-                // corrupt
+                // Freeblocks exist in the cell content area e.g. after deletions
+                // They should never exist in the unused area of the page.
                 todo!("corrupted page");
             }
 
@@ -1926,7 +1940,7 @@ pub fn btree_init_page(
     contents.offset = offset;
     let id = page_type as u8;
     contents.write_u8(PAGE_HEADER_OFFSET_PAGE_TYPE, id);
-    contents.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, 0);
+    contents.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
     contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
 
     let cell_content_area_start = db_header.page_size - db_header.reserved_space as u16;

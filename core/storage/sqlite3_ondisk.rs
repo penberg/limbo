@@ -475,6 +475,12 @@ impl PageContent {
         buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
     }
 
+    /// The second field of the b-tree page header is the offset of the first freeblock, or zero if there are no freeblocks on the page.
+    /// A freeblock is a structure used to identify unallocated space within a b-tree page.
+    /// Freeblocks are organized as a chain.
+    ///
+    /// To be clear, freeblocks do not mean the regular unallocated free space to the left of the cell content area pointer, but instead
+    /// blocks of at least 4 bytes WITHIN the cell content area that are not in use due to e.g. deletions.
     pub fn first_freeblock(&self) -> u16 {
         self.read_u16(1)
     }
@@ -486,10 +492,13 @@ impl PageContent {
     /// The start of the cell content area.
     /// SQLite strives to place cells as far toward the end of the b-tree page as it can,
     /// in order to leave space for future growth of the cell pointer array.
+    /// = the cell content area pointer moves leftward as cells are added to the page
     pub fn cell_content_area(&self) -> u16 {
         self.read_u16(5)
     }
 
+    /// The total number of bytes in all fragments is stored in the fifth field of the b-tree page header.
+    /// Fragments are isolated groups of 1, 2, or 3 unused bytes within the cell content area.
     pub fn num_frag_free_bytes(&self) -> u8 {
         self.read_u8(7)
     }
