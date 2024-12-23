@@ -572,14 +572,14 @@ impl PageContent {
     ) -> (usize, usize) {
         let buf = self.as_ptr();
         let ncells = self.cell_count();
-        let cell_start = match self.page_type() {
+        let cell_pointer_array_start = match self.page_type() {
             PageType::IndexInterior => 12,
             PageType::TableInterior => 12,
             PageType::IndexLeaf => 8,
             PageType::TableLeaf => 8,
         };
         assert!(idx < ncells, "cell_get: idx out of bounds");
-        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = cell_pointer_array_start + (idx * 2); // pointers are 2 bytes each
         let cell_pointer = self.read_u16(cell_pointer) as usize;
         let start = cell_pointer;
         let len = match self.page_type() {
