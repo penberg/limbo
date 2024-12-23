@@ -4,7 +4,12 @@ use super::{
         Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
     },
 };
-use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
+use crate::{
+    function::Func,
+    schema::Schema,
+    util::{exprs_are_equivalent, normalize_ident},
+    Result,
+};
 use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
 
 pub struct OperatorIdCounter {
@@ -23,7 +28,10 @@ impl OperatorIdCounter {
 }
 
 fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
-    if aggs.iter().any(|a| a.original_expr == *expr) {
+    if aggs
+        .iter()
+        .any(|a| exprs_are_equivalent(&a.original_expr, expr))
+    {
         return true;
     }
     match expr {

@@ -4,7 +4,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 use crate::function::JsonFunc;
 use crate::function::{AggFunc, Func, FuncCtx, MathFuncArity, ScalarFunc};
 use crate::schema::Type;
-use crate::util::normalize_ident;
+use crate::util::{exprs_are_equivalent, normalize_ident};
 use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
 use crate::Result;
 
@@ -554,10 +554,7 @@ pub fn translate_expr(
 ) -> Result<usize> {
     if let Some(precomputed_exprs_to_registers) = precomputed_exprs_to_registers {
         for (precomputed_expr, reg) in precomputed_exprs_to_registers.iter() {
-            // TODO: implement a custom equality check for expressions
-            // there are lots of examples where this breaks, even simple ones like
-            // sum(x) != SUM(x)
-            if expr == *precomputed_expr {
+            if exprs_are_equivalent(expr, precomputed_expr) {
                 program.emit_insn(Insn::Copy {
                     src_reg: *reg,
                     dst_reg: target_register,
