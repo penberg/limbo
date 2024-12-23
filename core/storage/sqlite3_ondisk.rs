@@ -524,6 +524,8 @@ impl PageContent {
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
+        // the page header is 12 bytes for interior pages, 8 bytes for leaf pages
+        // this is because the 4 last bytes in the interior page's header are used for the rightmost pointer.
         let cell_start = match self.page_type() {
             PageType::IndexInterior => 12,
             PageType::TableInterior => 12,
@@ -545,7 +547,6 @@ impl PageContent {
         )
     }
 
-    /// When using this fu
     pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
         let cell_start = match self.page_type() {
             PageType::IndexInterior => 12,
