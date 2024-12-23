@@ -526,14 +526,14 @@ impl PageContent {
         let ncells = self.cell_count();
         // the page header is 12 bytes for interior pages, 8 bytes for leaf pages
         // this is because the 4 last bytes in the interior page's header are used for the rightmost pointer.
-        let cell_start = match self.page_type() {
+        let cell_pointer_array_start = match self.page_type() {
             PageType::IndexInterior => 12,
             PageType::TableInterior => 12,
             PageType::IndexLeaf => 8,
             PageType::TableLeaf => 8,
         };
         assert!(idx < ncells, "cell_get: idx out of bounds");
-        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = cell_pointer_array_start + (idx * 2);
         let cell_pointer = self.read_u16(cell_pointer) as usize;
 
         read_btree_cell(
