@@ -546,7 +546,12 @@ impl PageContent {
             usable_size,
         )
     }
-
+    /// The cell pointer array of a b-tree page immediately follows the b-tree page header.
+    /// Let K be the number of cells on the btree.
+    /// The cell pointer array consists of K 2-byte integer offsets to the cell contents.
+    /// The cell pointers are arranged in key order with:
+    /// - left-most cell (the cell with the smallest key) first and
+    /// - the right-most cell (the cell with the largest key) last.
     pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
         let cell_start = match self.page_type() {
             PageType::IndexInterior => 12,
