@@ -1274,6 +1274,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
 /// Checks if payload will overflow a cell based on the maximum allowed size.
 /// It will return the min size that will be stored in that case,
 /// including overflow pointer
+/// see e.g. https://github.com/sqlite/sqlite/blob/9591d3fe93936533c8c3b0dc4d025ac999539e11/src/dbstat.c#L371
 pub fn payload_overflows(
     payload_size: usize,
     payload_overflow_threshold_max: usize,

@@ -1494,6 +1494,7 @@ impl BTreeCursor {
         log::debug!("fill_cell_payload(overflow)");
 
         let payload_overflow_threshold_min = self.payload_overflow_threshold_min(page_type);
+        // see e.g. https://github.com/sqlite/sqlite/blob/9591d3fe93936533c8c3b0dc4d025ac999539e11/src/dbstat.c#L371
         let mut space_left = payload_overflow_threshold_min
             + (record_buf.len() - payload_overflow_threshold_min) % (self.usable_space() - 4);
 
