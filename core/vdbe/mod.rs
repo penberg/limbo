@@ -24,6 +24,8 @@ pub mod sorter;
 mod datetime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
+#[cfg(feature = "uuid")]
+use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::schema::Table;
@@ -37,41 +39,22 @@ use crate::util::parse_schema_rows;
 use crate::{function::JsonFunc, json::get_json, json::json_array};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
+use macros::Description;
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::Regex;
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Display;
 use std::rc::{Rc, Weak};
+
 pub type BranchOffset = i64;
-use macros::Description;
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum Func {
-    Scalar(ScalarFunc),
-    #[cfg(feature = "json")]
-    Json(JsonFunc),
-}
-
-impl Display for Func {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            Func::Scalar(scalar_func) => scalar_func.to_string(),
-            #[cfg(feature = "json")]
-            Func::Json(json_func) => json_func.to_string(),
-        };
-        write!(f, "{}", str)
-    }
-}
 
 #[derive(Description, Debug)]
 pub enum Insn {
@@ -2530,6 +2513,38 @@ impl Program {
                                 let replacement = &state.registers[*start_reg + 2];
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
+                        },
+                        crate::function::Func::Extension(extfn) => match extfn {
+                            #[cfg(feature = "uuid")]
+                            ExtFunc::Uuid(uuidfn) => match uuidfn {
+                                UuidFunc::Uuid4 | UuidFunc::Uuid4Str => {
+                                    state.registers[*dest] = exec_uuid(uuidfn, None)?
+                                }
+                                UuidFunc::Uuid7 => match arg_count {
+                                    0 => {
+                                        state.registers[*dest] =
+                                            exec_uuid(uuidfn, None).unwrap_or(OwnedValue::Null);
+                                    }
+                                    1 => {
+                                        let reg_value = state.registers[*start_reg].borrow();
+                                        state.registers[*dest] = exec_uuid(uuidfn, Some(reg_value))
+                                            .unwrap_or(OwnedValue::Null);
+                                    }
+                                    _ => unreachable!(),
+                                },
+                                _ => {
+                                    // remaining accept 1 arg
+                                    let reg_value = state.registers[*start_reg].borrow();
+                                    state.registers[*dest] = match uuidfn {
+                                        UuidFunc::Uuid7TS => Some(exec_ts_from_uuid7(reg_value)),
+                                        UuidFunc::UuidStr => exec_uuidstr(reg_value).ok(),
+                                        UuidFunc::UuidBlob => exec_uuidblob(reg_value).ok(),
+                                        _ => unreachable!(),
+                                    }
+                                    .unwrap_or(OwnedValue::Null);
+                                }
+                            },
+                            _ => unreachable!(), // when more extension types are added
                         },
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {
