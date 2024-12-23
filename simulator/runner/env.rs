@@ -6,7 +6,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::model::table::Table;
 
-use crate::simulator::io::SimulatorIO;
+use crate::runner::io::SimulatorIO;
 
 pub(crate) struct SimulatorEnv {
     pub(crate) opts: SimulatorOpts,

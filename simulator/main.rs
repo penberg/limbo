@@ -6,9 +6,9 @@ use model::query::{Create, Query};
 use model::table::{Column, Name, Table, Value};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use simulator::cli::SimulatorCLI;
-use simulator::env::{SimConnection, SimulatorEnv, SimulatorOpts};
-use simulator::io::SimulatorIO;
+use runner::cli::SimulatorCLI;
+use runner::env::{SimConnection, SimulatorEnv, SimulatorOpts};
+use runner::io::SimulatorIO;
 use std::backtrace::Backtrace;
 use std::io::Write;
 use std::path::Path;
@@ -19,7 +19,7 @@ use tempfile::TempDir;
 mod generation;
 mod model;
 mod properties;
-mod simulator;
+mod runner;
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() {

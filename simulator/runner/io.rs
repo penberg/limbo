@@ -4,7 +4,7 @@ use limbo_core::{OpenFlags, PlatformIO, Result, IO};
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::simulator::file::SimulatorFile;
+use crate::runner::file::SimulatorFile;
 
 pub(crate) struct SimulatorIO {
     pub(crate) inner: Box<dyn IO>,
