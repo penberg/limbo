@@ -795,9 +795,12 @@ impl BTreeCursor {
 
         // if we clear space that is at the start of the cell content area,
         // we need to update the cell content area pointer forward to account for the removed space
-        // FIXME: is offset ever < cell_content_area?
+        // FIXME: is offset ever < cell_content_area? cell content area grows leftwards and the pointer
+        // is to the start of the last allocated cell. should we assert!(offset >= page.cell_content_area())
+        // and change this to if offset == page.cell_content_area()?
         if offset <= page.cell_content_area() {
-            page.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, page.first_freeblock()); // why is this here?
+            // FIXME: remove the line directly below this, it does not change anything.
+            page.write_u16(PAGE_HEADER_OFFSET_FREEBLOCK, page.first_freeblock());
             page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, offset + len);
             return;
         }

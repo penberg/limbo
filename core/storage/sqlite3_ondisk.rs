@@ -484,6 +484,8 @@ impl PageContent {
     }
 
     /// The start of the cell content area.
+    /// SQLite strives to place cells as far toward the end of the b-tree page as it can,
+    /// in order to leave space for future growth of the cell pointer array.
     pub fn cell_content_area(&self) -> u16 {
         self.read_u16(5)
     }
