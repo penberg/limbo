@@ -1405,6 +1405,15 @@ impl BTreeCursor {
 
         let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
         let mut first_byte_in_cell_content = page.cell_content_area();
+        // A zero value for the cell content area pointer is interpreted as 65536.
+        // See https://www.sqlite.org/fileformat.html
+        // The max page size for a sqlite database is 64kiB i.e. 65536 bytes.
+        // 65536 is u16::MAX + 1, and since cell content grows from right to left, this means
+        // the cell content area pointer is at the end of the page,
+        // i.e.
+        // 1. the page size is 64kiB
+        // 2. there are no cells on the page
+        // 3. there is no reserved space at the end of the page
         if first_byte_in_cell_content == 0 {
             first_byte_in_cell_content = u16::MAX;
         }
