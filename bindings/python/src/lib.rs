@@ -143,6 +143,11 @@ impl Cursor {
                     limbo_core::RowResult::Done => {
                         return Ok(None);
                     }
+                    limbo_core::RowResult::Busy => {
+                        return Err(
+                            PyErr::new::<OperationalError, _>("Busy error".to_string()).into()
+                        );
+                    }
                 }
             }
         } else {
@@ -176,6 +181,11 @@ impl Cursor {
                     }
                     limbo_core::RowResult::Done => {
                         return Ok(results);
+                    }
+                    limbo_core::RowResult::Busy => {
+                        return Err(
+                            PyErr::new::<OperationalError, _>("Busy error".to_string()).into()
+                        );
                     }
                 }
             }

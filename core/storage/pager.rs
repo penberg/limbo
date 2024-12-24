@@ -1,3 +1,4 @@
+use crate::result::LimboResult;
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
@@ -196,14 +197,12 @@ impl Pager {
         })
     }
 
-    pub fn begin_read_tx(&self) -> Result<()> {
-        self.wal.borrow_mut().begin_read_tx()?;
-        Ok(())
+    pub fn begin_read_tx(&self) -> Result<LimboResult> {
+        self.wal.borrow_mut().begin_read_tx()
     }
 
-    pub fn begin_write_tx(&self) -> Result<()> {
-        self.wal.borrow_mut().begin_write_tx()?;
-        Ok(())
+    pub fn begin_write_tx(&self) -> Result<LimboResult> {
+        self.wal.borrow_mut().begin_write_tx()
     }
 
     pub fn end_tx(&self) -> Result<CheckpointStatus> {

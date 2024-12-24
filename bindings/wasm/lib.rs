@@ -85,7 +85,8 @@ impl Statement {
             }
             Ok(limbo_core::RowResult::IO)
             | Ok(limbo_core::RowResult::Done)
-            | Ok(limbo_core::RowResult::Interrupt) => JsValue::UNDEFINED,
+            | Ok(limbo_core::RowResult::Interrupt)
+            | Ok(limbo_core::RowResult::Busy) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
@@ -105,6 +106,7 @@ impl Statement {
                 Ok(limbo_core::RowResult::IO) => {}
                 Ok(limbo_core::RowResult::Interrupt) => break,
                 Ok(limbo_core::RowResult::Done) => break,
+                Ok(limbo_core::RowResult::Busy) => break,
                 Err(e) => panic!("Error: {:?}", e),
             }
         }

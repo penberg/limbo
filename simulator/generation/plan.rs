@@ -235,6 +235,7 @@ impl Interaction {
                         RowResult::Done => {
                             break;
                         }
+                        RowResult::Busy => {}
                     }
                 }
 
