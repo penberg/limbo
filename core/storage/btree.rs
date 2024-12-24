@@ -761,7 +761,7 @@ impl BTreeCursor {
         buf[new_cell_data_pointer as usize..new_cell_data_pointer as usize + payload.len()]
             .copy_from_slice(payload);
         //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
-        let (cell_pointer_array_start, _) = page.cell_get_raw_pointer_region();
+        let (cell_pointer_array_start, _) = page.cell_pointer_array_offset_and_size();
         let cell_pointer_cur_idx = cell_pointer_array_start + (CELL_POINTER_SIZE_BYTES * cell_idx);
 
         // move existing pointers forward by CELL_POINTER_SIZE_BYTES...
@@ -1232,7 +1232,7 @@ impl BTreeCursor {
                 if is_page_1 {
                     // Remove header from child and set offset to 0
                     let contents = child.get().contents.as_mut().unwrap();
-                    let (cell_pointer_offset, _) = contents.cell_get_raw_pointer_region();
+                    let (cell_pointer_offset, _) = contents.cell_pointer_array_offset_and_size();
                     // change cell pointers
                     for cell_idx in 0..contents.cell_count() {
                         let cell_pointer_offset = cell_pointer_offset + (2 * cell_idx) - offset;
@@ -1288,7 +1288,7 @@ impl BTreeCursor {
     fn allocate_cell_space(&self, page_ref: &PageContent, amount: u16) -> u16 {
         let amount = amount as usize;
 
-        let (cell_offset, _) = page_ref.cell_get_raw_pointer_region();
+        let (cell_offset, _) = page_ref.cell_pointer_array_offset_and_size();
         let gap = cell_offset + 2 * page_ref.cell_count();
         let mut top = page_ref.cell_content_area() as usize;
 
@@ -1330,10 +1330,7 @@ impl BTreeCursor {
         // TODO: implement fast algorithm
 
         let last_cell = usable_space - 4;
-        let first_cell = {
-            let (start, end) = cloned_page.cell_get_raw_pointer_region();
-            start + end
-        };
+        let first_cell = cloned_page.unallocated_region_start() as u64;
 
         if cloned_page.cell_count() > 0 {
             let page_type = page.page_type();

@@ -500,7 +500,8 @@ impl PageContent {
     /// The start of the unallocated region.
     /// Effectively: the offset after the page header + the cell pointer array.
     pub fn unallocated_region_start(&self) -> usize {
-        self.offset + self.header_size() + self.cell_pointer_array_size()
+        let (cell_ptr_array_start, cell_ptr_array_size) = self.cell_pointer_array_offset_and_size();
+        cell_ptr_array_start + cell_ptr_array_size
     }
 
     pub fn unallocated_region_size(&self) -> usize {
@@ -576,9 +577,9 @@ impl PageContent {
     /// The cell pointers are arranged in key order with:
     /// - left-most cell (the cell with the smallest key) first and
     /// - the right-most cell (the cell with the largest key) last.
-    pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
-        let cell_start = self.header_size();
-        (self.offset + cell_start, self.cell_count() * 2)
+    pub fn cell_pointer_array_offset_and_size(&self) -> (usize, usize) {
+        let header_size = self.header_size();
+        (self.offset + header_size, self.cell_pointer_array_size())
     }
 
     /* Get region of a cell's payload */
