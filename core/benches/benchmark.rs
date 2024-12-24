@@ -52,6 +52,9 @@ fn limbo_bench(criterion: &mut Criterion) {
                 limbo_core::RowResult::Done => {
                     unreachable!();
                 }
+                limbo_core::RowResult::Busy => {
+                    unreachable!();
+                }
             }
             stmt.reset();
         });
@@ -76,6 +79,9 @@ fn limbo_bench(criterion: &mut Criterion) {
                     }
                     limbo_core::RowResult::Done => {
                         unreachable!();
+                    }
+                    limbo_core::RowResult::Busy => {
+                        unreachable!()
                     }
                 }
                 stmt.reset();
@@ -102,6 +108,9 @@ fn limbo_bench(criterion: &mut Criterion) {
                     }
                     limbo_core::RowResult::Done => {
                         unreachable!();
+                    }
+                    limbo_core::RowResult::Busy => {
+                        unreachable!()
                     }
                 }
                 stmt.reset();
