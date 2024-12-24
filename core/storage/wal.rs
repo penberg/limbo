@@ -26,6 +26,13 @@ pub const NO_LOCK: u32 = 0;
 pub const SHARED_LOCK: u32 = 1;
 pub const WRITE_LOCK: u32 = 2;
 
+pub enum CheckpointMode {
+    Passive,
+    Full,
+    Restart,
+    Truncate,
+}
+
 #[derive(Debug)]
 struct LimboRwLock {
     lock: AtomicU32,
@@ -143,6 +150,7 @@ pub trait Wal {
         &mut self,
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
+        mode: CheckpointMode,
     ) -> Result<CheckpointStatus>;
     fn sync(&mut self) -> Result<CheckpointStatus>;
     fn get_max_frame(&self) -> u64;
@@ -407,7 +415,12 @@ impl Wal for WalFile {
         &mut self,
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
+        mode: CheckpointMode,
     ) -> Result<CheckpointStatus> {
+        assert!(
+            matches!(mode, CheckpointMode::Passive),
+            "only passive mode supported for now"
+        );
         'checkpoint_loop: loop {
             let state = self.ongoing_checkpoint.state;
             log::debug!("checkpoint(state={:?})", state);

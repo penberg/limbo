@@ -4,7 +4,7 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::Wal;
 use crate::{Buffer, Result};
-use log::{debug, trace};
+use log::trace;
 use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use super::page_cache::{DumbLruPageCache, PageCacheKey};
-use super::wal::CheckpointStatus;
+use super::wal::{CheckpointMode, CheckpointStatus};
 
 pub struct PageInner {
     pub flags: AtomicUsize,
@@ -377,7 +377,11 @@ impl Pager {
             match state {
                 CheckpointState::Checkpoint => {
                     let in_flight = self.checkpoint_inflight.clone();
-                    match self.wal.borrow_mut().checkpoint(self, in_flight)? {
+                    match self.wal.borrow_mut().checkpoint(
+                        self,
+                        in_flight,
+                        CheckpointMode::Passive,
+                    )? {
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
                         CheckpointStatus::Done => {
                             self.checkpoint_state.replace(CheckpointState::SyncDbFile);
@@ -413,11 +417,11 @@ impl Pager {
     // WARN: used for testing purposes
     pub fn clear_page_cache(&self) {
         loop {
-            match self
-                .wal
-                .borrow_mut()
-                .checkpoint(self, Rc::new(RefCell::new(0)))
-            {
+            match self.wal.borrow_mut().checkpoint(
+                self,
+                Rc::new(RefCell::new(0)),
+                CheckpointMode::Passive,
+            ) {
                 Ok(CheckpointStatus::IO) => {
                     self.io.run_once();
                 }
