@@ -1441,10 +1441,14 @@ impl BTreeCursor {
         let first_cell = (page.offset + 8 + child_pointer_size + (2 * ncell)) as u16;
 
         // The amount of free space is the sum of:
-        // 1. 0..first_byte_in_cell_content (everything to the left of the cell content area pointer is unused free space)
-        // 2. fragmented_free_bytes.
+        // #1. space to the left of the cell content area pointer
+        // #2. fragmented_free_bytes (isolated 1-3 byte chunks of free space within the cell content area)
+        // #3. freeblocks (linked list of blocks of at least 4 bytes within the cell content area that are not in use due to e.g. deletions)
+
+        // #1 and #2 are known from the page header
         let mut nfree = fragmented_free_bytes as usize + first_byte_in_cell_content as usize;
 
+        // #3 is computed by iterating over the freeblocks linked list
         let mut pc = free_block_pointer as usize;
         if pc > 0 {
             if pc < first_byte_in_cell_content as usize {
@@ -1457,28 +1461,33 @@ impl BTreeCursor {
             let mut size = 0;
             loop {
                 // TODO: check corruption icellast
-                next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize;
-                size = u16::from_be_bytes(buf[pc + 2..pc + 4].try_into().unwrap()) as usize;
+                next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize; // first 2 bytes in freeblock = next freeblock pointer
+                size = u16::from_be_bytes(buf[pc + 2..pc + 4].try_into().unwrap()) as usize; // next 2 bytes in freeblock = size of current freeblock
                 nfree += size;
+                // Freeblocks are in order from left to right on the page,
+                // so next pointer should > current pointer + its size, or 0 if no next block exists.
                 if next <= pc + size + 3 {
                     break;
                 }
                 pc = next;
             }
 
-            if next > 0 {
-                todo!("corrupted page ascending order");
-            }
+            // Next should always be 0 (NULL) at this point since we have reached the end of the freeblocks linked list
+            assert!(
+                next == 0,
+                "corrupted page: freeblocks list not in ascending order"
+            );
 
-            if pc + size > usable_space {
-                todo!("corrupted page last freeblock extends last page end");
-            }
+            assert!(
+                pc + size <= usable_space,
+                "corrupted page: last freeblock extends last page end"
+            );
         }
 
         // if( nFree>usableSize || nFree<iCellFirst ){
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
-        // don't count header and cell pointers?
+        // FIXME:don't count header and cell pointers?
         nfree -= first_cell as usize;
         nfree as u16
     }
