@@ -47,7 +47,6 @@ impl LimboRwLock {
                 );
                 let ok = res.is_ok();
                 if ok {
-                    dbg!("adding");
                     self.nreads.fetch_add(1, Ordering::SeqCst);
                 }
                 ok
@@ -459,8 +458,9 @@ impl Wal for WalFile {
                         .expect("page must be in frame cache if it's in list");
 
                     for frame in frames.iter().rev() {
-                        // TODO: do proper selection of frames to checkpoint
-                        if *frame >= self.ongoing_checkpoint.min_frame {
+                        if *frame >= self.ongoing_checkpoint.min_frame
+                            && *frame <= self.ongoing_checkpoint.max_frame
+                        {
                             log::debug!(
                                 "checkpoint page(state={:?}, page={}, frame={})",
                                 state,
@@ -515,10 +515,18 @@ impl Wal for WalFile {
                         return Ok(CheckpointStatus::IO);
                     }
                     let mut shared = self.shared.write().unwrap();
-                    shared.frame_cache.clear();
-                    shared.pages_in_frames.clear();
-                    shared.max_frame = 0;
-                    shared.nbackfills = 0;
+                    let everything_backfilled =
+                        shared.max_frame == self.ongoing_checkpoint.max_frame;
+                    if everything_backfilled {
+                        // Here we know that we backfilled everything, therefore we can safely
+                        // reset the wal.
+                        shared.frame_cache.clear();
+                        shared.pages_in_frames.clear();
+                        shared.max_frame = 0;
+                        shared.nbackfills = 0;
+                    } else {
+                        shared.nbackfills = self.ongoing_checkpoint.max_frame;
+                    }
                     self.ongoing_checkpoint.state = CheckpointState::Start;
                     return Ok(CheckpointStatus::Done);
                 }
