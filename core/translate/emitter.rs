@@ -334,7 +334,7 @@ fn emit_program_for_delete(
         &mut metadata,
     )?;
 
-    emit_delete_insns(&mut program, &plan.source)?;
+    emit_delete_insns(&mut program, &plan.source, &plan.limit, &metadata)?;
 
     // Clean up and close the main execution loop
     close_loop(
@@ -1246,53 +1246,58 @@ fn close_loop(
     }
 }
 
-fn emit_delete_insns(program: &mut ProgramBuilder, source: &SourceOperator) -> Result<()> {
-    match source {
+fn emit_delete_insns(
+    program: &mut ProgramBuilder,
+    source: &SourceOperator,
+    limit: &Option<usize>,
+    metadata: &Metadata,
+) -> Result<()> {
+    let cursor_id = match source {
         SourceOperator::Scan {
-            id,
-            table_reference,
-            iter_dir,
-            ..
-        } => {
-            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
-
-            // Emit the instructions to delete the row
-            let key_reg = program.alloc_register();
-            program.emit_insn(Insn::RowId {
-                cursor_id,
-                dest: key_reg,
-            });
-            program.emit_insn(Insn::DeleteAsync { cursor_id });
-            program.emit_insn(Insn::DeleteAwait { cursor_id });
-
-            Ok(())
-        }
+            table_reference, ..
+        } => program.resolve_cursor_id(&table_reference.table_identifier),
         SourceOperator::Search {
-            id,
             table_reference,
             search,
             ..
-        } => {
-            let cursor_id = match search {
-                Search::RowidEq { .. } | Search::RowidSearch { .. } => {
-                    program.resolve_cursor_id(&table_reference.table_identifier)
-                }
-                Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
-            };
+        } => match search {
+            Search::RowidEq { .. } | Search::RowidSearch { .. } => {
+                program.resolve_cursor_id(&table_reference.table_identifier)
+            }
+            Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
+        },
+        _ => return Ok(()),
+    };
 
-            // Emit the instructions to delete the row
-            let key_reg = program.alloc_register();
-            program.emit_insn(Insn::RowId {
-                cursor_id,
-                dest: key_reg,
-            });
-            program.emit_insn(Insn::DeleteAsync { cursor_id });
-            program.emit_insn(Insn::DeleteAwait { cursor_id });
-
-            Ok(())
-        }
-        _ => Ok(()),
+    // Emit the instructions to delete the row
+    let key_reg = program.alloc_register();
+    program.emit_insn(Insn::RowId {
+        cursor_id,
+        dest: key_reg,
+    });
+    program.emit_insn(Insn::DeleteAsync { cursor_id });
+    program.emit_insn(Insn::DeleteAwait { cursor_id });
+    if let Some(limit) = limit {
+        let limit_reg = program.alloc_register();
+        program.emit_insn(Insn::Integer {
+            value: *limit as i64,
+            dest: limit_reg,
+        });
+        program.mark_last_insn_constant();
+        let jump_label_on_limit_reached = metadata
+            .termination_label_stack
+            .last()
+            .expect("termination_label_stack should not be empty.");
+        program.emit_insn_with_label_dependency(
+            Insn::DecrJumpZero {
+                reg: limit_reg,
+                target_pc: *jump_label_on_limit_reached,
+            },
+            *jump_label_on_limit_reached,
+        )
     }
+
+    Ok(())
 }
 
 /// Emits the bytecode for processing a GROUP BY clause.

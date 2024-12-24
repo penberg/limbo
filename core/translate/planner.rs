@@ -2,8 +2,10 @@ use super::plan::{
     Aggregate, BTreeTableReference, DeletePlan, Direction, GroupBy, Plan, ResultSetColumn,
     SelectPlan, SourceOperator,
 };
-use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
-use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, QualifiedName, ResultColumn};
+use crate::{bail_parse_error, function::Func, schema::Schema, util::normalize_ident, Result};
+use sqlite3_parser::ast::{
+    self, Expr, FromClause, JoinType, Limit, QualifiedName, ResultColumn, SortedColumn,
+};
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -468,15 +470,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             }
 
             // Parse the LIMIT clause
-            if let Some(limit) = &select.limit {
-                plan.limit = match &limit.expr {
-                    ast::Expr::Literal(ast::Literal::Numeric(n)) => {
-                        let l = n.parse()?;
-                        Some(l)
-                    }
-                    _ => todo!(),
-                }
-            }
+            plan.limit = select.limit.and_then(|limit| parse_limit(limit));
 
             // Return the unoptimized query plan
             Ok(Plan::Select(plan))
@@ -489,6 +483,7 @@ pub fn prepare_delete_plan(
     schema: &Schema,
     tbl_name: &QualifiedName,
     where_clause: Option<Expr>,
+    limit: Option<Limit>,
 ) -> Result<Plan> {
     let table = match schema.get_table(tbl_name.name.0.as_str()) {
         Some(table) => table,
@@ -500,9 +495,13 @@ pub fn prepare_delete_plan(
         table_identifier: table.name.clone(),
         table_index: 0,
     };
+    let referenced_tables = vec![table_ref.clone()];
 
-    // Parse and resolve the where_clause
+    // Parse the WHERE clause
     let resolved_where_clauses = parse_where(where_clause, &[table_ref.clone()])?;
+
+    // Parse the LIMIT clause
+    let resolved_limit = limit.and_then(|limit| parse_limit(limit));
 
     let plan = DeletePlan {
         source: SourceOperator::Scan {
@@ -514,8 +513,8 @@ pub fn prepare_delete_plan(
         result_columns: vec![],
         where_clause: resolved_where_clauses,
         order_by: None,
-        limit: None, // TODO: add support for limit
-        referenced_tables: vec![table_ref],
+        limit: resolved_limit,
+        referenced_tables,
         available_indexes: vec![],
         contains_constant_false_condition: false,
     };
@@ -781,6 +780,14 @@ fn parse_join(
         using,
         predicates,
     ))
+}
+
+fn parse_limit(limit: Limit) -> Option<usize> {
+    if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
+        n.parse().ok()
+    } else {
+        None
+    }
 }
 
 fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {

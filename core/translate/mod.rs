@@ -82,7 +82,7 @@ pub fn translate(
             schema,
             &tbl_name,
             where_clause,
-            &returning,
+            limit,
             database_header,
             connection,
         ),
