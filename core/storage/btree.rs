@@ -1415,10 +1415,12 @@ impl BTreeCursor {
     #[allow(unused_assignments)]
     fn compute_free_space(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) -> u16 {
         // TODO(pere): maybe free space is not calculated correctly with offset
-        let buf = page.as_ptr();
 
+        // Usable space, not the same as free space, simply means:
+        // space that is not reserved for extensions by sqlite. Usually reserved_space is 0.
         let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
-        let mut first_byte_in_cell_content = page.cell_content_area();
+
+        let mut cell_content_area_start = page.cell_content_area();
         // A zero value for the cell content area pointer is interpreted as 65536.
         // See https://www.sqlite.org/fileformat.html
         // The max page size for a sqlite database is 64kiB i.e. 65536 bytes.
@@ -1428,30 +1430,23 @@ impl BTreeCursor {
         // 1. the page size is 64kiB
         // 2. there are no cells on the page
         // 3. there is no reserved space at the end of the page
-        if first_byte_in_cell_content == 0 {
-            first_byte_in_cell_content = u16::MAX;
+        if cell_content_area_start == 0 {
+            cell_content_area_start = u16::MAX;
         }
 
-        let fragmented_free_bytes = page.num_frag_free_bytes();
-        let free_block_pointer = page.first_freeblock();
-        let ncell = page.cell_count();
-
-        // 8 + 4 == header end
-        let child_pointer_size = if page.is_leaf() { 0 } else { 4 };
-        let first_cell = (page.offset + 8 + child_pointer_size + (2 * ncell)) as u16;
-
         // The amount of free space is the sum of:
-        // #1. space to the left of the cell content area pointer
-        // #2. fragmented_free_bytes (isolated 1-3 byte chunks of free space within the cell content area)
+        // #1. the size of the unallocated region
+        // #2. fragments (isolated 1-3 byte chunks of free space within the cell content area)
         // #3. freeblocks (linked list of blocks of at least 4 bytes within the cell content area that are not in use due to e.g. deletions)
 
-        // #1 and #2 are known from the page header
-        let mut nfree = fragmented_free_bytes as usize + first_byte_in_cell_content as usize;
+        let mut free_space_bytes =
+            page.unallocated_region_size() as usize + page.num_frag_free_bytes() as usize;
 
         // #3 is computed by iterating over the freeblocks linked list
-        let mut pc = free_block_pointer as usize;
-        if pc > 0 {
-            if pc < first_byte_in_cell_content as usize {
+        let mut cur_freeblock_ptr = page.first_freeblock() as usize;
+        let page_buf = page.as_ptr();
+        if cur_freeblock_ptr > 0 {
+            if cur_freeblock_ptr < cell_content_area_start as usize {
                 // Freeblocks exist in the cell content area e.g. after deletions
                 // They should never exist in the unused area of the page.
                 todo!("corrupted page");
@@ -1461,15 +1456,23 @@ impl BTreeCursor {
             let mut size = 0;
             loop {
                 // TODO: check corruption icellast
-                next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize; // first 2 bytes in freeblock = next freeblock pointer
-                size = u16::from_be_bytes(buf[pc + 2..pc + 4].try_into().unwrap()) as usize; // next 2 bytes in freeblock = size of current freeblock
-                nfree += size;
+                next = u16::from_be_bytes(
+                    page_buf[cur_freeblock_ptr..cur_freeblock_ptr + 2]
+                        .try_into()
+                        .unwrap(),
+                ) as usize; // first 2 bytes in freeblock = next freeblock pointer
+                size = u16::from_be_bytes(
+                    page_buf[cur_freeblock_ptr + 2..cur_freeblock_ptr + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as usize; // next 2 bytes in freeblock = size of current freeblock
+                free_space_bytes += size;
                 // Freeblocks are in order from left to right on the page,
                 // so next pointer should > current pointer + its size, or 0 if no next block exists.
-                if next <= pc + size + 3 {
+                if next <= cur_freeblock_ptr + size + 3 {
                     break;
                 }
-                pc = next;
+                cur_freeblock_ptr = next;
             }
 
             // Next should always be 0 (NULL) at this point since we have reached the end of the freeblocks linked list
@@ -1479,17 +1482,21 @@ impl BTreeCursor {
             );
 
             assert!(
-                pc + size <= usable_space,
+                cur_freeblock_ptr + size <= usable_space,
                 "corrupted page: last freeblock extends last page end"
             );
         }
 
+        assert!(
+            free_space_bytes <= usable_space,
+            "corrupted page: free space is greater than usable space"
+        );
+
         // if( nFree>usableSize || nFree<iCellFirst ){
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
-        // FIXME:don't count header and cell pointers?
-        nfree -= first_cell as usize;
-        nfree as u16
+
+        free_space_bytes as u16
     }
 
     /// Fill in the cell payload with the record.
