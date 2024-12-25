@@ -149,8 +149,12 @@ fn run_simulation(
         (read_percent, write_percent, delete_percent)
     };
 
+    if cli_opts.maximum_size < 1 {
+        panic!("maximum size must be at least 1");
+    }
+
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..cli_opts.maximum_size),
+        ticks: rng.gen_range(1..=cli_opts.maximum_size),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -158,7 +162,7 @@ fn run_simulation(
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(0..cli_opts.maximum_size),
+        max_interactions: rng.gen_range(1..=cli_opts.maximum_size),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
