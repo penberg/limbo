@@ -126,9 +126,9 @@ fn main() {
         std::fs::rename(&old_plan_path, &plan_path).unwrap();
     }
     // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
-    log::info!("database path: {:?}", db_path);
-    log::info!("simulator plan path: {:?}", plan_path);
-    log::info!("seed: {}", seed);
+    println!("database path: {:?}", db_path);
+    println!("simulator plan path: {:?}", plan_path);
+    println!("seed: {}", seed);
 }
 
 fn run_simulation(
