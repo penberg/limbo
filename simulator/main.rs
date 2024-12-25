@@ -379,6 +379,9 @@ fn get_all_rows(
             RowResult::Done => {
                 break;
             }
+            RowResult::Busy => {
+                // for now let's retry?
+            }
         }
     }
     Ok(out)

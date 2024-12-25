@@ -60,6 +60,7 @@ pub fn parse_schema_rows(rows: Option<Rows>, schema: &mut Schema, io: Arc<dyn IO
                 }
                 RowResult::Interrupt => break,
                 RowResult::Done => break,
+                RowResult::Busy => break,
             }
         }
     }

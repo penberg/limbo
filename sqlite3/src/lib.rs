@@ -246,6 +246,7 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
                 stmt.row.replace(Some(row));
                 SQLITE_ROW
             }
+            limbo_core::RowResult::Busy => SQLITE_BUSY,
         }
     } else {
         SQLITE_ERROR

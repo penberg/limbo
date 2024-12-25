@@ -5,6 +5,7 @@ mod io;
 #[cfg(feature = "json")]
 mod json;
 mod pseudo;
+mod result;
 mod schema;
 mod storage;
 mod translate;
@@ -66,7 +67,6 @@ pub struct Database {
     pager: Rc<Pager>,
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
-    transaction_state: RefCell<TransactionState>,
     // Shared structures of a Database are the parts that are common to multiple threads that might
     // create DB connections.
     shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
@@ -123,6 +123,7 @@ impl Database {
             pager: pager.clone(),
             schema: bootstrap_schema.clone(),
             header: db_header.clone(),
+            transaction_state: RefCell::new(TransactionState::None),
             db: Weak::new(),
             last_insert_rowid: Cell::new(0),
         });
@@ -135,7 +136,6 @@ impl Database {
             pager,
             schema,
             header,
-            transaction_state: RefCell::new(TransactionState::None),
             shared_page_cache,
             shared_wal,
         }))
@@ -148,6 +148,7 @@ impl Database {
             header: self.header.clone(),
             last_insert_rowid: Cell::new(0),
             db: Arc::downgrade(self),
+            transaction_state: RefCell::new(TransactionState::None),
         })
     }
 }
@@ -206,6 +207,7 @@ pub struct Connection {
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
     db: Weak<Database>, // backpointer to the database holding this connection
+    transaction_state: RefCell<TransactionState>,
     last_insert_rowid: Cell<u64>,
 }
 
@@ -379,6 +381,7 @@ impl Statement {
             vdbe::StepResult::IO => Ok(RowResult::IO),
             vdbe::StepResult::Done => Ok(RowResult::Done),
             vdbe::StepResult::Interrupt => Ok(RowResult::Interrupt),
+            vdbe::StepResult::Busy => Ok(RowResult::Busy),
         }
     }
 
@@ -395,6 +398,7 @@ pub enum RowResult<'a> {
     IO,
     Done,
     Interrupt,
+    Busy,
 }
 
 pub struct Row<'a> {

@@ -525,6 +525,10 @@ impl Limbo {
                         Ok(RowResult::Done) => {
                             break;
                         }
+                        Ok(RowResult::Busy) => {
+                            self.writeln("database is busy");
+                            break;
+                        }
                         Err(err) => {
                             let _ = self.writeln(err.to_string());
                             break;
@@ -560,6 +564,10 @@ impl Limbo {
                             }
                             Ok(RowResult::Interrupt) => break,
                             Ok(RowResult::Done) => break,
+                            Ok(RowResult::Busy) => {
+                                self.writeln("database is busy");
+                                break;
+                            }
                             Err(err) => {
                                 let _ = self.write_fmt(format_args!("{}", err));
                                 break;
@@ -610,6 +618,10 @@ impl Limbo {
                         }
                         RowResult::Interrupt => break,
                         RowResult::Done => break,
+                        RowResult::Busy => {
+                            self.writeln("database is busy");
+                            break;
+                        }
                     }
                 }
                 if !found {
@@ -663,6 +675,10 @@ impl Limbo {
                         }
                         RowResult::Interrupt => break,
                         RowResult::Done => break,
+                        RowResult::Busy => {
+                            self.writeln("database is busy");
+                            break;
+                        }
                     }
                 }
 

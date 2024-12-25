@@ -95,6 +95,9 @@ mod tests {
                         }
                         RowResult::Interrupt => break,
                         RowResult::Done => break,
+                        RowResult::Busy => {
+                            panic!("Database is busy");
+                        }
                     }
                 },
                 Ok(None) => {}
@@ -163,6 +166,7 @@ mod tests {
                     }
                     RowResult::Interrupt => break,
                     RowResult::Done => break,
+                    RowResult::Busy => unreachable!(),
                 }
             },
             Ok(None) => {}
@@ -237,6 +241,7 @@ mod tests {
                     }
                     RowResult::Interrupt => break,
                     RowResult::Done => break,
+                    RowResult::Busy => unreachable!(),
                 }
             },
             Ok(None) => {}
@@ -300,6 +305,7 @@ mod tests {
                     }
                     RowResult::Interrupt => break,
                     RowResult::Done => break,
+                    RowResult::Busy => unreachable!(),
                 }
             },
             Ok(None) => {}
@@ -361,6 +367,7 @@ mod tests {
                             }
                             RowResult::Interrupt => break,
                             RowResult::Done => break,
+                            RowResult::Busy => panic!("Database is busy"),
                         }
                     }
                 }
@@ -453,6 +460,7 @@ mod tests {
                     }
                     RowResult::Interrupt => break,
                     RowResult::Done => break,
+                    RowResult::Busy => panic!("Database is busy"),
                 }
             }
         }
@@ -487,6 +495,7 @@ mod tests {
                     }
                     RowResult::Interrupt => break,
                     RowResult::Done => break,
+                    RowResult::Busy => panic!("Database is busy"),
                 }
             },
             Ok(None) => {}

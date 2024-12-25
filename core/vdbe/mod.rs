@@ -28,6 +28,7 @@ use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
+use crate::result::LimboResult;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
@@ -537,6 +538,7 @@ pub enum StepResult<'a> {
     IO,
     Row(Record<'a>),
     Interrupt,
+    Busy,
 }
 
 /// If there is I/O, the instruction is restarted.
@@ -1657,28 +1659,33 @@ impl Program {
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();
-                    if let Some(db) = connection.db.upgrade() {
-                        // TODO(pere): are backpointers good ?? this looks ugly af
-                        // upgrade transaction if needed
-                        let new_transaction_state =
-                            match (db.transaction_state.borrow().clone(), write) {
-                                (crate::TransactionState::Write, true) => TransactionState::Write,
-                                (crate::TransactionState::Write, false) => TransactionState::Write,
-                                (crate::TransactionState::Read, true) => TransactionState::Write,
-                                (crate::TransactionState::Read, false) => TransactionState::Read,
-                                (crate::TransactionState::None, true) => TransactionState::Read,
-                                (crate::TransactionState::None, false) => TransactionState::Read,
-                            };
-                        // TODO(Pere):
-                        //  1. lock wal
-                        //  2. lock shared
-                        //  3. lock write db if write
-                        db.transaction_state.replace(new_transaction_state.clone());
-                        if matches!(new_transaction_state, TransactionState::Write) {
-                            pager.begin_read_tx()?;
-                        } else {
-                            pager.begin_write_tx()?;
+                    let current_state = connection.transaction_state.borrow().clone();
+                    let (new_transaction_state, updated) = match (&current_state, write) {
+                        (crate::TransactionState::Write, true) => (TransactionState::Write, false),
+                        (crate::TransactionState::Write, false) => (TransactionState::Write, false),
+                        (crate::TransactionState::Read, true) => (TransactionState::Write, true),
+                        (crate::TransactionState::Read, false) => (TransactionState::Read, false),
+                        (crate::TransactionState::None, true) => (TransactionState::Write, true),
+                        (crate::TransactionState::None, false) => (TransactionState::Read, true),
+                    };
+
+                    if updated && matches!(current_state, TransactionState::None) {
+                        if let LimboResult::Busy = pager.begin_read_tx()? {
+                            log::trace!("begin_read_tx busy");
+                            return Ok(StepResult::Busy);
                         }
+                    }
+
+                    if updated && matches!(new_transaction_state, TransactionState::Write) {
+                        if let LimboResult::Busy = pager.begin_write_tx()? {
+                            log::trace!("begin_write_tx busy");
+                            return Ok(StepResult::Busy);
+                        }
+                    }
+                    if updated {
+                        connection
+                            .transaction_state
+                            .replace(new_transaction_state.clone());
                     }
                     state.pc += 1;
                 }
