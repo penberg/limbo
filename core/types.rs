@@ -394,11 +394,20 @@ impl OwnedRecord {
 
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         let initial_i = buf.len();
+        let mut serial_types = Vec::with_capacity(self.values.len());
 
+        // First pass: calculate serial types and store them
         for value in &self.values {
             let serial_type = match value {
                 OwnedValue::Null => 0,
-                OwnedValue::Integer(_) => 6, // for now let's only do i64
+                OwnedValue::Integer(i) => match i {
+                    i if *i >= -128 && *i <= 127 => 1,                         // 8-bit
+                    i if *i >= -32768 && *i <= 32767 => 2,                     // 16-bit
+                    i if *i >= -8388608 && *i <= 8388607 => 3,                 // 24-bit
+                    i if *i >= -2147483648 && *i <= 2147483647 => 4,           // 32-bit
+                    i if *i >= -140737488355328 && *i <= 140737488355327 => 5, // 48-bit
+                    _ => 6,                                                    // 64-bit
+                },
                 OwnedValue::Float(_) => 7,
                 OwnedValue::Text(t) => (t.value.len() * 2 + 13) as u64,
                 OwnedValue::Blob(b) => (b.len() * 2 + 12) as u64,
@@ -411,15 +420,24 @@ impl OwnedRecord {
             let len = buf.len();
             let n = write_varint(&mut buf[len - 9..], serial_type);
             buf.truncate(buf.len() - 9 + n); // Remove unused bytes
+
+            serial_types.push(serial_type);
         }
 
         let mut header_size = buf.len() - initial_i;
         // write content
-        for value in &self.values {
-            // TODO: make integers and floats with smaller serial types
+        for (value, &serial_type) in self.values.iter().zip(serial_types.iter()) {
             match value {
                 OwnedValue::Null => {}
-                OwnedValue::Integer(i) => buf.extend_from_slice(&i.to_be_bytes()),
+                OwnedValue::Integer(i) => match serial_type {
+                    1 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
+                    2 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
+                    3 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]),
+                    4 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
+                    5 => buf.extend_from_slice(&i.to_be_bytes()[2..]),
+                    6 => buf.extend_from_slice(&i.to_be_bytes()),
+                    _ => unreachable!(),
+                },
                 OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
                 OwnedValue::Text(t) => buf.extend_from_slice(t.value.as_bytes()),
                 OwnedValue::Blob(b) => buf.extend_from_slice(b),
