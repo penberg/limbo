@@ -40,7 +40,7 @@ use crate::util::parse_schema_rows;
 use crate::{function::JsonFunc, json::get_json, json::json_array};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
-use macros::Description;
+use limbo_macros::Description;
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
