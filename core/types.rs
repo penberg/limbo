@@ -387,6 +387,27 @@ pub struct OwnedRecord {
     pub values: Vec<OwnedValue>,
 }
 
+const I8_LOW: i64 = -128;
+const I8_HIGH: i64 = 127;
+const I16_LOW: i64 = -32768;
+const I16_HIGH: i64 = 32767;
+const I24_LOW: i64 = -8388608;
+const I24_HIGH: i64 = 8388607;
+const I32_LOW: i64 = -2147483648;
+const I32_HIGH: i64 = 2147483647;
+const I48_LOW: i64 = -140737488355328;
+const I48_HIGH: i64 = 140737488355327;
+
+// https://www.sqlite.org/fileformat.html#record_format
+const SERIAL_TYPE_INTEGER_ZERO: u64 = 0;
+const SERIAL_TYPE_I8: u64 = 1;
+const SERIAL_TYPE_I16: u64 = 2;
+const SERIAL_TYPE_I24: u64 = 3;
+const SERIAL_TYPE_I32: u64 = 4;
+const SERIAL_TYPE_I48: u64 = 5;
+const SERIAL_TYPE_I64: u64 = 6;
+const SERIAL_TYPE_F64: u64 = 7;
+
 impl OwnedRecord {
     pub fn new(values: Vec<OwnedValue>) -> Self {
         Self { values }
@@ -399,16 +420,16 @@ impl OwnedRecord {
         // First pass: calculate serial types and store them
         for value in &self.values {
             let serial_type = match value {
-                OwnedValue::Null => 0,
+                OwnedValue::Null => SERIAL_TYPE_INTEGER_ZERO,
                 OwnedValue::Integer(i) => match i {
-                    i if *i >= -128 && *i <= 127 => 1,                         // 8-bit
-                    i if *i >= -32768 && *i <= 32767 => 2,                     // 16-bit
-                    i if *i >= -8388608 && *i <= 8388607 => 3,                 // 24-bit
-                    i if *i >= -2147483648 && *i <= 2147483647 => 4,           // 32-bit
-                    i if *i >= -140737488355328 && *i <= 140737488355327 => 5, // 48-bit
-                    _ => 6,                                                    // 64-bit
+                    i if *i >= I8_LOW && *i <= I8_HIGH => SERIAL_TYPE_I8,
+                    i if *i >= I16_LOW && *i <= I16_HIGH => SERIAL_TYPE_I16,
+                    i if *i >= I24_LOW && *i <= I24_HIGH => SERIAL_TYPE_I24,
+                    i if *i >= I32_LOW && *i <= I32_HIGH => SERIAL_TYPE_I32,
+                    i if *i >= I48_LOW && *i <= I48_HIGH => SERIAL_TYPE_I48,
+                    _ => SERIAL_TYPE_I64,
                 },
-                OwnedValue::Float(_) => 7,
+                OwnedValue::Float(_) => SERIAL_TYPE_F64,
                 OwnedValue::Text(t) => (t.value.len() * 2 + 13) as u64,
                 OwnedValue::Blob(b) => (b.len() * 2 + 12) as u64,
                 // not serializable values
@@ -416,7 +437,7 @@ impl OwnedRecord {
                 OwnedValue::Record(_) => unreachable!(),
             };
 
-            buf.resize(buf.len() + 9, 0); // Ensure space for varint
+            buf.resize(buf.len() + 9, 0); // Ensure space for varint (1-9 bytes in length)
             let len = buf.len();
             let n = write_varint(&mut buf[len - 9..], serial_type);
             buf.truncate(buf.len() - 9 + n); // Remove unused bytes
@@ -430,12 +451,12 @@ impl OwnedRecord {
             match value {
                 OwnedValue::Null => {}
                 OwnedValue::Integer(i) => match serial_type {
-                    1 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
-                    2 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
-                    3 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]),
-                    4 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
-                    5 => buf.extend_from_slice(&i.to_be_bytes()[2..]),
-                    6 => buf.extend_from_slice(&i.to_be_bytes()),
+                    SERIAL_TYPE_I8 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
+                    SERIAL_TYPE_I16 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
+                    SERIAL_TYPE_I24 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]), // remove most significant byte
+                    SERIAL_TYPE_I32 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
+                    SERIAL_TYPE_I48 => buf.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
+                    SERIAL_TYPE_I64 => buf.extend_from_slice(&i.to_be_bytes()),
                     _ => unreachable!(),
                 },
                 OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
