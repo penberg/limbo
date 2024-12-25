@@ -1,13 +1,17 @@
+use clap::Parser;
 use generation::plan::{Interaction, InteractionPlan, ResultSet};
-use generation::{pick, pick_index, Arbitrary, ArbitraryFrom};
-use limbo_core::{Connection, Database, File, OpenFlags, PlatformIO, Result, RowResult, IO};
-use model::query::{Create, Insert, Predicate, Query, Select};
+use generation::{pick_index, Arbitrary, ArbitraryFrom};
+use limbo_core::{Connection, Database, Result, RowResult, IO};
+use model::query::{Create, Query};
 use model::table::{Column, Name, Table, Value};
-use properties::{property_insert_select, property_select_all};
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use std::cell::RefCell;
+use runner::cli::SimulatorCLI;
+use runner::env::{SimConnection, SimulatorEnv, SimulatorOpts};
+use runner::io::SimulatorIO;
+use std::backtrace::Backtrace;
 use std::io::Write;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -15,44 +19,124 @@ use tempfile::TempDir;
 mod generation;
 mod model;
 mod properties;
-
-struct SimulatorEnv {
-    opts: SimulatorOpts,
-    tables: Vec<Table>,
-    connections: Vec<SimConnection>,
-    io: Arc<SimulatorIO>,
-    db: Arc<Database>,
-    rng: ChaCha8Rng,
-}
-
-#[derive(Clone)]
-enum SimConnection {
-    Connected(Rc<Connection>),
-    Disconnected,
-}
-
-#[derive(Debug, Clone)]
-struct SimulatorOpts {
-    ticks: usize,
-    max_connections: usize,
-    max_tables: usize,
-    // this next options are the distribution of workload where read_percent + write_percent +
-    // delete_percent == 100%
-    read_percent: usize,
-    write_percent: usize,
-    delete_percent: usize,
-    max_interactions: usize,
-    page_size: usize,
-}
+mod runner;
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn main() {
     let _ = env_logger::try_init();
-    let seed = match std::env::var("SEED") {
-        Ok(seed) => seed.parse::<u64>().unwrap(),
-        Err(_) => rand::thread_rng().next_u64(),
+
+    let cli_opts = SimulatorCLI::parse();
+
+    let seed = match cli_opts.seed {
+        Some(seed) => seed,
+        None => rand::thread_rng().next_u64(),
     };
-    println!("Seed: {}", seed);
+
+    let output_dir = match &cli_opts.output_dir {
+        Some(dir) => Path::new(dir).to_path_buf(),
+        None => TempDir::new().unwrap().into_path(),
+    };
+
+    let db_path = output_dir.join("simulator.db");
+    let plan_path = output_dir.join("simulator.plan");
+
+    // Print the seed, the locations of the database and the plan file
+    log::info!("database path: {:?}", db_path);
+    log::info!("simulator plan path: {:?}", plan_path);
+    log::info!("seed: {}", seed);
+
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("panic occurred");
+
+        let payload = info.payload();
+        if let Some(s) = payload.downcast_ref::<&str>() {
+            log::error!("{}", s);
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            log::error!("{}", s);
+        } else {
+            log::error!("unknown panic payload");
+        }
+
+        let bt = Backtrace::force_capture();
+        log::error!("captured backtrace:\n{}", bt);
+    }));
+
+    let result = std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
+
+    if cli_opts.doublecheck {
+        // Move the old database and plan file to a new location
+        let old_db_path = db_path.with_extension("_old.db");
+        let old_plan_path = plan_path.with_extension("_old.plan");
+
+        std::fs::rename(&db_path, &old_db_path).unwrap();
+        std::fs::rename(&plan_path, &old_plan_path).unwrap();
+
+        // Run the simulation again
+        let result2 =
+            std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
+
+        match (result, result2) {
+            (Ok(Ok(_)), Err(_)) => {
+                log::error!("doublecheck failed! first run succeeded, but second run panicked.");
+            }
+            (Ok(Err(_)), Err(_)) => {
+                log::error!(
+                    "doublecheck failed! first run failed assertion, but second run panicked."
+                );
+            }
+            (Err(_), Ok(Ok(_))) => {
+                log::error!("doublecheck failed! first run panicked, but second run succeeded.");
+            }
+            (Err(_), Ok(Err(_))) => {
+                log::error!(
+                    "doublecheck failed! first run panicked, but second run failed assertion."
+                );
+            }
+            (Ok(Ok(_)), Ok(Err(_))) => {
+                log::error!(
+                    "doublecheck failed! first run succeeded, but second run failed assertion."
+                );
+            }
+            (Ok(Err(_)), Ok(Ok(_))) => {
+                log::error!(
+                    "doublecheck failed! first run failed assertion, but second run succeeded."
+                );
+            }
+            (Err(_), Err(_)) | (Ok(_), Ok(_)) => {
+                // Compare the two database files byte by byte
+                let old_db = std::fs::read(&old_db_path).unwrap();
+                let new_db = std::fs::read(&db_path).unwrap();
+                if old_db != new_db {
+                    log::error!("doublecheck failed! database files are different.");
+                } else {
+                    log::info!("doublecheck succeeded! database files are the same.");
+                }
+            }
+        }
+
+        // Move the new database and plan file to a new location
+        let new_db_path = db_path.with_extension("_double.db");
+        let new_plan_path = plan_path.with_extension("_double.plan");
+
+        std::fs::rename(&db_path, &new_db_path).unwrap();
+        std::fs::rename(&plan_path, &new_plan_path).unwrap();
+
+        // Move the old database and plan file back
+        std::fs::rename(&old_db_path, &db_path).unwrap();
+        std::fs::rename(&old_plan_path, &plan_path).unwrap();
+    }
+    // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
+    log::info!("database path: {:?}", db_path);
+    log::info!("simulator plan path: {:?}", plan_path);
+    log::info!("seed: {}", seed);
+}
+
+fn run_simulation(
+    seed: u64,
+    cli_opts: &SimulatorCLI,
+    db_path: &Path,
+    plan_path: &Path,
+) -> Result<()> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let (read_percent, write_percent, delete_percent) = {
@@ -66,7 +150,7 @@ fn main() {
     };
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(0..10240),
+        ticks: rng.gen_range(0..cli_opts.maximum_size),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
@@ -74,21 +158,19 @@ fn main() {
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(0..10240),
+        max_interactions: rng.gen_range(0..cli_opts.maximum_size),
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
-    let mut path = TempDir::new().unwrap().into_path();
-    path.push("simulator.db");
-    println!("path to db '{:?}'", path);
-    let db = match Database::open_file(io.clone(), path.as_path().to_str().unwrap()) {
+    let db = match Database::open_file(io.clone(), db_path.to_str().unwrap()) {
         Ok(db) => db,
         Err(e) => {
-            panic!("error opening simulator test file {:?}: {:?}", path, e);
+            panic!("error opening simulator test file {:?}: {:?}", db_path, e);
         }
     };
 
     let connections = vec![SimConnection::Disconnected; opts.max_connections];
+
     let mut env = SimulatorEnv {
         opts,
         tables: Vec::new(),
@@ -98,30 +180,29 @@ fn main() {
         db,
     };
 
-    println!("Initial opts {:?}", env.opts);
-
     log::info!("Generating database interaction plan...");
     let mut plans = (1..=env.opts.max_connections)
         .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
         .collect::<Vec<_>>();
 
+    let mut f = std::fs::File::create(plan_path).unwrap();
+    // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
+    f.write(plans[0].to_string().as_bytes()).unwrap();
+
     log::info!("{}", plans[0].stats());
 
     log::info!("Executing database interaction plan...");
-    let result = execute_plans(&mut env, &mut plans);
 
+    let result = execute_plans(&mut env, &mut plans);
     if result.is_err() {
-        log::error!("error executing plans: {:?}", result.err());
+        log::error!("error executing plans: {:?}", result.as_ref().err());
     }
-    log::info!("db is at {:?}", path);
-    let mut path = TempDir::new().unwrap().into_path();
-    path.push("simulator.plan");
-    let mut f = std::fs::File::create(path.clone()).unwrap();
-    f.write(plans[0].to_string().as_bytes()).unwrap();
-    log::info!("plan saved at {:?}", path);
-    log::info!("seed was {}", seed);
 
     env.io.print_stats();
+
+    log::info!("Simulation completed");
+
+    result
 }
 
 fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Result<()> {
@@ -301,177 +382,4 @@ fn get_all_rows(
         }
     }
     Ok(out)
-}
-
-struct SimulatorIO {
-    inner: Box<dyn IO>,
-    fault: RefCell<bool>,
-    files: RefCell<Vec<Rc<SimulatorFile>>>,
-    rng: RefCell<ChaCha8Rng>,
-    nr_run_once_faults: RefCell<usize>,
-    page_size: usize,
-}
-
-impl SimulatorIO {
-    fn new(seed: u64, page_size: usize) -> Result<Self> {
-        let inner = Box::new(PlatformIO::new()?);
-        let fault = RefCell::new(false);
-        let files = RefCell::new(Vec::new());
-        let rng = RefCell::new(ChaCha8Rng::seed_from_u64(seed));
-        let nr_run_once_faults = RefCell::new(0);
-        Ok(Self {
-            inner,
-            fault,
-            files,
-            rng,
-            nr_run_once_faults,
-            page_size,
-        })
-    }
-
-    fn inject_fault(&self, fault: bool) {
-        self.fault.replace(fault);
-        for file in self.files.borrow().iter() {
-            file.inject_fault(fault);
-        }
-    }
-
-    fn print_stats(&self) {
-        println!("run_once faults: {}", self.nr_run_once_faults.borrow());
-        for file in self.files.borrow().iter() {
-            file.print_stats();
-        }
-    }
-}
-
-impl IO for SimulatorIO {
-    fn open_file(
-        &self,
-        path: &str,
-        flags: OpenFlags,
-        _direct: bool,
-    ) -> Result<Rc<dyn limbo_core::File>> {
-        let inner = self.inner.open_file(path, flags, false)?;
-        let file = Rc::new(SimulatorFile {
-            inner,
-            fault: RefCell::new(false),
-            nr_pread_faults: RefCell::new(0),
-            nr_pwrite_faults: RefCell::new(0),
-            reads: RefCell::new(0),
-            writes: RefCell::new(0),
-            syncs: RefCell::new(0),
-            page_size: self.page_size,
-        });
-        self.files.borrow_mut().push(file.clone());
-        Ok(file)
-    }
-
-    fn run_once(&self) -> Result<()> {
-        if *self.fault.borrow() {
-            *self.nr_run_once_faults.borrow_mut() += 1;
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        self.inner.run_once().unwrap();
-        Ok(())
-    }
-
-    fn generate_random_number(&self) -> i64 {
-        self.rng.borrow_mut().next_u64() as i64
-    }
-
-    fn get_current_time(&self) -> String {
-        "2024-01-01 00:00:00".to_string()
-    }
-}
-
-struct SimulatorFile {
-    inner: Rc<dyn File>,
-    fault: RefCell<bool>,
-    nr_pread_faults: RefCell<usize>,
-    nr_pwrite_faults: RefCell<usize>,
-    writes: RefCell<usize>,
-    reads: RefCell<usize>,
-    syncs: RefCell<usize>,
-    page_size: usize,
-}
-
-impl SimulatorFile {
-    fn inject_fault(&self, fault: bool) {
-        self.fault.replace(fault);
-    }
-
-    fn print_stats(&self) {
-        println!(
-            "pread faults: {}, pwrite faults: {}, reads: {}, writes: {}, syncs: {}",
-            *self.nr_pread_faults.borrow(),
-            *self.nr_pwrite_faults.borrow(),
-            *self.reads.borrow(),
-            *self.writes.borrow(),
-            *self.syncs.borrow(),
-        );
-    }
-}
-
-impl limbo_core::File for SimulatorFile {
-    fn lock_file(&self, exclusive: bool) -> Result<()> {
-        if *self.fault.borrow() {
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        self.inner.lock_file(exclusive)
-    }
-
-    fn unlock_file(&self) -> Result<()> {
-        if *self.fault.borrow() {
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        self.inner.unlock_file()
-    }
-
-    fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        if *self.fault.borrow() {
-            *self.nr_pread_faults.borrow_mut() += 1;
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        *self.reads.borrow_mut() += 1;
-        self.inner.pread(pos, c)
-    }
-
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        c: Rc<limbo_core::Completion>,
-    ) -> Result<()> {
-        if *self.fault.borrow() {
-            *self.nr_pwrite_faults.borrow_mut() += 1;
-            return Err(limbo_core::LimboError::InternalError(
-                "Injected fault".into(),
-            ));
-        }
-        *self.writes.borrow_mut() += 1;
-        self.inner.pwrite(pos, buffer, c)
-    }
-
-    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
-        *self.syncs.borrow_mut() += 1;
-        self.inner.sync(c)
-    }
-
-    fn size(&self) -> Result<u64> {
-        self.inner.size()
-    }
-}
-
-impl Drop for SimulatorFile {
-    fn drop(&mut self) {
-        self.inner.unlock_file().expect("Failed to unlock file");
-    }
 }
