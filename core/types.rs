@@ -398,15 +398,63 @@ const I32_HIGH: i64 = 2147483647;
 const I48_LOW: i64 = -140737488355328;
 const I48_HIGH: i64 = 140737488355327;
 
-// https://www.sqlite.org/fileformat.html#record_format
-const SERIAL_TYPE_INTEGER_ZERO: u64 = 0;
-const SERIAL_TYPE_I8: u64 = 1;
-const SERIAL_TYPE_I16: u64 = 2;
-const SERIAL_TYPE_I24: u64 = 3;
-const SERIAL_TYPE_I32: u64 = 4;
-const SERIAL_TYPE_I48: u64 = 5;
-const SERIAL_TYPE_I64: u64 = 6;
-const SERIAL_TYPE_F64: u64 = 7;
+/// Sqlite Serial Types
+/// https://www.sqlite.org/fileformat.html#record_format
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SerialType {
+    Null,
+    I8,
+    I16,
+    I24,
+    I32,
+    I48,
+    I64,
+    F64,
+    Text { content_size: usize },
+    Blob { content_size: usize },
+}
+
+impl From<&OwnedValue> for SerialType {
+    fn from(value: &OwnedValue) -> Self {
+        match value {
+            OwnedValue::Null => SerialType::Null,
+            OwnedValue::Integer(i) => match i {
+                i if *i >= I8_LOW && *i <= I8_HIGH => SerialType::I8,
+                i if *i >= I16_LOW && *i <= I16_HIGH => SerialType::I16,
+                i if *i >= I24_LOW && *i <= I24_HIGH => SerialType::I24,
+                i if *i >= I32_LOW && *i <= I32_HIGH => SerialType::I32,
+                i if *i >= I48_LOW && *i <= I48_HIGH => SerialType::I48,
+                _ => SerialType::I64,
+            },
+            OwnedValue::Float(_) => SerialType::F64,
+            OwnedValue::Text(t) => SerialType::Text {
+                content_size: t.value.len(),
+            },
+            OwnedValue::Blob(b) => SerialType::Blob {
+                content_size: b.len(),
+            },
+            OwnedValue::Agg(_) => unreachable!(),
+            OwnedValue::Record(_) => unreachable!(),
+        }
+    }
+}
+
+impl From<SerialType> for u64 {
+    fn from(serial_type: SerialType) -> Self {
+        match serial_type {
+            SerialType::Null => 0,
+            SerialType::I8 => 1,
+            SerialType::I16 => 2,
+            SerialType::I24 => 3,
+            SerialType::I32 => 4,
+            SerialType::I48 => 5,
+            SerialType::I64 => 6,
+            SerialType::F64 => 7,
+            SerialType::Text { content_size } => (content_size * 2 + 13) as u64,
+            SerialType::Blob { content_size } => (content_size * 2 + 12) as u64,
+        }
+    }
+}
 
 impl OwnedRecord {
     pub fn new(values: Vec<OwnedValue>) -> Self {
@@ -415,50 +463,33 @@ impl OwnedRecord {
 
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         let initial_i = buf.len();
-        let mut serial_types = Vec::with_capacity(self.values.len());
 
-        // First pass: calculate serial types and store them
+        // write serial types
         for value in &self.values {
-            let serial_type = match value {
-                OwnedValue::Null => SERIAL_TYPE_INTEGER_ZERO,
-                OwnedValue::Integer(i) => match i {
-                    i if *i >= I8_LOW && *i <= I8_HIGH => SERIAL_TYPE_I8,
-                    i if *i >= I16_LOW && *i <= I16_HIGH => SERIAL_TYPE_I16,
-                    i if *i >= I24_LOW && *i <= I24_HIGH => SERIAL_TYPE_I24,
-                    i if *i >= I32_LOW && *i <= I32_HIGH => SERIAL_TYPE_I32,
-                    i if *i >= I48_LOW && *i <= I48_HIGH => SERIAL_TYPE_I48,
-                    _ => SERIAL_TYPE_I64,
-                },
-                OwnedValue::Float(_) => SERIAL_TYPE_F64,
-                OwnedValue::Text(t) => (t.value.len() * 2 + 13) as u64,
-                OwnedValue::Blob(b) => (b.len() * 2 + 12) as u64,
-                // not serializable values
-                OwnedValue::Agg(_) => unreachable!(),
-                OwnedValue::Record(_) => unreachable!(),
-            };
-
+            let serial_type = SerialType::from(value);
             buf.resize(buf.len() + 9, 0); // Ensure space for varint (1-9 bytes in length)
             let len = buf.len();
-            let n = write_varint(&mut buf[len - 9..], serial_type);
+            let n = write_varint(&mut buf[len - 9..], serial_type.into());
             buf.truncate(buf.len() - 9 + n); // Remove unused bytes
-
-            serial_types.push(serial_type);
         }
 
         let mut header_size = buf.len() - initial_i;
         // write content
-        for (value, &serial_type) in self.values.iter().zip(serial_types.iter()) {
+        for value in &self.values {
             match value {
                 OwnedValue::Null => {}
-                OwnedValue::Integer(i) => match serial_type {
-                    SERIAL_TYPE_I8 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
-                    SERIAL_TYPE_I16 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
-                    SERIAL_TYPE_I24 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]), // remove most significant byte
-                    SERIAL_TYPE_I32 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
-                    SERIAL_TYPE_I48 => buf.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
-                    SERIAL_TYPE_I64 => buf.extend_from_slice(&i.to_be_bytes()),
-                    _ => unreachable!(),
-                },
+                OwnedValue::Integer(i) => {
+                    let serial_type = SerialType::from(value);
+                    match serial_type {
+                        SerialType::I8 => buf.extend_from_slice(&(*i as i8).to_be_bytes()),
+                        SerialType::I16 => buf.extend_from_slice(&(*i as i16).to_be_bytes()),
+                        SerialType::I24 => buf.extend_from_slice(&(*i as i32).to_be_bytes()[1..]), // remove most significant byte
+                        SerialType::I32 => buf.extend_from_slice(&(*i as i32).to_be_bytes()),
+                        SerialType::I48 => buf.extend_from_slice(&i.to_be_bytes()[2..]), // remove 2 most significant bytes
+                        SerialType::I64 => buf.extend_from_slice(&i.to_be_bytes()),
+                        _ => unreachable!(),
+                    }
+                }
                 OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
                 OwnedValue::Text(t) => buf.extend_from_slice(t.value.as_bytes()),
                 OwnedValue::Blob(b) => buf.extend_from_slice(b),
@@ -545,7 +576,7 @@ mod tests {
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
         // Second byte should be serial type for NULL
-        assert_eq!(header[1], SERIAL_TYPE_INTEGER_ZERO as u8);
+        assert_eq!(header[1] as u64, u64::from(SerialType::Null));
         // Check that the buffer is empty after the header
         assert_eq!(buf.len(), header_length);
     }
@@ -569,12 +600,12 @@ mod tests {
         assert!(header[0] == header_length as u8); // Header should be larger than number of values
 
         // Check that correct serial types were chosen
-        assert_eq!(header[1], SERIAL_TYPE_I8 as u8);
-        assert_eq!(header[2], SERIAL_TYPE_I16 as u8);
-        assert_eq!(header[3], SERIAL_TYPE_I24 as u8);
-        assert_eq!(header[4], SERIAL_TYPE_I32 as u8);
-        assert_eq!(header[5], SERIAL_TYPE_I48 as u8);
-        assert_eq!(header[6], SERIAL_TYPE_I64 as u8);
+        assert_eq!(header[1] as u64, u64::from(SerialType::I8));
+        assert_eq!(header[2] as u64, u64::from(SerialType::I16));
+        assert_eq!(header[3] as u64, u64::from(SerialType::I24));
+        assert_eq!(header[4] as u64, u64::from(SerialType::I32));
+        assert_eq!(header[5] as u64, u64::from(SerialType::I48));
+        assert_eq!(header[6] as u64, u64::from(SerialType::I64));
 
         // test that the bytes after the header can be interpreted as the correct values
         let mut cur_offset = header_length;
@@ -636,7 +667,7 @@ mod tests {
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
         // Second byte should be serial type for FLOAT
-        assert_eq!(header[1], SERIAL_TYPE_F64 as u8);
+        assert_eq!(header[1] as u64, u64::from(SerialType::F64));
         // Check that the bytes after the header can be interpreted as the float
         let float_bytes = &buf[header_length..header_length + size_of::<f64>()];
         let float = f64::from_be_bytes(float_bytes.try_into().unwrap());
@@ -700,13 +731,13 @@ mod tests {
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
         // Second byte should be serial type for NULL
-        assert_eq!(header[1], SERIAL_TYPE_INTEGER_ZERO as u8);
+        assert_eq!(header[1] as u64, u64::from(SerialType::Null));
         // Third byte should be serial type for I8
-        assert_eq!(header[2], SERIAL_TYPE_I8 as u8);
+        assert_eq!(header[2] as u64, u64::from(SerialType::I8));
         // Fourth byte should be serial type for F64
-        assert_eq!(header[3], SERIAL_TYPE_F64 as u8);
+        assert_eq!(header[3] as u64, u64::from(SerialType::F64));
         // Fifth byte should be serial type for TEXT, which is (len * 2 + 13)
-        assert_eq!(header[4], (4 * 2 + 13) as u8);
+        assert_eq!(header[4] as u64, (4 * 2 + 13) as u64);
 
         // Check that the bytes after the header can be interpreted as the correct values
         let mut cur_offset = header_length;
