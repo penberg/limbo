@@ -82,6 +82,7 @@ impl RowIterator {
             Ok(limbo_core::RowResult::Done) | Ok(limbo_core::RowResult::Interrupt) => {
                 JsValue::UNDEFINED
             }
+            Ok(limbo_core::RowResult::Busy) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
