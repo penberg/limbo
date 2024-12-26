@@ -83,3 +83,35 @@ do_execsql_test json_array_json {
 do_execsql_test json_array_nested {
    SELECT json_array(json_array(1,2,3), json('[1,2,3]'), '[1,2,3]')
 } {{[[1,2,3],[1,2,3],"[1,2,3]"]}}
+
+do_execsql_test json_array_length {
+   SELECT json_array_length('[1,2,3,4]');
+} {{4}}
+
+do_execsql_test json_array_length_empty {
+   SELECT json_array_length('[]');
+} {{0}}
+
+do_execsql_test json_array_length_root {
+  SELECT json_array_length('[1,2,3,4]', '$');
+} {{4}}
+
+do_execsql_test json_array_length_not_array {
+  SELECT json_array_length('{"one":[1,2,3]}');
+} {{0}}
+
+do_execsql_test json_array_length_via_prop {
+  SELECT json_array_length('{"one":[1,2,3]}', '$.one');
+} {{3}}
+
+do_execsql_test json_array_length_via_index {
+  SELECT json_array_length('[[1,2,3,4]]', '$[0]');
+} {{4}}
+
+do_execsql_test json_array_length_via_index_not_array {
+  SELECT json_array_length('[1,2,3,4]', '$[2]');
+} {{0}}
+
+do_execsql_test json_array_length_via_bad_prop {
+  SELECT json_array_length('{"one":[1,2,3]}', '$.two');
+} {{}}
