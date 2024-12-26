@@ -3166,7 +3166,6 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
 }
 
 fn construct_like_regex(pattern: &str) -> Regex {
-
     let mut regex_pattern = String::with_capacity(pattern.len() * 2);
 
     regex_pattern.push('^');
