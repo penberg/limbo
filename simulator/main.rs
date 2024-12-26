@@ -269,7 +269,7 @@ fn execute_interaction(
             };
 
             log::debug!("{}", interaction);
-            let results = interaction.execute_query(conn)?;
+            let results = interaction.execute_query(conn);
             log::debug!("{:?}", results);
             stack.push(results);
         }

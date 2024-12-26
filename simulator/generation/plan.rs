@@ -16,7 +16,7 @@ use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
 
 use super::{pick, pick_index};
 
-pub(crate) type ResultSet = Vec<Vec<Value>>;
+pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
 pub(crate) struct InteractionPlan {
     pub(crate) plan: Vec<Interaction>,
@@ -195,7 +195,7 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
 }
 
 impl Interaction {
-    pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> Result<ResultSet> {
+    pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> ResultSet {
         match self {
             Interaction::Query(query) => {
                 let query_str = query.to_string();
@@ -340,11 +340,39 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
         ),
         func: Box::new(move |stack: &Vec<ResultSet>| {
             let rows = stack.last().unwrap();
-            rows.iter().any(|r| r == &row)
+            match rows {
+                Ok(rows) => rows.iter().any(|r| r == &row),
+                Err(_) => false,
+            }
         }),
     });
 
     Interactions(vec![insert_query, select_query, assertion])
+}
+
+fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+    let create_query = Create::arbitrary(rng);
+    let cq1 = Interaction::Query(Query::Create(create_query.clone()));
+    let cq2 = Interaction::Query(Query::Create(create_query.clone()));
+
+    let assertion = Interaction::Assertion(Assertion {
+        message:
+            "creating two tables with the name should result in a failure for the second query"
+                .to_string(),
+        func: Box::new(move |stack: &Vec<ResultSet>| {
+            let last = stack.last().unwrap();
+            println!("last: {:?}", last);
+            match last {
+                Ok(_) => false,
+                Err(e) => {
+                    let re = regex::Regex::new("Table .* already exists").unwrap();
+                    re.is_match(&e.to_string())
+                }
+            }
+        }),
+    });
+
+    Interactions(vec![cq1, cq2, assertion])
 }
 
 fn create_table<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
@@ -399,6 +427,10 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
                     Box::new(|rng: &mut R| create_table(rng, env)),
                 ),
                 (1, Box::new(|rng: &mut R| random_fault(rng, env))),
+                (
+                    1,
+                    Box::new(|rng: &mut R| property_double_create_failure(rng, env)),
+                ),
             ],
             rng,
         )

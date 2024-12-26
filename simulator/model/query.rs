@@ -61,7 +61,7 @@ pub(crate) enum Query {
     Delete(Delete),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Create {
     pub(crate) table: Table,
 }
