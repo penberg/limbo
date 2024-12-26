@@ -352,6 +352,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
 
 fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
     let create_query = Create::arbitrary(rng);
+    let table_name = create_query.table.name.clone();
     let cq1 = Interaction::Query(Query::Create(create_query.clone()));
     let cq2 = Interaction::Query(Query::Create(create_query.clone()));
 
@@ -361,12 +362,10 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv)
                 .to_string(),
         func: Box::new(move |stack: &Vec<ResultSet>| {
             let last = stack.last().unwrap();
-            println!("last: {:?}", last);
             match last {
                 Ok(_) => false,
                 Err(e) => {
-                    let re = regex::Regex::new("Table .* already exists").unwrap();
-                    re.is_match(&e.to_string())
+                    e.to_string().contains(&format!("Table {table_name} already exists"))
                 }
             }
         }),
