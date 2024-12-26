@@ -364,9 +364,9 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv)
             let last = stack.last().unwrap();
             match last {
                 Ok(_) => false,
-                Err(e) => {
-                    e.to_string().contains(&format!("Table {table_name} already exists"))
-                }
+                Err(e) => e
+                    .to_string()
+                    .contains(&format!("Table {table_name} already exists")),
             }
         }),
     });
