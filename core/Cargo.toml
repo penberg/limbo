@@ -44,7 +44,8 @@ sieve-cache = "0.1.4"
 sqlite3-parser = { path = "../vendored/sqlite3-parser" }
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15", features = ["js"] }
-regex = "1.10.5"
+regex = "1.11.1"
+regex-syntax = { version = "0.8.5", default-features = false, features = ["unicode"] }
 chrono = "0.4.38"
 julian_day_converter = "0.3.2"
 jsonb = { version = "0.4.4", optional = true }
