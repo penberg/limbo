@@ -1,14 +1,13 @@
 use std::rc::Weak;
 use std::{cell::RefCell, rc::Rc};
 
+use super::emitter::emit_program;
+use super::planner::prepare_select_plan;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
+use crate::translate::optimizer::optimize_plan;
 use crate::Connection;
 use crate::{schema::Schema, vdbe::Program, Result};
 use sqlite3_parser::ast;
-
-use super::emitter::emit_program;
-use super::optimizer::optimize_plan;
-use super::planner::prepare_select_plan;
 
 pub fn translate_select(
     schema: &Schema,

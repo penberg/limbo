@@ -468,6 +468,14 @@ pub enum Insn {
         cursor_id: usize,
     },
 
+    DeleteAsync {
+        cursor_id: CursorID,
+    },
+
+    DeleteAwait {
+        cursor_id: CursorID,
+    },
+
     NewRowid {
         cursor: CursorID,        // P1
         rowid_reg: usize,        // P2  Destination register to store the new rowid
@@ -2686,6 +2694,16 @@ impl Program {
                     }
                     state.pc += 1;
                 }
+                Insn::DeleteAsync { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    return_if_io!(cursor.delete());
+                    state.pc += 1;
+                }
+                Insn::DeleteAwait { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
+                    state.pc += 1;
+                }
                 Insn::NewRowid {
                     cursor, rowid_reg, ..
                 } => {
@@ -3913,6 +3931,10 @@ mod tests {
             _record: &OwnedRecord,
             _is_leaf: bool,
         ) -> Result<CursorResult<()>> {
+            unimplemented!()
+        }
+
+        fn delete(&mut self) -> Result<CursorResult<()>> {
             unimplemented!()
         }
 

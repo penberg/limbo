@@ -7,6 +7,7 @@
 //! a SELECT statement will be translated into a sequence of instructions that
 //! will read rows from the database and filter them according to a WHERE clause.
 
+pub(crate) mod delete;
 pub(crate) mod emitter;
 pub(crate) mod expr;
 pub(crate) mod insert;
@@ -23,6 +24,7 @@ use std::str::FromStr;
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use crate::translate::delete::translate_delete;
 use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
 use crate::{bail_parse_error, Connection, Result};
 use insert::translate_insert;
@@ -68,7 +70,22 @@ pub fn translate(
         ast::Stmt::CreateVirtualTable { .. } => {
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
-        ast::Stmt::Delete { .. } => bail_parse_error!("DELETE not supported yet"),
+        ast::Stmt::Delete {
+            with,
+            tbl_name,
+            indexed,
+            where_clause,
+            returning,
+            order_by,
+            limit,
+        } => translate_delete(
+            schema,
+            &tbl_name,
+            where_clause,
+            limit,
+            database_header,
+            connection,
+        ),
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),

@@ -36,12 +36,12 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
-use translate::optimizer::optimize_plan;
 use translate::planner::prepare_select_plan;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
 
+use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
