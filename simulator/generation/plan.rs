@@ -66,9 +66,9 @@ pub(crate) enum Interaction {
 impl Display for Interaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Interaction::Query(query) => write!(f, "{}", query),
-            Interaction::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
-            Interaction::Fault(fault) => write!(f, "FAULT: {}", fault),
+            Self::Query(query) => write!(f, "{}", query),
+            Self::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
+            Self::Fault(fault) => write!(f, "FAULT: {}", fault),
         }
     }
 }
@@ -120,7 +120,7 @@ impl Interactions {
 
 impl InteractionPlan {
     pub(crate) fn new() -> Self {
-        InteractionPlan {
+        Self {
             plan: Vec::new(),
             stack: Vec::new(),
             interaction_pointer: 0,
@@ -197,7 +197,7 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
 impl Interaction {
     pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> Result<ResultSet> {
         match self {
-            Interaction::Query(query) => {
+            Self::Query(query) => {
                 let query_str = query.to_string();
                 let rows = conn.query(&query_str);
                 if rows.is_err() {
@@ -241,10 +241,10 @@ impl Interaction {
 
                 Ok(out)
             }
-            Interaction::Assertion(_) => {
+            Self::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
-            Interaction::Fault(fault) => {
+            Self::Fault(fault) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
         }
@@ -252,10 +252,10 @@ impl Interaction {
 
     pub(crate) fn execute_assertion(&self, stack: &Vec<ResultSet>) -> Result<()> {
         match self {
-            Interaction::Query(_) => {
+            Self::Query(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
             }
-            Interaction::Assertion(assertion) => {
+            Self::Assertion(assertion) => {
                 if !assertion.func.as_ref()(stack) {
                     return Err(limbo_core::LimboError::InternalError(
                         assertion.message.clone(),
@@ -263,7 +263,7 @@ impl Interaction {
                 }
                 Ok(())
             }
-            Interaction::Fault(_) => {
+            Self::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
             }
         }
@@ -271,13 +271,13 @@ impl Interaction {
 
     pub(crate) fn execute_fault(&self, env: &mut SimulatorEnv, conn_index: usize) -> Result<()> {
         match self {
-            Interaction::Query(_) => {
+            Self::Query(_) => {
                 unreachable!("unexpected: this function should only be called on faults")
             }
-            Interaction::Assertion(_) => {
+            Self::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on faults")
             }
-            Interaction::Fault(fault) => {
+            Self::Fault(fault) => {
                 match fault {
                     Fault::Disconnect => {
                         match env.connections[conn_index] {

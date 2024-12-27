@@ -167,7 +167,7 @@ impl<'de> Deserializer<'de> {
     }
 
     fn from_pair(pair: Pair<'de, Rule>) -> Self {
-        Deserializer { pair: Some(pair) }
+        Self { pair: Some(pair) }
     }
 }
 

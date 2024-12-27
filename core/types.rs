@@ -18,11 +18,11 @@ pub enum Value<'a> {
 impl<'a> Display for Value<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Null => write!(f, "NULL"),
-            Value::Integer(i) => write!(f, "{}", i),
-            Value::Float(fl) => write!(f, "{}", fl),
-            Value::Text(s) => write!(f, "{}", s),
-            Value::Blob(b) => write!(f, "{:?}", b),
+            Self::Null => write!(f, "NULL"),
+            Self::Integer(i) => write!(f, "{}", i),
+            Self::Float(fl) => write!(f, "{}", fl),
+            Self::Text(s) => write!(f, "{}", s),
+            Self::Blob(b) => write!(f, "{:?}", b),
         }
     }
 }
@@ -69,27 +69,27 @@ pub enum OwnedValue {
 impl OwnedValue {
     // A helper function that makes building a text OwnedValue easier.
     pub fn build_text(text: Rc<String>) -> Self {
-        OwnedValue::Text(LimboText::new(text))
+        Self::Text(LimboText::new(text))
     }
 }
 
 impl Display for OwnedValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            OwnedValue::Null => write!(f, "NULL"),
-            OwnedValue::Integer(i) => write!(f, "{}", i),
-            OwnedValue::Float(fl) => write!(f, "{:?}", fl),
-            OwnedValue::Text(s) => write!(f, "{}", s.value),
-            OwnedValue::Blob(b) => write!(f, "{}", String::from_utf8_lossy(b)),
-            OwnedValue::Agg(a) => match a.as_ref() {
+            Self::Null => write!(f, "NULL"),
+            Self::Integer(i) => write!(f, "{}", i),
+            Self::Float(fl) => write!(f, "{:?}", fl),
+            Self::Text(s) => write!(f, "{}", s.value),
+            Self::Blob(b) => write!(f, "{}", String::from_utf8_lossy(b)),
+            Self::Agg(a) => match a.as_ref() {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
                 AggContext::Sum(acc) => write!(f, "{}", acc),
                 AggContext::Count(count) => write!(f, "{}", count),
-                AggContext::Max(max) => write!(f, "{}", max.as_ref().unwrap_or(&OwnedValue::Null)),
-                AggContext::Min(min) => write!(f, "{}", min.as_ref().unwrap_or(&OwnedValue::Null)),
+                AggContext::Max(max) => write!(f, "{}", max.as_ref().unwrap_or(&Self::Null)),
+                AggContext::Min(min) => write!(f, "{}", min.as_ref().unwrap_or(&Self::Null)),
                 AggContext::GroupConcat(s) => write!(f, "{}", s),
             },
-            OwnedValue::Record(r) => write!(f, "{:?}", r),
+            Self::Record(r) => write!(f, "{:?}", r),
         }
     }
 }
@@ -109,12 +109,12 @@ const NULL: OwnedValue = OwnedValue::Null;
 impl AggContext {
     pub fn final_value(&self) -> &OwnedValue {
         match self {
-            AggContext::Avg(acc, _count) => acc,
-            AggContext::Sum(acc) => acc,
-            AggContext::Count(count) => count,
-            AggContext::Max(max) => max.as_ref().unwrap_or(&NULL),
-            AggContext::Min(min) => min.as_ref().unwrap_or(&NULL),
-            AggContext::GroupConcat(s) => s,
+            Self::Avg(acc, _count) => acc,
+            Self::Sum(acc) => acc,
+            Self::Count(count) => count,
+            Self::Max(max) => max.as_ref().unwrap_or(&NULL),
+            Self::Min(min) => min.as_ref().unwrap_or(&NULL),
+            Self::GroupConcat(s) => s,
         }
     }
 }
@@ -123,44 +123,38 @@ impl AggContext {
 impl PartialOrd<OwnedValue> for OwnedValue {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {
-                int_left.partial_cmp(int_right)
-            }
-            (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
+            (Self::Integer(int_left), Self::Integer(int_right)) => int_left.partial_cmp(int_right),
+            (Self::Integer(int_left), Self::Float(float_right)) => {
                 (*int_left as f64).partial_cmp(float_right)
             }
-            (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
+            (Self::Float(float_left), Self::Integer(int_right)) => {
                 float_left.partial_cmp(&(*int_right as f64))
             }
-            (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
+            (Self::Float(float_left), Self::Float(float_right)) => {
                 float_left.partial_cmp(float_right)
             }
             // Numeric vs Text/Blob
-            (
-                OwnedValue::Integer(_) | OwnedValue::Float(_),
-                OwnedValue::Text(_) | OwnedValue::Blob(_),
-            ) => Some(std::cmp::Ordering::Less),
-            (
-                OwnedValue::Text(_) | OwnedValue::Blob(_),
-                OwnedValue::Integer(_) | OwnedValue::Float(_),
-            ) => Some(std::cmp::Ordering::Greater),
+            (Self::Integer(_) | Self::Float(_), Self::Text(_) | Self::Blob(_)) => {
+                Some(std::cmp::Ordering::Less)
+            }
+            (Self::Text(_) | Self::Blob(_), Self::Integer(_) | Self::Float(_)) => {
+                Some(std::cmp::Ordering::Greater)
+            }
 
-            (OwnedValue::Text(text_left), OwnedValue::Text(text_right)) => {
+            (Self::Text(text_left), Self::Text(text_right)) => {
                 text_left.value.partial_cmp(&text_right.value)
             }
             // Text vs Blob
-            (OwnedValue::Text(_), OwnedValue::Blob(_)) => Some(std::cmp::Ordering::Less),
-            (OwnedValue::Blob(_), OwnedValue::Text(_)) => Some(std::cmp::Ordering::Greater),
+            (Self::Text(_), Self::Blob(_)) => Some(std::cmp::Ordering::Less),
+            (Self::Blob(_), Self::Text(_)) => Some(std::cmp::Ordering::Greater),
 
-            (OwnedValue::Blob(blob_left), OwnedValue::Blob(blob_right)) => {
-                blob_left.partial_cmp(blob_right)
-            }
-            (OwnedValue::Null, OwnedValue::Null) => Some(std::cmp::Ordering::Equal),
-            (OwnedValue::Null, _) => Some(std::cmp::Ordering::Less),
-            (_, OwnedValue::Null) => Some(std::cmp::Ordering::Greater),
-            (OwnedValue::Agg(a), OwnedValue::Agg(b)) => a.partial_cmp(b),
-            (OwnedValue::Agg(a), other) => a.final_value().partial_cmp(other),
-            (other, OwnedValue::Agg(b)) => other.partial_cmp(b.final_value()),
+            (Self::Blob(blob_left), Self::Blob(blob_right)) => blob_left.partial_cmp(blob_right),
+            (Self::Null, Self::Null) => Some(std::cmp::Ordering::Equal),
+            (Self::Null, _) => Some(std::cmp::Ordering::Less),
+            (_, Self::Null) => Some(std::cmp::Ordering::Greater),
+            (Self::Agg(a), Self::Agg(b)) => a.partial_cmp(b),
+            (Self::Agg(a), other) => a.final_value().partial_cmp(other),
+            (other, Self::Agg(b)) => other.partial_cmp(b.final_value()),
             other => todo!("{:?}", other),
         }
     }
@@ -169,12 +163,12 @@ impl PartialOrd<OwnedValue> for OwnedValue {
 impl std::cmp::PartialOrd<AggContext> for AggContext {
     fn partial_cmp(&self, other: &AggContext) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (AggContext::Avg(a, _), AggContext::Avg(b, _)) => a.partial_cmp(b),
-            (AggContext::Sum(a), AggContext::Sum(b)) => a.partial_cmp(b),
-            (AggContext::Count(a), AggContext::Count(b)) => a.partial_cmp(b),
-            (AggContext::Max(a), AggContext::Max(b)) => a.partial_cmp(b),
-            (AggContext::Min(a), AggContext::Min(b)) => a.partial_cmp(b),
-            (AggContext::GroupConcat(a), AggContext::GroupConcat(b)) => a.partial_cmp(b),
+            (Self::Avg(a, _), Self::Avg(b, _)) => a.partial_cmp(b),
+            (Self::Sum(a), Self::Sum(b)) => a.partial_cmp(b),
+            (Self::Count(a), Self::Count(b)) => a.partial_cmp(b),
+            (Self::Max(a), Self::Max(b)) => a.partial_cmp(b),
+            (Self::Min(a), Self::Min(b)) => a.partial_cmp(b),
+            (Self::GroupConcat(a), Self::GroupConcat(b)) => a.partial_cmp(b),
             _ => None,
         }
     }
@@ -193,44 +187,38 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
 
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
-            (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {
-                OwnedValue::Integer(int_left + int_right)
+            (Self::Integer(int_left), Self::Integer(int_right)) => {
+                Self::Integer(int_left + int_right)
             }
-            (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
-                OwnedValue::Float(int_left as f64 + float_right)
+            (Self::Integer(int_left), Self::Float(float_right)) => {
+                Self::Float(int_left as f64 + float_right)
             }
-            (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
-                OwnedValue::Float(float_left + int_right as f64)
+            (Self::Float(float_left), Self::Integer(int_right)) => {
+                Self::Float(float_left + int_right as f64)
             }
-            (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
-                OwnedValue::Float(float_left + float_right)
+            (Self::Float(float_left), Self::Float(float_right)) => {
+                Self::Float(float_left + float_right)
             }
-            (OwnedValue::Text(string_left), OwnedValue::Text(string_right)) => {
-                OwnedValue::build_text(Rc::new(
-                    string_left.value.to_string() + &string_right.value.to_string(),
-                ))
+            (Self::Text(string_left), Self::Text(string_right)) => Self::build_text(Rc::new(
+                string_left.value.to_string() + &string_right.value.to_string(),
+            )),
+            (Self::Text(string_left), Self::Integer(int_right)) => Self::build_text(Rc::new(
+                string_left.value.to_string() + &int_right.to_string(),
+            )),
+            (Self::Integer(int_left), Self::Text(string_right)) => Self::build_text(Rc::new(
+                int_left.to_string() + &string_right.value.to_string(),
+            )),
+            (Self::Text(string_left), Self::Float(float_right)) => {
+                let string_right = Self::Float(float_right).to_string();
+                Self::build_text(Rc::new(string_left.value.to_string() + &string_right))
             }
-            (OwnedValue::Text(string_left), OwnedValue::Integer(int_right)) => {
-                OwnedValue::build_text(Rc::new(
-                    string_left.value.to_string() + &int_right.to_string(),
-                ))
+            (Self::Float(float_left), Self::Text(string_right)) => {
+                let string_left = Self::Float(float_left).to_string();
+                Self::build_text(Rc::new(string_left + &string_right.value.to_string()))
             }
-            (OwnedValue::Integer(int_left), OwnedValue::Text(string_right)) => {
-                OwnedValue::build_text(Rc::new(
-                    int_left.to_string() + &string_right.value.to_string(),
-                ))
-            }
-            (OwnedValue::Text(string_left), OwnedValue::Float(float_right)) => {
-                let string_right = OwnedValue::Float(float_right).to_string();
-                OwnedValue::build_text(Rc::new(string_left.value.to_string() + &string_right))
-            }
-            (OwnedValue::Float(float_left), OwnedValue::Text(string_right)) => {
-                let string_left = OwnedValue::Float(float_left).to_string();
-                OwnedValue::build_text(Rc::new(string_left + &string_right.value.to_string()))
-            }
-            (lhs, OwnedValue::Null) => lhs,
-            (OwnedValue::Null, rhs) => rhs,
-            _ => OwnedValue::Float(0.0),
+            (lhs, Self::Null) => lhs,
+            (Self::Null, rhs) => rhs,
+            _ => Self::Float(0.0),
         }
     }
 }
@@ -240,8 +228,8 @@ impl std::ops::Add<f64> for OwnedValue {
 
     fn add(self, rhs: f64) -> Self::Output {
         match self {
-            OwnedValue::Integer(int_left) => OwnedValue::Float(int_left as f64 + rhs),
-            OwnedValue::Float(float_left) => OwnedValue::Float(float_left + rhs),
+            Self::Integer(int_left) => Self::Float(int_left as f64 + rhs),
+            Self::Float(float_left) => Self::Float(float_left + rhs),
             _ => unreachable!(),
         }
     }
@@ -252,8 +240,8 @@ impl std::ops::Add<i64> for OwnedValue {
 
     fn add(self, rhs: i64) -> Self::Output {
         match self {
-            OwnedValue::Integer(int_left) => OwnedValue::Integer(int_left + rhs),
-            OwnedValue::Float(float_left) => OwnedValue::Float(float_left + rhs as f64),
+            Self::Integer(int_left) => Self::Integer(int_left + rhs),
+            Self::Float(float_left) => Self::Float(float_left + rhs as f64),
             _ => unreachable!(),
         }
     }
@@ -282,19 +270,19 @@ impl std::ops::Div<OwnedValue> for OwnedValue {
 
     fn div(self, rhs: OwnedValue) -> Self::Output {
         match (self, rhs) {
-            (OwnedValue::Integer(int_left), OwnedValue::Integer(int_right)) => {
-                OwnedValue::Integer(int_left / int_right)
+            (Self::Integer(int_left), Self::Integer(int_right)) => {
+                Self::Integer(int_left / int_right)
             }
-            (OwnedValue::Integer(int_left), OwnedValue::Float(float_right)) => {
-                OwnedValue::Float(int_left as f64 / float_right)
+            (Self::Integer(int_left), Self::Float(float_right)) => {
+                Self::Float(int_left as f64 / float_right)
             }
-            (OwnedValue::Float(float_left), OwnedValue::Integer(int_right)) => {
-                OwnedValue::Float(float_left / int_right as f64)
+            (Self::Float(float_left), Self::Integer(int_right)) => {
+                Self::Float(float_left / int_right as f64)
             }
-            (OwnedValue::Float(float_left), OwnedValue::Float(float_right)) => {
-                OwnedValue::Float(float_left / float_right)
+            (Self::Float(float_left), Self::Float(float_right)) => {
+                Self::Float(float_left / float_right)
             }
-            _ => OwnedValue::Float(0.0),
+            _ => Self::Float(0.0),
         }
     }
 }

@@ -572,7 +572,7 @@ struct RegexCache {
 }
 impl RegexCache {
     fn new() -> Self {
-        RegexCache {
+        Self {
             like: HashMap::new(),
             glob: HashMap::new(),
         }

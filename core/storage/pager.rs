@@ -40,8 +40,8 @@ const PAGE_DIRTY: usize = 0b1000;
 const PAGE_LOADED: usize = 0b10000;
 
 impl Page {
-    pub fn new(id: usize) -> Page {
-        Page {
+    pub fn new(id: usize) -> Self {
+        Self {
             inner: UnsafeCell::new(PageInner {
                 flags: AtomicUsize::new(0),
                 contents: None,

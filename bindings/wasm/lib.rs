@@ -64,7 +64,7 @@ pub struct Statement {
 #[wasm_bindgen]
 impl Statement {
     fn new(inner: RefCell<limbo_core::Statement>, raw: bool) -> Self {
-        Statement { inner, raw }
+        Self { inner, raw }
     }
 
     #[wasm_bindgen]
@@ -150,7 +150,7 @@ pub struct File {
 #[allow(dead_code)]
 impl File {
     fn new(vfs: VFS, fd: i32) -> Self {
-        File { vfs, fd }
+        Self { vfs, fd }
     }
 }
 
@@ -263,7 +263,7 @@ pub struct DatabaseStorage {
 
 impl DatabaseStorage {
     pub fn new(file: Rc<dyn limbo_core::File>) -> Self {
-        DatabaseStorage { file }
+        Self { file }
     }
 }
 

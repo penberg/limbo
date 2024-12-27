@@ -15,7 +15,7 @@ pub(crate) enum Predicate {
 impl Display for Predicate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Predicate::And(predicates) => {
+            Self::And(predicates) => {
                 if predicates.is_empty() {
                     // todo: Make this TRUE when the bug is fixed
                     write!(f, "TRUE")
@@ -30,7 +30,7 @@ impl Display for Predicate {
                     write!(f, ")")
                 }
             }
-            Predicate::Or(predicates) => {
+            Self::Or(predicates) => {
                 if predicates.is_empty() {
                     write!(f, "FALSE")
                 } else {
@@ -44,10 +44,10 @@ impl Display for Predicate {
                     write!(f, ")")
                 }
             }
-            Predicate::Eq(name, value) => write!(f, "{} = {}", name, value),
-            Predicate::Neq(name, value) => write!(f, "{} != {}", name, value),
-            Predicate::Gt(name, value) => write!(f, "{} > {}", name, value),
-            Predicate::Lt(name, value) => write!(f, "{} < {}", name, value),
+            Self::Eq(name, value) => write!(f, "{} = {}", name, value),
+            Self::Neq(name, value) => write!(f, "{} != {}", name, value),
+            Self::Gt(name, value) => write!(f, "{} > {}", name, value),
+            Self::Lt(name, value) => write!(f, "{} < {}", name, value),
         }
     }
 }
@@ -87,7 +87,7 @@ pub(crate) struct Delete {
 impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Query::Create(Create { table }) => {
+            Self::Create(Create { table }) => {
                 write!(f, "CREATE TABLE {} (", table.name)?;
 
                 for (i, column) in table.columns.iter().enumerate() {
@@ -99,11 +99,11 @@ impl Display for Query {
 
                 write!(f, ")")
             }
-            Query::Select(Select {
+            Self::Select(Select {
                 table,
                 predicate: guard,
             }) => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
-            Query::Insert(Insert { table, values }) => {
+            Self::Insert(Insert { table, values }) => {
                 write!(f, "INSERT INTO {} VALUES ", table)?;
                 for (i, row) in values.iter().enumerate() {
                     if i != 0 {
@@ -120,7 +120,7 @@ impl Display for Query {
                 }
                 Ok(())
             }
-            Query::Delete(Delete {
+            Self::Delete(Delete {
                 table,
                 predicate: guard,
             }) => write!(f, "DELETE FROM {} WHERE {}", table, guard),

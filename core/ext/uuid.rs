@@ -19,14 +19,14 @@ pub enum UuidFunc {
 impl UuidFunc {
     pub fn resolve_function(name: &str, num_args: usize) -> Option<ExtFunc> {
         match name {
-            "uuid4_str" => Some(ExtFunc::Uuid(UuidFunc::Uuid4Str)),
-            "uuid4" => Some(ExtFunc::Uuid(UuidFunc::Uuid4)),
-            "uuid7" if num_args < 2 => Some(ExtFunc::Uuid(UuidFunc::Uuid7)),
-            "uuid_str" if num_args == 1 => Some(ExtFunc::Uuid(UuidFunc::UuidStr)),
-            "uuid_blob" if num_args == 1 => Some(ExtFunc::Uuid(UuidFunc::UuidBlob)),
-            "uuid7_timestamp_ms" if num_args == 1 => Some(ExtFunc::Uuid(UuidFunc::Uuid7TS)),
+            "uuid4_str" => Some(ExtFunc::Uuid(Self::Uuid4Str)),
+            "uuid4" => Some(ExtFunc::Uuid(Self::Uuid4)),
+            "uuid7" if num_args < 2 => Some(ExtFunc::Uuid(Self::Uuid7)),
+            "uuid_str" if num_args == 1 => Some(ExtFunc::Uuid(Self::UuidStr)),
+            "uuid_blob" if num_args == 1 => Some(ExtFunc::Uuid(Self::UuidBlob)),
+            "uuid7_timestamp_ms" if num_args == 1 => Some(ExtFunc::Uuid(Self::Uuid7TS)),
             // postgres_compatability
-            "gen_random_uuid" => Some(ExtFunc::Uuid(UuidFunc::Uuid4Str)),
+            "gen_random_uuid" => Some(ExtFunc::Uuid(Self::Uuid4Str)),
             _ => None,
         }
     }
@@ -35,12 +35,12 @@ impl UuidFunc {
 impl std::fmt::Display for UuidFunc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UuidFunc::Uuid4Str => write!(f, "uuid4_str"),
-            UuidFunc::Uuid4 => write!(f, "uuid4"),
-            UuidFunc::Uuid7 => write!(f, "uuid7"),
-            UuidFunc::Uuid7TS => write!(f, "uuid7_timestamp_ms"),
-            UuidFunc::UuidStr => write!(f, "uuid_str"),
-            UuidFunc::UuidBlob => write!(f, "uuid_blob"),
+            Self::Uuid4Str => write!(f, "uuid4_str"),
+            Self::Uuid4 => write!(f, "uuid4"),
+            Self::Uuid7 => write!(f, "uuid7"),
+            Self::Uuid7TS => write!(f, "uuid7_timestamp_ms"),
+            Self::UuidStr => write!(f, "uuid_str"),
+            Self::UuidBlob => write!(f, "uuid_blob"),
         }
     }
 }

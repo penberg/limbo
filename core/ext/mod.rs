@@ -13,7 +13,7 @@ impl std::fmt::Display for ExtFunc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             #[cfg(feature = "uuid")]
-            ExtFunc::Uuid(uuidfn) => write!(f, "{}", uuidfn),
+            Self::Uuid(uuidfn) => write!(f, "{}", uuidfn),
             _ => write!(f, "unknown"),
         }
     }
