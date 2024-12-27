@@ -1,8 +1,5 @@
-use super::{
-    optimizer::Optimizable,
-    plan::{
-        Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
-    },
+use super::plan::{
+    Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
 };
 use crate::{
     function::Func,
