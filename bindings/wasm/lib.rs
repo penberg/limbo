@@ -75,7 +75,7 @@ impl Statement {
 
     pub fn get(&self) -> JsValue {
         match self.inner.borrow_mut().step() {
-            Ok(limbo_core::RowResult::Row(row)) => {
+            Ok(limbo_core::StepResult::Row(row)) => {
                 let row_array = js_sys::Array::new();
                 for value in row.values {
                     let value = to_js_value(value);
@@ -83,9 +83,10 @@ impl Statement {
                 }
                 JsValue::from(row_array)
             }
-            Ok(limbo_core::RowResult::IO)
-            | Ok(limbo_core::RowResult::Done)
-            | Ok(limbo_core::RowResult::Interrupt) => JsValue::UNDEFINED,
+            Ok(limbo_core::StepResult::IO)
+            | Ok(limbo_core::StepResult::Done)
+            | Ok(limbo_core::StepResult::Interrupt)
+            | Ok(limbo_core::StepResult::Busy) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
@@ -94,7 +95,7 @@ impl Statement {
         let array = js_sys::Array::new();
         loop {
             match self.inner.borrow_mut().step() {
-                Ok(limbo_core::RowResult::Row(row)) => {
+                Ok(limbo_core::StepResult::Row(row)) => {
                     let row_array = js_sys::Array::new();
                     for value in row.values {
                         let value = to_js_value(value);
@@ -102,9 +103,10 @@ impl Statement {
                     }
                     array.push(&row_array);
                 }
-                Ok(limbo_core::RowResult::IO) => {}
-                Ok(limbo_core::RowResult::Interrupt) => break,
-                Ok(limbo_core::RowResult::Done) => break,
+                Ok(limbo_core::StepResult::IO) => {}
+                Ok(limbo_core::StepResult::Interrupt) => break,
+                Ok(limbo_core::StepResult::Done) => break,
+                Ok(limbo_core::StepResult::Busy) => break,
                 Err(e) => panic!("Error: {:?}", e),
             }
         }

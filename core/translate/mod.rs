@@ -386,7 +386,6 @@ fn update_pragma(
             query_pragma("journal_mode", header, program)?;
             Ok(())
         }
-        _ => todo!("pragma `{name}`"),
     }
 }
 
@@ -403,7 +402,7 @@ fn query_pragma(
     match pragma {
         PragmaName::CacheSize => {
             program.emit_insn(Insn::Integer {
-                value: database_header.borrow().default_cache_size.into(),
+                value: database_header.borrow().default_page_cache_size.into(),
                 dest: register,
             });
         }
@@ -412,9 +411,6 @@ fn query_pragma(
                 value: "wal".into(),
                 dest: register,
             });
-        }
-        _ => {
-            todo!("pragma `{name}`");
         }
     }
 
@@ -441,7 +437,7 @@ fn update_cache_size(value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<
     }
 
     // update in-memory header
-    header.borrow_mut().default_cache_size = cache_size_unformatted
+    header.borrow_mut().default_page_cache_size = cache_size_unformatted
         .try_into()
         .unwrap_or_else(|_| panic!("invalid value, too big for a i32 {}", value));
 

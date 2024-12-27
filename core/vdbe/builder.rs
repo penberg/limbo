@@ -59,10 +59,6 @@ impl ProgramBuilder {
         reg
     }
 
-    pub fn next_free_register(&self) -> usize {
-        self.next_free_register
-    }
-
     pub fn alloc_cursor_id(
         &mut self,
         table_identifier: Option<String>,

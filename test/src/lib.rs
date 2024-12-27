@@ -40,7 +40,7 @@ impl TempDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use limbo_core::{CheckpointStatus, Connection, RowResult, Value};
+    use limbo_core::{CheckpointStatus, Connection, StepResult, Value};
     use log::debug;
 
     #[ignore]
@@ -63,10 +63,10 @@ mod tests {
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
                     match rows.next_row()? {
-                        RowResult::IO => {
+                        StepResult::IO => {
                             tmp_db.io.run_once()?;
                         }
-                        RowResult::Done => break,
+                        StepResult::Done => break,
                         _ => unreachable!(),
                     }
                 },
@@ -80,7 +80,7 @@ mod tests {
             match conn.query(list_query) {
                 Ok(Some(ref mut rows)) => loop {
                     match rows.next_row()? {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             let first_value = row.values.first().expect("missing id");
                             let id = match first_value {
                                 Value::Integer(i) => *i as i32,
@@ -90,11 +90,14 @@ mod tests {
                             assert_eq!(current_read_index, id);
                             current_read_index += 1;
                         }
-                        RowResult::IO => {
+                        StepResult::IO => {
                             tmp_db.io.run_once()?;
                         }
-                        RowResult::Interrupt => break,
-                        RowResult::Done => break,
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
+                            panic!("Database is busy");
+                        }
                     }
                 },
                 Ok(None) => {}
@@ -124,10 +127,10 @@ mod tests {
         match conn.query(insert_query) {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Done => break,
+                    StepResult::Done => break,
                     _ => unreachable!(),
                 }
             },
@@ -143,7 +146,7 @@ mod tests {
         match conn.query(list_query) {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
-                    RowResult::Row(row) => {
+                    StepResult::Row(row) => {
                         let first_value = &row.values[0];
                         let text = &row.values[1];
                         let id = match first_value {
@@ -158,11 +161,12 @@ mod tests {
                         assert_eq!(1, id);
                         compare_string(&huge_text, text);
                     }
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Interrupt => break,
-                    RowResult::Done => break,
+                    StepResult::Interrupt => break,
+                    StepResult::Done => break,
+                    StepResult::Busy => unreachable!(),
                 }
             },
             Ok(None) => {}
@@ -196,10 +200,10 @@ mod tests {
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
                     match rows.next_row()? {
-                        RowResult::IO => {
+                        StepResult::IO => {
                             tmp_db.io.run_once()?;
                         }
-                        RowResult::Done => break,
+                        StepResult::Done => break,
                         _ => unreachable!(),
                     }
                 },
@@ -215,7 +219,7 @@ mod tests {
         match conn.query(list_query) {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
-                    RowResult::Row(row) => {
+                    StepResult::Row(row) => {
                         let first_value = &row.values[0];
                         let text = &row.values[1];
                         let id = match first_value {
@@ -232,11 +236,12 @@ mod tests {
                         compare_string(huge_text, text);
                         current_index += 1;
                     }
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Interrupt => break,
-                    RowResult::Done => break,
+                    StepResult::Interrupt => break,
+                    StepResult::Done => break,
+                    StepResult::Busy => unreachable!(),
                 }
             },
             Ok(None) => {}
@@ -264,10 +269,10 @@ mod tests {
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
                     match rows.next_row()? {
-                        RowResult::IO => {
+                        StepResult::IO => {
                             tmp_db.io.run_once()?;
                         }
-                        RowResult::Done => break,
+                        StepResult::Done => break,
                         _ => unreachable!(),
                     }
                 },
@@ -285,7 +290,7 @@ mod tests {
         match conn.query(list_query) {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
-                    RowResult::Row(row) => {
+                    StepResult::Row(row) => {
                         let first_value = &row.values[0];
                         let id = match first_value {
                             Value::Integer(i) => *i as i32,
@@ -295,11 +300,12 @@ mod tests {
                         assert_eq!(current_index, id as usize);
                         current_index += 1;
                     }
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Interrupt => break,
-                    RowResult::Done => break,
+                    StepResult::Interrupt => break,
+                    StepResult::Done => break,
+                    StepResult::Busy => unreachable!(),
                 }
             },
             Ok(None) => {}
@@ -323,10 +329,10 @@ mod tests {
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
                     match rows.next_row()? {
-                        RowResult::IO => {
+                        StepResult::IO => {
                             tmp_db.io.run_once()?;
                         }
-                        RowResult::Done => break,
+                        StepResult::Done => break,
                         _ => unreachable!(),
                     }
                 },
@@ -347,7 +353,7 @@ mod tests {
                 if let Some(ref mut rows) = conn.query(list_query).unwrap() {
                     loop {
                         match rows.next_row()? {
-                            RowResult::Row(row) => {
+                            StepResult::Row(row) => {
                                 let first_value = &row.values[0];
                                 let count = match first_value {
                                     Value::Integer(i) => *i as i32,
@@ -356,11 +362,12 @@ mod tests {
                                 log::debug!("counted {}", count);
                                 return Ok(count as usize);
                             }
-                            RowResult::IO => {
+                            StepResult::IO => {
                                 tmp_db.io.run_once()?;
                             }
-                            RowResult::Interrupt => break,
-                            RowResult::Done => break,
+                            StepResult::Interrupt => break,
+                            StepResult::Done => break,
+                            StepResult::Busy => panic!("Database is busy"),
                         }
                     }
                 }
@@ -429,10 +436,10 @@ mod tests {
         if let Some(ref mut rows) = insert_query {
             loop {
                 match rows.next_row()? {
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Done => break,
+                    StepResult::Done => break,
                     _ => unreachable!(),
                 }
             }
@@ -443,16 +450,17 @@ mod tests {
         if let Some(ref mut rows) = select_query {
             loop {
                 match rows.next_row()? {
-                    RowResult::Row(row) => {
+                    StepResult::Row(row) => {
                         if let Value::Integer(id) = row.values[0] {
                             assert_eq!(id, 1, "First insert should have rowid 1");
                         }
                     }
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Interrupt => break,
-                    RowResult::Done => break,
+                    StepResult::Interrupt => break,
+                    StepResult::Done => break,
+                    StepResult::Busy => panic!("Database is busy"),
                 }
             }
         }
@@ -461,10 +469,10 @@ mod tests {
         match conn.query("INSERT INTO test_rowid (id, val) VALUES (5, 'test2')") {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Done => break,
+                    StepResult::Done => break,
                     _ => unreachable!(),
                 }
             },
@@ -477,16 +485,17 @@ mod tests {
         match conn.query("SELECT last_insert_rowid()") {
             Ok(Some(ref mut rows)) => loop {
                 match rows.next_row()? {
-                    RowResult::Row(row) => {
+                    StepResult::Row(row) => {
                         if let Value::Integer(id) = row.values[0] {
                             last_id = id;
                         }
                     }
-                    RowResult::IO => {
+                    StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
-                    RowResult::Interrupt => break,
-                    RowResult::Done => break,
+                    StepResult::Interrupt => break,
+                    StepResult::Done => break,
+                    StepResult::Busy => panic!("Database is busy"),
                 }
             },
             Ok(None) => {}

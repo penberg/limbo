@@ -1,5 +1,4 @@
 use super::{Insn, InsnReference, OwnedValue, Program};
-use crate::types::LimboText;
 use std::rc::Rc;
 
 pub fn insn_to_str(

@@ -1138,8 +1138,8 @@ dependencies = [
  "jsonb",
  "julian_day_converter",
  "libc",
+ "limbo_macros",
  "log",
- "macros",
  "mimalloc",
  "mockall",
  "nix 0.29.0",
@@ -1161,10 +1161,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo_macros"
+version = "0.0.10"
+
+[[package]]
 name = "limbo_sim"
 version = "0.0.10"
 dependencies = [
  "anarchist-readable-name-generator-lib",
+ "clap",
  "env_logger 0.10.2",
  "limbo_core",
  "log",
@@ -1204,10 +1209,6 @@ name = "log"
 version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
-
-[[package]]
-name = "macros"
-version = "0.0.0"
 
 [[package]]
 name = "memchr"

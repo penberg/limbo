@@ -28,6 +28,7 @@ use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
+use crate::result::LimboResult;
 use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
@@ -36,10 +37,10 @@ use crate::types::{
 };
 use crate::util::parse_schema_rows;
 #[cfg(feature = "json")]
-use crate::{function::JsonFunc, json::get_json, json::json_array};
+use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
-use macros::Description;
+use limbo_macros::Description;
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
 
@@ -545,6 +546,7 @@ pub enum StepResult<'a> {
     IO,
     Row(Record<'a>),
     Interrupt,
+    Busy,
 }
 
 /// If there is I/O, the instruction is restarted.
@@ -1665,28 +1667,33 @@ impl Program {
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();
-                    if let Some(db) = connection.db.upgrade() {
-                        // TODO(pere): are backpointers good ?? this looks ugly af
-                        // upgrade transaction if needed
-                        let new_transaction_state =
-                            match (db.transaction_state.borrow().clone(), write) {
-                                (crate::TransactionState::Write, true) => TransactionState::Write,
-                                (crate::TransactionState::Write, false) => TransactionState::Write,
-                                (crate::TransactionState::Read, true) => TransactionState::Write,
-                                (crate::TransactionState::Read, false) => TransactionState::Read,
-                                (crate::TransactionState::None, true) => TransactionState::Read,
-                                (crate::TransactionState::None, false) => TransactionState::Read,
-                            };
-                        // TODO(Pere):
-                        //  1. lock wal
-                        //  2. lock shared
-                        //  3. lock write db if write
-                        db.transaction_state.replace(new_transaction_state.clone());
-                        if matches!(new_transaction_state, TransactionState::Write) {
-                            pager.begin_read_tx()?;
-                        } else {
-                            pager.begin_write_tx()?;
+                    let current_state = connection.transaction_state.borrow().clone();
+                    let (new_transaction_state, updated) = match (&current_state, write) {
+                        (crate::TransactionState::Write, true) => (TransactionState::Write, false),
+                        (crate::TransactionState::Write, false) => (TransactionState::Write, false),
+                        (crate::TransactionState::Read, true) => (TransactionState::Write, true),
+                        (crate::TransactionState::Read, false) => (TransactionState::Read, false),
+                        (crate::TransactionState::None, true) => (TransactionState::Write, true),
+                        (crate::TransactionState::None, false) => (TransactionState::Read, true),
+                    };
+
+                    if updated && matches!(current_state, TransactionState::None) {
+                        if let LimboResult::Busy = pager.begin_read_tx()? {
+                            log::trace!("begin_read_tx busy");
+                            return Ok(StepResult::Busy);
                         }
+                    }
+
+                    if updated && matches!(new_transaction_state, TransactionState::Write) {
+                        if let LimboResult::Busy = pager.begin_write_tx()? {
+                            log::trace!("begin_write_tx busy");
+                            return Ok(StepResult::Busy);
+                        }
+                    }
+                    if updated {
+                        connection
+                            .transaction_state
+                            .replace(new_transaction_state.clone());
                     }
                     state.pc += 1;
                 }
@@ -2279,6 +2286,21 @@ impl Program {
 
                             match json_array {
                                 Ok(json) => state.registers[*dest] = json,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(JsonFunc::JsonArrayLength) => {
+                            let json_value = &state.registers[*start_reg];
+                            let path_value = if arg_count > 1 {
+                                Some(&state.registers[*start_reg + 1])
+                            } else {
+                                None
+                            };
+                            let json_array_length = json_array_length(json_value, path_value);
+
+                            match json_array_length {
+                                Ok(length) => state.registers[*dest] = length,
                                 Err(e) => return Err(e),
                             }
                         }

@@ -1,10 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use log::{debug, trace};
 
 use crate::io::{File, SyncCompletion, IO};
+use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::{
     begin_read_wal_frame, begin_write_wal_frame, WAL_FRAME_HEADER_SIZE, WAL_HEADER_SIZE,
 };
@@ -14,23 +16,119 @@ use crate::{Completion, Page};
 use self::sqlite3_ondisk::{checksum_wal, PageContent, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
 use super::buffer_pool::BufferPool;
-use super::page_cache::PageCacheKey;
 use super::pager::{PageRef, Pager};
 use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
+
+pub const READMARK_NOT_USED: u32 = 0xffffffff;
+
+pub const NO_LOCK: u32 = 0;
+pub const SHARED_LOCK: u32 = 1;
+pub const WRITE_LOCK: u32 = 2;
+
+pub enum CheckpointMode {
+    Passive,
+    Full,
+    Restart,
+    Truncate,
+}
+
+#[derive(Debug)]
+struct LimboRwLock {
+    lock: AtomicU32,
+    nreads: AtomicU32,
+    value: AtomicU32,
+}
+
+impl LimboRwLock {
+    /// Shared lock. Returns true if it was successful, false if it couldn't lock it
+    pub fn read(&mut self) -> bool {
+        let lock = self.lock.load(Ordering::SeqCst);
+        match lock {
+            NO_LOCK => {
+                let res = self.lock.compare_exchange(
+                    lock,
+                    SHARED_LOCK,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
+                let ok = res.is_ok();
+                if ok {
+                    self.nreads.fetch_add(1, Ordering::SeqCst);
+                }
+                ok
+            }
+            SHARED_LOCK => {
+                self.nreads.fetch_add(1, Ordering::SeqCst);
+                true
+            }
+            WRITE_LOCK => false,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Locks exlusively. Returns true if it was successful, false if it couldn't lock it
+    pub fn write(&mut self) -> bool {
+        let lock = self.lock.load(Ordering::SeqCst);
+        match lock {
+            NO_LOCK => {
+                let res = self.lock.compare_exchange(
+                    lock,
+                    WRITE_LOCK,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                );
+                res.is_ok()
+            }
+            SHARED_LOCK => {
+                // no op
+                false
+            }
+            WRITE_LOCK => true,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Unlock the current held lock.
+    pub fn unlock(&mut self) {
+        let lock = self.lock.load(Ordering::SeqCst);
+        match lock {
+            NO_LOCK => {}
+            SHARED_LOCK => {
+                let prev = self.nreads.fetch_sub(1, Ordering::SeqCst);
+                if prev == 1 {
+                    let res = self.lock.compare_exchange(
+                        lock,
+                        NO_LOCK,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    );
+                    assert!(res.is_ok());
+                }
+            }
+            WRITE_LOCK => {
+                let res =
+                    self.lock
+                        .compare_exchange(lock, NO_LOCK, Ordering::SeqCst, Ordering::SeqCst);
+                assert!(res.is_ok());
+            }
+            _ => unreachable!(),
+        }
+    }
+}
 
 /// Write-ahead log (WAL).
 pub trait Wal {
     /// Begin a read transaction.
-    fn begin_read_tx(&mut self) -> Result<()>;
+    fn begin_read_tx(&mut self) -> Result<LimboResult>;
 
     /// Begin a write transaction.
-    fn begin_write_tx(&mut self) -> Result<()>;
+    fn begin_write_tx(&mut self) -> Result<LimboResult>;
 
     /// End a read transaction.
-    fn end_read_tx(&self) -> Result<()>;
+    fn end_read_tx(&self) -> Result<LimboResult>;
 
     /// End a write transaction.
-    fn end_write_tx(&self) -> Result<()>;
+    fn end_write_tx(&self) -> Result<LimboResult>;
 
     /// Find the latest frame containing a page.
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>>;
@@ -51,6 +149,7 @@ pub trait Wal {
         &mut self,
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
+        mode: CheckpointMode,
     ) -> Result<CheckpointStatus>;
     fn sync(&mut self) -> Result<CheckpointStatus>;
     fn get_max_frame(&self) -> u64;
@@ -108,10 +207,16 @@ pub struct WalFile {
     ongoing_checkpoint: OngoingCheckpoint,
     checkpoint_threshold: usize,
     // min and max frames for this connection
+    /// This is the index to the read_lock in WalFileShared that we are holding. This lock contains
+    /// the max frame for this connection.
+    max_frame_read_lock_index: usize,
+    /// Max frame allowed to lookup range=(minframe..max_frame)
     max_frame: u64,
+    /// Start of range to look for frames range=(minframe..max_frame)
     min_frame: u64,
 }
 
+// TODO(pere): lock only important parts + pin WalFileShared
 /// WalFileShared is the part of a WAL that will be shared between threads. A wal has information
 /// that needs to be communicated between threads so this struct does the job.
 pub struct WalFileShared {
@@ -130,20 +235,94 @@ pub struct WalFileShared {
     pages_in_frames: Vec<u64>,
     last_checksum: (u32, u32), // Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
     file: Rc<dyn File>,
+    /// read_locks is a list of read locks that can coexist with the max_frame nubmer stored in
+    /// value. There is a limited amount because and unbounded amount of connections could be
+    /// fatal. Therefore, for now we copy how SQLite behaves with limited amounts of read max
+    /// frames that is equal to 5
+    read_locks: [LimboRwLock; 5],
+    /// There is only one write allowed in WAL mode. This lock takes care of ensuring there is only
+    /// one used.
+    write_lock: LimboRwLock,
 }
 
 impl Wal for WalFile {
     /// Begin a read transaction.
-    fn begin_read_tx(&mut self) -> Result<()> {
-        let shared = self.shared.read().unwrap();
+    fn begin_read_tx(&mut self) -> Result<LimboResult> {
+        let mut shared = self.shared.write().unwrap();
+        let max_frame_in_wal = shared.max_frame;
         self.min_frame = shared.nbackfills + 1;
-        self.max_frame = shared.max_frame;
-        Ok(())
+
+        let mut max_read_mark = 0;
+        let mut max_read_mark_index = -1;
+        // Find the largest mark we can find, ignore frames that are impossible to be in range and
+        // that are not set
+        for (index, lock) in shared.read_locks.iter().enumerate() {
+            let this_mark = lock.value.load(Ordering::SeqCst);
+            if this_mark > max_read_mark && this_mark <= max_frame_in_wal as u32 {
+                max_read_mark = this_mark;
+                max_read_mark_index = index as i64;
+            }
+        }
+
+        // If we didn't find any mark, then let's add a new one
+        if max_read_mark_index == -1 {
+            for (index, lock) in shared.read_locks.iter_mut().enumerate() {
+                let busy = !lock.write();
+                if !busy {
+                    // If this was busy then it must mean >1 threads tried to set this read lock
+                    lock.value.store(max_frame_in_wal as u32, Ordering::SeqCst);
+                    max_read_mark = max_frame_in_wal as u32;
+                    max_read_mark_index = index as i64;
+                    lock.unlock();
+                    break;
+                }
+            }
+        }
+
+        if max_read_mark_index == -1 {
+            return Ok(LimboResult::Busy);
+        }
+
+        let lock = &mut shared.read_locks[max_read_mark_index as usize];
+        let busy = !lock.read();
+        if busy {
+            return Ok(LimboResult::Busy);
+        }
+        self.max_frame_read_lock_index = max_read_mark_index as usize;
+        self.max_frame = max_read_mark as u64;
+        self.min_frame = shared.nbackfills + 1;
+        log::trace!(
+            "begin_read_tx(min_frame={}, max_frame={}, lock={})",
+            self.min_frame,
+            self.max_frame,
+            self.max_frame_read_lock_index
+        );
+        Ok(LimboResult::Ok)
     }
 
     /// End a read transaction.
-    fn end_read_tx(&self) -> Result<()> {
-        Ok(())
+    fn end_read_tx(&self) -> Result<LimboResult> {
+        let mut shared = self.shared.write().unwrap();
+        let read_lock = &mut shared.read_locks[self.max_frame_read_lock_index];
+        read_lock.unlock();
+        Ok(LimboResult::Ok)
+    }
+
+    /// Begin a write transaction
+    fn begin_write_tx(&mut self) -> Result<LimboResult> {
+        let mut shared = self.shared.write().unwrap();
+        let busy = !shared.write_lock.write();
+        if busy {
+            return Ok(LimboResult::Busy);
+        }
+        Ok(LimboResult::Ok)
+    }
+
+    /// End a write transaction
+    fn end_write_tx(&self) -> Result<LimboResult> {
+        let mut shared = self.shared.write().unwrap();
+        shared.write_lock.unlock();
+        Ok(LimboResult::Ok)
     }
 
     /// Find the latest frame containing a page.
@@ -186,7 +365,11 @@ impl Wal for WalFile {
     ) -> Result<()> {
         let page_id = page.get().id;
         let mut shared = self.shared.write().unwrap();
-        let frame_id = shared.max_frame;
+        let frame_id = if shared.max_frame == 0 {
+            1
+        } else {
+            shared.max_frame
+        };
         let offset = self.frame_offset(frame_id);
         trace!(
             "append_frame(frame={}, offset={}, page_id={})",
@@ -221,16 +404,6 @@ impl Wal for WalFile {
         Ok(())
     }
 
-    /// Begin a write transaction
-    fn begin_write_tx(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// End a write transaction
-    fn end_write_tx(&self) -> Result<()> {
-        Ok(())
-    }
-
     fn should_checkpoint(&self) -> bool {
         let shared = self.shared.read().unwrap();
         let frame_id = shared.max_frame as usize;
@@ -241,7 +414,12 @@ impl Wal for WalFile {
         &mut self,
         pager: &Pager,
         write_counter: Rc<RefCell<usize>>,
+        mode: CheckpointMode,
     ) -> Result<CheckpointStatus> {
+        assert!(
+            matches!(mode, CheckpointMode::Passive),
+            "only passive mode supported for now"
+        );
         'checkpoint_loop: loop {
             let state = self.ongoing_checkpoint.state;
             log::debug!("checkpoint(state={:?})", state);
@@ -249,9 +427,29 @@ impl Wal for WalFile {
                 CheckpointState::Start => {
                     // TODO(pere): check what frames are safe to checkpoint between many readers!
                     self.ongoing_checkpoint.min_frame = self.min_frame;
-                    self.ongoing_checkpoint.max_frame = self.max_frame;
+                    let mut shared = self.shared.write().unwrap();
+                    let max_frame_in_wal = shared.max_frame as u32;
+                    let mut max_safe_frame = shared.max_frame;
+                    for read_lock in shared.read_locks.iter_mut() {
+                        let this_mark = read_lock.value.load(Ordering::SeqCst);
+                        if this_mark < max_safe_frame as u32 {
+                            let busy = !read_lock.write();
+                            if !busy {
+                                read_lock.value.store(max_frame_in_wal, Ordering::SeqCst);
+                                read_lock.unlock();
+                            } else {
+                                max_safe_frame = this_mark as u64;
+                            }
+                        }
+                    }
+                    self.ongoing_checkpoint.max_frame = max_safe_frame;
                     self.ongoing_checkpoint.current_page = 0;
                     self.ongoing_checkpoint.state = CheckpointState::ReadFrame;
+                    log::trace!(
+                        "checkpoint_start(min_frame={}, max_frame={})",
+                        self.ongoing_checkpoint.max_frame,
+                        self.ongoing_checkpoint.min_frame
+                    );
                 }
                 CheckpointState::ReadFrame => {
                     let shared = self.shared.read().unwrap();
@@ -272,8 +470,9 @@ impl Wal for WalFile {
                         .expect("page must be in frame cache if it's in list");
 
                     for frame in frames.iter().rev() {
-                        // TODO: do proper selection of frames to checkpoint
-                        if *frame >= self.ongoing_checkpoint.min_frame {
+                        if *frame >= self.ongoing_checkpoint.min_frame
+                            && *frame <= self.ongoing_checkpoint.max_frame
+                        {
                             log::debug!(
                                 "checkpoint page(state={:?}, page={}, frame={})",
                                 state,
@@ -328,10 +527,18 @@ impl Wal for WalFile {
                         return Ok(CheckpointStatus::IO);
                     }
                     let mut shared = self.shared.write().unwrap();
-                    shared.frame_cache.clear();
-                    shared.pages_in_frames.clear();
-                    shared.max_frame = 0;
-                    shared.nbackfills = 0;
+                    let everything_backfilled =
+                        shared.max_frame == self.ongoing_checkpoint.max_frame;
+                    if everything_backfilled {
+                        // Here we know that we backfilled everything, therefore we can safely
+                        // reset the wal.
+                        shared.frame_cache.clear();
+                        shared.pages_in_frames.clear();
+                        shared.max_frame = 0;
+                        shared.nbackfills = 0;
+                    } else {
+                        shared.nbackfills = self.ongoing_checkpoint.max_frame;
+                    }
                     self.ongoing_checkpoint.state = CheckpointState::Start;
                     return Ok(CheckpointStatus::Done);
                 }
@@ -412,10 +619,11 @@ impl WalFile {
             syncing: Rc::new(RefCell::new(false)),
             checkpoint_threshold: 1000,
             page_size,
-            max_frame: 0,
-            min_frame: 0,
             buffer_pool,
             sync_state: RefCell::new(SyncState::NotSyncing),
+            max_frame: 0,
+            min_frame: 0,
+            max_frame_read_lock_index: 0,
         }
     }
 
@@ -488,6 +696,38 @@ impl WalFileShared {
             last_checksum: checksum,
             file,
             pages_in_frames: Vec::new(),
+            read_locks: [
+                LimboRwLock {
+                    lock: AtomicU32::new(NO_LOCK),
+                    nreads: AtomicU32::new(0),
+                    value: AtomicU32::new(READMARK_NOT_USED),
+                },
+                LimboRwLock {
+                    lock: AtomicU32::new(NO_LOCK),
+                    nreads: AtomicU32::new(0),
+                    value: AtomicU32::new(READMARK_NOT_USED),
+                },
+                LimboRwLock {
+                    lock: AtomicU32::new(NO_LOCK),
+                    nreads: AtomicU32::new(0),
+                    value: AtomicU32::new(READMARK_NOT_USED),
+                },
+                LimboRwLock {
+                    lock: AtomicU32::new(NO_LOCK),
+                    nreads: AtomicU32::new(0),
+                    value: AtomicU32::new(READMARK_NOT_USED),
+                },
+                LimboRwLock {
+                    lock: AtomicU32::new(NO_LOCK),
+                    nreads: AtomicU32::new(0),
+                    value: AtomicU32::new(READMARK_NOT_USED),
+                },
+            ],
+            write_lock: LimboRwLock {
+                lock: AtomicU32::new(NO_LOCK),
+                nreads: AtomicU32::new(0),
+                value: AtomicU32::new(READMARK_NOT_USED),
+            },
         };
         Ok(Arc::new(RwLock::new(shared)))
     }

@@ -234,8 +234,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | jsonb(json)                        |         |         |
 | json_array(value1,value2,...)      | Yes     |         |
 | jsonb_array(value1,value2,...)     |         |         |
-| json_array_length(json)            |         |         |
-| json_array_length(json,path)       |         |         |
+| json_array_length(json)            | Yes     |         |
+| json_array_length(json,path)       | Yes     |         |
 | json_error_position(json)          |         |         |
 | json_extract(json,path,...)        |         |         |
 | jsonb_extract(json,path,...)       |         |         |

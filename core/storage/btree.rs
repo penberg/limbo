@@ -20,22 +20,37 @@ use super::sqlite3_ondisk::{
 /*
     These are offsets of fields in the header of a b-tree page.
 */
-const BTREE_HEADER_OFFSET_TYPE: usize = 0; /* type of btree page -> u8 */
-const BTREE_HEADER_OFFSET_FREEBLOCK: usize = 1; /* pointer to first freeblock -> u16 */
-const BTREE_HEADER_OFFSET_CELL_COUNT: usize = 3; /* number of cells in the page -> u16 */
-const BTREE_HEADER_OFFSET_CELL_CONTENT: usize = 5; /* pointer to first byte of cell allocated content from top -> u16 */
-const BTREE_HEADER_OFFSET_FRAGMENTED: usize = 7; /* number of fragmented bytes -> u8 */
-const BTREE_HEADER_OFFSET_RIGHTMOST: usize = 8; /* if internalnode, pointer right most pointer (saved separately from cells) -> u32 */
 
-/*
-** Maximum depth of an SQLite B-Tree structure. Any B-Tree deeper than
-** this will be declared corrupt. This value is calculated based on a
-** maximum database size of 2^31 pages a minimum fanout of 2 for a
-** root-node and 3 for all other internal nodes.
-**
-** If a tree that appears to be taller than this is encountered, it is
-** assumed that the database is corrupt.
-*/
+/// type of btree page -> u8
+const PAGE_HEADER_OFFSET_PAGE_TYPE: usize = 0;
+/// pointer to first freeblock -> u16
+/// The second field of the b-tree page header is the offset of the first freeblock, or zero if there are no freeblocks on the page.
+/// A freeblock is a structure used to identify unallocated space within a b-tree page.
+/// Freeblocks are organized as a chain.
+///
+/// To be clear, freeblocks do not mean the regular unallocated free space to the left of the cell content area pointer, but instead
+/// blocks of at least 4 bytes WITHIN the cell content area that are not in use due to e.g. deletions.
+const PAGE_HEADER_OFFSET_FIRST_FREEBLOCK: usize = 1;
+/// number of cells in the page -> u16
+const PAGE_HEADER_OFFSET_CELL_COUNT: usize = 3;
+/// pointer to first byte of cell allocated content from top -> u16
+/// SQLite strives to place cells as far toward the end of the b-tree page as it can,
+/// in order to leave space for future growth of the cell pointer array.
+/// = the cell content area pointer moves leftward as cells are added to the page
+const PAGE_HEADER_OFFSET_CELL_CONTENT_AREA: usize = 5;
+/// number of fragmented bytes -> u8
+/// Fragments are isolated groups of 1, 2, or 3 unused bytes within the cell content area.
+const PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT: usize = 7;
+/// if internalnode, pointer right most pointer (saved separately from cells) -> u32
+const PAGE_HEADER_OFFSET_RIGHTMOST_PTR: usize = 8;
+
+/// Maximum depth of an SQLite B-Tree structure. Any B-Tree deeper than
+/// this will be declared corrupt. This value is calculated based on a
+/// maximum database size of 2^31 pages a minimum fanout of 2 for a
+/// root-node and 3 for all other internal nodes.
+///
+/// If a tree that appears to be taller than this is encountered, it is
+/// assumed that the database is corrupt.
 pub const BTCURSOR_MAX_DEPTH: usize = 20;
 
 /// Evaluate a Result<CursorResult<T>>, if IO return IO.
@@ -57,6 +72,8 @@ macro_rules! return_if_locked {
     }};
 }
 
+/// State machine of a write operation.
+/// May involve balancing due to overflow.
 #[derive(Debug)]
 enum WriteState {
     Start,
@@ -67,11 +84,16 @@ enum WriteState {
 }
 
 struct WriteInfo {
+    /// State of the write operation state machine.
     state: WriteState,
+    /// Pages allocated during the write operation due to balancing.
     new_pages: RefCell<Vec<PageRef>>,
+    /// Scratch space used during balancing.
     scratch_cells: RefCell<Vec<&'static [u8]>>,
+    /// Bookkeeping of the rightmost pointer so the PAGE_HEADER_OFFSET_RIGHTMOST_PTR can be updated.
     rightmost_pointer: RefCell<Option<u32>>,
-    page_copy: RefCell<Option<PageContent>>, // this holds the copy a of a page needed for buffer references
+    /// Copy of the current page needed for buffer references.
+    page_copy: RefCell<Option<PageContent>>,
 }
 
 pub struct BTreeCursor {
@@ -142,6 +164,8 @@ impl BTreeCursor {
         }
     }
 
+    /// Check if the table is empty.
+    /// This is done by checking if the root page has no cells.
     fn is_empty_table(&mut self) -> Result<CursorResult<bool>> {
         let page = self.pager.read_page(self.root_page)?;
         return_if_locked!(page);
@@ -150,16 +174,18 @@ impl BTreeCursor {
         Ok(CursorResult::Ok(cell_count == 0))
     }
 
+    /// Move the cursor to the previous record and return it.
+    /// Used in backwards iteration.
     fn get_prev_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
             let page = self.stack.top();
-            let cell_idx = self.stack.current_index();
+            let cell_idx = self.stack.current_cell_index();
 
-            // moved to current page begin
+            // moved to beginning of current page
             // todo: find a better way to flag moved to end or begin of page
-            if self.stack.curr_idx_out_of_begin() {
+            if self.stack.current_cell_index_less_than_min() {
                 loop {
-                    if self.stack.current_index() > 0 {
+                    if self.stack.current_cell_index() > 0 {
                         self.stack.retreat();
                         break;
                     }
@@ -198,8 +224,8 @@ impl BTreeCursor {
             let cell = contents.cell_get(
                 cell_idx,
                 self.pager.clone(),
-                self.max_local(contents.page_type()),
-                self.min_local(contents.page_type()),
+                self.payload_overflow_threshold_max(contents.page_type()),
+                self.payload_overflow_threshold_min(contents.page_type()),
                 self.usable_space(),
             )?;
 
@@ -228,13 +254,15 @@ impl BTreeCursor {
         }
     }
 
+    /// Move the cursor to the next record and return it.
+    /// Used in forwards iteration, which is the default.
     fn get_next_record(
         &mut self,
         predicate: Option<(SeekKey<'_>, SeekOp)>,
     ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
         loop {
             let mem_page_rc = self.stack.top();
-            let cell_idx = self.stack.current_index() as usize;
+            let cell_idx = self.stack.current_cell_index() as usize;
 
             debug!("current id={} cell={}", mem_page_rc.get().id, cell_idx);
             return_if_locked!(mem_page_rc);
@@ -286,8 +314,8 @@ impl BTreeCursor {
             let cell = contents.cell_get(
                 cell_idx,
                 self.pager.clone(),
-                self.max_local(contents.page_type()),
-                self.min_local(contents.page_type()),
+                self.payload_overflow_threshold_max(contents.page_type()),
+                self.payload_overflow_threshold_min(contents.page_type()),
                 self.usable_space(),
             )?;
             match &cell {
@@ -386,6 +414,9 @@ impl BTreeCursor {
         }
     }
 
+    /// Move the cursor to the record that matches the seek key and seek operation.
+    /// This may be used to seek to a specific record in a point query (e.g. SELECT * FROM table WHERE col = 10)
+    /// or e.g. find the first record greater than the seek key in a range query (e.g. SELECT * FROM table WHERE col > 10).
     fn seek(
         &mut self,
         key: SeekKey<'_>,
@@ -403,8 +434,8 @@ impl BTreeCursor {
                 let cell = contents.cell_get(
                     cell_idx,
                     self.pager.clone(),
-                    self.max_local(contents.page_type()),
-                    self.min_local(contents.page_type()),
+                    self.payload_overflow_threshold_max(contents.page_type()),
+                    self.payload_overflow_threshold_min(contents.page_type()),
                     self.usable_space(),
                 )?;
                 match &cell {
@@ -476,12 +507,14 @@ impl BTreeCursor {
         Ok(CursorResult::Ok((None, None)))
     }
 
+    /// Move the cursor to the root page of the btree.
     fn move_to_root(&mut self) {
         let mem_page = self.pager.read_page(self.root_page).unwrap();
         self.stack.clear();
         self.stack.push(mem_page);
     }
 
+    /// Move the cursor to the rightmost record in the btree.
     fn move_to_rightmost(&mut self) -> Result<CursorResult<()>> {
         self.move_to_root();
 
@@ -553,8 +586,8 @@ impl BTreeCursor {
                 match &contents.cell_get(
                     cell_idx,
                     self.pager.clone(),
-                    self.max_local(contents.page_type()),
-                    self.min_local(contents.page_type()),
+                    self.payload_overflow_threshold_max(contents.page_type()),
+                    self.payload_overflow_threshold_min(contents.page_type()),
                     self.usable_space(),
                 )? {
                     BTreeCell::TableInteriorCell(TableInteriorCell {
@@ -634,6 +667,8 @@ impl BTreeCursor {
         }
     }
 
+    /// Insert a record into the btree.
+    /// If the insert operation overflows the page, it will be split and the btree will be balanced.
     fn insert_into_page(
         &mut self,
         key: &OwnedValue,
@@ -700,10 +735,15 @@ impl BTreeCursor {
         }
     }
 
-    /* insert to position and shift other pointers */
+    /// Insert a record into a cell.
+    /// If the cell overflows, an overflow cell is created.
+    /// insert_into_cell() is called from insert_into_page(),
+    /// and the overflow cell count is used to determine if the page overflows,
+    /// i.e. whether we need to balance the btree after the insert.
     fn insert_into_cell(&self, page: &mut PageContent, payload: &[u8], cell_idx: usize) {
         let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
-        let enough_space = payload.len() + 2 <= free as usize;
+        const CELL_POINTER_SIZE_BYTES: usize = 2;
+        let enough_space = payload.len() + CELL_POINTER_SIZE_BYTES <= free as usize;
         if !enough_space {
             // add to overflow cell
             page.overflow_cells.push(OverflowCell {
@@ -714,61 +754,77 @@ impl BTreeCursor {
         }
 
         // TODO: insert into cell payload in internal page
-        let pc = self.allocate_cell_space(page, payload.len() as u16);
+        let new_cell_data_pointer = self.allocate_cell_space(page, payload.len() as u16);
         let buf = page.as_ptr();
 
         // copy data
-        buf[pc as usize..pc as usize + payload.len()].copy_from_slice(payload);
+        buf[new_cell_data_pointer as usize..new_cell_data_pointer as usize + payload.len()]
+            .copy_from_slice(payload);
         //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
-        let (pointer_area_pc_by_idx, _) = page.cell_get_raw_pointer_region();
-        let pointer_area_pc_by_idx = pointer_area_pc_by_idx + (2 * cell_idx);
+        let (cell_pointer_array_start, _) = page.cell_pointer_array_offset_and_size();
+        let cell_pointer_cur_idx = cell_pointer_array_start + (CELL_POINTER_SIZE_BYTES * cell_idx);
 
-        // move previous pointers forward and insert new pointer there
-        let n_cells_forward = 2 * (page.cell_count() - cell_idx);
-        if n_cells_forward > 0 {
+        // move existing pointers forward by CELL_POINTER_SIZE_BYTES...
+        let n_cells_forward = page.cell_count() - cell_idx;
+        let n_bytes_forward = CELL_POINTER_SIZE_BYTES * n_cells_forward;
+        if n_bytes_forward > 0 {
             buf.copy_within(
-                pointer_area_pc_by_idx..pointer_area_pc_by_idx + n_cells_forward,
-                pointer_area_pc_by_idx + 2,
+                cell_pointer_cur_idx..cell_pointer_cur_idx + n_bytes_forward,
+                cell_pointer_cur_idx + CELL_POINTER_SIZE_BYTES,
             );
         }
-        page.write_u16(pointer_area_pc_by_idx - page.offset, pc);
+        // ...and insert new cell pointer at the current index
+        page.write_u16(cell_pointer_cur_idx - page.offset, new_cell_data_pointer);
 
-        // update first byte of content area
-        page.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, pc);
+        // update first byte of content area (cell data always appended to the left, so cell content area pointer moves to point to the new cell data)
+        page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, new_cell_data_pointer);
 
         // update cell count
         let new_n_cells = (page.cell_count() + 1) as u16;
-        page.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, new_n_cells);
+        page.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, new_n_cells);
     }
 
+    /// Free the range of bytes that a cell occupies.
+    /// This function also updates the freeblock list in the page.
+    /// Freeblocks are used to keep track of free space in the page,
+    /// and are organized as a linked list.
     fn free_cell_range(&self, page: &mut PageContent, offset: u16, len: u16) {
+        // if the freeblock list is empty, we set this block as the first freeblock in the page header.
         if page.first_freeblock() == 0 {
-            // insert into empty list
-            page.write_u16(offset as usize, 0);
-            page.write_u16(offset as usize + 2, len);
-            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, offset);
+            page.write_u16(offset as usize, 0); // next freeblock = null
+            page.write_u16(offset as usize + 2, len); // size of this freeblock
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, offset); // first freeblock in page = this block
             return;
         }
         let first_block = page.first_freeblock();
 
+        // if the freeblock list is not empty, and the offset is less than the first freeblock,
+        // we insert this block at the head of the list
         if offset < first_block {
-            // insert into head of list
-            page.write_u16(offset as usize, first_block);
-            page.write_u16(offset as usize + 2, len);
-            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, offset);
+            page.write_u16(offset as usize, first_block); // next freeblock = previous first freeblock
+            page.write_u16(offset as usize + 2, len); // size of this freeblock
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, offset); // first freeblock in page = this block
             return;
         }
 
+        // if we clear space that is at the start of the cell content area,
+        // we need to update the cell content area pointer forward to account for the removed space
+        // FIXME: is offset ever < cell_content_area? cell content area grows leftwards and the pointer
+        // is to the start of the last allocated cell. should we assert!(offset >= page.cell_content_area())
+        // and change this to if offset == page.cell_content_area()?
         if offset <= page.cell_content_area() {
-            // extend boundary of content area
-            page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, page.first_freeblock());
-            page.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, offset + len);
+            // FIXME: remove the line directly below this, it does not change anything.
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, page.first_freeblock());
+            page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, offset + len);
             return;
         }
 
+        // if the freeblock list is not empty, and the offset is greater than the first freeblock,
+        // then we need to do some more calculation to figure out where to insert the freeblock
+        // in the freeblock linked list.
         let maxpc = {
             let db_header = self.database_header.borrow();
-            let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
+            let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
             usable_space as u16
         };
 
@@ -799,17 +855,23 @@ impl BTreeCursor {
         }
     }
 
+    /// Drop a cell from a page.
+    /// This is done by freeing the range of bytes that the cell occupies.
     fn drop_cell(&self, page: &mut PageContent, cell_idx: usize) {
         let (cell_start, cell_len) = page.cell_get_raw_region(
             cell_idx,
-            self.max_local(page.page_type()),
-            self.min_local(page.page_type()),
+            self.payload_overflow_threshold_max(page.page_type()),
+            self.payload_overflow_threshold_min(page.page_type()),
             self.usable_space(),
         );
         self.free_cell_range(page, cell_start as u16, cell_len as u16);
-        page.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, page.cell_count() as u16 - 1);
+        page.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, page.cell_count() as u16 - 1);
     }
 
+    /// Balance a leaf page.
+    /// Balancing is done when a page overflows.
+    /// see e.g. https://en.wikipedia.org/wiki/B-tree
+    ///
     /// This is a naive algorithm that doesn't try to distribute cells evenly by content.
     /// It will try to split the page in half by keys not by content.
     /// Sqlite tries to have a page at least 40% full.
@@ -852,8 +914,8 @@ impl BTreeCursor {
                 for cell_idx in 0..page_copy.cell_count() {
                     let (start, len) = page_copy.cell_get_raw_region(
                         cell_idx,
-                        self.max_local(page_copy.page_type()),
-                        self.min_local(page_copy.page_type()),
+                        self.payload_overflow_threshold_max(page_copy.page_type()),
+                        self.payload_overflow_threshold_min(page_copy.page_type()),
                         self.usable_space(),
                     );
                     let buf = page_copy.as_ptr();
@@ -930,14 +992,14 @@ impl BTreeCursor {
                 assert_eq!(parent_contents.overflow_cells.len(), 0);
 
                 // Right page pointer is u32 in right most pointer, and in cell is u32 too, so we can use a *u32 to hold where we want to change this value
-                let mut right_pointer = BTREE_HEADER_OFFSET_RIGHTMOST;
+                let mut right_pointer = PAGE_HEADER_OFFSET_RIGHTMOST_PTR;
                 for cell_idx in 0..parent_contents.cell_count() {
                     let cell = parent_contents
                         .cell_get(
                             cell_idx,
                             self.pager.clone(),
-                            self.max_local(page_type.clone()),
-                            self.min_local(page_type.clone()),
+                            self.payload_overflow_threshold_max(page_type.clone()),
+                            self.payload_overflow_threshold_min(page_type.clone()),
                             self.usable_space(),
                         )
                         .unwrap();
@@ -950,8 +1012,8 @@ impl BTreeCursor {
                     if found {
                         let (start, _len) = parent_contents.cell_get_raw_region(
                             cell_idx,
-                            self.max_local(page_type.clone()),
-                            self.min_local(page_type.clone()),
+                            self.payload_overflow_threshold_max(page_type.clone()),
+                            self.payload_overflow_threshold_min(page_type.clone()),
                             self.usable_space(),
                         );
                         right_pointer = start;
@@ -967,17 +1029,20 @@ impl BTreeCursor {
                     assert!(page.is_dirty());
                     let contents = page.get().contents.as_mut().unwrap();
 
-                    contents.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);
-                    contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
+                    contents.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
+                    contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
 
                     let db_header = RefCell::borrow(&self.database_header);
                     let cell_content_area_start =
-                        db_header.page_size - db_header.unused_space as u16;
-                    contents.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, cell_content_area_start);
+                        db_header.page_size - db_header.reserved_space as u16;
+                    contents.write_u16(
+                        PAGE_HEADER_OFFSET_CELL_CONTENT_AREA,
+                        cell_content_area_start,
+                    );
 
-                    contents.write_u8(BTREE_HEADER_OFFSET_FRAGMENTED, 0);
+                    contents.write_u8(PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT, 0);
                     if !contents.is_leaf() {
-                        contents.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, 0);
+                        contents.write_u32(PAGE_HEADER_OFFSET_RIGHTMOST_PTR, 0);
                     }
                 }
 
@@ -1035,8 +1100,8 @@ impl BTreeCursor {
                             .cell_get(
                                 contents.cell_count() - 1,
                                 self.pager.clone(),
-                                self.max_local(contents.page_type()),
-                                self.min_local(contents.page_type()),
+                                self.payload_overflow_threshold_max(contents.page_type()),
+                                self.payload_overflow_threshold_min(contents.page_type()),
                                 self.usable_space(),
                             )
                             .unwrap();
@@ -1045,13 +1110,13 @@ impl BTreeCursor {
                             _ => unreachable!(),
                         };
                         self.drop_cell(contents, contents.cell_count() - 1);
-                        contents.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, last_cell_pointer);
+                        contents.write_u32(PAGE_HEADER_OFFSET_RIGHTMOST_PTR, last_cell_pointer);
                     }
                     // last page right most pointer points to previous right most pointer before splitting
                     let last_page = new_pages.last().unwrap();
                     let last_page_contents = last_page.get().contents.as_mut().unwrap();
                     last_page_contents.write_u32(
-                        BTREE_HEADER_OFFSET_RIGHTMOST,
+                        PAGE_HEADER_OFFSET_RIGHTMOST_PTR,
                         self.write_info.rightmost_pointer.borrow().unwrap(),
                     );
                 }
@@ -1069,8 +1134,8 @@ impl BTreeCursor {
                         &contents.page_type(),
                         0,
                         self.pager.clone(),
-                        self.max_local(contents.page_type()),
-                        self.min_local(contents.page_type()),
+                        self.payload_overflow_threshold_max(contents.page_type()),
+                        self.payload_overflow_threshold_min(contents.page_type()),
                         self.usable_space(),
                     )
                     .unwrap();
@@ -1119,6 +1184,9 @@ impl BTreeCursor {
         }
     }
 
+    /// Balance the root page.
+    /// This is done when the root page overflows, and we need to create a new root page.
+    /// See e.g. https://en.wikipedia.org/wiki/B-tree
     fn balance_root(&mut self) {
         /* todo: balance deeper, create child and copy contents of root there. Then split root */
         /* if we are in root page then we just need to create a new root and push key there */
@@ -1145,8 +1213,8 @@ impl BTreeCursor {
             }
             // point new root right child to previous root
             new_root_page_contents
-                .write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, new_root_page_id as u32);
-            new_root_page_contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
+                .write_u32(PAGE_HEADER_OFFSET_RIGHTMOST_PTR, new_root_page_id as u32);
+            new_root_page_contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
         }
 
         /* swap splitted page buffer with new root buffer so we don't have to update page idx */
@@ -1164,7 +1232,7 @@ impl BTreeCursor {
                 if is_page_1 {
                     // Remove header from child and set offset to 0
                     let contents = child.get().contents.as_mut().unwrap();
-                    let (cell_pointer_offset, _) = contents.cell_get_raw_pointer_region();
+                    let (cell_pointer_offset, _) = contents.cell_pointer_array_offset_and_size();
                     // change cell pointers
                     for cell_idx in 0..contents.cell_count() {
                         let cell_pointer_offset = cell_pointer_offset + (2 * cell_idx) - offset;
@@ -1195,12 +1263,16 @@ impl BTreeCursor {
         }
     }
 
+    /// Allocate a new page to the btree via the pager.
+    /// This marks the page as dirty and writes the page header.
     fn allocate_page(&self, page_type: PageType, offset: usize) -> PageRef {
         let page = self.pager.allocate_page().unwrap();
         btree_init_page(&page, page_type, &self.database_header.borrow(), offset);
         page
     }
 
+    /// Allocate a new overflow page.
+    /// This is done when a cell overflows and new space is needed.
     fn allocate_overflow_page(&self) -> PageRef {
         let page = self.pager.allocate_page().unwrap();
 
@@ -1212,13 +1284,11 @@ impl BTreeCursor {
         page
     }
 
-    /*
-        Allocate space for a cell on a page.
-    */
+    /// Allocate space for a cell on a page.
     fn allocate_cell_space(&self, page_ref: &PageContent, amount: u16) -> u16 {
         let amount = amount as usize;
 
-        let (cell_offset, _) = page_ref.cell_get_raw_pointer_region();
+        let (cell_offset, _) = page_ref.cell_pointer_array_offset_and_size();
         let gap = cell_offset + 2 * page_ref.cell_count();
         let mut top = page_ref.cell_content_area() as usize;
 
@@ -1236,33 +1306,31 @@ impl BTreeCursor {
         if gap + 2 + amount > top {
             // defragment
             self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
-            top = page_ref.read_u16(BTREE_HEADER_OFFSET_CELL_CONTENT) as usize;
+            top = page_ref.read_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA) as usize;
         }
 
         let db_header = RefCell::borrow(&self.database_header);
         top -= amount;
 
-        page_ref.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, top as u16);
+        page_ref.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, top as u16);
 
-        let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
+        let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
         assert!(top + amount <= usable_space);
         top as u16
     }
 
+    /// Defragment a page. This means packing all the cells to the end of the page.
     fn defragment_page(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) {
         log::debug!("defragment_page");
         let cloned_page = page.clone();
         // TODO(pere): usable space should include offset probably
-        let usable_space = (db_header.page_size - db_header.unused_space as u16) as u64;
+        let usable_space = (db_header.page_size - db_header.reserved_space as u16) as u64;
         let mut cbrk = usable_space;
 
         // TODO: implement fast algorithm
 
         let last_cell = usable_space - 4;
-        let first_cell = {
-            let (start, end) = cloned_page.cell_get_raw_pointer_region();
-            start + end
-        };
+        let first_cell = cloned_page.unallocated_region_start() as u64;
 
         if cloned_page.cell_count() > 0 {
             let page_type = page.page_type();
@@ -1330,42 +1398,54 @@ impl BTreeCursor {
         let write_buf = page.as_ptr();
 
         // set new first byte of cell content
-        page.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, cbrk as u16);
+        page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, cbrk as u16);
         // set free block to 0, unused spaced can be retrieved from gap between cell pointer end and content start
-        page.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);
+        page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
         // set unused space to 0
         let first_cell = cloned_page.cell_content_area() as u64;
         assert!(first_cell <= cbrk);
         write_buf[first_cell as usize..cbrk as usize].fill(0);
     }
 
-    // Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
-    // and end of cell pointer area.
+    /// Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected to be between first cell byte
+    /// and end of cell pointer area.
     #[allow(unused_assignments)]
     fn compute_free_space(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) -> u16 {
         // TODO(pere): maybe free space is not calculated correctly with offset
-        let buf = page.as_ptr();
 
-        let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
-        let mut first_byte_in_cell_content = page.cell_content_area();
-        if first_byte_in_cell_content == 0 {
-            first_byte_in_cell_content = u16::MAX;
+        // Usable space, not the same as free space, simply means:
+        // space that is not reserved for extensions by sqlite. Usually reserved_space is 0.
+        let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
+
+        let mut cell_content_area_start = page.cell_content_area();
+        // A zero value for the cell content area pointer is interpreted as 65536.
+        // See https://www.sqlite.org/fileformat.html
+        // The max page size for a sqlite database is 64kiB i.e. 65536 bytes.
+        // 65536 is u16::MAX + 1, and since cell content grows from right to left, this means
+        // the cell content area pointer is at the end of the page,
+        // i.e.
+        // 1. the page size is 64kiB
+        // 2. there are no cells on the page
+        // 3. there is no reserved space at the end of the page
+        if cell_content_area_start == 0 {
+            cell_content_area_start = u16::MAX;
         }
 
-        let fragmented_free_bytes = page.num_frag_free_bytes();
-        let free_block_pointer = page.first_freeblock();
-        let ncell = page.cell_count();
+        // The amount of free space is the sum of:
+        // #1. the size of the unallocated region
+        // #2. fragments (isolated 1-3 byte chunks of free space within the cell content area)
+        // #3. freeblocks (linked list of blocks of at least 4 bytes within the cell content area that are not in use due to e.g. deletions)
 
-        // 8 + 4 == header end
-        let child_pointer_size = if page.is_leaf() { 0 } else { 4 };
-        let first_cell = (page.offset + 8 + child_pointer_size + (2 * ncell)) as u16;
+        let mut free_space_bytes =
+            page.unallocated_region_size() as usize + page.num_frag_free_bytes() as usize;
 
-        let mut nfree = fragmented_free_bytes as usize + first_byte_in_cell_content as usize;
-
-        let mut pc = free_block_pointer as usize;
-        if pc > 0 {
-            if pc < first_byte_in_cell_content as usize {
-                // corrupt
+        // #3 is computed by iterating over the freeblocks linked list
+        let mut cur_freeblock_ptr = page.first_freeblock() as usize;
+        let page_buf = page.as_ptr();
+        if cur_freeblock_ptr > 0 {
+            if cur_freeblock_ptr < cell_content_area_start as usize {
+                // Freeblocks exist in the cell content area e.g. after deletions
+                // They should never exist in the unused area of the page.
                 todo!("corrupted page");
             }
 
@@ -1373,32 +1453,51 @@ impl BTreeCursor {
             let mut size = 0;
             loop {
                 // TODO: check corruption icellast
-                next = u16::from_be_bytes(buf[pc..pc + 2].try_into().unwrap()) as usize;
-                size = u16::from_be_bytes(buf[pc + 2..pc + 4].try_into().unwrap()) as usize;
-                nfree += size;
-                if next <= pc + size + 3 {
+                next = u16::from_be_bytes(
+                    page_buf[cur_freeblock_ptr..cur_freeblock_ptr + 2]
+                        .try_into()
+                        .unwrap(),
+                ) as usize; // first 2 bytes in freeblock = next freeblock pointer
+                size = u16::from_be_bytes(
+                    page_buf[cur_freeblock_ptr + 2..cur_freeblock_ptr + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as usize; // next 2 bytes in freeblock = size of current freeblock
+                free_space_bytes += size;
+                // Freeblocks are in order from left to right on the page,
+                // so next pointer should > current pointer + its size, or 0 if no next block exists.
+                if next <= cur_freeblock_ptr + size + 3 {
                     break;
                 }
-                pc = next;
+                cur_freeblock_ptr = next;
             }
 
-            if next > 0 {
-                todo!("corrupted page ascending order");
-            }
+            // Next should always be 0 (NULL) at this point since we have reached the end of the freeblocks linked list
+            assert!(
+                next == 0,
+                "corrupted page: freeblocks list not in ascending order"
+            );
 
-            if pc + size > usable_space {
-                todo!("corrupted page last freeblock extends last page end");
-            }
+            assert!(
+                cur_freeblock_ptr + size <= usable_space,
+                "corrupted page: last freeblock extends last page end"
+            );
         }
+
+        assert!(
+            free_space_bytes <= usable_space,
+            "corrupted page: free space is greater than usable space"
+        );
 
         // if( nFree>usableSize || nFree<iCellFirst ){
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
-        // don't count header and cell pointers?
-        nfree -= first_cell as usize;
-        nfree as u16
+
+        free_space_bytes as u16
     }
 
+    /// Fill in the cell payload with the record.
+    /// If the record is too large to fit in the cell, it will spill onto overflow pages.
     fn fill_cell_payload(
         &self,
         page_type: PageType,
@@ -1423,25 +1522,26 @@ impl BTreeCursor {
             write_varint_to_vec(record_buf.len() as u64, cell_payload);
         }
 
-        let max_local = self.max_local(page_type.clone());
+        let payload_overflow_threshold_max = self.payload_overflow_threshold_max(page_type.clone());
         log::debug!(
-            "fill_cell_payload(record_size={}, max_local={})",
+            "fill_cell_payload(record_size={}, payload_overflow_threshold_max={})",
             record_buf.len(),
-            max_local
+            payload_overflow_threshold_max
         );
-        if record_buf.len() <= max_local {
+        if record_buf.len() <= payload_overflow_threshold_max {
             // enough allowed space to fit inside a btree page
             cell_payload.extend_from_slice(record_buf.as_slice());
-            cell_payload.resize(cell_payload.len() + 4, 0);
             return;
         }
         log::debug!("fill_cell_payload(overflow)");
 
-        let min_local = self.min_local(page_type);
-        let mut space_left = min_local + (record_buf.len() - min_local) % (self.usable_space() - 4);
+        let payload_overflow_threshold_min = self.payload_overflow_threshold_min(page_type);
+        // see e.g. https://github.com/sqlite/sqlite/blob/9591d3fe93936533c8c3b0dc4d025ac999539e11/src/dbstat.c#L371
+        let mut space_left = payload_overflow_threshold_min
+            + (record_buf.len() - payload_overflow_threshold_min) % (self.usable_space() - 4);
 
-        if space_left > max_local {
-            space_left = min_local;
+        if space_left > payload_overflow_threshold_max {
+            space_left = payload_overflow_threshold_min;
         }
 
         // cell_size must be equal to first value of space_left as this will be the bytes copied to non-overflow page.
@@ -1487,31 +1587,54 @@ impl BTreeCursor {
         assert_eq!(cell_size, cell_payload.len());
     }
 
-    fn max_local(&self, page_type: PageType) -> usize {
-        let usable_space = self.usable_space();
+    /// Returns the maximum payload size (X) that can be stored directly on a b-tree page without spilling to overflow pages.
+    ///
+    /// For table leaf pages: X = usable_size - 35
+    /// For index pages: X = ((usable_size - 12) * 64/255) - 23
+    ///
+    /// The usable size is the total page size less the reserved space at the end of each page.
+    /// These thresholds are designed to:
+    /// - Give a minimum fanout of 4 for index b-trees
+    /// - Ensure enough payload is on the b-tree page that the record header can usually be accessed
+    ///   without consulting an overflow page
+    fn payload_overflow_threshold_max(&self, page_type: PageType) -> usize {
+        let usable_size = self.usable_space();
         match page_type {
-            PageType::IndexInterior | PageType::TableInterior => {
-                (usable_space - 12) * 64 / 255 - 23
+            PageType::IndexInterior | PageType::IndexLeaf => {
+                ((usable_size - 12) * 64 / 255) - 23 // Index page formula
             }
-            PageType::IndexLeaf | PageType::TableLeaf => usable_space - 35,
+            PageType::TableInterior | PageType::TableLeaf => {
+                usable_size - 35 // Table leaf page formula
+            }
         }
     }
 
-    fn min_local(&self, page_type: PageType) -> usize {
-        let usable_space = self.usable_space();
-        match page_type {
-            PageType::IndexInterior | PageType::TableInterior => {
-                (usable_space - 12) * 32 / 255 - 23
-            }
-            PageType::IndexLeaf | PageType::TableLeaf => (usable_space - 12) * 32 / 255 - 23,
-        }
+    /// Returns the minimum payload size (M) that must be stored on the b-tree page before spilling to overflow pages is allowed.
+    ///
+    /// For all page types: M = ((usable_size - 12) * 32/255) - 23
+    ///
+    /// When payload size P exceeds max_local():
+    /// - If K = M + ((P-M) % (usable_size-4)) <= max_local(): store K bytes on page
+    /// - Otherwise: store M bytes on page
+    ///
+    /// The remaining bytes are stored on overflow pages in both cases.
+    fn payload_overflow_threshold_min(&self, _page_type: PageType) -> usize {
+        let usable_size = self.usable_space();
+        // Same formula for all page types
+        ((usable_size - 12) * 32 / 255) - 23
     }
 
+    /// The "usable size" of a database page is the page size specified by the 2-byte integer at offset 16
+    /// in the header, minus the "reserved" space size recorded in the 1-byte integer at offset 20 in the header.
+    /// The usable size of a page might be an odd number. However, the usable size is not allowed to be less than 480.
+    /// In other words, if the page size is 512, then the reserved space size cannot exceed 32.
     fn usable_space(&self) -> usize {
         let db_header = RefCell::borrow(&self.database_header);
-        (db_header.page_size - db_header.unused_space as u16) as usize
+        (db_header.page_size - db_header.reserved_space as u16) as usize
     }
 
+    /// Find the index of the cell in the page that contains the given rowid.
+    /// BTree tables only.
     fn find_cell(&self, page: &PageContent, int_key: u64) -> usize {
         let mut cell_idx = 0;
         let cell_count = page.cell_count();
@@ -1520,8 +1643,8 @@ impl BTreeCursor {
                 .cell_get(
                     cell_idx,
                     self.pager.clone(),
-                    self.max_local(page.page_type()),
-                    self.min_local(page.page_type()),
+                    self.payload_overflow_threshold_max(page.page_type()),
+                    self.payload_overflow_threshold_min(page.page_type()),
                     self.usable_space(),
                 )
                 .unwrap()
@@ -1545,6 +1668,8 @@ impl BTreeCursor {
 }
 
 impl PageStack {
+    /// Push a new page onto the stack.
+    /// This effectively means traversing to a child page.
     fn push(&self, page: PageRef) {
         debug!(
             "pagestack::push(current={}, new_page_id={})",
@@ -1561,6 +1686,8 @@ impl PageStack {
         self.cell_indices.borrow_mut()[current as usize] = 0;
     }
 
+    /// Pop a page off the stack.
+    /// This effectively means traversing back up to a parent page.
     fn pop(&self) {
         let current = *self.current_page.borrow();
         debug!("pagestack::pop(current={})", current);
@@ -1569,6 +1696,8 @@ impl PageStack {
         *self.current_page.borrow_mut() -= 1;
     }
 
+    /// Get the top page on the stack.
+    /// This is the page that is currently being traversed.
     fn top(&self) -> PageRef {
         let current = *self.current_page.borrow();
         let page = self.stack.borrow()[current as usize]
@@ -1583,6 +1712,7 @@ impl PageStack {
         page
     }
 
+    /// Get the parent page of the current page.
     fn parent(&self) -> PageRef {
         let current = *self.current_page.borrow();
         self.stack.borrow()[current as usize - 1]
@@ -1597,13 +1727,15 @@ impl PageStack {
     }
 
     /// Cell index of the current page
-    fn current_index(&self) -> i32 {
+    fn current_cell_index(&self) -> i32 {
         let current = self.current();
         self.cell_indices.borrow()[current]
     }
 
-    fn curr_idx_out_of_begin(&self) -> bool {
-        let cell_idx = self.current_index();
+    /// Check if the current cell index is less than 0.
+    /// This means we have been iterating backwards and have reached the start of the page.
+    fn current_cell_index_less_than_min(&self) -> bool {
+        let cell_idx = self.current_cell_index();
         cell_idx < 0
     }
 
@@ -1639,7 +1771,7 @@ fn find_free_cell(page_ref: &PageContent, db_header: Ref<DatabaseHeader>, amount
 
     let buf = page_ref.as_ptr();
 
-    let usable_space = (db_header.page_size - db_header.unused_space as u16) as usize;
+    let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
     let maxpc = usable_space - amount;
     let mut found = false;
     while pc <= maxpc {
@@ -1790,8 +1922,8 @@ impl Cursor for BTreeCursor {
             let equals = match &contents.cell_get(
                 cell_idx,
                 self.pager.clone(),
-                self.max_local(contents.page_type()),
-                self.min_local(contents.page_type()),
+                self.payload_overflow_threshold_max(contents.page_type()),
+                self.payload_overflow_threshold_min(contents.page_type()),
                 self.usable_space(),
             )? {
                 BTreeCell::TableLeafCell(l) => l._rowid == int_key,
@@ -1828,15 +1960,18 @@ pub fn btree_init_page(
     let contents = contents.contents.as_mut().unwrap();
     contents.offset = offset;
     let id = page_type as u8;
-    contents.write_u8(BTREE_HEADER_OFFSET_TYPE, id);
-    contents.write_u16(BTREE_HEADER_OFFSET_FREEBLOCK, 0);
-    contents.write_u16(BTREE_HEADER_OFFSET_CELL_COUNT, 0);
+    contents.write_u8(PAGE_HEADER_OFFSET_PAGE_TYPE, id);
+    contents.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
+    contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
 
-    let cell_content_area_start = db_header.page_size - db_header.unused_space as u16;
-    contents.write_u16(BTREE_HEADER_OFFSET_CELL_CONTENT, cell_content_area_start);
+    let cell_content_area_start = db_header.page_size - db_header.reserved_space as u16;
+    contents.write_u16(
+        PAGE_HEADER_OFFSET_CELL_CONTENT_AREA,
+        cell_content_area_start,
+    );
 
-    contents.write_u8(BTREE_HEADER_OFFSET_FRAGMENTED, 0);
-    contents.write_u32(BTREE_HEADER_OFFSET_RIGHTMOST, 0);
+    contents.write_u8(PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT, 0);
+    contents.write_u32(PAGE_HEADER_OFFSET_RIGHTMOST_PTR, 0);
 }
 
 fn to_static_buf(buf: &[u8]) -> &'static [u8] {
