@@ -1,6 +1,6 @@
 use std::{fmt::Display, rc::Rc};
 
-use limbo_core::{Connection, Result, RowResult};
+use limbo_core::{Connection, Result, StepResult};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -215,7 +215,7 @@ impl Interaction {
                 let mut out = Vec::new();
                 while let Ok(row) = rows.next_row() {
                     match row {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             let mut r = Vec::new();
                             for el in &row.values {
                                 let v = match el {
@@ -230,12 +230,12 @@ impl Interaction {
 
                             out.push(r);
                         }
-                        RowResult::IO => {}
-                        RowResult::Interrupt => {}
-                        RowResult::Done => {
+                        StepResult::IO => {}
+                        StepResult::Interrupt => {}
+                        StepResult::Done => {
                             break;
                         }
-                        RowResult::Busy => {}
+                        StepResult::Busy => {}
                     }
                 }
 

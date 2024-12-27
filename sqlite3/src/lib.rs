@@ -239,14 +239,14 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
     let stmt = &mut *stmt;
     if let Ok(result) = stmt.stmt.step() {
         match result {
-            limbo_core::RowResult::IO => SQLITE_BUSY,
-            limbo_core::RowResult::Done => SQLITE_DONE,
-            limbo_core::RowResult::Interrupt => SQLITE_INTERRUPT,
-            limbo_core::RowResult::Row(row) => {
+            limbo_core::StepResult::IO => SQLITE_BUSY,
+            limbo_core::StepResult::Done => SQLITE_DONE,
+            limbo_core::StepResult::Interrupt => SQLITE_INTERRUPT,
+            limbo_core::StepResult::Row(row) => {
                 stmt.row.replace(Some(row));
                 SQLITE_ROW
             }
-            limbo_core::RowResult::Busy => SQLITE_BUSY,
+            limbo_core::StepResult::Busy => SQLITE_BUSY,
         }
     } else {
         SQLITE_ERROR

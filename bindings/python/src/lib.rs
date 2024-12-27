@@ -128,22 +128,22 @@ impl Cursor {
                 match smt_lock.step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::RowResult::Row(row) => {
+                    limbo_core::StepResult::Row(row) => {
                         let py_row = row_to_py(py, &row);
                         return Ok(Some(py_row));
                     }
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         self.conn.io.run_once().map_err(|e| {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
                     }
-                    limbo_core::RowResult::Interrupt => {
+                    limbo_core::StepResult::Interrupt => {
                         return Ok(None);
                     }
-                    limbo_core::RowResult::Done => {
+                    limbo_core::StepResult::Done => {
                         return Ok(None);
                     }
-                    limbo_core::RowResult::Busy => {
+                    limbo_core::StepResult::Busy => {
                         return Err(
                             PyErr::new::<OperationalError, _>("Busy error".to_string()).into()
                         );
@@ -167,22 +167,22 @@ impl Cursor {
                 match smt_lock.step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::RowResult::Row(row) => {
+                    limbo_core::StepResult::Row(row) => {
                         let py_row = row_to_py(py, &row);
                         results.push(py_row);
                     }
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         self.conn.io.run_once().map_err(|e| {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
                     }
-                    limbo_core::RowResult::Interrupt => {
+                    limbo_core::StepResult::Interrupt => {
                         return Ok(results);
                     }
-                    limbo_core::RowResult::Done => {
+                    limbo_core::StepResult::Done => {
                         return Ok(results);
                     }
-                    limbo_core::RowResult::Busy => {
+                    limbo_core::StepResult::Busy => {
                         return Err(
                             PyErr::new::<OperationalError, _>("Busy error".to_string()).into()
                         );

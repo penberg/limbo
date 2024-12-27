@@ -1,6 +1,6 @@
 use crate::opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use cli_table::{Cell, Table};
-use limbo_core::{Database, LimboError, RowResult, Value};
+use limbo_core::{Database, LimboError, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -498,7 +498,7 @@ impl Limbo {
                     }
 
                     match rows.next_row() {
-                        Ok(RowResult::Row(row)) => {
+                        Ok(StepResult::Row(row)) => {
                             for (i, value) in row.values.iter().enumerate() {
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
@@ -518,14 +518,14 @@ impl Limbo {
                             }
                             let _ = self.writeln("");
                         }
-                        Ok(RowResult::IO) => {
+                        Ok(StepResult::IO) => {
                             self.io.run_once()?;
                         }
-                        Ok(RowResult::Interrupt) => break,
-                        Ok(RowResult::Done) => {
+                        Ok(StepResult::Interrupt) => break,
+                        Ok(StepResult::Done) => {
                             break;
                         }
-                        Ok(RowResult::Busy) => {
+                        Ok(StepResult::Busy) => {
                             self.writeln("database is busy");
                             break;
                         }
@@ -543,7 +543,7 @@ impl Limbo {
                     let mut table_rows: Vec<Vec<_>> = vec![];
                     loop {
                         match rows.next_row() {
-                            Ok(RowResult::Row(row)) => {
+                            Ok(StepResult::Row(row)) => {
                                 table_rows.push(
                                     row.values
                                         .iter()
@@ -559,12 +559,12 @@ impl Limbo {
                                         .collect(),
                                 );
                             }
-                            Ok(RowResult::IO) => {
+                            Ok(StepResult::IO) => {
                                 self.io.run_once()?;
                             }
-                            Ok(RowResult::Interrupt) => break,
-                            Ok(RowResult::Done) => break,
-                            Ok(RowResult::Busy) => {
+                            Ok(StepResult::Interrupt) => break,
+                            Ok(StepResult::Done) => break,
+                            Ok(StepResult::Busy) => {
                                 self.writeln("database is busy");
                                 break;
                             }
@@ -607,18 +607,18 @@ impl Limbo {
                 let mut found = false;
                 loop {
                     match rows.next_row()? {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             if let Some(Value::Text(schema)) = row.values.first() {
                                 let _ = self.write_fmt(format_args!("{};", schema));
                                 found = true;
                             }
                         }
-                        RowResult::IO => {
+                        StepResult::IO => {
                             self.io.run_once()?;
                         }
-                        RowResult::Interrupt => break,
-                        RowResult::Done => break,
-                        RowResult::Busy => {
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
                             self.writeln("database is busy");
                             break;
                         }
@@ -664,18 +664,18 @@ impl Limbo {
                 let mut tables = String::new();
                 loop {
                     match rows.next_row()? {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             if let Some(Value::Text(table)) = row.values.first() {
                                 tables.push_str(table);
                                 tables.push(' ');
                             }
                         }
-                        RowResult::IO => {
+                        StepResult::IO => {
                             self.io.run_once()?;
                         }
-                        RowResult::Interrupt => break,
-                        RowResult::Done => break,
-                        RowResult::Busy => {
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
                             self.writeln("database is busy");
                             break;
                         }
