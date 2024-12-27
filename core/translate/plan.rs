@@ -1,6 +1,5 @@
 use core::fmt;
 use sqlite3_parser::ast;
-use std::ptr::write;
 use std::{
     fmt::{Display, Formatter},
     rc::Rc,
