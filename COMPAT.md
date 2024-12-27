@@ -395,7 +395,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | ReadCookie      | No     |
 | Real            | Yes    |
 | RealAffinity    | Yes    |
-| Remainder       | No     |
+| Remainder       | Yes    |
 | ResetCount      | No     |
 | ResultRow       | Yes    |
 | Return          | Yes    |

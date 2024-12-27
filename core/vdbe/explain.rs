@@ -83,7 +83,7 @@ pub fn insn_to_str(
                 format!("r[{}]=~r[{}]", dest, reg),
             ),
             Insn::Remainder { lhs, rhs, dest } => (
-                "Modulus",
+                "Remainder",
                 *lhs as i32,
                 *rhs as i32,
                 *dest as i32,
