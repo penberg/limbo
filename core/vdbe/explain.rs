@@ -82,6 +82,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=~r[{}]", dest, reg),
             ),
+            Insn::Remainder { lhs, rhs, dest } => (
+                "Modulus",
+                *lhs as i32,
+                *rhs as i32,
+                *dest as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}]%r[{}]", dest, lhs, rhs),
+            ),
             Insn::Null { dest, dest_end } => (
                 "Null",
                 0,

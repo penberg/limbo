@@ -693,6 +693,13 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::Modulus => {
+                    program.emit_insn(Insn::Remainder {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 ast::Operator::BitwiseAnd => {
                     program.emit_insn(Insn::BitAnd {
                         lhs: e1_reg,

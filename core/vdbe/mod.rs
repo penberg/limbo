@@ -119,6 +119,12 @@ pub enum Insn {
         reg: usize,
         dest: usize,
     },
+    // Divide lhs by rhs and place the remainder in dest register.
+    Remainder {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
     // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
     Jump {
         target_pc_lt: BranchOffset,
@@ -1222,6 +1228,103 @@ impl Program {
                             unimplemented!("{:?}", state.registers[reg]);
                         }
                     }
+                    state.pc += 1;
+                }
+                Insn::Remainder { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    state.registers[dest] = match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Null, _)
+                        | (_, OwnedValue::Null)
+                        | (_, OwnedValue::Integer(0))
+                        | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            OwnedValue::Integer(lhs % rhs)
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            OwnedValue::Float(((*lhs as i64) % (*rhs as i64)) as f64)
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            OwnedValue::Float(((*lhs as i64) % rhs) as f64)
+                        }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            OwnedValue::Float((lhs % *rhs as i64) as f64)
+                        }
+                        (lhs, OwnedValue::Agg(agg_rhs)) => match lhs {
+                            OwnedValue::Agg(agg_lhs) => {
+                                let acc = agg_lhs.final_value();
+                                let acc2 = agg_rhs.final_value();
+                                match (acc, acc2) {
+                                    (_, OwnedValue::Integer(0))
+                                    | (_, OwnedValue::Float(0.0))
+                                    | (_, OwnedValue::Null)
+                                    | (OwnedValue::Null, _) => OwnedValue::Null,
+                                    (OwnedValue::Integer(l), OwnedValue::Integer(r)) => {
+                                        OwnedValue::Integer(l % r)
+                                    }
+                                    (OwnedValue::Float(lh_f), OwnedValue::Float(rh_f)) => {
+                                        OwnedValue::Float(((*lh_f as i64) % (*rh_f as i64)) as f64)
+                                    }
+                                    (OwnedValue::Integer(lh_i), OwnedValue::Float(rh_f)) => {
+                                        OwnedValue::Float((lh_i % (*rh_f as i64)) as f64)
+                                    }
+                                    _ => {
+                                        todo!("{:?} {:?}", acc, acc2);
+                                    }
+                                }
+                            }
+                            OwnedValue::Integer(lh_i) => match agg_rhs.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(rh_f) => {
+                                    OwnedValue::Float((lh_i % (*rh_f as i64)) as f64)
+                                }
+                                OwnedValue::Integer(rh_i) => OwnedValue::Integer(lh_i % rh_i),
+                                _ => {
+                                    todo!("{:?}", agg_rhs);
+                                }
+                            },
+                            OwnedValue::Float(lh_f) => match agg_rhs.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(rh_f) => {
+                                    OwnedValue::Float(((*lh_f as i64) % (*rh_f as i64)) as f64)
+                                }
+                                OwnedValue::Integer(rh_i) => {
+                                    OwnedValue::Float(((*lh_f as i64) % rh_i) as f64)
+                                }
+                                _ => {
+                                    todo!("{:?}", agg_rhs);
+                                }
+                            },
+                            _ => todo!("{:?}", rhs),
+                        },
+                        (OwnedValue::Agg(aggctx), rhs) => match rhs {
+                            OwnedValue::Integer(rh_i) => match aggctx.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(lh_f) => {
+                                    OwnedValue::Float(((*lh_f as i64) % rh_i) as f64)
+                                }
+                                OwnedValue::Integer(lh_i) => OwnedValue::Integer(lh_i % rh_i),
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            OwnedValue::Float(rh_f) => match aggctx.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(lh_f) => {
+                                    OwnedValue::Float(((*lh_f as i64) % (*rh_f as i64)) as f64)
+                                }
+                                OwnedValue::Integer(lh_i) => {
+                                    OwnedValue::Float((lh_i % (*rh_f as i64)) as f64)
+                                }
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            _ => todo!("{:?}", rhs),
+                        },
+                        _ => todo!("{:?} {:?}", state.registers[lhs], state.registers[rhs]),
+                    };
                     state.pc += 1;
                 }
                 Insn::Null { dest, dest_end } => {
