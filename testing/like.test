@@ -77,3 +77,15 @@ Robert|Roberts}
 do_execsql_test where-like-impossible {
     select * from products where 'foobar' like 'fooba';
 } {}
+
+do_execsql_test like-with-backslash {
+  select like('\%A', '\A')
+} {1}
+
+do_execsql_test like-with-dollar {
+  select like('A$%', 'A$')
+} {1}
+
+do_execsql_test like-with-dot {
+  select like('%a.a', 'aaaa')
+} {0}

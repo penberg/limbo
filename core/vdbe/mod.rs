@@ -46,7 +46,7 @@ use datetime::{exec_date, exec_time, exec_unixepoch};
 
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -3199,10 +3199,31 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
 }
 
 fn construct_like_regex(pattern: &str) -> Regex {
-    let mut regex_pattern = String::from("(?i)^");
-    regex_pattern.push_str(&pattern.replace('%', ".*").replace('_', "."));
+    let mut regex_pattern = String::with_capacity(pattern.len() * 2);
+
+    regex_pattern.push('^');
+
+    for c in pattern.chars() {
+        match c {
+            '\\' => regex_pattern.push_str("\\\\"),
+            '%' => regex_pattern.push_str(".*"),
+            '_' => regex_pattern.push('.'),
+            ch => {
+                if regex_syntax::is_meta_character(c) {
+                    regex_pattern.push('\\');
+                }
+                regex_pattern.push(ch);
+            }
+        }
+    }
+
     regex_pattern.push('$');
-    Regex::new(&regex_pattern).unwrap()
+
+    RegexBuilder::new(&regex_pattern)
+        .case_insensitive(true)
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
 }
 
 // Implements LIKE pattern matching. Caches the constructed regex if a cache is provided
@@ -4354,11 +4375,17 @@ mod tests {
     }
 
     #[test]
+    fn test_like_with_escape_or_regexmeta_chars() {
+        assert!(exec_like(None, r#"\%A"#, r#"\A"#));
+        assert!(exec_like(None, "%a%a", "aaaa"));
+    }
+
+    #[test]
     fn test_like_no_cache() {
         assert!(exec_like(None, "a%", "aaaa"));
         assert!(exec_like(None, "%a%a", "aaaa"));
-        assert!(exec_like(None, "%a.a", "aaaa"));
-        assert!(exec_like(None, "a.a%", "aaaa"));
+        assert!(!exec_like(None, "%a.a", "aaaa"));
+        assert!(!exec_like(None, "a.a%", "aaaa"));
         assert!(!exec_like(None, "%a.ab", "aaaa"));
     }
 
@@ -4367,15 +4394,15 @@ mod tests {
         let mut cache = HashMap::new();
         assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
         assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "a.a%", "aaaa"));
         assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
 
         // again after values have been cached
         assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
         assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "a.a%", "aaaa"));
         assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
     }
 
