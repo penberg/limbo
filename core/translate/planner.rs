@@ -264,7 +264,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             columns,
             from,
             where_clause,
-            mut group_by,
+            group_by,
             ..
         } => {
             let col_count = columns.len();
