@@ -1531,7 +1531,6 @@ impl BTreeCursor {
         if record_buf.len() <= payload_overflow_threshold_max {
             // enough allowed space to fit inside a btree page
             cell_payload.extend_from_slice(record_buf.as_slice());
-            cell_payload.resize(cell_payload.len() + 4, 0);
             return;
         }
         log::debug!("fill_cell_payload(overflow)");
