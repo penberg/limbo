@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
@@ -16,7 +16,6 @@ use crate::{Completion, Page};
 use self::sqlite3_ondisk::{checksum_wal, PageContent, WAL_MAGIC_BE, WAL_MAGIC_LE};
 
 use super::buffer_pool::BufferPool;
-use super::page_cache::PageCacheKey;
 use super::pager::{PageRef, Pager};
 use super::sqlite3_ondisk::{self, begin_write_btree_page, WalHeader};
 

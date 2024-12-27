@@ -526,7 +526,7 @@ impl Limbo {
                             break;
                         }
                         Ok(StepResult::Busy) => {
-                            self.writeln("database is busy");
+                            let _ = self.writeln("database is busy");
                             break;
                         }
                         Err(err) => {
@@ -565,7 +565,7 @@ impl Limbo {
                             Ok(StepResult::Interrupt) => break,
                             Ok(StepResult::Done) => break,
                             Ok(StepResult::Busy) => {
-                                self.writeln("database is busy");
+                                let _ = self.writeln("database is busy");
                                 break;
                             }
                             Err(err) => {
@@ -619,7 +619,7 @@ impl Limbo {
                         StepResult::Interrupt => break,
                         StepResult::Done => break,
                         StepResult::Busy => {
-                            self.writeln("database is busy");
+                            let _ = self.writeln("database is busy");
                             break;
                         }
                     }
@@ -676,7 +676,7 @@ impl Limbo {
                         StepResult::Interrupt => break,
                         StepResult::Done => break,
                         StepResult::Busy => {
-                            self.writeln("database is busy");
+                            let _ = self.writeln("database is busy");
                             break;
                         }
                     }

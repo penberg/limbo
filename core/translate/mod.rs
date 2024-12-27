@@ -369,7 +369,6 @@ fn update_pragma(
             query_pragma("journal_mode", header, program)?;
             Ok(())
         }
-        _ => todo!("pragma `{name}`"),
     }
 }
 
@@ -395,9 +394,6 @@ fn query_pragma(
                 value: "wal".into(),
                 dest: register,
             });
-        }
-        _ => {
-            todo!("pragma `{name}`");
         }
     }
 
