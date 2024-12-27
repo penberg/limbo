@@ -1,6 +1,25 @@
 use crate::ext::ExtFunc;
 use std::fmt;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
+use std::rc::Rc;
+
+pub struct ExternalFunc {
+    pub name: String,
+    pub func: Box<dyn Fn(&[crate::types::Value]) -> crate::Result<crate::types::OwnedValue>>,
+}
+
+impl Debug for ExternalFunc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl Display for ExternalFunc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 #[cfg(feature = "json")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonFunc {
@@ -263,6 +282,7 @@ pub enum Func {
     #[cfg(feature = "json")]
     Json(JsonFunc),
     Extension(ExtFunc),
+    External(Rc<ExternalFunc>),
 }
 
 impl Display for Func {
@@ -274,6 +294,7 @@ impl Display for Func {
             #[cfg(feature = "json")]
             Self::Json(json_func) => write!(f, "{}", json_func),
             Self::Extension(ext_func) => write!(f, "{}", ext_func),
+            Self::External(generic_func) => write!(f, "{}", generic_func),
         }
     }
 }

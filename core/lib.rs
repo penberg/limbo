@@ -23,6 +23,7 @@ use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
@@ -36,6 +37,7 @@ pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
 use translate::select::prepare_select_plan;
+use types::OwnedValue;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
@@ -66,6 +68,7 @@ pub struct Database {
     pager: Rc<Pager>,
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
+    syms: Rc<RefCell<SymbolTable>>,
     // Shared structures of a Database are the parts that are common to multiple threads that might
     // create DB connections.
     _shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
@@ -120,19 +123,21 @@ impl Database {
         )?);
         let header = db_header;
         let schema = Rc::new(RefCell::new(Schema::new()));
+        let syms = Rc::new(RefCell::new(SymbolTable::new()));
         let db = Arc::new(Database {
             pager: pager.clone(),
             schema: schema.clone(),
             header: header.clone(),
-            shared_page_cache,
-            shared_wal,
+            _shared_page_cache: _shared_page_cache.clone(),
+            _shared_wal: shared_wal.clone(),
+            syms,
         });
         let conn = Rc::new(Connection {
+            db: db.clone(),
             pager: pager,
             schema: schema.clone(),
             header,
             transaction_state: RefCell::new(TransactionState::None),
-            db: db.clone(),
             last_insert_rowid: Cell::new(0),
         });
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
@@ -143,17 +148,28 @@ impl Database {
 
     pub fn connect(self: &Arc<Database>) -> Rc<Connection> {
         Rc::new(Connection {
+            db: self.clone(),
             pager: self.pager.clone(),
             schema: self.schema.clone(),
             header: self.header.clone(),
             last_insert_rowid: Cell::new(0),
-<<<<<<< HEAD
-            _db: Arc::downgrade(self),
-=======
-            db: self.clone(),
->>>>>>> 680b321 (core: Don't use Weak reference for connection database)
             transaction_state: RefCell::new(TransactionState::None),
         })
+    }
+
+    pub fn define_scalar_function<S: AsRef<str>>(
+        &self,
+        name: S,
+        func: impl Fn(&[Value]) -> Result<OwnedValue> + 'static,
+    ) {
+        let func = function::ExternalFunc {
+            name: name.as_ref().to_string(),
+            func: Box::new(func),
+        };
+        self.syms
+            .borrow_mut()
+            .functions
+            .insert(name.as_ref().to_string(), Rc::new(func));
     }
 }
 
@@ -211,10 +227,6 @@ pub struct Connection {
     pager: Rc<Pager>,
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
-<<<<<<< HEAD
-    _db: Weak<Database>, // backpointer to the database holding this connection
-=======
->>>>>>> 680b321 (core: Don't use Weak reference for connection database)
     transaction_state: RefCell<TransactionState>,
     last_insert_rowid: Cell<u64>,
 }
@@ -223,6 +235,8 @@ impl Connection {
     pub fn prepare(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Statement> {
         let sql = sql.into();
         trace!("Preparing: {}", sql);
+        let db = self.db.clone();
+        let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
@@ -234,6 +248,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
+                        &syms,
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -248,6 +263,8 @@ impl Connection {
     pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Rows>> {
         let sql = sql.into();
         trace!("Querying: {}", sql);
+        let db = self.db.clone();
+        let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
@@ -259,6 +276,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
+                        &syms,
                     )?);
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
@@ -270,6 +288,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
+                        &syms,
                     )?;
                     program.explain();
                     Ok(None)
@@ -293,6 +312,8 @@ impl Connection {
 
     pub fn execute(self: &Rc<Connection>, sql: impl Into<String>) -> Result<()> {
         let sql = sql.into();
+        let db = self.db.clone();
+        let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
@@ -304,6 +325,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
+                        &syms,
                     )?;
                     program.explain();
                 }
@@ -315,6 +337,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
+                        &syms,
                     )?;
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
@@ -431,5 +454,25 @@ impl Rows {
 
     pub fn next_row(&mut self) -> Result<StepResult<'_>> {
         self.stmt.step()
+    }
+}
+
+pub(crate) struct SymbolTable {
+    pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
+}
+
+impl SymbolTable {
+    pub fn new() -> Self {
+        Self {
+            functions: HashMap::new(),
+        }
+    }
+
+    pub fn resolve_function(
+        &self,
+        name: &str,
+        _arg_count: usize,
+    ) -> Option<Rc<crate::function::ExternalFunc>> {
+        self.functions.get(name).cloned()
     }
 }

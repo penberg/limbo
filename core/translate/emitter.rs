@@ -14,7 +14,7 @@ use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
 use crate::vdbe::{insn::Insn, BranchOffset, Program};
-use crate::{Connection, Result};
+use crate::{Connection, Result, SymbolTable};
 
 use super::expr::{
     translate_aggregation, translate_aggregation_groupby, translate_condition_expr, translate_expr,
@@ -176,10 +176,11 @@ pub fn emit_program(
     database_header: Rc<RefCell<DatabaseHeader>>,
     plan: Plan,
     connection: Weak<Connection>,
+    syms: &SymbolTable,
 ) -> Result<Program> {
     match plan {
-        Plan::Select(plan) => emit_program_for_select(database_header, plan, connection),
-        Plan::Delete(plan) => emit_program_for_delete(database_header, plan, connection),
+        Plan::Select(plan) => emit_program_for_select(database_header, plan, connection, syms),
+        Plan::Delete(plan) => emit_program_for_delete(database_header, plan, connection, syms),
     }
 }
 
@@ -187,6 +188,7 @@ fn emit_program_for_select(
     database_header: Rc<RefCell<DatabaseHeader>>,
     mut plan: SelectPlan,
     connection: Weak<Connection>,
+    syms: &SymbolTable,
 ) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
 
@@ -235,10 +237,11 @@ fn emit_program_for_select(
         &mut plan.source,
         &plan.referenced_tables,
         &mut metadata,
+        syms,
     )?;
 
     // Process result columns and expressions in the inner loop
-    inner_loop_emit(&mut program, &mut plan, &mut metadata)?;
+    inner_loop_emit(&mut program, &mut plan, &mut metadata, syms)?;
 
     // Clean up and close the main execution loop
     close_loop(&mut program, &plan.source, &mut metadata)?;
@@ -260,6 +263,7 @@ fn emit_program_for_select(
             plan.limit,
             &plan.referenced_tables,
             &mut metadata,
+            syms,
         )?;
     } else if !plan.aggregates.is_empty() {
         // Handle aggregation without GROUP BY
@@ -269,6 +273,7 @@ fn emit_program_for_select(
             &plan.result_columns,
             &plan.aggregates,
             &mut metadata,
+            syms,
         )?;
         // Single row result for aggregates without GROUP BY, so ORDER BY not needed
         order_by_necessary = false;
@@ -297,6 +302,7 @@ fn emit_program_for_delete(
     database_header: Rc<RefCell<DatabaseHeader>>,
     mut plan: DeletePlan,
     connection: Weak<Connection>,
+    syms: &SymbolTable,
 ) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
 
@@ -328,6 +334,7 @@ fn emit_program_for_delete(
         &mut plan.source,
         &plan.referenced_tables,
         &mut metadata,
+        syms,
     )?;
 
     emit_delete_insns(&mut program, &plan.source, &plan.limit, &metadata)?;
@@ -590,6 +597,7 @@ fn open_loop(
     source: &mut SourceOperator,
     referenced_tables: &[BTreeTableReference],
     metadata: &mut Metadata,
+    syms: &SymbolTable,
 ) -> Result<()> {
     match source {
         SourceOperator::Join {
@@ -600,7 +608,7 @@ fn open_loop(
             outer,
             ..
         } => {
-            open_loop(program, left, referenced_tables, metadata)?;
+            open_loop(program, left, referenced_tables, metadata, syms)?;
 
             let mut jump_target_when_false = *metadata
                 .next_row_labels
@@ -620,7 +628,7 @@ fn open_loop(
                 .next_row_labels
                 .insert(right.id(), jump_target_when_false);
 
-            open_loop(program, right, referenced_tables, metadata)?;
+            open_loop(program, right, referenced_tables, metadata, syms)?;
 
             if let Some(predicates) = predicates {
                 let jump_target_when_true = program.allocate_label();
@@ -636,6 +644,7 @@ fn open_loop(
                         predicate,
                         condition_metadata,
                         None,
+                        syms,
                     )?;
                 }
                 program.resolve_label(jump_target_when_true, program.offset());
@@ -707,6 +716,7 @@ fn open_loop(
                         expr,
                         condition_metadata,
                         None,
+                        syms,
                     )?;
                     program.resolve_label(jump_target_when_true, program.offset());
                 }
@@ -745,7 +755,14 @@ fn open_loop(
                     ast::Operator::Equals
                     | ast::Operator::Greater
                     | ast::Operator::GreaterEquals => {
-                        translate_expr(program, Some(referenced_tables), cmp_expr, cmp_reg, None)?;
+                        translate_expr(
+                            program,
+                            Some(referenced_tables),
+                            cmp_expr,
+                            cmp_reg,
+                            None,
+                            syms,
+                        )?;
                     }
                     ast::Operator::Less | ast::Operator::LessEquals => {
                         program.emit_insn(Insn::Null {
@@ -778,7 +795,14 @@ fn open_loop(
                     *metadata.termination_label_stack.last().unwrap(),
                 );
                 if *cmp_op == ast::Operator::Less || *cmp_op == ast::Operator::LessEquals {
-                    translate_expr(program, Some(referenced_tables), cmp_expr, cmp_reg, None)?;
+                    translate_expr(
+                        program,
+                        Some(referenced_tables),
+                        cmp_expr,
+                        cmp_reg,
+                        None,
+                        syms,
+                    )?;
                 }
 
                 program.defer_label_resolution(scan_loop_body_label, program.offset() as usize);
@@ -866,7 +890,14 @@ fn open_loop(
 
             if let Search::RowidEq { cmp_expr } = search {
                 let src_reg = program.alloc_register();
-                translate_expr(program, Some(referenced_tables), cmp_expr, src_reg, None)?;
+                translate_expr(
+                    program,
+                    Some(referenced_tables),
+                    cmp_expr,
+                    src_reg,
+                    None,
+                    syms,
+                )?;
                 program.emit_insn_with_label_dependency(
                     Insn::SeekRowid {
                         cursor_id: table_cursor_id,
@@ -890,6 +921,7 @@ fn open_loop(
                         predicate,
                         condition_metadata,
                         None,
+                        syms,
                     )?;
                     program.resolve_label(jump_target_when_true, program.offset());
                 }
@@ -927,6 +959,7 @@ fn inner_loop_emit(
     program: &mut ProgramBuilder,
     plan: &mut SelectPlan,
     metadata: &mut Metadata,
+    syms: &SymbolTable,
 ) -> Result<()> {
     // if we have a group by, we emit a record into the group by sorter.
     if let Some(group_by) = &plan.group_by {
@@ -940,6 +973,7 @@ fn inner_loop_emit(
                 aggregates: &plan.aggregates,
             },
             &plan.referenced_tables,
+            syms,
         );
     }
     // if we DONT have a group by, but we have aggregates, we emit without ResultRow.
@@ -952,6 +986,7 @@ fn inner_loop_emit(
             metadata,
             InnerLoopEmitTarget::AggStep,
             &plan.referenced_tables,
+            syms,
         );
     }
     // if we DONT have a group by, but we have an order by, we emit a record into the order by sorter.
@@ -963,6 +998,7 @@ fn inner_loop_emit(
             metadata,
             InnerLoopEmitTarget::OrderBySorter { order_by },
             &plan.referenced_tables,
+            syms,
         );
     }
     // if we have neither, we emit a ResultRow. In that case, if we have a Limit, we handle that with DecrJumpZero.
@@ -973,6 +1009,7 @@ fn inner_loop_emit(
         metadata,
         InnerLoopEmitTarget::ResultRow { limit: plan.limit },
         &plan.referenced_tables,
+        syms,
     )
 }
 
@@ -986,6 +1023,7 @@ fn inner_loop_source_emit(
     metadata: &mut Metadata,
     emit_target: InnerLoopEmitTarget,
     referenced_tables: &[BTreeTableReference],
+    syms: &SymbolTable,
 ) -> Result<()> {
     match emit_target {
         InnerLoopEmitTarget::GroupBySorter {
@@ -1003,7 +1041,7 @@ fn inner_loop_source_emit(
             for expr in group_by.exprs.iter() {
                 let key_reg = cur_reg;
                 cur_reg += 1;
-                translate_expr(program, Some(referenced_tables), expr, key_reg, None)?;
+                translate_expr(program, Some(referenced_tables), expr, key_reg, None, syms)?;
             }
             // Then we have the aggregate arguments.
             for agg in aggregates.iter() {
@@ -1016,7 +1054,7 @@ fn inner_loop_source_emit(
                 for expr in agg.args.iter() {
                     let agg_reg = cur_reg;
                     cur_reg += 1;
-                    translate_expr(program, Some(referenced_tables), expr, agg_reg, None)?;
+                    translate_expr(program, Some(referenced_tables), expr, agg_reg, None, syms)?;
                 }
             }
 
@@ -1044,6 +1082,7 @@ fn inner_loop_source_emit(
                 &mut metadata.result_column_indexes_in_orderby_sorter,
                 metadata.sort_metadata.as_ref().unwrap(),
                 None,
+                syms,
             )?;
             Ok(())
         }
@@ -1060,7 +1099,7 @@ fn inner_loop_source_emit(
             // Instead, we translate the aggregates + any expressions that do not contain aggregates.
             for (i, agg) in aggregates.iter().enumerate() {
                 let reg = start_reg + i;
-                translate_aggregation(program, referenced_tables, agg, reg)?;
+                translate_aggregation(program, referenced_tables, agg, reg, syms)?;
             }
             for (i, rc) in result_columns.iter().enumerate() {
                 if rc.contains_aggregates {
@@ -1070,7 +1109,7 @@ fn inner_loop_source_emit(
                     continue;
                 }
                 let reg = start_reg + num_aggs + i;
-                translate_expr(program, Some(referenced_tables), &rc.expr, reg, None)?;
+                translate_expr(program, Some(referenced_tables), &rc.expr, reg, None, syms)?;
             }
             Ok(())
         }
@@ -1085,6 +1124,7 @@ fn inner_loop_source_emit(
                 result_columns,
                 None,
                 limit.map(|l| (l, *metadata.termination_label_stack.last().unwrap())),
+                syms,
             )?;
 
             Ok(())
@@ -1301,6 +1341,7 @@ fn group_by_emit(
     limit: Option<usize>,
     referenced_tables: &[BTreeTableReference],
     metadata: &mut Metadata,
+    syms: &SymbolTable,
 ) -> Result<()> {
     let sort_loop_start_label = program.allocate_label();
     let grouping_done_label = program.allocate_label();
@@ -1451,6 +1492,7 @@ fn group_by_emit(
             cursor_index,
             agg,
             agg_result_reg,
+            syms,
         )?;
         cursor_index += agg.args.len();
     }
@@ -1585,6 +1627,7 @@ fn group_by_emit(
                     jump_target_when_true: i64::MAX, // unused
                 },
                 Some(&precomputed_exprs_to_register),
+                syms,
             )?;
         }
     }
@@ -1597,6 +1640,7 @@ fn group_by_emit(
                 result_columns,
                 Some(&precomputed_exprs_to_register),
                 limit.map(|l| (l, *metadata.termination_label_stack.last().unwrap())),
+                syms,
             )?;
         }
         Some(order_by) => {
@@ -1608,6 +1652,7 @@ fn group_by_emit(
                 &mut metadata.result_column_indexes_in_orderby_sorter,
                 metadata.sort_metadata.as_ref().unwrap(),
                 Some(&precomputed_exprs_to_register),
+                syms,
             )?;
         }
     }
@@ -1647,6 +1692,7 @@ fn agg_without_group_by_emit(
     result_columns: &[ResultSetColumn],
     aggregates: &[Aggregate],
     metadata: &mut Metadata,
+    syms: &SymbolTable,
 ) -> Result<()> {
     let agg_start_reg = metadata.aggregation_start_register.unwrap();
     for (i, agg) in aggregates.iter().enumerate() {
@@ -1672,6 +1718,7 @@ fn agg_without_group_by_emit(
         result_columns,
         Some(&precomputed_exprs_to_register),
         None,
+        syms,
     )?;
 
     Ok(())
@@ -1822,6 +1869,7 @@ fn emit_select_result(
     result_columns: &[ResultSetColumn],
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
     limit: Option<(usize, BranchOffset)>,
+    syms: &SymbolTable,
 ) -> Result<()> {
     let start_reg = program.alloc_registers(result_columns.len());
     for (i, rc) in result_columns.iter().enumerate() {
@@ -1832,6 +1880,7 @@ fn emit_select_result(
             &rc.expr,
             reg,
             precomputed_exprs_to_register,
+            syms,
         )?;
     }
     emit_result_row_and_limit(program, start_reg, result_columns.len(), limit)?;
@@ -1867,6 +1916,7 @@ fn order_by_sorter_insert(
     result_column_indexes_in_orderby_sorter: &mut HashMap<usize, usize>,
     sort_metadata: &SortMetadata,
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
+    syms: &SymbolTable,
 ) -> Result<()> {
     let order_by_len = order_by.len();
     // If any result columns can be skipped due to being an exact duplicate of a sort key, we need to know which ones and their new index in the ORDER BY sorter.
@@ -1888,6 +1938,7 @@ fn order_by_sorter_insert(
             expr,
             key_reg,
             precomputed_exprs_to_register,
+            syms,
         )?;
     }
     let mut cur_reg = start_reg + order_by_len;
@@ -1907,6 +1958,7 @@ fn order_by_sorter_insert(
             &rc.expr,
             cur_reg,
             precomputed_exprs_to_register,
+            syms,
         )?;
         result_column_indexes_in_orderby_sorter.insert(i, cur_idx_in_orderby_sorter);
         cur_idx_in_orderby_sorter += 1;
