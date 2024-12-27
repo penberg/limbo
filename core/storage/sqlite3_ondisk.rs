@@ -485,8 +485,27 @@ impl PageContent {
         self.read_u16(1)
     }
 
+    /// The number of cells on the page.
     pub fn cell_count(&self) -> usize {
         self.read_u16(3) as usize
+    }
+
+    /// The size of the cell pointer array in bytes.
+    /// 2 bytes per cell pointer
+    pub fn cell_pointer_array_size(&self) -> usize {
+        const CELL_POINTER_SIZE_BYTES: usize = 2;
+        self.cell_count() * CELL_POINTER_SIZE_BYTES
+    }
+
+    /// The start of the unallocated region.
+    /// Effectively: the offset after the page header + the cell pointer array.
+    pub fn unallocated_region_start(&self) -> usize {
+        let (cell_ptr_array_start, cell_ptr_array_size) = self.cell_pointer_array_offset_and_size();
+        cell_ptr_array_start + cell_ptr_array_size
+    }
+
+    pub fn unallocated_region_size(&self) -> usize {
+        self.cell_content_area() as usize - self.unallocated_region_start()
     }
 
     /// The start of the cell content area.
@@ -495,6 +514,17 @@ impl PageContent {
     /// = the cell content area pointer moves leftward as cells are added to the page
     pub fn cell_content_area(&self) -> u16 {
         self.read_u16(5)
+    }
+
+    /// The size of the page header in bytes.
+    /// 8 bytes for leaf pages, 12 bytes for interior pages (due to storing rightmost child pointer)
+    pub fn header_size(&self) -> usize {
+        match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        }
     }
 
     /// The total number of bytes in all fragments is stored in the fifth field of the b-tree page header.
@@ -526,12 +556,7 @@ impl PageContent {
         let ncells = self.cell_count();
         // the page header is 12 bytes for interior pages, 8 bytes for leaf pages
         // this is because the 4 last bytes in the interior page's header are used for the rightmost pointer.
-        let cell_pointer_array_start = match self.page_type() {
-            PageType::IndexInterior => 12,
-            PageType::TableInterior => 12,
-            PageType::IndexLeaf => 8,
-            PageType::TableLeaf => 8,
-        };
+        let cell_pointer_array_start = self.header_size();
         assert!(idx < ncells, "cell_get: idx out of bounds");
         let cell_pointer = cell_pointer_array_start + (idx * 2);
         let cell_pointer = self.read_u16(cell_pointer) as usize;
@@ -552,14 +577,9 @@ impl PageContent {
     /// The cell pointers are arranged in key order with:
     /// - left-most cell (the cell with the smallest key) first and
     /// - the right-most cell (the cell with the largest key) last.
-    pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
-        let cell_start = match self.page_type() {
-            PageType::IndexInterior => 12,
-            PageType::TableInterior => 12,
-            PageType::IndexLeaf => 8,
-            PageType::TableLeaf => 8,
-        };
-        (self.offset + cell_start, self.cell_count() * 2)
+    pub fn cell_pointer_array_offset_and_size(&self) -> (usize, usize) {
+        let header_size = self.header_size();
+        (self.offset + header_size, self.cell_pointer_array_size())
     }
 
     /* Get region of a cell's payload */
@@ -572,12 +592,7 @@ impl PageContent {
     ) -> (usize, usize) {
         let buf = self.as_ptr();
         let ncells = self.cell_count();
-        let cell_pointer_array_start = match self.page_type() {
-            PageType::IndexInterior => 12,
-            PageType::TableInterior => 12,
-            PageType::IndexLeaf => 8,
-            PageType::TableLeaf => 8,
-        };
+        let cell_pointer_array_start = self.header_size();
         assert!(idx < ncells, "cell_get: idx out of bounds");
         let cell_pointer = cell_pointer_array_start + (idx * 2); // pointers are 2 bytes each
         let cell_pointer = self.read_u16(cell_pointer) as usize;
