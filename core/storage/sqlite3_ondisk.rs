@@ -1329,7 +1329,7 @@ pub fn payload_overflows(
 /// The 32-bit integers are big-endian if the magic number in the first 4 bytes of the WAL header is 0x377f0683
 /// and the integers are little-endian if the magic number is 0x377f0682.
 /// The checksum values are always stored in the frame header in a big-endian format regardless of which byte order is used to compute the checksum.
-
+///
 /// The checksum algorithm only works for content which is a multiple of 8 bytes in length.
 /// In other words, if the inputs are x(0) through x(N) then N must be odd.
 /// The checksum algorithm is as follows:

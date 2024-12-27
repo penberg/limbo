@@ -69,8 +69,8 @@ pub struct Database {
     header: Rc<RefCell<DatabaseHeader>>,
     // Shared structures of a Database are the parts that are common to multiple threads that might
     // create DB connections.
-    shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
-    shared_wal: Arc<RwLock<WalFileShared>>,
+    _shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
+    _shared_wal: Arc<RwLock<WalFileShared>>,
 }
 
 impl Database {
@@ -96,6 +96,7 @@ impl Database {
         Self::open(io, page_io, wal, wal_shared, buffer_pool)
     }
 
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn open(
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
@@ -109,13 +110,13 @@ impl Database {
             let version = db_header.borrow().version_number;
             version.to_string()
         });
-        let shared_page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
+        let _shared_page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
         let pager = Rc::new(Pager::finish_open(
             db_header.clone(),
             page_io,
             wal,
             io.clone(),
-            shared_page_cache.clone(),
+            _shared_page_cache.clone(),
             buffer_pool,
         )?);
         let bootstrap_schema = Rc::new(RefCell::new(Schema::new()));
@@ -124,7 +125,7 @@ impl Database {
             schema: bootstrap_schema.clone(),
             header: db_header.clone(),
             transaction_state: RefCell::new(TransactionState::None),
-            db: Weak::new(),
+            _db: Weak::new(),
             last_insert_rowid: Cell::new(0),
         });
         let mut schema = Schema::new();
@@ -136,8 +137,8 @@ impl Database {
             pager,
             schema,
             header,
-            shared_page_cache,
-            shared_wal,
+            _shared_page_cache,
+            _shared_wal: shared_wal,
         }))
     }
 
@@ -147,7 +148,7 @@ impl Database {
             schema: self.schema.clone(),
             header: self.header.clone(),
             last_insert_rowid: Cell::new(0),
-            db: Arc::downgrade(self),
+            _db: Arc::downgrade(self),
             transaction_state: RefCell::new(TransactionState::None),
         })
     }
@@ -206,7 +207,7 @@ pub struct Connection {
     pager: Rc<Pager>,
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
-    db: Weak<Database>, // backpointer to the database holding this connection
+    _db: Weak<Database>, // backpointer to the database holding this connection
     transaction_state: RefCell<TransactionState>,
     last_insert_rowid: Cell<u64>,
 }
@@ -269,7 +270,7 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let plan = prepare_select_plan(&*self.schema.borrow(), select)?;
+                            let plan = prepare_select_plan(&self.schema.borrow(), select)?;
                             let plan = optimize_plan(plan)?;
                             println!("{}", plan);
                         }

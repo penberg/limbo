@@ -9,6 +9,7 @@ pub enum ExtFunc {
     Uuid(UuidFunc),
 }
 
+#[allow(unreachable_patterns)] // TODO: remove when more extension funcs added
 impl std::fmt::Display for ExtFunc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -19,6 +20,7 @@ impl std::fmt::Display for ExtFunc {
     }
 }
 
+#[allow(unreachable_patterns)]
 impl ExtFunc {
     pub fn resolve_function(name: &str, num_args: usize) -> Option<ExtFunc> {
         match name {

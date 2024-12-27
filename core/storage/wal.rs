@@ -195,6 +195,7 @@ struct OngoingCheckpoint {
     current_page: u64,
 }
 
+#[allow(dead_code)]
 pub struct WalFile {
     io: Arc<dyn crate::io::IO>,
     buffer_pool: Rc<BufferPool>,
@@ -219,6 +220,7 @@ pub struct WalFile {
 // TODO(pere): lock only important parts + pin WalFileShared
 /// WalFileShared is the part of a WAL that will be shared between threads. A wal has information
 /// that needs to be communicated between threads so this struct does the job.
+#[allow(dead_code)]
 pub struct WalFileShared {
     wal_header: Arc<RwLock<sqlite3_ondisk::WalHeader>>,
     min_frame: u64,

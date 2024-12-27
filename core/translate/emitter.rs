@@ -13,7 +13,7 @@ use crate::translate::plan::{DeletePlan, IterationDirection, Plan, Search};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
-use crate::vdbe::{BranchOffset, Insn, Program};
+use crate::vdbe::{insn::Insn, BranchOffset, Program};
 use crate::{Connection, Result};
 
 use super::expr::{
@@ -102,6 +102,7 @@ pub struct Metadata {
 }
 
 /// Used to distinguish database operations
+#[allow(clippy::upper_case_acronyms, dead_code)]
 #[derive(Debug, Clone)]
 pub enum OperationMode {
     SELECT,
@@ -173,7 +174,7 @@ fn epilogue(
 /// Takes a query plan and generates the corresponding bytecode program
 pub fn emit_program(
     database_header: Rc<RefCell<DatabaseHeader>>,
-    mut plan: Plan,
+    plan: Plan,
     connection: Weak<Connection>,
 ) -> Result<Program> {
     match plan {

@@ -39,6 +39,12 @@ jobs:
       run: cargo test --verbose
       timeout-minutes: 5
 
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clippy
+        run: cargo clippy -- -A clippy::all -W clippy::correctness -W clippy::perf -W clippy::suspicious --deny=warnings
+
   build-wasm:
     runs-on: ubuntu-latest
     steps:

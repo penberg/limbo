@@ -56,6 +56,7 @@ pub struct SelectPlan {
     pub contains_constant_false_condition: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct DeletePlan {
     /// A tree of sources (tables).
@@ -205,6 +206,7 @@ pub struct BTreeTableReference {
 
 /// An enum that represents a search operation that can be used to search for a row in a table using an index
 /// (i.e. a primary key or a secondary index)
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug)]
 pub enum Search {
     /// A rowid equality point lookup. This is a special case that uses the SeekRowid bytecode instruction and does not loop.
@@ -395,7 +397,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
             table_refs_mask |= 1
                 << tables
                     .iter()
-                    .position(|t| &t.table_identifier == &table_reference.table_identifier)
+                    .position(|t| t.table_identifier == table_reference.table_identifier)
                     .unwrap();
         }
         SourceOperator::Search {
@@ -404,7 +406,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
             table_refs_mask |= 1
                 << tables
                     .iter()
-                    .position(|t| &t.table_identifier == &table_reference.table_identifier)
+                    .position(|t| t.table_identifier == table_reference.table_identifier)
                     .unwrap();
         }
         SourceOperator::Nothing => {}
@@ -420,6 +422,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
     and predicate = "t1.a = t2.b"
     then the return value will be (in bits): 011
 */
+#[allow(clippy::only_used_in_recursion)]
 pub fn get_table_ref_bitmask_for_ast_expr<'a>(
     tables: &'a Vec<BTreeTableReference>,
     predicate: &'a ast::Expr,

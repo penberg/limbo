@@ -9,7 +9,7 @@ use super::plan::{
     DeletePlan, Direction, IterationDirection, Plan, Search, SelectPlan, SourceOperator,
 };
 
-pub fn optimize_plan(mut plan: Plan) -> Result<Plan> {
+pub fn optimize_plan(plan: Plan) -> Result<Plan> {
     match plan {
         Plan::Select(plan) => optimize_select_plan(plan).map(Plan::Select),
         Plan::Delete(plan) => optimize_delete_plan(plan).map(Plan::Delete),

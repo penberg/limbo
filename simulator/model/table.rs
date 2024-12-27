@@ -16,7 +16,7 @@ pub(crate) struct Table {
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct Column {
     pub(crate) name: String,
@@ -54,8 +54,12 @@ pub(crate) enum Value {
 }
 
 fn to_sqlite_blob(bytes: &[u8]) -> String {
-    let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
-    format!("X'{}'", hex)
+    format!(
+        "X'{}'",
+        bytes
+            .iter()
+            .fold(String::new(), |acc, b| acc + &format!("{:02X}", b))
+    )
 }
 
 impl Display for Value {

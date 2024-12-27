@@ -11,7 +11,7 @@ use crate::{
     schema::{Column, Schema, Table},
     storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
-    vdbe::{builder::ProgramBuilder, Insn, Program},
+    vdbe::{builder::ProgramBuilder, insn::Insn, Program},
 };
 use crate::{Connection, Result};
 

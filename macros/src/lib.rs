@@ -65,15 +65,13 @@ pub fn derive_description_from_doc(item: TokenStream) -> TokenStream {
 
 /// Processes a Rust docs to extract the description string.
 fn process_description(token_iter: &mut IntoIter) -> Option<String> {
-    if let Some(doc_token_tree) = token_iter.next() {
-        if let TokenTree::Group(doc_group) = doc_token_tree {
-            let mut doc_group_iter = doc_group.stream().into_iter();
-            // Skip the `desc` and `(` tokens to reach the actual description
-            doc_group_iter.next();
-            doc_group_iter.next();
-            if let Some(TokenTree::Literal(description)) = doc_group_iter.next() {
-                return Some(description.to_string());
-            }
+    if let Some(TokenTree::Group(doc_group)) = token_iter.next() {
+        let mut doc_group_iter = doc_group.stream().into_iter();
+        // Skip the `desc` and `(` tokens to reach the actual description
+        doc_group_iter.next();
+        doc_group_iter.next();
+        if let Some(TokenTree::Literal(description)) = doc_group_iter.next() {
+            return Some(description.to_string());
         }
     }
     None
@@ -81,14 +79,14 @@ fn process_description(token_iter: &mut IntoIter) -> Option<String> {
 
 /// Processes the payload of an enum variant to extract variable names (ignoring types).
 fn process_payload(payload_group: Group) -> String {
-    let mut payload_group_iter = payload_group.stream().into_iter();
+    let payload_group_iter = payload_group.stream().into_iter();
     let mut variable_name_list = String::from("");
     let mut is_variable_name = true;
-    while let Some(token) = payload_group_iter.next() {
+    for token in payload_group_iter {
         match token {
             TokenTree::Ident(ident) => {
                 if is_variable_name {
-                    variable_name_list.push_str(&format!("{},", ident.to_string()));
+                    variable_name_list.push_str(&format!("{},", ident));
                 }
                 is_variable_name = false;
             }

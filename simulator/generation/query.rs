@@ -227,7 +227,7 @@ impl ArbitraryFrom<(&str, &Value)> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
         one_of(
             vec![
-                Box::new(|rng| Self::Eq(column_name.to_string(), (*value).clone())),
+                Box::new(|_| Predicate::Eq(column_name.to_string(), (*value).clone())),
                 Box::new(|rng| {
                     Self::Gt(
                         column_name.to_string(),

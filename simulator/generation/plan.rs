@@ -9,7 +9,7 @@ use crate::{
         query::{Create, Insert, Predicate, Query, Select},
         table::Value,
     },
-    SimConnection, SimulatorEnv, SimulatorOpts,
+    SimConnection, SimulatorEnv,
 };
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
@@ -28,11 +28,11 @@ impl Display for InteractionPlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for interaction in &self.plan {
             match interaction {
-                Interaction::Query(query) => write!(f, "{};\n", query)?,
+                Interaction::Query(query) => writeln!(f, "{};", query)?,
                 Interaction::Assertion(assertion) => {
-                    write!(f, "-- ASSERT: {};\n", assertion.message)?
+                    writeln!(f, "-- ASSERT: {};", assertion.message)?
                 }
-                Interaction::Fault(fault) => write!(f, "-- FAULT: {};\n", fault)?,
+                Interaction::Fault(fault) => writeln!(f, "-- FAULT: {};", fault)?,
             }
         }
 
@@ -73,8 +73,10 @@ impl Display for Interaction {
     }
 }
 
+type AssertionFunc = dyn Fn(&Vec<ResultSet>) -> bool;
+
 pub(crate) struct Assertion {
-    pub(crate) func: Box<dyn Fn(&Vec<ResultSet>) -> bool>,
+    pub(crate) func: Box<AssertionFunc>,
     pub(crate) message: String,
 }
 
@@ -244,7 +246,7 @@ impl Interaction {
             Self::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
-            Self::Fault(fault) => {
+            Interaction::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
         }
@@ -347,7 +349,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
     Interactions(vec![insert_query, select_query, assertion])
 }
 
-fn create_table<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     let create_query = Interaction::Query(Query::Create(Create::arbitrary(rng)));
     Interactions(vec![create_query])
 }
@@ -363,7 +365,7 @@ fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
     Interactions(vec![insert_query])
 }
 
-fn random_fault<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn random_fault<R: rand::Rng>(_rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     let fault = Interaction::Fault(Fault::Disconnect);
     Interactions(vec![fault])
 }

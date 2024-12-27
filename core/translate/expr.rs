@@ -7,7 +7,7 @@ use crate::function::JsonFunc;
 use crate::function::{AggFunc, Func, FuncCtx, MathFuncArity, ScalarFunc};
 use crate::schema::Type;
 use crate::util::{exprs_are_equivalent, normalize_ident};
-use crate::vdbe::{builder::ProgramBuilder, BranchOffset, Insn};
+use crate::vdbe::{builder::ProgramBuilder, insn::Insn, BranchOffset};
 use crate::Result;
 
 use super::plan::{Aggregate, BTreeTableReference};
@@ -1748,6 +1748,7 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                     },
+                    #[allow(unreachable_patterns)]
                     _ => unreachable!("{ext_func} not implemented yet"),
                 },
                 Func::Math(math_func) => match math_func.arity() {

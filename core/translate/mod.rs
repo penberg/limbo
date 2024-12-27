@@ -16,21 +16,20 @@ pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod select;
 
-use std::cell::RefCell;
-use std::fmt::Display;
-use std::rc::{Rc, Weak};
-use std::str::FromStr;
-
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::translate::delete::translate_delete;
-use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
+use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, Result};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast::fmt::ToTokens;
 use sqlite3_parser::ast::{self, PragmaName};
+use std::cell::RefCell;
+use std::fmt::Display;
+use std::rc::{Rc, Weak};
+use std::str::FromStr;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -71,13 +70,10 @@ pub fn translate(
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
         ast::Stmt::Delete {
-            with,
             tbl_name,
-            indexed,
             where_clause,
-            returning,
-            order_by,
             limit,
+            ..
         } => translate_delete(
             schema,
             &tbl_name,

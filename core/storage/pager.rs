@@ -50,6 +50,7 @@ impl Page {
         }
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn get(&self) -> &mut PageInner {
         unsafe { &mut *self.inner.get() }
     }
@@ -423,7 +424,7 @@ impl Pager {
                 CheckpointMode::Passive,
             ) {
                 Ok(CheckpointStatus::IO) => {
-                    self.io.run_once();
+                    let _ = self.io.run_once();
                 }
                 Ok(CheckpointStatus::Done) => {
                     break;
