@@ -1555,7 +1555,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Copy {
                                 src_reg: output_register,
                                 dst_reg: target_register,
-                                amount: 1,
+                                amount: 0,
                             });
                             Ok(target_register)
                         }
