@@ -6,6 +6,7 @@ use std::fmt::Display;
 pub enum JsonFunc {
     Json,
     JsonArray,
+    JsonArrayLength,
 }
 
 #[cfg(feature = "json")]
@@ -17,6 +18,7 @@ impl Display for JsonFunc {
             match self {
                 JsonFunc::Json => "json".to_string(),
                 JsonFunc::JsonArray => "json_array".to_string(),
+                JsonFunc::JsonArrayLength => "json_array_length".to_string(),
             }
         )
     }
@@ -334,6 +336,8 @@ impl Func {
             "json" => Ok(Func::Json(JsonFunc::Json)),
             #[cfg(feature = "json")]
             "json_array" => Ok(Func::Json(JsonFunc::JsonArray)),
+            #[cfg(feature = "json")]
+            "json_array_length" => Ok(Func::Json(JsonFunc::JsonArrayLength)),
             "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),
             "hex" => Ok(Func::Scalar(ScalarFunc::Hex)),
             "unhex" => Ok(Func::Scalar(ScalarFunc::Unhex)),

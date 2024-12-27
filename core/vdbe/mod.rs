@@ -37,7 +37,7 @@ use crate::types::{
 };
 use crate::util::parse_schema_rows;
 #[cfg(feature = "json")]
-use crate::{function::JsonFunc, json::get_json, json::json_array};
+use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
 use limbo_macros::Description;
@@ -2278,6 +2278,21 @@ impl Program {
 
                             match json_array {
                                 Ok(json) => state.registers[*dest] = json,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(JsonFunc::JsonArrayLength) => {
+                            let json_value = &state.registers[*start_reg];
+                            let path_value = if arg_count > 1 {
+                                Some(&state.registers[*start_reg + 1])
+                            } else {
+                                None
+                            };
+                            let json_array_length = json_array_length(json_value, path_value);
+
+                            match json_array_length {
+                                Ok(length) => state.registers[*dest] = length,
                                 Err(e) => return Err(e),
                             }
                         }

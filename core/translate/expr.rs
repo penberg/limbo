@@ -913,6 +913,51 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+                    JsonFunc::JsonArrayLength => {
+                        let args = if let Some(args) = args {
+                            if args.len() > 2 {
+                                crate::bail_parse_error!(
+                                    "{} function with wrong number of arguments",
+                                    j.to_string()
+                                )
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!(
+                                "{} function with no arguments",
+                                j.to_string()
+                            );
+                        };
+
+                        let json_reg = program.alloc_register();
+                        let path_reg = program.alloc_register();
+
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            json_reg,
+                            precomputed_exprs_to_registers,
+                        )?;
+
+                        if args.len() == 2 {
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &args[1],
+                                path_reg,
+                                precomputed_exprs_to_registers,
+                            )?;
+                        }
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: json_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
