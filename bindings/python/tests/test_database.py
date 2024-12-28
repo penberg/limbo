@@ -33,7 +33,7 @@ def test_in_memory_fetchone_select_all_users(provider):
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT)")
     cursor.execute("INSERT INTO users VALUES (1, 'alice')")
- 
+
     cursor.execute("SELECT * FROM users")
 
     alice = cursor.fetchone()

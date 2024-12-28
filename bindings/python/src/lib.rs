@@ -106,7 +106,7 @@ impl Cursor {
                 match stmt.borrow_mut().step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         self.conn.io.run_once().map_err(|e| {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
