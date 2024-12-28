@@ -19,6 +19,7 @@
 
 pub mod builder;
 pub mod explain;
+pub mod likeop;
 pub mod sorter;
 
 mod datetime;
@@ -40,6 +41,7 @@ use crate::util::parse_schema_rows;
 use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
+use likeop::{construct_like_escape_arg, exec_like_with_escape};
 use limbo_macros::Description;
 
 use datetime::{exec_date, exec_time, exec_unixepoch};
@@ -564,6 +566,7 @@ struct RegexCache {
     like: HashMap<String, Regex>,
     glob: HashMap<String, Regex>,
 }
+
 impl RegexCache {
     fn new() -> Self {
         RegexCache {
@@ -2377,7 +2380,25 @@ impl Program {
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
                                 let text = &state.registers[*start_reg + 1];
+
                                 let result = match (pattern, text) {
+                                    (OwnedValue::Text(pattern), OwnedValue::Text(text))
+                                        if arg_count == 3 =>
+                                    {
+                                        let escape = match construct_like_escape_arg(
+                                            &state.registers[*start_reg + 2],
+                                        ) {
+                                            Ok(x) => x,
+                                            Err(e) => return Result::Err(e),
+                                        };
+
+                                        OwnedValue::Integer(exec_like_with_escape(
+                                            &pattern.value,
+                                            &text.value,
+                                            escape,
+                                        )
+                                            as i64)
+                                    }
                                     (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
                                         let cache = if *constant_mask > 0 {
                                             Some(&mut state.regex_cache.like)
@@ -2395,6 +2416,7 @@ impl Program {
                                         unreachable!("Like on non-text registers");
                                     }
                                 };
+
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::Abs

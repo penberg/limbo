@@ -116,8 +116,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
-| like(X,Y)                    | No     |         |
-| like(X,Y,Z)                  | No     |         |
+| like(X,Y)                    | Yes    |         |
+| like(X,Y,Z)                  | Yes    |         |
 | likelihood(X,Y)              | No     |         |
 | likely(X)                    | No     |         |
 | load_extension(X)            | No     |         |
