@@ -1,7 +1,7 @@
 use super::ExtFunc;
 use crate::{
     types::{LimboText, OwnedValue},
-    LimboError,
+    Database, LimboError,
 };
 use std::rc::Rc;
 use uuid::{ContextV7, Timestamp, Uuid};
@@ -9,7 +9,6 @@ use uuid::{ContextV7, Timestamp, Uuid};
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UuidFunc {
     Uuid4Str,
-    Uuid4,
     Uuid7,
     Uuid7TS,
     UuidStr,
@@ -20,7 +19,6 @@ impl UuidFunc {
     pub fn resolve_function(name: &str, num_args: usize) -> Option<ExtFunc> {
         match name {
             "uuid4_str" => Some(ExtFunc::Uuid(Self::Uuid4Str)),
-            "uuid4" => Some(ExtFunc::Uuid(Self::Uuid4)),
             "uuid7" if num_args < 2 => Some(ExtFunc::Uuid(Self::Uuid7)),
             "uuid_str" if num_args == 1 => Some(ExtFunc::Uuid(Self::UuidStr)),
             "uuid_blob" if num_args == 1 => Some(ExtFunc::Uuid(Self::UuidBlob)),
@@ -36,7 +34,6 @@ impl std::fmt::Display for UuidFunc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Uuid4Str => write!(f, "uuid4_str"),
-            Self::Uuid4 => write!(f, "uuid4"),
             Self::Uuid7 => write!(f, "uuid7"),
             Self::Uuid7TS => write!(f, "uuid7_timestamp_ms"),
             Self::UuidStr => write!(f, "uuid_str"),
@@ -47,9 +44,6 @@ impl std::fmt::Display for UuidFunc {
 
 pub fn exec_uuid(var: &UuidFunc, sec: Option<&OwnedValue>) -> crate::Result<OwnedValue> {
     match var {
-        UuidFunc::Uuid4 => Ok(OwnedValue::Blob(Rc::new(
-            Uuid::new_v4().into_bytes().to_vec(),
-        ))),
         UuidFunc::Uuid4Str => Ok(OwnedValue::Text(LimboText::new(Rc::new(
             Uuid::new_v4().to_string(),
         )))),
@@ -69,6 +63,12 @@ pub fn exec_uuid(var: &UuidFunc, sec: Option<&OwnedValue>) -> crate::Result<Owne
         }
         _ => unreachable!(),
     }
+}
+
+pub fn exec_uuid4() -> crate::Result<OwnedValue> {
+    Ok(OwnedValue::Blob(Rc::new(
+        Uuid::new_v4().into_bytes().to_vec(),
+    )))
 }
 
 pub fn exec_uuidstr(reg: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -136,6 +136,10 @@ fn uuid_to_unix(uuid: &[u8; 16]) -> u64 {
         | (uuid[5] as u64)
 }
 
+pub fn init(db: &mut Database) {
+    db.define_scalar_function("uuid4", |_args| exec_uuid4());
+}
+
 #[cfg(test)]
 #[cfg(feature = "uuid")]
 pub mod test {
@@ -143,10 +147,9 @@ pub mod test {
     use crate::types::OwnedValue;
     #[test]
     fn test_exec_uuid_v4blob() {
-        use super::exec_uuid;
+        use super::exec_uuid4;
         use uuid::Uuid;
-        let func = UuidFunc::Uuid4;
-        let owned_val = exec_uuid(&func, None);
+        let owned_val = exec_uuid4();
         match owned_val {
             Ok(OwnedValue::Blob(blob)) => {
                 assert_eq!(blob.len(), 16);
@@ -303,11 +306,10 @@ pub mod test {
 
     #[test]
     fn test_exec_uuid_v4_blob_to_str() {
-        use super::{exec_uuid, exec_uuidstr, UuidFunc};
+        use super::{exec_uuid4, exec_uuidstr};
         use uuid::Uuid;
         // convert a v4 blob to a string
-        let owned_val =
-            exec_uuidstr(&exec_uuid(&UuidFunc::Uuid4, None).expect("uuid v7 blob to generate"));
+        let owned_val = exec_uuidstr(&exec_uuid4().expect("uuid v7 blob to generate"));
         match owned_val {
             Ok(OwnedValue::Text(v4str)) => {
                 assert_eq!(v4str.value.len(), 36);

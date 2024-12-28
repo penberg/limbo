@@ -1766,7 +1766,7 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        UuidFunc::Uuid4 | UuidFunc::Uuid4Str => {
+                        UuidFunc::Uuid4Str => {
                             if args.is_some() {
                                 crate::bail_parse_error!(
                                     "{} function with arguments",

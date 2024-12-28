@@ -2183,7 +2183,7 @@ impl Program {
                         crate::function::Func::Extension(extfn) => match extfn {
                             #[cfg(feature = "uuid")]
                             ExtFunc::Uuid(uuidfn) => match uuidfn {
-                                UuidFunc::Uuid4 | UuidFunc::Uuid4Str => {
+                                UuidFunc::Uuid4Str => {
                                     state.registers[*dest] = exec_uuid(uuidfn, None)?
                                 }
                                 UuidFunc::Uuid7 => match arg_count {
