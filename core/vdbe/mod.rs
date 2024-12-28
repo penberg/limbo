@@ -37,7 +37,7 @@ use crate::types::{
 };
 use crate::util::parse_schema_rows;
 #[cfg(feature = "json")]
-use crate::{function::JsonFunc, json::get_json, json::json_array};
+use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
 use crate::{Connection, Result, TransactionState};
 use crate::{Rows, DATABASE_VERSION};
 use limbo_macros::Description;
@@ -46,7 +46,7 @@ use datetime::{exec_date, exec_time, exec_unixepoch};
 
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -466,6 +466,14 @@ pub enum Insn {
 
     InsertAwait {
         cursor_id: usize,
+    },
+
+    DeleteAsync {
+        cursor_id: CursorID,
+    },
+
+    DeleteAwait {
+        cursor_id: CursorID,
     },
 
     NewRowid {
@@ -2281,6 +2289,21 @@ impl Program {
                                 Err(e) => return Err(e),
                             }
                         }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(JsonFunc::JsonArrayLength) => {
+                            let json_value = &state.registers[*start_reg];
+                            let path_value = if arg_count > 1 {
+                                Some(&state.registers[*start_reg + 1])
+                            } else {
+                                None
+                            };
+                            let json_array_length = json_array_length(json_value, path_value);
+
+                            match json_array_length {
+                                Ok(length) => state.registers[*dest] = length,
+                                Err(e) => return Err(e),
+                            }
+                        }
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
                                 assert!(arg_count == 2);
@@ -2669,6 +2692,16 @@ impl Program {
                             }
                         }
                     }
+                    state.pc += 1;
+                }
+                Insn::DeleteAsync { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    return_if_io!(cursor.delete());
+                    state.pc += 1;
+                }
+                Insn::DeleteAwait { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
                     state.pc += 1;
                 }
                 Insn::NewRowid {
@@ -3166,10 +3199,31 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
 }
 
 fn construct_like_regex(pattern: &str) -> Regex {
-    let mut regex_pattern = String::from("(?i)^");
-    regex_pattern.push_str(&pattern.replace('%', ".*").replace('_', "."));
+    let mut regex_pattern = String::with_capacity(pattern.len() * 2);
+
+    regex_pattern.push('^');
+
+    for c in pattern.chars() {
+        match c {
+            '\\' => regex_pattern.push_str("\\\\"),
+            '%' => regex_pattern.push_str(".*"),
+            '_' => regex_pattern.push('.'),
+            ch => {
+                if regex_syntax::is_meta_character(c) {
+                    regex_pattern.push('\\');
+                }
+                regex_pattern.push(ch);
+            }
+        }
+    }
+
     regex_pattern.push('$');
-    Regex::new(&regex_pattern).unwrap()
+
+    RegexBuilder::new(&regex_pattern)
+        .case_insensitive(true)
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
 }
 
 // Implements LIKE pattern matching. Caches the constructed regex if a cache is provided
@@ -3901,6 +3955,10 @@ mod tests {
             unimplemented!()
         }
 
+        fn delete(&mut self) -> Result<CursorResult<()>> {
+            unimplemented!()
+        }
+
         fn wait_for_completion(&mut self) -> Result<()> {
             unimplemented!()
         }
@@ -4317,11 +4375,17 @@ mod tests {
     }
 
     #[test]
+    fn test_like_with_escape_or_regexmeta_chars() {
+        assert!(exec_like(None, r#"\%A"#, r#"\A"#));
+        assert!(exec_like(None, "%a%a", "aaaa"));
+    }
+
+    #[test]
     fn test_like_no_cache() {
         assert!(exec_like(None, "a%", "aaaa"));
         assert!(exec_like(None, "%a%a", "aaaa"));
-        assert!(exec_like(None, "%a.a", "aaaa"));
-        assert!(exec_like(None, "a.a%", "aaaa"));
+        assert!(!exec_like(None, "%a.a", "aaaa"));
+        assert!(!exec_like(None, "a.a%", "aaaa"));
         assert!(!exec_like(None, "%a.ab", "aaaa"));
     }
 
@@ -4330,15 +4394,15 @@ mod tests {
         let mut cache = HashMap::new();
         assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
         assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "a.a%", "aaaa"));
         assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
 
         // again after values have been cached
         assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
         assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "a.a%", "aaaa"));
         assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
     }
 

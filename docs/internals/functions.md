@@ -65,9 +65,38 @@ We can see that the function is not implemented yet so the Parser did not unders
 
 For limbo to understand the meaning of `unixtimestamp`, we need to define it as a Function somewhere.
 That place can be found currently in `core/functions.rs`. We need to edit 3 places
-1. add to ScalarFunc as `unixtimestamp` is a scalar function.
+1. add to ScalarFunc as `unixtimestamp` is a scalar function. 
+```diff
+pub enum ScalarFunc {
+  // other funcs...
+  SqliteVersion,
++ UnixEpoch,
+  Hex
+  // other funcs...
+}
+```
 2. add to Display to show the function as string in our program.
+```diff
+impl Display for ScalarFunc {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    let str = match self {
+      // ...
+      ScalarFunc::SqliteVersion => "sqlite_version".to_string(),
++     ScalarFunc::UnixEpoch => "unixepoch".to_string(),
+      ScalarFunc::Hex => "hex".to_string(),
+      // ...
+}
+```
 3. add to `fn resolve_function(..)` of `impl Func` to enable parsing from str to this function.
+```diff 
+impl Func {
+  pub fn resolve_function(name: &str, arg_count: usize) -> Result<Func, ()> {
+    match name {
+      // ...
++     "unixepoch" => Ok(Func::Scalar(ScalarFunc::UnixEpoch)),
+      // ...
+}
+```
 
 https://github.com/tursodatabase/limbo/blob/69e3dd28f77e59927da4313e517b2b428ede480d/core/function.rs#L86
 

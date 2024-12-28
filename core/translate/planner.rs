@@ -1,8 +1,6 @@
-use super::{
-    optimizer::Optimizable,
-    plan::{
-        Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
-    },
+use super::plan::{
+    Aggregate, BTreeTableReference, DeletePlan, Direction, GroupBy, Plan, ResultSetColumn,
+    SelectPlan, SourceOperator,
 };
 use crate::{
     function::Func,
@@ -10,7 +8,7 @@ use crate::{
     util::{exprs_are_equivalent, normalize_ident},
     Result,
 };
-use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
+use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit, QualifiedName, ResultColumn};
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -267,7 +265,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             columns,
             from,
             where_clause,
-            mut group_by,
+            group_by,
             ..
         } => {
             let col_count = columns.len();
@@ -280,7 +278,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             // Parse the FROM clause
             let (source, referenced_tables) = parse_from(schema, from, &mut operator_id_counter)?;
 
-            let mut plan = Plan {
+            let mut plan = SelectPlan {
                 source,
                 result_columns: vec![],
                 where_clause: None,
@@ -294,14 +292,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             };
 
             // Parse the WHERE clause
-            if let Some(w) = where_clause {
-                let mut predicates = vec![];
-                break_predicate_at_and_boundaries(w, &mut predicates);
-                for expr in predicates.iter_mut() {
-                    bind_column_references(expr, &plan.referenced_tables)?;
-                }
-                plan.where_clause = Some(predicates);
-            }
+            plan.where_clause = parse_where(where_clause, &plan.referenced_tables)?;
 
             let mut aggregate_expressions = Vec::new();
             for column in columns.clone() {
@@ -485,21 +476,56 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             }
 
             // Parse the LIMIT clause
-            if let Some(limit) = &select.limit {
-                plan.limit = match &limit.expr {
-                    ast::Expr::Literal(ast::Literal::Numeric(n)) => {
-                        let l = n.parse()?;
-                        Some(l)
-                    }
-                    _ => todo!(),
-                }
-            }
+            plan.limit = select.limit.and_then(|limit| parse_limit(limit));
 
             // Return the unoptimized query plan
-            Ok(plan)
+            Ok(Plan::Select(plan))
         }
         _ => todo!(),
     }
+}
+
+pub fn prepare_delete_plan(
+    schema: &Schema,
+    tbl_name: &QualifiedName,
+    where_clause: Option<Expr>,
+    limit: Option<Limit>,
+) -> Result<Plan> {
+    let table = match schema.get_table(tbl_name.name.0.as_str()) {
+        Some(table) => table,
+        None => crate::bail_corrupt_error!("Parse error: no such table: {}", tbl_name),
+    };
+
+    let table_ref = BTreeTableReference {
+        table: table.clone(),
+        table_identifier: table.name.clone(),
+        table_index: 0,
+    };
+    let referenced_tables = vec![table_ref.clone()];
+
+    // Parse the WHERE clause
+    let resolved_where_clauses = parse_where(where_clause, &[table_ref.clone()])?;
+
+    // Parse the LIMIT clause
+    let resolved_limit = limit.and_then(|limit| parse_limit(limit));
+
+    let plan = DeletePlan {
+        source: SourceOperator::Scan {
+            id: 0,
+            table_reference: table_ref.clone(),
+            predicates: resolved_where_clauses.clone(),
+            iter_dir: None,
+        },
+        result_columns: vec![],
+        where_clause: resolved_where_clauses,
+        order_by: None,
+        limit: resolved_limit,
+        referenced_tables,
+        available_indexes: vec![],
+        contains_constant_false_condition: false,
+    };
+
+    Ok(Plan::Delete(plan))
 }
 
 #[allow(clippy::type_complexity)]
@@ -561,6 +587,22 @@ fn parse_from(
     }
 
     Ok((operator, tables))
+}
+
+fn parse_where(
+    where_clause: Option<Expr>,
+    referenced_tables: &[BTreeTableReference],
+) -> Result<Option<Vec<Expr>>> {
+    if let Some(where_expr) = where_clause {
+        let mut predicates = vec![];
+        break_predicate_at_and_boundaries(where_expr, &mut predicates);
+        for expr in predicates.iter_mut() {
+            bind_column_references(expr, referenced_tables)?;
+        }
+        Ok(Some(predicates))
+    } else {
+        Ok(None)
+    }
 }
 
 fn parse_join(
@@ -744,6 +786,14 @@ fn parse_join(
         using,
         predicates,
     ))
+}
+
+fn parse_limit(limit: Limit) -> Option<usize> {
+    if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
+        n.parse().ok()
+    } else {
+        None
+    }
 }
 
 fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {

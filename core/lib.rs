@@ -36,12 +36,12 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
-use translate::optimizer::optimize_plan;
 use translate::planner::prepare_select_plan;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
 
+use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -374,14 +374,14 @@ impl Statement {
         self.state.interrupt();
     }
 
-    pub fn step(&mut self) -> Result<RowResult<'_>> {
+    pub fn step(&mut self) -> Result<StepResult<'_>> {
         let result = self.program.step(&mut self.state, self.pager.clone())?;
         match result {
-            vdbe::StepResult::Row(row) => Ok(RowResult::Row(Row { values: row.values })),
-            vdbe::StepResult::IO => Ok(RowResult::IO),
-            vdbe::StepResult::Done => Ok(RowResult::Done),
-            vdbe::StepResult::Interrupt => Ok(RowResult::Interrupt),
-            vdbe::StepResult::Busy => Ok(RowResult::Busy),
+            vdbe::StepResult::Row(row) => Ok(StepResult::Row(Row { values: row.values })),
+            vdbe::StepResult::IO => Ok(StepResult::IO),
+            vdbe::StepResult::Done => Ok(StepResult::Done),
+            vdbe::StepResult::Interrupt => Ok(StepResult::Interrupt),
+            vdbe::StepResult::Busy => Ok(StepResult::Busy),
         }
     }
 
@@ -393,7 +393,7 @@ impl Statement {
     pub fn reset(&self) {}
 }
 
-pub enum RowResult<'a> {
+pub enum StepResult<'a> {
     Row(Row<'a>),
     IO,
     Done,
@@ -421,7 +421,7 @@ impl Rows {
         Self { stmt }
     }
 
-    pub fn next_row(&mut self) -> Result<RowResult<'_>> {
+    pub fn next_row(&mut self) -> Result<StepResult<'_>> {
         self.stmt.step()
     }
 }

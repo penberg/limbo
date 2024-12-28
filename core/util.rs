@@ -4,7 +4,7 @@ use sqlite3_parser::ast::{Expr, FunctionTail, Literal};
 
 use crate::{
     schema::{self, Schema},
-    Result, RowResult, Rows, IO,
+    Result, Rows, StepResult, IO,
 };
 
 // https://sqlite.org/lang_keywords.html
@@ -27,7 +27,7 @@ pub fn parse_schema_rows(rows: Option<Rows>, schema: &mut Schema, io: Arc<dyn IO
     if let Some(mut rows) = rows {
         loop {
             match rows.next_row()? {
-                RowResult::Row(row) => {
+                StepResult::Row(row) => {
                     let ty = row.get::<&str>(0)?;
                     if ty != "table" && ty != "index" {
                         continue;
@@ -53,14 +53,14 @@ pub fn parse_schema_rows(rows: Option<Rows>, schema: &mut Schema, io: Arc<dyn IO
                         _ => continue,
                     }
                 }
-                RowResult::IO => {
+                StepResult::IO => {
                     // TODO: How do we ensure that the I/O we submitted to
                     // read the schema is actually complete?
                     io.run_once()?;
                 }
-                RowResult::Interrupt => break,
-                RowResult::Done => break,
-                RowResult::Busy => break,
+                StepResult::Interrupt => break,
+                StepResult::Done => break,
+                StepResult::Busy => break,
             }
         }
     }

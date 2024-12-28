@@ -9,7 +9,7 @@ use sqlite3_parser::ast::{self};
 
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
-use crate::translate::plan::{IterationDirection, Search};
+use crate::translate::plan::{DeletePlan, IterationDirection, Plan, Search};
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
@@ -20,7 +20,7 @@ use super::expr::{
     translate_aggregation, translate_aggregation_groupby, translate_condition_expr, translate_expr,
     ConditionMetadata,
 };
-use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, Plan};
+use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, SelectPlan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
 // Metadata for handling LEFT JOIN operations
@@ -101,6 +101,15 @@ pub struct Metadata {
     pub result_columns_to_skip_in_orderby_sorter: Option<Vec<usize>>,
 }
 
+/// Used to distinguish database operations
+#[derive(Debug, Clone)]
+pub enum OperationMode {
+    SELECT,
+    INSERT,
+    UPDATE,
+    DELETE,
+}
+
 /// Initialize the program with basic setup and return initial metadata and labels
 fn prologue() -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> {
     let mut program = ProgramBuilder::new();
@@ -167,6 +176,17 @@ pub fn emit_program(
     mut plan: Plan,
     connection: Weak<Connection>,
 ) -> Result<Program> {
+    match plan {
+        Plan::Select(plan) => emit_program_for_select(database_header, plan, connection),
+        Plan::Delete(plan) => emit_program_for_delete(database_header, plan, connection),
+    }
+}
+
+fn emit_program_for_select(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: SelectPlan,
+    connection: Weak<Connection>,
+) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
 
     // Trivial exit on LIMIT 0
@@ -201,7 +221,12 @@ pub fn emit_program(
     if let Some(ref mut group_by) = plan.group_by {
         init_group_by(&mut program, group_by, &plan.aggregates, &mut metadata)?;
     }
-    init_source(&mut program, &plan.source, &mut metadata)?;
+    init_source(
+        &mut program,
+        &plan.source,
+        &mut metadata,
+        &OperationMode::SELECT,
+    )?;
 
     // Set up main query execution loop
     open_loop(
@@ -264,6 +289,63 @@ pub fn emit_program(
                 &mut metadata,
             )?;
         }
+    }
+
+    // Finalize program
+    epilogue(&mut program, &mut metadata, init_label, start_offset)?;
+
+    Ok(program.build(database_header, connection))
+}
+
+fn emit_program_for_delete(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: DeletePlan,
+    connection: Weak<Connection>,
+) -> Result<Program> {
+    let (mut program, mut metadata, init_label, start_offset) = prologue()?;
+
+    // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
+    let skip_loops_label = if plan.contains_constant_false_condition {
+        let skip_loops_label = program.allocate_label();
+        program.emit_insn_with_label_dependency(
+            Insn::Goto {
+                target_pc: skip_loops_label,
+            },
+            skip_loops_label,
+        );
+        Some(skip_loops_label)
+    } else {
+        None
+    };
+
+    // Initialize cursors and other resources needed for query execution
+    init_source(
+        &mut program,
+        &plan.source,
+        &mut metadata,
+        &OperationMode::DELETE,
+    )?;
+
+    // Set up main query execution loop
+    open_loop(
+        &mut program,
+        &mut plan.source,
+        &plan.referenced_tables,
+        &mut metadata,
+    )?;
+
+    emit_delete_insns(&mut program, &plan.source, &plan.limit, &metadata)?;
+
+    // Clean up and close the main execution loop
+    close_loop(
+        &mut program,
+        &plan.source,
+        &mut metadata,
+        &plan.referenced_tables,
+    )?;
+
+    if let Some(skip_loops_label) = skip_loops_label {
+        program.resolve_label(skip_loops_label, program.offset());
     }
 
     // Finalize program
@@ -385,6 +467,7 @@ fn init_source(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
     metadata: &mut Metadata,
+    mode: &OperationMode,
 ) -> Result<()> {
     match source {
         SourceOperator::Join {
@@ -402,10 +485,10 @@ fn init_source(
                 };
                 metadata.left_joins.insert(*id, lj_metadata);
             }
-            init_source(program, left, metadata)?;
-            init_source(program, right, metadata)?;
+            init_source(program, left, metadata, mode)?;
+            init_source(program, right, metadata, mode)?;
 
-            return Ok(());
+            Ok(())
         }
         SourceOperator::Scan {
             id,
@@ -419,13 +502,28 @@ fn init_source(
             let root_page = table_reference.table.root_page;
             let next_row_label = program.allocate_label();
             metadata.next_row_labels.insert(*id, next_row_label);
-            program.emit_insn(Insn::OpenReadAsync {
-                cursor_id,
-                root_page,
-            });
-            program.emit_insn(Insn::OpenReadAwait);
 
-            return Ok(());
+            match mode {
+                OperationMode::SELECT => {
+                    program.emit_insn(Insn::OpenReadAsync {
+                        cursor_id,
+                        root_page,
+                    });
+                    program.emit_insn(Insn::OpenReadAwait {});
+                }
+                OperationMode::DELETE => {
+                    program.emit_insn(Insn::OpenWriteAsync {
+                        cursor_id,
+                        root_page,
+                    });
+                    program.emit_insn(Insn::OpenWriteAwait {});
+                }
+                _ => {
+                    unimplemented!()
+                }
+            }
+
+            Ok(())
         }
         SourceOperator::Search {
             id,
@@ -442,27 +540,54 @@ fn init_source(
 
             metadata.next_row_labels.insert(*id, next_row_label);
 
-            program.emit_insn(Insn::OpenReadAsync {
-                cursor_id: table_cursor_id,
-                root_page: table_reference.table.root_page,
-            });
-            program.emit_insn(Insn::OpenReadAwait);
+            match mode {
+                OperationMode::SELECT => {
+                    program.emit_insn(Insn::OpenReadAsync {
+                        cursor_id: table_cursor_id,
+                        root_page: table_reference.table.root_page,
+                    });
+                    program.emit_insn(Insn::OpenReadAwait {});
+                }
+                OperationMode::DELETE => {
+                    program.emit_insn(Insn::OpenWriteAsync {
+                        cursor_id: table_cursor_id,
+                        root_page: table_reference.table.root_page,
+                    });
+                    program.emit_insn(Insn::OpenWriteAwait {});
+                }
+                _ => {
+                    unimplemented!()
+                }
+            }
 
             if let Search::IndexSearch { index, .. } = search {
                 let index_cursor_id = program
                     .alloc_cursor_id(Some(index.name.clone()), Some(Table::Index(index.clone())));
-                program.emit_insn(Insn::OpenReadAsync {
-                    cursor_id: index_cursor_id,
-                    root_page: index.root_page,
-                });
-                program.emit_insn(Insn::OpenReadAwait);
+
+                match mode {
+                    OperationMode::SELECT => {
+                        program.emit_insn(Insn::OpenReadAsync {
+                            cursor_id: index_cursor_id,
+                            root_page: index.root_page,
+                        });
+                        program.emit_insn(Insn::OpenReadAwait);
+                    }
+                    OperationMode::DELETE => {
+                        program.emit_insn(Insn::OpenWriteAsync {
+                            cursor_id: index_cursor_id,
+                            root_page: index.root_page,
+                        });
+                        program.emit_insn(Insn::OpenWriteAwait {});
+                    }
+                    _ => {
+                        unimplemented!()
+                    }
+                }
             }
 
-            return Ok(());
+            Ok(())
         }
-        SourceOperator::Nothing => {
-            return Ok(());
-        }
+        SourceOperator::Nothing => Ok(()),
     }
 }
 
@@ -811,7 +936,7 @@ pub enum InnerLoopEmitTarget<'a> {
 /// At this point the cursors for all tables have been opened and rewound.
 fn inner_loop_emit(
     program: &mut ProgramBuilder,
-    plan: &mut Plan,
+    plan: &mut SelectPlan,
     metadata: &mut Metadata,
 ) -> Result<()> {
     // if we have a group by, we emit a record into the group by sorter.
@@ -1119,6 +1244,60 @@ fn close_loop(
         }
         SourceOperator::Nothing => Ok(()),
     }
+}
+
+fn emit_delete_insns(
+    program: &mut ProgramBuilder,
+    source: &SourceOperator,
+    limit: &Option<usize>,
+    metadata: &Metadata,
+) -> Result<()> {
+    let cursor_id = match source {
+        SourceOperator::Scan {
+            table_reference, ..
+        } => program.resolve_cursor_id(&table_reference.table_identifier),
+        SourceOperator::Search {
+            table_reference,
+            search,
+            ..
+        } => match search {
+            Search::RowidEq { .. } | Search::RowidSearch { .. } => {
+                program.resolve_cursor_id(&table_reference.table_identifier)
+            }
+            Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
+        },
+        _ => return Ok(()),
+    };
+
+    // Emit the instructions to delete the row
+    let key_reg = program.alloc_register();
+    program.emit_insn(Insn::RowId {
+        cursor_id,
+        dest: key_reg,
+    });
+    program.emit_insn(Insn::DeleteAsync { cursor_id });
+    program.emit_insn(Insn::DeleteAwait { cursor_id });
+    if let Some(limit) = limit {
+        let limit_reg = program.alloc_register();
+        program.emit_insn(Insn::Integer {
+            value: *limit as i64,
+            dest: limit_reg,
+        });
+        program.mark_last_insn_constant();
+        let jump_label_on_limit_reached = metadata
+            .termination_label_stack
+            .last()
+            .expect("termination_label_stack should not be empty.");
+        program.emit_insn_with_label_dependency(
+            Insn::DecrJumpZero {
+                reg: limit_reg,
+                target_pc: *jump_label_on_limit_reached,
+            },
+            *jump_label_on_limit_reached,
+        )
+    }
+
+    Ok(())
 }
 
 /// Emits the bytecode for processing a GROUP BY clause.

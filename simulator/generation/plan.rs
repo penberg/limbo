@@ -1,6 +1,6 @@
 use std::{fmt::Display, rc::Rc};
 
-use limbo_core::{Connection, Result, RowResult};
+use limbo_core::{Connection, Result, StepResult};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -106,7 +106,7 @@ impl Interactions {
                             .iter_mut()
                             .find(|t| t.name == insert.table)
                             .unwrap();
-                        table.rows.push(insert.values.clone());
+                        table.rows.extend(insert.values.clone());
                     }
                     Query::Delete(_) => todo!(),
                     Query::Select(_) => {}
@@ -215,7 +215,7 @@ impl Interaction {
                 let mut out = Vec::new();
                 while let Ok(row) = rows.next_row() {
                     match row {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             let mut r = Vec::new();
                             for el in &row.values {
                                 let v = match el {
@@ -230,12 +230,12 @@ impl Interaction {
 
                             out.push(r);
                         }
-                        RowResult::IO => {}
-                        RowResult::Interrupt => {}
-                        RowResult::Done => {
+                        StepResult::IO => {}
+                        StepResult::Interrupt => {}
+                        StepResult::Done => {
                             break;
                         }
-                        RowResult::Busy => {}
+                        StepResult::Busy => {}
                     }
                 }
 
@@ -320,7 +320,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
     // Insert the row
     let insert_query = Interaction::Query(Query::Insert(Insert {
         table: table.name.clone(),
-        values: row.clone(),
+        values: vec![row.clone()],
     }));
 
     // Select the row

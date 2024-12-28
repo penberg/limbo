@@ -1,11 +1,11 @@
 use core::fmt;
+use sqlite3_parser::ast;
 use std::{
     fmt::{Display, Formatter},
     rc::Rc,
 };
 
-use sqlite3_parser::ast;
-
+use crate::translate::plan::Plan::{Delete, Select};
 use crate::{
     function::AggFunc,
     schema::{BTreeTable, Column, Index},
@@ -27,7 +27,13 @@ pub struct GroupBy {
 }
 
 #[derive(Debug)]
-pub struct Plan {
+pub enum Plan {
+    Select(SelectPlan),
+    Delete(DeletePlan),
+}
+
+#[derive(Debug)]
+pub struct SelectPlan {
     /// A tree of sources (tables).
     pub source: SourceOperator,
     /// the columns inside SELECT ... FROM
@@ -50,9 +56,32 @@ pub struct Plan {
     pub contains_constant_false_condition: bool,
 }
 
+#[derive(Debug)]
+pub struct DeletePlan {
+    /// A tree of sources (tables).
+    pub source: SourceOperator,
+    /// the columns inside SELECT ... FROM
+    pub result_columns: Vec<ResultSetColumn>,
+    /// where clause split into a vec at 'AND' boundaries.
+    pub where_clause: Option<Vec<ast::Expr>>,
+    /// order by clause
+    pub order_by: Option<Vec<(ast::Expr, Direction)>>,
+    /// limit clause
+    pub limit: Option<usize>,
+    /// all the tables referenced in the query
+    pub referenced_tables: Vec<BTreeTableReference>,
+    /// all the indexes available
+    pub available_indexes: Vec<Rc<Index>>,
+    /// query contains a constant condition that is always false
+    pub contains_constant_false_condition: bool,
+}
+
 impl Display for Plan {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.source)
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Select(select_plan) => write!(f, "{}", select_plan.source),
+            Delete(delete_plan) => write!(f, "{}", delete_plan.source),
+        }
     }
 }
 

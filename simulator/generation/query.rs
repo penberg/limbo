@@ -37,10 +37,15 @@ impl ArbitraryFrom<Vec<&Table>> for Select {
 
 impl ArbitraryFrom<Table> for Insert {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        let values = table
-            .columns
-            .iter()
-            .map(|c| Value::arbitrary_from(rng, &c.column_type))
+        let num_rows = rng.gen_range(1..10);
+        let values: Vec<Vec<Value>> = (0..num_rows)
+            .map(|_| {
+                table
+                    .columns
+                    .iter()
+                    .map(|c| Value::arbitrary_from(rng, &c.column_type))
+                    .collect()
+            })
             .collect();
         Insert {
             table: table.name.clone(),
