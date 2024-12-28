@@ -255,7 +255,7 @@ impl Display for MathFunc {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
