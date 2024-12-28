@@ -17,6 +17,10 @@ If you are new to Rust, the following books are recommended reading:
 * Jim Blandy et al. [Programming Rust, 2nd Edition](https://www.oreilly.com/library/view/programming-rust-2nd/9781492052586/). 2021
 * Steve Klabnik and Carol Nichols. [The Rust Programming Language](https://doc.rust-lang.org/book/#the-rust-programming-language). 2022
 
+Examples of contributing
+
+* [How to contribute a SQL function implementation](docs/internals/functions.md)
+
 ## Finding things to work on
 
 The issue tracker has issues tagged with [good first issue](https://github.com/penberg/limbo/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
