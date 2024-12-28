@@ -1025,3 +1025,51 @@ do_execsql_test log-null-int {
 do_execsql_test log-int-null {
   SELECT log(5, null)
 } {}
+
+do_execsql_test mod-int-null {
+  SELECT 183 % null
+} {}
+
+do_execsql_test mod-int-0 {
+  SELECT 183 % 0
+} {}
+
+do_execsql_test mod-int-int {
+  SELECT 183 % 10
+} { 3 }
+
+do_execsql_test mod-int-float {
+  SELECT 38 % 10.35
+} { 8.0 }
+
+do_execsql_test mod-float-int {
+  SELECT 38.43 % 13
+} { 12.0 }
+
+do_execsql_test mod-0-float {
+  SELECT 0 % 12.0
+} { 0.0 }
+
+do_execsql_test mod-float-0 {
+  SELECT 23.14 % 0
+} {}
+
+do_execsql_test mod-float-float {
+  SELECT 23.14 % 12.0
+} { 11.0 }
+
+do_execsql_test mod-float-agg {
+    SELECT 23.14 % sum(id) from products
+} { 23.0 }
+
+do_execsql_test mod-int-agg {
+    SELECT 17 % sum(id) from users
+} { 17 }
+
+do_execsql_test mod-agg-int {
+    SELECT count(*) % 17 from users
+} { 4 }
+
+do_execsql_test mod-agg-float {
+    SELECT count(*) % 2.43 from users 
+} { 0.0 }
