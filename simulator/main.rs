@@ -1,3 +1,4 @@
+#![allow(clippy::arc_with_non_send_sync, dead_code)]
 use clap::Parser;
 use generation::plan::{Interaction, InteractionPlan, ResultSet};
 use generation::{pick_index, ArbitraryFrom};
@@ -18,7 +19,6 @@ mod generation;
 mod model;
 mod runner;
 
-#[allow(clippy::arc_with_non_send_sync)]
 fn main() {
     let _ = env_logger::try_init();
 
@@ -193,7 +193,7 @@ fn run_simulation(
 
     let mut f = std::fs::File::create(plan_path).unwrap();
     // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
-    f.write(plans[0].to_string().as_bytes()).unwrap();
+    f.write_all(plans[0].to_string().as_bytes()).unwrap();
 
     log::info!("{}", plans[0].stats());
 
@@ -211,7 +211,7 @@ fn run_simulation(
     result
 }
 
-fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Result<()> {
+fn execute_plans(env: &mut SimulatorEnv, plans: &mut [InteractionPlan]) -> Result<()> {
     // todo: add history here by recording which interaction was executed at which tick
     for _tick in 0..env.opts.ticks {
         // Pick the connection to interact with
@@ -226,7 +226,7 @@ fn execute_plans(env: &mut SimulatorEnv, plans: &mut Vec<InteractionPlan>) -> Re
 fn execute_plan(
     env: &mut SimulatorEnv,
     connection_index: usize,
-    plans: &mut Vec<InteractionPlan>,
+    plans: &mut [InteractionPlan],
 ) -> Result<()> {
     let connection = &env.connections[connection_index];
     let plan = &mut plans[connection_index];

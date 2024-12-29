@@ -18,10 +18,11 @@
 //! https://www.sqlite.org/opcode.html
 
 pub mod builder;
-pub mod explain;
-pub mod sorter;
-
 mod datetime;
+pub mod explain;
+pub mod insn;
+pub mod likeop;
+pub mod sorter;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 #[cfg(feature = "uuid")]
@@ -36,17 +37,15 @@ use crate::types::{
     AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
 };
 use crate::util::parse_schema_rows;
+use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
-use crate::{function::JsonFunc, json::get_json, json::json_array};
-use crate::{Connection, Result, TransactionState};
-use crate::{Rows, DATABASE_VERSION};
-use limbo_macros::Description;
-
+use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
+use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_time, exec_unixepoch};
-
+use likeop::{construct_like_escape_arg, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -56,479 +55,6 @@ pub type BranchOffset = i64;
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
-
-#[derive(Description, Debug)]
-pub enum Insn {
-    // Initialize the program state and jump to the given PC.
-    Init {
-        target_pc: BranchOffset,
-    },
-    // Write a NULL into register dest. If dest_end is Some, then also write NULL into register dest_end and every register in between dest and dest_end. If dest_end is not set, then only register dest is set to NULL.
-    Null {
-        dest: usize,
-        dest_end: Option<usize>,
-    },
-    // Move the cursor P1 to a null row. Any Column operations that occur while the cursor is on the null row will always write a NULL.
-    NullRow {
-        cursor_id: CursorID,
-    },
-    // Add two registers and store the result in a third register.
-    Add {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Subtract rhs from lhs and store in dest
-    Subtract {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Multiply two registers and store the result in a third register.
-    Multiply {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Divide lhs by rhs and store the result in a third register.
-    Divide {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Compare two vectors of registers in reg(P1)..reg(P1+P3-1) (call this vector "A") and in reg(P2)..reg(P2+P3-1) ("B"). Save the result of the comparison for use by the next Jump instruct.
-    Compare {
-        start_reg_a: usize,
-        start_reg_b: usize,
-        count: usize,
-    },
-    // Place the result of rhs bitwise AND lhs in third register.
-    BitAnd {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Place the result of rhs bitwise OR lhs in third register.
-    BitOr {
-        lhs: usize,
-        rhs: usize,
-        dest: usize,
-    },
-    // Place the result of bitwise NOT register P1 in dest register.
-    BitNot {
-        reg: usize,
-        dest: usize,
-    },
-    // Jump to the instruction at address P1, P2, or P3 depending on whether in the most recent Compare instruction the P1 vector was less than, equal to, or greater than the P2 vector, respectively.
-    Jump {
-        target_pc_lt: BranchOffset,
-        target_pc_eq: BranchOffset,
-        target_pc_gt: BranchOffset,
-    },
-    // Move the P3 values in register P1..P1+P3-1 over into registers P2..P2+P3-1. Registers P1..P1+P3-1 are left holding a NULL. It is an error for register ranges P1..P1+P3-1 and P2..P2+P3-1 to overlap. It is an error for P3 to be less than 1.
-    Move {
-        source_reg: usize,
-        dest_reg: usize,
-        count: usize,
-    },
-    // If the given register is a positive integer, decrement it by decrement_by and jump to the given PC.
-    IfPos {
-        reg: usize,
-        target_pc: BranchOffset,
-        decrement_by: usize,
-    },
-    // If the given register is not NULL, jump to the given PC.
-    NotNull {
-        reg: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if they are equal.
-    Eq {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if they are not equal.
-    Ne {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
-    Lt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
-    Le {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
-    Gt {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
-    Ge {
-        lhs: usize,
-        rhs: usize,
-        target_pc: BranchOffset,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
-    If {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
-        null_reg: usize,
-    },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
-    IfNot {
-        reg: usize,              // P1
-        target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
-        null_reg: usize,
-    },
-    // Open a cursor for reading.
-    OpenReadAsync {
-        cursor_id: CursorID,
-        root_page: PageIdx,
-    },
-
-    // Await for the completion of open cursor.
-    OpenReadAwait,
-
-    // Open a cursor for a pseudo-table that contains a single row.
-    OpenPseudo {
-        cursor_id: CursorID,
-        content_reg: usize,
-        num_fields: usize,
-    },
-
-    // Rewind the cursor to the beginning of the B-Tree.
-    RewindAsync {
-        cursor_id: CursorID,
-    },
-
-    // Await for the completion of cursor rewind.
-    RewindAwait {
-        cursor_id: CursorID,
-        pc_if_empty: BranchOffset,
-    },
-
-    LastAsync {
-        cursor_id: CursorID,
-    },
-
-    LastAwait {
-        cursor_id: CursorID,
-        pc_if_empty: BranchOffset,
-    },
-
-    // Read a column from the current row of the cursor.
-    Column {
-        cursor_id: CursorID,
-        column: usize,
-        dest: usize,
-    },
-
-    // Make a record and write it to destination register.
-    MakeRecord {
-        start_reg: usize, // P1
-        count: usize,     // P2
-        dest_reg: usize,  // P3
-    },
-
-    // Emit a row of results.
-    ResultRow {
-        start_reg: usize, // P1
-        count: usize,     // P2
-    },
-
-    // Advance the cursor to the next row.
-    NextAsync {
-        cursor_id: CursorID,
-    },
-
-    // Await for the completion of cursor advance.
-    NextAwait {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-    },
-
-    PrevAsync {
-        cursor_id: CursorID,
-    },
-
-    PrevAwait {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-    },
-
-    // Halt the program.
-    Halt {
-        err_code: usize,
-        description: String,
-    },
-
-    // Start a transaction.
-    Transaction {
-        write: bool,
-    },
-
-    // Branch to the given PC.
-    Goto {
-        target_pc: BranchOffset,
-    },
-
-    // Stores the current program counter into register 'return_reg' then jumps to address target_pc.
-    Gosub {
-        target_pc: BranchOffset,
-        return_reg: usize,
-    },
-
-    // Returns to the program counter stored in register 'return_reg'.
-    Return {
-        return_reg: usize,
-    },
-
-    // Write an integer value into a register.
-    Integer {
-        value: i64,
-        dest: usize,
-    },
-
-    // Write a float value into a register
-    Real {
-        value: f64,
-        dest: usize,
-    },
-
-    // If register holds an integer, transform it to a float
-    RealAffinity {
-        register: usize,
-    },
-
-    // Write a string value into a register.
-    String8 {
-        value: String,
-        dest: usize,
-    },
-
-    // Write a blob value into a register.
-    Blob {
-        value: Vec<u8>,
-        dest: usize,
-    },
-
-    // Read the rowid of the current row.
-    RowId {
-        cursor_id: CursorID,
-        dest: usize,
-    },
-
-    // Seek to a rowid in the cursor. If not found, jump to the given PC. Otherwise, continue to the next instruction.
-    SeekRowid {
-        cursor_id: CursorID,
-        src_reg: usize,
-        target_pc: BranchOffset,
-    },
-
-    // P1 is an open index cursor and P3 is a cursor on the corresponding table. This opcode does a deferred seek of the P3 table cursor to the row that corresponds to the current row of P1.
-    // This is a deferred seek. Nothing actually happens until the cursor is used to read a record. That way, if no reads occur, no unnecessary I/O happens.
-    DeferredSeek {
-        index_cursor_id: CursorID,
-        table_cursor_id: CursorID,
-    },
-
-    // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
-    // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
-    // Seek to the first index entry that is greater than or equal to the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
-    SeekGE {
-        is_index: bool,
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
-
-    // If cursor_id refers to an SQL table (B-Tree that uses integer keys), use the value in start_reg as the key.
-    // If cursor_id refers to an SQL index, then start_reg is the first in an array of num_regs registers that are used as an unpacked index key.
-    // Seek to the first index entry that is greater than the given key. If not found, jump to the given PC. Otherwise, continue to the next instruction.
-    SeekGT {
-        is_index: bool,
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
-
-    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
-    // If the P1 index entry is greater or equal than the key value then jump to P2. Otherwise fall through to the next instruction.
-    IdxGE {
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
-
-    // The P4 register values beginning with P3 form an unpacked index key that omits the PRIMARY KEY. Compare this key value against the index that P1 is currently pointing to, ignoring the PRIMARY KEY or ROWID fields at the end.
-    // If the P1 index entry is greater than the key value then jump to P2. Otherwise fall through to the next instruction.
-    IdxGT {
-        cursor_id: CursorID,
-        start_reg: usize,
-        num_regs: usize,
-        target_pc: BranchOffset,
-    },
-
-    // Decrement the given register and jump to the given PC if the result is zero.
-    DecrJumpZero {
-        reg: usize,
-        target_pc: BranchOffset,
-    },
-
-    AggStep {
-        acc_reg: usize,
-        col: usize,
-        delimiter: usize,
-        func: AggFunc,
-    },
-
-    AggFinal {
-        register: usize,
-        func: AggFunc,
-    },
-
-    // Open a sorter.
-    SorterOpen {
-        cursor_id: CursorID, // P1
-        columns: usize,      // P2
-        order: OwnedRecord,  // P4. 0 if ASC and 1 if DESC
-    },
-
-    // Insert a row into the sorter.
-    SorterInsert {
-        cursor_id: CursorID,
-        record_reg: usize,
-    },
-
-    // Sort the rows in the sorter.
-    SorterSort {
-        cursor_id: CursorID,
-        pc_if_empty: BranchOffset,
-    },
-
-    // Retrieve the next row from the sorter.
-    SorterData {
-        cursor_id: CursorID,  // P1
-        dest_reg: usize,      // P2
-        pseudo_cursor: usize, // P3
-    },
-
-    // Advance to the next row in the sorter.
-    SorterNext {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-    },
-
-    // Function
-    Function {
-        constant_mask: i32, // P1
-        start_reg: usize,   // P2, start of argument registers
-        dest: usize,        // P3
-        func: FuncCtx,      // P4
-    },
-
-    InitCoroutine {
-        yield_reg: usize,
-        jump_on_definition: BranchOffset,
-        start_offset: BranchOffset,
-    },
-
-    EndCoroutine {
-        yield_reg: usize,
-    },
-
-    Yield {
-        yield_reg: usize,
-        end_offset: BranchOffset,
-    },
-
-    InsertAsync {
-        cursor: CursorID,
-        key_reg: usize,    // Must be int.
-        record_reg: usize, // Blob of record data.
-        flag: usize,       // Flags used by insert, for now not used.
-    },
-
-    InsertAwait {
-        cursor_id: usize,
-    },
-
-    NewRowid {
-        cursor: CursorID,        // P1
-        rowid_reg: usize,        // P2  Destination register to store the new rowid
-        prev_largest_reg: usize, // P3 Previous largest rowid in the table (Not used for now)
-    },
-
-    MustBeInt {
-        reg: usize,
-    },
-
-    SoftNull {
-        reg: usize,
-    },
-
-    NotExists {
-        cursor: CursorID,
-        rowid_reg: usize,
-        target_pc: BranchOffset,
-    },
-
-    OpenWriteAsync {
-        cursor_id: CursorID,
-        root_page: PageIdx,
-    },
-
-    OpenWriteAwait {},
-
-    Copy {
-        src_reg: usize,
-        dst_reg: usize,
-        amount: usize, // 0 amount means we include src_reg, dst_reg..=dst_reg+amount = src_reg..=src_reg+amount
-    },
-
-    /// Allocate a new b-tree.
-    CreateBtree {
-        /// Allocate b-tree in main database if zero or in temp database if non-zero (P1).
-        db: usize,
-        /// The root page of the new b-tree (P2).
-        root: usize,
-        /// Flags (P3).
-        flags: usize,
-    },
-
-    /// Close a cursor.
-    Close {
-        cursor_id: CursorID,
-    },
-
-    /// Check if the register is null.
-    IsNull {
-        /// Source register (P1).
-        src: usize,
-
-        /// Jump to this PC if the register is null (P2).
-        target_pc: BranchOffset,
-    },
-    ParseSchema {
-        db: usize,
-        where_clause: String,
-    },
-}
 
 // Index of insn in list of insns
 type InsnReference = usize;
@@ -556,9 +82,10 @@ struct RegexCache {
     like: HashMap<String, Regex>,
     glob: HashMap<String, Regex>,
 }
+
 impl RegexCache {
     fn new() -> Self {
-        RegexCache {
+        Self {
             like: HashMap::new(),
             glob: HashMap::new(),
         }
@@ -1214,6 +741,103 @@ impl Program {
                             unimplemented!("{:?}", state.registers[reg]);
                         }
                     }
+                    state.pc += 1;
+                }
+                Insn::Remainder { lhs, rhs, dest } => {
+                    let lhs = *lhs;
+                    let rhs = *rhs;
+                    let dest = *dest;
+                    state.registers[dest] = match (&state.registers[lhs], &state.registers[rhs]) {
+                        (OwnedValue::Null, _)
+                        | (_, OwnedValue::Null)
+                        | (_, OwnedValue::Integer(0))
+                        | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
+                        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                            OwnedValue::Integer(lhs % rhs)
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                            OwnedValue::Float(((*lhs as i64) % (*rhs as i64)) as f64)
+                        }
+                        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                            OwnedValue::Float(((*lhs as i64) % rhs) as f64)
+                        }
+                        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                            OwnedValue::Float((lhs % *rhs as i64) as f64)
+                        }
+                        (lhs, OwnedValue::Agg(agg_rhs)) => match lhs {
+                            OwnedValue::Agg(agg_lhs) => {
+                                let acc = agg_lhs.final_value();
+                                let acc2 = agg_rhs.final_value();
+                                match (acc, acc2) {
+                                    (_, OwnedValue::Integer(0))
+                                    | (_, OwnedValue::Float(0.0))
+                                    | (_, OwnedValue::Null)
+                                    | (OwnedValue::Null, _) => OwnedValue::Null,
+                                    (OwnedValue::Integer(l), OwnedValue::Integer(r)) => {
+                                        OwnedValue::Integer(l % r)
+                                    }
+                                    (OwnedValue::Float(lh_f), OwnedValue::Float(rh_f)) => {
+                                        OwnedValue::Float(((*lh_f as i64) % (*rh_f as i64)) as f64)
+                                    }
+                                    (OwnedValue::Integer(lh_i), OwnedValue::Float(rh_f)) => {
+                                        OwnedValue::Float((lh_i % (*rh_f as i64)) as f64)
+                                    }
+                                    _ => {
+                                        todo!("{:?} {:?}", acc, acc2);
+                                    }
+                                }
+                            }
+                            OwnedValue::Integer(lh_i) => match agg_rhs.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(rh_f) => {
+                                    OwnedValue::Float((lh_i % (*rh_f as i64)) as f64)
+                                }
+                                OwnedValue::Integer(rh_i) => OwnedValue::Integer(lh_i % rh_i),
+                                _ => {
+                                    todo!("{:?}", agg_rhs);
+                                }
+                            },
+                            OwnedValue::Float(lh_f) => match agg_rhs.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(rh_f) => {
+                                    OwnedValue::Float(((*lh_f as i64) % (*rh_f as i64)) as f64)
+                                }
+                                OwnedValue::Integer(rh_i) => {
+                                    OwnedValue::Float(((*lh_f as i64) % rh_i) as f64)
+                                }
+                                _ => {
+                                    todo!("{:?}", agg_rhs);
+                                }
+                            },
+                            _ => todo!("{:?}", rhs),
+                        },
+                        (OwnedValue::Agg(aggctx), rhs) => match rhs {
+                            OwnedValue::Integer(rh_i) => match aggctx.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(lh_f) => {
+                                    OwnedValue::Float(((*lh_f as i64) % rh_i) as f64)
+                                }
+                                OwnedValue::Integer(lh_i) => OwnedValue::Integer(lh_i % rh_i),
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            OwnedValue::Float(rh_f) => match aggctx.final_value() {
+                                OwnedValue::Null => OwnedValue::Null,
+                                OwnedValue::Float(lh_f) => {
+                                    OwnedValue::Float(((*lh_f as i64) % (*rh_f as i64)) as f64)
+                                }
+                                OwnedValue::Integer(lh_i) => {
+                                    OwnedValue::Float((lh_i % (*rh_f as i64)) as f64)
+                                }
+                                _ => {
+                                    todo!("{:?}", aggctx);
+                                }
+                            },
+                            _ => todo!("{:?}", rhs),
+                        },
+                        _ => todo!("{:?} {:?}", state.registers[lhs], state.registers[rhs]),
+                    };
                     state.pc += 1;
                 }
                 Insn::Null { dest, dest_end } => {
@@ -2281,6 +1905,21 @@ impl Program {
                                 Err(e) => return Err(e),
                             }
                         }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(JsonFunc::JsonArrayLength) => {
+                            let json_value = &state.registers[*start_reg];
+                            let path_value = if arg_count > 1 {
+                                Some(&state.registers[*start_reg + 1])
+                            } else {
+                                None
+                            };
+                            let json_array_length = json_array_length(json_value, path_value);
+
+                            match json_array_length {
+                                Ok(length) => state.registers[*dest] = length,
+                                Err(e) => return Err(e),
+                            }
+                        }
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
                                 assert!(arg_count == 2);
@@ -2354,7 +1993,25 @@ impl Program {
                             ScalarFunc::Like => {
                                 let pattern = &state.registers[*start_reg];
                                 let text = &state.registers[*start_reg + 1];
+
                                 let result = match (pattern, text) {
+                                    (OwnedValue::Text(pattern), OwnedValue::Text(text))
+                                        if arg_count == 3 =>
+                                    {
+                                        let escape = match construct_like_escape_arg(
+                                            &state.registers[*start_reg + 2],
+                                        ) {
+                                            Ok(x) => x,
+                                            Err(e) => return Result::Err(e),
+                                        };
+
+                                        OwnedValue::Integer(exec_like_with_escape(
+                                            &pattern.value,
+                                            &text.value,
+                                            escape,
+                                        )
+                                            as i64)
+                                    }
                                     (OwnedValue::Text(pattern), OwnedValue::Text(text)) => {
                                         let cache = if *constant_mask > 0 {
                                             Some(&mut state.regex_cache.like)
@@ -2372,6 +2029,7 @@ impl Program {
                                         unreachable!("Like on non-text registers");
                                     }
                                 };
+
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::Abs
@@ -2521,6 +2179,7 @@ impl Program {
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
                         },
+                        #[allow(unreachable_patterns)]
                         crate::function::Func::Extension(extfn) => match extfn {
                             #[cfg(feature = "uuid")]
                             ExtFunc::Uuid(uuidfn) => match uuidfn {
@@ -2669,6 +2328,16 @@ impl Program {
                             }
                         }
                     }
+                    state.pc += 1;
+                }
+                Insn::DeleteAsync { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    return_if_io!(cursor.delete());
+                    state.pc += 1;
+                }
+                Insn::DeleteAwait { cursor_id } => {
+                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    cursor.wait_for_completion()?;
                     state.pc += 1;
                 }
                 Insn::NewRowid {
@@ -3166,10 +2835,31 @@ fn exec_char(values: Vec<OwnedValue>) -> OwnedValue {
 }
 
 fn construct_like_regex(pattern: &str) -> Regex {
-    let mut regex_pattern = String::from("(?i)^");
-    regex_pattern.push_str(&pattern.replace('%', ".*").replace('_', "."));
+    let mut regex_pattern = String::with_capacity(pattern.len() * 2);
+
+    regex_pattern.push('^');
+
+    for c in pattern.chars() {
+        match c {
+            '\\' => regex_pattern.push_str("\\\\"),
+            '%' => regex_pattern.push_str(".*"),
+            '_' => regex_pattern.push('.'),
+            ch => {
+                if regex_syntax::is_meta_character(c) {
+                    regex_pattern.push('\\');
+                }
+                regex_pattern.push(ch);
+            }
+        }
+    }
+
     regex_pattern.push('$');
-    Regex::new(&regex_pattern).unwrap()
+
+    RegexBuilder::new(&regex_pattern)
+        .case_insensitive(true)
+        .dot_matches_new_line(true)
+        .build()
+        .unwrap()
 }
 
 // Implements LIKE pattern matching. Caches the constructed regex if a cache is provided
@@ -3901,6 +3591,10 @@ mod tests {
             unimplemented!()
         }
 
+        fn delete(&mut self) -> Result<CursorResult<()>> {
+            unimplemented!()
+        }
+
         fn wait_for_completion(&mut self) -> Result<()> {
             unimplemented!()
         }
@@ -4317,11 +4011,17 @@ mod tests {
     }
 
     #[test]
+    fn test_like_with_escape_or_regexmeta_chars() {
+        assert!(exec_like(None, r#"\%A"#, r#"\A"#));
+        assert!(exec_like(None, "%a%a", "aaaa"));
+    }
+
+    #[test]
     fn test_like_no_cache() {
         assert!(exec_like(None, "a%", "aaaa"));
         assert!(exec_like(None, "%a%a", "aaaa"));
-        assert!(exec_like(None, "%a.a", "aaaa"));
-        assert!(exec_like(None, "a.a%", "aaaa"));
+        assert!(!exec_like(None, "%a.a", "aaaa"));
+        assert!(!exec_like(None, "a.a%", "aaaa"));
         assert!(!exec_like(None, "%a.ab", "aaaa"));
     }
 
@@ -4330,15 +4030,15 @@ mod tests {
         let mut cache = HashMap::new();
         assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
         assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "a.a%", "aaaa"));
         assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
 
         // again after values have been cached
         assert!(exec_like(Some(&mut cache), "a%", "aaaa"));
         assert!(exec_like(Some(&mut cache), "%a%a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "%a.a", "aaaa"));
-        assert!(exec_like(Some(&mut cache), "a.a%", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "%a.a", "aaaa"));
+        assert!(!exec_like(Some(&mut cache), "a.a%", "aaaa"));
         assert!(!exec_like(Some(&mut cache), "%a.ab", "aaaa"));
     }
 

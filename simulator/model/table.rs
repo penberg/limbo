@@ -16,7 +16,7 @@ pub(crate) struct Table {
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,
 }
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct Column {
     pub(crate) name: String,
@@ -36,10 +36,10 @@ pub(crate) enum ColumnType {
 impl Display for ColumnType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ColumnType::Integer => write!(f, "INTEGER"),
-            ColumnType::Float => write!(f, "REAL"),
-            ColumnType::Text => write!(f, "TEXT"),
-            ColumnType::Blob => write!(f, "BLOB"),
+            Self::Integer => write!(f, "INTEGER"),
+            Self::Float => write!(f, "REAL"),
+            Self::Text => write!(f, "TEXT"),
+            Self::Blob => write!(f, "BLOB"),
         }
     }
 }
@@ -54,18 +54,22 @@ pub(crate) enum Value {
 }
 
 fn to_sqlite_blob(bytes: &[u8]) -> String {
-    let hex: String = bytes.iter().map(|b| format!("{:02X}", b)).collect();
-    format!("X'{}'", hex)
+    format!(
+        "X'{}'",
+        bytes
+            .iter()
+            .fold(String::new(), |acc, b| acc + &format!("{:02X}", b))
+    )
 }
 
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Null => write!(f, "NULL"),
-            Value::Integer(i) => write!(f, "{}", i),
-            Value::Float(fl) => write!(f, "{}", fl),
-            Value::Text(t) => write!(f, "'{}'", t),
-            Value::Blob(b) => write!(f, "{}", to_sqlite_blob(b)),
+            Self::Null => write!(f, "NULL"),
+            Self::Integer(i) => write!(f, "{}", i),
+            Self::Float(fl) => write!(f, "{}", fl),
+            Self::Text(t) => write!(f, "'{}'", t),
+            Self::Blob(b) => write!(f, "{}", to_sqlite_blob(b)),
         }
     }
 }

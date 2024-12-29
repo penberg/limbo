@@ -1,5 +1,4 @@
 use super::{Insn, InsnReference, OwnedValue, Program};
-use crate::types::LimboText;
 use std::rc::Rc;
 
 pub fn insn_to_str(
@@ -82,6 +81,15 @@ pub fn insn_to_str(
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 format!("r[{}]=~r[{}]", dest, reg),
+            ),
+            Insn::Remainder { lhs, rhs, dest } => (
+                "Remainder",
+                *lhs as i32,
+                *rhs as i32,
+                *dest as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}]%r[{}]", dest, lhs, rhs),
             ),
             Insn::Null { dest, dest_end } => (
                 "Null",
@@ -827,6 +835,24 @@ pub fn insn_to_str(
             ),
             Insn::InsertAwait { cursor_id } => (
                 "InsertAwait",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::DeleteAsync { cursor_id } => (
+                "DeleteAsync",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::DeleteAwait { cursor_id } => (
+                "DeleteAwait",
                 *cursor_id as i32,
                 0,
                 0,

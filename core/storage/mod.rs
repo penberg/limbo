@@ -10,11 +10,12 @@
 //! for reading and writing pages to the database file, either local or
 //! remote. The `Wal` struct is responsible for managing the write-ahead log
 //! for the database, also either local or remote.
-
 pub(crate) mod btree;
 pub(crate) mod buffer_pool;
 pub(crate) mod database;
 pub(crate) mod page_cache;
+#[allow(clippy::arc_with_non_send_sync)]
 pub(crate) mod pager;
 pub(crate) mod sqlite3_ondisk;
+#[allow(clippy::arc_with_non_send_sync)]
 pub(crate) mod wal;

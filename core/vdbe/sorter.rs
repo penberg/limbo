@@ -96,6 +96,10 @@ impl Cursor for Sorter {
         Ok(CursorResult::Ok(()))
     }
 
+    fn delete(&mut self) -> Result<CursorResult<()>> {
+        unimplemented!()
+    }
+
     fn set_null_flag(&mut self, _flag: bool) {
         todo!();
     }

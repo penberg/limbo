@@ -1,6 +1,6 @@
 use std::{fmt::Display, rc::Rc};
 
-use limbo_core::{Connection, Result, RowResult};
+use limbo_core::{Connection, Result, StepResult};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -28,11 +28,11 @@ impl Display for InteractionPlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for interaction in &self.plan {
             match interaction {
-                Interaction::Query(query) => write!(f, "{};\n", query)?,
+                Interaction::Query(query) => writeln!(f, "{};", query)?,
                 Interaction::Assertion(assertion) => {
-                    write!(f, "-- ASSERT: {};\n", assertion.message)?
+                    writeln!(f, "-- ASSERT: {};", assertion.message)?
                 }
-                Interaction::Fault(fault) => write!(f, "-- FAULT: {};\n", fault)?,
+                Interaction::Fault(fault) => writeln!(f, "-- FAULT: {};", fault)?,
             }
         }
 
@@ -67,15 +67,17 @@ pub(crate) enum Interaction {
 impl Display for Interaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Interaction::Query(query) => write!(f, "{}", query),
-            Interaction::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
-            Interaction::Fault(fault) => write!(f, "FAULT: {}", fault),
+            Self::Query(query) => write!(f, "{}", query),
+            Self::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
+            Self::Fault(fault) => write!(f, "FAULT: {}", fault),
         }
     }
 }
 
+type AssertionFunc = dyn Fn(&Vec<ResultSet>) -> bool;
+
 pub(crate) struct Assertion {
-    pub(crate) func: Box<dyn Fn(&Vec<ResultSet>) -> bool>,
+    pub(crate) func: Box<AssertionFunc>,
     pub(crate) message: String,
 }
 
@@ -107,7 +109,7 @@ impl Interactions {
                             .iter_mut()
                             .find(|t| t.name == insert.table)
                             .unwrap();
-                        table.rows.push(insert.values.clone());
+                        table.rows.extend(insert.values.clone());
                     }
                     Query::Delete(_) => todo!(),
                     Query::Select(_) => {}
@@ -121,7 +123,7 @@ impl Interactions {
 
 impl InteractionPlan {
     pub(crate) fn new() -> Self {
-        InteractionPlan {
+        Self {
             plan: Vec::new(),
             stack: Vec::new(),
             interaction_pointer: 0,
@@ -200,7 +202,7 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
 impl Interaction {
     pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> ResultSet {
         match self {
-            Interaction::Query(query) => {
+            Self::Query(query) => {
                 let query_str = query.to_string();
                 let rows = conn.query(&query_str);
                 if rows.is_err() {
@@ -218,7 +220,7 @@ impl Interaction {
                 let mut out = Vec::new();
                 while let Ok(row) = rows.next_row() {
                     match row {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             let mut r = Vec::new();
                             for el in &row.values {
                                 let v = match el {
@@ -233,21 +235,21 @@ impl Interaction {
 
                             out.push(r);
                         }
-                        RowResult::IO => {}
-                        RowResult::Interrupt => {}
-                        RowResult::Done => {
+                        StepResult::IO => {}
+                        StepResult::Interrupt => {}
+                        StepResult::Done => {
                             break;
                         }
-                        RowResult::Busy => {}
+                        StepResult::Busy => {}
                     }
                 }
 
                 Ok(out)
             }
-            Interaction::Assertion(_) => {
+            Self::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
-            Interaction::Fault(fault) => {
+            Interaction::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
         }
@@ -255,10 +257,10 @@ impl Interaction {
 
     pub(crate) fn execute_assertion(&self, stack: &Vec<ResultSet>) -> Result<()> {
         match self {
-            Interaction::Query(_) => {
+            Self::Query(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
             }
-            Interaction::Assertion(assertion) => {
+            Self::Assertion(assertion) => {
                 if !assertion.func.as_ref()(stack) {
                     return Err(limbo_core::LimboError::InternalError(
                         assertion.message.clone(),
@@ -266,7 +268,7 @@ impl Interaction {
                 }
                 Ok(())
             }
-            Interaction::Fault(_) => {
+            Self::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
             }
         }
@@ -274,13 +276,13 @@ impl Interaction {
 
     pub(crate) fn execute_fault(&self, env: &mut SimulatorEnv, conn_index: usize) -> Result<()> {
         match self {
-            Interaction::Query(_) => {
+            Self::Query(_) => {
                 unreachable!("unexpected: this function should only be called on faults")
             }
-            Interaction::Assertion(_) => {
+            Self::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on faults")
             }
-            Interaction::Fault(fault) => {
+            Self::Fault(fault) => {
                 match fault {
                     Fault::Disconnect => {
                         match env.connections[conn_index] {
@@ -323,7 +325,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
     // Insert the row
     let insert_query = Interaction::Query(Query::Insert(Insert {
         table: table.name.clone(),
-        values: row.clone(),
+        values: vec![row.clone()],
     }));
 
     // Select the row
@@ -353,7 +355,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
     Interactions(vec![insert_query, select_query, assertion])
 }
 
-fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     let create_query = Create::arbitrary(rng);
     let table_name = create_query.table.name.clone();
     let cq1 = Interaction::Query(Query::Create(create_query.clone()));
@@ -377,7 +379,8 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv)
     Interactions(vec![cq1, cq2, assertion])
 }
 
-fn create_table<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+
+fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     let create_query = Interaction::Query(Query::Create(Create::arbitrary(rng)));
     Interactions(vec![create_query])
 }
@@ -393,7 +396,7 @@ fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
     Interactions(vec![insert_query])
 }
 
-fn random_fault<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn random_fault<R: rand::Rng>(_rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     let fault = Interaction::Fault(Fault::Disconnect);
     Interactions(vec![fault])
 }

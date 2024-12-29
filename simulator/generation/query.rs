@@ -18,7 +18,7 @@ impl Arbitrary for Create {
 impl ArbitraryFrom<Vec<Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<Table>) -> Self {
         let table = pick(tables, rng);
-        Select {
+        Self {
             table: table.name.clone(),
             predicate: Predicate::arbitrary_from(rng, table),
         }
@@ -28,7 +28,7 @@ impl ArbitraryFrom<Vec<Table>> for Select {
 impl ArbitraryFrom<Vec<&Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<&Table>) -> Self {
         let table = pick(tables, rng);
-        Select {
+        Self {
             table: table.name.clone(),
             predicate: Predicate::arbitrary_from(rng, *table),
         }
@@ -37,12 +37,17 @@ impl ArbitraryFrom<Vec<&Table>> for Select {
 
 impl ArbitraryFrom<Table> for Insert {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        let values = table
-            .columns
-            .iter()
-            .map(|c| Value::arbitrary_from(rng, &c.column_type))
+        let num_rows = rng.gen_range(1..10);
+        let values: Vec<Vec<Value>> = (0..num_rows)
+            .map(|_| {
+                table
+                    .columns
+                    .iter()
+                    .map(|c| Value::arbitrary_from(rng, &c.column_type))
+                    .collect()
+            })
             .collect();
-        Insert {
+        Self {
             table: table.name.clone(),
             values,
         }
@@ -51,7 +56,7 @@ impl ArbitraryFrom<Table> for Insert {
 
 impl ArbitraryFrom<Table> for Delete {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        Delete {
+        Self {
             table: table.name.clone(),
             predicate: Predicate::arbitrary_from(rng, table),
         }
@@ -62,18 +67,18 @@ impl ArbitraryFrom<Table> for Query {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         frequency(
             vec![
-                (1, Box::new(|rng| Query::Create(Create::arbitrary(rng)))),
+                (1, Box::new(|rng| Self::Create(Create::arbitrary(rng)))),
                 (
                     100,
-                    Box::new(|rng| Query::Select(Select::arbitrary_from(rng, &vec![table]))),
+                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, &vec![table]))),
                 ),
                 (
                     100,
-                    Box::new(|rng| Query::Insert(Insert::arbitrary_from(rng, table))),
+                    Box::new(|rng| Self::Insert(Insert::arbitrary_from(rng, table))),
                 ),
                 (
                     0,
-                    Box::new(|rng| Query::Delete(Delete::arbitrary_from(rng, table))),
+                    Box::new(|rng| Self::Delete(Delete::arbitrary_from(rng, table))),
                 ),
             ],
             rng,
@@ -144,14 +149,14 @@ impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
             ),
         };
 
-        SimplePredicate(operator)
+        Self(operator)
     }
 }
 
 impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): &(&Table, bool)) -> Self {
         // Decide if you want to create an AND or an OR
-        CompoundPredicate(if rng.gen_bool(0.7) {
+        Self(if rng.gen_bool(0.7) {
             // An AND for true requires each of its children to be true
             // An AND for false requires at least one of its children to be false
             if *predicate_value {
@@ -222,15 +227,15 @@ impl ArbitraryFrom<(&str, &Value)> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
         one_of(
             vec![
-                Box::new(|rng| Predicate::Eq(column_name.to_string(), (*value).clone())),
+                Box::new(|_| Predicate::Eq(column_name.to_string(), (*value).clone())),
                 Box::new(|rng| {
-                    Predicate::Gt(
+                    Self::Gt(
                         column_name.to_string(),
                         GTValue::arbitrary_from(rng, *value).0,
                     )
                 }),
                 Box::new(|rng| {
-                    Predicate::Lt(
+                    Self::Lt(
                         column_name.to_string(),
                         LTValue::arbitrary_from(rng, *value).0,
                     )

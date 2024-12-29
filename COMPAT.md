@@ -116,8 +116,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
-| like(X,Y)                    | No     |         |
-| like(X,Y,Z)                  | No     |         |
+| like(X,Y)                    | Yes    |         |
+| like(X,Y,Z)                  | Yes    |         |
 | likelihood(X,Y)              | No     |         |
 | likely(X)                    | No     |         |
 | load_extension(X)            | No     |         |
@@ -234,8 +234,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | jsonb(json)                        |         |         |
 | json_array(value1,value2,...)      | Yes     |         |
 | jsonb_array(value1,value2,...)     |         |         |
-| json_array_length(json)            |         |         |
-| json_array_length(json,path)       |         |         |
+| json_array_length(json)            | Yes     |         |
+| json_array_length(json,path)       | Yes     |         |
 | json_error_position(json)          |         |         |
 | json_extract(json,path,...)        |         |         |
 | jsonb_extract(json,path,...)       |         |         |
@@ -395,7 +395,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | ReadCookie      | No     |
 | Real            | Yes    |
 | RealAffinity    | Yes    |
-| Remainder       | No     |
+| Remainder       | Yes    |
 | ResetCount      | No     |
 | ResultRow       | Yes    |
 | Return          | Yes    |

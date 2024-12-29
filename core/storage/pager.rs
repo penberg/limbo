@@ -40,8 +40,8 @@ const PAGE_DIRTY: usize = 0b1000;
 const PAGE_LOADED: usize = 0b10000;
 
 impl Page {
-    pub fn new(id: usize) -> Page {
-        Page {
+    pub fn new(id: usize) -> Self {
+        Self {
             inner: UnsafeCell::new(PageInner {
                 flags: AtomicUsize::new(0),
                 contents: None,
@@ -50,6 +50,7 @@ impl Page {
         }
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn get(&self) -> &mut PageInner {
         unsafe { &mut *self.inner.get() }
     }
@@ -423,7 +424,7 @@ impl Pager {
                 CheckpointMode::Passive,
             ) {
                 Ok(CheckpointStatus::IO) => {
-                    self.io.run_once();
+                    let _ = self.io.run_once();
                 }
                 Ok(CheckpointStatus::Done) => {
                     break;

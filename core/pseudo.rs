@@ -79,6 +79,10 @@ impl Cursor for PseudoCursor {
         Ok(CursorResult::Ok(()))
     }
 
+    fn delete(&mut self) -> Result<CursorResult<()>> {
+        unimplemented!()
+    }
+
     fn get_null_flag(&self) -> bool {
         false
     }

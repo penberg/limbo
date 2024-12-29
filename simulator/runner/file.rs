@@ -1,7 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
 use limbo_core::{File, Result};
-
 pub(crate) struct SimulatorFile {
     pub(crate) inner: Rc<dyn File>,
     pub(crate) fault: RefCell<bool>,

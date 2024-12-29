@@ -77,3 +77,60 @@ Robert|Roberts}
 do_execsql_test where-like-impossible {
     select * from products where 'foobar' like 'fooba';
 } {}
+
+do_execsql_test like-with-backslash {
+  select like('\%A', '\A')
+} {1}
+
+do_execsql_test like-with-dollar {
+  select like('A$%', 'A$')
+} {1}
+
+do_execsql_test like-with-dot {
+  select like('%a.a', 'aaaa')
+} {0}
+
+do_execsql_test like-fn-esc-1  { 
+    SELECT like('abcX%', 'abc%' , 'X') 
+} 1
+do_execsql_test like-fn-esc-2  { 
+    SELECT like('abcX%', 'abc5' , 'X') 
+} 0
+do_execsql_test like-fn-esc-3  { 
+    SELECT like('abcX%', 'abc', 'X') 
+} 0
+do_execsql_test like-fn-esc-4  { 
+    SELECT like('abcX%', 'abcX%', 'X') 
+} 0
+do_execsql_test like-fn-esc-5  { 
+    SELECT like('abcX%', 'abc%%', 'X') 
+} 0
+
+do_execsql_test like-fn-esc-6  { 
+    SELECT like('abcX_', 'abc_' , 'X') 
+} 1
+do_execsql_test like-fn-esc-7  { 
+    SELECT like('abcX_', 'abc5' , 'X') 
+} 0
+do_execsql_test like-fn-esc-8  { 
+    SELECT like('abcX_', 'abc'  , 'X') 
+} 0
+do_execsql_test like-fn-esc-9  { 
+    SELECT like('abcX_', 'abcX_', 'X') 
+} 0
+do_execsql_test like-fn-esc-10 { 
+    SELECT like('abcX_', 'abc__', 'X') 
+} 0
+
+do_execsql_test like-fn-esc-11 { 
+    SELECT like('abcXX', 'abcX' , 'X') 
+} 1
+do_execsql_test like-fn-esc-12 { 
+    SELECT like('abcXX', 'abc5' , 'X') 
+} 0
+do_execsql_test like-fn-esc-13 { 
+    SELECT like('abcXX', 'abc'  , 'X') 
+} 0
+do_execsql_test like-fn-esc-14 { 
+    SELECT like('abcXX', 'abcXX', 'X') 
+} 0
