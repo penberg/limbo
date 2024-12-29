@@ -1,11 +1,14 @@
-use super::{
-    optimizer::Optimizable,
-    plan::{
-        Aggregate, BTreeTableReference, Direction, GroupBy, Plan, ResultSetColumn, SourceOperator,
-    },
+use super::plan::{
+    Aggregate, BTreeTableReference, DeletePlan, Direction, GroupBy, Plan, ResultSetColumn,
+    SelectPlan, SourceOperator,
 };
-use crate::{function::Func, schema::Schema, util::normalize_ident, Result};
-use sqlite3_parser::ast::{self, FromClause, JoinType, ResultColumn};
+use crate::{
+    function::Func,
+    schema::Schema,
+    util::{exprs_are_equivalent, normalize_ident},
+    Result,
+};
+use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit, QualifiedName, ResultColumn};
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -23,7 +26,10 @@ impl OperatorIdCounter {
 }
 
 fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
-    if aggs.iter().any(|a| a.original_expr == *expr) {
+    if aggs
+        .iter()
+        .any(|a| exprs_are_equivalent(&a.original_expr, expr))
+    {
         return true;
     }
     match expr {
@@ -97,12 +103,13 @@ fn bind_column_references(
                 return Ok(());
             }
             let mut match_result = None;
+            let normalized_id = normalize_ident(id.0.as_str());
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
                 let col_idx = table
                     .table
                     .columns
                     .iter()
-                    .position(|c| c.name.eq_ignore_ascii_case(&id.0));
+                    .position(|c| c.name.eq_ignore_ascii_case(&normalized_id));
                 if col_idx.is_some() {
                     if match_result.is_some() {
                         crate::bail_parse_error!("Column {} is ambiguous", id.0);
@@ -124,20 +131,23 @@ fn bind_column_references(
             Ok(())
         }
         ast::Expr::Qualified(tbl, id) => {
-            let matching_tbl_idx = referenced_tables
-                .iter()
-                .position(|t| t.table_identifier.eq_ignore_ascii_case(&tbl.0));
+            let normalized_table_name = normalize_ident(tbl.0.as_str());
+            let matching_tbl_idx = referenced_tables.iter().position(|t| {
+                t.table_identifier
+                    .eq_ignore_ascii_case(&normalized_table_name)
+            });
             if matching_tbl_idx.is_none() {
-                crate::bail_parse_error!("Table {} not found", tbl.0);
+                crate::bail_parse_error!("Table {} not found", normalized_table_name);
             }
             let tbl_idx = matching_tbl_idx.unwrap();
+            let normalized_id = normalize_ident(id.0.as_str());
             let col_idx = referenced_tables[tbl_idx]
                 .table
                 .columns
                 .iter()
-                .position(|c| c.name.eq_ignore_ascii_case(&id.0));
+                .position(|c| c.name.eq_ignore_ascii_case(&normalized_id));
             if col_idx.is_none() {
-                crate::bail_parse_error!("Column {} not found", id.0);
+                crate::bail_parse_error!("Column {} not found", normalized_id);
             }
             let col = referenced_tables[tbl_idx]
                 .table
@@ -255,7 +265,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             columns,
             from,
             where_clause,
-            mut group_by,
+            group_by,
             ..
         } => {
             let col_count = columns.len();
@@ -268,7 +278,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             // Parse the FROM clause
             let (source, referenced_tables) = parse_from(schema, from, &mut operator_id_counter)?;
 
-            let mut plan = Plan {
+            let mut plan = SelectPlan {
                 source,
                 result_columns: vec![],
                 where_clause: None,
@@ -282,14 +292,7 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             };
 
             // Parse the WHERE clause
-            if let Some(w) = where_clause {
-                let mut predicates = vec![];
-                break_predicate_at_and_boundaries(w, &mut predicates);
-                for expr in predicates.iter_mut() {
-                    bind_column_references(expr, &plan.referenced_tables)?;
-                }
-                plan.where_clause = Some(predicates);
-            }
+            plan.where_clause = parse_where(where_clause, &plan.referenced_tables)?;
 
             let mut aggregate_expressions = Vec::new();
             for column in columns.clone() {
@@ -473,21 +476,56 @@ pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<P
             }
 
             // Parse the LIMIT clause
-            if let Some(limit) = &select.limit {
-                plan.limit = match &limit.expr {
-                    ast::Expr::Literal(ast::Literal::Numeric(n)) => {
-                        let l = n.parse()?;
-                        Some(l)
-                    }
-                    _ => todo!(),
-                }
-            }
+            plan.limit = select.limit.and_then(|limit| parse_limit(limit));
 
             // Return the unoptimized query plan
-            Ok(plan)
+            Ok(Plan::Select(plan))
         }
         _ => todo!(),
     }
+}
+
+pub fn prepare_delete_plan(
+    schema: &Schema,
+    tbl_name: &QualifiedName,
+    where_clause: Option<Expr>,
+    limit: Option<Limit>,
+) -> Result<Plan> {
+    let table = match schema.get_table(tbl_name.name.0.as_str()) {
+        Some(table) => table,
+        None => crate::bail_corrupt_error!("Parse error: no such table: {}", tbl_name),
+    };
+
+    let table_ref = BTreeTableReference {
+        table: table.clone(),
+        table_identifier: table.name.clone(),
+        table_index: 0,
+    };
+    let referenced_tables = vec![table_ref.clone()];
+
+    // Parse the WHERE clause
+    let resolved_where_clauses = parse_where(where_clause, &[table_ref.clone()])?;
+
+    // Parse the LIMIT clause
+    let resolved_limit = limit.and_then(|limit| parse_limit(limit));
+
+    let plan = DeletePlan {
+        source: SourceOperator::Scan {
+            id: 0,
+            table_reference: table_ref.clone(),
+            predicates: resolved_where_clauses.clone(),
+            iter_dir: None,
+        },
+        result_columns: vec![],
+        where_clause: resolved_where_clauses,
+        order_by: None,
+        limit: resolved_limit,
+        referenced_tables,
+        available_indexes: vec![],
+        contains_constant_false_condition: false,
+    };
+
+    Ok(Plan::Delete(plan))
 }
 
 #[allow(clippy::type_complexity)]
@@ -504,8 +542,9 @@ fn parse_from(
 
     let first_table = match *from.select.unwrap() {
         ast::SelectTable::Table(qualified_name, maybe_alias, _) => {
-            let Some(table) = schema.get_table(&qualified_name.name.0) else {
-                crate::bail_parse_error!("Table {} not found", qualified_name.name.0);
+            let normalized_qualified_name = normalize_ident(qualified_name.name.0.as_str());
+            let Some(table) = schema.get_table(&normalized_qualified_name) else {
+                crate::bail_parse_error!("Table {} not found", normalized_qualified_name);
             };
             let alias = maybe_alias
                 .map(|a| match a {
@@ -516,7 +555,7 @@ fn parse_from(
 
             BTreeTableReference {
                 table: table.clone(),
-                table_identifier: alias.unwrap_or(qualified_name.name.0),
+                table_identifier: alias.unwrap_or(normalized_qualified_name),
                 table_index: 0,
             }
         }
@@ -550,6 +589,22 @@ fn parse_from(
     Ok((operator, tables))
 }
 
+fn parse_where(
+    where_clause: Option<Expr>,
+    referenced_tables: &[BTreeTableReference],
+) -> Result<Option<Vec<Expr>>> {
+    if let Some(where_expr) = where_clause {
+        let mut predicates = vec![];
+        break_predicate_at_and_boundaries(where_expr, &mut predicates);
+        for expr in predicates.iter_mut() {
+            bind_column_references(expr, referenced_tables)?;
+        }
+        Ok(Some(predicates))
+    } else {
+        Ok(None)
+    }
+}
+
 fn parse_join(
     schema: &Schema,
     join: ast::JoinedSelectTable,
@@ -570,8 +625,9 @@ fn parse_join(
 
     let table = match table {
         ast::SelectTable::Table(qualified_name, maybe_alias, _) => {
-            let Some(table) = schema.get_table(&qualified_name.name.0) else {
-                crate::bail_parse_error!("Table {} not found", qualified_name.name.0);
+            let normalized_name = normalize_ident(qualified_name.name.0.as_str());
+            let Some(table) = schema.get_table(&normalized_name) else {
+                crate::bail_parse_error!("Table {} not found", normalized_name);
             };
             let alias = maybe_alias
                 .map(|a| match a {
@@ -581,7 +637,7 @@ fn parse_join(
                 .map(|a| a.0);
             BTreeTableReference {
                 table: table.clone(),
-                table_identifier: alias.unwrap_or(qualified_name.name.0),
+                table_identifier: alias.unwrap_or(normalized_name),
                 table_index,
             }
         }
@@ -730,6 +786,14 @@ fn parse_join(
         using,
         predicates,
     ))
+}
+
+fn parse_limit(limit: Limit) -> Option<usize> {
+    if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
+        n.parse().ok()
+    } else {
+        None
+    }
 }
 
 fn break_predicate_at_and_boundaries(predicate: ast::Expr, out_predicates: &mut Vec<ast::Expr>) {

@@ -7,6 +7,7 @@
 //! a SELECT statement will be translated into a sequence of instructions that
 //! will read rows from the database and filter them according to a WHERE clause.
 
+pub(crate) mod delete;
 pub(crate) mod emitter;
 pub(crate) mod expr;
 pub(crate) mod insert;
@@ -15,19 +16,20 @@ pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod select;
 
-use std::cell::RefCell;
-use std::fmt::Display;
-use std::rc::{Rc, Weak};
-
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
-use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
+use crate::translate::delete::translate_delete;
+use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, Result};
 use insert::translate_insert;
 use select::translate_select;
-use sqlite3_parser::ast;
 use sqlite3_parser::ast::fmt::ToTokens;
+use sqlite3_parser::ast::{self, PragmaName};
+use std::cell::RefCell;
+use std::fmt::Display;
+use std::rc::{Rc, Weak};
+use std::str::FromStr;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -67,7 +69,19 @@ pub fn translate(
         ast::Stmt::CreateVirtualTable { .. } => {
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
-        ast::Stmt::Delete { .. } => bail_parse_error!("DELETE not supported yet"),
+        ast::Stmt::Delete {
+            tbl_name,
+            where_clause,
+            limit,
+            ..
+        } => translate_delete(
+            schema,
+            &tbl_name,
+            where_clause,
+            limit,
+            database_header,
+            connection,
+        ),
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
@@ -305,39 +319,18 @@ fn translate_pragma(
     let mut write = false;
     match body {
         None => {
-            let pragma_result = program.alloc_register();
-
-            program.emit_insn(Insn::Integer {
-                value: database_header.borrow().default_cache_size.into(),
-                dest: pragma_result,
-            });
-
-            let pragma_result_end = program.next_free_register();
-            program.emit_insn(Insn::ResultRow {
-                start_reg: pragma_result,
-                count: pragma_result_end - pragma_result,
-            });
+            let pragma_name = &name.name.0;
+            query_pragma(pragma_name, database_header.clone(), &mut program)?;
         }
         Some(ast::PragmaBody::Equals(value)) => {
-            let value_to_update = match value {
-                ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
-                    numeric_value.parse::<i64>().unwrap()
-                }
-                ast::Expr::Unary(ast::UnaryOperator::Negative, expr) => match *expr {
-                    ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
-                        -numeric_value.parse::<i64>().unwrap()
-                    }
-                    _ => 0,
-                },
-                _ => 0,
-            };
             write = true;
             update_pragma(
                 &name.name.0,
-                value_to_update,
+                value,
                 database_header.clone(),
                 pager,
-            );
+                &mut program,
+            )?;
         }
         Some(ast::PragmaBody::Call(_)) => {
             todo!()
@@ -357,42 +350,105 @@ fn translate_pragma(
     Ok(program.build(database_header, connection))
 }
 
-fn update_pragma(name: &str, value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {
-    match name {
-        "cache_size" => {
-            let mut cache_size_unformatted = value;
-            let mut cache_size = if cache_size_unformatted < 0 {
-                let kb = cache_size_unformatted.abs() * 1024;
-                kb / 512 // assume 512 page size for now
-            } else {
-                value
-            } as usize;
-            if cache_size < MIN_PAGE_CACHE_SIZE {
-                // update both in memory and stored disk value
-                cache_size = MIN_PAGE_CACHE_SIZE;
-                cache_size_unformatted = MIN_PAGE_CACHE_SIZE as i64;
-            }
-
-            // update in-memory header
-            header.borrow_mut().default_cache_size = cache_size_unformatted
-                .try_into()
-                .unwrap_or_else(|_| panic!("invalid value, too big for a i32 {}", value));
-
-            // update in disk
-            let header_copy = header.borrow().clone();
-            pager.write_database_header(&header_copy);
-
-            // update cache size
-            pager.change_page_cache_size(cache_size);
+fn update_pragma(
+    name: &str,
+    value: ast::Expr,
+    header: Rc<RefCell<DatabaseHeader>>,
+    pager: Rc<Pager>,
+    program: &mut ProgramBuilder,
+) -> Result<()> {
+    let pragma = match PragmaName::from_str(name) {
+        Ok(pragma) => pragma,
+        Err(()) => bail_parse_error!("Not a valid pragma name"),
+    };
+    match pragma {
+        PragmaName::CacheSize => {
+            let cache_size = match value {
+                ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
+                    numeric_value.parse::<i64>().unwrap()
+                }
+                ast::Expr::Unary(ast::UnaryOperator::Negative, expr) => match *expr {
+                    ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
+                        -numeric_value.parse::<i64>().unwrap()
+                    }
+                    _ => bail_parse_error!("Not a valid value"),
+                },
+                _ => bail_parse_error!("Not a valid value"),
+            };
+            update_cache_size(cache_size, header, pager);
+            Ok(())
         }
-        _ => todo!(),
+        PragmaName::JournalMode => {
+            query_pragma("journal_mode", header, program)?;
+            Ok(())
+        }
     }
+}
+
+fn query_pragma(
+    name: &str,
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    program: &mut ProgramBuilder,
+) -> Result<()> {
+    let pragma = match PragmaName::from_str(name) {
+        Ok(pragma) => pragma,
+        Err(()) => bail_parse_error!("Not a valid pragma name"),
+    };
+    let register = program.alloc_register();
+    match pragma {
+        PragmaName::CacheSize => {
+            program.emit_insn(Insn::Integer {
+                value: database_header.borrow().default_page_cache_size.into(),
+                dest: register,
+            });
+        }
+        PragmaName::JournalMode => {
+            program.emit_insn(Insn::String8 {
+                value: "wal".into(),
+                dest: register,
+            });
+        }
+    }
+
+    program.emit_insn(Insn::ResultRow {
+        start_reg: register,
+        count: 1,
+    });
+    Ok(())
+}
+
+fn update_cache_size(value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<Pager>) {
+    let mut cache_size_unformatted: i64 = value;
+    let mut cache_size = if cache_size_unformatted < 0 {
+        let kb = cache_size_unformatted.abs() * 1024;
+        kb / 512 // assume 512 page size for now
+    } else {
+        value
+    } as usize;
+
+    if cache_size < MIN_PAGE_CACHE_SIZE {
+        // update both in memory and stored disk value
+        cache_size = MIN_PAGE_CACHE_SIZE;
+        cache_size_unformatted = MIN_PAGE_CACHE_SIZE as i64;
+    }
+
+    // update in-memory header
+    header.borrow_mut().default_page_cache_size = cache_size_unformatted
+        .try_into()
+        .unwrap_or_else(|_| panic!("invalid value, too big for a i32 {}", value));
+
+    // update in disk
+    let header_copy = header.borrow().clone();
+    pager.write_database_header(&header_copy);
+
+    // update cache size
+    pager.change_page_cache_size(cache_size);
 }
 
 struct TableFormatter<'a> {
     body: &'a ast::CreateTableBody,
 }
-impl<'a> Display for TableFormatter<'a> {
+impl Display for TableFormatter<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.body.to_fmt(f)
     }

@@ -6,3 +6,7 @@ source $testdir/tester.tcl
 do_execsql_test pragma-cache-size {
   PRAGMA cache_size
 } {-2000}
+
+do_execsql_test pragma-update-journal-mode-wal {
+  PRAGMA journal_mode=WAL
+} {wal}

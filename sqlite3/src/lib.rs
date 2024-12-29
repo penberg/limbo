@@ -3,7 +3,7 @@
 
 use log::trace;
 use std::cell::RefCell;
-use std::ffi;
+use std::ffi::{self, CStr, CString};
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ pub const SQLITE_ERROR: ffi::c_int = 1;
 pub const SQLITE_ABORT: ffi::c_int = 4;
 pub const SQLITE_BUSY: ffi::c_int = 5;
 pub const SQLITE_NOMEM: ffi::c_int = 7;
+pub const SQLITE_INTERRUPT: ffi::c_int = 9;
 pub const SQLITE_NOTFOUND: ffi::c_int = 14;
 pub const SQLITE_MISUSE: ffi::c_int = 21;
 pub const SQLITE_ROW: ffi::c_int = 100;
@@ -27,6 +28,11 @@ pub const SQLITE_ABORT_ROLLBACK: ffi::c_int = SQLITE_ABORT | (2 << 8);
 pub const SQLITE_STATE_OPEN: u8 = 0x76;
 pub const SQLITE_STATE_SICK: u8 = 0xba;
 pub const SQLITE_STATE_BUSY: u8 = 0x6d;
+
+pub const SQLITE_CHECKPOINT_PASSIVE: ffi::c_int = 0;
+pub const SQLITE_CHECKPOINT_FULL: ffi::c_int = 1;
+pub const SQLITE_CHECKPOINT_RESTART: ffi::c_int = 2;
+pub const SQLITE_CHECKPOINT_TRUNCATE: ffi::c_int = 3;
 
 pub mod util;
 
@@ -61,7 +67,7 @@ pub struct sqlite3_stmt<'a> {
     pub(crate) row: RefCell<Option<limbo_core::Row<'a>>>,
 }
 
-impl<'a> sqlite3_stmt<'a> {
+impl sqlite3_stmt<'_> {
     pub fn new(stmt: limbo_core::Statement) -> Self {
         let row = RefCell::new(None);
         Self { stmt, row }
@@ -233,23 +239,34 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
     let stmt = &mut *stmt;
     if let Ok(result) = stmt.stmt.step() {
         match result {
-            limbo_core::RowResult::IO => SQLITE_BUSY,
-            limbo_core::RowResult::Done => SQLITE_DONE,
-            limbo_core::RowResult::Row(row) => {
+            limbo_core::StepResult::IO => SQLITE_BUSY,
+            limbo_core::StepResult::Done => SQLITE_DONE,
+            limbo_core::StepResult::Interrupt => SQLITE_INTERRUPT,
+            limbo_core::StepResult::Row(row) => {
                 stmt.row.replace(Some(row));
                 SQLITE_ROW
             }
+            limbo_core::StepResult::Busy => SQLITE_BUSY,
         }
     } else {
         SQLITE_ERROR
     }
 }
 
+type exec_callback = Option<
+    unsafe extern "C" fn(
+        context: *mut std::ffi::c_void,
+        n_column: std::ffi::c_int,
+        argv: *mut *mut std::ffi::c_char,
+        colv: *mut *mut std::ffi::c_char,
+    ) -> ffi::c_int,
+>;
+
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_exec(
     db: *mut sqlite3,
     sql: *const ffi::c_char,
-    _callback: Option<unsafe extern "C" fn() -> ffi::c_int>,
+    _callback: exec_callback,
     _context: *mut std::ffi::c_void,
     _err: *mut *mut std::ffi::c_char,
 ) -> ffi::c_int {
@@ -640,6 +657,137 @@ pub unsafe extern "C" fn sqlite3_column_text(
     }
 }
 
+pub struct TabResult {
+    az_result: Vec<*mut std::ffi::c_char>,
+    n_row: usize,
+    n_column: usize,
+    z_err_msg: Option<CString>,
+    rc: std::ffi::c_int,
+}
+
+impl TabResult {
+    fn new(initial_capacity: usize) -> Self {
+        Self {
+            az_result: Vec::with_capacity(initial_capacity),
+            n_row: 0,
+            n_column: 0,
+            z_err_msg: None,
+            rc: SQLITE_OK,
+        }
+    }
+
+    fn free(&mut self) {
+        for &ptr in &self.az_result {
+            if !ptr.is_null() {
+                unsafe {
+                    sqlite3_free(ptr as *mut _);
+                }
+            }
+        }
+        self.az_result.clear();
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn sqlite_get_table_cb(
+    context: *mut std::ffi::c_void,
+    n_column: std::ffi::c_int,
+    argv: *mut *mut std::ffi::c_char,
+    colv: *mut *mut std::ffi::c_char,
+) -> std::ffi::c_int {
+    let res = &mut *(context as *mut TabResult);
+
+    if res.n_row == 0 {
+        res.n_column = n_column as usize;
+        for i in 0..n_column {
+            let col_name = *colv.add(i as usize);
+            let col_name_cstring = if !col_name.is_null() {
+                CStr::from_ptr(col_name).to_owned()
+            } else {
+                CString::new("NULL").unwrap()
+            };
+            res.az_result.push(col_name_cstring.into_raw());
+        }
+    } else if res.n_column != n_column as usize {
+        res.z_err_msg = Some(
+            CString::new("sqlite3_get_table() called with two or more incompatible queries")
+                .unwrap(),
+        );
+        res.rc = SQLITE_ERROR;
+        return SQLITE_ERROR;
+    }
+
+    for i in 0..n_column {
+        let value = *argv.add(i as usize);
+        let value_cstring = if !value.is_null() {
+            let len = libc::strlen(value);
+            let mut buf = Vec::with_capacity(len + 1);
+            libc::strncpy(buf.as_mut_ptr() as *mut std::ffi::c_char, value, len);
+            buf.set_len(len + 1);
+            CString::from_vec_with_nul(buf).unwrap()
+        } else {
+            CString::new("NULL").unwrap()
+        };
+        res.az_result.push(value_cstring.into_raw());
+    }
+
+    res.n_row += 1;
+    SQLITE_OK
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_get_table(
+    db: *mut sqlite3,
+    sql: *const std::ffi::c_char,
+    paz_result: *mut *mut *mut std::ffi::c_char,
+    pn_row: *mut std::ffi::c_int,
+    pn_column: *mut std::ffi::c_int,
+    pz_err_msg: *mut *mut std::ffi::c_char,
+) -> std::ffi::c_int {
+    if db.is_null() || sql.is_null() || paz_result.is_null() {
+        return SQLITE_ERROR;
+    }
+
+    let mut res = TabResult::new(20);
+
+    let rc = sqlite3_exec(
+        db,
+        sql,
+        Some(sqlite_get_table_cb),
+        &mut res as *mut _ as *mut _,
+        pz_err_msg,
+    );
+
+    if rc != SQLITE_OK {
+        res.free();
+        if let Some(err_msg) = res.z_err_msg {
+            if !pz_err_msg.is_null() {
+                *pz_err_msg = err_msg.into_raw();
+            }
+        }
+        return rc;
+    }
+
+    let total_results = res.az_result.len();
+    if res.az_result.capacity() > total_results {
+        res.az_result.shrink_to_fit();
+    }
+
+    *paz_result = res.az_result.as_mut_ptr();
+    *pn_row = res.n_row as std::ffi::c_int;
+    *pn_column = res.n_column as std::ffi::c_int;
+
+    std::mem::forget(res);
+
+    SQLITE_OK
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_free_table(paz_result: *mut *mut *mut std::ffi::c_char) {
+    let res = &mut *(paz_result as *mut TabResult);
+    res.free();
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_null(_context: *mut std::ffi::c_void) {
     stub!();
@@ -850,9 +998,7 @@ pub unsafe extern "C" fn sqlite3_threadsafe() -> ffi::c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_libversion() -> *const std::ffi::c_char {
-    ffi::CStr::from_bytes_with_nul(b"3.42.0\0")
-        .unwrap()
-        .as_ptr()
+    c"3.42.0".as_ptr()
 }
 
 #[no_mangle]
@@ -917,4 +1063,37 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
             }
         }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_wal_checkpoint(
+    _db: *mut sqlite3,
+    _db_name: *const std::ffi::c_char,
+) -> ffi::c_int {
+    sqlite3_wal_checkpoint_v2(
+        _db,
+        _db_name,
+        SQLITE_CHECKPOINT_PASSIVE,
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    )
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn sqlite3_wal_checkpoint_v2(
+    db: *mut sqlite3,
+    _db_name: *const std::ffi::c_char,
+    _mode: ffi::c_int,
+    _log_size: *mut ffi::c_int,
+    _checkpoint_count: *mut ffi::c_int,
+) -> ffi::c_int {
+    if db.is_null() {
+        return SQLITE_MISUSE;
+    }
+    let db: &mut sqlite3 = &mut *db;
+    // TODO: Checkpointing modes and reporting back log size and checkpoint count to caller.
+    if db.conn.checkpoint().is_err() {
+        return SQLITE_ERROR;
+    }
+    SQLITE_OK
 }

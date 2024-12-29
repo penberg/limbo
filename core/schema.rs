@@ -57,39 +57,39 @@ impl Table {
 
     pub fn get_rowid_alias_column(&self) -> Option<(usize, &Column)> {
         match self {
-            Table::BTree(table) => table.get_rowid_alias_column(),
-            Table::Index(_) => None,
-            Table::Pseudo(_) => None,
+            Self::BTree(table) => table.get_rowid_alias_column(),
+            Self::Index(_) => None,
+            Self::Pseudo(_) => None,
         }
     }
 
     pub fn column_is_rowid_alias(&self, col: &Column) -> bool {
         match self {
             Table::BTree(table) => table.column_is_rowid_alias(col),
-            Table::Index(_) => false,
-            Table::Pseudo(_) => false,
+            Self::Index(_) => false,
+            Self::Pseudo(_) => false,
         }
     }
 
     pub fn get_name(&self) -> &str {
         match self {
-            Table::BTree(table) => &table.name,
-            Table::Index(index) => &index.name,
-            Table::Pseudo(_) => "",
+            Self::BTree(table) => &table.name,
+            Self::Index(index) => &index.name,
+            Self::Pseudo(_) => "",
         }
     }
 
     pub fn column_index_to_name(&self, index: usize) -> Option<&str> {
         match self {
-            Table::BTree(table) => match table.columns.get(index) {
+            Self::BTree(table) => match table.columns.get(index) {
                 Some(column) => Some(&column.name),
                 None => None,
             },
-            Table::Index(i) => match i.columns.get(index) {
+            Self::Index(i) => match i.columns.get(index) {
                 Some(column) => Some(&column.name),
                 None => None,
             },
-            Table::Pseudo(table) => match table.columns.get(index) {
+            Self::Pseudo(table) => match table.columns.get(index) {
                 Some(_) => None,
                 None => None,
             },
@@ -98,33 +98,33 @@ impl Table {
 
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         match self {
-            Table::BTree(table) => table.get_column(name),
-            Table::Index(_) => unimplemented!(),
-            Table::Pseudo(table) => table.get_column(name),
+            Self::BTree(table) => table.get_column(name),
+            Self::Index(_) => unimplemented!(),
+            Self::Pseudo(table) => table.get_column(name),
         }
     }
 
     pub fn get_column_at(&self, index: usize) -> &Column {
         match self {
-            Table::BTree(table) => table.columns.get(index).unwrap(),
-            Table::Index(_) => unimplemented!(),
-            Table::Pseudo(table) => table.columns.get(index).unwrap(),
+            Self::BTree(table) => table.columns.get(index).unwrap(),
+            Self::Index(_) => unimplemented!(),
+            Self::Pseudo(table) => table.columns.get(index).unwrap(),
         }
     }
 
     pub fn columns(&self) -> &Vec<Column> {
         match self {
-            Table::BTree(table) => &table.columns,
-            Table::Index(_) => unimplemented!(),
-            Table::Pseudo(table) => &table.columns,
+            Self::BTree(table) => &table.columns,
+            Self::Index(_) => unimplemented!(),
+            Self::Pseudo(table) => &table.columns,
         }
     }
 
     pub fn has_rowid(&self) -> bool {
         match self {
-            Table::BTree(table) => table.has_rowid,
-            Table::Index(_) => unimplemented!(),
-            Table::Pseudo(_) => unimplemented!(),
+            Self::BTree(table) => table.has_rowid,
+            Self::Index(_) => unimplemented!(),
+            Self::Pseudo(_) => unimplemented!(),
         }
     }
 }
@@ -132,8 +132,8 @@ impl Table {
 impl PartialEq for Table {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Table::BTree(a), Table::BTree(b)) => Rc::ptr_eq(a, b),
-            (Table::Pseudo(a), Table::Pseudo(b)) => Rc::ptr_eq(a, b),
+            (Self::BTree(a), Self::BTree(b)) => Rc::ptr_eq(a, b),
+            (Self::Pseudo(a), Self::Pseudo(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -386,12 +386,12 @@ pub enum Type {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Type::Null => "NULL",
-            Type::Text => "TEXT",
-            Type::Numeric => "NUMERIC",
-            Type::Integer => "INTEGER",
-            Type::Real => "REAL",
-            Type::Blob => "BLOB",
+            Self::Null => "NULL",
+            Self::Text => "TEXT",
+            Self::Numeric => "NUMERIC",
+            Self::Integer => "INTEGER",
+            Self::Real => "REAL",
+            Self::Blob => "BLOB",
         };
         write!(f, "{}", s)
     }

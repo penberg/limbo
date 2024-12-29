@@ -6,38 +6,68 @@ use crate::{schema::Index, Result};
 
 use super::plan::{
     get_table_ref_bitmask_for_ast_expr, get_table_ref_bitmask_for_operator, BTreeTableReference,
-    Direction, IterationDirection, Plan, Search, SourceOperator,
+    DeletePlan, Direction, IterationDirection, Plan, Search, SelectPlan, SourceOperator,
 };
+
+pub fn optimize_plan(plan: Plan) -> Result<Plan> {
+    match plan {
+        Plan::Select(plan) => optimize_select_plan(plan).map(Plan::Select),
+        Plan::Delete(plan) => optimize_delete_plan(plan).map(Plan::Delete),
+    }
+}
 
 /**
  * Make a few passes over the plan to optimize it.
  * TODO: these could probably be done in less passes,
  * but having them separate makes them easier to understand
  */
-pub fn optimize_plan(mut select_plan: Plan) -> Result<Plan> {
+fn optimize_select_plan(mut plan: SelectPlan) -> Result<SelectPlan> {
+    eliminate_between(&mut plan.source, &mut plan.where_clause)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
-        eliminate_constants(&mut select_plan.source, &mut select_plan.where_clause)?
+        eliminate_constants(&mut plan.source, &mut plan.where_clause)?
     {
-        select_plan.contains_constant_false_condition = true;
-        return Ok(select_plan);
+        plan.contains_constant_false_condition = true;
+        return Ok(plan);
     }
+
     push_predicates(
-        &mut select_plan.source,
-        &mut select_plan.where_clause,
-        &select_plan.referenced_tables,
+        &mut plan.source,
+        &mut plan.where_clause,
+        &plan.referenced_tables,
     )?;
+
     use_indexes(
-        &mut select_plan.source,
-        &select_plan.referenced_tables,
-        &select_plan.available_indexes,
+        &mut plan.source,
+        &plan.referenced_tables,
+        &plan.available_indexes,
     )?;
+
     eliminate_unnecessary_orderby(
-        &mut select_plan.source,
-        &mut select_plan.order_by,
-        &select_plan.referenced_tables,
-        &select_plan.available_indexes,
+        &mut plan.source,
+        &mut plan.order_by,
+        &plan.referenced_tables,
+        &plan.available_indexes,
     )?;
-    Ok(select_plan)
+
+    Ok(plan)
+}
+
+fn optimize_delete_plan(mut plan: DeletePlan) -> Result<DeletePlan> {
+    eliminate_between(&mut plan.source, &mut plan.where_clause)?;
+    if let ConstantConditionEliminationResult::ImpossibleCondition =
+        eliminate_constants(&mut plan.source, &mut plan.where_clause)?
+    {
+        plan.contains_constant_false_condition = true;
+        return Ok(plan);
+    }
+
+    use_indexes(
+        &mut plan.source,
+        &plan.referenced_tables,
+        &plan.available_indexes,
+    )?;
+
+    Ok(plan)
 }
 
 fn _operator_is_already_ordered_by(
@@ -498,6 +528,46 @@ fn push_scan_direction(operator: &mut SourceOperator, direction: &Direction) {
     }
 }
 
+fn eliminate_between(
+    operator: &mut SourceOperator,
+    where_clauses: &mut Option<Vec<ast::Expr>>,
+) -> Result<()> {
+    if let Some(predicates) = where_clauses {
+        *predicates = predicates.drain(..).map(convert_between_expr).collect();
+    }
+
+    match operator {
+        SourceOperator::Join {
+            left,
+            right,
+            predicates,
+            ..
+        } => {
+            eliminate_between(left, where_clauses)?;
+            eliminate_between(right, where_clauses)?;
+
+            if let Some(predicates) = predicates {
+                *predicates = predicates.drain(..).map(convert_between_expr).collect();
+            }
+        }
+        SourceOperator::Scan {
+            predicates: Some(preds),
+            ..
+        } => {
+            *preds = preds.drain(..).map(convert_between_expr).collect();
+        }
+        SourceOperator::Search {
+            predicates: Some(preds),
+            ..
+        } => {
+            *preds = preds.drain(..).map(convert_between_expr).collect();
+        }
+        _ => (),
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstantPredicate {
     AlwaysTrue,
@@ -533,7 +603,7 @@ pub trait Optimizable {
 impl Optimizable for ast::Expr {
     fn is_rowid_alias_of(&self, table_index: usize) -> bool {
         match self {
-            ast::Expr::Column {
+            Self::Column {
                 table,
                 is_rowid_alias,
                 ..
@@ -548,7 +618,7 @@ impl Optimizable for ast::Expr {
         available_indexes: &[Rc<Index>],
     ) -> Result<Option<usize>> {
         match self {
-            ast::Expr::Column { table, column, .. } => {
+            Self::Column { table, column, .. } => {
                 if *table != table_index {
                     return Ok(None);
                 }
@@ -566,7 +636,7 @@ impl Optimizable for ast::Expr {
                 }
                 Ok(None)
             }
-            ast::Expr::Binary(lhs, op, rhs) => {
+            Self::Binary(lhs, op, rhs) => {
                 let lhs_index =
                     lhs.check_index_scan(table_index, referenced_tables, available_indexes)?;
                 if lhs_index.is_some() {
@@ -578,7 +648,7 @@ impl Optimizable for ast::Expr {
                     // swap lhs and rhs
                     let lhs_new = rhs.take_ownership();
                     let rhs_new = lhs.take_ownership();
-                    *self = ast::Expr::Binary(Box::new(lhs_new), *op, Box::new(rhs_new));
+                    *self = Self::Binary(Box::new(lhs_new), *op, Box::new(rhs_new));
                     return Ok(rhs_index);
                 }
                 Ok(None)
@@ -588,7 +658,7 @@ impl Optimizable for ast::Expr {
     }
     fn check_constant(&self) -> Result<Option<ConstantPredicate>> {
         match self {
-            ast::Expr::Id(id) => {
+            Self::Id(id) => {
                 // true and false are special constants that are effectively aliases for 1 and 0
                 if id.0.eq_ignore_ascii_case("true") {
                     return Ok(Some(ConstantPredicate::AlwaysTrue));
@@ -598,7 +668,7 @@ impl Optimizable for ast::Expr {
                 }
                 return Ok(None);
             }
-            ast::Expr::Literal(lit) => match lit {
+            Self::Literal(lit) => match lit {
                 ast::Literal::Null => Ok(Some(ConstantPredicate::AlwaysFalse)),
                 ast::Literal::Numeric(b) => {
                     if let Ok(int_value) = b.parse::<i64>() {
@@ -640,7 +710,7 @@ impl Optimizable for ast::Expr {
                 }
                 _ => Ok(None),
             },
-            ast::Expr::Unary(op, expr) => {
+            Self::Unary(op, expr) => {
                 if *op == ast::UnaryOperator::Not {
                     let trivial = expr.check_constant()?;
                     return Ok(trivial.map(|t| match t {
@@ -656,7 +726,7 @@ impl Optimizable for ast::Expr {
 
                 Ok(None)
             }
-            ast::Expr::InList { lhs: _, not, rhs } => {
+            Self::InList { lhs: _, not, rhs } => {
                 if rhs.is_none() {
                     return Ok(Some(if *not {
                         ConstantPredicate::AlwaysTrue
@@ -675,7 +745,7 @@ impl Optimizable for ast::Expr {
 
                 Ok(None)
             }
-            ast::Expr::Binary(lhs, op, rhs) => {
+            Self::Binary(lhs, op, rhs) => {
                 let lhs_trivial = lhs.check_constant()?;
                 let rhs_trivial = rhs.check_constant()?;
                 match op {
@@ -808,6 +878,65 @@ pub fn try_extract_index_search_expression(
     }
 }
 
+fn convert_between_expr(expr: ast::Expr) -> ast::Expr {
+    match expr {
+        ast::Expr::Between {
+            lhs,
+            not,
+            start,
+            end,
+        } => {
+            // Convert `y NOT BETWEEN x AND z` to `x > y OR y > z`
+            let (lower_op, upper_op) = if not {
+                (ast::Operator::Greater, ast::Operator::Greater)
+            } else {
+                // Convert `y BETWEEN x AND z` to `x <= y AND y <= z`
+                (ast::Operator::LessEquals, ast::Operator::LessEquals)
+            };
+
+            let lower_bound = ast::Expr::Binary(start, lower_op, lhs.clone());
+            let upper_bound = ast::Expr::Binary(lhs, upper_op, end);
+
+            if not {
+                ast::Expr::Binary(
+                    Box::new(lower_bound),
+                    ast::Operator::Or,
+                    Box::new(upper_bound),
+                )
+            } else {
+                ast::Expr::Binary(
+                    Box::new(lower_bound),
+                    ast::Operator::And,
+                    Box::new(upper_bound),
+                )
+            }
+        }
+        ast::Expr::Parenthesized(mut exprs) => {
+            ast::Expr::Parenthesized(exprs.drain(..).map(convert_between_expr).collect())
+        }
+        // Process other expressions recursively
+        ast::Expr::Binary(lhs, op, rhs) => ast::Expr::Binary(
+            Box::new(convert_between_expr(*lhs)),
+            op,
+            Box::new(convert_between_expr(*rhs)),
+        ),
+        ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args,
+            order_by,
+            filter_over,
+        } => ast::Expr::FunctionCall {
+            name,
+            distinctness,
+            args: args.map(|args| args.into_iter().map(convert_between_expr).collect()),
+            order_by,
+            filter_over,
+        },
+        _ => expr,
+    }
+}
+
 trait TakeOwnership {
     fn take_ownership(&mut self) -> Self;
 }
@@ -820,6 +949,6 @@ impl TakeOwnership for ast::Expr {
 
 impl TakeOwnership for SourceOperator {
     fn take_ownership(&mut self) -> Self {
-        std::mem::replace(self, SourceOperator::Nothing)
+        std::mem::replace(self, Self::Nothing)
     }
 }

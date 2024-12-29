@@ -1,6 +1,6 @@
 use crate::opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use cli_table::{Cell, Table};
-use limbo_core::{Database, LimboError, RowResult, Value};
+use limbo_core::{Database, LimboError, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -76,6 +76,8 @@ pub enum Command {
     NullValue,
     /// Toggle 'echo' mode to repeat commands before execution
     Echo,
+    /// Display tables
+    Tables,
 }
 
 impl Command {
@@ -86,6 +88,7 @@ impl Command {
             | Self::Help
             | Self::Opcodes
             | Self::ShowInfo
+            | Self::Tables
             | Self::SetOutput => 0,
             Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
         } + 1) // argv0
@@ -104,6 +107,7 @@ impl Command {
             Self::ShowInfo => ".show",
             Self::NullValue => ".nullvalue <string>",
             Self::Echo => ".echo on|off",
+            Self::Tables => ".tables",
         }
     }
 }
@@ -116,6 +120,7 @@ impl FromStr for Command {
             ".open" => Ok(Self::Open),
             ".help" => Ok(Self::Help),
             ".schema" => Ok(Self::Schema),
+            ".tables" => Ok(Self::Tables),
             ".opcodes" => Ok(Self::Opcodes),
             ".mode" => Ok(Self::OutputMode),
             ".output" => Ok(Self::SetOutput),
@@ -155,7 +160,7 @@ impl From<&Opts> for Settings {
             null_value: String::new(),
             output_mode: opts.output_mode,
             echo: false,
-            is_stdout: opts.output == "",
+            is_stdout: opts.output.is_empty(),
             output_filename: opts.output.clone(),
             db_file: opts
                 .database
@@ -187,7 +192,6 @@ impl std::fmt::Display for Settings {
 }
 
 impl Limbo {
-    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> anyhow::Result<Self> {
         let opts = Opts::parse();
         let db_file = opts
@@ -224,13 +228,13 @@ impl Limbo {
             app.writeln("Enter \".help\" for usage hints.")?;
             app.display_in_memory()?;
         }
-        return Ok(app);
+        Ok(app)
     }
 
     fn handle_first_input(&mut self, cmd: &str) {
         if cmd.trim().starts_with('.') {
-            self.handle_dot_command(&cmd);
-        } else if let Err(e) = self.query(&cmd) {
+            self.handle_dot_command(cmd);
+        } else if let Err(e) = self.query(cmd) {
             eprintln!("{}", e);
         }
         std::process::exit(0);
@@ -288,7 +292,7 @@ impl Limbo {
                 let db = Database::open_file(self.io.clone(), path)?;
                 self.conn = db.connect();
                 self.opts.db_file = ":memory:".to_string();
-                return Ok(());
+                Ok(())
             }
             path => {
                 let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new()?);
@@ -296,7 +300,7 @@ impl Limbo {
                 let db = Database::open_file(self.io.clone(), path)?;
                 self.conn = db.connect();
                 self.opts.db_file = path.to_string();
-                return Ok(());
+                Ok(())
             }
         }
     }
@@ -312,11 +316,9 @@ impl Limbo {
                 self.opts.is_stdout = false;
                 self.opts.output_mode = OutputMode::Raw;
                 self.opts.output_filename = path.to_string();
-                return Ok(());
+                Ok(())
             }
-            Err(e) => {
-                return Err(e.to_string());
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -328,7 +330,7 @@ impl Limbo {
 
     fn set_mode(&mut self, mode: OutputMode) -> Result<(), String> {
         if mode == OutputMode::Pretty && !self.opts.is_stdout {
-            return Err("pretty output can only be written to a tty".to_string());
+            Err("pretty output can only be written to a tty".to_string())
         } else {
             self.opts.output_mode = mode;
             Ok(())
@@ -421,6 +423,12 @@ impl Limbo {
                         let _ = self.writeln(e.to_string());
                     }
                 }
+                Command::Tables => {
+                    let pattern = args.get(1).copied();
+                    if let Err(e) = self.display_tables(pattern) {
+                        let _ = self.writeln(e.to_string());
+                    }
+                }
                 Command::Opcodes => {
                     if args.len() > 1 {
                         for op in &OPCODE_DESCRIPTIONS {
@@ -487,7 +495,7 @@ impl Limbo {
                     }
 
                     match rows.next_row() {
-                        Ok(RowResult::Row(row)) => {
+                        Ok(StepResult::Row(row)) => {
                             for (i, value) in row.values.iter().enumerate() {
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
@@ -507,10 +515,15 @@ impl Limbo {
                             }
                             let _ = self.writeln("");
                         }
-                        Ok(RowResult::IO) => {
+                        Ok(StepResult::IO) => {
                             self.io.run_once()?;
                         }
-                        Ok(RowResult::Done) => {
+                        Ok(StepResult::Interrupt) => break,
+                        Ok(StepResult::Done) => {
+                            break;
+                        }
+                        Ok(StepResult::Busy) => {
+                            let _ = self.writeln("database is busy");
                             break;
                         }
                         Err(err) => {
@@ -527,7 +540,7 @@ impl Limbo {
                     let mut table_rows: Vec<Vec<_>> = vec![];
                     loop {
                         match rows.next_row() {
-                            Ok(RowResult::Row(row)) => {
+                            Ok(StepResult::Row(row)) => {
                                 table_rows.push(
                                     row.values
                                         .iter()
@@ -543,10 +556,15 @@ impl Limbo {
                                         .collect(),
                                 );
                             }
-                            Ok(RowResult::IO) => {
+                            Ok(StepResult::IO) => {
                                 self.io.run_once()?;
                             }
-                            Ok(RowResult::Done) => break,
+                            Ok(StepResult::Interrupt) => break,
+                            Ok(StepResult::Done) => break,
+                            Ok(StepResult::Busy) => {
+                                let _ = self.writeln("database is busy");
+                                break;
+                            }
                             Err(err) => {
                                 let _ = self.write_fmt(format_args!("{}", err));
                                 break;
@@ -586,16 +604,21 @@ impl Limbo {
                 let mut found = false;
                 loop {
                     match rows.next_row()? {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             if let Some(Value::Text(schema)) = row.values.first() {
                                 let _ = self.write_fmt(format_args!("{};", schema));
                                 found = true;
                             }
                         }
-                        RowResult::IO => {
+                        StepResult::IO => {
                             self.io.run_once()?;
                         }
-                        RowResult::Done => break,
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
+                            let _ = self.writeln("database is busy");
+                            break;
+                        }
                     }
                 }
                 if !found {
@@ -605,6 +628,66 @@ impl Limbo {
                     } else {
                         let _ = self.writeln("No tables or indexes found in the database.");
                     }
+                }
+            }
+            Ok(None) => {
+                let _ = self.writeln("No results returned from the query.");
+            }
+            Err(err) => {
+                if err.to_string().contains("no such table: sqlite_schema") {
+                    return Err(anyhow::anyhow!("Unable to access database schema. The database may be using an older SQLite version or may not be properly initialized."));
+                } else {
+                    return Err(anyhow::anyhow!("Error querying schema: {}", err));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn display_tables(&mut self, pattern: Option<&str>) -> anyhow::Result<()> {
+        let sql = match pattern {
+            Some(pattern) => format!(
+                "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name LIKE '{}' ORDER BY 1",
+                pattern
+            ),
+            None => String::from(
+                "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY 1"
+            ),
+        };
+
+        match self.conn.query(&sql) {
+            Ok(Some(ref mut rows)) => {
+                let mut tables = String::new();
+                loop {
+                    match rows.next_row()? {
+                        StepResult::Row(row) => {
+                            if let Some(Value::Text(table)) = row.values.first() {
+                                tables.push_str(table);
+                                tables.push(' ');
+                            }
+                        }
+                        StepResult::IO => {
+                            self.io.run_once()?;
+                        }
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
+                            let _ = self.writeln("database is busy");
+                            break;
+                        }
+                    }
+                }
+
+                if !tables.is_empty() {
+                    let _ = self.writeln(tables.trim_end());
+                } else if let Some(pattern) = pattern {
+                    let _ = self.write_fmt(format_args!(
+                        "Error: Tables with pattern '{}' not found.",
+                        pattern
+                    ));
+                } else {
+                    let _ = self.writeln("No tables found in the database.");
                 }
             }
             Ok(None) => {
@@ -646,7 +729,6 @@ fn get_io(db: &str) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
 const HELP_MSG: &str = r#"
 Limbo SQL Shell Help
 ==============
-
 Welcome to the Limbo SQL Shell! You can execute any standard SQL command here.
 In addition to standard SQL commands, the following special commands are available:
 
@@ -657,6 +739,7 @@ Special Commands:
 .open <database_file>      Open and connect to a database file.
 .output <mode>             Change the output mode. Available modes are 'raw' and 'pretty'.
 .schema <table_name>       Show the schema of the specified table.
+.tables <pattern>          List names of tables matching LIKE pattern TABLE
 .opcodes                   Display all the opcodes defined by the virtual machine
 .cd <directory>            Change the current working directory.
 .nullvalue <string>        Set the value to be displayed for null values.
@@ -674,27 +757,24 @@ Usage Examples:
 3. To view the schema of a table named 'employees':
    .schema employees
 
-4. To list all available SQL opcodes:
+4. To list all tables:
+   .tables
+
+5. To list all available SQL opcodes:
    .opcodes
 
-5. To change the current output mode to 'pretty':
+6. To change the current output mode to 'pretty':
    .mode pretty
 
-6. Send output to STDOUT if no file is specified:
+7. Send output to STDOUT if no file is specified:
    .output
 
-7. To change the current working directory to '/tmp':
+8. To change the current working directory to '/tmp':
    .cd /tmp
 
-8. Show the current values of settings:
+9. Show the current values of settings:
    .show
 
-9. Set the value 'NULL' to be displayed for null values instead of empty string:
-   .nullvalue "NULL"
-
 Note:
------
 - All SQL commands must end with a semicolon (;).
-- Special commands do not require a semicolon.
-
-"#;
+- Special commands do not require a semicolon."#;

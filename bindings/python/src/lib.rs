@@ -104,7 +104,10 @@ impl Cursor {
 
         // TODO: use stmt_is_dml to set rowcount
         if stmt_is_dml {
-            todo!()
+            return Err(PyErr::new::<NotSupportedError, _>(
+                "DML statements (INSERT/UPDATE/DELETE) are not fully supported in this version",
+            )
+            .into());
         }
 
         Ok(Cursor {
@@ -125,17 +128,25 @@ impl Cursor {
                 match smt_lock.step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::RowResult::Row(row) => {
+                    limbo_core::StepResult::Row(row) => {
                         let py_row = row_to_py(py, &row);
                         return Ok(Some(py_row));
                     }
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         self.conn.io.run_once().map_err(|e| {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
                     }
-                    limbo_core::RowResult::Done => {
+                    limbo_core::StepResult::Interrupt => {
                         return Ok(None);
+                    }
+                    limbo_core::StepResult::Done => {
+                        return Ok(None);
+                    }
+                    limbo_core::StepResult::Busy => {
+                        return Err(
+                            PyErr::new::<OperationalError, _>("Busy error".to_string()).into()
+                        );
                     }
                 }
             }
@@ -156,17 +167,25 @@ impl Cursor {
                 match smt_lock.step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::RowResult::Row(row) => {
+                    limbo_core::StepResult::Row(row) => {
                         let py_row = row_to_py(py, &row);
                         results.push(py_row);
                     }
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         self.conn.io.run_once().map_err(|e| {
                             PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
                         })?;
                     }
-                    limbo_core::RowResult::Done => {
+                    limbo_core::StepResult::Interrupt => {
                         return Ok(results);
+                    }
+                    limbo_core::StepResult::Done => {
+                        return Ok(results);
+                    }
+                    limbo_core::StepResult::Busy => {
+                        return Err(
+                            PyErr::new::<OperationalError, _>("Busy error".to_string()).into()
+                        );
                     }
                 }
             }
@@ -175,18 +194,24 @@ impl Cursor {
         }
     }
 
-    pub fn close(&self) -> Result<()> {
-        todo!()
+    pub fn close(&self) -> PyResult<()> {
+        Err(PyErr::new::<NotSupportedError, _>(
+            "close() is not supported in this version",
+        ))
     }
 
     #[pyo3(signature = (sql, parameters=None))]
-    pub fn executemany(&self, sql: &str, parameters: Option<Py<PyList>>) {
-        todo!()
+    pub fn executemany(&self, sql: &str, parameters: Option<Py<PyList>>) -> PyResult<()> {
+        Err(PyErr::new::<NotSupportedError, _>(
+            "executemany() is not supported in this version",
+        ))
     }
 
     #[pyo3(signature = (size=None))]
-    pub fn fetchmany(&self, size: Option<i64>) {
-        todo!()
+    pub fn fetchmany(&self, size: Option<i64>) -> PyResult<Option<Vec<PyObject>>> {
+        Err(PyErr::new::<NotSupportedError, _>(
+            "fetchmany() is not supported in this version",
+        ))
     }
 }
 
@@ -222,12 +247,16 @@ impl Connection {
         drop(self.conn.clone());
     }
 
-    pub fn commit(&self) {
-        todo!()
+    pub fn commit(&self) -> PyResult<()> {
+        Err(PyErr::new::<NotSupportedError, _>(
+            "Transactions are not supported in this version",
+        ))
     }
 
-    pub fn rollback(&self) {
-        todo!()
+    pub fn rollback(&self) -> PyResult<()> {
+        Err(PyErr::new::<NotSupportedError, _>(
+            "Transactions are not supported in this version",
+        ))
     }
 }
 

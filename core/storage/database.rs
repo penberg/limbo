@@ -25,7 +25,7 @@ pub struct FileStorage {
 #[cfg(feature = "fs")]
 impl DatabaseStorage for FileStorage {
     fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
-        let r = match &(*c) {
+        let r = match c.as_ref() {
             Completion::Read(r) => r,
             _ => unreachable!(),
         };

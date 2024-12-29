@@ -55,3 +55,63 @@ do_execsql_test json5-multi-comment {
    SELECT json(' /* abc */ { /*def*/ aaa /* xyz */ : // to the end of line
           123 /* xyz */ , /* 123 */ }')
 } {{{"aaa":123}}}
+
+do_execsql_test json_array_str {
+   SELECT json_array('a')
+} {{["a"]}}
+
+do_execsql_test json_array_numbers {
+   SELECT json_array(1, 1.5)
+} {{[1,1.5]}}
+
+do_execsql_test json_array_numbers_2 {
+   SELECT json_array(1., +2., -2.)
+} {{[1.0,2.0,-2.0]}}
+
+do_execsql_test json_array_null {
+   SELECT json_array(null)
+} {{[null]}}
+
+do_execsql_test json_array_not_json {
+   SELECT json_array('{"a":1}')
+} {{["{\"a\":1}"]}}
+
+do_execsql_test json_array_json {
+   SELECT json_array(json('{"a":1}'))
+} {{[{"a":1}]}}
+
+do_execsql_test json_array_nested {
+   SELECT json_array(json_array(1,2,3), json('[1,2,3]'), '[1,2,3]')
+} {{[[1,2,3],[1,2,3],"[1,2,3]"]}}
+
+do_execsql_test json_array_length {
+   SELECT json_array_length('[1,2,3,4]');
+} {{4}}
+
+do_execsql_test json_array_length_empty {
+   SELECT json_array_length('[]');
+} {{0}}
+
+do_execsql_test json_array_length_root {
+  SELECT json_array_length('[1,2,3,4]', '$');
+} {{4}}
+
+do_execsql_test json_array_length_not_array {
+  SELECT json_array_length('{"one":[1,2,3]}');
+} {{0}}
+
+do_execsql_test json_array_length_via_prop {
+  SELECT json_array_length('{"one":[1,2,3]}', '$.one');
+} {{3}}
+
+do_execsql_test json_array_length_via_index {
+  SELECT json_array_length('[[1,2,3,4]]', '$[0]');
+} {{4}}
+
+do_execsql_test json_array_length_via_index_not_array {
+  SELECT json_array_length('[1,2,3,4]', '$[2]');
+} {{0}}
+
+do_execsql_test json_array_length_via_bad_prop {
+  SELECT json_array_length('{"one":[1,2,3]}', '$.two');
+} {{}}

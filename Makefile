@@ -61,7 +61,7 @@ test: limbo test-compat test-sqlite3 test-shell
 .PHONY: test
 
 test-shell: limbo
-	./testing/shelltests.py
+	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/shelltests.py
 .PHONY: test-shell
 
 test-compat:

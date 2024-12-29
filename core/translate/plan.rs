@@ -1,11 +1,11 @@
 use core::fmt;
+use sqlite3_parser::ast;
 use std::{
     fmt::{Display, Formatter},
     rc::Rc,
 };
 
-use sqlite3_parser::ast;
-
+use crate::translate::plan::Plan::{Delete, Select};
 use crate::{
     function::AggFunc,
     schema::{BTreeTable, Column, Index},
@@ -27,7 +27,13 @@ pub struct GroupBy {
 }
 
 #[derive(Debug)]
-pub struct Plan {
+pub enum Plan {
+    Select(SelectPlan),
+    Delete(DeletePlan),
+}
+
+#[derive(Debug)]
+pub struct SelectPlan {
     /// A tree of sources (tables).
     pub source: SourceOperator,
     /// the columns inside SELECT ... FROM
@@ -50,9 +56,33 @@ pub struct Plan {
     pub contains_constant_false_condition: bool,
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct DeletePlan {
+    /// A tree of sources (tables).
+    pub source: SourceOperator,
+    /// the columns inside SELECT ... FROM
+    pub result_columns: Vec<ResultSetColumn>,
+    /// where clause split into a vec at 'AND' boundaries.
+    pub where_clause: Option<Vec<ast::Expr>>,
+    /// order by clause
+    pub order_by: Option<Vec<(ast::Expr, Direction)>>,
+    /// limit clause
+    pub limit: Option<usize>,
+    /// all the tables referenced in the query
+    pub referenced_tables: Vec<BTreeTableReference>,
+    /// all the indexes available
+    pub available_indexes: Vec<Rc<Index>>,
+    /// query contains a constant condition that is always false
+    pub contains_constant_false_condition: bool,
+}
+
 impl Display for Plan {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.source)
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Select(select_plan) => write!(f, "{}", select_plan.source),
+            Delete(delete_plan) => write!(f, "{}", delete_plan.source),
+        }
     }
 }
 
@@ -176,6 +206,7 @@ pub struct BTreeTableReference {
 
 /// An enum that represents a search operation that can be used to search for a row in a table using an index
 /// (i.e. a primary key or a secondary index)
+#[allow(clippy::enum_variant_names)]
 #[derive(Clone, Debug)]
 pub enum Search {
     /// A rowid equality point lookup. This is a special case that uses the SeekRowid bytecode instruction and does not loop.
@@ -366,7 +397,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
             table_refs_mask |= 1
                 << tables
                     .iter()
-                    .position(|t| &t.table_identifier == &table_reference.table_identifier)
+                    .position(|t| t.table_identifier == table_reference.table_identifier)
                     .unwrap();
         }
         SourceOperator::Search {
@@ -375,7 +406,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
             table_refs_mask |= 1
                 << tables
                     .iter()
-                    .position(|t| &t.table_identifier == &table_reference.table_identifier)
+                    .position(|t| t.table_identifier == table_reference.table_identifier)
                     .unwrap();
         }
         SourceOperator::Nothing => {}
@@ -391,6 +422,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
     and predicate = "t1.a = t2.b"
     then the return value will be (in bits): 011
 */
+#[allow(clippy::only_used_in_recursion)]
 pub fn get_table_ref_bitmask_for_ast_expr<'a>(
     tables: &'a Vec<BTreeTableReference>,
     predicate: &'a ast::Expr,

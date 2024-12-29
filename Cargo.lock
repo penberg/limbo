@@ -386,7 +386,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core_tester"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -1063,9 +1063,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.168"
+version = "0.2.169"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aaeb2981e0606ca11d79718f8bb01164f1d6ed75080182d3abf017e6d244b6d"
+checksum = "b5aba8db14291edd000dfcc4d620c7ebfb122c613afb886ca8803fa4e128a20a"
 
 [[package]]
 name = "libmimalloc-sys"
@@ -1100,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "clap",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "limbo-wasm"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -1124,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_core"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "bumpalo",
  "cfg_block",
@@ -1138,6 +1138,7 @@ dependencies = [
  "jsonb",
  "julian_day_converter",
  "libc",
+ "limbo_macros",
  "log",
  "mimalloc",
  "mockall",
@@ -1148,6 +1149,7 @@ dependencies = [
  "pprof",
  "rand",
  "regex",
+ "regex-syntax",
  "rstest",
  "rusqlite",
  "rustix",
@@ -1156,13 +1158,19 @@ dependencies = [
  "sqlite3-parser",
  "tempfile",
  "thiserror 1.0.69",
+ "uuid",
 ]
 
 [[package]]
+name = "limbo_macros"
+version = "0.0.10"
+
+[[package]]
 name = "limbo_sim"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anarchist-readable-name-generator-lib",
+ "clap",
  "env_logger 0.10.2",
  "limbo_core",
  "log",
@@ -1173,9 +1181,10 @@ dependencies = [
 
 [[package]]
 name = "limbo_sqlite3"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "env_logger 0.11.5",
+ "libc",
  "limbo_core",
  "log",
 ]
@@ -1616,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "py-limbo"
-version = "0.0.9"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "limbo_core",
@@ -2271,6 +2280,9 @@ name = "uuid"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8c5f0a0af699448548ad1a2fbf920fb4bee257eae39953ba95cb84891a0446a"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "vcpkg"

@@ -51,9 +51,9 @@ pub struct ReadCompletion {
 impl Completion {
     pub fn complete(&self, result: i32) {
         match self {
-            Completion::Read(r) => r.complete(),
-            Completion::Write(w) => w.complete(result),
-            Completion::Sync(s) => s.complete(result), // fix
+            Self::Read(r) => r.complete(),
+            Self::Write(w) => w.complete(result),
+            Self::Sync(s) => s.complete(result), // fix
         }
     }
 }

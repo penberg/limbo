@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::prelude::*;
-
+#[allow(dead_code)]
 #[wasm_bindgen]
 pub struct Database {
     db: Arc<limbo_core::Database>,
@@ -64,7 +64,7 @@ pub struct Statement {
 #[wasm_bindgen]
 impl Statement {
     fn new(inner: RefCell<limbo_core::Statement>, raw: bool) -> Self {
-        Statement { inner, raw }
+        Self { inner, raw }
     }
 
     #[wasm_bindgen]
@@ -75,7 +75,7 @@ impl Statement {
 
     pub fn get(&self) -> JsValue {
         match self.inner.borrow_mut().step() {
-            Ok(limbo_core::RowResult::Row(row)) => {
+            Ok(limbo_core::StepResult::Row(row)) => {
                 let row_array = js_sys::Array::new();
                 for value in row.values {
                     let value = to_js_value(value);
@@ -83,7 +83,10 @@ impl Statement {
                 }
                 JsValue::from(row_array)
             }
-            Ok(limbo_core::RowResult::IO) | Ok(limbo_core::RowResult::Done) => JsValue::UNDEFINED,
+            Ok(limbo_core::StepResult::IO)
+            | Ok(limbo_core::StepResult::Done)
+            | Ok(limbo_core::StepResult::Interrupt)
+            | Ok(limbo_core::StepResult::Busy) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
@@ -92,7 +95,7 @@ impl Statement {
         let array = js_sys::Array::new();
         loop {
             match self.inner.borrow_mut().step() {
-                Ok(limbo_core::RowResult::Row(row)) => {
+                Ok(limbo_core::StepResult::Row(row)) => {
                     let row_array = js_sys::Array::new();
                     for value in row.values {
                         let value = to_js_value(value);
@@ -100,8 +103,10 @@ impl Statement {
                     }
                     array.push(&row_array);
                 }
-                Ok(limbo_core::RowResult::IO) => {}
-                Ok(limbo_core::RowResult::Done) => break,
+                Ok(limbo_core::StepResult::IO) => {}
+                Ok(limbo_core::StepResult::Interrupt) => break,
+                Ok(limbo_core::StepResult::Done) => break,
+                Ok(limbo_core::StepResult::Busy) => break,
                 Err(e) => panic!("Error: {:?}", e),
             }
         }
@@ -145,7 +150,7 @@ pub struct File {
 #[allow(dead_code)]
 impl File {
     fn new(vfs: VFS, fd: i32) -> Self {
-        File { vfs, fd }
+        Self { vfs, fd }
     }
 }
 
@@ -258,13 +263,13 @@ pub struct DatabaseStorage {
 
 impl DatabaseStorage {
     pub fn new(file: Rc<dyn limbo_core::File>) -> Self {
-        DatabaseStorage { file }
+        Self { file }
     }
 }
 
 impl limbo_core::DatabaseStorage for DatabaseStorage {
     fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        let r = match &(*c) {
+        let r = match c.as_ref() {
             limbo_core::Completion::Read(r) => r,
             _ => unreachable!(),
         };

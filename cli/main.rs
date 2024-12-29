@@ -1,10 +1,10 @@
+#![allow(clippy::arc_with_non_send_sync)]
 mod app;
 mod opcodes_dictionary;
 
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::atomic::Ordering;
 
-#[allow(clippy::arc_with_non_send_sync)]
 fn main() -> anyhow::Result<()> {
     env_logger::init();
     let mut app = app::Limbo::new()?;

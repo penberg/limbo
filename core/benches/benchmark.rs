@@ -40,13 +40,19 @@ fn limbo_bench(criterion: &mut Criterion) {
         b.iter(|| {
             let mut rows = stmt.query().unwrap();
             match rows.next_row().unwrap() {
-                limbo_core::RowResult::Row(row) => {
+                limbo_core::StepResult::Row(row) => {
                     assert_eq!(row.get::<i64>(0).unwrap(), 1);
                 }
-                limbo_core::RowResult::IO => {
+                limbo_core::StepResult::IO => {
                     io.run_once().unwrap();
                 }
-                limbo_core::RowResult::Done => {
+                limbo_core::StepResult::Interrupt => {
+                    unreachable!();
+                }
+                limbo_core::StepResult::Done => {
+                    unreachable!();
+                }
+                limbo_core::StepResult::Busy => {
                     unreachable!();
                 }
             }
@@ -62,14 +68,20 @@ fn limbo_bench(criterion: &mut Criterion) {
             b.iter(|| {
                 let mut rows = stmt.query().unwrap();
                 match rows.next_row().unwrap() {
-                    limbo_core::RowResult::Row(row) => {
+                    limbo_core::StepResult::Row(row) => {
                         assert_eq!(row.get::<i64>(0).unwrap(), 1);
                     }
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         io.run_once().unwrap();
                     }
-                    limbo_core::RowResult::Done => {
+                    limbo_core::StepResult::Interrupt => {
                         unreachable!();
+                    }
+                    limbo_core::StepResult::Done => {
+                        unreachable!();
+                    }
+                    limbo_core::StepResult::Busy => {
+                        unreachable!()
                     }
                 }
                 stmt.reset();
@@ -85,14 +97,20 @@ fn limbo_bench(criterion: &mut Criterion) {
             b.iter(|| {
                 let mut rows = stmt.query().unwrap();
                 match rows.next_row().unwrap() {
-                    limbo_core::RowResult::Row(row) => {
+                    limbo_core::StepResult::Row(row) => {
                         assert_eq!(row.get::<i64>(0).unwrap(), 1);
                     }
-                    limbo_core::RowResult::IO => {
+                    limbo_core::StepResult::IO => {
                         io.run_once().unwrap();
                     }
-                    limbo_core::RowResult::Done => {
+                    limbo_core::StepResult::Interrupt => {
                         unreachable!();
+                    }
+                    limbo_core::StepResult::Done => {
+                        unreachable!();
+                    }
+                    limbo_core::StepResult::Busy => {
+                        unreachable!()
                     }
                 }
                 stmt.reset();

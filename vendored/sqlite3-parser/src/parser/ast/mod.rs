@@ -648,6 +648,21 @@ impl From<YYCODETYPE> for Operator {
     }
 }
 
+impl Operator {
+    /// returns whether order of operations can be ignored
+    pub fn is_commutative(&self) -> bool {
+        matches!(
+            self,
+            Operator::Add
+                | Operator::Multiply
+                | Operator::BitwiseAnd
+                | Operator::BitwiseOr
+                | Operator::Equals
+                | Operator::NotEquals
+        )
+    }
+}
+
 /// Unary operators
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnaryOperator {
@@ -1557,10 +1572,31 @@ pub enum PragmaBody {
     /// function call
     Call(PragmaValue),
 }
-
 /// `PRAGMA` value
 // https://sqlite.org/syntax/pragma-value.html
 pub type PragmaValue = Expr; // TODO
+
+/// `PRAGMA` value
+// https://sqlite.org/pragma.html
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PragmaName {
+    /// `cache_size` pragma
+    CacheSize,
+    /// `journal_mode` pragma
+    JournalMode,
+}
+
+impl FromStr for PragmaName {
+    type Err = ();
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            "cache_size" => Ok(PragmaName::CacheSize),
+            "journal_mode" => Ok(PragmaName::JournalMode),
+            _ => Err(()),
+        }
+    }
+}
 
 /// `CREATE TRIGGER` time
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

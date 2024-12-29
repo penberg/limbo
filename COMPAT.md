@@ -116,8 +116,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
-| like(X,Y)                    | No     |         |
-| like(X,Y,Z)                  | No     |         |
+| like(X,Y)                    | Yes    |         |
+| like(X,Y,Z)                  | Yes    |         |
 | likelihood(X,Y)              | No     |         |
 | likely(X)                    | No     |         |
 | load_extension(X)            | No     |         |
@@ -160,6 +160,45 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | upper(X)                     | Yes    |         |
 | zeroblob(N)                  | Yes    |         |
 
+
+
+
+
+### Mathematical functions
+
+| Function   | Status | Comment |
+| ---------- | ------ | ------- |
+| acos(X)    | Yes    |         |
+| acosh(X)   | Yes    |         |
+| asin(X)    | Yes    |         |
+| asinh(X)   | Yes    |         |
+| atan(X)    | Yes    |         |
+| atan2(Y,X) | Yes    |         |
+| atanh(X)   | Yes    |         |
+| ceil(X)    | Yes    |         |
+| ceiling(X) | Yes    |         |
+| cos(X)     | Yes    |         |
+| cosh(X)    | Yes    |         |
+| degrees(X) | Yes    |         |
+| exp(X)     | Yes    |         |
+| floor(X)   | Yes    |         |
+| ln(X)      | Yes    |         |
+| log(B,X)   | Yes    |         |
+| log(X)     | Yes    |         |
+| log10(X)   | Yes    |         |
+| log2(X)    | Yes    |         |
+| mod(X,Y)   | Yes    |         |
+| pi()       | Yes    |         |
+| pow(X,Y)   | Yes    |         |
+| power(X,Y) | Yes    |         |
+| radians(X) | Yes    |         |
+| sin(X)     | Yes    |         |
+| sinh(X)    | Yes    |         |
+| sqrt(X)    | Yes    |         |
+| tan(X)     | Yes    |         |
+| tanh(X)    | Yes    |         |
+| trunc(X)   | Yes    |         |
+
 ### Aggregate functions
 
 | Function                     | Status  | Comment |
@@ -193,10 +232,10 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 |------------------------------------|---------|---------|
 | json(json)                         | Partial |         |
 | jsonb(json)                        |         |         |
-| json_array(value1,value2,...)      |         |         |
+| json_array(value1,value2,...)      | Yes     |         |
 | jsonb_array(value1,value2,...)     |         |         |
-| json_array_length(json)            |         |         |
-| json_array_length(json,path)       |         |         |
+| json_array_length(json)            | Yes     |         |
+| json_array_length(json,path)       | Yes     |         |
 | json_error_position(json)          |         |         |
 | json_extract(json,path,...)        |         |         |
 | jsonb_extract(json,path,...)       |         |         |
@@ -356,7 +395,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | ReadCookie      | No     |
 | Real            | Yes    |
 | RealAffinity    | Yes    |
-| Remainder       | No     |
+| Remainder       | Yes    |
 | ResetCount      | No     |
 | ResultRow       | Yes    |
 | Return          | Yes    |
@@ -414,3 +453,16 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Variable        | No     |
 | VerifyCookie    | No     |
 | Yield           | Yes    |
+
+
+
+
+| LibSql Compatibility / Extensions|    |         |
+| ---------------------------- | ------ | ------- |
+|  **UUID**                    |        | UUID's in limbo are `blobs` by default|
+| uuid4()                      | Yes    | uuid version 4 |
+| uuid4_str()                  | Yes    | uuid v4 string alias `gen_random_uuid()` for PG compatibility|
+| uuid7(X?)                    | Yes    | uuid version 7, Optional arg for seconds since epoch|
+| uuid7_timestamp_ms(X)        | Yes    | Convert a uuid v7 to milliseconds since epoch|
+| uuid_str(X)                  | Yes    | Convert a valid uuid to string|
+| uuid_blob(X)                 | Yes    | Convert a valid uuid to blob|

@@ -14,13 +14,14 @@ name = "limbo_core"
 path = "lib.rs"
 
 [features]
-default = ["fs", "json"]
+default = ["fs", "json", "uuid"]
 fs = []
 json = [
     "dep:jsonb",
     "dep:pest",
     "dep:pest_derive",
 ]
+uuid = ["dep:uuid"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.6.1"
@@ -43,7 +44,8 @@ sieve-cache = "0.1.4"
 sqlite3-parser = { path = "../vendored/sqlite3-parser" }
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15", features = ["js"] }
-regex = "1.10.5"
+regex = "1.11.1"
+regex-syntax = { version = "0.8.5", default-features = false, features = ["unicode"] }
 chrono = "0.4.38"
 julian_day_converter = "0.3.2"
 jsonb = { version = "0.4.4", optional = true }
@@ -53,6 +55,8 @@ pest = { version = "2.0", optional = true }
 pest_derive = { version = "2.0", optional = true }
 rand = "0.8.5"
 bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
+limbo_macros = { path = "../macros" }
+uuid = { version = "1.11.0", features = ["v4", "v7"], optional = true }
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }

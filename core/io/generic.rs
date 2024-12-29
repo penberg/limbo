@@ -15,7 +15,11 @@ impl GenericIO {
 impl IO for GenericIO {
     fn open_file(&self, path: &str, flags: OpenFlags, _direct: bool) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
-        let file = std::fs::File::open(path)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(matches!(flags, OpenFlags::Create))
+            .open(path)?;
         Ok(Rc::new(GenericFile {
             file: RefCell::new(file),
         }))
@@ -55,7 +59,7 @@ impl File for GenericFile {
         let mut file = self.file.borrow_mut();
         file.seek(std::io::SeekFrom::Start(pos as u64))?;
         {
-            let r = match &(*c) {
+            let r = match c.as_ref() {
                 Completion::Read(r) => r,
                 _ => unreachable!(),
             };

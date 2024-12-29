@@ -5,21 +5,22 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
-use sqlite3_parser::ast;
+use sqlite3_parser::ast::{self};
 
 use crate::schema::{Column, PseudoTable, Table};
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
-use crate::translate::plan::{IterationDirection, Search};
+use crate::translate::plan::{DeletePlan, IterationDirection, Plan, Search};
 use crate::types::{OwnedRecord, OwnedValue};
+use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
-use crate::vdbe::{BranchOffset, Insn, Program};
+use crate::vdbe::{insn::Insn, BranchOffset, Program};
 use crate::{Connection, Result};
 
 use super::expr::{
     translate_aggregation, translate_aggregation_groupby, translate_condition_expr, translate_expr,
     ConditionMetadata,
 };
-use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, Plan};
+use super::plan::{Aggregate, BTreeTableReference, Direction, GroupBy, SelectPlan};
 use super::plan::{ResultSetColumn, SourceOperator};
 
 // Metadata for handling LEFT JOIN operations
@@ -100,6 +101,16 @@ pub struct Metadata {
     pub result_columns_to_skip_in_orderby_sorter: Option<Vec<usize>>,
 }
 
+/// Used to distinguish database operations
+#[allow(clippy::upper_case_acronyms, dead_code)]
+#[derive(Debug, Clone)]
+pub enum OperationMode {
+    SELECT,
+    INSERT,
+    UPDATE,
+    DELETE,
+}
+
 /// Initialize the program with basic setup and return initial metadata and labels
 fn prologue() -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> {
     let mut program = ProgramBuilder::new();
@@ -163,7 +174,18 @@ fn epilogue(
 /// Takes a query plan and generates the corresponding bytecode program
 pub fn emit_program(
     database_header: Rc<RefCell<DatabaseHeader>>,
-    mut plan: Plan,
+    plan: Plan,
+    connection: Weak<Connection>,
+) -> Result<Program> {
+    match plan {
+        Plan::Select(plan) => emit_program_for_select(database_header, plan, connection),
+        Plan::Delete(plan) => emit_program_for_delete(database_header, plan, connection),
+    }
+}
+
+fn emit_program_for_select(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: SelectPlan,
     connection: Weak<Connection>,
 ) -> Result<Program> {
     let (mut program, mut metadata, init_label, start_offset) = prologue()?;
@@ -200,7 +222,12 @@ pub fn emit_program(
     if let Some(ref mut group_by) = plan.group_by {
         init_group_by(&mut program, group_by, &plan.aggregates, &mut metadata)?;
     }
-    init_source(&mut program, &plan.source, &mut metadata)?;
+    init_source(
+        &mut program,
+        &plan.source,
+        &mut metadata,
+        &OperationMode::SELECT,
+    )?;
 
     // Set up main query execution loop
     open_loop(
@@ -216,7 +243,7 @@ pub fn emit_program(
     // Clean up and close the main execution loop
     close_loop(
         &mut program,
-        &mut plan.source,
+        &plan.source,
         &mut metadata,
         &plan.referenced_tables,
     )?;
@@ -235,7 +262,7 @@ pub fn emit_program(
             group_by,
             plan.order_by.as_ref(),
             &plan.aggregates,
-            plan.limit.clone(),
+            plan.limit,
             &plan.referenced_tables,
             &mut metadata,
         )?;
@@ -259,7 +286,7 @@ pub fn emit_program(
                 &mut program,
                 order_by,
                 &plan.result_columns,
-                plan.limit.clone(),
+                plan.limit,
                 &mut metadata,
             )?;
         }
@@ -271,10 +298,67 @@ pub fn emit_program(
     Ok(program.build(database_header, connection))
 }
 
+fn emit_program_for_delete(
+    database_header: Rc<RefCell<DatabaseHeader>>,
+    mut plan: DeletePlan,
+    connection: Weak<Connection>,
+) -> Result<Program> {
+    let (mut program, mut metadata, init_label, start_offset) = prologue()?;
+
+    // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
+    let skip_loops_label = if plan.contains_constant_false_condition {
+        let skip_loops_label = program.allocate_label();
+        program.emit_insn_with_label_dependency(
+            Insn::Goto {
+                target_pc: skip_loops_label,
+            },
+            skip_loops_label,
+        );
+        Some(skip_loops_label)
+    } else {
+        None
+    };
+
+    // Initialize cursors and other resources needed for query execution
+    init_source(
+        &mut program,
+        &plan.source,
+        &mut metadata,
+        &OperationMode::DELETE,
+    )?;
+
+    // Set up main query execution loop
+    open_loop(
+        &mut program,
+        &mut plan.source,
+        &plan.referenced_tables,
+        &mut metadata,
+    )?;
+
+    emit_delete_insns(&mut program, &plan.source, &plan.limit, &metadata)?;
+
+    // Clean up and close the main execution loop
+    close_loop(
+        &mut program,
+        &plan.source,
+        &mut metadata,
+        &plan.referenced_tables,
+    )?;
+
+    if let Some(skip_loops_label) = skip_loops_label {
+        program.resolve_label(skip_loops_label, program.offset());
+    }
+
+    // Finalize program
+    epilogue(&mut program, &mut metadata, init_label, start_offset)?;
+
+    Ok(program.build(database_header, connection))
+}
+
 /// Initialize resources needed for ORDER BY processing
 fn init_order_by(
     program: &mut ProgramBuilder,
-    order_by: &Vec<(ast::Expr, Direction)>,
+    order_by: &[(ast::Expr, Direction)],
     metadata: &mut Metadata,
 ) -> Result<()> {
     metadata
@@ -301,7 +385,7 @@ fn init_order_by(
 fn init_group_by(
     program: &mut ProgramBuilder,
     group_by: &GroupBy,
-    aggregates: &Vec<Aggregate>,
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_final_label = program.allocate_label();
@@ -384,6 +468,7 @@ fn init_source(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
     metadata: &mut Metadata,
+    mode: &OperationMode,
 ) -> Result<()> {
     match source {
         SourceOperator::Join {
@@ -401,10 +486,10 @@ fn init_source(
                 };
                 metadata.left_joins.insert(*id, lj_metadata);
             }
-            init_source(program, left, metadata)?;
-            init_source(program, right, metadata)?;
+            init_source(program, left, metadata, mode)?;
+            init_source(program, right, metadata, mode)?;
 
-            return Ok(());
+            Ok(())
         }
         SourceOperator::Scan {
             id,
@@ -418,13 +503,28 @@ fn init_source(
             let root_page = table_reference.table.root_page;
             let next_row_label = program.allocate_label();
             metadata.next_row_labels.insert(*id, next_row_label);
-            program.emit_insn(Insn::OpenReadAsync {
-                cursor_id,
-                root_page,
-            });
-            program.emit_insn(Insn::OpenReadAwait);
 
-            return Ok(());
+            match mode {
+                OperationMode::SELECT => {
+                    program.emit_insn(Insn::OpenReadAsync {
+                        cursor_id,
+                        root_page,
+                    });
+                    program.emit_insn(Insn::OpenReadAwait {});
+                }
+                OperationMode::DELETE => {
+                    program.emit_insn(Insn::OpenWriteAsync {
+                        cursor_id,
+                        root_page,
+                    });
+                    program.emit_insn(Insn::OpenWriteAwait {});
+                }
+                _ => {
+                    unimplemented!()
+                }
+            }
+
+            Ok(())
         }
         SourceOperator::Search {
             id,
@@ -441,27 +541,54 @@ fn init_source(
 
             metadata.next_row_labels.insert(*id, next_row_label);
 
-            program.emit_insn(Insn::OpenReadAsync {
-                cursor_id: table_cursor_id,
-                root_page: table_reference.table.root_page,
-            });
-            program.emit_insn(Insn::OpenReadAwait);
+            match mode {
+                OperationMode::SELECT => {
+                    program.emit_insn(Insn::OpenReadAsync {
+                        cursor_id: table_cursor_id,
+                        root_page: table_reference.table.root_page,
+                    });
+                    program.emit_insn(Insn::OpenReadAwait {});
+                }
+                OperationMode::DELETE => {
+                    program.emit_insn(Insn::OpenWriteAsync {
+                        cursor_id: table_cursor_id,
+                        root_page: table_reference.table.root_page,
+                    });
+                    program.emit_insn(Insn::OpenWriteAwait {});
+                }
+                _ => {
+                    unimplemented!()
+                }
+            }
 
             if let Search::IndexSearch { index, .. } = search {
                 let index_cursor_id = program
                     .alloc_cursor_id(Some(index.name.clone()), Some(Table::Index(index.clone())));
-                program.emit_insn(Insn::OpenReadAsync {
-                    cursor_id: index_cursor_id,
-                    root_page: index.root_page,
-                });
-                program.emit_insn(Insn::OpenReadAwait);
+
+                match mode {
+                    OperationMode::SELECT => {
+                        program.emit_insn(Insn::OpenReadAsync {
+                            cursor_id: index_cursor_id,
+                            root_page: index.root_page,
+                        });
+                        program.emit_insn(Insn::OpenReadAwait);
+                    }
+                    OperationMode::DELETE => {
+                        program.emit_insn(Insn::OpenWriteAsync {
+                            cursor_id: index_cursor_id,
+                            root_page: index.root_page,
+                        });
+                        program.emit_insn(Insn::OpenWriteAwait {});
+                    }
+                    _ => {
+                        unimplemented!()
+                    }
+                }
             }
 
-            return Ok(());
+            Ok(())
         }
-        SourceOperator::Nothing => {
-            return Ok(());
-        }
+        SourceOperator::Nothing => Ok(()),
     }
 }
 
@@ -810,7 +937,7 @@ pub enum InnerLoopEmitTarget<'a> {
 /// At this point the cursors for all tables have been opened and rewound.
 fn inner_loop_emit(
     program: &mut ProgramBuilder,
-    plan: &mut Plan,
+    plan: &mut SelectPlan,
     metadata: &mut Metadata,
 ) -> Result<()> {
     // if we have a group by, we emit a record into the group by sorter.
@@ -866,8 +993,8 @@ fn inner_loop_emit(
 /// See the InnerLoopEmitTarget enum for more details.
 fn inner_loop_source_emit(
     program: &mut ProgramBuilder,
-    result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Vec<Aggregate>,
+    result_columns: &[ResultSetColumn],
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
     emit_target: InnerLoopEmitTarget,
     referenced_tables: &[BTreeTableReference],
@@ -927,7 +1054,7 @@ fn inner_loop_source_emit(
                 order_by,
                 result_columns,
                 &mut metadata.result_column_indexes_in_orderby_sorter,
-                &metadata.sort_metadata.as_ref().unwrap(),
+                metadata.sort_metadata.as_ref().unwrap(),
                 None,
             )?;
             Ok(())
@@ -1120,15 +1247,70 @@ fn close_loop(
     }
 }
 
+fn emit_delete_insns(
+    program: &mut ProgramBuilder,
+    source: &SourceOperator,
+    limit: &Option<usize>,
+    metadata: &Metadata,
+) -> Result<()> {
+    let cursor_id = match source {
+        SourceOperator::Scan {
+            table_reference, ..
+        } => program.resolve_cursor_id(&table_reference.table_identifier),
+        SourceOperator::Search {
+            table_reference,
+            search,
+            ..
+        } => match search {
+            Search::RowidEq { .. } | Search::RowidSearch { .. } => {
+                program.resolve_cursor_id(&table_reference.table_identifier)
+            }
+            Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
+        },
+        _ => return Ok(()),
+    };
+
+    // Emit the instructions to delete the row
+    let key_reg = program.alloc_register();
+    program.emit_insn(Insn::RowId {
+        cursor_id,
+        dest: key_reg,
+    });
+    program.emit_insn(Insn::DeleteAsync { cursor_id });
+    program.emit_insn(Insn::DeleteAwait { cursor_id });
+    if let Some(limit) = limit {
+        let limit_reg = program.alloc_register();
+        program.emit_insn(Insn::Integer {
+            value: *limit as i64,
+            dest: limit_reg,
+        });
+        program.mark_last_insn_constant();
+        let jump_label_on_limit_reached = metadata
+            .termination_label_stack
+            .last()
+            .expect("termination_label_stack should not be empty.");
+        program.emit_insn_with_label_dependency(
+            Insn::DecrJumpZero {
+                reg: limit_reg,
+                target_pc: *jump_label_on_limit_reached,
+            },
+            *jump_label_on_limit_reached,
+        )
+    }
+
+    Ok(())
+}
+
 /// Emits the bytecode for processing a GROUP BY clause.
 /// This is called when the main query execution loop has finished processing,
 /// and we now have data in the GROUP BY sorter.
+#[allow(clippy::too_many_arguments)]
 fn group_by_emit(
     program: &mut ProgramBuilder,
-    result_columns: &Vec<ResultSetColumn>,
+    result_columns: &[ResultSetColumn],
     group_by: &GroupBy,
     order_by: Option<&Vec<(ast::Expr, Direction)>>,
-    aggregates: &Vec<Aggregate>,
+    aggregates: &[Aggregate],
     limit: Option<usize>,
     referenced_tables: &[BTreeTableReference],
     metadata: &mut Metadata,
@@ -1437,7 +1619,7 @@ fn group_by_emit(
                 order_by,
                 result_columns,
                 &mut metadata.result_column_indexes_in_orderby_sorter,
-                &metadata.sort_metadata.as_ref().unwrap(),
+                metadata.sort_metadata.as_ref().unwrap(),
                 Some(&precomputed_exprs_to_register),
             )?;
         }
@@ -1474,9 +1656,9 @@ fn group_by_emit(
 /// and we can now materialize the aggregate results.
 fn agg_without_group_by_emit(
     program: &mut ProgramBuilder,
-    referenced_tables: &Vec<BTreeTableReference>,
-    result_columns: &Vec<ResultSetColumn>,
-    aggregates: &Vec<Aggregate>,
+    referenced_tables: &[BTreeTableReference],
+    result_columns: &[ResultSetColumn],
+    aggregates: &[Aggregate],
     metadata: &mut Metadata,
 ) -> Result<()> {
     let agg_start_reg = metadata.aggregation_start_register.unwrap();
@@ -1513,8 +1695,8 @@ fn agg_without_group_by_emit(
 /// and we can now emit rows from the ORDER BY sorter.
 fn order_by_emit(
     program: &mut ProgramBuilder,
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
     limit: Option<usize>,
     metadata: &mut Metadata,
 ) -> Result<()> {
@@ -1693,8 +1875,8 @@ fn sorter_insert(
 fn order_by_sorter_insert(
     program: &mut ProgramBuilder,
     referenced_tables: &[BTreeTableReference],
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
     result_column_indexes_in_orderby_sorter: &mut HashMap<usize, usize>,
     sort_metadata: &SortMetadata,
     precomputed_exprs_to_register: Option<&Vec<(&ast::Expr, usize)>>,
@@ -1760,18 +1942,15 @@ fn order_by_sorter_insert(
 ///
 /// If any result columns can be skipped, this returns list of 2-tuples of (SkippedResultColumnIndex: usize, ResultColumnIndexInOrderBySorter: usize)
 fn order_by_deduplicate_result_columns(
-    order_by: &Vec<(ast::Expr, Direction)>,
-    result_columns: &Vec<ResultSetColumn>,
+    order_by: &[(ast::Expr, Direction)],
+    result_columns: &[ResultSetColumn],
 ) -> Option<Vec<(usize, usize)>> {
     let mut result_column_remapping: Option<Vec<(usize, usize)>> = None;
     for (i, rc) in result_columns.iter().enumerate() {
-        // TODO: implement a custom equality check for expressions
-        // there are lots of examples where this breaks, even simple ones like
-        // sum(x) != SUM(x)
         let found = order_by
             .iter()
             .enumerate()
-            .find(|(_, (expr, _))| expr == &rc.expr);
+            .find(|(_, (expr, _))| exprs_are_equivalent(expr, &rc.expr));
         if let Some((j, _)) = found {
             if let Some(ref mut v) = result_column_remapping {
                 v.push((i, j));
@@ -1781,5 +1960,5 @@ fn order_by_deduplicate_result_columns(
         }
     }
 
-    return result_column_remapping;
+    result_column_remapping
 }
