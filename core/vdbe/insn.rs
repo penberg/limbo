@@ -1,5 +1,5 @@
 use super::{AggFunc, BranchOffset, CursorID, FuncCtx, PageIdx};
-use crate::types::OwnedRecord;
+use crate::types::{OwnedRecord, OwnedValue};
 use limbo_macros::Description;
 
 #[derive(Description, Debug)]
@@ -487,4 +487,144 @@ pub enum Insn {
         db: usize,
         where_clause: String,
     },
+}
+
+impl Insn {
+    pub fn math_binary_eval(&self) -> fn(&OwnedValue, &OwnedValue) -> OwnedValue {
+        match self {
+            Self::Add { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Integer(lhs + rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(lhs + rhs)
+                    }
+                    (OwnedValue::Float(f), OwnedValue::Integer(i))
+                    | (OwnedValue::Integer(i), OwnedValue::Float(f)) => {
+                        OwnedValue::Float(*f + *i as f64)
+                    }
+                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    _ => {
+                        todo!("{:?} {:?}", lhs, rhs);
+                    }
+                }
+            },
+            Self::Subtract { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Integer(lhs - rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(lhs - rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Float(lhs - *rhs as f64)
+                    }
+                    (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(*lhs as f64 - rhs)
+                    }
+                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    _ => unimplemented!(),
+                }
+            },
+            Self::Multiply { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Integer(lhs * rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(lhs * rhs)
+                    }
+                    (OwnedValue::Integer(i), OwnedValue::Float(f))
+                    | (OwnedValue::Float(f), OwnedValue::Integer(i)) => {
+                        OwnedValue::Float(*i as f64 * { *f })
+                    }
+                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    _ => todo!(),
+                }
+            },
+            Self::Divide { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (_, OwnedValue::Integer(0)) | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
+                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Integer(lhs / rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(lhs / rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Float(lhs / *rhs as f64)
+                    }
+                    (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(*lhs as f64 / rhs)
+                    }
+                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    _ => todo!(),
+                }
+            },
+            Self::BitAnd { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    (_, OwnedValue::Integer(0))
+                    | (OwnedValue::Integer(0), _)
+                    | (_, OwnedValue::Float(0.0))
+                    | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
+                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                        OwnedValue::Integer(lh & rh)
+                    }
+                    (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                        OwnedValue::Integer(*lh as i64 & *rh as i64)
+                    }
+                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                        OwnedValue::Integer(*lh as i64 & rh)
+                    }
+                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                        OwnedValue::Integer(lh & *rh as i64)
+                    }
+                    _ => todo!(),
+                }
+            },
+            Self::BitOr { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+                        OwnedValue::Integer(lh | rh)
+                    }
+                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+                        OwnedValue::Integer(*lh as i64 | rh)
+                    }
+                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+                        OwnedValue::Integer(lh | *rh as i64)
+                    }
+                    (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+                        OwnedValue::Integer(*lh as i64 | *rh as i64)
+                    }
+                    _ => todo!(),
+                }
+            },
+            Self::Remainder { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
+                match (lhs, rhs) {
+                    (OwnedValue::Null, _)
+                    | (_, OwnedValue::Null)
+                    | (_, OwnedValue::Integer(0))
+                    | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
+                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Integer(lhs % rhs)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float(((*lhs as i64) % (*rhs as i64)) as f64)
+                    }
+                    (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+                        OwnedValue::Float(((*lhs as i64) % rhs) as f64)
+                    }
+                    (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+                        OwnedValue::Float((lhs % *rhs as i64) as f64)
+                    }
+                    _ => todo!(),
+                }
+            },
+            _ => todo!(),
+        }
+    }
 }
