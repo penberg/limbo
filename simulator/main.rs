@@ -1,7 +1,7 @@
 use clap::Parser;
 use generation::plan::{Interaction, InteractionPlan, ResultSet};
 use generation::{pick_index, ArbitraryFrom};
-use limbo_core::{Connection, Database, Result, RowResult, IO};
+use limbo_core::{Database, Result};
 use model::table::Value;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -11,7 +11,6 @@ use runner::io::SimulatorIO;
 use std::backtrace::Backtrace;
 use std::io::Write;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -137,14 +136,18 @@ fn run_simulation(
 ) -> Result<()> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
-    let (read_percent, write_percent, delete_percent) = {
-        let mut remaining = 100;
-        let read_percent = rng.gen_range(0..=remaining);
+    let (create_percent, read_percent, write_percent, delete_percent) = {
+        let mut remaining = 100.0;
+        let read_percent = rng.gen_range(0.0..=remaining);
         remaining -= read_percent;
-        let write_percent = rng.gen_range(0..=remaining);
+        let write_percent = rng.gen_range(0.0..=remaining);
         remaining -= write_percent;
         let delete_percent = remaining;
-        (read_percent, write_percent, delete_percent)
+
+        let create_percent = write_percent / 10.0;
+        let write_percent = write_percent - create_percent;
+
+        (create_percent, read_percent, write_percent, delete_percent)
     };
 
     if cli_opts.maximum_size < 1 {
@@ -156,6 +159,7 @@ fn run_simulation(
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
+        create_percent,
         read_percent,
         write_percent,
         delete_percent,

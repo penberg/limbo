@@ -1,5 +1,10 @@
+use std::{
+    iter::Sum,
+    ops::{Add, Sub, SubAssign},
+};
+
 use anarchist_readable_name_generator_lib::readable_name_custom;
-use rand::Rng;
+use rand::{distributions::uniform::SampleUniform, Rng};
 
 pub mod plan;
 pub mod query;
@@ -13,12 +18,17 @@ pub trait ArbitraryFrom<T> {
     fn arbitrary_from<R: Rng>(rng: &mut R, t: &T) -> Self;
 }
 
-pub(crate) fn frequency<'a, T, R: rand::Rng>(
-    choices: Vec<(usize, Box<dyn FnOnce(&mut R) -> T + 'a>)>,
+pub(crate) fn frequency<
+    'a,
+    T,
+    R: rand::Rng,
+    N: Sum + PartialOrd + Copy + Default + SampleUniform + SubAssign,
+>(
+    choices: Vec<(N, Box<dyn FnOnce(&mut R) -> T + 'a>)>,
     rng: &mut R,
 ) -> T {
-    let total = choices.iter().map(|(weight, _)| weight).sum::<usize>();
-    let mut choice = rng.gen_range(0..total);
+    let total = choices.iter().map(|(weight, _)| *weight).sum::<N>();
+    let mut choice = rng.gen_range(N::default()..total);
 
     for (weight, f) in choices {
         if choice < weight {
