@@ -490,6 +490,8 @@ pub enum Insn {
 }
 
 impl Insn {
+    // returns a function that evaluates a binary expression of final values
+    // do not use on unresolved AggFunc values not in their .final_state()
     pub fn math_binary_eval(&self) -> fn(&OwnedValue, &OwnedValue) -> OwnedValue {
         match self {
             Self::Add { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
@@ -505,9 +507,10 @@ impl Insn {
                         OwnedValue::Float(*f + *i as f64)
                     }
                     (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    _ => {
-                        todo!("{:?} {:?}", lhs, rhs);
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
                     }
+                    _ => todo!(),
                 }
             },
             Self::Subtract { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
@@ -525,7 +528,10 @@ impl Insn {
                         OwnedValue::Float(*lhs as f64 - rhs)
                     }
                     (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    _ => unimplemented!(),
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
+                    }
+                    _ => todo!(),
                 }
             },
             Self::Multiply { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
@@ -541,6 +547,9 @@ impl Insn {
                         OwnedValue::Float(*i as f64 * { *f })
                     }
                     (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
+                    }
                     _ => todo!(),
                 }
             },
@@ -560,6 +569,9 @@ impl Insn {
                         OwnedValue::Float(*lhs as f64 / rhs)
                     }
                     (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
+                    }
                     _ => todo!(),
                 }
             },
@@ -582,6 +594,9 @@ impl Insn {
                     (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
                         OwnedValue::Integer(lh & *rh as i64)
                     }
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
+                    }
                     _ => todo!(),
                 }
             },
@@ -599,6 +614,9 @@ impl Insn {
                     }
                     (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
                         OwnedValue::Integer(*lh as i64 | *rh as i64)
+                    }
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
                     }
                     _ => todo!(),
                 }
@@ -621,10 +639,13 @@ impl Insn {
                     (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
                         OwnedValue::Float((lhs % *rhs as i64) as f64)
                     }
+                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
+                        unimplemented!("unresolved values {:?}", (lhs, rhs))
+                    }
                     _ => todo!(),
                 }
             },
-            _ => todo!(),
+            _ => unimplemented!("Not a binary operation instruction {:?}", self),
         }
     }
 }
