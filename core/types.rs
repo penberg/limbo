@@ -15,7 +15,7 @@ pub enum Value<'a> {
     Blob(&'a Vec<u8>),
 }
 
-impl<'a> Display for Value<'a> {
+impl Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Null => write!(f, "NULL"),

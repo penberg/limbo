@@ -8,11 +8,9 @@ pub fn construct_like_escape_arg(escape_value: &OwnedValue) -> Result<char, Limb
             let mut escape_chars = text.value.chars();
             match (escape_chars.next(), escape_chars.next()) {
                 (Some(escape), None) => Ok(escape),
-                _ => {
-                    return Result::Err(LimboError::Constraint(
-                        "ESCAPE expression must be a single character".to_string(),
-                    ))
-                }
+                _ => Result::Err(LimboError::Constraint(
+                    "ESCAPE expression must be a single character".to_string(),
+                )),
             }
         }
         _ => {

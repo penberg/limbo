@@ -1378,10 +1378,10 @@ impl BTreeCursor {
                     PageType::IndexLeaf => todo!(),
                 };
                 cbrk -= size;
-                if cbrk < first_cell as u64 || pc + size > usable_space {
+                if cbrk < first_cell || pc + size > usable_space {
                     todo!("corrupt");
                 }
-                assert!(cbrk + size <= usable_space && cbrk >= first_cell as u64);
+                assert!(cbrk + size <= usable_space && cbrk >= first_cell);
                 // set new pointer
                 write_buf[cell_idx..cell_idx + 2].copy_from_slice(&(cbrk as u16).to_be_bytes());
                 // copy payload
@@ -1394,7 +1394,7 @@ impl BTreeCursor {
         // if( data[hdr+7]+cbrk-iCellFirst!=pPage->nFree ){
         //   return SQLITE_CORRUPT_PAGE(pPage);
         // }
-        assert!(cbrk >= first_cell as u64);
+        assert!(cbrk >= first_cell);
         let write_buf = page.as_ptr();
 
         // set new first byte of cell content
@@ -1437,7 +1437,7 @@ impl BTreeCursor {
         // #3. freeblocks (linked list of blocks of at least 4 bytes within the cell content area that are not in use due to e.g. deletions)
 
         let mut free_space_bytes =
-            page.unallocated_region_size() as usize + page.num_frag_free_bytes() as usize;
+            page.unallocated_region_size() + page.num_frag_free_bytes() as usize;
 
         // #3 is computed by iterating over the freeblocks linked list
         let mut cur_freeblock_ptr = page.first_freeblock() as usize;
