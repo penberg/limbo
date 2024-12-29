@@ -15,156 +15,6 @@ use crate::{
 };
 use crate::{Connection, Result};
 
-#[derive(Debug)]
-/// Represents how a column should be populated during an INSERT.
-/// Contains both the column definition and optionally the index into the VALUES tuple.
-struct ColumnMapping<'a> {
-    /// Reference to the column definition from the table schema
-    column: &'a Column,
-    /// If Some(i), use the i-th value from the VALUES tuple
-    /// If None, use NULL (column was not specified in INSERT statement)
-    value_index: Option<usize>,
-}
-
-/// Resolves how each column in a table should be populated during an INSERT.
-/// Returns a Vec of ColumnMapping, one for each column in the table's schema.
-///
-/// For each column, specifies:
-/// 1. The column definition (type, constraints, etc)
-/// 2. Where to get the value from:
-///    - Some(i) -> use i-th value from the VALUES tuple
-///    - None -> use NULL (column wasn't specified in INSERT)
-///
-/// Two cases are handled:
-/// 1. No column list specified (INSERT INTO t VALUES ...):
-///    - Values are assigned to columns in table definition order
-///    - If fewer values than columns, remaining columns map to None
-/// 2. Column list specified (INSERT INTO t (col1, col3) VALUES ...):
-///    - Named columns map to their corresponding value index
-///    - Unspecified columns map to None
-fn resolve_columns_for_insert<'a>(
-    table: &'a Table,
-    columns: &Option<DistinctNames>,
-    values: &[Vec<Expr>],
-) -> Result<Vec<ColumnMapping<'a>>> {
-    if values.is_empty() {
-        crate::bail_parse_error!("no values to insert");
-    }
-
-    let table_columns = table.columns();
-
-    // Case 1: No columns specified - map values to columns in order
-    if columns.is_none() {
-        let num_values = values[0].len();
-        if num_values > table_columns.len() {
-            crate::bail_parse_error!(
-                "table {} has {} columns but {} values were supplied",
-                table.get_name(),
-                table_columns.len(),
-                num_values
-            );
-        }
-
-        // Verify all value tuples have same length
-        for value in values.iter().skip(1) {
-            if value.len() != num_values {
-                crate::bail_parse_error!("all VALUES must have the same number of terms");
-            }
-        }
-
-        // Map each column to either its corresponding value index or None
-        return Ok(table_columns
-            .iter()
-            .enumerate()
-            .map(|(i, col)| ColumnMapping {
-                column: col,
-                value_index: if i < num_values { Some(i) } else { None },
-            })
-            .collect());
-    }
-
-    // Case 2: Columns specified - map named columns to their values
-    let mut mappings: Vec<_> = table_columns
-        .iter()
-        .map(|col| ColumnMapping {
-            column: col,
-            value_index: None,
-        })
-        .collect();
-
-    // Map each named column to its value index
-    for (value_index, column_name) in columns.as_ref().unwrap().iter().enumerate() {
-        let column_name = normalize_ident(column_name.0.as_str());
-        let table_index = table_columns
-            .iter()
-            .position(|c| c.name.eq_ignore_ascii_case(&column_name));
-
-        if table_index.is_none() {
-            crate::bail_parse_error!(
-                "table {} has no column named {}",
-                table.get_name(),
-                column_name
-            );
-        }
-
-        mappings[table_index.unwrap()].value_index = Some(value_index);
-    }
-
-    Ok(mappings)
-}
-
-/// Populates the column registers with values for a single row
-fn populate_column_registers(
-    program: &mut ProgramBuilder,
-    value: &[Expr],
-    column_mappings: &[ColumnMapping],
-    column_registers_start: usize,
-    inserting_multiple_rows: bool,
-    rowid_reg: usize,
-) -> Result<()> {
-    for (i, mapping) in column_mappings.iter().enumerate() {
-        let target_reg = column_registers_start + i;
-
-        // Column has a value in the VALUES tuple
-        if let Some(value_index) = mapping.value_index {
-            // When inserting a single row, SQLite writes the value provided for the rowid alias column (INTEGER PRIMARY KEY)
-            // directly into the rowid register and writes a NULL into the rowid alias column. Not sure why this only happens
-            // in the single row case, but let's copy it.
-            let write_directly_to_rowid_reg =
-                mapping.column.is_rowid_alias && !inserting_multiple_rows;
-            let reg = if write_directly_to_rowid_reg {
-                rowid_reg
-            } else {
-                target_reg
-            };
-            translate_expr(
-                program,
-                None,
-                value.get(value_index).expect("value index out of bounds"),
-                reg,
-                None,
-            )?;
-            if write_directly_to_rowid_reg {
-                program.emit_insn(Insn::SoftNull { reg: target_reg });
-            }
-        } else {
-            // Column was not specified - use NULL if it is nullable, otherwise error
-            // Rowid alias columns can be NULL because we will autogenerate a rowid in that case.
-            let is_nullable = !mapping.column.primary_key || mapping.column.is_rowid_alias;
-            if is_nullable {
-                program.emit_insn(Insn::Null {
-                    dest: target_reg,
-                    dest_end: None,
-                });
-                program.mark_last_insn_constant();
-            } else {
-                crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
-            }
-        }
-    }
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
     schema: &Schema,
@@ -421,4 +271,154 @@ pub fn translate_insert(
     });
     program.resolve_deferred_labels();
     Ok(program.build(database_header, connection))
+}
+
+#[derive(Debug)]
+/// Represents how a column should be populated during an INSERT.
+/// Contains both the column definition and optionally the index into the VALUES tuple.
+struct ColumnMapping<'a> {
+    /// Reference to the column definition from the table schema
+    column: &'a Column,
+    /// If Some(i), use the i-th value from the VALUES tuple
+    /// If None, use NULL (column was not specified in INSERT statement)
+    value_index: Option<usize>,
+}
+
+/// Resolves how each column in a table should be populated during an INSERT.
+/// Returns a Vec of ColumnMapping, one for each column in the table's schema.
+///
+/// For each column, specifies:
+/// 1. The column definition (type, constraints, etc)
+/// 2. Where to get the value from:
+///    - Some(i) -> use i-th value from the VALUES tuple
+///    - None -> use NULL (column wasn't specified in INSERT)
+///
+/// Two cases are handled:
+/// 1. No column list specified (INSERT INTO t VALUES ...):
+///    - Values are assigned to columns in table definition order
+///    - If fewer values than columns, remaining columns map to None
+/// 2. Column list specified (INSERT INTO t (col1, col3) VALUES ...):
+///    - Named columns map to their corresponding value index
+///    - Unspecified columns map to None
+fn resolve_columns_for_insert<'a>(
+    table: &'a Table,
+    columns: &Option<DistinctNames>,
+    values: &[Vec<Expr>],
+) -> Result<Vec<ColumnMapping<'a>>> {
+    if values.is_empty() {
+        crate::bail_parse_error!("no values to insert");
+    }
+
+    let table_columns = table.columns();
+
+    // Case 1: No columns specified - map values to columns in order
+    if columns.is_none() {
+        let num_values = values[0].len();
+        if num_values > table_columns.len() {
+            crate::bail_parse_error!(
+                "table {} has {} columns but {} values were supplied",
+                table.get_name(),
+                table_columns.len(),
+                num_values
+            );
+        }
+
+        // Verify all value tuples have same length
+        for value in values.iter().skip(1) {
+            if value.len() != num_values {
+                crate::bail_parse_error!("all VALUES must have the same number of terms");
+            }
+        }
+
+        // Map each column to either its corresponding value index or None
+        return Ok(table_columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| ColumnMapping {
+                column: col,
+                value_index: if i < num_values { Some(i) } else { None },
+            })
+            .collect());
+    }
+
+    // Case 2: Columns specified - map named columns to their values
+    let mut mappings: Vec<_> = table_columns
+        .iter()
+        .map(|col| ColumnMapping {
+            column: col,
+            value_index: None,
+        })
+        .collect();
+
+    // Map each named column to its value index
+    for (value_index, column_name) in columns.as_ref().unwrap().iter().enumerate() {
+        let column_name = normalize_ident(column_name.0.as_str());
+        let table_index = table_columns
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(&column_name));
+
+        if table_index.is_none() {
+            crate::bail_parse_error!(
+                "table {} has no column named {}",
+                table.get_name(),
+                column_name
+            );
+        }
+
+        mappings[table_index.unwrap()].value_index = Some(value_index);
+    }
+
+    Ok(mappings)
+}
+
+/// Populates the column registers with values for a single row
+fn populate_column_registers(
+    program: &mut ProgramBuilder,
+    value: &[Expr],
+    column_mappings: &[ColumnMapping],
+    column_registers_start: usize,
+    inserting_multiple_rows: bool,
+    rowid_reg: usize,
+) -> Result<()> {
+    for (i, mapping) in column_mappings.iter().enumerate() {
+        let target_reg = column_registers_start + i;
+
+        // Column has a value in the VALUES tuple
+        if let Some(value_index) = mapping.value_index {
+            // When inserting a single row, SQLite writes the value provided for the rowid alias column (INTEGER PRIMARY KEY)
+            // directly into the rowid register and writes a NULL into the rowid alias column. Not sure why this only happens
+            // in the single row case, but let's copy it.
+            let write_directly_to_rowid_reg =
+                mapping.column.is_rowid_alias && !inserting_multiple_rows;
+            let reg = if write_directly_to_rowid_reg {
+                rowid_reg
+            } else {
+                target_reg
+            };
+            translate_expr(
+                program,
+                None,
+                value.get(value_index).expect("value index out of bounds"),
+                reg,
+                None,
+            )?;
+            if write_directly_to_rowid_reg {
+                program.emit_insn(Insn::SoftNull { reg: target_reg });
+            }
+        } else {
+            // Column was not specified - use NULL if it is nullable, otherwise error
+            // Rowid alias columns can be NULL because we will autogenerate a rowid in that case.
+            let is_nullable = !mapping.column.primary_key || mapping.column.is_rowid_alias;
+            if is_nullable {
+                program.emit_insn(Insn::Null {
+                    dest: target_reg,
+                    dest_end: None,
+                });
+                program.mark_last_insn_constant();
+            } else {
+                crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
+            }
+        }
+    }
+    Ok(())
 }
