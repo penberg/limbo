@@ -258,8 +258,7 @@ fn bind_column_references(
     }
 }
 
-#[allow(clippy::extra_unused_lifetimes)]
-pub fn prepare_select_plan<'a>(schema: &Schema, select: ast::Select) -> Result<Plan> {
+pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan> {
     match select.body.select {
         ast::OneSelect::Select {
             columns,
