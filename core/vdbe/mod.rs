@@ -4097,7 +4097,7 @@ mod tests {
                 expected_len: 2,
             },
             TestCase {
-                input: OwnedValue::Float(-3.14),
+                input: OwnedValue::Float(-3.15),
                 expected_len: 1,
             },
             TestCase {
