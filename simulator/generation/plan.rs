@@ -379,7 +379,6 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv
     Interactions(vec![cq1, cq2, assertion])
 }
 
-
 fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     let create_query = Interaction::Query(Query::Create(Create::arbitrary(rng)));
     Interactions(vec![create_query])
