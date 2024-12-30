@@ -1,7 +1,4 @@
-use std::{
-    iter::Sum,
-    ops::{Add, Sub, SubAssign},
-};
+use std::{iter::Sum, ops::SubAssign};
 
 use anarchist_readable_name_generator_lib::readable_name_custom;
 use rand::{distributions::uniform::SampleUniform, Rng};
@@ -48,7 +45,7 @@ pub(crate) fn one_of<'a, T, R: rand::Rng>(
     choices[index](rng)
 }
 
-pub(crate) fn pick<'a, T, R: rand::Rng>(choices: &'a Vec<T>, rng: &mut R) -> &'a T {
+pub(crate) fn pick<'a, T, R: rand::Rng>(choices: &'a [T], rng: &mut R) -> &'a T {
     let index = rng.gen_range(0..choices.len());
     &choices[index]
 }

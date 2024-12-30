@@ -36,4 +36,5 @@ pub(crate) struct SimulatorOpts {
     pub(crate) delete_percent: f64,
     pub(crate) max_interactions: usize,
     pub(crate) page_size: usize,
+    pub(crate) max_time_simulation: usize,
 }

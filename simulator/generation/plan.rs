@@ -101,7 +101,9 @@ impl Interactions {
             match interaction {
                 Interaction::Query(query) => match query {
                     Query::Create(create) => {
-                        env.tables.push(create.table.clone());
+                        if !env.tables.iter().any(|t| t.name == create.table.name) {
+                            env.tables.push(create.table.clone());
+                        }
                     }
                     Query::Insert(insert) => {
                         let table = env
@@ -175,7 +177,7 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
             rng: ChaCha8Rng::seed_from_u64(rng.next_u64()),
         };
 
-        let num_interactions = rng.gen_range(0..env.opts.max_interactions);
+        let num_interactions = env.opts.max_interactions;
 
         // First create at least one table
         let create_query = Create::arbitrary(rng);
