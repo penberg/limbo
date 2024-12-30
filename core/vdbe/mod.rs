@@ -42,6 +42,10 @@ use crate::vdbe::insn::Insn;
 use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_time, exec_unixepoch};
+use insn::{
+    exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
+    exec_subtract,
+};
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
@@ -186,137 +190,42 @@ impl Program {
                     state.pc = *target_pc;
                 }
                 Insn::Add { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
+                    state.registers[*dest] =
+                        exec_add(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
                 Insn::Subtract { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
+                    state.registers[*dest] =
+                        exec_subtract(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
                 Insn::Multiply { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
+                    state.registers[*dest] =
+                        exec_multiply(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
                 Insn::Divide { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
-                    state.pc += 1;
-                }
-                Insn::BitAnd { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
-                    state.pc += 1;
-                }
-                Insn::BitOr { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
-                    state.pc += 1;
-                }
-                Insn::BitNot { reg, dest } => {
-                    let reg = *reg;
-                    let dest = *dest;
-                    match &state.registers[reg] {
-                        OwnedValue::Integer(i) => state.registers[dest] = OwnedValue::Integer(!i),
-                        OwnedValue::Float(f) => {
-                            state.registers[dest] = OwnedValue::Integer(!{ *f as i64 })
-                        }
-                        OwnedValue::Null => {
-                            state.registers[dest] = OwnedValue::Null;
-                        }
-                        OwnedValue::Agg(aggctx) => match aggctx.final_value() {
-                            OwnedValue::Integer(i) => {
-                                state.registers[dest] = OwnedValue::Integer(!i);
-                            }
-                            OwnedValue::Float(f) => {
-                                state.registers[dest] = OwnedValue::Integer(!{ *f as i64 });
-                            }
-                            OwnedValue::Null => {
-                                state.registers[dest] = OwnedValue::Null;
-                            }
-                            _ => unimplemented!("{:?}", aggctx),
-                        },
-                        _ => {
-                            unimplemented!("{:?}", state.registers[reg]);
-                        }
-                    }
+                    state.registers[*dest] =
+                        exec_divide(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
                 Insn::Remainder { lhs, rhs, dest } => {
-                    let lhs = *lhs;
-                    let rhs = *rhs;
-                    let dest = *dest;
-                    let mut lhs = &state.registers[lhs];
-                    let mut rhs = &state.registers[rhs];
-                    if let OwnedValue::Agg(aggctx) = &lhs {
-                        lhs = aggctx.final_value();
-                    }
-                    if let OwnedValue::Agg(aggctx) = &rhs {
-                        rhs = aggctx.final_value();
-                    }
-                    state.registers[dest] = insn.math_binary_eval()(lhs, rhs);
+                    state.registers[*dest] =
+                        exec_remainder(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::BitAnd { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_bit_and(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::BitOr { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_bit_or(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::BitNot { reg, dest } => {
+                    state.registers[*dest] = exec_bit_not(&state.registers[*reg]);
                     state.pc += 1;
                 }
                 Insn::Null { dest, dest_end } => {

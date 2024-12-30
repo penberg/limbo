@@ -489,163 +489,149 @@ pub enum Insn {
     },
 }
 
-impl Insn {
-    // returns a function that evaluates a binary expression of final values
-    // do not use on unresolved AggFunc values not in their .final_state()
-    pub fn math_binary_eval(&self) -> fn(&OwnedValue, &OwnedValue) -> OwnedValue {
-        match self {
-            Self::Add { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Integer(lhs + rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(lhs + rhs)
-                    }
-                    (OwnedValue::Float(f), OwnedValue::Integer(i))
-                    | (OwnedValue::Integer(i), OwnedValue::Float(f)) => {
-                        OwnedValue::Float(*f + *i as f64)
-                    }
-                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            Self::Subtract { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Integer(lhs - rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(lhs - rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Float(lhs - *rhs as f64)
-                    }
-                    (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(*lhs as f64 - rhs)
-                    }
-                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            Self::Multiply { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Integer(lhs * rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(lhs * rhs)
-                    }
-                    (OwnedValue::Integer(i), OwnedValue::Float(f))
-                    | (OwnedValue::Float(f), OwnedValue::Integer(i)) => {
-                        OwnedValue::Float(*i as f64 * { *f })
-                    }
-                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            Self::Divide { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (_, OwnedValue::Integer(0)) | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
-                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Integer(lhs / rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(lhs / rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Float(lhs / *rhs as f64)
-                    }
-                    (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(*lhs as f64 / rhs)
-                    }
-                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            Self::BitAnd { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    (_, OwnedValue::Integer(0))
-                    | (OwnedValue::Integer(0), _)
-                    | (_, OwnedValue::Float(0.0))
-                    | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
-                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
-                        OwnedValue::Integer(lh & rh)
-                    }
-                    (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
-                        OwnedValue::Integer(*lh as i64 & *rh as i64)
-                    }
-                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
-                        OwnedValue::Integer(*lh as i64 & rh)
-                    }
-                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
-                        OwnedValue::Integer(lh & *rh as i64)
-                    }
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            Self::BitOr { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
-                    (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
-                        OwnedValue::Integer(lh | rh)
-                    }
-                    (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
-                        OwnedValue::Integer(*lh as i64 | rh)
-                    }
-                    (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
-                        OwnedValue::Integer(lh | *rh as i64)
-                    }
-                    (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
-                        OwnedValue::Integer(*lh as i64 | *rh as i64)
-                    }
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            Self::Remainder { .. } => |lhs: &OwnedValue, rhs: &OwnedValue| -> OwnedValue {
-                match (lhs, rhs) {
-                    (OwnedValue::Null, _)
-                    | (_, OwnedValue::Null)
-                    | (_, OwnedValue::Integer(0))
-                    | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
-                    (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Integer(lhs % rhs)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float(((*lhs as i64) % (*rhs as i64)) as f64)
-                    }
-                    (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
-                        OwnedValue::Float(((*lhs as i64) % rhs) as f64)
-                    }
-                    (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
-                        OwnedValue::Float((lhs % *rhs as i64) as f64)
-                    }
-                    (OwnedValue::Agg(_), _) | (_, OwnedValue::Agg(_)) => {
-                        unimplemented!("unresolved values {:?}", (lhs, rhs))
-                    }
-                    _ => todo!(),
-                }
-            },
-            _ => unimplemented!("Not a binary operation instruction {:?}", self),
+pub fn exec_add(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs + rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs + rhs),
+        (OwnedValue::Float(f), OwnedValue::Integer(i))
+        | (OwnedValue::Integer(i), OwnedValue::Float(f)) => OwnedValue::Float(*f + *i as f64),
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        _ => todo!(),
+    }
+}
+
+pub fn exec_subtract(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs - rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs - rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Float(lhs - *rhs as f64),
+        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(*lhs as f64 - rhs),
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        _ => todo!(),
+    }
+}
+pub fn exec_multiply(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs * rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs * rhs),
+        (OwnedValue::Integer(i), OwnedValue::Float(f))
+        | (OwnedValue::Float(f), OwnedValue::Integer(i)) => OwnedValue::Float(*i as f64 * { *f }),
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        _ => todo!(),
+    }
+}
+
+pub fn exec_divide(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (_, OwnedValue::Integer(0)) | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs / rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs / rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Float(lhs / *rhs as f64),
+        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(*lhs as f64 / rhs),
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        _ => todo!(),
+    }
+}
+
+pub fn exec_bit_and(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (_, OwnedValue::Integer(0))
+        | (OwnedValue::Integer(0), _)
+        | (_, OwnedValue::Float(0.0))
+        | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
+        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => OwnedValue::Integer(lh & rh),
+        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+            OwnedValue::Integer(*lh as i64 & *rh as i64)
         }
+        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => OwnedValue::Integer(*lh as i64 & rh),
+        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => OwnedValue::Integer(lh & *rh as i64),
+        _ => todo!(),
+    }
+}
+pub fn exec_bit_or(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => OwnedValue::Integer(lh | rh),
+        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => OwnedValue::Integer(*lh as i64 | rh),
+        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => OwnedValue::Integer(lh | *rh as i64),
+        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+            OwnedValue::Integer(*lh as i64 | *rh as i64)
+        }
+        _ => todo!(),
+    }
+}
+
+pub fn exec_remainder(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Null, _)
+        | (_, OwnedValue::Null)
+        | (_, OwnedValue::Integer(0))
+        | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs % rhs),
+        (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => {
+            OwnedValue::Float(((*lhs as i64) % (*rhs as i64)) as f64)
+        }
+        (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => {
+            OwnedValue::Float(((*lhs as i64) % rhs) as f64)
+        }
+        (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => {
+            OwnedValue::Float((lhs % *rhs as i64) as f64)
+        }
+        _ => todo!(),
+    }
+}
+
+pub fn exec_bit_not(mut reg: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = reg {
+        reg = agg.final_value();
+    }
+    match reg {
+        OwnedValue::Null => OwnedValue::Null,
+        OwnedValue::Integer(i) => OwnedValue::Integer(!i),
+        OwnedValue::Float(f) => OwnedValue::Integer(!(*f as i64)),
+        _ => todo!(),
     }
 }
