@@ -1,12 +1,11 @@
 use anyhow::Result;
 use errors::*;
-use limbo_core::IO;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 mod errors;
 
