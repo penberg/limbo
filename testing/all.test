@@ -17,4 +17,5 @@ source $testdir/pragma.test
 source $testdir/scalar-functions.test
 source $testdir/scalar-functions-datetime.test
 source $testdir/select.test
+source $testdir/subquery.test
 source $testdir/where.test

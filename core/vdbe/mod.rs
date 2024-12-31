@@ -99,7 +99,7 @@ pub struct ProgramState {
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
     deferred_seek: Option<(CursorID, CursorID)>,
-    ended_coroutine: bool, // flag to notify yield coroutine finished
+    ended_coroutine: HashMap<usize, bool>, // flag to indicate that a coroutine has ended (key is the yield register)
     regex_cache: RegexCache,
     interrupted: bool,
 }
@@ -115,7 +115,7 @@ impl ProgramState {
             registers,
             last_compare: None,
             deferred_seek: None,
-            ended_coroutine: false,
+            ended_coroutine: HashMap::new(),
             regex_cache: RegexCache::new(),
             interrupted: false,
         }
@@ -179,6 +179,7 @@ impl Program {
             }
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
+            // print_insn(self, state.pc as InsnReference, insn, "".to_string());
             let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
@@ -2279,12 +2280,18 @@ impl Program {
                     jump_on_definition,
                     start_offset,
                 } => {
+                    assert!(*jump_on_definition >= 0);
                     state.registers[*yield_reg] = OwnedValue::Integer(*start_offset);
-                    state.pc = *jump_on_definition;
+                    state.ended_coroutine.insert(*yield_reg, false);
+                    state.pc = if *jump_on_definition == 0 {
+                        state.pc + 1
+                    } else {
+                        *jump_on_definition
+                    };
                 }
                 Insn::EndCoroutine { yield_reg } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
-                        state.ended_coroutine = true;
+                        state.ended_coroutine.insert(*yield_reg, true);
                         state.pc = pc - 1; // yield jump is always next to yield. Here we substract 1 to go back to yield instruction
                     } else {
                         unreachable!();
@@ -2295,7 +2302,7 @@ impl Program {
                     end_offset,
                 } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
-                        if state.ended_coroutine {
+                        if *state.ended_coroutine.get(yield_reg).unwrap_or(&false) {
                             state.pc = *end_offset;
                         } else {
                             // swap
@@ -2303,7 +2310,10 @@ impl Program {
                                 (pc, OwnedValue::Integer(state.pc + 1));
                         }
                     } else {
-                        unreachable!();
+                        unreachable!(
+                            "yield_reg {} contains non-integer value: {:?}",
+                            *yield_reg, state.registers[*yield_reg]
+                        );
                     }
                 }
                 Insn::InsertAsync {

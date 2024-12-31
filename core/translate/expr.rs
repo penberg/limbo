@@ -10,7 +10,7 @@ use crate::util::{exprs_are_equivalent, normalize_ident};
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, BranchOffset};
 use crate::{Result, SymbolTable};
 
-use super::plan::{Aggregate, BTreeTableReference};
+use super::plan::{Aggregate, TableReference, TableReferenceType};
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct ConditionMetadata {
@@ -21,7 +21,7 @@ pub struct ConditionMetadata {
 
 pub fn translate_condition_expr(
     program: &mut ProgramBuilder,
-    referenced_tables: &[BTreeTableReference],
+    referenced_tables: &[TableReference],
     expr: &ast::Expr,
     condition_metadata: ConditionMetadata,
     precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
@@ -562,7 +562,7 @@ pub fn translate_condition_expr(
 
 pub fn translate_expr(
     program: &mut ProgramBuilder,
-    referenced_tables: Option<&[BTreeTableReference]>,
+    referenced_tables: Option<&[TableReference]>,
     expr: &ast::Expr,
     target_register: usize,
     precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
@@ -1962,22 +1962,41 @@ pub fn translate_expr(
             is_rowid_alias,
         } => {
             let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
-            let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
-            if *is_rowid_alias {
-                program.emit_insn(Insn::RowId {
-                    cursor_id,
-                    dest: target_register,
-                });
-            } else {
-                program.emit_insn(Insn::Column {
-                    cursor_id,
-                    column: *column,
-                    dest: target_register,
-                });
+            match tbl_ref.reference_type {
+                // If we are reading a column from a table, we find the cursor that corresponds to
+                // the table and read the column from the cursor.
+                TableReferenceType::BTreeTable => {
+                    let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
+                    if *is_rowid_alias {
+                        program.emit_insn(Insn::RowId {
+                            cursor_id,
+                            dest: target_register,
+                        });
+                    } else {
+                        program.emit_insn(Insn::Column {
+                            cursor_id,
+                            column: *column,
+                            dest: target_register,
+                        });
+                    }
+                    let column = tbl_ref.table.get_column_at(*column);
+                    maybe_apply_affinity(column.ty, target_register, program);
+                    Ok(target_register)
+                }
+                // If we are reading a column from a subquery, we instead copy the column from the
+                // subquery's result registers.
+                TableReferenceType::Subquery {
+                    result_columns_start_reg,
+                    ..
+                } => {
+                    program.emit_insn(Insn::Copy {
+                        src_reg: result_columns_start_reg + *column,
+                        dst_reg: target_register,
+                        amount: 0,
+                    });
+                    Ok(target_register)
+                }
             }
-            let column = &tbl_ref.table.columns[*column];
-            maybe_apply_affinity(column.ty, target_register, program);
-            Ok(target_register)
         }
         ast::Expr::InList { .. } => todo!(),
         ast::Expr::InSelect { .. } => todo!(),
@@ -2170,7 +2189,7 @@ pub fn translate_expr(
 fn translate_variable_sized_function_parameter_list(
     program: &mut ProgramBuilder,
     args: &Option<Vec<ast::Expr>>,
-    referenced_tables: Option<&[BTreeTableReference]>,
+    referenced_tables: Option<&[TableReference]>,
     precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
     syms: &SymbolTable,
 ) -> Result<usize> {
@@ -2223,7 +2242,7 @@ pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mu
 
 pub fn translate_aggregation(
     program: &mut ProgramBuilder,
-    referenced_tables: &[BTreeTableReference],
+    referenced_tables: &[TableReference],
     agg: &Aggregate,
     target_register: usize,
     syms: &SymbolTable,
@@ -2408,7 +2427,7 @@ pub fn translate_aggregation(
 
 pub fn translate_aggregation_groupby(
     program: &mut ProgramBuilder,
-    referenced_tables: &[BTreeTableReference],
+    referenced_tables: &[TableReference],
     group_by_sorter_cursor_id: usize,
     cursor_index: usize,
     agg: &Aggregate,
@@ -2584,4 +2603,30 @@ pub fn translate_aggregation_groupby(
         }
     };
     Ok(dest)
+}
+
+/// Get an appropriate name for an expression.
+/// If the query provides an alias (e.g. `SELECT a AS b FROM t`), use that (e.g. `b`).
+/// If the expression is a column from a table, use the column name (e.g. `a`).
+/// Otherwise we just use a generic fallback name (e.g. `expr_<index>`).
+pub fn get_name(
+    maybe_alias: Option<&ast::As>,
+    expr: &ast::Expr,
+    referenced_tables: &[TableReference],
+    fallback: impl Fn() -> String,
+) -> String {
+    let alias = maybe_alias.map(|a| match a {
+        ast::As::As(id) => id.0.clone(),
+        ast::As::Elided(id) => id.0.clone(),
+    });
+    if let Some(alias) = alias {
+        return alias;
+    }
+    match expr {
+        ast::Expr::Column { table, column, .. } => {
+            let table_ref = referenced_tables.get(*table).unwrap();
+            table_ref.table.get_column_at(*column).name.clone()
+        }
+        _ => fallback(),
+    }
 }
