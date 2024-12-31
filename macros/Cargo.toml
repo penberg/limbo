@@ -1,0 +1,13 @@
+# Copyright 2024 the Limbo authors. All rights reserved. MIT license.
+
+[package]
+name = "limbo_macros"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Limbo database library"
+
+[lib]
+proc-macro = true

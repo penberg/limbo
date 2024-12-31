@@ -1,9 +1,11 @@
 mod error;
+mod ext;
 mod function;
 mod io;
 #[cfg(feature = "json")]
 mod json;
 mod pseudo;
+mod result;
 mod schema;
 mod storage;
 mod translate;
@@ -34,12 +36,12 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
-use translate::optimizer::optimize_plan;
 use translate::planner::prepare_select_plan;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
 
+use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
 #[cfg(feature = "fs")]
 pub use io::PlatformIO;
@@ -65,11 +67,10 @@ pub struct Database {
     pager: Rc<Pager>,
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
-    transaction_state: RefCell<TransactionState>,
     // Shared structures of a Database are the parts that are common to multiple threads that might
     // create DB connections.
-    shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
-    shared_wal: Arc<RwLock<WalFileShared>>,
+    _shared_page_cache: Arc<RwLock<DumbLruPageCache>>,
+    _shared_wal: Arc<RwLock<WalFileShared>>,
 }
 
 impl Database {
@@ -95,6 +96,7 @@ impl Database {
         Self::open(io, page_io, wal, wal_shared, buffer_pool)
     }
 
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn open(
         io: Arc<dyn IO>,
         page_io: Rc<dyn DatabaseStorage>,
@@ -108,13 +110,13 @@ impl Database {
             let version = db_header.borrow().version_number;
             version.to_string()
         });
-        let shared_page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
+        let _shared_page_cache = Arc::new(RwLock::new(DumbLruPageCache::new(10)));
         let pager = Rc::new(Pager::finish_open(
             db_header.clone(),
             page_io,
             wal,
             io.clone(),
-            shared_page_cache.clone(),
+            _shared_page_cache.clone(),
             buffer_pool,
         )?);
         let bootstrap_schema = Rc::new(RefCell::new(Schema::new()));
@@ -122,7 +124,8 @@ impl Database {
             pager: pager.clone(),
             schema: bootstrap_schema.clone(),
             header: db_header.clone(),
-            db: Weak::new(),
+            transaction_state: RefCell::new(TransactionState::None),
+            _db: Weak::new(),
             last_insert_rowid: Cell::new(0),
         });
         let mut schema = Schema::new();
@@ -134,9 +137,8 @@ impl Database {
             pager,
             schema,
             header,
-            transaction_state: RefCell::new(TransactionState::None),
-            shared_page_cache,
-            shared_wal,
+            _shared_page_cache,
+            _shared_wal: shared_wal,
         }))
     }
 
@@ -146,7 +148,8 @@ impl Database {
             schema: self.schema.clone(),
             header: self.header.clone(),
             last_insert_rowid: Cell::new(0),
-            db: Arc::downgrade(self),
+            _db: Arc::downgrade(self),
+            transaction_state: RefCell::new(TransactionState::None),
         })
     }
 }
@@ -204,7 +207,8 @@ pub struct Connection {
     pager: Rc<Pager>,
     schema: Rc<RefCell<Schema>>,
     header: Rc<RefCell<DatabaseHeader>>,
-    db: Weak<Database>, // backpointer to the database holding this connection
+    _db: Weak<Database>, // backpointer to the database holding this connection
+    transaction_state: RefCell<TransactionState>,
     last_insert_rowid: Cell<u64>,
 }
 
@@ -266,7 +270,7 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let plan = prepare_select_plan(&*self.schema.borrow(), select)?;
+                            let plan = prepare_select_plan(&self.schema.borrow(), select)?;
                             let plan = optimize_plan(plan)?;
                             println!("{}", plan);
                         }
@@ -371,13 +375,14 @@ impl Statement {
         self.state.interrupt();
     }
 
-    pub fn step(&mut self) -> Result<RowResult<'_>> {
+    pub fn step(&mut self) -> Result<StepResult<'_>> {
         let result = self.program.step(&mut self.state, self.pager.clone())?;
         match result {
-            vdbe::StepResult::Row(row) => Ok(RowResult::Row(Row { values: row.values })),
-            vdbe::StepResult::IO => Ok(RowResult::IO),
-            vdbe::StepResult::Done => Ok(RowResult::Done),
-            vdbe::StepResult::Interrupt => Ok(RowResult::Interrupt),
+            vdbe::StepResult::Row(row) => Ok(StepResult::Row(Row { values: row.values })),
+            vdbe::StepResult::IO => Ok(StepResult::IO),
+            vdbe::StepResult::Done => Ok(StepResult::Done),
+            vdbe::StepResult::Interrupt => Ok(StepResult::Interrupt),
+            vdbe::StepResult::Busy => Ok(StepResult::Busy),
         }
     }
 
@@ -389,11 +394,12 @@ impl Statement {
     pub fn reset(&self) {}
 }
 
-pub enum RowResult<'a> {
+pub enum StepResult<'a> {
     Row(Row<'a>),
     IO,
     Done,
     Interrupt,
+    Busy,
 }
 
 pub struct Row<'a> {
@@ -416,7 +422,7 @@ impl Rows {
         Self { stmt }
     }
 
-    pub fn next_row(&mut self) -> Result<RowResult<'_>> {
+    pub fn next_row(&mut self) -> Result<StepResult<'_>> {
         self.stmt.step()
     }
 }

@@ -7,6 +7,7 @@
 //! a SELECT statement will be translated into a sequence of instructions that
 //! will read rows from the database and filter them according to a WHERE clause.
 
+pub(crate) mod delete;
 pub(crate) mod emitter;
 pub(crate) mod expr;
 pub(crate) mod insert;
@@ -15,20 +16,20 @@ pub(crate) mod plan;
 pub(crate) mod planner;
 pub(crate) mod select;
 
-use std::cell::RefCell;
-use std::fmt::Display;
-use std::rc::{Rc, Weak};
-use std::str::FromStr;
-
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
-use crate::vdbe::{builder::ProgramBuilder, Insn, Program};
+use crate::translate::delete::translate_delete;
+use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, Result};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast::fmt::ToTokens;
 use sqlite3_parser::ast::{self, PragmaName};
+use std::cell::RefCell;
+use std::fmt::Display;
+use std::rc::{Rc, Weak};
+use std::str::FromStr;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -68,7 +69,19 @@ pub fn translate(
         ast::Stmt::CreateVirtualTable { .. } => {
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
-        ast::Stmt::Delete { .. } => bail_parse_error!("DELETE not supported yet"),
+        ast::Stmt::Delete {
+            tbl_name,
+            where_clause,
+            limit,
+            ..
+        } => translate_delete(
+            schema,
+            &tbl_name,
+            where_clause,
+            limit,
+            database_header,
+            connection,
+        ),
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
@@ -369,7 +382,6 @@ fn update_pragma(
             query_pragma("journal_mode", header, program)?;
             Ok(())
         }
-        _ => todo!("pragma `{name}`"),
     }
 }
 
@@ -386,7 +398,7 @@ fn query_pragma(
     match pragma {
         PragmaName::CacheSize => {
             program.emit_insn(Insn::Integer {
-                value: database_header.borrow().default_cache_size.into(),
+                value: database_header.borrow().default_page_cache_size.into(),
                 dest: register,
             });
         }
@@ -395,9 +407,6 @@ fn query_pragma(
                 value: "wal".into(),
                 dest: register,
             });
-        }
-        _ => {
-            todo!("pragma `{name}`");
         }
     }
 
@@ -424,7 +433,7 @@ fn update_cache_size(value: i64, header: Rc<RefCell<DatabaseHeader>>, pager: Rc<
     }
 
     // update in-memory header
-    header.borrow_mut().default_cache_size = cache_size_unformatted
+    header.borrow_mut().default_page_cache_size = cache_size_unformatted
         .try_into()
         .unwrap_or_else(|_| panic!("invalid value, too big for a i32 {}", value));
 

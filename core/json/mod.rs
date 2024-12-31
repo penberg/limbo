@@ -117,6 +117,32 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     Ok(OwnedValue::Text(LimboText::json(Rc::new(s))))
 }
 
+pub fn json_array_length(
+    json_value: &OwnedValue,
+    json_path: Option<&OwnedValue>,
+) -> crate::Result<OwnedValue> {
+    let path = match json_path {
+        Some(OwnedValue::Text(t)) => Some(t.value.to_string()),
+        Some(OwnedValue::Integer(i)) => Some(i.to_string()),
+        Some(OwnedValue::Float(f)) => Some(f.to_string()),
+        _ => None::<String>,
+    };
+
+    let json = get_json_value(json_value)?;
+
+    let arr_val = if let Some(path) = path {
+        &json_extract_single(&json, path.as_str())?
+    } else {
+        &json
+    };
+
+    match arr_val {
+        Val::Array(val) => (Ok(OwnedValue::Integer(val.len() as i64))),
+        Val::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Integer(0)),
+    }
+}
+
 pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<OwnedValue> {
     if let OwnedValue::Null = value {
         return Ok(OwnedValue::Null);
@@ -386,6 +412,123 @@ mod tests {
         match result {
             Ok(_) => panic!("Expected error for blob input"),
             Err(e) => assert!(e.to_string().contains("JSON cannot hold BLOB values")),
+        }
+    }
+
+    #[test]
+    fn test_json_array_length() {
+        let input = OwnedValue::build_text(Rc::new("[1,2,3,4]".to_string()));
+        let result = json_array_length(&input, None).unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 4);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_empty() {
+        let input = OwnedValue::build_text(Rc::new("[]".to_string()));
+        let result = json_array_length(&input, None).unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 0);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_root() {
+        let input = OwnedValue::build_text(Rc::new("[1,2,3,4]".to_string()));
+        let result = json_array_length(
+            &input,
+            Some(&OwnedValue::build_text(Rc::new("$".to_string()))),
+        )
+        .unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 4);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_not_array() {
+        let input = OwnedValue::build_text(Rc::new("{one: [1,2,3,4]}".to_string()));
+        let result = json_array_length(&input, None).unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 0);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_via_prop() {
+        let input = OwnedValue::build_text(Rc::new("{one: [1,2,3,4]}".to_string()));
+        let result = json_array_length(
+            &input,
+            Some(&OwnedValue::build_text(Rc::new("$.one".to_string()))),
+        )
+        .unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 4);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_via_index() {
+        let input = OwnedValue::build_text(Rc::new("[[1,2,3,4]]".to_string()));
+        let result = json_array_length(
+            &input,
+            Some(&OwnedValue::build_text(Rc::new("$[0]".to_string()))),
+        )
+        .unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 4);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_via_index_not_array() {
+        let input = OwnedValue::build_text(Rc::new("[1,2,3,4]".to_string()));
+        let result = json_array_length(
+            &input,
+            Some(&OwnedValue::build_text(Rc::new("$[2]".to_string()))),
+        )
+        .unwrap();
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 0);
+        } else {
+            panic!("Expected OwnedValue::Integer");
+        }
+    }
+
+    #[test]
+    fn test_json_array_length_via_index_bad_prop() {
+        let input = OwnedValue::build_text(Rc::new("{one: [1,2,3,4]}".to_string()));
+        let result = json_array_length(
+            &input,
+            Some(&OwnedValue::build_text(Rc::new("$.two".to_string()))),
+        )
+        .unwrap();
+        assert_eq!(OwnedValue::Null, result);
+    }
+
+    #[test]
+    fn test_json_array_length_simple_json_subtype() {
+        let input = OwnedValue::build_text(Rc::new("[1,2,3]".to_string()));
+        let wrapped = get_json(&input).unwrap();
+        let result = json_array_length(&wrapped, None).unwrap();
+
+        if let OwnedValue::Integer(res) = result {
+            assert_eq!(res, 3);
+        } else {
+            panic!("Expected OwnedValue::Integer");
         }
     }
 

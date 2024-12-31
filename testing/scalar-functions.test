@@ -809,6 +809,10 @@ do_execsql_test cast-small-float-to-numeric {
   SELECT typeof(CAST('1.23' AS NUMERIC)), CAST('1.23' AS NUMERIC);
 } {real|1.23}
 
+do_execsql_test_regex sqlite-version-should-return-valid-output {
+  SELECT sqlite_version();
+} {\d+\.\d+\.\d+}
+
 # TODO COMPAT: sqlite returns 9.22337203685478e+18, do we care...?
 # do_execsql_test cast-large-text-to-numeric {
 #   SELECT typeof(CAST('9223372036854775808' AS NUMERIC)), CAST('9223372036854775808' AS NUMERIC);

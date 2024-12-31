@@ -20,81 +20,81 @@ This document describes the SQLite compatibility status of Limbo:
 
 ## SQL statements
 
-| Statement                 | Status  | Comment                                                                           |
-|---------------------------|---------|-----------------------------------------------------------------------------------|
-| ALTER TABLE               | No      |                                                                                   |
-| ANALYZE                   | No      |                                                                                   |
-| ATTACH DATABASE           | No      |                                                                                   |
-| BEGIN TRANSACTION         | No      |                                                                                   |
-| COMMIT TRANSACTION        | No      |                                                                                   |
-| CREATE INDEX              | No      |                                                                                   |
-| CREATE TABLE              | Partial |                                                                                   |
-| CREATE TRIGGER            | No      |                                                                                   |
-| CREATE VIEW               | No      |                                                                                   |
-| CREATE VIRTUAL TABLE      | No      |                                                                                   |
-| DELETE                    | No      |                                                                                   |
-| DETACH DATABASE           | No      |                                                                                   |
-| DROP INDEX                | No      |                                                                                   |
-| DROP TABLE                | No      |                                                                                   |
-| DROP TRIGGER              | No      |                                                                                   |
-| DROP VIEW                 | No      |                                                                                   |
-| END TRANSACTION           | No      |                                                                                   |
-| EXPLAIN                   | Yes     |                                                                                   |
-| INDEXED BY                | No      |                                                                                   |
-| INSERT                    | Partial |                                                                                   |
-| ON CONFLICT clause        | No      |                                                                                   |
-| PRAGMA                    | Partial |                                                                                   |
-| PRAGMA cache_size         | Yes     |                                                                                   |
-| REINDEX                   | No      |                                                                                   |
-| RELEASE SAVEPOINT         | No      |                                                                                   |
-| REPLACE                   | No      |                                                                                   |
-| RETURNING clause          | No      |                                                                                   |
-| ROLLBACK TRANSACTION      | No      |                                                                                   |
-| SAVEPOINT                 | No      |                                                                                   |
-| SELECT                    | Yes     |                                                                                   |
-| SELECT ... WHERE          | Yes     |                                                                                   |
-| SELECT ... WHERE ... LIKE | Yes     |                                                                                   |
-| SELECT ... LIMIT          | Yes     |                                                                                   |
-| SELECT ... ORDER BY       | Yes     |                                                                                   |
-| SELECT ... GROUP BY       | Yes     |                                                                                   |
-| SELECT ... HAVING         | Yes     |                                                                                   |
-| SELECT ... JOIN           | Yes     |                                                                                   |
+| Statement                 | Status  | Comment |
+| ------------------------- | ------- | ------- |
+| ALTER TABLE               | No      |         |
+| ANALYZE                   | No      |         |
+| ATTACH DATABASE           | No      |         |
+| BEGIN TRANSACTION         | No      |         |
+| COMMIT TRANSACTION        | No      |         |
+| CREATE INDEX              | No      |         |
+| CREATE TABLE              | Partial |         |
+| CREATE TRIGGER            | No      |         |
+| CREATE VIEW               | No      |         |
+| CREATE VIRTUAL TABLE      | No      |         |
+| DELETE                    | No      |         |
+| DETACH DATABASE           | No      |         |
+| DROP INDEX                | No      |         |
+| DROP TABLE                | No      |         |
+| DROP TRIGGER              | No      |         |
+| DROP VIEW                 | No      |         |
+| END TRANSACTION           | No      |         |
+| EXPLAIN                   | Yes     |         |
+| INDEXED BY                | No      |         |
+| INSERT                    | Partial |         |
+| ON CONFLICT clause        | No      |         |
+| PRAGMA                    | Partial |         |
+| PRAGMA cache_size         | Yes     |         |
+| REINDEX                   | No      |         |
+| RELEASE SAVEPOINT         | No      |         |
+| REPLACE                   | No      |         |
+| RETURNING clause          | No      |         |
+| ROLLBACK TRANSACTION      | No      |         |
+| SAVEPOINT                 | No      |         |
+| SELECT                    | Yes     |         |
+| SELECT ... WHERE          | Yes     |         |
+| SELECT ... WHERE ... LIKE | Yes     |         |
+| SELECT ... LIMIT          | Yes     |         |
+| SELECT ... ORDER BY       | Yes     |         |
+| SELECT ... GROUP BY       | Yes     |         |
+| SELECT ... HAVING         | Yes     |         |
+| SELECT ... JOIN           | Yes     |         |
 | SELECT ... CROSS JOIN     | Yes     | SQLite CROSS JOIN means "do not reorder joins". We don't support that yet anyway. |
-| SELECT ... INNER JOIN     | Yes     |                                                                                   |
-| SELECT ... OUTER JOIN     | Partial | no RIGHT JOIN                                                                     |
-| SELECT ... JOIN USING     | Yes     |                                                                                   |
-| SELECT ... NATURAL JOIN   | Yes     |                                                                                   |
-| UPDATE                    | No      |                                                                                   |
-| UPSERT                    | No      |                                                                                   |
-| VACUUM                    | No      |                                                                                   |
-| WITH clause               | No      |                                                                                   |
+| SELECT ... INNER JOIN     | Yes     |         |
+| SELECT ... OUTER JOIN     | Partial | no RIGHT JOIN |
+| SELECT ... JOIN USING     | Yes     |         |
+| SELECT ... NATURAL JOIN   | Yes     |         |
+| UPDATE                    | No      |         |
+| UPSERT                    | No      |         |
+| VACUUM                    | No      |         |
+| WITH clause               | No      |         |
 
 ### SELECT Expressions
 
 Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 
-| Syntax                    | Status  | Comment                                  |
-|---------------------------|---------|------------------------------------------|
-| literals                  | Yes     |                                          |
-| schema.table.column       | Partial | Schemas aren't supported                 |
-| unary operator            | Yes     |                                          |
-| binary operator           | Partial | Only `%`, `!<`, and `!>` are unsupported |
-| agg() FILTER (WHERE ...)  | No      | Is incorrectly ignored                   |
-| ... OVER (...)            | No      | Is incorrectly ignored                   |
-| (expr)                    | Yes     |                                          |
-| CAST (expr AS type)       | Yes     |                                          |
-| COLLATE                   | No      |                                          |
-| (NOT) LIKE                | No      |                                          |
-| (NOT) GLOB                | No      |                                          |
-| (NOT) REGEXP              | No      |                                          |
-| (NOT) MATCH               | No      |                                          |
-| IS (NOT)                  | No      |                                          |
-| IS (NOT) DISTINCT FROM    | No      |                                          |
-| (NOT) BETWEEN ... AND ... | No      |                                          |
-| (NOT) IN (subquery)       | No      |                                          |
-| (NOT) EXISTS (subquery)   | No      |                                          |
-| CASE WHEN THEN ELSE END   | Yes     |                                          |
-| RAISE                     | No      |                                          |
+| Syntax                       | Status  | Comment |
+|------------------------------|---------|---------|
+| literals                     | Yes     |         |
+| schema.table.column          | Partial | Schemas aren't supported |
+| unary operator               | Yes     | |
+| binary operator              | Partial | Only `%`, `!<`, and `!>` are unsupported |
+| agg() FILTER (WHERE ...)     | No      | Is incorrectly ignored |
+| ... OVER (...)               | No      | Is incorrectly ignored |
+| (expr)                       | Yes     |         |
+| CAST (expr AS type)          | Yes     |         |
+| COLLATE                      | No      |         |
+| (NOT) LIKE                   | No      |         |
+| (NOT) GLOB                   | No      |         |
+| (NOT) REGEXP                 | No      |         |
+| (NOT) MATCH                  | No      |         |
+| IS (NOT)                     | No      |         |
+| IS (NOT) DISTINCT FROM       | No      |         |
+| (NOT) BETWEEN ... AND ...    | No      |         |
+| (NOT) IN (subquery)          | No      |         |
+| (NOT) EXISTS (subquery)      | No      |         |
+| CASE WHEN THEN ELSE END      | Yes     |         |
+| RAISE                        | No      |         |
 
 ## SQL functions
 
@@ -116,8 +116,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | instr(X,Y)                   | Yes    |         |
 | last_insert_rowid()          | Yes    |         |
 | length(X)                    | Yes    |         |
-| like(X,Y)                    | No     |         |
-| like(X,Y,Z)                  | No     |         |
+| like(X,Y)                    | Yes    |         |
+| like(X,Y,Z)                  | Yes    |         |
 | likelihood(X,Y)              | No     |         |
 | likely(X)                    | No     |         |
 | load_extension(X)            | No     |         |
@@ -160,10 +160,14 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | upper(X)                     | Yes    |         |
 | zeroblob(N)                  | Yes    |         |
 
+
+
+
+
 ### Mathematical functions
 
 | Function   | Status | Comment |
-|------------|--------|---------|
+| ---------- | ------ | ------- |
 | acos(X)    | Yes    |         |
 | acosh(X)   | Yes    |         |
 | asin(X)    | Yes    |         |
@@ -197,18 +201,18 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 
 ### Aggregate functions
 
-| Function          | Status | Comment |
-|-------------------|--------|---------|
-| avg(X)            | Yes    |         |
-| count()           | Yes    |         |
-| count(*)          | Yes    |         |
-| group_concat(X)   | Yes    |         |
-| group_concat(X,Y) | Yes    |         |
-| string_agg(X,Y)   | Yes    |         |
-| max(X)            | Yes    |         |
-| min(X)            | Yes    |         |
-| sum(X)            | Yes    |         |
-| total(X)          | Yes    |         |
+| Function                     | Status  | Comment |
+|------------------------------|---------|---------|
+| avg(X)                       | Yes     |         |
+| count()                      | Yes     |         |
+| count(*)                     | Yes     |         |
+| group_concat(X)              | Yes     |         |
+| group_concat(X,Y)            | Yes     |         |
+| string_agg(X,Y)              | Yes     |         |
+| max(X)                       | Yes     |         |
+| min(X)                       | Yes     |         |
+| sum(X)                       | Yes     |         |
+| total(X)                     | Yes     |         |
 
 ### Date and time functions
 
@@ -224,45 +228,45 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 
 ### JSON functions
 
-| Function                           | Status  | Comment                                                                                                              |
-|------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------|
-| json(json)                         | Partial |                                                                                                                      |
-| jsonb(json)                        |         |                                                                                                                      |
-| json_array(value1,value2,...)      | Yes     |                                                                                                                      |
-| jsonb_array(value1,value2,...)     |         |                                                                                                                      |
-| json_array_length(json)            |         |                                                                                                                      |
-| json_array_length(json,path)       |         |                                                                                                                      |
-| json_error_position(json)          |         |                                                                                                                      |
-| json_extract(json,path,...)        | Partial | Does not fully support unicode literal syntax and does not allow numbers > 2^127 - 1 (which SQLite truncates to i32) |
-| jsonb_extract(json,path,...)       |         |                                                                                                                      |
-| json -> path                       |         |                                                                                                                      |
-| json ->> path                      |         |                                                                                                                      |
-| json_insert(json,path,value,...)   |         |                                                                                                                      |
-| jsonb_insert(json,path,value,...)  |         |                                                                                                                      |
-| json_object(label1,value1,...)     |         |                                                                                                                      |
-| jsonb_object(label1,value1,...)    |         |                                                                                                                      |
-| json_patch(json1,json2)            |         |                                                                                                                      |
-| jsonb_patch(json1,json2)           |         |                                                                                                                      |
-| json_pretty(json)                  |         |                                                                                                                      |
-| json_remove(json,path,...)         |         |                                                                                                                      |
-| jsonb_remove(json,path,...)        |         |                                                                                                                      |
-| json_replace(json,path,value,...)  |         |                                                                                                                      |
-| jsonb_replace(json,path,value,...) |         |                                                                                                                      |
-| json_set(json,path,value,...)      |         |                                                                                                                      |
-| jsonb_set(json,path,value,...)     |         |                                                                                                                      |
-| json_type(json)                    |         |                                                                                                                      |
-| json_type(json,path)               |         |                                                                                                                      |
-| json_valid(json)                   |         |                                                                                                                      |
-| json_valid(json,flags)             |         |                                                                                                                      |
-| json_quote(value)                  |         |                                                                                                                      |
-| json_group_array(value)            |         |                                                                                                                      |
-| jsonb_group_array(value)           |         |                                                                                                                      |
-| json_group_object(label,value)     |         |                                                                                                                      |
-| jsonb_group_object(name,value)     |         |                                                                                                                      |
-| json_each(json)                    |         |                                                                                                                      |
-| json_each(json,path)               |         |                                                                                                                      |
-| json_tree(json)                    |         |                                                                                                                      |
-| json_tree(json,path)               |         |                                                                                                                      |
+| Function                           | Status  | Comment                                                                                                                                      |
+|------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| json(json)                         | Partial |                                                                                                                                              |
+| jsonb(json)                        |         |                                                                                                                                              |
+| json_array(value1,value2,...)      | Yes     |                                                                                                                                              |
+| jsonb_array(value1,value2,...)     |         |                                                                                                                                              |
+| json_array_length(json)            | Yes     |                                                                                                                                              |
+| json_array_length(json,path)       | Yes     |                                                                                                                                              |
+| json_error_position(json)          |         |                                                                                                                                              |
+| json_extract(json,path,...)        | Partial | Does not fully support unicode literal syntax and does not allow numbers > 2^127 - 1 (which SQLite truncates to i32), does not support BLOBs |
+| jsonb_extract(json,path,...)       |         |                                                                                                                                              |
+| json -> path                       |         |                                                                                                                                              |
+| json ->> path                      |         |                                                                                                                                              |
+| json_insert(json,path,value,...)   |         |                                                                                                                                              |
+| jsonb_insert(json,path,value,...)  |         |                                                                                                                                              |
+| json_object(label1,value1,...)     |         |                                                                                                                                              |
+| jsonb_object(label1,value1,...)    |         |                                                                                                                                              |
+| json_patch(json1,json2)            |         |                                                                                                                                              |
+| jsonb_patch(json1,json2)           |         |                                                                                                                                              |
+| json_pretty(json)                  |         |                                                                                                                                              |
+| json_remove(json,path,...)         |         |                                                                                                                                              |
+| jsonb_remove(json,path,...)        |         |                                                                                                                                              |
+| json_replace(json,path,value,...)  |         |                                                                                                                                              |
+| jsonb_replace(json,path,value,...) |         |                                                                                                                                              |
+| json_set(json,path,value,...)      |         |                                                                                                                                              |
+| jsonb_set(json,path,value,...)     |         |                                                                                                                                              |
+| json_type(json)                    |         |                                                                                                                                              |
+| json_type(json,path)               |         |                                                                                                                                              |
+| json_valid(json)                   |         |                                                                                                                                              |
+| json_valid(json,flags)             |         |                                                                                                                                              |
+| json_quote(value)                  |         |                                                                                                                                              |
+| json_group_array(value)            |         |                                                                                                                                              |
+| jsonb_group_array(value)           |         |                                                                                                                                              |
+| json_group_object(label,value)     |         |                                                                                                                                              |
+| jsonb_group_object(name,value)     |         |                                                                                                                                              |
+| json_each(json)                    |         |                                                                                                                                              |
+| json_each(json,path)               |         |                                                                                                                                              |
+| json_tree(json)                    |         |                                                                                                                                              |
+| json_tree(json,path)               |         |                                                                                                                                              |
 
 ## SQLite API
 
@@ -390,7 +394,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | ReadCookie     | No     |
 | Real           | Yes    |
 | RealAffinity   | Yes    |
-| Remainder      | No     |
+| Remainder      | Yes    |
 | ResetCount     | No     |
 | ResultRow      | Yes    |
 | Return         | Yes    |
@@ -448,3 +452,13 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Variable       | No     |
 | VerifyCookie   | No     |
 | Yield          | Yes    |
+
+| LibSql Compatibility / Extensions |     |                                                               |
+|-----------------------------------|-----|---------------------------------------------------------------|
+| **UUID**                          |     | UUID's in limbo are `blobs` by default                        |
+| uuid4()                           | Yes | uuid version 4                                                |
+| uuid4_str()                       | Yes | uuid v4 string alias `gen_random_uuid()` for PG compatibility |
+| uuid7(X?)                         | Yes | uuid version 7, Optional arg for seconds since epoch          |
+| uuid7_timestamp_ms(X)             | Yes | Convert a uuid v7 to milliseconds since epoch                 |
+| uuid_str(X)                       | Yes | Convert a valid uuid to string                                |
+| uuid_blob(X)                      | Yes | Convert a valid uuid to blob                                  |

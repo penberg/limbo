@@ -59,10 +59,6 @@ impl ProgramBuilder {
         reg
     }
 
-    pub fn next_free_register(&self) -> usize {
-        self.next_free_register
-    }
-
     pub fn alloc_cursor_id(
         &mut self,
         table_identifier: Option<String>,
@@ -144,6 +140,17 @@ impl ProgramBuilder {
             .push((label, insn_reference));
     }
 
+    /// Resolve unresolved labels to a specific offset in the instruction list.
+    ///
+    /// This function updates all instructions that reference the given label
+    /// to point to the specified offset. It ensures that the label and offset
+    /// are valid and updates the target program counter (PC) of each instruction
+    /// that references the label.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - The label to resolve.
+    /// * `to_offset` - The offset to which the labeled instructions should be resolved to.
     pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
         assert!(label < 0);
         assert!(to_offset >= 0);

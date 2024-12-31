@@ -38,11 +38,11 @@ fn main() {
                     loop {
                         let row = rows.next_row().unwrap();
                         match row {
-                            limbo_core::RowResult::Row(_) => {
+                            limbo_core::StepResult::Row(_) => {
                                 count += 1;
                             }
-                            limbo_core::RowResult::IO => yield,
-                            limbo_core::RowResult::Done => break,
+                            limbo_core::StepResult::IO => yield,
+                            limbo_core::StepResult::Done => break,
                         }
                     }
                     assert!(count == 100);

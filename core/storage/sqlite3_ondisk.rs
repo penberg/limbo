@@ -64,30 +64,84 @@ const DEFAULT_CACHE_SIZE: i32 = -2000;
 // Minimum number of pages that cache can hold.
 pub const MIN_PAGE_CACHE_SIZE: usize = 10;
 
+/// The database header.
+/// The first 100 bytes of the database file comprise the database file header.
+/// The database file header is divided into fields as shown by the table below.
+/// All multibyte fields in the database file header are stored with the most significant byte first (big-endian).
 #[derive(Debug, Clone)]
 pub struct DatabaseHeader {
+    /// The header string: "SQLite format 3\0"
     magic: [u8; 16],
+
+    /// The database page size in bytes. Must be a power of two between 512 and 32768 inclusive,
+    /// or the value 1 representing a page size of 65536.
     pub page_size: u16,
+
+    /// File format write version. 1 for legacy; 2 for WAL.
     write_version: u8,
+
+    /// File format read version. 1 for legacy; 2 for WAL.
     read_version: u8,
-    pub unused_space: u8,
+
+    /// Bytes of unused "reserved" space at the end of each page. Usually 0.
+    /// SQLite has the ability to set aside a small number of extra bytes at the end of every page for use by extensions.
+    /// These extra bytes are used, for example, by the SQLite Encryption Extension to store a nonce and/or
+    /// cryptographic checksum associated with each page.
+    pub reserved_space: u8,
+
+    /// Maximum embedded payload fraction. Must be 64.
     max_embed_frac: u8,
+
+    /// Minimum embedded payload fraction. Must be 32.
     min_embed_frac: u8,
+
+    /// Leaf payload fraction. Must be 32.
     min_leaf_frac: u8,
+
+    /// File change counter, incremented when database is modified.
     change_counter: u32,
+
+    /// Size of the database file in pages. The "in-header database size".
     pub database_size: u32,
+
+    /// Page number of the first freelist trunk page.
     freelist_trunk_page: u32,
+
+    /// Total number of freelist pages.
     freelist_pages: u32,
+
+    /// The schema cookie. Incremented when the database schema changes.
     schema_cookie: u32,
+
+    /// The schema format number. Supported formats are 1, 2, 3, and 4.
     schema_format: u32,
-    pub default_cache_size: i32,
-    vacuum: u32,
+
+    /// Default page cache size.
+    pub default_page_cache_size: i32,
+
+    /// The page number of the largest root b-tree page when in auto-vacuum or
+    /// incremental-vacuum modes, or zero otherwise.
+    vacuum_mode_largest_root_page: u32,
+
+    /// The database text encoding. 1=UTF-8, 2=UTF-16le, 3=UTF-16be.
     text_encoding: u32,
+
+    /// The "user version" as read and set by the user_version pragma.
     user_version: u32,
-    incremental_vacuum: u32,
+
+    /// True (non-zero) for incremental-vacuum mode. False (zero) otherwise.
+    incremental_vacuum_enabled: u32,
+
+    /// The "Application ID" set by PRAGMA application_id.
     application_id: u32,
-    reserved: [u8; 20],
+
+    /// Reserved for expansion. Must be zero.
+    reserved_for_expansion: [u8; 20],
+
+    /// The version-valid-for number.
     version_valid_for: u32,
+
+    /// SQLITE_VERSION_NUMBER
     pub version_number: u32,
 }
 
@@ -98,28 +152,62 @@ pub const WAL_FRAME_HEADER_SIZE: usize = 24;
 pub const WAL_MAGIC_LE: u32 = 0x377f0682;
 pub const WAL_MAGIC_BE: u32 = 0x377f0683;
 
+/// The Write-Ahead Log (WAL) header.
+/// The first 32 bytes of a WAL file comprise the WAL header.
+/// The WAL header is divided into the following fields stored in big-endian order.
 #[derive(Debug, Default, Clone)]
 #[repr(C)] // This helps with encoding because rust does not respect the order in structs, so in
            // this case we want to keep the order
 pub struct WalHeader {
+    /// Magic number. 0x377f0682 or 0x377f0683
+    /// If the LSB is 0, checksums are native byte order, else checksums are serialized
     pub magic: u32,
+
+    /// WAL format version. Currently 3007000
     pub file_format: u32,
+
+    /// Database page size in bytes. Power of two between 512 and 32768 inclusive
     pub page_size: u32,
+
+    /// Checkpoint sequence number. Increases with each checkpoint
     pub checkpoint_seq: u32,
+
+    /// Random value used for the first salt in checksum calculations
     pub salt_1: u32,
+
+    /// Random value used for the second salt in checksum calculations
     pub salt_2: u32,
+
+    /// First checksum value in the wal-header
     pub checksum_1: u32,
+
+    /// Second checksum value in the wal-header
     pub checksum_2: u32,
 }
 
+/// Immediately following the wal-header are zero or more frames.
+/// Each frame consists of a 24-byte frame-header followed by <page-size> bytes of page data.
+/// The frame-header is six big-endian 32-bit unsigned integer values, as follows:
 #[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct WalFrameHeader {
+    /// Page number
     page_number: u32,
+
+    /// For commit records, the size of the database file in pages after the commit.
+    /// For all other records, zero.
     db_size: u32,
+
+    /// Salt-1 copied from the WAL header
     salt_1: u32,
+
+    /// Salt-2 copied from the WAL header
     salt_2: u32,
+
+    /// Checksum-1: Cumulative checksum up through and including this page
     checksum_1: u32,
+
+    /// Checksum-2: Second half of the cumulative checksum
     checksum_2: u32,
 }
 
@@ -130,7 +218,7 @@ impl Default for DatabaseHeader {
             page_size: 4096,
             write_version: 2,
             read_version: 2,
-            unused_space: 0,
+            reserved_space: 0,
             max_embed_frac: 64,
             min_embed_frac: 32,
             min_leaf_frac: 32,
@@ -140,13 +228,13 @@ impl Default for DatabaseHeader {
             freelist_pages: 0,
             schema_cookie: 0,
             schema_format: 4, // latest format, new sqlite3 databases use this format
-            default_cache_size: 500, // pages
-            vacuum: 0,
+            default_page_cache_size: 500, // pages
+            vacuum_mode_largest_root_page: 0,
             text_encoding: 1, // utf-8
             user_version: 1,
-            incremental_vacuum: 0,
+            incremental_vacuum_enabled: 0,
             application_id: 0,
-            reserved: [0; 20],
+            reserved_for_expansion: [0; 20],
             version_valid_for: 3047000,
             version_number: 3047000,
         }
@@ -180,7 +268,7 @@ fn finish_read_database_header(
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
     header.write_version = buf[18];
     header.read_version = buf[19];
-    header.unused_space = buf[20];
+    header.reserved_space = buf[20];
     header.max_embed_frac = buf[21];
     header.min_embed_frac = buf[22];
     header.min_leaf_frac = buf[23];
@@ -190,16 +278,16 @@ fn finish_read_database_header(
     header.freelist_pages = u32::from_be_bytes([buf[36], buf[37], buf[38], buf[39]]);
     header.schema_cookie = u32::from_be_bytes([buf[40], buf[41], buf[42], buf[43]]);
     header.schema_format = u32::from_be_bytes([buf[44], buf[45], buf[46], buf[47]]);
-    header.default_cache_size = i32::from_be_bytes([buf[48], buf[49], buf[50], buf[51]]);
-    if header.default_cache_size == 0 {
-        header.default_cache_size = DEFAULT_CACHE_SIZE;
+    header.default_page_cache_size = i32::from_be_bytes([buf[48], buf[49], buf[50], buf[51]]);
+    if header.default_page_cache_size == 0 {
+        header.default_page_cache_size = DEFAULT_CACHE_SIZE;
     }
-    header.vacuum = u32::from_be_bytes([buf[52], buf[53], buf[54], buf[55]]);
+    header.vacuum_mode_largest_root_page = u32::from_be_bytes([buf[52], buf[53], buf[54], buf[55]]);
     header.text_encoding = u32::from_be_bytes([buf[56], buf[57], buf[58], buf[59]]);
     header.user_version = u32::from_be_bytes([buf[60], buf[61], buf[62], buf[63]]);
-    header.incremental_vacuum = u32::from_be_bytes([buf[64], buf[65], buf[66], buf[67]]);
+    header.incremental_vacuum_enabled = u32::from_be_bytes([buf[64], buf[65], buf[66], buf[67]]);
     header.application_id = u32::from_be_bytes([buf[68], buf[69], buf[70], buf[71]]);
-    header.reserved.copy_from_slice(&buf[72..92]);
+    header.reserved_for_expansion.copy_from_slice(&buf[72..92]);
     header.version_valid_for = u32::from_be_bytes([buf[92], buf[93], buf[94], buf[95]]);
     header.version_number = u32::from_be_bytes([buf[96], buf[97], buf[98], buf[99]]);
     Ok(())
@@ -258,7 +346,7 @@ fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
     buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
     buf[18] = header.write_version;
     buf[19] = header.read_version;
-    buf[20] = header.unused_space;
+    buf[20] = header.reserved_space;
     buf[21] = header.max_embed_frac;
     buf[22] = header.min_embed_frac;
     buf[23] = header.min_leaf_frac;
@@ -268,15 +356,15 @@ fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
     buf[36..40].copy_from_slice(&header.freelist_pages.to_be_bytes());
     buf[40..44].copy_from_slice(&header.schema_cookie.to_be_bytes());
     buf[44..48].copy_from_slice(&header.schema_format.to_be_bytes());
-    buf[48..52].copy_from_slice(&header.default_cache_size.to_be_bytes());
+    buf[48..52].copy_from_slice(&header.default_page_cache_size.to_be_bytes());
 
-    buf[52..56].copy_from_slice(&header.vacuum.to_be_bytes());
+    buf[52..56].copy_from_slice(&header.vacuum_mode_largest_root_page.to_be_bytes());
     buf[56..60].copy_from_slice(&header.text_encoding.to_be_bytes());
     buf[60..64].copy_from_slice(&header.user_version.to_be_bytes());
-    buf[64..68].copy_from_slice(&header.incremental_vacuum.to_be_bytes());
+    buf[64..68].copy_from_slice(&header.incremental_vacuum_enabled.to_be_bytes());
 
     buf[68..72].copy_from_slice(&header.application_id.to_be_bytes());
-    buf[72..92].copy_from_slice(&header.reserved);
+    buf[72..92].copy_from_slice(&header.reserved_for_expansion);
     buf[92..96].copy_from_slice(&header.version_valid_for.to_be_bytes());
     buf[96..100].copy_from_slice(&header.version_number.to_be_bytes());
 }
@@ -387,18 +475,60 @@ impl PageContent {
         buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
     }
 
+    /// The second field of the b-tree page header is the offset of the first freeblock, or zero if there are no freeblocks on the page.
+    /// A freeblock is a structure used to identify unallocated space within a b-tree page.
+    /// Freeblocks are organized as a chain.
+    ///
+    /// To be clear, freeblocks do not mean the regular unallocated free space to the left of the cell content area pointer, but instead
+    /// blocks of at least 4 bytes WITHIN the cell content area that are not in use due to e.g. deletions.
     pub fn first_freeblock(&self) -> u16 {
         self.read_u16(1)
     }
 
+    /// The number of cells on the page.
     pub fn cell_count(&self) -> usize {
         self.read_u16(3) as usize
     }
 
+    /// The size of the cell pointer array in bytes.
+    /// 2 bytes per cell pointer
+    pub fn cell_pointer_array_size(&self) -> usize {
+        const CELL_POINTER_SIZE_BYTES: usize = 2;
+        self.cell_count() * CELL_POINTER_SIZE_BYTES
+    }
+
+    /// The start of the unallocated region.
+    /// Effectively: the offset after the page header + the cell pointer array.
+    pub fn unallocated_region_start(&self) -> usize {
+        let (cell_ptr_array_start, cell_ptr_array_size) = self.cell_pointer_array_offset_and_size();
+        cell_ptr_array_start + cell_ptr_array_size
+    }
+
+    pub fn unallocated_region_size(&self) -> usize {
+        self.cell_content_area() as usize - self.unallocated_region_start()
+    }
+
+    /// The start of the cell content area.
+    /// SQLite strives to place cells as far toward the end of the b-tree page as it can,
+    /// in order to leave space for future growth of the cell pointer array.
+    /// = the cell content area pointer moves leftward as cells are added to the page
     pub fn cell_content_area(&self) -> u16 {
         self.read_u16(5)
     }
 
+    /// The size of the page header in bytes.
+    /// 8 bytes for leaf pages, 12 bytes for interior pages (due to storing rightmost child pointer)
+    pub fn header_size(&self) -> usize {
+        match self.page_type() {
+            PageType::IndexInterior => 12,
+            PageType::TableInterior => 12,
+            PageType::IndexLeaf => 8,
+            PageType::TableLeaf => 8,
+        }
+    }
+
+    /// The total number of bytes in all fragments is stored in the fifth field of the b-tree page header.
+    /// Fragments are isolated groups of 1, 2, or 3 unused bytes within the cell content area.
     pub fn num_frag_free_bytes(&self) -> u8 {
         self.read_u8(7)
     }
@@ -416,22 +546,19 @@ impl PageContent {
         &self,
         idx: usize,
         pager: Rc<Pager>,
-        max_local: usize,
-        min_local: usize,
+        payload_overflow_threshold_max: usize,
+        payload_overflow_threshold_min: usize,
         usable_size: usize,
     ) -> Result<BTreeCell> {
         log::debug!("cell_get(idx={})", idx);
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
-        let cell_start = match self.page_type() {
-            PageType::IndexInterior => 12,
-            PageType::TableInterior => 12,
-            PageType::IndexLeaf => 8,
-            PageType::TableLeaf => 8,
-        };
+        // the page header is 12 bytes for interior pages, 8 bytes for leaf pages
+        // this is because the 4 last bytes in the interior page's header are used for the rightmost pointer.
+        let cell_pointer_array_start = self.header_size();
         assert!(idx < ncells, "cell_get: idx out of bounds");
-        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = cell_pointer_array_start + (idx * 2);
         let cell_pointer = self.read_u16(cell_pointer) as usize;
 
         read_btree_cell(
@@ -439,48 +566,46 @@ impl PageContent {
             &self.page_type(),
             cell_pointer,
             pager,
-            max_local,
-            min_local,
+            payload_overflow_threshold_max,
+            payload_overflow_threshold_min,
             usable_size,
         )
     }
-
-    /// When using this fu
-    pub fn cell_get_raw_pointer_region(&self) -> (usize, usize) {
-        let cell_start = match self.page_type() {
-            PageType::IndexInterior => 12,
-            PageType::TableInterior => 12,
-            PageType::IndexLeaf => 8,
-            PageType::TableLeaf => 8,
-        };
-        (self.offset + cell_start, self.cell_count() * 2)
+    /// The cell pointer array of a b-tree page immediately follows the b-tree page header.
+    /// Let K be the number of cells on the btree.
+    /// The cell pointer array consists of K 2-byte integer offsets to the cell contents.
+    /// The cell pointers are arranged in key order with:
+    /// - left-most cell (the cell with the smallest key) first and
+    /// - the right-most cell (the cell with the largest key) last.
+    pub fn cell_pointer_array_offset_and_size(&self) -> (usize, usize) {
+        let header_size = self.header_size();
+        (self.offset + header_size, self.cell_pointer_array_size())
     }
 
     /* Get region of a cell's payload */
     pub fn cell_get_raw_region(
         &self,
         idx: usize,
-        max_local: usize,
-        min_local: usize,
+        payload_overflow_threshold_max: usize,
+        payload_overflow_threshold_min: usize,
         usable_size: usize,
     ) -> (usize, usize) {
         let buf = self.as_ptr();
         let ncells = self.cell_count();
-        let cell_start = match self.page_type() {
-            PageType::IndexInterior => 12,
-            PageType::TableInterior => 12,
-            PageType::IndexLeaf => 8,
-            PageType::TableLeaf => 8,
-        };
+        let cell_pointer_array_start = self.header_size();
         assert!(idx < ncells, "cell_get: idx out of bounds");
-        let cell_pointer = cell_start + (idx * 2);
+        let cell_pointer = cell_pointer_array_start + (idx * 2); // pointers are 2 bytes each
         let cell_pointer = self.read_u16(cell_pointer) as usize;
         let start = cell_pointer;
         let len = match self.page_type() {
             PageType::IndexInterior => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer + 4..]).unwrap();
-                let (overflows, to_read) =
-                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
+                let (overflows, to_read) = payload_overflows(
+                    len_payload as usize,
+                    payload_overflow_threshold_max,
+                    payload_overflow_threshold_min,
+                    usable_size,
+                );
                 if overflows {
                     4 + to_read + n_payload + 4
                 } else {
@@ -493,8 +618,12 @@ impl PageContent {
             }
             PageType::IndexLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
-                let (overflows, to_read) =
-                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
+                let (overflows, to_read) = payload_overflows(
+                    len_payload as usize,
+                    payload_overflow_threshold_max,
+                    payload_overflow_threshold_min,
+                    usable_size,
+                );
                 if overflows {
                     to_read + n_payload + 4
                 } else {
@@ -504,8 +633,12 @@ impl PageContent {
             PageType::TableLeaf => {
                 let (len_payload, n_payload) = read_varint(&buf[cell_pointer..]).unwrap();
                 let (_, n_rowid) = read_varint(&buf[cell_pointer + n_payload..]).unwrap();
-                let (overflows, to_read) =
-                    payload_overflows(len_payload as usize, max_local, min_local, usable_size);
+                let (overflows, to_read) = payload_overflows(
+                    len_payload as usize,
+                    payload_overflow_threshold_max,
+                    payload_overflow_threshold_min,
+                    usable_size,
+                );
                 if overflows {
                     to_read + n_payload + n_rowid
                 } else {
@@ -1170,28 +1303,46 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
     Ok(())
 }
 
-/*
-    Checks if payload will overflow a cell based on max local and
-    it will return the min size that will be stored in that case,
-    including overflow pointer
-*/
+/// Checks if payload will overflow a cell based on the maximum allowed size.
+/// It will return the min size that will be stored in that case,
+/// including overflow pointer
+/// see e.g. https://github.com/sqlite/sqlite/blob/9591d3fe93936533c8c3b0dc4d025ac999539e11/src/dbstat.c#L371
 pub fn payload_overflows(
     payload_size: usize,
-    max_local: usize,
-    min_local: usize,
+    payload_overflow_threshold_max: usize,
+    payload_overflow_threshold_min: usize,
     usable_size: usize,
 ) -> (bool, usize) {
-    if payload_size <= max_local {
+    if payload_size <= payload_overflow_threshold_max {
         return (false, 0);
     }
 
-    let mut space_left = min_local + (payload_size - min_local) % (usable_size - 4);
-    if space_left > max_local {
-        space_left = min_local;
+    let mut space_left = payload_overflow_threshold_min
+        + (payload_size - payload_overflow_threshold_min) % (usable_size - 4);
+    if space_left > payload_overflow_threshold_max {
+        space_left = payload_overflow_threshold_min;
     }
     (true, space_left + 4)
 }
 
+/// The checksum is computed by interpreting the input as an even number of unsigned 32-bit integers: x(0) through x(N).
+/// The 32-bit integers are big-endian if the magic number in the first 4 bytes of the WAL header is 0x377f0683
+/// and the integers are little-endian if the magic number is 0x377f0682.
+/// The checksum values are always stored in the frame header in a big-endian format regardless of which byte order is used to compute the checksum.
+///
+/// The checksum algorithm only works for content which is a multiple of 8 bytes in length.
+/// In other words, if the inputs are x(0) through x(N) then N must be odd.
+/// The checksum algorithm is as follows:
+///
+/// s0 = s1 = 0
+/// for i from 0 to n-1 step 2:
+///    s0 += x(i) + s1;
+///    s1 += x(i+1) + s0;
+/// endfor
+///
+/// The outputs s0 and s1 are both weighted checksums using Fibonacci weights in reverse order.
+/// (The largest Fibonacci weight occurs on the first element of the sequence being summed.)
+/// The s1 value spans all 32-bit integer terms of the sequence whereas s0 omits the final term.
 pub fn checksum_wal(
     buf: &[u8],
     _wal_header: &WalHeader,

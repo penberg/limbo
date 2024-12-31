@@ -67,7 +67,7 @@ pub struct sqlite3_stmt<'a> {
     pub(crate) row: RefCell<Option<limbo_core::Row<'a>>>,
 }
 
-impl<'a> sqlite3_stmt<'a> {
+impl sqlite3_stmt<'_> {
     pub fn new(stmt: limbo_core::Statement) -> Self {
         let row = RefCell::new(None);
         Self { stmt, row }
@@ -239,13 +239,14 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
     let stmt = &mut *stmt;
     if let Ok(result) = stmt.stmt.step() {
         match result {
-            limbo_core::RowResult::IO => SQLITE_BUSY,
-            limbo_core::RowResult::Done => SQLITE_DONE,
-            limbo_core::RowResult::Interrupt => SQLITE_INTERRUPT,
-            limbo_core::RowResult::Row(row) => {
+            limbo_core::StepResult::IO => SQLITE_BUSY,
+            limbo_core::StepResult::Done => SQLITE_DONE,
+            limbo_core::StepResult::Interrupt => SQLITE_INTERRUPT,
+            limbo_core::StepResult::Row(row) => {
                 stmt.row.replace(Some(row));
                 SQLITE_ROW
             }
+            limbo_core::StepResult::Busy => SQLITE_BUSY,
         }
     } else {
         SQLITE_ERROR
@@ -997,9 +998,7 @@ pub unsafe extern "C" fn sqlite3_threadsafe() -> ffi::c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_libversion() -> *const std::ffi::c_char {
-    ffi::CStr::from_bytes_with_nul(b"3.42.0\0")
-        .unwrap()
-        .as_ptr()
+    c"3.42.0".as_ptr()
 }
 
 #[no_mangle]
@@ -1093,7 +1092,7 @@ pub unsafe extern "C" fn sqlite3_wal_checkpoint_v2(
     }
     let db: &mut sqlite3 = &mut *db;
     // TODO: Checkpointing modes and reporting back log size and checkpoint count to caller.
-    if let Err(e) = db.conn.checkpoint() {
+    if db.conn.checkpoint().is_err() {
         return SQLITE_ERROR;
     }
     SQLITE_OK

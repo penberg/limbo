@@ -13,7 +13,7 @@ jobs:
   cargo-fmt-check:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Check formatting
       run: cargo fmt --check
 
@@ -39,10 +39,19 @@ jobs:
       run: cargo test --verbose
       timeout-minutes: 5
 
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Clippy
+        run: |
+           cargo clippy -- -A clippy::all -W clippy::correctness -W clippy::perf -W clippy::suspicious --deny=warnings
+
   build-wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Install
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: wasm-pack build --target nodejs bindings/wasm
@@ -50,7 +59,7 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Bench
       run: cargo bench
 
@@ -66,14 +75,14 @@ jobs:
       run: |
         curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
 
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Test
       run: make test
 
   test-sqlite:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Install sqlite
       run: sudo apt update && sudo apt install -y sqlite3 libsqlite3-dev
     - name: Test

@@ -1,6 +1,6 @@
 use crate::opcodes_dictionary::OPCODE_DESCRIPTIONS;
 use cli_table::{Cell, Table};
-use limbo_core::{Database, LimboError, RowResult, Value};
+use limbo_core::{Database, LimboError, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -160,7 +160,7 @@ impl From<&Opts> for Settings {
             null_value: String::new(),
             output_mode: opts.output_mode,
             echo: false,
-            is_stdout: opts.output == "",
+            is_stdout: opts.output.is_empty(),
             output_filename: opts.output.clone(),
             db_file: opts
                 .database
@@ -192,7 +192,6 @@ impl std::fmt::Display for Settings {
 }
 
 impl Limbo {
-    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> anyhow::Result<Self> {
         let opts = Opts::parse();
         let db_file = opts
@@ -229,13 +228,13 @@ impl Limbo {
             app.writeln("Enter \".help\" for usage hints.")?;
             app.display_in_memory()?;
         }
-        return Ok(app);
+        Ok(app)
     }
 
     fn handle_first_input(&mut self, cmd: &str) {
         if cmd.trim().starts_with('.') {
-            self.handle_dot_command(&cmd);
-        } else if let Err(e) = self.query(&cmd) {
+            self.handle_dot_command(cmd);
+        } else if let Err(e) = self.query(cmd) {
             eprintln!("{}", e);
         }
         std::process::exit(0);
@@ -293,7 +292,7 @@ impl Limbo {
                 let db = Database::open_file(self.io.clone(), path)?;
                 self.conn = db.connect();
                 self.opts.db_file = ":memory:".to_string();
-                return Ok(());
+                Ok(())
             }
             path => {
                 let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new()?);
@@ -301,7 +300,7 @@ impl Limbo {
                 let db = Database::open_file(self.io.clone(), path)?;
                 self.conn = db.connect();
                 self.opts.db_file = path.to_string();
-                return Ok(());
+                Ok(())
             }
         }
     }
@@ -317,11 +316,9 @@ impl Limbo {
                 self.opts.is_stdout = false;
                 self.opts.output_mode = OutputMode::Raw;
                 self.opts.output_filename = path.to_string();
-                return Ok(());
+                Ok(())
             }
-            Err(e) => {
-                return Err(e.to_string());
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -333,7 +330,7 @@ impl Limbo {
 
     fn set_mode(&mut self, mode: OutputMode) -> Result<(), String> {
         if mode == OutputMode::Pretty && !self.opts.is_stdout {
-            return Err("pretty output can only be written to a tty".to_string());
+            Err("pretty output can only be written to a tty".to_string())
         } else {
             self.opts.output_mode = mode;
             Ok(())
@@ -498,7 +495,7 @@ impl Limbo {
                     }
 
                     match rows.next_row() {
-                        Ok(RowResult::Row(row)) => {
+                        Ok(StepResult::Row(row)) => {
                             for (i, value) in row.values.iter().enumerate() {
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
@@ -518,11 +515,15 @@ impl Limbo {
                             }
                             let _ = self.writeln("");
                         }
-                        Ok(RowResult::IO) => {
+                        Ok(StepResult::IO) => {
                             self.io.run_once()?;
                         }
-                        Ok(RowResult::Interrupt) => break,
-                        Ok(RowResult::Done) => {
+                        Ok(StepResult::Interrupt) => break,
+                        Ok(StepResult::Done) => {
+                            break;
+                        }
+                        Ok(StepResult::Busy) => {
+                            let _ = self.writeln("database is busy");
                             break;
                         }
                         Err(err) => {
@@ -539,7 +540,7 @@ impl Limbo {
                     let mut table_rows: Vec<Vec<_>> = vec![];
                     loop {
                         match rows.next_row() {
-                            Ok(RowResult::Row(row)) => {
+                            Ok(StepResult::Row(row)) => {
                                 table_rows.push(
                                     row.values
                                         .iter()
@@ -555,11 +556,15 @@ impl Limbo {
                                         .collect(),
                                 );
                             }
-                            Ok(RowResult::IO) => {
+                            Ok(StepResult::IO) => {
                                 self.io.run_once()?;
                             }
-                            Ok(RowResult::Interrupt) => break,
-                            Ok(RowResult::Done) => break,
+                            Ok(StepResult::Interrupt) => break,
+                            Ok(StepResult::Done) => break,
+                            Ok(StepResult::Busy) => {
+                                let _ = self.writeln("database is busy");
+                                break;
+                            }
                             Err(err) => {
                                 let _ = self.write_fmt(format_args!("{}", err));
                                 break;
@@ -599,17 +604,21 @@ impl Limbo {
                 let mut found = false;
                 loop {
                     match rows.next_row()? {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             if let Some(Value::Text(schema)) = row.values.first() {
                                 let _ = self.write_fmt(format_args!("{};", schema));
                                 found = true;
                             }
                         }
-                        RowResult::IO => {
+                        StepResult::IO => {
                             self.io.run_once()?;
                         }
-                        RowResult::Interrupt => break,
-                        RowResult::Done => break,
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
+                            let _ = self.writeln("database is busy");
+                            break;
+                        }
                     }
                 }
                 if !found {
@@ -652,31 +661,33 @@ impl Limbo {
                 let mut tables = String::new();
                 loop {
                     match rows.next_row()? {
-                        RowResult::Row(row) => {
+                        StepResult::Row(row) => {
                             if let Some(Value::Text(table)) = row.values.first() {
                                 tables.push_str(table);
                                 tables.push(' ');
                             }
                         }
-                        RowResult::IO => {
+                        StepResult::IO => {
                             self.io.run_once()?;
                         }
-                        RowResult::Interrupt => break,
-                        RowResult::Done => break,
+                        StepResult::Interrupt => break,
+                        StepResult::Done => break,
+                        StepResult::Busy => {
+                            let _ = self.writeln("database is busy");
+                            break;
+                        }
                     }
                 }
 
-                if tables.len() > 0 {
+                if !tables.is_empty() {
                     let _ = self.writeln(tables.trim_end());
+                } else if let Some(pattern) = pattern {
+                    let _ = self.write_fmt(format_args!(
+                        "Error: Tables with pattern '{}' not found.",
+                        pattern
+                    ));
                 } else {
-                    if let Some(pattern) = pattern {
-                        let _ = self.write_fmt(format_args!(
-                            "Error: Tables with pattern '{}' not found.",
-                            pattern
-                        ));
-                    } else {
-                        let _ = self.writeln("No tables found in the database.");
-                    }
+                    let _ = self.writeln("No tables found in the database.");
                 }
             }
             Ok(None) => {
