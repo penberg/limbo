@@ -11,6 +11,7 @@ use std::rc::Rc;
 use thiserror::Error;
 
 const MAX_IOVECS: usize = 128;
+const SQPOLL_IDLE: u32 = 1000;
 
 #[derive(Debug, Error)]
 enum LinuxIOError {
@@ -49,7 +50,13 @@ struct InnerLinuxIO {
 
 impl LinuxIO {
     pub fn new() -> Result<Self> {
-        let ring = io_uring::IoUring::new(MAX_IOVECS as u32)?;
+        let ring = match io_uring::IoUring::builder()
+            .setup_sqpoll(SQPOLL_IDLE)
+            .build(MAX_IOVECS as u32)
+        {
+            Ok(ring) => ring,
+            Err(_) => io_uring::IoUring::new(MAX_IOVECS as u32)?,
+        };
         let inner = InnerLinuxIO {
             ring: WrappedIOUring {
                 ring,
