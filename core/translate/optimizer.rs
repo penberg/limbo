@@ -709,6 +709,23 @@ impl Optimizable for ast::Expr {
                 Ok(None)
             }
             Self::Binary(lhs, op, rhs) => {
+                // Only consider index scans for binary ops that are comparisons.
+                // e.g. "t1.id = t2.id" is a valid index scan, but "t1.id + 1" is not.
+                //
+                // TODO/optimization: consider detecting index scan on e.g. table t1 in
+                // "WHERE t1.id + 1 = t2.id"
+                // here the Expr could be rewritten to "t1.id = t2.id - 1"
+                // and then t1.id could be used as an index key.
+                if !matches!(
+                    *op,
+                    ast::Operator::Equals
+                        | ast::Operator::Greater
+                        | ast::Operator::GreaterEquals
+                        | ast::Operator::Less
+                        | ast::Operator::LessEquals
+                ) {
+                    return Ok(None);
+                }
                 let lhs_index =
                     lhs.check_index_scan(table_index, referenced_tables, available_indexes)?;
                 if lhs_index.is_some() {

@@ -1360,8 +1360,8 @@ fn close_loop(
             iter_dir,
             ..
         } => {
-            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
             program.resolve_label(loop_labels.next, program.offset());
+            let cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
             if iter_dir
                 .as_ref()
                 .is_some_and(|dir| *dir == IterationDirection::Backwards)

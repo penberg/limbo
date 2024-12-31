@@ -1843,7 +1843,7 @@ impl Program {
                     }
                     state.pc += 1;
                 }
-                Insn::CreateBtree { db, root, flags: _ } => {
+                Insn::CreateBtree { db, root, flags } => {
                     if *db > 0 {
                         // TODO: implement temp datbases
                         todo!("temp databases not implemented yet");
@@ -1854,7 +1854,7 @@ impl Program {
                         self.database_header.clone(),
                     ));
 
-                    let root_page = cursor.btree_create(1);
+                    let root_page = cursor.btree_create(*flags);
                     state.registers[*root] = OwnedValue::Integer(root_page as i64);
                     state.pc += 1;
                 }
