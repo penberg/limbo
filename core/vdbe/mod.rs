@@ -1321,6 +1321,10 @@ impl Program {
                                 let result = exec_cast(&reg_value_argument, &reg_value_type.value);
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::Changes => {
+                                //placeholder
+                                state.registers[*dest] = OwnedValue::Integer(0);
+                            }
                             ScalarFunc::Char => {
                                 let reg_values =
                                     state.registers[*start_reg..*start_reg + arg_count].to_vec();
@@ -1528,6 +1532,10 @@ impl Program {
                                 let result =
                                     exec_time(&state.registers[*start_reg..*start_reg + arg_count]);
                                 state.registers[*dest] = result;
+                            }
+                            ScalarFunc::TotalChanges => {
+                                //placeholder
+                                state.registers[*dest] = OwnedValue::Integer(0);
                             }
                             ScalarFunc::UnixEpoch => {
                                 if *start_reg == 0 {
