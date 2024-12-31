@@ -115,6 +115,15 @@ Test coverage report:
 cargo tarpaulin -o html
 ```
 
+> [!NOTE]
+> Generation of coverage report requires [tarpaulin](https://github.com/xd009642/tarpaulin) binary to be installed.
+> You can install it with `cargo install cargo-tarpaulin`
+
+[//]: # (TODO remove the below tip when the bug is solved)
+
+> [!TIP]
+> If coverage fails with "Test failed during run" error and all of the tests passed it might be the result of tarpaulin [bug](https://github.com/xd009642/tarpaulin/issues/1642). You can temporarily set [dynamic libraries linking manually](https://doc.rust-lang.org/cargo/reference/environment-variables.html#dynamic-library-paths) as a workaround, e.g. for linux  `LD_LIBRARY_PATH="$(rustc --print=target-libdir)" cargo tarpaulin -o html`.
+
 Run benchmarks:
 
 ```console
