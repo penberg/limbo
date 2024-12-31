@@ -2281,14 +2281,10 @@ pub fn translate_aggregation(
             let delimiter_reg = program.alloc_register();
 
             let expr = &agg.args[0];
-            let delimiter_expr: ast::Expr;
-
-            match &agg.args[1] {
-                ast::Expr::Column { .. } => {
-                    delimiter_expr = agg.args[1].clone();
-                }
+            let delimiter_expr = match &agg.args[1] {
+                ast::Expr::Column { .. } => agg.args[1].clone(),
                 ast::Expr::Literal(ast::Literal::String(s)) => {
-                    delimiter_expr = ast::Expr::Literal(ast::Literal::String(s.to_string()));
+                    ast::Expr::Literal(ast::Literal::String(s.to_string()))
                 }
                 _ => crate::bail_parse_error!("Incorrect delimiter parameter"),
             };
@@ -2464,14 +2460,10 @@ pub fn translate_aggregation_groupby(
             let expr_reg = program.alloc_register();
             let delimiter_reg = program.alloc_register();
 
-            let delimiter_expr: ast::Expr;
-
-            match &agg.args[1] {
-                ast::Expr::Column { .. } => {
-                    delimiter_expr = agg.args[1].clone();
-                }
+            let delimiter_expr = match &agg.args[1] {
+                ast::Expr::Column { .. } => agg.args[1].clone(),
                 ast::Expr::Literal(ast::Literal::String(s)) => {
-                    delimiter_expr = ast::Expr::Literal(ast::Literal::String(s.to_string()));
+                    ast::Expr::Literal(ast::Literal::String(s.to_string()))
                 }
                 _ => crate::bail_parse_error!("Incorrect delimiter parameter"),
             };

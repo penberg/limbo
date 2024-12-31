@@ -30,9 +30,11 @@ pub(crate) struct SimulatorOpts {
     pub(crate) max_tables: usize,
     // this next options are the distribution of workload where read_percent + write_percent +
     // delete_percent == 100%
-    pub(crate) read_percent: usize,
-    pub(crate) write_percent: usize,
-    pub(crate) delete_percent: usize,
+    pub(crate) create_percent: f64,
+    pub(crate) read_percent: f64,
+    pub(crate) write_percent: f64,
+    pub(crate) delete_percent: f64,
     pub(crate) max_interactions: usize,
     pub(crate) page_size: usize,
+    pub(crate) max_time_simulation: usize,
 }

@@ -15,10 +15,24 @@ pub struct SimulatorCLI {
     )]
     pub doublecheck: bool,
     #[clap(
-        short,
+        short = 'n',
         long,
         help = "change the maximum size of the randomly generated sequence of interactions",
         default_value_t = 1024
     )]
     pub maximum_size: usize,
+    #[clap(
+        short = 'k',
+        long,
+        help = "change the minimum size of the randomly generated sequence of interactions",
+        default_value_t = 1
+    )]
+    pub minimum_size: usize,
+    #[clap(
+        short = 't',
+        long,
+        help = "change the maximum time of the simulation(in seconds)",
+        default_value_t = 60 * 60 // default to 1 hour
+    )]
+    pub maximum_time: usize,
 }

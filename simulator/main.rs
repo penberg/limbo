@@ -121,6 +121,15 @@ fn main() {
         // Move the old database and plan file back
         std::fs::rename(&old_db_path, &db_path).unwrap();
         std::fs::rename(&old_plan_path, &plan_path).unwrap();
+    } else if let Ok(result) = result {
+        match result {
+            Ok(_) => {
+                log::info!("simulation completed successfully");
+            }
+            Err(e) => {
+                log::error!("simulation failed: {:?}", e);
+            }
+        }
     }
     // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
     println!("database path: {:?}", db_path);
@@ -136,30 +145,50 @@ fn run_simulation(
 ) -> Result<()> {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
-    let (read_percent, write_percent, delete_percent) = {
-        let mut remaining = 100;
-        let read_percent = rng.gen_range(0..=remaining);
+    let (create_percent, read_percent, write_percent, delete_percent) = {
+        let mut remaining = 100.0;
+        let read_percent = rng.gen_range(0.0..=remaining);
         remaining -= read_percent;
-        let write_percent = rng.gen_range(0..=remaining);
+        let write_percent = rng.gen_range(0.0..=remaining);
         remaining -= write_percent;
         let delete_percent = remaining;
-        (read_percent, write_percent, delete_percent)
+
+        let create_percent = write_percent / 10.0;
+        let write_percent = write_percent - create_percent;
+
+        (create_percent, read_percent, write_percent, delete_percent)
     };
 
+    if cli_opts.minimum_size < 1 {
+        return Err(limbo_core::LimboError::InternalError(
+            "minimum size must be at least 1".to_string(),
+        ));
+    }
+
     if cli_opts.maximum_size < 1 {
-        panic!("maximum size must be at least 1");
+        return Err(limbo_core::LimboError::InternalError(
+            "maximum size must be at least 1".to_string(),
+        ));
+    }
+
+    if cli_opts.maximum_size < cli_opts.minimum_size {
+        return Err(limbo_core::LimboError::InternalError(
+            "maximum size must be greater than or equal to minimum size".to_string(),
+        ));
     }
 
     let opts = SimulatorOpts {
-        ticks: rng.gen_range(1..=cli_opts.maximum_size),
+        ticks: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
         max_connections: 1, // TODO: for now let's use one connection as we didn't implement
         // correct transactions procesing
         max_tables: rng.gen_range(0..128),
+        create_percent,
         read_percent,
         write_percent,
         delete_percent,
         page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(1..=cli_opts.maximum_size),
+        max_interactions: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
+        max_time_simulation: cli_opts.maximum_time,
     };
     let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
@@ -207,12 +236,19 @@ fn run_simulation(
 }
 
 fn execute_plans(env: &mut SimulatorEnv, plans: &mut [InteractionPlan]) -> Result<()> {
+    let now = std::time::Instant::now();
     // todo: add history here by recording which interaction was executed at which tick
     for _tick in 0..env.opts.ticks {
         // Pick the connection to interact with
         let connection_index = pick_index(env.connections.len(), &mut env.rng);
         // Execute the interaction for the selected connection
         execute_plan(env, connection_index, plans)?;
+        // Check if the maximum time for the simulation has been reached
+        if now.elapsed().as_secs() >= env.opts.max_time_simulation as u64 {
+            return Err(limbo_core::LimboError::InternalError(
+                "maximum time for simulation reached".into(),
+            ));
+        }
     }
 
     Ok(())
@@ -266,7 +302,7 @@ fn execute_interaction(
             };
 
             log::debug!("{}", interaction);
-            let results = interaction.execute_query(conn)?;
+            let results = interaction.execute_query(conn);
             log::debug!("{:?}", results);
             stack.push(results);
         }

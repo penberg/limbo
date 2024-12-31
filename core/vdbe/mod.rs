@@ -39,12 +39,13 @@ use crate::types::{
 use crate::util::parse_schema_rows;
 use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
-use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
+use crate::{
+    function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
+    json::json_extract,
+};
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_time, exec_unixepoch};
-use likeop::{construct_like_escape_arg, exec_like_with_escape};
-
-use crate::json::json_extract;
+use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
@@ -2701,7 +2702,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
     let word: String = s
         .value
         .chars()
-        .filter(|c| !c.is_digit(10))
+        .filter(|c| !c.is_ascii_digit())
         .collect::<String>()
         .replace(" ", "");
     if word.is_empty() {
@@ -2743,7 +2744,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
 
     // Remove adjacent same digits
     let tmp = tmp.chars().fold(String::new(), |mut acc, ch| {
-        if acc.chars().last() != Some(ch) {
+        if !acc.ends_with(ch) {
             acc.push(ch);
         }
         acc
@@ -2759,7 +2760,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
 
     // If the first symbol is a digit, replace it with the saved first letter
     if let Some(first_digit) = result.chars().next() {
-        if first_digit.is_digit(10) {
+        if first_digit.is_ascii_digit() {
             result.replace_range(0..1, &first_letter.to_string());
         }
     }
@@ -2894,31 +2895,6 @@ fn exec_like(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, te
         }
     } else {
         let re = construct_like_regex(pattern);
-        re.is_match(text)
-    }
-}
-
-fn construct_glob_regex(pattern: &str) -> Regex {
-    let mut regex_pattern = String::from("^");
-    regex_pattern.push_str(&pattern.replace('*', ".*").replace("?", "."));
-    regex_pattern.push('$');
-    Regex::new(&regex_pattern).unwrap()
-}
-
-// Implements GLOB pattern matching. Caches the constructed regex if a cache is provided
-fn exec_glob(regex_cache: Option<&mut HashMap<String, Regex>>, pattern: &str, text: &str) -> bool {
-    if let Some(cache) = regex_cache {
-        match cache.get(pattern) {
-            Some(re) => re.is_match(text),
-            None => {
-                let re = construct_glob_regex(pattern);
-                let res = re.is_match(text);
-                cache.insert(pattern.to_string(), re);
-                res
-            }
-        }
-    } else {
-        let re = construct_glob_regex(pattern);
         re.is_match(text)
     }
 }
@@ -4114,7 +4090,7 @@ mod tests {
                 expected_len: 2,
             },
             TestCase {
-                input: OwnedValue::Float(-3.14),
+                input: OwnedValue::Float(-3.15),
                 expected_len: 1,
             },
             TestCase {

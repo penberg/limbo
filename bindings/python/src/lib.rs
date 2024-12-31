@@ -1,11 +1,11 @@
 use anyhow::Result;
 use errors::*;
-use limbo_core::IO;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::types::PyTuple;
+use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 mod errors;
 
@@ -78,7 +78,7 @@ pub struct Cursor {
     #[pyo3(get)]
     rowcount: i64,
 
-    smt: Option<Arc<Mutex<limbo_core::Statement>>>,
+    smt: Option<Rc<RefCell<limbo_core::Statement>>>,
 }
 
 // SAFETY: The limbo_core crate guarantees that `Cursor` is thread-safe.
@@ -90,25 +90,32 @@ impl Cursor {
     #[pyo3(signature = (sql, parameters=None))]
     pub fn execute(&mut self, sql: &str, parameters: Option<Py<PyTuple>>) -> Result<Self> {
         let stmt_is_dml = stmt_is_dml(sql);
+        let stmt_is_ddl = stmt_is_ddl(sql);
 
-        let conn_lock =
-            self.conn.conn.lock().map_err(|_| {
-                PyErr::new::<OperationalError, _>("Failed to acquire connection lock")
-            })?;
-
-        let statement = conn_lock.prepare(sql).map_err(|e| {
+        let statement = self.conn.conn.prepare(sql).map_err(|e| {
             PyErr::new::<ProgrammingError, _>(format!("Failed to prepare statement: {:?}", e))
         })?;
 
-        self.smt = Some(Arc::new(Mutex::new(statement)));
+        let stmt = Rc::new(RefCell::new(statement));
 
-        // TODO: use stmt_is_dml to set rowcount
-        if stmt_is_dml {
-            return Err(PyErr::new::<NotSupportedError, _>(
-                "DML statements (INSERT/UPDATE/DELETE) are not fully supported in this version",
-            )
-            .into());
+        // For DDL and DML statements,
+        // we need to execute the statement immediately
+        if stmt_is_ddl || stmt_is_dml {
+            loop {
+                match stmt.borrow_mut().step().map_err(|e| {
+                    PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
+                })? {
+                    limbo_core::StepResult::IO => {
+                        self.conn.io.run_once().map_err(|e| {
+                            PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
+                        })?;
+                    }
+                    _ => break,
+                }
+            }
         }
+
+        self.smt = Some(stmt);
 
         Ok(Cursor {
             smt: self.smt.clone(),
@@ -121,11 +128,8 @@ impl Cursor {
 
     pub fn fetchone(&mut self, py: Python) -> Result<Option<PyObject>> {
         if let Some(smt) = &self.smt {
-            let mut smt_lock = smt.lock().map_err(|_| {
-                PyErr::new::<OperationalError, _>("Failed to acquire statement lock")
-            })?;
             loop {
-                match smt_lock.step().map_err(|e| {
+                match smt.borrow_mut().step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
                     limbo_core::StepResult::Row(row) => {
@@ -157,14 +161,9 @@ impl Cursor {
 
     pub fn fetchall(&mut self, py: Python) -> Result<Vec<PyObject>> {
         let mut results = Vec::new();
-
         if let Some(smt) = &self.smt {
-            let mut smt_lock = smt.lock().map_err(|_| {
-                PyErr::new::<OperationalError, _>("Failed to acquire statement lock")
-            })?;
-
             loop {
-                match smt_lock.step().map_err(|e| {
+                match smt.borrow_mut().step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
                     limbo_core::StepResult::Row(row) => {
@@ -221,11 +220,17 @@ fn stmt_is_dml(sql: &str) -> bool {
     sql.starts_with("INSERT") || sql.starts_with("UPDATE") || sql.starts_with("DELETE")
 }
 
+fn stmt_is_ddl(sql: &str) -> bool {
+    let sql = sql.trim();
+    let sql = sql.to_uppercase();
+    sql.starts_with("CREATE") || sql.starts_with("ALTER") || sql.starts_with("DROP")
+}
+
 #[pyclass]
 #[derive(Clone)]
 pub struct Connection {
-    conn: Arc<Mutex<Rc<limbo_core::Connection>>>,
-    io: Arc<limbo_core::PlatformIO>,
+    conn: Rc<limbo_core::Connection>,
+    io: Arc<dyn limbo_core::IO>,
 }
 
 // SAFETY: The limbo_core crate guarantees that `Connection` is thread-safe.
@@ -263,16 +268,24 @@ impl Connection {
 #[allow(clippy::arc_with_non_send_sync)]
 #[pyfunction]
 pub fn connect(path: &str) -> Result<Connection> {
-    let io = Arc::new(limbo_core::PlatformIO::new().map_err(|e| {
-        PyErr::new::<InterfaceError, _>(format!("IO initialization failed: {:?}", e))
-    })?);
-    let db = limbo_core::Database::open_file(io.clone(), path)
-        .map_err(|e| PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e)))?;
-    let conn: Rc<limbo_core::Connection> = db.connect();
-    Ok(Connection {
-        conn: Arc::new(Mutex::new(conn)),
-        io,
-    })
+    match path {
+        ":memory:" => {
+            let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::MemoryIO::new()?);
+            let db = limbo_core::Database::open_file(io.clone(), path).map_err(|e| {
+                PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e))
+            })?;
+            let conn: Rc<limbo_core::Connection> = db.connect();
+            Ok(Connection { conn, io })
+        }
+        path => {
+            let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new()?);
+            let db = limbo_core::Database::open_file(io.clone(), path).map_err(|e| {
+                PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e))
+            })?;
+            let conn: Rc<limbo_core::Connection> = db.connect();
+            Ok(Connection { conn, io })
+        }
+    }
 }
 
 fn row_to_py(py: Python, row: &limbo_core::Row) -> PyObject {

@@ -16,7 +16,7 @@ use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
 
 use super::{pick, pick_index};
 
-pub(crate) type ResultSet = Vec<Vec<Value>>;
+pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
 pub(crate) struct InteractionPlan {
     pub(crate) plan: Vec<Interaction>,
@@ -45,14 +45,15 @@ pub(crate) struct InteractionStats {
     pub(crate) read_count: usize,
     pub(crate) write_count: usize,
     pub(crate) delete_count: usize,
+    pub(crate) create_count: usize,
 }
 
 impl Display for InteractionStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Read: {}, Write: {}, Delete: {}",
-            self.read_count, self.write_count, self.delete_count
+            "Read: {}, Write: {}, Delete: {}, Create: {}",
+            self.read_count, self.write_count, self.delete_count, self.create_count
         )
     }
 }
@@ -100,7 +101,9 @@ impl Interactions {
             match interaction {
                 Interaction::Query(query) => match query {
                     Query::Create(create) => {
-                        env.tables.push(create.table.clone());
+                        if !env.tables.iter().any(|t| t.name == create.table.name) {
+                            env.tables.push(create.table.clone());
+                        }
                     }
                     Query::Insert(insert) => {
                         let table = env
@@ -137,6 +140,7 @@ impl InteractionPlan {
         let mut read = 0;
         let mut write = 0;
         let mut delete = 0;
+        let mut create = 0;
 
         for interaction in &self.plan {
             match interaction {
@@ -144,7 +148,7 @@ impl InteractionPlan {
                     Query::Select(_) => read += 1,
                     Query::Insert(_) => write += 1,
                     Query::Delete(_) => delete += 1,
-                    Query::Create(_) => {}
+                    Query::Create(_) => create += 1,
                 },
                 Interaction::Assertion(_) => {}
                 Interaction::Fault(_) => {}
@@ -155,6 +159,7 @@ impl InteractionPlan {
             read_count: read,
             write_count: write,
             delete_count: delete,
+            create_count: create,
         }
     }
 }
@@ -172,7 +177,7 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
             rng: ChaCha8Rng::seed_from_u64(rng.next_u64()),
         };
 
-        let num_interactions = rng.gen_range(0..env.opts.max_interactions);
+        let num_interactions = env.opts.max_interactions;
 
         // First create at least one table
         let create_query = Create::arbitrary(rng);
@@ -197,7 +202,7 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
 }
 
 impl Interaction {
-    pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> Result<ResultSet> {
+    pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> ResultSet {
         match self {
             Self::Query(query) => {
                 let query_str = query.to_string();
@@ -342,11 +347,38 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
         ),
         func: Box::new(move |stack: &Vec<ResultSet>| {
             let rows = stack.last().unwrap();
-            rows.iter().any(|r| r == &row)
+            match rows {
+                Ok(rows) => rows.iter().any(|r| r == &row),
+                Err(_) => false,
+            }
         }),
     });
 
     Interactions(vec![insert_query, select_query, assertion])
+}
+
+fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
+    let create_query = Create::arbitrary(rng);
+    let table_name = create_query.table.name.clone();
+    let cq1 = Interaction::Query(Query::Create(create_query.clone()));
+    let cq2 = Interaction::Query(Query::Create(create_query.clone()));
+
+    let assertion = Interaction::Assertion(Assertion {
+        message:
+            "creating two tables with the name should result in a failure for the second query"
+                .to_string(),
+        func: Box::new(move |stack: &Vec<ResultSet>| {
+            let last = stack.last().unwrap();
+            match last {
+                Ok(_) => false,
+                Err(e) => e
+                    .to_string()
+                    .contains(&format!("Table {table_name} already exists")),
+            }
+        }),
+    });
+
+    Interactions(vec![cq1, cq2, assertion])
 }
 
 fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
@@ -375,17 +407,21 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
         rng: &mut R,
         (env, stats): &(&SimulatorEnv, InteractionStats),
     ) -> Self {
-        let remaining_read =
-            ((((env.opts.max_interactions * env.opts.read_percent) as f64) / 100.0) as usize)
-                .saturating_sub(stats.read_count);
-        let remaining_write = ((((env.opts.max_interactions * env.opts.write_percent) as f64)
-            / 100.0) as usize)
-            .saturating_sub(stats.write_count);
+        let remaining_read = ((env.opts.max_interactions as f64 * env.opts.read_percent / 100.0)
+            - (stats.read_count as f64))
+            .max(0.0);
+        let remaining_write = ((env.opts.max_interactions as f64 * env.opts.write_percent / 100.0)
+            - (stats.write_count as f64))
+            .max(0.0);
+        let remaining_create = ((env.opts.max_interactions as f64 * env.opts.create_percent
+            / 100.0)
+            - (stats.create_count as f64))
+            .max(0.0);
 
         frequency(
             vec![
                 (
-                    usize::min(remaining_read, remaining_write),
+                    f64::min(remaining_read, remaining_write),
                     Box::new(|rng: &mut R| property_insert_select(rng, env)),
                 ),
                 (
@@ -397,10 +433,14 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
                     Box::new(|rng: &mut R| random_write(rng, env)),
                 ),
                 (
-                    remaining_write / 10,
+                    remaining_create,
                     Box::new(|rng: &mut R| create_table(rng, env)),
                 ),
-                (1, Box::new(|rng: &mut R| random_fault(rng, env))),
+                (1.0, Box::new(|rng: &mut R| random_fault(rng, env))),
+                (
+                    remaining_create / 2.0,
+                    Box::new(|rng: &mut R| property_double_create_failure(rng, env)),
+                ),
             ],
             rng,
         )

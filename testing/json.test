@@ -113,10 +113,10 @@ do_execsql_test json_extract_number {
     SELECT json_extract(1, '$')
 } {{1}}
 
-# \x61 is the ASCII code for 'a', json_extract needs an exact match though
+# \x61 is the ASCII code for 'a'
 do_execsql_test json_extract_with_escaping {
     SELECT json_extract('{"\x61": 1}', '$.a')
-} {{}}
+} {{1}}
 
 # TODO: fix me
 #do_execsql_test json_extract_with_escaping_2 {

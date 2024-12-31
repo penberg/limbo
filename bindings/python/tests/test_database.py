@@ -28,6 +28,20 @@ def test_fetchall_select_user_ids(provider):
 
 
 @pytest.mark.parametrize("provider", ["sqlite3", "limbo"])
+def test_in_memory_fetchone_select_all_users(provider):
+    conn = connect(provider, ":memory:")
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT)")
+    cursor.execute("INSERT INTO users VALUES (1, 'alice')")
+
+    cursor.execute("SELECT * FROM users")
+
+    alice = cursor.fetchone()
+    assert alice
+    assert alice == (1, "alice")
+
+
+@pytest.mark.parametrize("provider", ["sqlite3", "limbo"])
 def test_fetchone_select_all_users(provider):
     conn = connect(provider, "tests/database.db")
     cursor = conn.cursor()

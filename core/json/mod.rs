@@ -66,7 +66,7 @@ fn get_json_value(json_value: &OwnedValue) -> crate::Result<Val> {
             }
         },
         OwnedValue::Blob(b) => {
-            if let Ok(json) = jsonb::from_slice(b) {
+            if let Ok(_json) = jsonb::from_slice(b) {
                 todo!("jsonb to json conversion");
             } else {
                 crate::bail_parse_error!("malformed JSON");
@@ -137,7 +137,7 @@ pub fn json_array_length(
     };
 
     match arr_val {
-        Val::Array(val) => (Ok(OwnedValue::Integer(val.len() as i64))),
+        Val::Array(val) => Ok(OwnedValue::Integer(val.len() as i64)),
         Val::Null => Ok(OwnedValue::Null),
         _ => Ok(OwnedValue::Integer(0)),
     }
