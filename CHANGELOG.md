@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.0.11 - 2024-12-31
+
+### Added
+
+* Add in-memory mode to Python bindings (Jean Arhancet)
+
+* Add json_array_length function (Peter Sooley)
+
+* Add support for the UUID extension (Preston Thorpe)
+
+### Changed
+
+* Enable sqpoll by default in io_uring (Preston Thorpe)
+
+* Simulator improvements (Alperen Keleş)
+
+### Fixed
+
+* Fix escaping issues with like and glob functions (Vrishabh)
+
+* Fix `sqlite_version()` out of bound panics' (Diego Reis)
+
+* Fix on-disk file format bugs (Jussi Saurio)
+
 ## 0.0.10 - 2024-12-18
 
 ### Added
