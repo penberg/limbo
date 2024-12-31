@@ -36,7 +36,7 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
 
-use translate::planner::prepare_select_plan;
+use translate::select::prepare_select_plan;
 
 pub use error::LimboError;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
