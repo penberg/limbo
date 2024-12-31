@@ -2183,7 +2183,7 @@ impl Program {
                         crate::function::Func::Extension(extfn) => match extfn {
                             #[cfg(feature = "uuid")]
                             ExtFunc::Uuid(uuidfn) => match uuidfn {
-                                UuidFunc::Uuid4 | UuidFunc::Uuid4Str => {
+                                UuidFunc::Uuid4Str => {
                                     state.registers[*dest] = exec_uuid(uuidfn, None)?
                                 }
                                 UuidFunc::Uuid7 => match arg_count {
@@ -2212,6 +2212,10 @@ impl Program {
                             },
                             _ => unreachable!(), // when more extension types are added
                         },
+                        crate::function::Func::External(f) => {
+                            let result = (f.func)(&[])?;
+                            state.registers[*dest] = result;
+                        }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {
                                 MathFunc::Pi => {
