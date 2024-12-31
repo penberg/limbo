@@ -15,7 +15,7 @@ pub enum Value<'a> {
     Blob(&'a Vec<u8>),
 }
 
-impl<'a> Display for Value<'a> {
+impl Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Null => write!(f, "NULL"),
@@ -647,7 +647,8 @@ mod tests {
 
     #[test]
     fn test_serialize_float() {
-        let record = OwnedRecord::new(vec![OwnedValue::Float(3.14159)]);
+        #[warn(clippy::approx_constant)]
+        let record = OwnedRecord::new(vec![OwnedValue::Float(3.15555)]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -660,7 +661,7 @@ mod tests {
         // Check that the bytes after the header can be interpreted as the float
         let float_bytes = &buf[header_length..header_length + size_of::<f64>()];
         let float = f64::from_be_bytes(float_bytes.try_into().unwrap());
-        assert_eq!(float, 3.14159);
+        assert_eq!(float, 3.15555);
         // Check that buffer length is correct
         assert_eq!(buf.len(), header_length + size_of::<f64>());
     }
@@ -709,7 +710,7 @@ mod tests {
         let record = OwnedRecord::new(vec![
             OwnedValue::Null,
             OwnedValue::Integer(42),
-            OwnedValue::Float(3.14),
+            OwnedValue::Float(3.15),
             OwnedValue::Text(LimboText::new(text.clone())),
         ]);
         let mut buf = Vec::new();
@@ -741,7 +742,7 @@ mod tests {
         let val_text = String::from_utf8(text_bytes.to_vec()).unwrap();
 
         assert_eq!(val_int8, 42);
-        assert_eq!(val_float, 3.14);
+        assert_eq!(val_float, 3.15);
         assert_eq!(val_text, "test");
 
         // Check that buffer length is correct

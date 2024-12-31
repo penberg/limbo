@@ -2683,7 +2683,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
     let word: String = s
         .value
         .chars()
-        .filter(|c| !c.is_digit(10))
+        .filter(|c| !c.is_ascii_digit())
         .collect::<String>()
         .replace(" ", "");
     if word.is_empty() {
@@ -2725,7 +2725,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
 
     // Remove adjacent same digits
     let tmp = tmp.chars().fold(String::new(), |mut acc, ch| {
-        if acc.chars().last() != Some(ch) {
+        if !acc.ends_with(ch) {
             acc.push(ch);
         }
         acc
@@ -2741,7 +2741,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
 
     // If the first symbol is a digit, replace it with the saved first letter
     if let Some(first_digit) = result.chars().next() {
-        if first_digit.is_digit(10) {
+        if first_digit.is_ascii_digit() {
             result.replace_range(0..1, &first_letter.to_string());
         }
     }
@@ -4097,7 +4097,7 @@ mod tests {
                 expected_len: 2,
             },
             TestCase {
-                input: OwnedValue::Float(-3.14),
+                input: OwnedValue::Float(-3.15),
                 expected_len: 1,
             },
             TestCase {

@@ -241,12 +241,7 @@ fn emit_program_for_select(
     inner_loop_emit(&mut program, &mut plan, &mut metadata)?;
 
     // Clean up and close the main execution loop
-    close_loop(
-        &mut program,
-        &plan.source,
-        &mut metadata,
-        &plan.referenced_tables,
-    )?;
+    close_loop(&mut program, &plan.source, &mut metadata)?;
 
     if let Some(skip_loops_label) = skip_loops_label {
         program.resolve_label(skip_loops_label, program.offset());
@@ -338,12 +333,7 @@ fn emit_program_for_delete(
     emit_delete_insns(&mut program, &plan.source, &plan.limit, &metadata)?;
 
     // Clean up and close the main execution loop
-    close_loop(
-        &mut program,
-        &plan.source,
-        &mut metadata,
-        &plan.referenced_tables,
-    )?;
+    close_loop(&mut program, &plan.source, &mut metadata)?;
 
     if let Some(skip_loops_label) = skip_loops_label {
         program.resolve_label(skip_loops_label, program.offset());
@@ -663,7 +653,7 @@ fn open_loop(
                 });
             }
 
-            return Ok(());
+            Ok(())
         }
         SourceOperator::Scan {
             id,
@@ -722,7 +712,7 @@ fn open_loop(
                 }
             }
 
-            return Ok(());
+            Ok(())
         }
         SourceOperator::Search {
             id,
@@ -905,11 +895,9 @@ fn open_loop(
                 }
             }
 
-            return Ok(());
+            Ok(())
         }
-        SourceOperator::Nothing => {
-            return Ok(());
-        }
+        SourceOperator::Nothing => Ok(()),
     }
 }
 
@@ -978,14 +966,14 @@ fn inner_loop_emit(
         );
     }
     // if we have neither, we emit a ResultRow. In that case, if we have a Limit, we handle that with DecrJumpZero.
-    return inner_loop_source_emit(
+    inner_loop_source_emit(
         program,
         &plan.result_columns,
         &plan.aggregates,
         metadata,
         InnerLoopEmitTarget::ResultRow { limit: plan.limit },
         &plan.referenced_tables,
-    );
+    )
 }
 
 /// This is a helper function for inner_loop_emit,
@@ -1111,7 +1099,6 @@ fn close_loop(
     program: &mut ProgramBuilder,
     source: &SourceOperator,
     metadata: &mut Metadata,
-    referenced_tables: &[BTreeTableReference],
 ) -> Result<()> {
     match source {
         SourceOperator::Join {
@@ -1121,7 +1108,7 @@ fn close_loop(
             outer,
             ..
         } => {
-            close_loop(program, right, metadata, referenced_tables)?;
+            close_loop(program, right, metadata)?;
 
             if *outer {
                 let lj_meta = metadata.left_joins.get(id).unwrap();
@@ -1168,7 +1155,7 @@ fn close_loop(
                 assert!(program.offset() == jump_offset);
             }
 
-            close_loop(program, left, metadata, referenced_tables)?;
+            close_loop(program, left, metadata)?;
 
             Ok(())
         }

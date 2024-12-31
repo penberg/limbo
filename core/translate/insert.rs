@@ -349,7 +349,7 @@ pub fn translate_insert(
     // Create new rowid if a) not provided by user or b) provided by user but is NULL
     program.emit_insn(Insn::NewRowid {
         cursor: cursor_id,
-        rowid_reg: rowid_reg,
+        rowid_reg,
         prev_largest_reg: 0,
     });
 
@@ -366,7 +366,7 @@ pub fn translate_insert(
         program.emit_insn_with_label_dependency(
             Insn::NotExists {
                 cursor: cursor_id,
-                rowid_reg: rowid_reg,
+                rowid_reg,
                 target_pc: make_record_label,
             },
             make_record_label,
