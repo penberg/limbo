@@ -211,7 +211,7 @@ fn use_indexes(
             use_indexes(right, referenced_tables, available_indexes)?;
             Ok(())
         }
-        SourceOperator::Nothing => Ok(()),
+        SourceOperator::Nothing { .. } => Ok(()),
     }
 }
 
@@ -335,7 +335,7 @@ fn eliminate_constants(
 
             Ok(ConstantConditionEliminationResult::Continue)
         }
-        SourceOperator::Nothing => Ok(ConstantConditionEliminationResult::Continue),
+        SourceOperator::Nothing { .. } => Ok(ConstantConditionEliminationResult::Continue),
     }
 }
 
@@ -430,7 +430,7 @@ fn push_predicates(
         // Base cases - nowhere else to push to
         SourceOperator::Scan { .. } => Ok(()),
         SourceOperator::Search { .. } => Ok(()),
-        SourceOperator::Nothing => Ok(()),
+        SourceOperator::Nothing { .. } => Ok(()),
     }
 }
 
@@ -585,7 +585,7 @@ fn push_predicate(
 
             Ok(None)
         }
-        SourceOperator::Nothing => Ok(Some(predicate)),
+        SourceOperator::Nothing { .. } => Ok(Some(predicate)),
     }
 }
 
@@ -1016,11 +1016,5 @@ trait TakeOwnership {
 impl TakeOwnership for ast::Expr {
     fn take_ownership(&mut self) -> Self {
         std::mem::replace(self, ast::Expr::Literal(ast::Literal::Null))
-    }
-}
-
-impl TakeOwnership for SourceOperator {
-    fn take_ownership(&mut self) -> Self {
-        std::mem::replace(self, Self::Nothing)
     }
 }

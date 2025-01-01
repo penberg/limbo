@@ -324,7 +324,12 @@ pub fn parse_from(
     operator_id_counter: &mut OperatorIdCounter,
 ) -> Result<(SourceOperator, Vec<TableReference>)> {
     if from.as_ref().and_then(|f| f.select.as_ref()).is_none() {
-        return Ok((SourceOperator::Nothing, vec![]));
+        return Ok((
+            SourceOperator::Nothing {
+                id: operator_id_counter.get_next_id(),
+            },
+            vec![],
+        ));
     }
 
     let mut table_index = 0;

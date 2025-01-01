@@ -167,7 +167,7 @@ impl SourceOperator {
                 .enumerate()
                 .map(|(i, col)| (table_reference.table_index, col, i))
                 .collect(),
-            SourceOperator::Nothing => Vec::new(),
+            SourceOperator::Nothing { .. } => Vec::new(),
         }
     }
 }
@@ -222,7 +222,9 @@ pub enum SourceOperator {
     // Nothing operator
     // This operator is used to represent an empty query.
     // e.g. SELECT * from foo WHERE 0 will eventually be optimized to Nothing.
-    Nothing,
+    Nothing {
+        id: usize,
+    },
 }
 
 /// The type of the table reference, either BTreeTable or Subquery
@@ -306,7 +308,7 @@ impl SourceOperator {
             SourceOperator::Scan { id, .. } => *id,
             SourceOperator::Search { id, .. } => *id,
             SourceOperator::Subquery { id, .. } => *id,
-            SourceOperator::Nothing => unreachable!(),
+            SourceOperator::Nothing { id } => *id,
         }
     }
 }
@@ -445,7 +447,7 @@ impl Display for SourceOperator {
                 SourceOperator::Subquery { plan, .. } => {
                     fmt_operator(&plan.source, f, level + 1, last)
                 }
-                SourceOperator::Nothing => Ok(()),
+                SourceOperator::Nothing { .. } => Ok(()),
             }
         }
         writeln!(f, "QUERY PLAN")?;
@@ -490,7 +492,7 @@ pub fn get_table_ref_bitmask_for_operator<'a>(
                     .unwrap();
         }
         SourceOperator::Subquery { .. } => {}
-        SourceOperator::Nothing => {}
+        SourceOperator::Nothing { .. } => {}
     }
     Ok(table_refs_mask)
 }
