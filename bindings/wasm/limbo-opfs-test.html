@@ -1,62 +1,83 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>Limbo Test</title>
+</head>
 <body>
-  <button onclick="runTests()">Run Tests</button>
-  <script type="module">
-    import init, { Database } from './pkg/limbo_wasm.js';
+    <script type="module">
+        function waitForMessage(worker, type, op) {
+            return new Promise((resolve, reject) => {
+                const handler = (e) => {
+                    if (e.data.type === type && (!op || e.data.op === op)) {
+                        worker.removeEventListener('message', handler);
+                        resolve(e.data);
+                    } else if (e.data.type === 'error') {
+                        worker.removeEventListener('message', handler);
+                        reject(e.data.error);
+                    }
+                };
+                worker.addEventListener('message', handler);
+            });
+        }
 
-    console.log('Page loading, initializing WASM...');
-    
-    try {
-      await navigator.storage.getDirectory();
-      console.log('OPFS access granted');
-      
-      await init();
-      console.log('WASM initialized successfully');
-    } catch (e) {
-      console.error('Initialization failed:', e);
-    }
-    
-    window.connect = async () => {
-      console.log('Connect started...');
-      try {
-        console.log('Creating Database instance...');
-        const db = await new Database("hello.db");  // Added await here
-        console.log('Database instance created:', db);
-        return [db, Error, "limbo-wasm"];
-      } catch (e) {
-        console.error('Connection error type:', e.constructor.name);
-        console.error('Connection error:', e);
-        throw e;
-      }
-    };
+        async function runTests() {
+            const worker = new Worker('./src/limbo-worker.js', { type: 'module' });
+            
+            // Wait for ready then send createDb
+            await waitForMessage(worker, 'ready');
+            worker.postMessage({
+                op: 'createDb',
+                path: 'test.db'
+            });
 
-    window.runTests = async () => {
-      console.log('Starting tests...');
-      try {
-        console.log('Before connect call');
-        const [db] = await connect();
-        console.log('After connect call');
+            // Wait for createDb success then send exec
+            await waitForMessage(worker, 'success', 'createDb');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);
+                `
+            });
+            console.log("made it here");
 
-       
-       await db.exec(`
-         DROP TABLE IF EXISTS users;
-         CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)
-       `);
-       await db.exec("INSERT INTO users VALUES (1, 'Alice', 'alice@example.org')");
-       await db.exec("INSERT INTO users VALUES (2, 'Bob', 'bob@example.com')");
-       console.log('Test data inserted');
+            // Wait for exec success then send prepare
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    INSERT INTO users VALUES (1, 'Alice', 'alice@example.org');
+                `
+            });
 
-       const stmt = db.prepare("SELECT * FROM users");
-       const result = stmt.raw().all();
-       console.log('Query result:', result);
-       
-       console.log('Tests completed successfully');
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    INSERT INTO users VALUES (2, 'Bob', 'bob@example.org');
+                `
+            });
 
-      } catch (e) {
-        console.error('Test error:', e);
-      }
-    };
-  </script>
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    INSERT INTO users VALUES (3, 'bill', 'bill@example.com');
+                `
+            });
+
+            // Wait for exec success then send prepare
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'prepare',
+                sql: 'SELECT * FROM users;'
+            });
+
+            const results = await waitForMessage(worker, 'result');
+            console.log('Query results:', results);
+        }
+
+        runTests().catch(console.error);
+    </script>
 </body>
 </html>
+
