@@ -4,8 +4,14 @@ This source tree contains Limbo Wasm bindings.
 
 ## Building
 
+For nodejs
 ```
 ./scripts/build
+```
+For web
+
+```
+./scripts/build web
 ```
 
 # Browser Support
