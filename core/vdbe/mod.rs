@@ -2308,7 +2308,8 @@ impl Program {
                         {
                             state.pc = *end_offset;
                         } else {
-                            // swap
+                            // swap the program counter with the value in the yield register
+                            // this is the mechanism that allows jumping back and forth between the coroutine and the caller
                             (state.pc, state.registers[*yield_reg]) =
                                 (pc, OwnedValue::Integer(state.pc + 1));
                         }
