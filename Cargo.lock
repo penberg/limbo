@@ -1105,6 +1105,7 @@ dependencies = [
  "anyhow",
  "clap",
  "cli-table",
+ "csv",
  "ctrlc",
  "dirs",
  "env_logger 0.10.2",

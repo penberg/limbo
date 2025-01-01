@@ -27,3 +27,4 @@ env_logger = "0.10.1"
 limbo_core = { path = "../core" }
 rustyline = "12.0.0"
 ctrlc = "3.4.4"
+csv = "1.3.1"

@@ -200,6 +200,33 @@ do_execshell_test(
 
 do_execshell_test(pipe, "test-verify-null-value", "select NULL;", "LIMBO")
 
+# test import csv
+csv_file = "./test_files/test.csv"
+write_to_pipe(".open :memory:")
+
+
+def test_import_csv(test_name: str, options: str, import_output: str, table_output: str):
+    csv_table_name = f'csv_table_{test_name}'
+    write_to_pipe(f"CREATE TABLE {csv_table_name} (c1 INT, c2 REAL, c3 String);")
+    do_execshell_test(
+        pipe,
+        f"test-import-csv-{test_name}",
+        f".import {options} {csv_file} {csv_table_name}",
+        import_output,
+    )
+    do_execshell_test(
+        pipe,
+        f"test-import-csv-{test_name}-output",
+        f"select * from {csv_table_name};",
+        table_output,
+    )
+
+test_import_csv('no_options', '--csv', '', '1|2.0|String1\n3|4.0|String2')
+test_import_csv('verbose', '--csv -v', 
+                'Added 2 rows with 0 errors using 2 lines of input' 
+                ,'1|2.0|String1\n3|4.0|String2')
+test_import_csv('skip', '--csv --skip 1', '' ,'3|4.0|String2')
+
 
 # Verify the output file exists and contains expected content
 filepath = os.path.join(cwd, dir, outfile)

@@ -1,4 +1,7 @@
-use crate::opcodes_dictionary::OPCODE_DESCRIPTIONS;
+use crate::{
+    import::{ImportFile, IMPORT_HELP},
+    opcodes_dictionary::OPCODE_DESCRIPTIONS,
+};
 use cli_table::{Cell, Table};
 use limbo_core::{Database, LimboError, StepResult, Value};
 
@@ -78,6 +81,8 @@ pub enum Command {
     Echo,
     /// Display tables
     Tables,
+    /// Import data from FILE into TABLE
+    Import,
 }
 
 impl Command {
@@ -91,6 +96,7 @@ impl Command {
             | Self::Tables
             | Self::SetOutput => 0,
             Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
+            Self::Import => 2,
         } + 1) // argv0
     }
 
@@ -108,6 +114,7 @@ impl Command {
             Self::NullValue => ".nullvalue <string>",
             Self::Echo => ".echo on|off",
             Self::Tables => ".tables",
+            Self::Import => &IMPORT_HELP,
         }
     }
 }
@@ -128,6 +135,7 @@ impl FromStr for Command {
             ".show" => Ok(Self::ShowInfo),
             ".nullvalue" => Ok(Self::NullValue),
             ".echo" => Ok(Self::Echo),
+            ".import" => Ok(Self::Import),
             _ => Err("Unknown command".to_string()),
         }
     }
@@ -475,6 +483,13 @@ impl Limbo {
                 }
                 Command::Help => {
                     let _ = self.writeln(HELP_MSG);
+                }
+                Command::Import => {
+                    let mut import_file =
+                        ImportFile::new(self.conn.clone(), self.io.clone(), &mut self.writer);
+                    if let Err(e) = import_file.import(&args) {
+                        let _ = self.writeln(e.to_string());
+                    };
                 }
             }
         } else {
