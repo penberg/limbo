@@ -129,7 +129,6 @@ pub enum OperationMode {
 fn prologue() -> Result<(ProgramBuilder, Metadata, BranchOffset, BranchOffset)> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
-    let halt_label = program.allocate_label();
 
     program.emit_insn_with_label_dependency(
         Insn::Init {
@@ -1414,7 +1413,6 @@ fn close_loop(
             close_loop(program, left, metadata)?;
         }
         SourceOperator::Scan {
-            id,
             table_reference,
             iter_dir,
             ..
@@ -1451,7 +1449,6 @@ fn close_loop(
             }
         }
         SourceOperator::Search {
-            id,
             table_reference,
             search,
             ..

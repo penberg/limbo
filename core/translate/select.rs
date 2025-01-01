@@ -125,7 +125,7 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                         plan.result_columns.push(ResultSetColumn {
                                             name: get_name(
                                                 maybe_alias.as_ref(),
-                                                &expr,
+                                                expr,
                                                 &plan.referenced_tables,
                                                 || format!("expr_{}", result_column_idx),
                                             ),
@@ -135,11 +135,11 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                     }
                                     Ok(_) => {
                                         let contains_aggregates =
-                                            resolve_aggregates(&expr, &mut aggregate_expressions);
+                                            resolve_aggregates(expr, &mut aggregate_expressions);
                                         plan.result_columns.push(ResultSetColumn {
                                             name: get_name(
                                                 maybe_alias.as_ref(),
-                                                &expr,
+                                                expr,
                                                 &plan.referenced_tables,
                                                 || format!("expr_{}", result_column_idx),
                                             ),
@@ -169,7 +169,7 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                     plan.result_columns.push(ResultSetColumn {
                                         name: get_name(
                                             maybe_alias.as_ref(),
-                                            &expr,
+                                            expr,
                                             &plan.referenced_tables,
                                             || format!("expr_{}", result_column_idx),
                                         ),
@@ -189,7 +189,7 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                 plan.result_columns.push(ResultSetColumn {
                                     name: get_name(
                                         maybe_alias.as_ref(),
-                                        &expr,
+                                        expr,
                                         &plan.referenced_tables,
                                         || format!("expr_{}", result_column_idx),
                                     ),
