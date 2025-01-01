@@ -90,10 +90,7 @@ pub struct LoopLabels {
 /// generation process.
 #[derive(Debug)]
 pub struct Metadata {
-    // labels for the instructions that either:
-    // - jump to the start of the current loop. (e.g. a Next instruction jumps here)
-    // - jump to the Next instruction (or equivalent) in the current operator. (e.g. a condition evaluates to false, so the current row is skipped)
-    // - jump to the end of the current loop. (e.g. an index seek results in no key matching the seek condition, so execution will jump to the end of the loop)
+    // A typical query plan is a nested loop. Each loop has its own LoopLabels (see the definition of LoopLabels for more details)
     loop_labels: HashMap<usize, LoopLabels>,
     // label for the instruction that jumps to the next phase of the query after the main loop
     // we don't know ahead of time what that is (GROUP BY, ORDER BY, etc.)
