@@ -1,4 +1,4 @@
 #!/bin/bash
 
-wasm-pack build --no-pack --target nodejs
+wasm-pack build --no-pack --target web
 cp package.json pkg/package.json

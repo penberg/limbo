@@ -46,7 +46,10 @@ impl Database {
     }
 
     #[wasm_bindgen]
-    pub fn exec(&self, _sql: &str) {}
+    pub fn exec(&self, _sql: &str) {
+        let _res = self.conn.execute(_sql).unwrap();
+        // Statement::new(RefCell::new(stmt), false)
+    }
 
     #[wasm_bindgen]
     pub fn prepare(&self, _sql: &str) -> Statement {
@@ -300,7 +303,7 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
     }
 }
 
-#[wasm_bindgen(module = "/vfs.js")]
+#[wasm_bindgen(module = "/src/web-vfs.js")]
 extern "C" {
     type VFS;
 

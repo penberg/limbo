@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <button onclick="runTests()">Run Tests</button>
+  <script type="module">
+    import init, { Database } from './pkg/limbo_wasm.js';
+
+    console.log('Page loading, initializing WASM...');
+    
+    try {
+      await navigator.storage.getDirectory();
+      console.log('OPFS access granted');
+      
+      await init();
+      console.log('WASM initialized successfully');
+    } catch (e) {
+      console.error('Initialization failed:', e);
+    }
+    
+    window.connect = async () => {
+      console.log('Connect started...');
+      try {
+        console.log('Creating Database instance...');
+        const db = await new Database("hello.db");  // Added await here
+        console.log('Database instance created:', db);
+        return [db, Error, "limbo-wasm"];
+      } catch (e) {
+        console.error('Connection error type:', e.constructor.name);
+        console.error('Connection error:', e);
+        throw e;
+      }
+    };
+
+    window.runTests = async () => {
+      console.log('Starting tests...');
+      try {
+        console.log('Before connect call');
+        const [db] = await connect();
+        console.log('After connect call');
+
+       
+       await db.exec(`
+         DROP TABLE IF EXISTS users;
+         CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)
+       `);
+       await db.exec("INSERT INTO users VALUES (1, 'Alice', 'alice@example.org')");
+       await db.exec("INSERT INTO users VALUES (2, 'Bob', 'bob@example.com')");
+       console.log('Test data inserted');
+
+       const stmt = db.prepare("SELECT * FROM users");
+       const result = stmt.raw().all();
+       console.log('Query result:', result);
+       
+       console.log('Tests completed successfully');
+
+      } catch (e) {
+        console.error('Test error:', e);
+      }
+    };
+  </script>
+</body>
+</html>

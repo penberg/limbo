@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <script type="module">
+      import { VFSInterface } from './src/opfs-interface.js';
+      window.VFSInterface = VFSInterface;
+    </script>
+  </body>
+</html>
+
+<!-- <!DOCTYPE html> -->
+<!-- <html> -->
+<!-- <head> -->
+<!--    <title>OPFS Tests</title> -->
+<!--    <style> -->
+<!--        .status-box { -->
+<!--            width: 100px; -->
+<!--            height: 100px; -->
+<!--            margin: 20px; -->
+<!--            border: 2px solid #333; -->
+<!--        } -->
+<!--        .success { background-color: #4CAF50; } -->
+<!--        .error { background-color: #f44336; } -->
+<!--        .running { background-color: #FFA500; } -->
+<!--    </style> -->
+<!-- </head> -->
+<!-- <body> -->
+<!--    <h1>OPFS Tests</h1> -->
+<!--    <button id="startTests">Run Tests</button> -->
+<!--    <div id="status" class="status-box"></div> -->
+<!--    <div id="results"></div> -->
+<!---->
+<!--    <script type="module"> -->
+<!--        import { VFSInterface } from './src/opfs-interface.js'; -->
+<!--         -->
+<!--        const status = document.getElementById('status'); -->
+<!--        const results = document.getElementById('results'); -->
+<!--         -->
+<!--        async function runTests() { -->
+<!--            status.className = 'status-box running'; -->
+<!--            results.innerHTML = ''; -->
+<!--             -->
+<!--            const log = (msg) => { -->
+<!--                console.log(msg); -->
+<!--                results.innerHTML += `<p>${msg}</p>`; -->
+<!--            }; -->
+<!---->
+<!--            try { -->
+<!--                const vfs = new VFSInterface("./src/opfs-worker.js"); -->
+<!--                 -->
+<!--                log('Test 1: Basic Write/Read'); -->
+<!--                const testFd = await vfs.open('test.txt'); -->
+<!--                const writeData = new Uint8Array([1, 2, 3, 4]); -->
+<!--                const bytesWritten = await vfs.pwrite(testFd, writeData, 0); -->
+<!--                log(`Wrote ${bytesWritten} bytes`); -->
+<!---->
+<!--                const readBuffer = new Uint8Array(4); -->
+<!--                const bytesRead = await vfs.pread(testFd, readBuffer, 0); -->
+<!--                log(`Read ${bytesRead} bytes: ${Array.from(readBuffer)}`); -->
+<!--                 -->
+<!--                log('Test 2: File Size'); -->
+<!--                const size = await vfs.size(testFd); -->
+<!--                log(`File size: ${size} bytes`); -->
+<!--                 -->
+<!--                log('Test 3: Close File'); -->
+<!--                await vfs.close(testFd); -->
+<!--                log('File closed successfully'); -->
+<!---->
+<!--                status.className = 'status-box success'; -->
+<!---->
+<!--            } catch (error) { -->
+<!--                log(`Error: ${error.message}`); -->
+<!--                console.error('Full error:', error); -->
+<!--                status.className = 'status-box error'; -->
+<!--            } -->
+<!--            console.log("done and exiting"); -->
+<!--        } -->
+<!---->
+<!--        document.getElementById('startTests').onclick = () => runTests().catch(console.error); -->
+<!--    </script> -->
+<!-- </body> -->
+<!-- </html> -->
