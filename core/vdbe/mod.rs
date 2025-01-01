@@ -2301,7 +2301,11 @@ impl Program {
                     end_offset,
                 } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
-                        if *state.ended_coroutine.get(yield_reg).unwrap_or(&false) {
+                        if *state
+                            .ended_coroutine
+                            .get(yield_reg)
+                            .expect("coroutine not initialized")
+                        {
                             state.pc = *end_offset;
                         } else {
                             // swap
