@@ -3,6 +3,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "bindings/java",
     "bindings/python",
     "bindings/wasm",
     "cli",
