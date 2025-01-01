@@ -1322,8 +1322,9 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::Changes => {
-                                //placeholder
-                                state.registers[*dest] = OwnedValue::Integer(0);
+                                let res = &self.connection.upgrade().unwrap().last_change;
+                                let changes = res.get();
+                                state.registers[*dest] = OwnedValue::Integer(changes);
                             }
                             ScalarFunc::Char => {
                                 let reg_values =
@@ -1534,8 +1535,9 @@ impl Program {
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::TotalChanges => {
-                                //placeholder
-                                state.registers[*dest] = OwnedValue::Integer(0);
+                                let res = &self.connection.upgrade().unwrap().total_changes;
+                                let total_changes = res.get();
+                                state.registers[*dest] = OwnedValue::Integer(total_changes);
                             }
                             ScalarFunc::UnixEpoch => {
                                 if *start_reg == 0 {
@@ -1739,6 +1741,9 @@ impl Program {
                         if let Some(rowid) = cursor.rowid()? {
                             if let Some(conn) = self.connection.upgrade() {
                                 conn.update_last_rowid(rowid);
+                                let prev_total_changes = conn.total_changes.get();
+                                conn.last_change.set(1);
+                                conn.total_changes.set(prev_total_changes + 1);
                             }
                         }
                     }

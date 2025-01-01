@@ -1012,11 +1012,14 @@ pub fn translate_expr(
                             unreachable!("this is always ast::Expr::Cast")
                         }
                         ScalarFunc::Changes => {
-                            if let Some(args) = args{
-                                crate::bail_parse_error!("{} fucntion with more than 0 arguments", srf);
+                            if let Some(_) = args {
+                                crate::bail_parse_error!(
+                                    "{} fucntion with more than 0 arguments",
+                                    srf
+                                );
                             }
                             let start_reg = program.alloc_register();
-                            program.emit_insn(Insn::Function{
+                            program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg,
                                 dest: target_register,
@@ -1515,11 +1518,14 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::TotalChanges => {
-                            if let Some(args) = args {
-                                crate::bail_parse_error!("{} fucntion with more than 0 arguments", srf.to_string());
+                            if let Some(_) = args {
+                                crate::bail_parse_error!(
+                                    "{} fucntion with more than 0 arguments",
+                                    srf.to_string()
+                                );
                             }
                             let start_reg = program.alloc_register();
-                            program.emit_insn(Insn::Function{
+                            program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg,
                                 dest: target_register,
