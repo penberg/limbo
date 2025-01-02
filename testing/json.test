@@ -113,6 +113,18 @@ do_execsql_test json_extract_number {
     SELECT json_extract(1, '$')
 } {{1}}
 
+do_execsql_test json_extract_object_1 {
+    SELECT json_extract('{"a": [1,2,3]}', '$.a')
+} {{[1,2,3]}}
+
+do_execsql_test json_extract_object_2 {
+    SELECT json_extract('{"a": [1,2,3]}', '$.a', '$.a[0]', '$.a[1]', '$.a[3]')
+} {{[[1,2,3],1,2,null]}}
+
+do_execsql_test json_extract_object_3 {
+    SELECT json_extract('{"a": [1,2,3]}', '$.a', '$.a[0]', '$.a[1]', null, '$.a[3]')
+} {{}}
+
 # TODO: fix me
 # \x61 is the ASCII code for 'a'
 # do_execsql_test json_extract_with_escaping {

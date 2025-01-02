@@ -6,19 +6,24 @@ use pest_derive::Parser;
 #[grammar = "json/json_path.pest"]
 struct Parser;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum PathElement {
-    Root(),
-    Key(String),
-    ArrayLocator(i32),
-}
-
+/// Describes a JSON path, which is a sequence of keys and/or array locators.
 #[derive(Debug)]
 pub struct JsonPath {
     pub elements: Vec<PathElement>,
 }
 
-// Parses path into a Vec of Strings, where each string is a key or an array locator.
+/// PathElement describes a single element of a JSON path.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PathElement {
+    /// Root element: '$'
+    Root(),
+    /// JSON key
+    Key(String),
+    /// Array locator, eg. [2], [#-5]
+    ArrayLocator(i32),
+}
+
+/// Parses path into a Vec of Strings, where each string is a key or an array locator.
 pub fn json_path(path: &str) -> crate::Result<JsonPath> {
     let parsed = Parser::parse(Rule::path, path);
 

@@ -185,7 +185,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
     }
 
     if paths.len() > 1 {
-        result.pop();
+        result.pop(); // remove the final comma
         result.push(']');
     }
 
