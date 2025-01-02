@@ -7,7 +7,7 @@ use pest_derive::Parser;
 struct Parser;
 
 /// Describes a JSON path, which is a sequence of keys and/or array locators.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct JsonPath {
     pub elements: Vec<PathElement>,
 }
@@ -120,12 +120,13 @@ mod tests {
 
         for value in invalid_values {
             let path = json_path(value);
-            assert!(
-                path.is_err(),
-                "Expected error for: {:?}, got: {:?}",
-                value,
-                path
-            );
+
+            match path {
+                Err(crate::error::LimboError::Constraint(e)) => {
+                    // happy path
+                }
+                _ => panic!("Expected error for: {:?}, got: {:?}", value, path),
+            }
         }
     }
 
