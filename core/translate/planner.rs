@@ -12,6 +12,8 @@ use crate::{
 };
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit};
 
+pub const ROWID: &'static str = "rowid";
+
 pub struct OperatorIdCounter {
     id: usize,
 }
@@ -102,8 +104,18 @@ pub fn bind_column_references(
             if id.0.eq_ignore_ascii_case("true") || id.0.eq_ignore_ascii_case("false") {
                 return Ok(());
             }
-            let mut match_result = None;
             let normalized_id = normalize_ident(id.0.as_str());
+
+            if referenced_tables.len() > 0 {
+                if let Some(row_id_expr) =
+                    parse_row_id(&normalized_id, 0, || referenced_tables.len() != 1)?
+                {
+                    *expr = row_id_expr;
+
+                    return Ok(());
+                }
+            }
+            let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
                 let col_idx = table
                     .columns()
@@ -140,6 +152,12 @@ pub fn bind_column_references(
             }
             let tbl_idx = matching_tbl_idx.unwrap();
             let normalized_id = normalize_ident(id.0.as_str());
+
+            if let Some(row_id_expr) = parse_row_id(&normalized_id, tbl_idx, || false)? {
+                *expr = row_id_expr;
+
+                return Ok(());
+            }
             let col_idx = referenced_tables[tbl_idx]
                 .columns()
                 .iter()
@@ -209,7 +227,7 @@ pub fn bind_column_references(
             Ok(())
         }
         // Already bound earlier
-        ast::Expr::Column { .. } => Ok(()),
+        ast::Expr::Column { .. } | ast::Expr::RowId { .. } => Ok(()),
         ast::Expr::DoublyQualified(_, _, _) => todo!(),
         ast::Expr::Exists(_) => todo!(),
         ast::Expr::FunctionCallStar { .. } => Ok(()),
@@ -491,17 +509,23 @@ fn parse_join(
                     let left_tables = &tables[..table_index];
                     assert!(!left_tables.is_empty());
                     let right_table = &tables[table_index];
-                    let mut left_col = None;
+                    let mut left_col =
+                        parse_row_id(&name_normalized, 0, || left_tables.len() != 1)?;
                     for (left_table_idx, left_table) in left_tables.iter().enumerate() {
+                        if left_col.is_some() {
+                            break;
+                        }
                         left_col = left_table
                             .columns()
                             .iter()
                             .enumerate()
                             .find(|(_, col)| col.name == name_normalized)
-                            .map(|(idx, col)| (left_table_idx, idx, col));
-                        if left_col.is_some() {
-                            break;
-                        }
+                            .map(|(idx, col)| ast::Expr::Column {
+                                database: None,
+                                table: left_table_idx,
+                                column: idx,
+                                is_rowid_alias: col.is_rowid_alias,
+                            });
                     }
                     if left_col.is_none() {
                         crate::bail_parse_error!(
@@ -509,33 +533,33 @@ fn parse_join(
                             distinct_name.0
                         );
                     }
-                    let right_col = right_table
-                        .columns()
-                        .iter()
-                        .enumerate()
-                        .find(|(_, col)| col.name == name_normalized);
+                    let right_col =
+                        parse_row_id(&name_normalized, right_table.table_index, || false)?.or_else(
+                            || {
+                                right_table
+                                    .table
+                                    .columns()
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(_, col)| col.name == name_normalized)
+                                    .map(|(i, col)| ast::Expr::Column {
+                                        database: None,
+                                        table: right_table.table_index,
+                                        column: i,
+                                        is_rowid_alias: col.is_rowid_alias,
+                                    })
+                            },
+                        );
                     if right_col.is_none() {
                         crate::bail_parse_error!(
                             "cannot join using column {} - column not present in all tables",
                             distinct_name.0
                         );
                     }
-                    let (left_table_idx, left_col_idx, left_col) = left_col.unwrap();
-                    let (right_col_idx, right_col) = right_col.unwrap();
                     using_predicates.push(ast::Expr::Binary(
-                        Box::new(ast::Expr::Column {
-                            database: None,
-                            table: left_table_idx,
-                            column: left_col_idx,
-                            is_rowid_alias: left_col.is_rowid_alias,
-                        }),
+                        Box::new(left_col.unwrap()),
                         ast::Operator::Equals,
-                        Box::new(ast::Expr::Column {
-                            database: None,
-                            table: right_table.table_index,
-                            column: right_col_idx,
-                            is_rowid_alias: right_col.is_rowid_alias,
-                        }),
+                        Box::new(right_col.unwrap()),
                     ));
                 }
                 predicates = Some(using_predicates);
@@ -581,4 +605,21 @@ pub fn break_predicate_at_and_boundaries(
             out_predicates.push(predicate);
         }
     }
+}
+
+fn parse_row_id<F>(column_name: &str, table_id: usize, fn_check: F) -> Result<Option<ast::Expr>>
+where
+    F: FnOnce() -> bool,
+{
+    if column_name.eq_ignore_ascii_case(ROWID) {
+        if fn_check() {
+            crate::bail_parse_error!("ROWID is ambiguous");
+        }
+
+        return Ok(Some(ast::Expr::RowId {
+            database: None, // TODO: support different databases
+            table: table_id,
+        }));
+    }
+    Ok(None)
 }

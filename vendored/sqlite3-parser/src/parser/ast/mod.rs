@@ -338,6 +338,13 @@ pub enum Expr {
         /// is the column a rowid alias
         is_rowid_alias: bool,
     },
+    /// `ROWID`
+    RowId {
+        /// the x in `x.y.z`. index of the db in catalog.
+        database: Option<usize>,
+        /// the y in `x.y.z`. index of the table in catalog.
+        table: usize,
+    },
     /// `IN`
     InList {
         /// expression
