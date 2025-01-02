@@ -318,6 +318,10 @@ do_execsql_test where-age-index-seek-regression-test-2 {
     select count(1) from users where age > 0;
 } {10000}
 
+do_execsql_test where-age-index-seek-regression-test-3 {
+    select age from users where age > 90 limit 1;
+} {91}
+
 do_execsql_test where-simple-between {
     SELECT * FROM products WHERE price BETWEEN 70 AND 100;
 } {1|hat|79.0

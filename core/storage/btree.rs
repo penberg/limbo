@@ -464,9 +464,15 @@ impl BTreeCursor {
                         };
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let found = match op {
-                            SeekOp::GT => record > *index_key,
-                            SeekOp::GE => record >= *index_key,
-                            SeekOp::EQ => record == *index_key,
+                            SeekOp::GT => {
+                                &record.values[..record.values.len() - 1] > &index_key.values
+                            }
+                            SeekOp::GE => {
+                                &record.values[..record.values.len() - 1] >= &index_key.values
+                            }
+                            SeekOp::EQ => {
+                                &record.values[..record.values.len() - 1] == &index_key.values
+                            }
                         };
                         self.stack.advance();
                         if found {
