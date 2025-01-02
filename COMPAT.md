@@ -220,7 +220,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 |-------------|---------|------------------------------|
 | date()      | Yes     | partially supports modifiers |
 | time()      | Yes     | partially supports modifiers |
-| datetime()  | No      |                              |
+| datetime()  | Yes     | partially supports modifiers |
 | julianday() | No      |                              |
 | unixepoch() | Partial | does not support modifiers   |
 | strftime()  | No      |                              |

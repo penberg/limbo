@@ -44,7 +44,7 @@ use crate::{
     json::json_extract,
 };
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
-use datetime::{exec_date, exec_time, exec_unixepoch};
+use datetime::{exec_date, exec_datetime_full, exec_time, exec_unixepoch};
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
     exec_subtract,
@@ -1557,6 +1557,12 @@ impl Program {
                                 let res = &self.connection.upgrade().unwrap().total_changes;
                                 let total_changes = res.get();
                                 state.registers[*dest] = OwnedValue::Integer(total_changes);
+                            }
+                            ScalarFunc::DateTime => {
+                                let result = exec_datetime_full(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                );
+                                state.registers[*dest] = result;
                             }
                             ScalarFunc::UnixEpoch => {
                                 if *start_reg == 0 {

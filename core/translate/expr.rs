@@ -1239,7 +1239,7 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Date => {
+                        ScalarFunc::Date | ScalarFunc::DateTime => {
                             if let Some(args) = args {
                                 for arg in args.iter() {
                                     // register containing result of each argument expression
