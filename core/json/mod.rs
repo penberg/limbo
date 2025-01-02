@@ -173,13 +173,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
                     result.push(',');
                 }
             }
-            OwnedValue::Null => {
-                if paths.len() == 1 {
-                    return Ok(OwnedValue::Null);
-                } else {
-                    result.push_str("null,");
-                }
-            }
+            OwnedValue::Null => return Ok(OwnedValue::Null),
             _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
         }
     }
