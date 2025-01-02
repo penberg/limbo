@@ -21,7 +21,7 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::translate::delete::translate_delete;
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
-use crate::{bail_parse_error, Connection, Result};
+use crate::{bail_parse_error, Connection, Result, SymbolTable};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast::fmt::ToTokens;
@@ -38,6 +38,7 @@ pub fn translate(
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
     connection: Weak<Connection>,
+    syms: &SymbolTable,
 ) -> Result<Program> {
     match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
@@ -81,6 +82,7 @@ pub fn translate(
             limit,
             database_header,
             connection,
+            syms,
         ),
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
@@ -94,7 +96,9 @@ pub fn translate(
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
         ast::Stmt::Rollback { .. } => bail_parse_error!("ROLLBACK not supported yet"),
         ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
-        ast::Stmt::Select(select) => translate_select(schema, select, database_header, connection),
+        ast::Stmt::Select(select) => {
+            translate_select(schema, select, database_header, connection, syms)
+        }
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
         ast::Stmt::Insert {
@@ -114,6 +118,7 @@ pub fn translate(
             &returning,
             database_header,
             connection,
+            syms,
         ),
     }
 }
