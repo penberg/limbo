@@ -1,0 +1,194 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test subquery-inner-filter {
+    select sub.loud_hat from (
+        select concat(name, '!!!') as loud_hat 
+        from products where name = 'hat'
+    ) sub;
+} {hat!!!}
+
+do_execsql_test subquery-outer-filter {
+    select sub.loud_hat from (
+        select concat(name, '!!!') as loud_hat 
+        from products
+    ) sub where sub.loud_hat = 'hat!!!'
+} {hat!!!}
+
+do_execsql_test subquery-without-alias {
+    select loud_hat from (
+        select concat(name, '!!!') as loud_hat 
+        from products where name = 'hat'
+    );
+} {hat!!!}
+
+do_execsql_test subquery-no-alias-on-col {
+    select price from (
+        select * from products where name = 'hat'
+    )
+} {79.0}
+
+do_execsql_test subquery-no-alias-on-col-named {
+    select price from (
+        select price from products where name = 'hat'
+    )
+} {79.0}
+
+do_execsql_test subquery-select-star {
+    select * from (
+        select price, price + 1.0, name from products where name = 'hat'
+    )
+} {79.0|80.0|hat}
+
+do_execsql_test subquery-select-table-star {
+    select sub.* from (
+        select price, price + 1.0, name from products where name = 'hat'
+    ) sub
+} {79.0|80.0|hat}
+
+do_execsql_test nested-subquery {
+    select sub.loudest_hat from (
+        select upper(nested_sub.loud_hat) as loudest_hat from (
+            select concat(name, '!!!') as loud_hat 
+            from products where name = 'hat'
+        ) nested_sub 
+    ) sub;
+} {HAT!!!}
+
+do_execsql_test subquery-orderby-limit {
+    select upper(sub.loud_name) as loudest_name 
+    from (
+        select concat(name, '!!!') as loud_name 
+        from products 
+        order by name 
+        limit 3
+    ) sub;
+} {ACCESSORIES!!!
+BOOTS!!!
+CAP!!!}
+
+do_execsql_test table-join-subquery {
+    select sub.product_name, p.name 
+    from products p join (
+        select name as product_name 
+        from products
+    ) sub on p.name = sub.product_name where p.name = 'hat'
+} {hat|hat}
+
+do_execsql_test subquery-join-table {
+    select sub.product_name, p.name
+    from (
+        select name as product_name 
+        from products
+    ) sub join products p on sub.product_name = p.name where sub.product_name = 'hat'
+} {hat|hat}
+
+do_execsql_test subquery-join-subquery {
+    select sub1.sus_name, sub2.truthful_name
+    from (
+        select name as sus_name
+        from products
+        where name = 'cap'
+    ) sub1 join (
+        select concat('no ', name) as truthful_name
+        from products 
+        where name = 'cap'
+    ) sub2;
+} {"cap|no cap"}
+
+do_execsql_test select-star-table-subquery {
+    select * 
+    from products p join (
+        select name, price 
+        from products
+        where name = 'hat'
+    ) sub on p.name = sub.name;
+} {1|hat|79.0|hat|79.0}
+
+do_execsql_test select-star-subquery-table {
+    select * 
+    from (
+        select name, price 
+        from products
+        where name = 'hat'
+    ) sub join products p on sub.name = p.name;
+} {hat|79.0|1|hat|79.0}
+
+do_execsql_test select-star-subquery-subquery {
+    select *
+    from (
+        select name, price 
+        from products
+        where name = 'hat'
+    ) sub1 join (
+        select price
+        from products 
+        where name = 'hat'
+    ) sub2 on sub1.price = sub2.price;
+} {hat|79.0|79.0}
+
+
+do_execsql_test subquery-inner-grouping {
+    select is_jennifer, person_count
+    from (
+        select first_name = 'Jennifer' as is_jennifer, count(1) as person_count from users
+        group by first_name = 'Jennifer'
+    ) order by person_count asc
+} {1|151
+0|9849}
+
+do_execsql_test subquery-outer-grouping {
+    select is_jennifer, count(1) as person_count
+    from (
+        select first_name = 'Jennifer' as is_jennifer from users
+    ) group by is_jennifer order by count(1) asc
+} {1|151
+0|9849}
+
+do_execsql_test subquery-join-using-with-outer-limit {
+    SELECT p.name, sub.funny_name 
+    FROM products p 
+    JOIN (
+        select id, concat(name, '-lol') as funny_name 
+        from products
+    ) sub USING (id) 
+    LIMIT 3;
+} {"hat|hat-lol
+cap|cap-lol
+shirt|shirt-lol"}
+
+do_execsql_test subquery-join-using-with-inner-limit {
+    SELECT p.name, sub.funny_name 
+    FROM products p 
+    JOIN (
+        select id, concat(name, '-lol') as funny_name 
+        from products
+        limit 3
+    ) sub USING (id);
+} {"hat|hat-lol
+cap|cap-lol
+shirt|shirt-lol"}
+
+do_execsql_test subquery-join-using-with-both-limits {
+    SELECT p.name, sub.funny_name 
+    FROM products p 
+    JOIN (
+        select id, concat(name, '-lol') as funny_name 
+        from products
+        limit 3
+    ) sub USING (id)
+    LIMIT 2;
+} {"hat|hat-lol
+cap|cap-lol"}
+
+do_execsql_test subquery-containing-join {
+    select foo, bar 
+    from (
+        select p.name as foo, u.first_name as bar 
+        from products p join users u using (id)
+    ) limit 3;
+} {hat|Jamie
+cap|Cindy
+shirt|Tommy}

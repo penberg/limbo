@@ -71,6 +71,14 @@ impl Table {
         }
     }
 
+    pub fn get_root_page(&self) -> usize {
+        match self {
+            Table::BTree(table) => table.root_page,
+            Table::Index(_) => unimplemented!(),
+            Table::Pseudo(_) => unimplemented!(),
+        }
+    }
+
     pub fn get_name(&self) -> &str {
         match self {
             Self::BTree(table) => &table.name,
@@ -209,6 +217,10 @@ pub struct PseudoTable {
 impl PseudoTable {
     pub fn new() -> Self {
         Self { columns: vec![] }
+    }
+
+    pub fn new_with_columns(columns: Vec<Column>) -> Self {
+        Self { columns }
     }
 
     pub fn add_column(&mut self, name: &str, ty: Type, primary_key: bool) {

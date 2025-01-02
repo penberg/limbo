@@ -2,6 +2,8 @@ use std::rc::Weak;
 use std::{cell::RefCell, rc::Rc};
 
 use super::emitter::emit_program;
+use super::expr::get_name;
+use super::plan::SelectQueryType;
 use crate::function::Func;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::optimizer::optimize_plan;
@@ -23,15 +25,15 @@ pub fn translate_select(
     connection: Weak<Connection>,
     syms: &SymbolTable,
 ) -> Result<Program> {
-    let select_plan = prepare_select_plan(schema, select)?;
-    let optimized_plan = optimize_plan(select_plan)?;
-    emit_program(database_header, optimized_plan, connection, syms)
+    let mut select_plan = prepare_select_plan(schema, select)?;
+    optimize_plan(&mut select_plan)?;
+    emit_program(database_header, select_plan, connection, syms)
 }
 
 pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan> {
     match select.body.select {
         ast::OneSelect::Select {
-            columns,
+            mut columns,
             from,
             where_clause,
             group_by,
@@ -58,13 +60,14 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                 referenced_tables,
                 available_indexes: schema.indexes.clone().into_values().flatten().collect(),
                 contains_constant_false_condition: false,
+                query_type: SelectQueryType::TopLevel,
             };
 
             // Parse the WHERE clause
             plan.where_clause = parse_where(where_clause, &plan.referenced_tables)?;
 
             let mut aggregate_expressions = Vec::new();
-            for column in columns.clone() {
+            for (result_column_idx, column) in columns.iter_mut().enumerate() {
                 match column {
                     ast::ResultColumn::Star => {
                         plan.source.select_star(&mut plan.result_columns);
@@ -80,7 +83,7 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                             crate::bail_parse_error!("Table {} not found", name.0);
                         }
                         let table_reference = referenced_table.unwrap();
-                        for (idx, col) in table_reference.table.columns.iter().enumerate() {
+                        for (idx, col) in table_reference.columns().iter().enumerate() {
                             plan.result_columns.push(ResultSetColumn {
                                 expr: ast::Expr::Column {
                                     database: None, // TODO: support different databases
@@ -88,13 +91,14 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                     column: idx,
                                     is_rowid_alias: col.is_rowid_alias,
                                 },
+                                name: col.name.clone(),
                                 contains_aggregates: false,
                             });
                         }
                     }
-                    ast::ResultColumn::Expr(mut expr, _) => {
-                        bind_column_references(&mut expr, &plan.referenced_tables)?;
-                        match &expr {
+                    ast::ResultColumn::Expr(ref mut expr, maybe_alias) => {
+                        bind_column_references(expr, &plan.referenced_tables)?;
+                        match expr {
                             ast::Expr::FunctionCall {
                                 name,
                                 distinctness: _,
@@ -119,14 +123,26 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                         };
                                         aggregate_expressions.push(agg.clone());
                                         plan.result_columns.push(ResultSetColumn {
+                                            name: get_name(
+                                                maybe_alias.as_ref(),
+                                                expr,
+                                                &plan.referenced_tables,
+                                                || format!("expr_{}", result_column_idx),
+                                            ),
                                             expr: expr.clone(),
                                             contains_aggregates: true,
                                         });
                                     }
                                     Ok(_) => {
                                         let contains_aggregates =
-                                            resolve_aggregates(&expr, &mut aggregate_expressions);
+                                            resolve_aggregates(expr, &mut aggregate_expressions);
                                         plan.result_columns.push(ResultSetColumn {
+                                            name: get_name(
+                                                maybe_alias.as_ref(),
+                                                expr,
+                                                &plan.referenced_tables,
+                                                || format!("expr_{}", result_column_idx),
+                                            ),
                                             expr: expr.clone(),
                                             contains_aggregates,
                                         });
@@ -151,6 +167,12 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                     };
                                     aggregate_expressions.push(agg.clone());
                                     plan.result_columns.push(ResultSetColumn {
+                                        name: get_name(
+                                            maybe_alias.as_ref(),
+                                            expr,
+                                            &plan.referenced_tables,
+                                            || format!("expr_{}", result_column_idx),
+                                        ),
                                         expr: expr.clone(),
                                         contains_aggregates: true,
                                     });
@@ -163,8 +185,14 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                             }
                             expr => {
                                 let contains_aggregates =
-                                    resolve_aggregates(expr, &mut aggregate_expressions);
+                                    resolve_aggregates(&expr, &mut aggregate_expressions);
                                 plan.result_columns.push(ResultSetColumn {
+                                    name: get_name(
+                                        maybe_alias.as_ref(),
+                                        expr,
+                                        &plan.referenced_tables,
+                                        || format!("expr_{}", result_column_idx),
+                                    ),
                                     expr: expr.clone(),
                                     contains_aggregates,
                                 });

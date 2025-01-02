@@ -250,7 +250,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
-                        &syms,
+                        syms,
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -278,7 +278,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
-                        &syms,
+                        syms,
                     )?);
                     let stmt = Statement::new(program, self.pager.clone());
                     Ok(Some(Rows { stmt }))
@@ -290,7 +290,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
-                        &syms,
+                        syms,
                     )?;
                     program.explain();
                     Ok(None)
@@ -298,8 +298,8 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let plan = prepare_select_plan(&self.schema.borrow(), select)?;
-                            let plan = optimize_plan(plan)?;
+                            let mut plan = prepare_select_plan(&self.schema.borrow(), select)?;
+                            optimize_plan(&mut plan)?;
                             println!("{}", plan);
                         }
                         _ => todo!(),
@@ -327,7 +327,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
-                        &syms,
+                        syms,
                     )?;
                     program.explain();
                 }
@@ -339,7 +339,7 @@ impl Connection {
                         self.header.clone(),
                         self.pager.clone(),
                         Rc::downgrade(self),
-                        &syms,
+                        syms,
                     )?;
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
