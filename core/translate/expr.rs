@@ -964,6 +964,7 @@ pub fn translate_expr(
                             args,
                             referenced_tables,
                             precomputed_exprs_to_registers,
+                            syms,
                         )?;
 
                         program.emit_insn(Insn::Function {
