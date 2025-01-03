@@ -759,6 +759,7 @@ Special Commands:
 .cd <directory>            Change the current working directory.
 .nullvalue <string>        Set the value to be displayed for null values.
 .echo on|off               Toggle echo mode to repeat commands before execution.
+.import --csv FILE TABLE   Import csv data from FILE into TABLE
 .help                      Display this help message.
 
 Usage Examples:
@@ -789,6 +790,9 @@ Usage Examples:
 
 9. Show the current values of settings:
    .show
+
+10. To import csv file 'sample.csv' into 'csv_table' table:
+   .import --csv sample.csv csv_table
 
 Note:
 - All SQL commands must end with a semicolon (;).
