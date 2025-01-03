@@ -1,0 +1,16 @@
+# Copyright 2025 the Limbo authors. All rights reserved. MIT license.
+
+[package]
+name = "limbo_libsql"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+limbo_core = { path = "../../core" }
+thiserror = "2.0.9"
+
+[dev-dependencies]
+tokio = { version = "1.29.1", features = ["full"] }

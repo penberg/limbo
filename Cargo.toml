@@ -5,6 +5,7 @@ resolver = "2"
 members = [
     "bindings/java",
     "bindings/python",
+    "bindings/rust",
     "bindings/wasm",
     "cli",
     "sqlite3",
