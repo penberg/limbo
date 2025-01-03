@@ -112,6 +112,7 @@ pub enum ScalarFunc {
     Quote,
     SqliteVersion,
     UnixEpoch,
+    JulianDay,
     Hex,
     Unhex,
     ZeroBlob,
@@ -158,6 +159,7 @@ impl Display for ScalarFunc {
             Self::Unicode => "unicode".to_string(),
             Self::Quote => "quote".to_string(),
             Self::SqliteVersion => "sqlite_version".to_string(),
+            Self::JulianDay => "julianday".to_string(),
             Self::UnixEpoch => "unixepoch".to_string(),
             Self::Hex => "hex".to_string(),
             Self::Unhex => "unhex".to_string(),
@@ -370,6 +372,7 @@ impl Func {
             #[cfg(feature = "json")]
             "json_extract" => Ok(Func::Json(JsonFunc::JsonExtract)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
+            "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),
             "unhex" => Ok(Self::Scalar(ScalarFunc::Unhex)),
             "zeroblob" => Ok(Self::Scalar(ScalarFunc::ZeroBlob)),

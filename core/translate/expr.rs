@@ -1334,11 +1334,11 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::UnixEpoch => {
+                        ScalarFunc::UnixEpoch | ScalarFunc::JulianDay => {
                             let mut start_reg = 0;
                             match args {
                                 Some(args) if args.len() > 1 => {
-                                    crate::bail_parse_error!("epoch function with > 1 arguments. Modifiers are not yet supported.");
+                                    crate::bail_parse_error!("epoch or julianday function with > 1 arguments. Modifiers are not yet supported.");
                                 }
                                 Some(args) if args.len() == 1 => {
                                     let arg_reg = program.alloc_register();

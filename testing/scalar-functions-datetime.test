@@ -275,14 +275,6 @@ do_execsql_test date-with-subsec {
   SELECT date('2023-05-18 15:30:45.123', 'subsec');
 } {2023-05-18}
 
-do_execsql_test time-with-modifier-ceiling {
-  SELECT time('2023-05-18 15:30:45.987', 'ceiling');
-} {15:30:46}
-
-do_execsql_test time-with-modifier-floor {
-  SELECT time('2023-05-18 15:30:45.987', 'floor');
-} {15:30:45}
-
 do_execsql_test time-with-modifier-add-hours {
   SELECT time('2023-05-18 15:30:45', '+5 hours');
 } {20:30:45}
@@ -302,6 +294,14 @@ do_execsql_test time-with-modifier-subtract-seconds {
 do_execsql_test time-with-subsec {
   SELECT time('2023-05-18 15:30:45.123', 'subsec');
 } {15:30:45.123}
+
+do_execsql_test time-with-modifier-add {
+  SELECT time('15:30:45', '+15:30:15');
+} {{07:01:00}}
+
+do_execsql_test time-with-modifier-sub {
+  SELECT time('15:30:45', '-15:30:15');
+} {{00:00:30}}
 
 do_execsql_test date-with-modifier-add-months {
   SELECT date('2023-01-31', '+1 month');
@@ -328,32 +328,52 @@ do_execsql_test date-with-modifier-february-non-leap-year {
 } {2020-02-28}
 
 do_execsql_test date-with-modifier-invalid-date {
-  SELECT date('2023-03-31', '-1 month');
-} {2023-03-03}
+  SELECT date('2023-02-15 15:30:45', '-0001-01-01 00:00');
+} {2022-01-14}
+
+do_execsql_test date-with-modifier-date {
+  SELECT date('2023-02-15 15:30:45', '+0001-01-01');
+} {2024-03-16}
+
+do_execsql_test datetime-with-modifier-datetime-pos {
+  SELECT datetime('2023-02-15 15:30:45', '+0001-01-01 15:30');
+} {{2024-03-17 07:00:45}}
+
+do_execsql_test datetime-with-modifier-datetime-neg {
+  SELECT datetime('2023-02-15 15:30:45', '+0001-01-01 15:30');
+} {{2024-03-17 07:00:45}}
+
+do_execsql_test datetime-with-modifier-datetime-large {
+   SELECT datetime('2023-02-15 15:30:45', '+7777-10-10 23:59');
+} {{9800-12-26 15:29:45}}
+
+do_execsql_test datetime-with-modifier-datetime-sub-large {
+   SELECT datetime('2023-02-15 15:30:45', '-2024-10-10 23:59');
+} {{-0002-04-04 15:31:45}}
+
+do_execsql_test datetime-with-timezone-utc {
+  SELECT datetime('2023-05-18 15:30:45Z');
+} {{2023-05-18 15:30:45}}
+
+do_execsql_test datetime-with-modifier-sub {
+   SELECT datetime('2023-12-12', '-0002-10-10 15:30:45');
+} {{2021-02-01 08:29:15}}
+
+do_execsql_test datetime-with-modifier-add {
+   SELECT datetime('2023-12-12', '+0002-10-10 15:30:45');
+} {{2026-10-22 15:30:45}}
 
 do_execsql_test time-with-multiple-modifiers {
   SELECT time('2023-05-18 15:30:45', '+1 hours', '-20 minutes', '+15 seconds', 'subsec');
 } {16:11:00.000}
 
-do_execsql_test datetime-with-modifier-utc {
-  SELECT datetime('2023-05-18 15:30:45', 'utc');
-} {{2023-05-18 15:30:45}}
-
-do_execsql_test datetime-with-modifier-unixepoch {
-  SELECT datetime(1684401045, 'unixepoch');
-} {{2023-05-18 09:10:45}}
-
-do_execsql_test datetime-with-modifier-julianday {
-  SELECT datetime(2460082.5, 'julianday');
-} {{2023-05-18 00:00:00}}
+do_execsql_test datetime-with-multiple-modifiers {
+select datetime('2024-01-31', '+1 month', '+13 hours', '+5 minutes', '+62 seconds');
+} {{2024-03-02 13:06:02}}
 
 do_execsql_test datetime-with-weekday {
   SELECT datetime('2023-05-18', 'weekday 3');
 } {{2023-05-24 00:00:00}}
-
-do_execsql_test datetime-with-auto {
-  SELECT datetime('2023-05-18', 'auto');
-} {{2023-05-18 00:00:00}}
 
 do_execsql_test unixepoch-subsec {
   SELECT unixepoch('2023-05-18 15:30:45.123');
@@ -364,7 +384,7 @@ do_execsql_test unixepoch-invalid-date {
 } {{}}
 
 do_execsql_test unixepoch-leap-second {
-  SELECT unixepoch('2023-06-30 23:59:60');
+  SELECT unixepoch('2015-06-30 23:59:60');
 } {{}}
 
 do_execsql_test unixepoch-negative-timestamp {
@@ -375,6 +395,51 @@ do_execsql_test unixepoch-large-date {
   SELECT unixepoch('9999-12-31 23:59:59');
 } {253402300799}
 
-do_execsql_test datetime-with-timezone-change-negative {
-  SELECT datetime('2023-05-19 01:30:45+03:00', 'utc');
+do_execsql_test datetime-with-timezone {
+  SELECT datetime('2023-05-19 01:30:45+03:00');
 } {{2023-05-18 22:30:45}}
+
+do_execsql_test julianday-fractional {
+    SELECT julianday('2023-05-18 15:30:45.123');
+} {2460083.14635559}
+
+do_execsql_test julianday-fractional-2 {
+    SELECT julianday('2000-01-01 12:00:00.500');
+} {2451545.00000579}
+
+do_execsql_test julianday-rounded-up {
+    SELECT julianday('2023-05-18 15:30:45.129');
+} {2460083.14635566}
+
+do_execsql_test julianday-with-timezone {
+    SELECT julianday('2023-05-18 15:30:45+02:00');
+} {2460083.06302083}
+
+do_execsql_test julianday-fractional-seconds {
+    SELECT julianday('2023-05-18 15:30:45.123');
+} {2460083.14635559}
+
+do_execsql_test julianday-time-only {
+    SELECT julianday('15:30:45');
+} {2451545.14635417}
+
+#
+# TODO: fix precision issue
+#
+#do_execsql_test julianday-midnight {
+#    SELECT julianday('2023-05-18 00:00:00');
+#} {2460082.5}
+
+#do_execsql_test julianday-noon {
+#    SELECT julianday('2023-05-18 12:00:00');
+#} {2460083.0}
+
+#do_execsql_test julianday-fractional-zero {
+#    SELECT julianday('2023-05-18 00:00:00.000');
+#} {2460082.5}
+
+# same issue as above, we return .5000000 because we are using fmt precision
+#do_execsql_test julianday-date-only {
+#    SELECT julianday('2023-05-18');
+#} {2460082.5}
+

@@ -221,10 +221,37 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | date()      | Yes     | partially supports modifiers |
 | time()      | Yes     | partially supports modifiers |
 | datetime()  | Yes     | partially supports modifiers |
-| julianday() | No      |                              |
+| julianday() | Partial | does not support modifiers   |
 | unixepoch() | Partial | does not support modifiers   |
 | strftime()  | No      |                              |
 | timediff()  | No      |                              |
+
+### Date and Time Modifiers
+|  Modifier      | Status|  Comment                        |
+|----------------|-------|---------------------------------|
+| Days           | Yes 	 |                                 | 
+| Hours          | Yes	 |                                 |
+| Minutes        | Yes	 |                                 |
+| Seconds        | Yes	 |                                 |
+| Months         | Yes	 |                                 |
+| Years          | Yes	 |                                 |
+| TimeOffset     | Yes	 |                                 |
+| DateOffset	 | Yes   |                                 |
+| DateTimeOffset | Yes   |                                 |
+| Ceiling	     | No    |                                 |
+| Floor          | No    |                                 |
+| StartOfMonth	 | Yes	 |                                 |
+| StartOfYear	 | Yes	 |                                 |
+| StartOfDay	 | Yes	 |                                 |
+| Weekday(N)	 | Yes   |                                 |
+| Auto           | No    |                                 |
+| UnixEpoch      | No    |                                 |
+| JulianDay      | No    |                                 |
+| Localtime      |Partial| requires fixes to avoid double conversions.|
+| Utc            |Partial| requires fixes to avoid double conversions.|
+| Subsec         | Yes   |                                  |
+
+
 
 ### JSON functions
 
