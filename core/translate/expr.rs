@@ -958,6 +958,23 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+                    JsonFunc::JsonExtract => {
+                        let start_reg = translate_variable_sized_function_parameter_list(
+                            program,
+                            args,
+                            referenced_tables,
+                            precomputed_exprs_to_registers,
+                            syms,
+                        )?;
+
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                     JsonFunc::JsonArrayLength => {
                         let args = if let Some(args) = args {
                             if args.len() > 2 {

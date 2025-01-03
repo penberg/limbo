@@ -84,6 +84,108 @@ do_execsql_test json_array_nested {
    SELECT json_array(json_array(1,2,3), json('[1,2,3]'), '[1,2,3]')
 } {{[[1,2,3],[1,2,3],"[1,2,3]"]}}
 
+
+do_execsql_test json_extract_null {
+    SELECT json_extract(null, '$')
+} {{}}
+
+do_execsql_test json_extract_empty {
+    SELECT json_extract()
+} {{}}
+
+do_execsql_test json_extract_single_param {
+    SELECT json_extract(1)
+} {{}}
+
+do_execsql_test json_extract_null_invalid_path {
+    SELECT json_extract(null, 1)
+} {{}}
+
+do_execsql_test json_extract_null_invalid_path_2 {
+    SELECT json_extract(null, CAST(1 AS BLOB))
+} {{}}
+
+do_execsql_test json_extract_multiple_nulls {
+    SELECT json_extract(null, CAST(1 AS BLOB), null, 1, 2, 3)
+} {{}}
+
+do_execsql_test json_extract_number {
+    SELECT json_extract(1, '$')
+} {{1}}
+
+do_execsql_test json_extract_object_1 {
+    SELECT json_extract('{"a": [1,2,3]}', '$.a')
+} {{[1,2,3]}}
+
+do_execsql_test json_extract_object_2 {
+    SELECT json_extract('{"a": [1,2,3]}', '$.a', '$.a[0]', '$.a[1]', '$.a[3]')
+} {{[[1,2,3],1,2,null]}}
+
+do_execsql_test json_extract_object_3 {
+    SELECT json_extract('{"a": [1,2,3]}', '$.a', '$.a[0]', '$.a[1]', null, '$.a[3]')
+} {{}}
+
+# TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
+#       \x61 is the ASCII code for 'a'
+# do_execsql_test json_extract_with_escaping {
+#     SELECT json_extract('{"\x61": 1}', '$.a')
+# } {{1}}
+
+# TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
+#do_execsql_test json_extract_with_escaping_2 {
+#    SELECT json_extract('{"\x61": 1}', '$.\x61')
+#} {{1}}
+
+do_execsql_test json_extract_null_path {
+    SELECT json_extract(1, null)
+} {{}}
+
+# TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
+do_execsql_test json_extract_multiple_null_paths {
+    SELECT json_extract(1, null, null, null)
+} {{}}
+
+# TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
+#do_execsql_test json_extract_quote {
+#  SELECT json_extract('{"\"":1 }', '$.\"')
+#} {{1}}
+
+# Overflows 2**32 is equivalent to 0
+do_execsql_test json_extract_overflow_int32_1 {
+  SELECT json_extract('[1,2,3]', '$[4294967296]')
+} {{1}}
+
+# Overflows 2**32 + 1 is equivalent to 1
+do_execsql_test json_extract_overflow_int32_2 {
+  SELECT json_extract('[1,2,3]', '$[4294967297]')
+} {{2}}
+
+# Overflows -2**32 - 1 is equivalent to -1
+do_execsql_test json_extract_overflow_int32_3 {
+  SELECT json_extract('[1,2,3]', '$[#-4294967297]')
+} {{3}}
+
+# Overflows -2**32 - 2 is equivalent to -2
+do_execsql_test json_extract_overflow_int32_3 {
+  SELECT json_extract('[1,2,3]', '$[#-4294967298]')
+} {{2}}
+
+# pow(2,63) + 1 == 9223372036854775808
+do_execsql_test json_extract_overflow_int64 {
+  SELECT json_extract('[1,2,3]', '$[9223372036854775808]');
+} {{1}}
+
+# TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
+# pow(2, 127) + 1 == 170141183460469231731687303715884105729
+#do_execsql_test json_extract_overflow_int128 {
+#  SELECT json_extract('[1, 2, 3]', '$[170141183460469231731687303715884105729]');
+#} {{2}}
+
+# TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
+#do_execsql_test json_extract_blob {
+#  select json_extract(CAST('[1,2,3]' as BLOB), '$[1]')
+#} {{2}}
+
 do_execsql_test json_array_length {
    SELECT json_array_length('[1,2,3,4]');
 } {{4}}
@@ -115,3 +217,7 @@ do_execsql_test json_array_length_via_index_not_array {
 do_execsql_test json_array_length_via_bad_prop {
   SELECT json_array_length('{"one":[1,2,3]}', '$.two');
 } {{}}
+
+do_execsql_test json_array_length_nested {
+  SELECT json_array_length('{"one":[[1,2,3],2,3]}', '$.one[0]');
+} {{3}}

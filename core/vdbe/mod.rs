@@ -39,7 +39,10 @@ use crate::types::{
 use crate::util::parse_schema_rows;
 use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
-use crate::{function::JsonFunc, json::get_json, json::json_array, json::json_array_length};
+use crate::{
+    function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
+    json::json_extract,
+};
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_time, exec_unixepoch};
 use insn::{
@@ -1282,13 +1285,29 @@ impl Program {
                         }
                         #[cfg(feature = "json")]
                         crate::function::Func::Json(JsonFunc::JsonArray) => {
-                            let reg_values = state.registers[*start_reg..*start_reg + arg_count]
-                                .iter()
-                                .collect();
+                            let reg_values = &state.registers[*start_reg..*start_reg + arg_count];
 
                             let json_array = json_array(reg_values);
 
                             match json_array {
+                                Ok(json) => state.registers[*dest] = json,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(JsonFunc::JsonExtract) => {
+                            let result = match arg_count {
+                                0 => json_extract(&OwnedValue::Null, &[]),
+                                _ => {
+                                    let val = &state.registers[*start_reg];
+                                    let reg_values =
+                                        &state.registers[*start_reg + 1..*start_reg + arg_count];
+
+                                    json_extract(val, reg_values)
+                                }
+                            };
+
+                            match result {
                                 Ok(json) => state.registers[*dest] = json,
                                 Err(e) => return Err(e),
                             }
@@ -2896,7 +2915,6 @@ fn exec_math_log(arg: &OwnedValue, base: Option<&OwnedValue>) -> OwnedValue {
 
 #[cfg(test)]
 mod tests {
-
     use crate::{
         types::{SeekKey, SeekOp},
         vdbe::exec_replace,
