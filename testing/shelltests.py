@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import os
+import select
 import subprocess
 
 # Configuration
 sqlite_exec = os.getenv("SQLITE_EXEC", "./target/debug/limbo")
+sqlite_flags = os.getenv("SQLITE_FLAGS", "-q").split(" ")
 cwd = os.getcwd()
 
 # Initial setup commands
@@ -21,16 +23,18 @@ INSERT INTO t VALUES (zeroblob(1024 - 1), zeroblob(1024 - 2), zeroblob(1024 - 3)
 
 def start_sqlite_repl(sqlite_exec, init_commands):
     # start limbo shell in quiet mode and pipe in init_commands
+    # we cannot use Popen text mode as it is not compatible with non blocking reads
+    # via select and we will be not able to poll for errors
     pipe = subprocess.Popen(
-        [sqlite_exec, "-q"],
+        [sqlite_exec, *sqlite_flags],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        universal_newlines=True,
         bufsize=0,
     )
     if init_commands and pipe.stdin is not None:
-        pipe.stdin.write(init_commands + "\n")
+        init_as_bytes = (init_commands + "\n").encode()
+        pipe.stdin.write(init_as_bytes)
         pipe.stdin.flush()
     return pipe
 
@@ -40,16 +44,43 @@ pipe = start_sqlite_repl(sqlite_exec, init_commands)
 
 
 def execute_sql(pipe, sql):
-    write_to_pipe(sql + "\n")
-    write_to_pipe("SELECT 'END_OF_RESULT';\n")
+    end_suffix = "END_OF_RESULT"
+    write_to_pipe(sql)
+    write_to_pipe(f"SELECT '{end_suffix}';\n")
+    stdout = pipe.stdout
+    stderr = pipe.stderr
 
-    output = []
+    output = ""
     while True:
-        line = pipe.stdout.readline().strip()
-        if line == "END_OF_RESULT":
+        ready_to_read, _, error_in_pipe = select.select([stdout, stderr], [], [stdout, stderr])
+        ready_to_read_or_err = set(ready_to_read + error_in_pipe)
+        if stderr in ready_to_read_or_err:
+            exit_on_error(stderr)
+
+        if stdout in ready_to_read_or_err:
+            fragment = stdout.read(select.PIPE_BUF)
+            output += fragment.decode()
+            if output.rstrip().endswith(end_suffix):
+                output = output.rstrip().removesuffix(end_suffix)
+                break
+
+    output = strip_each_line(output)
+    return output
+
+def strip_each_line(lines: str) -> str:
+    lines = lines.split("\n")
+    lines = [line.strip() for line in lines if line != ""]
+    return "\n".join(lines)
+
+
+def exit_on_error(stderr):
+    while True:
+        ready_to_read, _, have_error = select.select([stderr], [], [stderr], 0)
+        if not (ready_to_read + have_error):
             break
-        output.append(line)
-    return "\n".join(output).strip()
+        error_line = stderr.read(select.PIPE_BUF).decode()
+        print(error_line, end="")
+    exit(2)
 
 
 def run_test(pipe, sql, expected_output):
@@ -70,7 +101,8 @@ def write_to_pipe(line):
     if pipe.stdin is None:
         print("Failed to start SQLite REPL")
         exit(1)
-    pipe.stdin.write(line + "\n")
+    encoded_line = (line + "\n").encode()
+    pipe.stdin.write(encoded_line)
     pipe.stdin.flush()
 
 

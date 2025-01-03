@@ -78,7 +78,7 @@ make test
 To run the test suite with SQLite, type:
 
 ```
-SQLITE_EXEC=sqlite3 make test
+SQLITE_EXEC=sqlite3 SQLITE_FLAGS="" make test
 ```
 
 When working on a new feature, please consider adding a test case for it.
