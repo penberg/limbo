@@ -31,6 +31,19 @@ do_execsql_test add-agg-float-agg-int {
   SELECT sum(1.5) + sum(2)
 } {3.5}
 
+foreach {testnum lhs rhs ans} {
+   1   'a'   'a'   0 
+   2   'a'   10    10
+   3   10    'a'   10
+   4   'a'   11.0  11.0
+   5   11.0  'a'   11.0
+   7   '1'   '2'   3 
+   8   '1.0' '2'   3.0
+   9   '1.0' '3.0' 4.0
+} {
+  do_execsql_test add-text-$testnum "SELECT $lhs + $rhs" $::ans
+}
+
 do_execsql_test subtract-int {
   SELECT 10 - 1
 } {9}
@@ -54,6 +67,19 @@ do_execsql_test subtract-agg-int-agg-float {
 do_execsql_test subtract-agg-float-agg-int {
   SELECT sum(3.5) - sum(1)
 } {2.5}
+
+foreach {testnum lhs rhs ans} {
+   1   'a'   'a'   0 
+   2   'a'   10    -10
+   3   10    'a'   10
+   4   'a'   11.0  -11.0
+   5   11.0  'a'   11.0
+   7   '1'   '2'   -1 
+   8   '1.0' '2'   -1.0
+   9   '1.0' '3.0' -2.0
+} {
+  do_execsql_test subtract-text-$testnum "SELECT $lhs - $rhs" $::ans
+}
 
 do_execsql_test multiply-int {
   SELECT 10 * 2
@@ -82,6 +108,19 @@ do_execsql_test multiply-agg-int-agg-float {
 do_execsql_test multiply-agg-float-agg-int {
   SELECT sum(2.5) * sum(3)
 } {7.5}
+
+foreach {testnum lhs rhs ans} {
+   1   'a'   'a'   0 
+   2   'a'   10    0
+   3   10    'a'   0
+   4   'a'   11.0  0.0
+   5   11.0  'a'   0.0
+   7   '1'   '2'   2
+   8   '1.0' '2'   2.0
+   9   '1.0' '3.0' 3.0
+} {
+  do_execsql_test multiply-text-$testnum "SELECT $lhs * $rhs" $::ans
+}
 
 do_execsql_test divide-int {
   SELECT 10 / 2
@@ -131,6 +170,18 @@ do_execsql_test divide-agg-float-agg-int {
   SELECT sum(4.0) / sum(2)
 } {2.0}
 
+foreach {testnum lhs rhs ans} {
+   1   'a'   'a'   {} 
+   2   'a'   10    0
+   3   10    'a'   {}
+   4   'a'   11.0  0.0
+   5   11.0  'a'   {}
+   7   '1'   '2'   0
+   8   '1.0' '2'   0.5
+   9   '1.0' '4.0' 0.25
+} {
+  do_execsql_test divide-text-$testnum "SELECT $lhs / $rhs" $::ans
+}
 
 do_execsql_test add-agg-int {
   SELECT sum(id) + 10 from products
@@ -299,6 +350,21 @@ do_execsql_test bitwise-and-int-agg-int-agg {
     SELECT sum(id) & sum(id) from products
 } {66}
 
+foreach {testnum lhs rhs ans} {
+   1   'a'   'a'   0 
+   2   'a'   10    0
+   3   10    'a'   0
+   4   'a'   11.0  0
+   5   11.0  'a'   0
+   7   '1'   '2'   0
+   8   '1.0' '2'   0
+   9   '1.0' '4.0' 0
+   10  '1.0' '1.0' 1
+   11  '1'   '1'   1
+} {
+  do_execsql_test bitwise-and-text-$testnum "SELECT $lhs & $rhs" $::ans
+}
+
 
 do_execsql_test bitwise-or-int-null {
     SELECT 1234 | NULL
@@ -324,6 +390,21 @@ do_execsql_test bitwise-or-float-float {
     SELECT 1234.6 | 5432.2
 } {5626}
 
+foreach {testnum lhs rhs ans} {
+   1   'a'   'a'   0 
+   2   'a'   10    10
+   3   10    'a'   10
+   4   'a'   11.0  11
+   5   11.0  'a'   11
+   7   '1'   '2'   3
+   8   '1.0' '2'   3
+   9   '1.0' '4.0' 5
+   10  '1.0' '1.0' 1
+   11  '1'   '1'   1
+} {
+  do_execsql_test bitwise-or-text-$testnum "SELECT $lhs | $rhs" $::ans
+}
+
 do_execsql_test bitwise-and-int-agg-int-agg {
     SELECT sum(id) | sum(id) from products
 } {66}
@@ -340,6 +421,14 @@ do_execsql_test bitwise-not-int {
 do_execsql_test bitwise-not-float {
 	SELECT ~823.34
 } {-824}
+
+do_execsql_test bitwise-not-text-float {
+	SELECT ~'823.34'
+} {-824}
+
+do_execsql_test bitwise-not-text-int {
+	SELECT ~'1234'
+} {-1235}
 
 do_execsql_test bitwise-not-scalar-float {
 	SELECT ~abs(693.9)
