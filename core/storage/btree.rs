@@ -417,6 +417,7 @@ impl BTreeCursor {
     /// Move the cursor to the record that matches the seek key and seek operation.
     /// This may be used to seek to a specific record in a point query (e.g. SELECT * FROM table WHERE col = 10)
     /// or e.g. find the first record greater than the seek key in a range query (e.g. SELECT * FROM table WHERE col > 10).
+    /// We don't include the rowid in the comparison and that's why the last value from the record is not included.
     fn seek(
         &mut self,
         key: SeekKey<'_>,
@@ -464,9 +465,15 @@ impl BTreeCursor {
                         };
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let found = match op {
-                            SeekOp::GT => record > *index_key,
-                            SeekOp::GE => record >= *index_key,
-                            SeekOp::EQ => record == *index_key,
+                            SeekOp::GT => {
+                                &record.values[..record.values.len() - 1] > &index_key.values
+                            }
+                            SeekOp::GE => {
+                                &record.values[..record.values.len() - 1] >= &index_key.values
+                            }
+                            SeekOp::EQ => {
+                                &record.values[..record.values.len() - 1] == &index_key.values
+                            }
                         };
                         self.stack.advance();
                         if found {
