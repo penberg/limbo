@@ -48,7 +48,6 @@ impl Database {
     #[wasm_bindgen]
     pub fn exec(&self, _sql: &str) {
         let _res = self.conn.execute(_sql).unwrap();
-        // Statement::new(RefCell::new(stmt), false)
     }
 
     #[wasm_bindgen]

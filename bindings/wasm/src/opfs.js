@@ -32,7 +32,7 @@ class VFS {
   initWorker() {
     return new Promise((resolve) => {
       this.worker.addEventListener("message", (e) => {
-        console.log("eventListener: ", e.data);
+        log("eventListener: ", e.data);
         resolve();
       }, { once: true });
 
@@ -50,8 +50,8 @@ class VFS {
     Atomics.wait(this.statusArray, 0, 0);
 
     const result = this.statusView.getInt32(4, true);
-    console.log("opfs.js open result: ", result);
-    console.log("opfs.js open result type: ", typeof result);
+    log("opfs.js open result: ", result);
+    log("opfs.js open result type: ", typeof result);
 
     return result;
   }
@@ -86,7 +86,7 @@ class VFS {
         new Uint8Array(this.transferBuffer, 0, readSize),
         bytesRead,
       );
-      console.log("opfs pread buffer: ", [...buffer]);
+      log("opfs pread buffer: ", [...buffer]);
 
       bytesRead += readSize;
       if (readSize < chunkSize) break;
@@ -96,7 +96,7 @@ class VFS {
   }
 
   pwrite(fd, buffer, offset) {
-    console.log("write buffer size: ", buffer.byteLength);
+    log("write buffer size: ", buffer.byteLength);
     Atomics.store(this.statusArray, 0, 0);
     this.worker.postMessage({
       cmd: "write",
@@ -106,7 +106,7 @@ class VFS {
     });
 
     Atomics.wait(this.statusArray, 0, 0);
-    console.log(
+    log(
       "opfs pwrite length statusview: ",
       this.statusView.getInt32(4, true),
     );
@@ -119,8 +119,8 @@ class VFS {
     Atomics.wait(this.statusArray, 0, 0);
 
     const result = this.statusView.getInt32(4, true);
-    console.log("opfs.js size result: ", result);
-    console.log("opfs.js size result type: ", typeof result);
+    log("opfs.js size result: ", result);
+    log("opfs.js size result type: ", typeof result);
     return BigInt(result);
   }
 
@@ -130,5 +130,25 @@ class VFS {
     Atomics.wait(this.statusArray, 0, 0);
   }
 }
+
+// logLevel:
+//
+// 0 = no logging output
+// 1 = only errors
+// 2 = warnings and errors
+// 3 = debug, warnings, and errors
+const logLevel = 1;
+
+const loggers = {
+  0: console.error.bind(console),
+  1: console.warn.bind(console),
+  2: console.log.bind(console),
+};
+const logImpl = (level, ...args) => {
+  if (logLevel > level) loggers[level]("OPFS asyncer:", ...args);
+};
+const log = (...args) => logImpl(2, ...args);
+const warn = (...args) => logImpl(1, ...args);
+const error = (...args) => logImpl(0, ...args);
 
 export { VFS };

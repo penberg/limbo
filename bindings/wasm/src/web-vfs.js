@@ -4,10 +4,7 @@ export class VFS {
   }
 
   open(path, flags) {
-    const result = self.vfs.open(path);
-    consol.log("webvfs open result: ", result);
-    consol.log("webvfs open result type: ", typeof result);
-    return result;
+    return self.vfs.open(path);
   }
 
   close(fd) {

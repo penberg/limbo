@@ -35,7 +35,6 @@ use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use util::parse_schema_rows;
-// use web_sys::console; // Add to dependencies in Cargo.toml
 
 use translate::select::prepare_select_plan;
 use types::OwnedValue;
@@ -80,8 +79,6 @@ impl Database {
     #[cfg(feature = "fs")]
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Arc<Database>> {
         use storage::wal::WalFileShared;
-
-        // console::log_1(&"Hello from Rust!".into());
 
         let file = io.open_file(path, io::OpenFlags::Create, true)?;
         maybe_init_database_file(&file, &io)?;

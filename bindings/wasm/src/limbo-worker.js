@@ -28,7 +28,7 @@ initAll().then(() => {
           break;
         }
         case "exec": {
-          console.log(e.data.sql);
+          log(e.data.sql);
           db.exec(e.data.sql);
           self.postMessage({ type: "success", op: "exec" });
           break;
@@ -53,3 +53,22 @@ initAll().then(() => {
   self.postMessage({ type: "error", error: error.toString() });
 });
 
+// logLevel:
+//
+// 0 = no logging output
+// 1 = only errors
+// 2 = warnings and errors
+// 3 = debug, warnings, and errors
+const logLevel = 1;
+
+const loggers = {
+  0: console.error.bind(console),
+  1: console.warn.bind(console),
+  2: console.log.bind(console),
+};
+const logImpl = (level, ...args) => {
+  if (logLevel > level) loggers[level]("OPFS asyncer:", ...args);
+};
+const log = (...args) => logImpl(2, ...args);
+const warn = (...args) => logImpl(1, ...args);
+const error = (...args) => logImpl(0, ...args);

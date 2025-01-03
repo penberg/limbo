@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# get target as argument from cli, defaults to nodejs if no argument is supplied
 TARGET=${1:-nodejs}
 FEATURE="nodejs"
 

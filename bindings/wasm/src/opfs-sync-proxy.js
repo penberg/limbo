@@ -8,9 +8,9 @@ let nextFd = 1;
 self.postMessage("ready");
 
 onmessage = async (e) => {
-  console.log("handle message: ", e.data);
+  log("handle message: ", e.data);
   if (e.data.cmd === "init") {
-    console.log("init");
+    log("init");
     transferBuffer = e.data.transferBuffer;
     statusBuffer = e.data.statusBuffer;
 
@@ -33,7 +33,7 @@ self.onerror = (error) => {
 };
 
 function handleCommand(msg) {
-  console.log(`handle message: ${msg.cmd}`);
+  log(`handle message: ${msg.cmd}`);
   switch (msg.cmd) {
     case "open":
       return handleOpen(msg.path);
@@ -74,10 +74,10 @@ function handleRead(fd, offset, size) {
   const handle = handles.get(fd);
   const readBuffer = new ArrayBuffer(size);
   const readSize = handle.read(readBuffer, { at: offset });
-  console.log("opfssync read: size: ", readBuffer.byteLength);
+  log("opfssync read: size: ", readBuffer.byteLength);
 
   const tmp = new Uint8Array(readBuffer);
-  console.log("opfssync read buffer: ", [...tmp]);
+  log("opfssync read buffer: ", [...tmp]);
 
   transferArray.set(tmp);
 
@@ -85,8 +85,8 @@ function handleRead(fd, offset, size) {
 }
 
 function handleWrite(fd, buffer, offset) {
-  console.log("opfssync buffer size:", buffer.byteLength);
-  console.log("opfssync write buffer: ", [...buffer]);
+  log("opfssync buffer size:", buffer.byteLength);
+  log("opfssync write buffer: ", [...buffer]);
   const handle = handles.get(fd);
   const size = handle.write(buffer, { at: offset });
   return { success: true, length: size };
@@ -107,10 +107,30 @@ function sendResult(result) {
   if (result?.fd) {
     statusView.setInt32(4, result.fd, true);
   } else {
-    console.log("opfs-sync-proxy: result.length: ", result.length);
+    log("opfs-sync-proxy: result.length: ", result.length);
     statusView.setInt32(4, result?.length || 0, true);
   }
 
   Atomics.store(statusArray, 0, 1);
   Atomics.notify(statusArray, 0);
 }
+
+// logLevel:
+//
+// 0 = no logging output
+// 1 = only errors
+// 2 = warnings and errors
+// 3 = debug, warnings, and errors
+const logLevel = 1;
+
+const loggers = {
+  0: console.error.bind(console),
+  1: console.warn.bind(console),
+  2: console.log.bind(console),
+};
+const logImpl = (level, ...args) => {
+  if (logLevel > level) loggers[level]("OPFS asyncer:", ...args);
+};
+const log = (...args) => logImpl(2, ...args);
+const warn = (...args) => logImpl(1, ...args);
+const error = (...args) => logImpl(0, ...args);
