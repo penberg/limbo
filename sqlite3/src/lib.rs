@@ -112,9 +112,15 @@ pub unsafe extern "C" fn sqlite3_open(
         Ok(s) => s,
         Err(_) => return SQLITE_MISUSE,
     };
-    let io = match limbo_core::PlatformIO::new() {
-        Ok(io) => Arc::new(io),
-        Err(_) => return SQLITE_MISUSE,
+    let io: Arc<dyn limbo_core::IO> = match filename {
+        ":memory:" => match limbo_core::MemoryIO::new() {
+            Ok(io) => Arc::new(io),
+            Err(_) => return SQLITE_MISUSE,
+        },
+        _ => match limbo_core::PlatformIO::new() {
+            Ok(io) => Arc::new(io),
+            Err(_) => return SQLITE_MISUSE,
+        },
     };
     match limbo_core::Database::open_file(io, filename) {
         Ok(db) => {
