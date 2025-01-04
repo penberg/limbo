@@ -8,10 +8,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/penberg/limbo/actions">
-    <img src="https://github.com/penberg/limbo/actions/workflows/rust.yml/badge.svg" alt="Build badge">
+  <a href="https://github.com/tursodatabase/limbo/actions">
+    <img src="https://github.com/tursodatabase/limbo/actions/workflows/rust.yml/badge.svg" alt="Build badge">
   </a>
-  <a href="https://github.com/penberg/limbo/blob/main/LICENSE.md">
+  <a href="https://github.com/tursodatabase/limbo/blob/main/LICENSE.md">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" title="MIT License" />
   </a>
   <a href="https://discord.gg/jgjmyYgHwB">
@@ -42,7 +42,7 @@ Install `limbo` with:
 
 ```shell 
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/penberg/limbo/releases/latest/download/limbo-installer.sh | sh
+  https://github.com/tursodatabase/limbo/releases/latest/download/limbo-installer.sh | sh
 ```
 
 Then use the SQL shell to create and query a database:
@@ -153,5 +153,5 @@ Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in Limbo by you, shall be licensed as MIT, without any additional
 terms or conditions.
 
-[contribution guide]: https://github.com/penberg/limbo/blob/main/CONTRIBUTING.md
-[MIT license]: https://github.com/penberg/limbo/blob/main/LICENSE.md
+[contribution guide]: https://github.com/tursodatabase/limbo/blob/main/CONTRIBUTING.md
+[MIT license]: https://github.com/tursodatabase/limbo/blob/main/LICENSE.md
