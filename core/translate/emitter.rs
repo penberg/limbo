@@ -402,22 +402,22 @@ fn emit_query<'a>(
 
     // Initialize cursors and other resources needed for query execution
     if let Some(ref mut order_by) = plan.order_by {
-        init_order_by(program, order_by, t_ctx)?;
+        init_order_by(program, t_ctx, order_by)?;
     }
 
     if let Some(ref mut group_by) = plan.group_by {
-        init_group_by(program, group_by, &plan.aggregates, t_ctx)?;
+        init_group_by(program, t_ctx, group_by, &plan.aggregates)?;
     }
-    init_source(program, &plan.source, t_ctx, &OperationMode::SELECT)?;
+    init_source(program, t_ctx, &plan.source, &OperationMode::SELECT)?;
 
     // Set up main query execution loop
     open_loop(program, t_ctx, &mut plan.source, &plan.referenced_tables)?;
 
     // Process result columns and expressions in the inner loop
-    emit_loop(program, plan, t_ctx)?;
+    emit_loop(program, t_ctx, plan)?;
 
     // Clean up and close the main execution loop
-    close_loop(program, &plan.source, t_ctx)?;
+    close_loop(program, t_ctx, &plan.source)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
@@ -440,10 +440,10 @@ fn emit_query<'a>(
         // Handle aggregation without GROUP BY
         emit_ungrouped_aggregation(
             program,
+            t_ctx,
             &plan.result_columns,
             &plan.referenced_tables,
             &plan.aggregates,
-            t_ctx,
             &plan.query_type,
         )?;
         // Single row result for aggregates without GROUP BY, so ORDER BY not needed
@@ -455,10 +455,10 @@ fn emit_query<'a>(
         if order_by_necessary {
             emit_order_by(
                 program,
+                t_ctx,
                 order_by,
                 &plan.result_columns,
                 plan.limit,
-                t_ctx,
                 &plan.query_type,
             )?;
         }
@@ -489,8 +489,8 @@ fn emit_program_for_delete(
     // Initialize cursors and other resources needed for query execution
     init_source(
         &mut program,
-        &plan.source,
         &mut t_ctx,
+        &plan.source,
         &OperationMode::DELETE,
     )?;
 
@@ -502,10 +502,10 @@ fn emit_program_for_delete(
         &plan.referenced_tables,
     )?;
 
-    emit_delete_insns(&mut program, &plan.source, &plan.limit, &t_ctx)?;
+    emit_delete_insns(&mut program, &mut t_ctx, &plan.source, &plan.limit)?;
 
     // Clean up and close the main execution loop
-    close_loop(&mut program, &plan.source, &mut t_ctx)?;
+    close_loop(&mut program, &mut t_ctx, &plan.source)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
@@ -518,8 +518,8 @@ fn emit_program_for_delete(
 /// Initialize resources needed for ORDER BY processing
 fn init_order_by(
     program: &mut ProgramBuilder,
-    order_by: &[(ast::Expr, Direction)],
     t_ctx: &mut TranslateCtx,
+    order_by: &[(ast::Expr, Direction)],
 ) -> Result<()> {
     let sort_cursor = program.alloc_cursor_id(None, None);
     t_ctx.meta_sort = Some(SortMetadata {
@@ -541,9 +541,9 @@ fn init_order_by(
 /// Initialize resources needed for GROUP BY processing
 fn init_group_by(
     program: &mut ProgramBuilder,
+    t_ctx: &mut TranslateCtx,
     group_by: &GroupBy,
     aggregates: &[Aggregate],
-    t_ctx: &mut TranslateCtx,
 ) -> Result<()> {
     let num_aggs = aggregates.len();
 
@@ -616,8 +616,8 @@ fn init_group_by(
 /// Initialize resources needed for the source operators (tables, joins, etc)
 fn init_source(
     program: &mut ProgramBuilder,
-    source: &SourceOperator,
     t_ctx: &mut TranslateCtx,
+    source: &SourceOperator,
     mode: &OperationMode,
 ) -> Result<()> {
     let operator_id = source.id();
@@ -645,8 +645,8 @@ fn init_source(
                 };
                 t_ctx.meta_left_joins.insert(*id, lj_metadata);
             }
-            init_source(program, left, t_ctx, mode)?;
-            init_source(program, right, t_ctx, mode)?;
+            init_source(program, t_ctx, left, mode)?;
+            init_source(program, t_ctx, right, mode)?;
 
             Ok(())
         }
@@ -1171,17 +1171,17 @@ pub enum LoopEmitTarget<'a> {
 /// At this point the cursors for all tables have been opened and rewound.
 fn emit_loop(
     program: &mut ProgramBuilder,
-    plan: &mut SelectPlan,
     t_ctx: &mut TranslateCtx,
+    plan: &mut SelectPlan,
 ) -> Result<()> {
     // if we have a group by, we emit a record into the group by sorter.
     if let Some(group_by) = &plan.group_by {
         return emit_loop_source(
             program,
+            t_ctx,
             &plan.result_columns,
             &plan.aggregates,
             &plan.referenced_tables,
-            t_ctx,
             LoopEmitTarget::GroupBySorter {
                 group_by,
                 aggregates: &plan.aggregates,
@@ -1193,10 +1193,10 @@ fn emit_loop(
     if !plan.aggregates.is_empty() {
         return emit_loop_source(
             program,
+            t_ctx,
             &plan.result_columns,
             &plan.aggregates,
             &plan.referenced_tables,
-            t_ctx,
             LoopEmitTarget::AggStep,
         );
     }
@@ -1204,20 +1204,20 @@ fn emit_loop(
     if let Some(order_by) = &plan.order_by {
         return emit_loop_source(
             program,
+            t_ctx,
             &plan.result_columns,
             &plan.aggregates,
             &plan.referenced_tables,
-            t_ctx,
             LoopEmitTarget::OrderBySorter { order_by },
         );
     }
     // if we have neither, we emit a ResultRow. In that case, if we have a Limit, we handle that with DecrJumpZero.
     emit_loop_source(
         program,
+        t_ctx,
         &plan.result_columns,
         &plan.aggregates,
         &plan.referenced_tables,
-        t_ctx,
         LoopEmitTarget::QueryResult {
             query_type: &plan.query_type,
             limit: plan.limit,
@@ -1230,10 +1230,10 @@ fn emit_loop(
 /// See the InnerLoopEmitTarget enum for more details.
 fn emit_loop_source(
     program: &mut ProgramBuilder,
+    t_ctx: &mut TranslateCtx,
     result_columns: &[ResultSetColumn],
     aggregates: &[Aggregate],
     referenced_tables: &[TableReference],
-    t_ctx: &mut TranslateCtx,
     emit_target: LoopEmitTarget,
 ) -> Result<()> {
     match emit_target {
@@ -1361,8 +1361,8 @@ fn emit_loop_source(
 /// for all tables involved, innermost first.
 fn close_loop(
     program: &mut ProgramBuilder,
-    source: &SourceOperator,
     t_ctx: &mut TranslateCtx,
+    source: &SourceOperator,
 ) -> Result<()> {
     let loop_labels = *t_ctx
         .labels_main_loop
@@ -1388,7 +1388,7 @@ fn close_loop(
             outer,
             ..
         } => {
-            close_loop(program, right, t_ctx)?;
+            close_loop(program, t_ctx, right)?;
 
             if *outer {
                 let lj_meta = t_ctx.meta_left_joins.get(id).unwrap();
@@ -1435,7 +1435,7 @@ fn close_loop(
                 assert!(program.offset() == jump_offset);
             }
 
-            close_loop(program, left, t_ctx)?;
+            close_loop(program, t_ctx, left)?;
         }
         SourceOperator::Scan {
             table_reference,
@@ -1507,11 +1507,11 @@ fn close_loop(
     Ok(())
 }
 
-fn emit_delete_insns(
+fn emit_delete_insns<'a>(
     program: &mut ProgramBuilder,
+    t_ctx: &mut TranslateCtx<'a>,
     source: &SourceOperator,
     limit: &Option<usize>,
-    t_ctx: &TranslateCtx,
 ) -> Result<()> {
     let cursor_id = match source {
         SourceOperator::Scan {
@@ -1912,10 +1912,10 @@ fn emit_group_by<'a>(
 /// and we can now materialize the aggregate results.
 fn emit_ungrouped_aggregation<'a>(
     program: &mut ProgramBuilder,
+    t_ctx: &mut TranslateCtx<'a>,
     result_columns: &'a [ResultSetColumn],
     referenced_tables: &'a [TableReference],
     aggregates: &'a [Aggregate],
-    t_ctx: &mut TranslateCtx<'a>,
     query_type: &SelectQueryType,
 ) -> Result<()> {
     let agg_start_reg = t_ctx.reg_agg_start.unwrap();
@@ -1955,10 +1955,10 @@ fn emit_ungrouped_aggregation<'a>(
 /// and we can now emit rows from the ORDER BY sorter.
 fn emit_order_by(
     program: &mut ProgramBuilder,
+    t_ctx: &mut TranslateCtx,
     order_by: &[(ast::Expr, Direction)],
     result_columns: &[ResultSetColumn],
     limit: Option<usize>,
-    t_ctx: &mut TranslateCtx,
     query_type: &SelectQueryType,
 ) -> Result<()> {
     let sort_loop_start_label = program.allocate_label();
