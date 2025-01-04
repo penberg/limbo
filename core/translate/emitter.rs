@@ -51,21 +51,21 @@ pub struct GroupByMetadata {
     // Cursor ID for the Sorter table where the grouped rows are stored
     pub sort_cursor: usize,
     // Label for the subroutine that clears the accumulator registers (temporary storage for per-group aggregate calculations)
-    pub subroutine_accumulator_clear_label: BranchOffset,
-    // Register holding the return offset for the accumulator clear subroutine
-    pub subroutine_accumulator_clear_return_offset_register: usize,
+    pub label_subrtn_acc_clear: BranchOffset,
     // Label for the instruction that sets the accumulator indicator to true (indicating data exists in the accumulator for the current group)
-    pub accumulator_indicator_set_true_label: BranchOffset,
+    pub label_acc_indicator_set_flag_true: BranchOffset,
+    // Register holding the return offset for the accumulator clear subroutine
+    pub reg_subrtn_acc_clear_return_offset: usize,
     // Register holding the key used for sorting in the Sorter
-    pub sorter_key_register: usize,
+    pub reg_sorter_key: usize,
     // Register holding a flag to abort the grouping process if necessary
-    pub abort_flag_register: usize,
+    pub reg_abort_flag: usize,
     // Register holding the start of the accumulator group registers (i.e. the groups, not the aggregates)
-    pub group_exprs_accumulator_register: usize,
+    pub reg_group_exprs_acc: usize,
     // Starting index of the register(s) that hold the comparison result between the current row and the previous row
     // The comparison result is used to determine if the current row belongs to the same group as the previous row
     // Each group by expression has a corresponding register
-    pub group_exprs_comparison_register: usize,
+    pub reg_group_exprs_cmp: usize,
 }
 
 /// Jump labels for each loop in the query's main execution loop
@@ -515,13 +515,13 @@ fn init_group_by(
 
     let sort_cursor = program.alloc_cursor_id(None, None);
 
-    let abort_flag_register = program.alloc_register();
-    let group_exprs_comparison_register = program.alloc_registers(group_by.exprs.len());
-    let group_exprs_accumulator_register = program.alloc_registers(group_by.exprs.len());
-    let agg_exprs_start_reg = program.alloc_registers(num_aggs);
-    let sorter_key_register = program.alloc_register();
+    let reg_abort_flag = program.alloc_register();
+    let reg_group_exprs_cmp = program.alloc_registers(group_by.exprs.len());
+    let reg_group_exprs_acc = program.alloc_registers(group_by.exprs.len());
+    let reg_agg_exprs_start = program.alloc_registers(num_aggs);
+    let reg_sorter_key = program.alloc_register();
 
-    let subroutine_accumulator_clear_label = program.allocate_label();
+    let label_subrtn_acc_clear = program.allocate_label();
 
     let mut order = Vec::new();
     const ASCENDING: i64 = 0;
@@ -537,7 +537,7 @@ fn init_group_by(
     program.add_comment(program.offset(), "clear group by abort flag");
     program.emit_insn(Insn::Integer {
         value: 0,
-        dest: abort_flag_register,
+        dest: reg_abort_flag,
     });
 
     program.add_comment(
@@ -545,9 +545,9 @@ fn init_group_by(
         "initialize group by comparison registers to NULL",
     );
     program.emit_insn(Insn::Null {
-        dest: group_exprs_comparison_register,
+        dest: reg_group_exprs_cmp,
         dest_end: if group_by.exprs.len() > 1 {
-            Some(group_exprs_comparison_register + group_by.exprs.len() - 1)
+            Some(reg_group_exprs_cmp + group_by.exprs.len() - 1)
         } else {
             None
         },
@@ -555,26 +555,26 @@ fn init_group_by(
 
     program.add_comment(program.offset(), "go to clear accumulator subroutine");
 
-    let subroutine_accumulator_clear_return_offset_register = program.alloc_register();
+    let reg_subrtn_acc_clear_return_offset = program.alloc_register();
     program.emit_insn_with_label_dependency(
         Insn::Gosub {
-            target_pc: subroutine_accumulator_clear_label,
-            return_reg: subroutine_accumulator_clear_return_offset_register,
+            target_pc: label_subrtn_acc_clear,
+            return_reg: reg_subrtn_acc_clear_return_offset,
         },
-        subroutine_accumulator_clear_label,
+        label_subrtn_acc_clear,
     );
 
-    t_ctx.aggregation_start_register = Some(agg_exprs_start_reg);
+    t_ctx.aggregation_start_register = Some(reg_agg_exprs_start);
 
     t_ctx.group_by_metadata = Some(GroupByMetadata {
         sort_cursor,
-        subroutine_accumulator_clear_label,
-        subroutine_accumulator_clear_return_offset_register,
-        accumulator_indicator_set_true_label: program.allocate_label(),
-        abort_flag_register,
-        group_exprs_accumulator_register,
-        group_exprs_comparison_register,
-        sorter_key_register,
+        label_subrtn_acc_clear,
+        label_acc_indicator_set_flag_true: program.allocate_label(),
+        reg_subrtn_acc_clear_return_offset,
+        reg_abort_flag,
+        reg_group_exprs_acc,
+        reg_group_exprs_cmp,
+        reg_sorter_key,
     });
     Ok(())
 }
@@ -1246,7 +1246,7 @@ fn inner_loop_source_emit(
                 start_reg,
                 column_count,
                 group_by_metadata.sort_cursor,
-                group_by_metadata.sorter_key_register,
+                group_by_metadata.reg_sorter_key,
             );
 
             Ok(())
@@ -1535,30 +1535,30 @@ fn group_by_emit(
 ) -> Result<()> {
     // Label for the first instruction of the grouping loop.
     // This is the start of the loop that reads the sorted data and groups&aggregates it.
-    let grouping_loop_start_label = program.allocate_label();
+    let label_grouping_loop_start = program.allocate_label();
     // Label for the instruction immediately after the grouping loop.
-    let grouping_loop_end_label = program.allocate_label();
+    let label_grouping_loop_end = program.allocate_label();
     // Label for the instruction where a row for a finished group is output.
     // Distinct from subroutine_accumulator_output_label, which is the start of the subroutine, but may still skip emitting a row.
-    let group_by_agg_final_label = program.allocate_label();
+    let label_agg_final = program.allocate_label();
     // Label for the instruction immediately after the entire group by phase.
-    let group_by_end_label = program.allocate_label();
+    let label_group_by_end = program.allocate_label();
     // Label for the beginning of the subroutine that potentially outputs a row for a finished group.
-    let subroutine_accumulator_output_label = program.allocate_label();
+    let label_subrtn_acc_output = program.allocate_label();
     // Register holding the return offset of the subroutine that potentially outputs a row for a finished group.
-    let subroutine_accumulator_output_return_offset_register = program.alloc_register();
+    let reg_subrtn_acc_output_return_offset = program.alloc_register();
     // Register holding a boolean indicating whether there's data in the accumulator (used for aggregation)
-    let data_in_accumulator_indicator_register = program.alloc_register();
+    let reg_data_in_acc_flag = program.alloc_register();
 
     let group_by_metadata = t_ctx.group_by_metadata.as_mut().unwrap();
     let GroupByMetadata {
-        group_exprs_comparison_register: comparison_register,
-        subroutine_accumulator_clear_return_offset_register,
-        subroutine_accumulator_clear_label,
-        accumulator_indicator_set_true_label,
-        group_exprs_accumulator_register: group_exprs_start_register,
-        abort_flag_register,
-        sorter_key_register,
+        reg_group_exprs_cmp,
+        reg_subrtn_acc_clear_return_offset,
+        reg_group_exprs_acc,
+        reg_abort_flag,
+        reg_sorter_key,
+        label_subrtn_acc_clear,
+        label_acc_indicator_set_flag_true,
         ..
     } = *group_by_metadata;
 
@@ -1585,7 +1585,7 @@ fn group_by_emit(
 
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
-        content_reg: sorter_key_register,
+        content_reg: reg_sorter_key,
         num_fields: sorter_column_count,
     });
 
@@ -1593,16 +1593,16 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterSort {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_empty: grouping_loop_end_label,
+            pc_if_empty: label_grouping_loop_end,
         },
-        grouping_loop_end_label,
+        label_grouping_loop_end,
     );
 
-    program.defer_label_resolution(grouping_loop_start_label, program.offset() as usize);
+    program.defer_label_resolution(label_grouping_loop_start, program.offset() as usize);
     // Read a row from the sorted data in the sorter into the pseudo cursor
     program.emit_insn(Insn::SorterData {
         cursor_id: group_by_metadata.sort_cursor,
-        dest_reg: group_by_metadata.sorter_key_register,
+        dest_reg: group_by_metadata.reg_sorter_key,
         pseudo_cursor,
     });
 
@@ -1620,7 +1620,7 @@ fn group_by_emit(
 
     // Compare the group by columns to the previous group by columns to see if we are at a new group or not
     program.emit_insn(Insn::Compare {
-        start_reg_a: comparison_register,
+        start_reg_a: reg_group_exprs_cmp,
         start_reg_b: groups_start_reg,
         count: group_by.exprs.len(),
     });
@@ -1644,7 +1644,7 @@ fn group_by_emit(
     // New group, move current group by columns into the comparison register
     program.emit_insn(Insn::Move {
         source_reg: groups_start_reg,
-        dest_reg: comparison_register,
+        dest_reg: reg_group_exprs_cmp,
         count: group_by.exprs.len(),
     });
 
@@ -1654,29 +1654,29 @@ fn group_by_emit(
     );
     program.emit_insn_with_label_dependency(
         Insn::Gosub {
-            target_pc: subroutine_accumulator_output_label,
-            return_reg: subroutine_accumulator_output_return_offset_register,
+            target_pc: label_subrtn_acc_output,
+            return_reg: reg_subrtn_acc_output_return_offset,
         },
-        subroutine_accumulator_output_label,
+        label_subrtn_acc_output,
     );
 
     program.add_comment(program.offset(), "check abort flag");
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
-            reg: abort_flag_register,
-            target_pc: group_by_end_label,
+            reg: reg_abort_flag,
+            target_pc: label_group_by_end,
             decrement_by: 0,
         },
-        group_by_end_label,
+        label_group_by_end,
     );
 
     program.add_comment(program.offset(), "goto clear accumulator subroutine");
     program.emit_insn_with_label_dependency(
         Insn::Gosub {
-            target_pc: subroutine_accumulator_clear_label,
-            return_reg: subroutine_accumulator_clear_return_offset_register,
+            target_pc: label_subrtn_acc_clear,
+            return_reg: reg_subrtn_acc_clear_return_offset,
         },
-        subroutine_accumulator_clear_label,
+        label_subrtn_acc_clear,
     );
 
     // Accumulate the values into the aggregations
@@ -1704,16 +1704,16 @@ fn group_by_emit(
     );
     program.emit_insn_with_label_dependency(
         Insn::If {
-            target_pc: accumulator_indicator_set_true_label,
-            reg: data_in_accumulator_indicator_register,
+            target_pc: label_acc_indicator_set_flag_true,
+            reg: reg_data_in_acc_flag,
             null_reg: 0, // unused in this case
         },
-        accumulator_indicator_set_true_label,
+        label_acc_indicator_set_flag_true,
     );
 
     // Read the group by columns for a finished group
     for i in 0..group_by.exprs.len() {
-        let key_reg = group_exprs_start_register + i;
+        let key_reg = reg_group_exprs_acc + i;
         let sorter_column_index = i;
         program.emit_insn(Insn::Column {
             cursor_id: pseudo_cursor,
@@ -1722,57 +1722,57 @@ fn group_by_emit(
         });
     }
 
-    program.resolve_label(accumulator_indicator_set_true_label, program.offset());
+    program.resolve_label(label_acc_indicator_set_flag_true, program.offset());
     program.add_comment(program.offset(), "indicate data in accumulator");
     program.emit_insn(Insn::Integer {
         value: 1,
-        dest: data_in_accumulator_indicator_register,
+        dest: reg_data_in_acc_flag,
     });
 
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_next: grouping_loop_start_label,
+            pc_if_next: label_grouping_loop_start,
         },
-        grouping_loop_start_label,
+        label_grouping_loop_start,
     );
 
-    program.resolve_label(grouping_loop_end_label, program.offset());
+    program.resolve_label(label_grouping_loop_end, program.offset());
 
     program.add_comment(program.offset(), "emit row for final group");
     program.emit_insn_with_label_dependency(
         Insn::Gosub {
-            target_pc: subroutine_accumulator_output_label,
-            return_reg: subroutine_accumulator_output_return_offset_register,
+            target_pc: label_subrtn_acc_output,
+            return_reg: reg_subrtn_acc_output_return_offset,
         },
-        subroutine_accumulator_output_label,
+        label_subrtn_acc_output,
     );
 
     program.add_comment(program.offset(), "group by finished");
     program.emit_insn_with_label_dependency(
         Insn::Goto {
-            target_pc: group_by_end_label,
+            target_pc: label_group_by_end,
         },
-        group_by_end_label,
+        label_group_by_end,
     );
     program.emit_insn(Insn::Integer {
         value: 1,
-        dest: group_by_metadata.abort_flag_register,
+        dest: group_by_metadata.reg_abort_flag,
     });
     program.emit_insn(Insn::Return {
-        return_reg: subroutine_accumulator_output_return_offset_register,
+        return_reg: reg_subrtn_acc_output_return_offset,
     });
 
-    program.resolve_label(subroutine_accumulator_output_label, program.offset());
+    program.resolve_label(label_subrtn_acc_output, program.offset());
 
     program.add_comment(program.offset(), "output group by row subroutine start");
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
-            reg: data_in_accumulator_indicator_register,
-            target_pc: group_by_agg_final_label,
+            reg: reg_data_in_acc_flag,
+            target_pc: label_agg_final,
             decrement_by: 0,
         },
-        group_by_agg_final_label,
+        label_agg_final,
     );
     let group_by_end_without_emitting_row_label = program.allocate_label();
     program.defer_label_resolution(
@@ -1780,12 +1780,12 @@ fn group_by_emit(
         program.offset() as usize,
     );
     program.emit_insn(Insn::Return {
-        return_reg: subroutine_accumulator_output_return_offset_register,
+        return_reg: reg_subrtn_acc_output_return_offset,
     });
 
     let agg_start_reg = t_ctx.aggregation_start_register.unwrap();
     // Resolve the label for the start of the group by output row subroutine
-    program.resolve_label(group_by_agg_final_label, program.offset());
+    program.resolve_label(label_agg_final, program.offset());
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = agg_start_reg + i;
         program.emit_insn(Insn::AggFinal {
@@ -1801,7 +1801,7 @@ fn group_by_emit(
     let mut precomputed_exprs_to_register =
         Vec::with_capacity(aggregates.len() + group_by.exprs.len());
     for (i, expr) in group_by.exprs.iter().enumerate() {
-        precomputed_exprs_to_register.push((expr, group_exprs_start_register + i));
+        precomputed_exprs_to_register.push((expr, reg_group_exprs_acc + i));
     }
     for (i, agg) in aggregates.iter().enumerate() {
         precomputed_exprs_to_register.push((&agg.original_expr, agg_start_reg + i));
@@ -1832,7 +1832,7 @@ fn group_by_emit(
                 result_columns,
                 t_ctx.result_column_start_register.unwrap(),
                 Some(&precomputed_exprs_to_register),
-                limit.map(|l| (l, t_ctx.limit_reg.unwrap(), group_by_end_label)),
+                limit.map(|l| (l, t_ctx.limit_reg.unwrap(), label_group_by_end)),
                 syms,
                 query_type,
             )?;
@@ -1852,15 +1852,12 @@ fn group_by_emit(
     }
 
     program.emit_insn(Insn::Return {
-        return_reg: subroutine_accumulator_output_return_offset_register,
+        return_reg: reg_subrtn_acc_output_return_offset,
     });
 
     program.add_comment(program.offset(), "clear accumulator subroutine start");
-    program.resolve_label(
-        group_by_metadata.subroutine_accumulator_clear_label,
-        program.offset(),
-    );
-    let start_reg = group_by_metadata.group_exprs_accumulator_register;
+    program.resolve_label(group_by_metadata.label_subrtn_acc_clear, program.offset());
+    let start_reg = group_by_metadata.reg_group_exprs_acc;
     program.emit_insn(Insn::Null {
         dest: start_reg,
         dest_end: Some(start_reg + group_by.exprs.len() + aggregates.len() - 1),
@@ -1868,13 +1865,13 @@ fn group_by_emit(
 
     program.emit_insn(Insn::Integer {
         value: 0,
-        dest: data_in_accumulator_indicator_register,
+        dest: reg_data_in_acc_flag,
     });
     program.emit_insn(Insn::Return {
-        return_reg: subroutine_accumulator_clear_return_offset_register,
+        return_reg: reg_subrtn_acc_clear_return_offset,
     });
 
-    program.resolve_label(group_by_end_label, program.offset());
+    program.resolve_label(label_group_by_end, program.offset());
 
     Ok(())
 }
