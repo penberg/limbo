@@ -465,6 +465,7 @@ impl Rows {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct SymbolTable {
     pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
 }
