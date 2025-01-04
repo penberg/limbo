@@ -508,11 +508,50 @@ impl Index {
             _ => todo!("Expected create index statement"),
         }
     }
+
+    pub fn automatic_from_primary_key(
+        table: &BTreeTable,
+        index_name: &str,
+        root_page: usize,
+    ) -> Result<Index> {
+        if table.primary_key_column_names.is_empty() {
+            return Err(crate::LimboError::InternalError(
+                "Cannot create automatic index for table without primary key".to_string(),
+            ));
+        }
+
+        let index_columns = table
+            .primary_key_column_names
+            .iter()
+            .map(|col_name| {
+                // Verify that each primary key column exists in the table
+                if table.get_column(col_name).is_none() {
+                    return Err(crate::LimboError::InternalError(format!(
+                        "Primary key column {} not found in table {}",
+                        col_name, table.name
+                    )));
+                }
+                Ok(IndexColumn {
+                    name: normalize_ident(col_name),
+                    order: Order::Ascending, // Primary key indexes are always ascending
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Index {
+            name: normalize_ident(index_name),
+            table_name: table.name.clone(),
+            root_page,
+            columns: index_columns,
+            unique: true, // Primary key indexes are always unique
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LimboError;
 
     #[test]
     pub fn test_has_rowid_true() -> Result<()> {
@@ -734,5 +773,79 @@ mod tests {
 "#;
         let actual = sqlite_schema_table().to_sql();
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_automatic_index_single_column() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER PRIMARY KEY, b TEXT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let index = Index::automatic_from_primary_key(&table, "sqlite_autoindex_t1_1", 2)?;
+
+        assert_eq!(index.name, "sqlite_autoindex_t1_1");
+        assert_eq!(index.table_name, "t1");
+        assert_eq!(index.root_page, 2);
+        assert!(index.unique);
+        assert_eq!(index.columns.len(), 1);
+        assert_eq!(index.columns[0].name, "a");
+        assert!(matches!(index.columns[0].order, Order::Ascending));
+        Ok(())
+    }
+
+    #[test]
+    fn test_automatic_index_composite_key() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT, PRIMARY KEY(a, b));"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let index = Index::automatic_from_primary_key(&table, "sqlite_autoindex_t1_1", 2)?;
+
+        assert_eq!(index.name, "sqlite_autoindex_t1_1");
+        assert_eq!(index.table_name, "t1");
+        assert_eq!(index.root_page, 2);
+        assert!(index.unique);
+        assert_eq!(index.columns.len(), 2);
+        assert_eq!(index.columns[0].name, "a");
+        assert_eq!(index.columns[1].name, "b");
+        assert!(matches!(index.columns[0].order, Order::Ascending));
+        assert!(matches!(index.columns[1].order, Order::Ascending));
+        Ok(())
+    }
+
+    #[test]
+    fn test_automatic_index_no_primary_key() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER, b TEXT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let result = Index::automatic_from_primary_key(&table, "sqlite_autoindex_t1_1", 2);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            LimboError::InternalError(msg) if msg.contains("without primary key")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn test_automatic_index_nonexistent_column() -> Result<()> {
+        // Create a table with a primary key column that doesn't exist in the table
+        let table = BTreeTable {
+            root_page: 0,
+            name: "t1".to_string(),
+            has_rowid: true,
+            primary_key_column_names: vec!["nonexistent".to_string()],
+            columns: vec![Column {
+                name: "a".to_string(),
+                ty: Type::Integer,
+                primary_key: false,
+                is_rowid_alias: false,
+            }],
+        };
+
+        let result = Index::automatic_from_primary_key(&table, "sqlite_autoindex_t1_1", 2);
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            LimboError::InternalError(msg) if msg.contains("not found in table")
+        ));
+        Ok(())
     }
 }
