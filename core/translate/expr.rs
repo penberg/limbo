@@ -1028,6 +1028,22 @@ pub fn translate_expr(
                         ScalarFunc::Cast => {
                             unreachable!("this is always ast::Expr::Cast")
                         }
+                        ScalarFunc::Changes => {
+                            if let Some(_) = args {
+                                crate::bail_parse_error!(
+                                    "{} fucntion with more than 0 arguments",
+                                    srf
+                                );
+                            }
+                            let start_reg = program.alloc_register();
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::Char => {
                             let start_reg = translate_variable_sized_function_parameter_list(
                                 program,
@@ -1513,6 +1529,22 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: target_register + 1,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
+                        ScalarFunc::TotalChanges => {
+                            if let Some(_) = args {
+                                crate::bail_parse_error!(
+                                    "{} fucntion with more than 0 arguments",
+                                    srf.to_string()
+                                );
+                            }
+                            let start_reg = program.alloc_register();
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });

@@ -75,6 +75,7 @@ impl AggFunc {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarFunc {
     Cast,
+    Changes,
     Char,
     Coalesce,
     Concat,
@@ -104,6 +105,7 @@ pub enum ScalarFunc {
     Soundex,
     Date,
     Time,
+    TotalChanges,
     Typeof,
     Unicode,
     Quote,
@@ -120,6 +122,7 @@ impl Display for ScalarFunc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             Self::Cast => "cast".to_string(),
+            Self::Changes => "changes".to_string(),
             Self::Char => "char".to_string(),
             Self::Coalesce => "coalesce".to_string(),
             Self::Concat => "concat".to_string(),
@@ -149,6 +152,7 @@ impl Display for ScalarFunc {
             Self::Soundex => "soundex".to_string(),
             Self::Date => "date".to_string(),
             Self::Time => "time".to_string(),
+            Self::TotalChanges => "total_changes".to_string(),
             Self::Typeof => "typeof".to_string(),
             Self::Unicode => "unicode".to_string(),
             Self::Quote => "quote".to_string(),
@@ -325,6 +329,8 @@ impl Func {
             "coalesce" => Ok(Self::Scalar(ScalarFunc::Coalesce)),
             "concat" => Ok(Self::Scalar(ScalarFunc::Concat)),
             "concat_ws" => Ok(Self::Scalar(ScalarFunc::ConcatWs)),
+            "changes" => Ok(Self::Scalar(ScalarFunc::Changes)),
+            "total_changes" => Ok(Self::Scalar(ScalarFunc::TotalChanges)),
             "glob" => Ok(Self::Scalar(ScalarFunc::Glob)),
             "ifnull" => Ok(Self::Scalar(ScalarFunc::IfNull)),
             "iif" => Ok(Self::Scalar(ScalarFunc::Iif)),

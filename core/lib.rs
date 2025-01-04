@@ -141,6 +141,8 @@ impl Database {
             header,
             transaction_state: RefCell::new(TransactionState::None),
             last_insert_rowid: Cell::new(0),
+            last_change: Cell::new(0),
+            total_changes: Cell::new(0),
         });
         let rows = conn.query("SELECT * FROM sqlite_schema")?;
         let mut schema = schema.borrow_mut();
@@ -156,6 +158,8 @@ impl Database {
             header: self.header.clone(),
             last_insert_rowid: Cell::new(0),
             transaction_state: RefCell::new(TransactionState::None),
+            last_change: Cell::new(0),
+            total_changes: Cell::new(0),
         })
     }
 
@@ -231,6 +235,8 @@ pub struct Connection {
     header: Rc<RefCell<DatabaseHeader>>,
     transaction_state: RefCell<TransactionState>,
     last_insert_rowid: Cell<u64>,
+    last_change: Cell<i64>,
+    total_changes: Cell<i64>,
 }
 
 impl Connection {

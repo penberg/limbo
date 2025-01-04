@@ -1340,6 +1340,11 @@ impl Program {
                                 let result = exec_cast(&reg_value_argument, &reg_value_type.value);
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::Changes => {
+                                let res = &self.connection.upgrade().unwrap().last_change;
+                                let changes = res.get();
+                                state.registers[*dest] = OwnedValue::Integer(changes);
+                            }
                             ScalarFunc::Char => {
                                 let reg_values =
                                     state.registers[*start_reg..*start_reg + arg_count].to_vec();
@@ -1548,6 +1553,11 @@ impl Program {
                                     exec_time(&state.registers[*start_reg..*start_reg + arg_count]);
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::TotalChanges => {
+                                let res = &self.connection.upgrade().unwrap().total_changes;
+                                let total_changes = res.get();
+                                state.registers[*dest] = OwnedValue::Integer(total_changes);
+                            }
                             ScalarFunc::UnixEpoch => {
                                 if *start_reg == 0 {
                                     let unixepoch: String = exec_unixepoch(
@@ -1750,6 +1760,9 @@ impl Program {
                         if let Some(rowid) = cursor.rowid()? {
                             if let Some(conn) = self.connection.upgrade() {
                                 conn.update_last_rowid(rowid);
+                                let prev_total_changes = conn.total_changes.get();
+                                conn.last_change.set(1);
+                                conn.total_changes.set(prev_total_changes + 1);
                             }
                         }
                     }
