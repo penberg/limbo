@@ -507,7 +507,14 @@ pub fn exec_add(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         rhs = agg.final_value();
     }
     match (lhs, rhs) {
-        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs + rhs),
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+            let result = lhs.overflowing_add(*rhs);
+            if result.1 {
+                OwnedValue::Float(*lhs as f64 + *rhs as f64)
+            } else {
+                OwnedValue::Integer(result.0)
+            }
+        }
         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs + rhs),
         (OwnedValue::Float(f), OwnedValue::Integer(i))
         | (OwnedValue::Integer(i), OwnedValue::Float(f)) => OwnedValue::Float(*f + *i as f64),
@@ -531,7 +538,14 @@ pub fn exec_subtract(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         rhs = agg.final_value();
     }
     match (lhs, rhs) {
-        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs - rhs),
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+            let result = lhs.overflowing_sub(*rhs);
+            if result.1 {
+                OwnedValue::Float(*lhs as f64 - *rhs as f64)
+            } else {
+                OwnedValue::Integer(result.0)
+            }
+        }
         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs - rhs),
         (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Float(lhs - *rhs as f64),
         (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(*lhs as f64 - rhs),
@@ -557,7 +571,14 @@ pub fn exec_multiply(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         rhs = agg.final_value();
     }
     match (lhs, rhs) {
-        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs * rhs),
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+            let result = lhs.overflowing_mul(*rhs);
+            if result.1 {
+                OwnedValue::Float(*lhs as f64 * *rhs as f64)
+            } else {
+                OwnedValue::Integer(result.0)
+            }
+        }
         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs * rhs),
         (OwnedValue::Integer(i), OwnedValue::Float(f))
         | (OwnedValue::Float(f), OwnedValue::Integer(i)) => OwnedValue::Float(*i as f64 * { *f }),
@@ -583,7 +604,14 @@ pub fn exec_divide(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
     }
     match (lhs, rhs) {
         (_, OwnedValue::Integer(0)) | (_, OwnedValue::Float(0.0)) => OwnedValue::Null,
-        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Integer(lhs / rhs),
+        (OwnedValue::Integer(lhs), OwnedValue::Integer(rhs)) => {
+            let result = lhs.overflowing_div(*rhs);
+            if result.1 {
+                OwnedValue::Float(*lhs as f64 / *rhs as f64)
+            } else {
+                OwnedValue::Integer(result.0)
+            }
+        }
         (OwnedValue::Float(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(lhs / rhs),
         (OwnedValue::Float(lhs), OwnedValue::Integer(rhs)) => OwnedValue::Float(lhs / *rhs as f64),
         (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(*lhs as f64 / rhs),
