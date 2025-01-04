@@ -75,9 +75,13 @@ The purpose of these tests is to verify behavior matches with SQLite and Limbo.
 ```console
 cargo install cargo-c
 ```
-2. [SQLite](https://www.sqlite.org/index.html) is needed for compatibility checking. You can install it using `brew`:
+2. [SQLite](https://www.sqlite.org/index.html) is needed for compatibility checking. You can install it using `brew` on macOS/Linux:
 ```console
 brew install sqlite
+```
+Or using `choco` on Windows:
+```console
+choco install sqlite
 ```
 
 ### Running the tests
