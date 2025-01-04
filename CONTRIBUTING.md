@@ -35,7 +35,7 @@ Fork the repository and open a pull request to submit your work. Please consider
 
 As general guideline for pull requests, please:
 
-* Don't mix fixes and cleanups in same pull request. They just increase the likelhood of merge conflicts. Cleanups are welcome, but just keep them separate.
+* Don't mix fixes and cleanups in same pull request. They just increase the likelihood of merge conflicts. Cleanups are welcome, but just keep them separate.
 * Prefer `git rebase main` over `git merge main` on your branches to keep git logs clean.
 
 ## Debugging query execution
@@ -69,6 +69,18 @@ If the bytecode is the same, but query results are different, then the bug is so
 The `testing/test.all` is a starting point for adding functional tests using a similar syntax to SQLite.
 The purpose of these tests is to verify behavior matches with SQLite and Limbo.
 
+### Prerequisites
+
+1. [Cargo-c](https://github.com/lu-zero/cargo-c) is needed for building C-ABI compatible library. You can get it via:
+```console
+cargo install cargo-c
+```
+2. [SQLite](https://www.sqlite.org/index.html) is needed for compatibility checking. You can install it using `brew`:
+```console
+brew install sqlite
+```
+
+### Running the tests
 To run the test suite with Limbo, simply run:
 
 ```
