@@ -1533,16 +1533,24 @@ fn group_by_emit(
     syms: &SymbolTable,
     query_type: &SelectQueryType,
 ) -> Result<()> {
-    let sort_loop_start_label = program.allocate_label();
-    let grouping_done_label = program.allocate_label();
-    let group_by_output_row_label = program.allocate_label();
+    // Label for the first instruction of the grouping loop.
+    // This is the start of the loop that reads the sorted data and groups&aggregates it.
+    let grouping_loop_start_label = program.allocate_label();
+    // Label for the instruction immediately after the grouping loop.
+    let grouping_loop_end_label = program.allocate_label();
+    // Label for the instruction where a row for a finished group is output.
+    // Distinct from subroutine_accumulator_output_label, which is the start of the subroutine, but may still skip emitting a row.
+    let group_by_agg_final_label = program.allocate_label();
+    // Label for the instruction immediately after the entire group by phase.
     let group_by_end_label = program.allocate_label();
-    let group_by_metadata = t_ctx.group_by_metadata.as_mut().unwrap();
+    // Label for the beginning of the subroutine that potentially outputs a row for a finished group.
     let subroutine_accumulator_output_label = program.allocate_label();
+    // Register holding the return offset of the subroutine that potentially outputs a row for a finished group.
     let subroutine_accumulator_output_return_offset_register = program.alloc_register();
     // Register holding a boolean indicating whether there's data in the accumulator (used for aggregation)
     let data_in_accumulator_indicator_register = program.alloc_register();
 
+    let group_by_metadata = t_ctx.group_by_metadata.as_mut().unwrap();
     let GroupByMetadata {
         group_exprs_comparison_register: comparison_register,
         subroutine_accumulator_clear_return_offset_register,
@@ -1585,12 +1593,12 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterSort {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_empty: grouping_done_label,
+            pc_if_empty: grouping_loop_end_label,
         },
-        grouping_done_label,
+        grouping_loop_end_label,
     );
 
-    program.defer_label_resolution(sort_loop_start_label, program.offset() as usize);
+    program.defer_label_resolution(grouping_loop_start_label, program.offset() as usize);
     // Read a row from the sorted data in the sorter into the pseudo cursor
     program.emit_insn(Insn::SorterData {
         cursor_id: group_by_metadata.sort_cursor,
@@ -1724,12 +1732,12 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::SorterNext {
             cursor_id: group_by_metadata.sort_cursor,
-            pc_if_next: sort_loop_start_label,
+            pc_if_next: grouping_loop_start_label,
         },
-        sort_loop_start_label,
+        grouping_loop_start_label,
     );
 
-    program.resolve_label(grouping_done_label, program.offset());
+    program.resolve_label(grouping_loop_end_label, program.offset());
 
     program.add_comment(program.offset(), "emit row for final group");
     program.emit_insn_with_label_dependency(
@@ -1761,10 +1769,10 @@ fn group_by_emit(
     program.emit_insn_with_label_dependency(
         Insn::IfPos {
             reg: data_in_accumulator_indicator_register,
-            target_pc: group_by_output_row_label,
+            target_pc: group_by_agg_final_label,
             decrement_by: 0,
         },
-        group_by_output_row_label,
+        group_by_agg_final_label,
     );
     let group_by_end_without_emitting_row_label = program.allocate_label();
     program.defer_label_resolution(
@@ -1777,7 +1785,7 @@ fn group_by_emit(
 
     let agg_start_reg = t_ctx.aggregation_start_register.unwrap();
     // Resolve the label for the start of the group by output row subroutine
-    program.resolve_label(group_by_output_row_label, program.offset());
+    program.resolve_label(group_by_agg_final_label, program.offset());
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = agg_start_reg + i;
         program.emit_insn(Insn::AggFinal {
