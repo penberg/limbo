@@ -6,10 +6,11 @@ use crate::ext::{ExtFunc, UuidFunc};
 use crate::function::JsonFunc;
 use crate::function::{AggFunc, Func, FuncCtx, MathFuncArity, ScalarFunc};
 use crate::schema::Type;
-use crate::util::{exprs_are_equivalent, normalize_ident};
+use crate::util::normalize_ident;
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, BranchOffset};
-use crate::{Result, SymbolTable};
+use crate::Result;
 
+use super::emitter::Resolver;
 use super::plan::{Aggregate, TableReference, TableReferenceType};
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -24,8 +25,7 @@ pub fn translate_condition_expr(
     referenced_tables: &[TableReference],
     expr: &ast::Expr,
     condition_metadata: ConditionMetadata,
-    precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
-    syms: &SymbolTable,
+    resolver: &Resolver,
 ) -> Result<()> {
     match expr {
         ast::Expr::Between { .. } => todo!(),
@@ -40,16 +40,14 @@ pub fn translate_condition_expr(
                     jump_if_condition_is_true: false,
                     ..condition_metadata
                 },
-                precomputed_exprs_to_registers,
-                syms,
+                resolver,
             );
             let _ = translate_condition_expr(
                 program,
                 referenced_tables,
                 rhs,
                 condition_metadata,
-                precomputed_exprs_to_registers,
-                syms,
+                resolver,
             );
         }
         ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
@@ -64,8 +62,7 @@ pub fn translate_condition_expr(
                     jump_target_when_false,
                     ..condition_metadata
                 },
-                precomputed_exprs_to_registers,
-                syms,
+                resolver,
             );
             program.resolve_label(jump_target_when_false, program.offset());
             let _ = translate_condition_expr(
@@ -73,32 +70,17 @@ pub fn translate_condition_expr(
                 referenced_tables,
                 rhs,
                 condition_metadata,
-                precomputed_exprs_to_registers,
-                syms,
+                resolver,
             );
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = program.alloc_register();
-            let _ = translate_expr(
-                program,
-                Some(referenced_tables),
-                lhs,
-                lhs_reg,
-                precomputed_exprs_to_registers,
-                syms,
-            );
+            let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, resolver);
             if let ast::Expr::Literal(_) = lhs.as_ref() {
                 program.mark_last_insn_constant()
             }
             let rhs_reg = program.alloc_register();
-            let _ = translate_expr(
-                program,
-                Some(referenced_tables),
-                rhs,
-                rhs_reg,
-                precomputed_exprs_to_registers,
-                syms,
-            );
+            let _ = translate_expr(program, Some(referenced_tables), rhs, rhs_reg, resolver);
             if let ast::Expr::Literal(_) = rhs.as_ref() {
                 program.mark_last_insn_constant()
             }
@@ -340,14 +322,7 @@ pub fn translate_condition_expr(
 
             // The left hand side only needs to be evaluated once we have a list of values to compare against.
             let lhs_reg = program.alloc_register();
-            let _ = translate_expr(
-                program,
-                Some(referenced_tables),
-                lhs,
-                lhs_reg,
-                precomputed_exprs_to_registers,
-                syms,
-            )?;
+            let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, resolver)?;
 
             let rhs = rhs.as_ref().unwrap();
 
@@ -370,14 +345,8 @@ pub fn translate_condition_expr(
                 for (i, expr) in rhs.iter().enumerate() {
                     let rhs_reg = program.alloc_register();
                     let last_condition = i == rhs.len() - 1;
-                    let _ = translate_expr(
-                        program,
-                        Some(referenced_tables),
-                        expr,
-                        rhs_reg,
-                        precomputed_exprs_to_registers,
-                        syms,
-                    )?;
+                    let _ =
+                        translate_expr(program, Some(referenced_tables), expr, rhs_reg, resolver)?;
                     // If this is not the last condition, we need to jump to the 'jump_target_when_true' label if the condition is true.
                     if !last_condition {
                         program.emit_insn_with_label_dependency(
@@ -414,14 +383,8 @@ pub fn translate_condition_expr(
                 // If it's a NOT IN expression, we need to jump to the 'jump_target_when_false' label if any of the conditions are true.
                 for expr in rhs.iter() {
                     let rhs_reg = program.alloc_register();
-                    let _ = translate_expr(
-                        program,
-                        Some(referenced_tables),
-                        expr,
-                        rhs_reg,
-                        precomputed_exprs_to_registers,
-                        syms,
-                    )?;
+                    let _ =
+                        translate_expr(program, Some(referenced_tables), expr, rhs_reg, resolver)?;
                     program.emit_insn_with_label_dependency(
                         Insn::Eq {
                             lhs: lhs_reg,
@@ -465,8 +428,7 @@ pub fn translate_condition_expr(
                         Some(referenced_tables),
                         lhs,
                         column_reg,
-                        precomputed_exprs_to_registers,
-                        syms,
+                        resolver,
                     )?;
                     if let ast::Expr::Literal(_) = lhs.as_ref() {
                         program.mark_last_insn_constant();
@@ -476,8 +438,7 @@ pub fn translate_condition_expr(
                         Some(referenced_tables),
                         rhs,
                         pattern_reg,
-                        precomputed_exprs_to_registers,
-                        syms,
+                        resolver,
                     )?;
                     if let ast::Expr::Literal(_) = rhs.as_ref() {
                         program.mark_last_insn_constant();
@@ -550,8 +511,7 @@ pub fn translate_condition_expr(
                     referenced_tables,
                     expr,
                     condition_metadata,
-                    precomputed_exprs_to_registers,
-                    syms,
+                    resolver,
                 );
             }
         }
@@ -565,42 +525,23 @@ pub fn translate_expr(
     referenced_tables: Option<&[TableReference]>,
     expr: &ast::Expr,
     target_register: usize,
-    precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
-    syms: &SymbolTable,
+    resolver: &Resolver,
 ) -> Result<usize> {
-    if let Some(precomputed_exprs_to_registers) = precomputed_exprs_to_registers {
-        for (precomputed_expr, reg) in precomputed_exprs_to_registers.iter() {
-            if exprs_are_equivalent(expr, precomputed_expr) {
-                program.emit_insn(Insn::Copy {
-                    src_reg: *reg,
-                    dst_reg: target_register,
-                    amount: 0,
-                });
-                return Ok(target_register);
-            }
-        }
+    if let Some(reg) = resolver.resolve_cached_expr_reg(expr) {
+        program.emit_insn(Insn::Copy {
+            src_reg: reg,
+            dst_reg: target_register,
+            amount: 0,
+        });
+        return Ok(target_register);
     }
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
             let e1_reg = program.alloc_register();
-            translate_expr(
-                program,
-                referenced_tables,
-                e1,
-                e1_reg,
-                precomputed_exprs_to_registers,
-                syms,
-            )?;
+            translate_expr(program, referenced_tables, e1, e1_reg, resolver)?;
             let e2_reg = program.alloc_register();
-            translate_expr(
-                program,
-                referenced_tables,
-                e2,
-                e2_reg,
-                precomputed_exprs_to_registers,
-                syms,
-            )?;
+            translate_expr(program, referenced_tables, e2, e2_reg, resolver)?;
 
             match op {
                 ast::Operator::NotEquals => {
@@ -759,19 +700,11 @@ pub fn translate_expr(
                     referenced_tables,
                     base_expr,
                     base_reg.unwrap(),
-                    precomputed_exprs_to_registers,
-                    syms,
+                    resolver,
                 )?;
             };
             for (when_expr, then_expr) in when_then_pairs {
-                translate_expr(
-                    program,
-                    referenced_tables,
-                    when_expr,
-                    expr_reg,
-                    precomputed_exprs_to_registers,
-                    syms,
-                )?;
+                translate_expr(program, referenced_tables, when_expr, expr_reg, resolver)?;
                 match base_reg {
                     // CASE 1 WHEN 0 THEN 0 ELSE 1 becomes 1==0, Ne branch to next clause
                     Some(base_reg) => program.emit_insn_with_label_dependency(
@@ -798,8 +731,7 @@ pub fn translate_expr(
                     referenced_tables,
                     then_expr,
                     target_register,
-                    precomputed_exprs_to_registers,
-                    syms,
+                    resolver,
                 )?;
                 program.emit_insn_with_label_dependency(
                     Insn::Goto {
@@ -814,14 +746,7 @@ pub fn translate_expr(
             }
             match else_expr {
                 Some(expr) => {
-                    translate_expr(
-                        program,
-                        referenced_tables,
-                        expr,
-                        target_register,
-                        precomputed_exprs_to_registers,
-                        syms,
-                    )?;
+                    translate_expr(program, referenced_tables, expr, target_register, resolver)?;
                 }
                 // If ELSE isn't specified, it means ELSE null.
                 None => {
@@ -837,14 +762,7 @@ pub fn translate_expr(
         ast::Expr::Cast { expr, type_name } => {
             let type_name = type_name.as_ref().unwrap(); // TODO: why is this optional?
             let reg_expr = program.alloc_register();
-            translate_expr(
-                program,
-                referenced_tables,
-                expr,
-                reg_expr,
-                precomputed_exprs_to_registers,
-                syms,
-            )?;
+            translate_expr(program, referenced_tables, expr, reg_expr, resolver)?;
             let reg_type = program.alloc_register();
             program.emit_insn(Insn::String8 {
                 // we make a comparison against uppercase static strs in the affinity() function,
@@ -877,12 +795,7 @@ pub fn translate_expr(
         } => {
             let args_count = if let Some(args) = args { args.len() } else { 0 };
             let func_name = normalize_ident(name.0.as_str());
-            let func_type = match Func::resolve_function(&func_name, args_count).ok() {
-                Some(func) => Some(func),
-                None => syms
-                    .resolve_function(&func_name, args_count)
-                    .map(|func| Func::External(func)),
-            };
+            let func_type = resolver.resolve_function(&func_name, args_count);
 
             if func_type.is_none() {
                 crate::bail_parse_error!("unknown function {}", name.0);
@@ -925,14 +838,7 @@ pub fn translate_expr(
                             );
                         };
                         let regs = program.alloc_register();
-                        translate_expr(
-                            program,
-                            referenced_tables,
-                            &args[0],
-                            regs,
-                            precomputed_exprs_to_registers,
-                            syms,
-                        )?;
+                        translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
                             start_reg: regs,
@@ -946,8 +852,7 @@ pub fn translate_expr(
                             program,
                             args,
                             referenced_tables,
-                            precomputed_exprs_to_registers,
-                            syms,
+                            resolver,
                         )?;
 
                         program.emit_insn(Insn::Function {
@@ -963,8 +868,7 @@ pub fn translate_expr(
                             program,
                             args,
                             referenced_tables,
-                            precomputed_exprs_to_registers,
-                            syms,
+                            resolver,
                         )?;
 
                         program.emit_insn(Insn::Function {
@@ -994,14 +898,7 @@ pub fn translate_expr(
                         let json_reg = program.alloc_register();
                         let path_reg = program.alloc_register();
 
-                        translate_expr(
-                            program,
-                            referenced_tables,
-                            &args[0],
-                            json_reg,
-                            precomputed_exprs_to_registers,
-                            syms,
-                        )?;
+                        translate_expr(program, referenced_tables, &args[0], json_reg, resolver)?;
 
                         if args.len() == 2 {
                             translate_expr(
@@ -1009,8 +906,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[1],
                                 path_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                         }
 
@@ -1049,8 +945,7 @@ pub fn translate_expr(
                                 program,
                                 args,
                                 referenced_tables,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
 
                             program.emit_insn(Insn::Function {
@@ -1086,8 +981,7 @@ pub fn translate_expr(
                                     referenced_tables,
                                     arg,
                                     target_register,
-                                    precomputed_exprs_to_registers,
-                                    syms,
+                                    resolver,
                                 )?;
                                 if index < args.len() - 1 {
                                     program.emit_insn_with_label_dependency(
@@ -1126,14 +1020,7 @@ pub fn translate_expr(
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
                                 start_reg = Some(start_reg.unwrap_or(reg));
-                                translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                translate_expr(program, referenced_tables, arg, reg, resolver)?;
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1159,14 +1046,7 @@ pub fn translate_expr(
                             let temp_register = program.alloc_register();
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                translate_expr(program, referenced_tables, arg, reg, resolver)?;
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1201,8 +1081,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[0],
                                 temp_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             program.emit_insn(Insn::NotNull {
                                 reg: temp_reg,
@@ -1214,8 +1093,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[1],
                                 temp_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             program.emit_insn(Insn::Copy {
                                 src_reg: temp_reg,
@@ -1239,8 +1117,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[0],
                                 temp_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             let jump_target_when_false = program.allocate_label();
                             program.emit_insn_with_label_dependency(
@@ -1256,8 +1133,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[1],
                                 target_register,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             let jump_target_result = program.allocate_label();
                             program.emit_insn_with_label_dependency(
@@ -1272,8 +1148,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[2],
                                 target_register,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             program.resolve_label(jump_target_result, program.offset());
                             Ok(target_register)
@@ -1295,14 +1170,8 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                let _ =
+                                    translate_expr(program, referenced_tables, arg, reg, resolver)?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant()
                                 }
@@ -1345,14 +1214,7 @@ pub fn translate_expr(
                             };
 
                             let regs = program.alloc_register();
-                            translate_expr(
-                                program,
-                                referenced_tables,
-                                &args[0],
-                                regs,
-                                precomputed_exprs_to_registers,
-                                syms,
-                            )?;
+                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: regs,
@@ -1387,8 +1249,7 @@ pub fn translate_expr(
                                         referenced_tables,
                                         arg,
                                         target_reg,
-                                        precomputed_exprs_to_registers,
-                                        syms,
+                                        resolver,
                                     )?;
                                 }
                             }
@@ -1425,16 +1286,14 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[0],
                                 str_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[1],
                                 start_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             if args.len() == 3 {
                                 translate_expr(
@@ -1442,8 +1301,7 @@ pub fn translate_expr(
                                     referenced_tables,
                                     &args[2],
                                     length_reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
+                                    resolver,
                                 )?;
                             }
 
@@ -1467,14 +1325,7 @@ pub fn translate_expr(
                                 crate::bail_parse_error!("hex function with no arguments",);
                             };
                             let regs = program.alloc_register();
-                            translate_expr(
-                                program,
-                                referenced_tables,
-                                &args[0],
-                                regs,
-                                precomputed_exprs_to_registers,
-                                syms,
-                            )?;
+                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: regs,
@@ -1496,8 +1347,7 @@ pub fn translate_expr(
                                         referenced_tables,
                                         &args[0],
                                         arg_reg,
-                                        precomputed_exprs_to_registers,
-                                        syms,
+                                        resolver,
                                     )?;
                                     start_reg = arg_reg;
                                 }
@@ -1521,8 +1371,7 @@ pub fn translate_expr(
                                         referenced_tables,
                                         arg,
                                         target_reg,
-                                        precomputed_exprs_to_registers,
-                                        syms,
+                                        resolver,
                                     )?;
                                 }
                             }
@@ -1572,14 +1421,7 @@ pub fn translate_expr(
 
                             for arg in args.iter() {
                                 let reg = program.alloc_register();
-                                translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                translate_expr(program, referenced_tables, arg, reg, resolver)?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant();
                                 }
@@ -1605,14 +1447,8 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                let _ =
+                                    translate_expr(program, referenced_tables, arg, reg, resolver)?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant()
                                 }
@@ -1639,14 +1475,8 @@ pub fn translate_expr(
                             };
                             for arg in args {
                                 let reg = program.alloc_register();
-                                let _ = translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                let _ =
+                                    translate_expr(program, referenced_tables, arg, reg, resolver)?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant()
                                 }
@@ -1682,8 +1512,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[0],
                                 first_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             let second_reg = program.alloc_register();
                             translate_expr(
@@ -1691,8 +1520,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[1],
                                 second_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1748,16 +1576,14 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[0],
                                 str_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
                             translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[1],
                                 pattern_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
 
                             translate_expr(
@@ -1765,8 +1591,7 @@ pub fn translate_expr(
                                 referenced_tables,
                                 &args[2],
                                 replacement_reg,
-                                precomputed_exprs_to_registers,
-                                syms,
+                                resolver,
                             )?;
 
                             program.emit_insn(Insn::Function {
@@ -1799,14 +1624,7 @@ pub fn translate_expr(
                             };
 
                             let regs = program.alloc_register();
-                            translate_expr(
-                                program,
-                                referenced_tables,
-                                &args[0],
-                                regs,
-                                precomputed_exprs_to_registers,
-                                syms,
-                            )?;
+                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: regs,
@@ -1844,14 +1662,7 @@ pub fn translate_expr(
                             if let Some(arg) = args.first() {
                                 let reg = program.alloc_register();
                                 start_reg = Some(reg);
-                                translate_expr(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    reg,
-                                    precomputed_exprs_to_registers,
-                                    syms,
-                                )?;
+                                translate_expr(program, referenced_tables, arg, reg, resolver)?;
                                 if let ast::Expr::Literal(_) = arg {
                                     program.mark_last_insn_constant()
                                 }
@@ -1898,14 +1709,7 @@ pub fn translate_expr(
 
                         let reg = program.alloc_register();
 
-                        translate_expr(
-                            program,
-                            referenced_tables,
-                            &args[0],
-                            reg,
-                            precomputed_exprs_to_registers,
-                            syms,
-                        )?;
+                        translate_expr(program, referenced_tables, &args[0], reg, resolver)?;
 
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
@@ -1932,26 +1736,12 @@ pub fn translate_expr(
                         let reg1 = program.alloc_register();
                         let reg2 = program.alloc_register();
 
-                        translate_expr(
-                            program,
-                            referenced_tables,
-                            &args[0],
-                            reg1,
-                            precomputed_exprs_to_registers,
-                            syms,
-                        )?;
+                        translate_expr(program, referenced_tables, &args[0], reg1, resolver)?;
                         if let ast::Expr::Literal(_) = &args[0] {
                             program.mark_last_insn_constant();
                         }
 
-                        translate_expr(
-                            program,
-                            referenced_tables,
-                            &args[1],
-                            reg2,
-                            precomputed_exprs_to_registers,
-                            syms,
-                        )?;
+                        translate_expr(program, referenced_tables, &args[1], reg2, resolver)?;
                         if let ast::Expr::Literal(_) = &args[1] {
                             program.mark_last_insn_constant();
                         }
@@ -1981,14 +1771,7 @@ pub fn translate_expr(
                         let regs = program.alloc_registers(args.len());
 
                         for (i, arg) in args.iter().enumerate() {
-                            translate_expr(
-                                program,
-                                referenced_tables,
-                                arg,
-                                regs + i,
-                                precomputed_exprs_to_registers,
-                                syms,
-                            )?;
+                            translate_expr(program, referenced_tables, arg, regs + i, resolver)?;
                         }
 
                         program.emit_insn(Insn::Function {
@@ -2117,8 +1900,7 @@ pub fn translate_expr(
                     referenced_tables,
                     &exprs[0],
                     target_register,
-                    precomputed_exprs_to_registers,
-                    syms,
+                    resolver,
                 )?;
             } else {
                 // Parenthesized expressions with multiple arguments are reserved for special cases
@@ -2165,14 +1947,7 @@ pub fn translate_expr(
                 };
 
                 let reg = program.alloc_register();
-                translate_expr(
-                    program,
-                    referenced_tables,
-                    expr,
-                    reg,
-                    precomputed_exprs_to_registers,
-                    syms,
-                )?;
+                translate_expr(program, referenced_tables, expr, reg, resolver)?;
                 let zero_reg = program.alloc_register();
                 program.emit_insn(Insn::Integer {
                     value,
@@ -2213,14 +1988,7 @@ pub fn translate_expr(
             }
             (UnaryOperator::BitwiseNot, _) => {
                 let reg = program.alloc_register();
-                translate_expr(
-                    program,
-                    referenced_tables,
-                    expr,
-                    reg,
-                    precomputed_exprs_to_registers,
-                    syms,
-                )?;
+                translate_expr(program, referenced_tables, expr, reg, resolver)?;
                 program.emit_insn(Insn::BitNot {
                     reg,
                     dest: target_register,
@@ -2239,8 +2007,7 @@ fn translate_variable_sized_function_parameter_list(
     program: &mut ProgramBuilder,
     args: &Option<Vec<ast::Expr>>,
     referenced_tables: Option<&[TableReference]>,
-    precomputed_exprs_to_registers: Option<&Vec<(&ast::Expr, usize)>>,
-    syms: &SymbolTable,
+    resolver: &Resolver,
 ) -> Result<usize> {
     let args = args.as_deref().unwrap_or_default();
 
@@ -2248,14 +2015,7 @@ fn translate_variable_sized_function_parameter_list(
     let mut current_reg = reg;
 
     for arg in args.iter() {
-        translate_expr(
-            program,
-            referenced_tables,
-            arg,
-            current_reg,
-            precomputed_exprs_to_registers,
-            syms,
-        )?;
+        translate_expr(program, referenced_tables, arg, current_reg, resolver)?;
 
         current_reg += 1;
     }
@@ -2294,7 +2054,7 @@ pub fn translate_aggregation(
     referenced_tables: &[TableReference],
     agg: &Aggregate,
     target_register: usize,
-    syms: &SymbolTable,
+    resolver: &Resolver,
 ) -> Result<usize> {
     let dest = match agg.func {
         AggFunc::Avg => {
@@ -2303,7 +2063,7 @@ pub fn translate_aggregation(
             }
             let expr = &agg.args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -2318,8 +2078,7 @@ pub fn translate_aggregation(
             } else {
                 let expr = &agg.args[0];
                 let expr_reg = program.alloc_register();
-                let _ =
-                    translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+                let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
                 expr_reg
             };
             program.emit_insn(Insn::AggStep {
@@ -2355,14 +2114,13 @@ pub fn translate_aggregation(
                 delimiter_expr = ast::Expr::Literal(ast::Literal::String(String::from("\",\"")));
             }
 
-            translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             translate_expr(
                 program,
                 Some(referenced_tables),
                 &delimiter_expr,
                 delimiter_reg,
-                None,
-                syms,
+                resolver,
             )?;
 
             program.emit_insn(Insn::AggStep {
@@ -2380,7 +2138,7 @@ pub fn translate_aggregation(
             }
             let expr = &agg.args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -2395,7 +2153,7 @@ pub fn translate_aggregation(
             }
             let expr = &agg.args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -2421,14 +2179,13 @@ pub fn translate_aggregation(
                 _ => crate::bail_parse_error!("Incorrect delimiter parameter"),
             };
 
-            translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             translate_expr(
                 program,
                 Some(referenced_tables),
                 &delimiter_expr,
                 delimiter_reg,
-                None,
-                syms,
+                resolver,
             )?;
 
             program.emit_insn(Insn::AggStep {
@@ -2446,7 +2203,7 @@ pub fn translate_aggregation(
             }
             let expr = &agg.args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -2461,7 +2218,7 @@ pub fn translate_aggregation(
             }
             let expr = &agg.args[0];
             let expr_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, None, syms)?;
+            let _ = translate_expr(program, Some(referenced_tables), expr, expr_reg, resolver)?;
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
@@ -2481,7 +2238,7 @@ pub fn translate_aggregation_groupby(
     cursor_index: usize,
     agg: &Aggregate,
     target_register: usize,
-    syms: &SymbolTable,
+    resolver: &Resolver,
 ) -> Result<usize> {
     let emit_column = |program: &mut ProgramBuilder, expr_reg: usize| {
         program.emit_insn(Insn::Column {
@@ -2546,8 +2303,7 @@ pub fn translate_aggregation_groupby(
                 Some(referenced_tables),
                 &delimiter_expr,
                 delimiter_reg,
-                None,
-                syms,
+                resolver,
             )?;
 
             program.emit_insn(Insn::AggStep {
@@ -2609,8 +2365,7 @@ pub fn translate_aggregation_groupby(
                 Some(referenced_tables),
                 &delimiter_expr,
                 delimiter_reg,
-                None,
-                syms,
+                resolver,
             )?;
 
             program.emit_insn(Insn::AggStep {

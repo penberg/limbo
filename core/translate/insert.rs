@@ -16,6 +16,8 @@ use crate::{
 };
 use crate::{Connection, Result};
 
+use super::emitter::Resolver;
+
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
     schema: &Schema,
@@ -36,6 +38,7 @@ pub fn translate_insert(
         crate::bail_parse_error!("ON CONFLICT clause is not supported");
     }
     let mut program = ProgramBuilder::new();
+    let resolver = Resolver::new(syms);
     let init_label = program.allocate_label();
     program.emit_insn_with_label_dependency(
         Insn::Init {
@@ -126,7 +129,7 @@ pub fn translate_insert(
                 column_registers_start,
                 true,
                 rowid_reg,
-                syms,
+                &resolver,
             )?;
             program.emit_insn(Insn::Yield {
                 yield_reg,
@@ -168,7 +171,7 @@ pub fn translate_insert(
             column_registers_start,
             false,
             rowid_reg,
-            syms,
+            &resolver,
         )?;
     }
 
@@ -383,7 +386,7 @@ fn populate_column_registers(
     column_registers_start: usize,
     inserting_multiple_rows: bool,
     rowid_reg: usize,
-    syms: &SymbolTable,
+    resolver: &Resolver,
 ) -> Result<()> {
     for (i, mapping) in column_mappings.iter().enumerate() {
         let target_reg = column_registers_start + i;
@@ -405,8 +408,7 @@ fn populate_column_registers(
                 None,
                 value.get(value_index).expect("value index out of bounds"),
                 reg,
-                None,
-                syms,
+                resolver,
             )?;
             if write_directly_to_rowid_reg {
                 program.emit_insn(Insn::SoftNull { reg: target_reg });
