@@ -6,6 +6,7 @@ source $testdir/tester.tcl
 # Tolerance for floating point comparisons
 # FIXME: When Limbo's floating point presentation matches to SQLite, this could/should be removed
 set tolerance 1e-13
+set overflow_tolerance 5e4
 
 do_execsql_test add-int {
   SELECT 10 + 1
@@ -44,6 +45,19 @@ foreach {testnum lhs rhs ans} {
   do_execsql_test add-text-$testnum "SELECT $lhs + $rhs" $::ans
 }
 
+foreach {testnum lhs rhs ans} {
+   1   '9223372036854775807'   '0'   9223372036854775807 
+   2   '9223372036854775807'   '1'   9.22337203685478e+18
+   3   9223372036854775807      0    9223372036854775807 
+   4   9223372036854775807      1    9.22337203685478e+18
+   5   '-9223372036854775808'  '0'   -9223372036854775808 
+   6   '-9223372036854775808'  '-1'  -9.22337203685478e+18
+   7   -9223372036854775808     0    -9223372036854775808 
+   8   -9223372036854775808     -1   -9.22337203685478e+18
+} {
+  do_execsql_test_tolerance add-overflow-$testnum "SELECT $lhs + $rhs" $::ans $overflow_tolerance
+}
+
 do_execsql_test subtract-int {
   SELECT 10 - 1
 } {9}
@@ -79,6 +93,19 @@ foreach {testnum lhs rhs ans} {
    9   '1.0' '3.0' -2.0
 } {
   do_execsql_test subtract-text-$testnum "SELECT $lhs - $rhs" $::ans
+}
+
+foreach {testnum lhs rhs ans} {
+   1   '9223372036854775807'   '0'   9223372036854775807 
+   2   '9223372036854775807'   '-1'   9.22337203685478e+18
+   3   9223372036854775807      0    9223372036854775807 
+   4   9223372036854775807      -1    9.22337203685478e+18
+   5   '-9223372036854775808'  '0'   -9223372036854775808 
+   6   '-9223372036854775808'  '1'  -9.22337203685478e+18
+   7   -9223372036854775808     0    -9223372036854775808 
+   8   -9223372036854775808     1   -9.22337203685478e+18
+} {
+  do_execsql_test_tolerance subtract-overflow-$testnum "SELECT $lhs - $rhs" $::ans $overflow_tolerance
 }
 
 do_execsql_test multiply-int {
@@ -120,6 +147,19 @@ foreach {testnum lhs rhs ans} {
    9   '1.0' '3.0' 3.0
 } {
   do_execsql_test multiply-text-$testnum "SELECT $lhs * $rhs" $::ans
+}
+
+foreach {testnum lhs rhs ans} {
+   1   '9223372036854775807'   '1'   9223372036854775807 
+   2   '9223372036854775807'   '2'   1.84467440737096e+19
+   3   9223372036854775807      1    9223372036854775807 
+   4   9223372036854775807      2    1.84467440737096e+19
+   5   '-9223372036854775808'  '1'   -9223372036854775808 
+   6   '-9223372036854775808'  '2'  -1.84467440737096e+19
+   7   -9223372036854775808     1    -9223372036854775808 
+   8   -9223372036854775808     2   -1.84467440737096e+19
+} {
+  do_execsql_test_tolerance multiply-overflow-$testnum "SELECT $lhs * $rhs" $::ans $overflow_tolerance
 }
 
 do_execsql_test divide-int {
@@ -181,6 +221,15 @@ foreach {testnum lhs rhs ans} {
    9   '1.0' '4.0' 0.25
 } {
   do_execsql_test divide-text-$testnum "SELECT $lhs / $rhs" $::ans
+}
+
+foreach {testnum lhs rhs ans} {
+   5   '-9223372036854775808'  '0'   {} 
+   6   '-9223372036854775808'  '-1'  9.22337203685478e+18
+   7   -9223372036854775808     0    {}
+   8   -9223372036854775808     -1   9.22337203685478e+18
+} {
+  do_execsql_test_tolerance divide-overflow-$testnum "SELECT $lhs / $rhs" $::ans $overflow_tolerance
 }
 
 do_execsql_test add-agg-int {
