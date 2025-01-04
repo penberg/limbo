@@ -7,14 +7,20 @@
 //! a SELECT statement will be translated into a sequence of instructions that
 //! will read rows from the database and filter them according to a WHERE clause.
 
+pub(crate) mod aggregation;
 pub(crate) mod delete;
 pub(crate) mod emitter;
 pub(crate) mod expr;
+pub(crate) mod group_by;
 pub(crate) mod insert;
+pub(crate) mod main_loop;
 pub(crate) mod optimizer;
+pub(crate) mod order_by;
 pub(crate) mod plan;
 pub(crate) mod planner;
+pub(crate) mod result_row;
 pub(crate) mod select;
+pub(crate) mod subquery;
 
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
