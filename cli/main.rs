@@ -1,5 +1,6 @@
 #![allow(clippy::arc_with_non_send_sync)]
 mod app;
+mod import;
 mod opcodes_dictionary;
 
 use rustyline::{error::ReadlineError, DefaultEditor};
