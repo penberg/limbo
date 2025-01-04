@@ -11,6 +11,10 @@ do_execsql_test select-const-2 {
   SELECT 2
 } {2}
 
+do_execsql_test select-text-escape-1 {
+  SELECT '''a'
+} {'a}
+
 do_execsql_test select-blob-empty {
   SELECT x'';
 } {}

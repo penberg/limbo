@@ -1854,7 +1854,7 @@ pub fn translate_expr(
             }
             ast::Literal::String(s) => {
                 program.emit_insn(Insn::String8 {
-                    value: s[1..s.len() - 1].to_string(),
+                    value: s[1..s.len() - 1].replace("''", "'").to_string(),
                     dest: target_register,
                 });
                 Ok(target_register)
