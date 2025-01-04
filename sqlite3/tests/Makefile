@@ -29,7 +29,7 @@ test: $(PROGRAM)
 
 %.o: %.c
 	$(E) "  CC      " $@
-	$(Q) $(CC) $(CFLAGS) -c $< -o $@
+	$(Q) $(CC) $(CFLAGS) -c $< -o $@ -I$(HEADERS)
 
 $(PROGRAM): $(OBJS)
 	$(E) "  LINK    " $@

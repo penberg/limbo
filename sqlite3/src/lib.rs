@@ -20,7 +20,8 @@ pub const SQLITE_ABORT: ffi::c_int = 4;
 pub const SQLITE_BUSY: ffi::c_int = 5;
 pub const SQLITE_NOMEM: ffi::c_int = 7;
 pub const SQLITE_INTERRUPT: ffi::c_int = 9;
-pub const SQLITE_NOTFOUND: ffi::c_int = 14;
+pub const SQLITE_NOTFOUND: ffi::c_int = 12;
+pub const SQLITE_CANTOPEN: ffi::c_int = 14;
 pub const SQLITE_MISUSE: ffi::c_int = 21;
 pub const SQLITE_ROW: ffi::c_int = 100;
 pub const SQLITE_DONE: ffi::c_int = 101;
@@ -121,7 +122,7 @@ pub unsafe extern "C" fn sqlite3_open(
             *db_out = Box::leak(Box::new(sqlite3::new(db, conn)));
             SQLITE_OK
         }
-        Err(_e) => SQLITE_NOTFOUND,
+        Err(_e) => SQLITE_CANTOPEN,
     }
 }
 
