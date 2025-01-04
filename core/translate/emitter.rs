@@ -85,28 +85,28 @@ pub struct LoopLabels {
 #[derive(Debug)]
 pub struct TranslateCtx {
     // A typical query plan is a nested loop. Each loop has its own LoopLabels (see the definition of LoopLabels for more details)
-    loop_labels: HashMap<usize, LoopLabels>,
+    labels_main_loop: HashMap<usize, LoopLabels>,
     // label for the instruction that jumps to the next phase of the query after the main loop
     // we don't know ahead of time what that is (GROUP BY, ORDER BY, etc.)
-    after_main_loop_label: Option<BranchOffset>,
-    // metadata for the group by operator
-    group_by_metadata: Option<GroupByMetadata>,
-    // metadata for the order by operator
-    sort_metadata: Option<SortMetadata>,
-    // mapping between Join operator id and associated metadata (for left joins only)
-    left_joins: HashMap<usize, LeftJoinMetadata>,
+    label_main_loop_end: Option<BranchOffset>,
     // First register of the aggregation results
-    pub aggregation_start_register: Option<usize>,
+    pub reg_agg_start: Option<usize>,
     // First register of the result columns of the query
-    pub result_column_start_register: Option<usize>,
+    pub reg_result_cols_start: Option<usize>,
+    // The register holding the limit value, if any.
+    pub reg_limit: Option<usize>,
+    // metadata for the group by operator
+    meta_group_by: Option<GroupByMetadata>,
+    // metadata for the order by operator
+    meta_sort: Option<SortMetadata>,
+    // mapping between Join operator id and associated metadata (for left joins only)
+    meta_left_joins: HashMap<usize, LeftJoinMetadata>,
     // We need to emit result columns in the order they are present in the SELECT, but they may not be in the same order in the ORDER BY sorter.
     // This vector holds the indexes of the result columns in the ORDER BY sorter.
     pub result_column_indexes_in_orderby_sorter: HashMap<usize, usize>,
     // We might skip adding a SELECT result column into the ORDER BY sorter if it is an exact match in the ORDER BY keys.
     // This vector holds the indexes of the result columns that we need to skip.
     pub result_columns_to_skip_in_orderby_sorter: Option<Vec<usize>>,
-    // The register holding the limit value, if any.
-    pub limit_reg: Option<usize>,
 }
 
 /// Used to distinguish database operations
@@ -134,16 +134,16 @@ fn prologue() -> Result<(ProgramBuilder, TranslateCtx, BranchOffset, BranchOffse
     let start_offset = program.offset();
 
     let t_ctx = TranslateCtx {
-        loop_labels: HashMap::new(),
-        after_main_loop_label: None,
-        group_by_metadata: None,
-        left_joins: HashMap::new(),
-        sort_metadata: None,
-        aggregation_start_register: None,
-        result_column_start_register: None,
+        labels_main_loop: HashMap::new(),
+        label_main_loop_end: None,
+        reg_agg_start: None,
+        reg_limit: None,
+        reg_result_cols_start: None,
+        meta_group_by: None,
+        meta_left_joins: HashMap::new(),
+        meta_sort: None,
         result_column_indexes_in_orderby_sorter: HashMap::new(),
         result_columns_to_skip_in_orderby_sorter: None,
-        limit_reg: None,
     };
 
     Ok((program, t_ctx, init_label, start_offset))
@@ -291,16 +291,16 @@ fn emit_subquery(
     }
     let end_coroutine_label = program.allocate_label();
     let mut metadata = TranslateCtx {
-        loop_labels: HashMap::new(),
-        after_main_loop_label: None,
-        group_by_metadata: None,
-        left_joins: HashMap::new(),
-        sort_metadata: None,
-        aggregation_start_register: None,
-        result_column_start_register: None,
+        labels_main_loop: HashMap::new(),
+        label_main_loop_end: None,
+        meta_group_by: None,
+        meta_left_joins: HashMap::new(),
+        meta_sort: None,
+        reg_agg_start: None,
+        reg_result_cols_start: None,
         result_column_indexes_in_orderby_sorter: HashMap::new(),
         result_columns_to_skip_in_orderby_sorter: None,
-        limit_reg: plan.limit.map(|_| program.alloc_register()),
+        reg_limit: plan.limit.map(|_| program.alloc_register()),
     };
     let subquery_body_end_label = program.allocate_label();
     program.emit_insn_with_label_dependency(
@@ -317,7 +317,7 @@ fn emit_subquery(
     if let Some(limit) = plan.limit {
         program.emit_insn(Insn::Integer {
             value: limit as i64,
-            dest: metadata.limit_reg.unwrap(),
+            dest: metadata.reg_limit.unwrap(),
         });
     }
     let result_column_start_reg = emit_query(program, plan, &mut metadata, syms)?;
@@ -336,15 +336,15 @@ fn emit_query(
     // Emit subqueries first so the results can be read in the main query loop.
     emit_subqueries(program, &mut plan.referenced_tables, &mut plan.source, syms)?;
 
-    if t_ctx.limit_reg.is_none() {
-        t_ctx.limit_reg = plan.limit.map(|_| program.alloc_register());
+    if t_ctx.reg_limit.is_none() {
+        t_ctx.reg_limit = plan.limit.map(|_| program.alloc_register());
     }
 
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
     // however an aggregation might still happen,
     // e.g. SELECT COUNT(*) WHERE 0 returns a row with 0, not an empty result set
     let after_main_loop_label = program.allocate_label();
-    t_ctx.after_main_loop_label = Some(after_main_loop_label);
+    t_ctx.label_main_loop_end = Some(after_main_loop_label);
     if plan.contains_constant_false_condition {
         program.emit_insn_with_label_dependency(
             Insn::Goto {
@@ -355,7 +355,7 @@ fn emit_query(
     }
 
     // Allocate registers for result columns
-    t_ctx.result_column_start_register = Some(program.alloc_registers(plan.result_columns.len()));
+    t_ctx.reg_result_cols_start = Some(program.alloc_registers(plan.result_columns.len()));
 
     // Initialize cursors and other resources needed for query execution
     if let Some(ref mut order_by) = plan.order_by {
@@ -429,7 +429,7 @@ fn emit_query(
         }
     }
 
-    Ok(t_ctx.result_column_start_register.unwrap())
+    Ok(t_ctx.reg_result_cols_start.unwrap())
 }
 
 fn emit_program_for_delete(
@@ -488,7 +488,7 @@ fn init_order_by(
     t_ctx: &mut TranslateCtx,
 ) -> Result<()> {
     let sort_cursor = program.alloc_cursor_id(None, None);
-    t_ctx.sort_metadata = Some(SortMetadata {
+    t_ctx.meta_sort = Some(SortMetadata {
         sort_cursor,
         reg_sorter_data: program.alloc_register(),
     });
@@ -564,9 +564,9 @@ fn init_group_by(
         label_subrtn_acc_clear,
     );
 
-    t_ctx.aggregation_start_register = Some(reg_agg_exprs_start);
+    t_ctx.reg_agg_start = Some(reg_agg_exprs_start);
 
-    t_ctx.group_by_metadata = Some(GroupByMetadata {
+    t_ctx.meta_group_by = Some(GroupByMetadata {
         sort_cursor,
         label_subrtn_acc_clear,
         label_acc_indicator_set_flag_true: program.allocate_label(),
@@ -592,7 +592,7 @@ fn init_source(
         loop_start: program.allocate_label(),
         loop_end: program.allocate_label(),
     };
-    t_ctx.loop_labels.insert(operator_id, loop_labels);
+    t_ctx.labels_main_loop.insert(operator_id, loop_labels);
 
     match source {
         SourceOperator::Subquery { .. } => Ok(()),
@@ -609,7 +609,7 @@ fn init_source(
                     label_match_flag_set_true: program.allocate_label(),
                     label_match_flag_check_value: program.allocate_label(),
                 };
-                t_ctx.left_joins.insert(*id, lj_metadata);
+                t_ctx.meta_left_joins.insert(*id, lj_metadata);
             }
             init_source(program, left, t_ctx, mode)?;
             init_source(program, right, t_ctx, mode)?;
@@ -739,7 +739,7 @@ fn open_loop(
                 start_offset: coroutine_implementation_start,
             });
             let loop_labels = t_ctx
-                .loop_labels
+                .labels_main_loop
                 .get(id)
                 .expect("subquery has no loop labels");
             program.defer_label_resolution(loop_labels.loop_start, program.offset() as usize);
@@ -791,14 +791,14 @@ fn open_loop(
             open_loop(program, left, referenced_tables, t_ctx, syms)?;
 
             let loop_labels = t_ctx
-                .loop_labels
+                .labels_main_loop
                 .get(&right.id())
                 .expect("right side of join has no loop labels");
 
             let mut jump_target_when_false = loop_labels.next;
 
             if *outer {
-                let lj_meta = t_ctx.left_joins.get(id).unwrap();
+                let lj_meta = t_ctx.meta_left_joins.get(id).unwrap();
                 program.emit_insn(Insn::Integer {
                     value: 0,
                     dest: lj_meta.reg_match_flag,
@@ -829,7 +829,7 @@ fn open_loop(
             }
 
             if *outer {
-                let lj_meta = t_ctx.left_joins.get(id).unwrap();
+                let lj_meta = t_ctx.meta_left_joins.get(id).unwrap();
                 program.defer_label_resolution(
                     lj_meta.label_match_flag_set_true,
                     program.offset() as usize,
@@ -857,7 +857,10 @@ fn open_loop(
             } else {
                 program.emit_insn(Insn::RewindAsync { cursor_id });
             }
-            let loop_labels = t_ctx.loop_labels.get(id).expect("scan has no loop labels");
+            let loop_labels = t_ctx
+                .labels_main_loop
+                .get(id)
+                .expect("scan has no loop labels");
             program.emit_insn_with_label_dependency(
                 if iter_dir
                     .as_ref()
@@ -908,7 +911,7 @@ fn open_loop(
         } => {
             let table_cursor_id = program.resolve_cursor_id(&table_reference.table_identifier);
             let loop_labels = t_ctx
-                .loop_labels
+                .labels_main_loop
                 .get(id)
                 .expect("search has no loop labels");
             // Open the loop for the index search.
@@ -1239,7 +1242,7 @@ fn emit_loop_source(
             // TODO: although it's less often useful, SQLite does allow for expressions in the SELECT that are not part of a GROUP BY or aggregate.
             // We currently ignore those and only emit the GROUP BY keys and aggregate arguments. This should be fixed.
 
-            let group_by_metadata = t_ctx.group_by_metadata.as_ref().unwrap();
+            let group_by_metadata = t_ctx.meta_group_by.as_ref().unwrap();
 
             sorter_insert(
                 program,
@@ -1258,7 +1261,7 @@ fn emit_loop_source(
                 order_by,
                 result_columns,
                 &mut t_ctx.result_column_indexes_in_orderby_sorter,
-                t_ctx.sort_metadata.as_ref().unwrap(),
+                t_ctx.meta_sort.as_ref().unwrap(),
                 None,
                 syms,
             )?;
@@ -1267,7 +1270,7 @@ fn emit_loop_source(
         LoopEmitTarget::AggStep => {
             let num_aggs = aggregates.len();
             let start_reg = program.alloc_registers(num_aggs);
-            t_ctx.aggregation_start_register = Some(start_reg);
+            t_ctx.reg_agg_start = Some(start_reg);
 
             // In planner.rs, we have collected all aggregates from the SELECT clause, including ones where the aggregate is embedded inside
             // a more complex expression. Some examples: length(sum(x)), sum(x) + avg(y), sum(x) + 1, etc.
@@ -1298,13 +1301,13 @@ fn emit_loop_source(
                 program,
                 referenced_tables,
                 result_columns,
-                t_ctx.result_column_start_register.unwrap(),
+                t_ctx.reg_result_cols_start.unwrap(),
                 None,
                 limit.map(|l| {
                     (
                         l,
-                        t_ctx.limit_reg.unwrap(),
-                        t_ctx.after_main_loop_label.unwrap(),
+                        t_ctx.reg_limit.unwrap(),
+                        t_ctx.label_main_loop_end.unwrap(),
                     )
                 }),
                 syms,
@@ -1325,7 +1328,7 @@ fn close_loop(
     t_ctx: &mut TranslateCtx,
 ) -> Result<()> {
     let loop_labels = *t_ctx
-        .loop_labels
+        .labels_main_loop
         .get(&source.id())
         .expect("source has no loop labels");
     match source {
@@ -1351,7 +1354,7 @@ fn close_loop(
             close_loop(program, right, t_ctx)?;
 
             if *outer {
-                let lj_meta = t_ctx.left_joins.get(id).unwrap();
+                let lj_meta = t_ctx.meta_left_joins.get(id).unwrap();
                 // The left join match flag is set to 1 when there is any match on the right table
                 // (e.g. SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a).
                 // If the left join match flag has been set to 1, we jump to the next row on the outer table,
@@ -1508,9 +1511,9 @@ fn emit_delete_insns(
         program.emit_insn_with_label_dependency(
             Insn::DecrJumpZero {
                 reg: limit_reg,
-                target_pc: t_ctx.after_main_loop_label.unwrap(),
+                target_pc: t_ctx.label_main_loop_end.unwrap(),
             },
-            t_ctx.after_main_loop_label.unwrap(),
+            t_ctx.label_main_loop_end.unwrap(),
         )
     }
 
@@ -1550,7 +1553,7 @@ fn emit_group_by(
     // Register holding a boolean indicating whether there's data in the accumulator (used for aggregation)
     let reg_data_in_acc_flag = program.alloc_register();
 
-    let group_by_metadata = t_ctx.group_by_metadata.as_mut().unwrap();
+    let group_by_metadata = t_ctx.meta_group_by.as_mut().unwrap();
     let GroupByMetadata {
         reg_group_exprs_cmp,
         reg_subrtn_acc_clear_return_offset,
@@ -1681,7 +1684,7 @@ fn emit_group_by(
 
     // Accumulate the values into the aggregations
     program.resolve_label(agg_step_label, program.offset());
-    let start_reg = t_ctx.aggregation_start_register.unwrap();
+    let start_reg = t_ctx.reg_agg_start.unwrap();
     let mut cursor_index = group_by.exprs.len();
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = start_reg + i;
@@ -1783,7 +1786,7 @@ fn emit_group_by(
         return_reg: reg_subrtn_acc_output_return_offset,
     });
 
-    let agg_start_reg = t_ctx.aggregation_start_register.unwrap();
+    let agg_start_reg = t_ctx.reg_agg_start.unwrap();
     // Resolve the label for the start of the group by output row subroutine
     program.resolve_label(label_agg_final, program.offset());
     for (i, agg) in aggregates.iter().enumerate() {
@@ -1830,9 +1833,9 @@ fn emit_group_by(
                 program,
                 referenced_tables,
                 result_columns,
-                t_ctx.result_column_start_register.unwrap(),
+                t_ctx.reg_result_cols_start.unwrap(),
                 Some(&precomputed_exprs_to_register),
-                limit.map(|l| (l, t_ctx.limit_reg.unwrap(), label_group_by_end)),
+                limit.map(|l| (l, t_ctx.reg_limit.unwrap(), label_group_by_end)),
                 syms,
                 query_type,
             )?;
@@ -1844,7 +1847,7 @@ fn emit_group_by(
                 order_by,
                 result_columns,
                 &mut t_ctx.result_column_indexes_in_orderby_sorter,
-                t_ctx.sort_metadata.as_ref().unwrap(),
+                t_ctx.meta_sort.as_ref().unwrap(),
                 Some(&precomputed_exprs_to_register),
                 syms,
             )?;
@@ -1888,7 +1891,7 @@ fn emit_ungrouped_aggregation(
     syms: &SymbolTable,
     query_type: &SelectQueryType,
 ) -> Result<()> {
-    let agg_start_reg = t_ctx.aggregation_start_register.unwrap();
+    let agg_start_reg = t_ctx.reg_agg_start.unwrap();
     for (i, agg) in aggregates.iter().enumerate() {
         let agg_result_reg = agg_start_reg + i;
         program.emit_insn(Insn::AggFinal {
@@ -1910,7 +1913,7 @@ fn emit_ungrouped_aggregation(
         program,
         referenced_tables,
         result_columns,
-        t_ctx.result_column_start_register.unwrap(),
+        t_ctx.reg_result_cols_start.unwrap(),
         Some(&precomputed_exprs_to_register),
         None,
         syms,
@@ -1971,7 +1974,7 @@ fn emit_order_by(
             columns: pseudo_columns,
         }))),
     );
-    let sort_metadata = t_ctx.sort_metadata.as_mut().unwrap();
+    let sort_metadata = t_ctx.meta_sort.as_mut().unwrap();
 
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
@@ -1997,7 +2000,7 @@ fn emit_order_by(
     // We emit the columns in SELECT order, not sorter order (sorter always has the sort keys first).
     // This is tracked in m.result_column_indexes_in_orderby_sorter.
     let cursor_id = pseudo_cursor;
-    let start_reg = t_ctx.result_column_start_register.unwrap();
+    let start_reg = t_ctx.reg_result_cols_start.unwrap();
     for i in 0..result_columns.len() {
         let reg = start_reg + i;
         program.emit_insn(Insn::Column {
@@ -2011,7 +2014,7 @@ fn emit_order_by(
         program,
         start_reg,
         result_columns.len(),
-        limit.map(|l| (l, t_ctx.limit_reg.unwrap(), sort_loop_end_label)),
+        limit.map(|l| (l, t_ctx.reg_limit.unwrap(), sort_loop_end_label)),
         query_type,
     )?;
 
