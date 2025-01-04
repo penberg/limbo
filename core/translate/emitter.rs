@@ -29,11 +29,11 @@ use super::plan::{ResultSetColumn, SourceOperator};
 #[derive(Debug)]
 pub struct LeftJoinMetadata {
     // integer register that holds a flag that is set to true if the current row has a match for the left join
-    pub match_flag_register: usize,
+    pub reg_match_flag: usize,
     // label for the instruction that sets the match flag to true
-    pub set_match_flag_true_label: BranchOffset,
+    pub label_match_flag_set_true: BranchOffset,
     // label for the instruction that checks if the match flag is true
-    pub check_match_flag_label: BranchOffset,
+    pub label_match_flag_check_value: BranchOffset,
 }
 
 // Metadata for handling ORDER BY operations
@@ -605,9 +605,9 @@ fn init_source(
         } => {
             if *outer {
                 let lj_metadata = LeftJoinMetadata {
-                    match_flag_register: program.alloc_register(),
-                    set_match_flag_true_label: program.allocate_label(),
-                    check_match_flag_label: program.allocate_label(),
+                    reg_match_flag: program.alloc_register(),
+                    label_match_flag_set_true: program.allocate_label(),
+                    label_match_flag_check_value: program.allocate_label(),
                 };
                 t_ctx.left_joins.insert(*id, lj_metadata);
             }
@@ -801,9 +801,9 @@ fn open_loop(
                 let lj_meta = t_ctx.left_joins.get(id).unwrap();
                 program.emit_insn(Insn::Integer {
                     value: 0,
-                    dest: lj_meta.match_flag_register,
+                    dest: lj_meta.reg_match_flag,
                 });
-                jump_target_when_false = lj_meta.check_match_flag_label;
+                jump_target_when_false = lj_meta.label_match_flag_check_value;
             }
 
             open_loop(program, right, referenced_tables, t_ctx, syms)?;
@@ -831,12 +831,12 @@ fn open_loop(
             if *outer {
                 let lj_meta = t_ctx.left_joins.get(id).unwrap();
                 program.defer_label_resolution(
-                    lj_meta.set_match_flag_true_label,
+                    lj_meta.label_match_flag_set_true,
                     program.offset() as usize,
                 );
                 program.emit_insn(Insn::Integer {
                     value: 1,
-                    dest: lj_meta.match_flag_register,
+                    dest: lj_meta.reg_match_flag,
                 });
             }
 
@@ -1356,10 +1356,10 @@ fn close_loop(
                 // (e.g. SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a).
                 // If the left join match flag has been set to 1, we jump to the next row on the outer table,
                 // i.e. continue to the next row of t1 in our example.
-                program.resolve_label(lj_meta.check_match_flag_label, program.offset());
+                program.resolve_label(lj_meta.label_match_flag_check_value, program.offset());
                 let jump_offset = program.offset() + 3;
                 program.emit_insn(Insn::IfPos {
-                    reg: lj_meta.match_flag_register,
+                    reg: lj_meta.reg_match_flag,
                     target_pc: jump_offset,
                     decrement_by: 0,
                 });
@@ -1387,9 +1387,9 @@ fn close_loop(
                 // next row in the left table.
                 program.emit_insn_with_label_dependency(
                     Insn::Goto {
-                        target_pc: lj_meta.set_match_flag_true_label,
+                        target_pc: lj_meta.label_match_flag_set_true,
                     },
-                    lj_meta.set_match_flag_true_label,
+                    lj_meta.label_match_flag_set_true,
                 );
 
                 assert!(program.offset() == jump_offset);
