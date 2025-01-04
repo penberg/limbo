@@ -42,7 +42,7 @@ pub struct SortMetadata {
     // cursor id for the Sorter table where the sorted rows are stored
     pub sort_cursor: usize,
     // register where the sorter data is inserted and later retrieved from
-    pub sorter_data_register: usize,
+    pub reg_sorter_data: usize,
 }
 
 // Metadata for handling GROUP BY operations
@@ -490,7 +490,7 @@ fn init_order_by(
     let sort_cursor = program.alloc_cursor_id(None, None);
     t_ctx.sort_metadata = Some(SortMetadata {
         sort_cursor,
-        sorter_data_register: program.alloc_register(),
+        reg_sorter_data: program.alloc_register(),
     });
     let mut order = Vec::new();
     for (_, direction) in order_by.iter() {
@@ -1975,7 +1975,7 @@ fn emit_order_by(
 
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
-        content_reg: sort_metadata.sorter_data_register,
+        content_reg: sort_metadata.reg_sorter_data,
         num_fields: num_columns_in_sorter,
     });
 
@@ -1990,7 +1990,7 @@ fn emit_order_by(
     program.defer_label_resolution(sort_loop_start_label, program.offset() as usize);
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_metadata.sort_cursor,
-        dest_reg: sort_metadata.sorter_data_register,
+        dest_reg: sort_metadata.reg_sorter_data,
         pseudo_cursor,
     });
 
@@ -2183,7 +2183,7 @@ fn order_by_sorter_insert(
         start_reg,
         orderby_sorter_column_count,
         sort_metadata.sort_cursor,
-        sort_metadata.sorter_data_register,
+        sort_metadata.reg_sorter_data,
     );
     Ok(())
 }
