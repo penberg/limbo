@@ -377,7 +377,7 @@ fn emit_query(
     )?;
 
     // Process result columns and expressions in the inner loop
-    inner_loop_emit(program, plan, t_ctx, syms)?;
+    emit_loop(program, plan, t_ctx, syms)?;
 
     // Clean up and close the main execution loop
     close_loop(program, &plan.source, t_ctx)?;
@@ -388,7 +388,7 @@ fn emit_query(
 
     // Handle GROUP BY and aggregation processing
     if let Some(ref mut group_by) = plan.group_by {
-        group_by_emit(
+        emit_group_by(
             program,
             &plan.result_columns,
             group_by,
@@ -402,7 +402,7 @@ fn emit_query(
         )?;
     } else if !plan.aggregates.is_empty() {
         // Handle aggregation without GROUP BY
-        agg_without_group_by_emit(
+        emit_ungrouped_aggregation(
             program,
             &plan.referenced_tables,
             &plan.result_columns,
@@ -418,7 +418,7 @@ fn emit_query(
     // Process ORDER BY results if needed
     if let Some(ref mut order_by) = plan.order_by {
         if order_by_necessary {
-            order_by_emit(
+            emit_order_by(
                 program,
                 order_by,
                 &plan.result_columns,
@@ -1108,12 +1108,12 @@ fn open_loop(
 }
 
 /// SQLite (and so Limbo) processes joins as a nested loop.
-/// The inner loop may emit rows to various destinations depending on the query:
+/// The loop may emit rows to various destinations depending on the query:
 /// - a GROUP BY sorter (grouping is done by sorting based on the GROUP BY keys and aggregating while the GROUP BY keys match)
 /// - an ORDER BY sorter (when there is no GROUP BY, but there is an ORDER BY)
 /// - an AggStep (the columns are collected for aggregation, which is finished later)
 /// - a QueryResult (there is none of the above, so the loop either emits a ResultRow, or if it's a subquery, yields to the parent query)
-pub enum InnerLoopEmitTarget<'a> {
+pub enum LoopEmitTarget<'a> {
     GroupBySorter {
         group_by: &'a GroupBy,
         aggregates: &'a Vec<Aggregate>,
@@ -1130,7 +1130,7 @@ pub enum InnerLoopEmitTarget<'a> {
 
 /// Emits the bytecode for the inner loop of a query.
 /// At this point the cursors for all tables have been opened and rewound.
-fn inner_loop_emit(
+fn emit_loop(
     program: &mut ProgramBuilder,
     plan: &mut SelectPlan,
     t_ctx: &mut TranslateCtx,
@@ -1138,12 +1138,12 @@ fn inner_loop_emit(
 ) -> Result<()> {
     // if we have a group by, we emit a record into the group by sorter.
     if let Some(group_by) = &plan.group_by {
-        return inner_loop_source_emit(
+        return emit_loop_source(
             program,
             &plan.result_columns,
             &plan.aggregates,
             t_ctx,
-            InnerLoopEmitTarget::GroupBySorter {
+            LoopEmitTarget::GroupBySorter {
                 group_by,
                 aggregates: &plan.aggregates,
             },
@@ -1154,35 +1154,35 @@ fn inner_loop_emit(
     // if we DONT have a group by, but we have aggregates, we emit without ResultRow.
     // we also do not need to sort because we are emitting a single row.
     if !plan.aggregates.is_empty() {
-        return inner_loop_source_emit(
+        return emit_loop_source(
             program,
             &plan.result_columns,
             &plan.aggregates,
             t_ctx,
-            InnerLoopEmitTarget::AggStep,
+            LoopEmitTarget::AggStep,
             &plan.referenced_tables,
             syms,
         );
     }
     // if we DONT have a group by, but we have an order by, we emit a record into the order by sorter.
     if let Some(order_by) = &plan.order_by {
-        return inner_loop_source_emit(
+        return emit_loop_source(
             program,
             &plan.result_columns,
             &plan.aggregates,
             t_ctx,
-            InnerLoopEmitTarget::OrderBySorter { order_by },
+            LoopEmitTarget::OrderBySorter { order_by },
             &plan.referenced_tables,
             syms,
         );
     }
     // if we have neither, we emit a ResultRow. In that case, if we have a Limit, we handle that with DecrJumpZero.
-    inner_loop_source_emit(
+    emit_loop_source(
         program,
         &plan.result_columns,
         &plan.aggregates,
         t_ctx,
-        InnerLoopEmitTarget::QueryResult {
+        LoopEmitTarget::QueryResult {
             query_type: &plan.query_type,
             limit: plan.limit,
         },
@@ -1194,17 +1194,17 @@ fn inner_loop_emit(
 /// This is a helper function for inner_loop_emit,
 /// which does a different thing depending on the emit target.
 /// See the InnerLoopEmitTarget enum for more details.
-fn inner_loop_source_emit(
+fn emit_loop_source(
     program: &mut ProgramBuilder,
     result_columns: &[ResultSetColumn],
     aggregates: &[Aggregate],
     t_ctx: &mut TranslateCtx,
-    emit_target: InnerLoopEmitTarget,
+    emit_target: LoopEmitTarget,
     referenced_tables: &[TableReference],
     syms: &SymbolTable,
 ) -> Result<()> {
     match emit_target {
-        InnerLoopEmitTarget::GroupBySorter {
+        LoopEmitTarget::GroupBySorter {
             group_by,
             aggregates,
         } => {
@@ -1251,7 +1251,7 @@ fn inner_loop_source_emit(
 
             Ok(())
         }
-        InnerLoopEmitTarget::OrderBySorter { order_by } => {
+        LoopEmitTarget::OrderBySorter { order_by } => {
             order_by_sorter_insert(
                 program,
                 referenced_tables,
@@ -1264,7 +1264,7 @@ fn inner_loop_source_emit(
             )?;
             Ok(())
         }
-        InnerLoopEmitTarget::AggStep => {
+        LoopEmitTarget::AggStep => {
             let num_aggs = aggregates.len();
             let start_reg = program.alloc_registers(num_aggs);
             t_ctx.aggregation_start_register = Some(start_reg);
@@ -1289,7 +1289,7 @@ fn inner_loop_source_emit(
             }
             Ok(())
         }
-        InnerLoopEmitTarget::QueryResult { query_type, limit } => {
+        LoopEmitTarget::QueryResult { query_type, limit } => {
             assert!(
                 aggregates.is_empty(),
                 "We should not get here with aggregates"
@@ -1521,7 +1521,7 @@ fn emit_delete_insns(
 /// This is called when the main query execution loop has finished processing,
 /// and we now have data in the GROUP BY sorter.
 #[allow(clippy::too_many_arguments)]
-fn group_by_emit(
+fn emit_group_by(
     program: &mut ProgramBuilder,
     result_columns: &[ResultSetColumn],
     group_by: &GroupBy,
@@ -1879,7 +1879,7 @@ fn group_by_emit(
 /// Emits the bytecode for processing an aggregate without a GROUP BY clause.
 /// This is called when the main query execution loop has finished processing,
 /// and we can now materialize the aggregate results.
-fn agg_without_group_by_emit(
+fn emit_ungrouped_aggregation(
     program: &mut ProgramBuilder,
     referenced_tables: &[TableReference],
     result_columns: &[ResultSetColumn],
@@ -1923,7 +1923,7 @@ fn agg_without_group_by_emit(
 /// Emits the bytecode for outputting rows from an ORDER BY sorter.
 /// This is called when the main query execution loop has finished processing,
 /// and we can now emit rows from the ORDER BY sorter.
-fn order_by_emit(
+fn emit_order_by(
     program: &mut ProgramBuilder,
     order_by: &[(ast::Expr, Direction)],
     result_columns: &[ResultSetColumn],
