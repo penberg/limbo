@@ -34,6 +34,12 @@ fn limbo_bench(criterion: &mut Criterion) {
         });
     });
 
+    group.bench_function("Prepare statement: 'SELECT first_name, count(1) FROM users GROUP BY first_name HAVING count(1) > 1 ORDER BY count(1)  LIMIT 1'", |b| {
+        b.iter(|| {
+            conn.prepare("SELECT first_name, count(1) FROM users GROUP BY first_name HAVING count(1) > 1 ORDER BY count(1) LIMIT 1").unwrap();
+        });
+    });
+
     let mut stmt = conn.prepare("SELECT 1").unwrap();
     group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
         let io = io.clone();
