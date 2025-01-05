@@ -4,11 +4,32 @@ import { Database } from 'limbo-wasm';
 
 const db = new Database('limbo.db');
 
-const stmt = db.prepare("SELECT 1");
+db.exec('CREATE TABLE t (x)');
+db.exec('INSERT INTO t VALUES (1)');
+db.exec('INSERT INTO t VALUES (2)');
+db.exec('INSERT INTO t VALUES (3)');
 
-group('Statement', () => {
+group('SQL queries [all()]', () => {
+  const stmt1 = db.prepare("SELECT 1");
   bench('SELECT 1', () => {
-    stmt.all();
+    stmt1.all();
+  });
+  const stmt2 = db.prepare("SELECT * FROM t");
+  bench('SELECT * FROM t', () => {
+    stmt2.all();
+  });
+});
+
+group('SQL queries [iterate()]', () => {
+  const stmt1 = db.prepare("SELECT 1");
+  const it1 = stmt1.iterate();
+  bench('SELECT 1', () => {
+    it1.next();
+  });
+  const stmt2 = db.prepare("SELECT * FROM t");
+  const it2 = stmt2.iterate();
+  bench('SELECT * FROM t', () => {
+    it2.next();
   });
 });
 
