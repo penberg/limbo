@@ -1,0 +1,19 @@
+[package]
+name = "java-limbo"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "_limbo_java"
+crate-type = ["cdylib"]
+path = "rs_src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+limbo_core = { path = "../../core" }
+jni = "0.21.1"
+rand = { version = "0.8.5", features = [] }
+lazy_static = "1.5.0"
