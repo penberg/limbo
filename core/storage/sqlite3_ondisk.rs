@@ -301,42 +301,33 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let buffer_to_copy = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
     let buffer_to_copy_in_cb = buffer_to_copy.clone();
 
-    let header_cb = header.clone();
-    let complete = Box::new(move |buffer: Rc<RefCell<Buffer>>| {
-        let header = header_cb.clone();
-        let buffer: Buffer = buffer.borrow().clone();
+    let read_complete = Box::new(move |buffer: Rc<RefCell<Buffer>>| {
+        let buffer = buffer.borrow().clone();
         let buffer = Rc::new(RefCell::new(buffer));
-        {
-            let mut buf_mut = std::cell::RefCell::borrow_mut(&buffer);
-            let buf = buf_mut.as_mut_slice();
-            write_header_to_buf(buf, &header);
-            let mut buffer_to_copy = std::cell::RefCell::borrow_mut(&buffer_to_copy_in_cb);
-            let buffer_to_copy_slice = buffer_to_copy.as_mut_slice();
-
-            buffer_to_copy_slice.copy_from_slice(buf);
-        }
+        let mut buf_mut = buffer.borrow_mut();
+        write_header_to_buf(buf_mut.as_mut_slice(), &header);
+        let mut dest_buf = buffer_to_copy_in_cb.borrow_mut();
+        dest_buf.as_mut_slice().copy_from_slice(buf_mut.as_slice());
     });
 
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf.clone(), complete)));
-    page_source.read_page(1, c.clone())?;
+    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, read_complete)));
+    page_source.read_page(1, c)?;
     // run get header block
     pager.io.run_once()?;
 
-    let buffer_in_cb = buffer_to_copy.clone();
+    let buffer_to_copy_in_cb = buffer_to_copy.clone();
     let write_complete = Box::new(move |bytes_written: i32| {
-        let buf = buffer_in_cb.clone();
-        let buf_len = std::cell::RefCell::borrow(&buf).len();
+        let buf_len = buffer_to_copy_in_cb.borrow().len();
         if bytes_written < buf_len as i32 {
             log::error!("wrote({bytes_written}) less than expected({buf_len})");
         }
         // finish_read_database_header(buf, header).unwrap();
     });
+
     let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
-    page_source
-        .write_page(0, buffer_to_copy.clone(), c)
-        .unwrap();
+    page_source.write_page(0, buffer_to_copy, c)?;
 
     Ok(())
 }
