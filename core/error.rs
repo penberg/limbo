@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, miette::Diagnostic)]
 pub enum LimboError {
     #[error("Corrupt database: {0}")]
     Corrupt(String),
@@ -10,7 +10,8 @@ pub enum LimboError {
     InternalError(String),
     #[error("Parse error: {0}")]
     ParseError(String),
-    #[error("Parse error: {0}")]
+    #[error(transparent)]
+    #[diagnostic(transparent)]
     LexerError(#[from] sqlite3_parser::lexer::sql::Error),
     #[error("Conversion error: {0}")]
     ConversionError(String),

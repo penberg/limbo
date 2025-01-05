@@ -57,6 +57,7 @@ rand = "0.8.5"
 bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
 limbo_macros = { path = "../macros" }
 uuid = { version = "1.11.0", features = ["v4", "v7"], optional = true }
+miette = "7.4.0"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }

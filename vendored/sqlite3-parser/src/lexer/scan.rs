@@ -79,6 +79,12 @@ impl<S: Splitter> Scanner<S> {
     pub fn column(&self) -> usize {
         self.column
     }
+
+    /// Current byte offset in the source string
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
     /// Associated splitter
     pub fn splitter(&self) -> &S {
         &self.splitter
