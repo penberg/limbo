@@ -737,7 +737,7 @@ groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs
 having_opt(A) ::= .                {A = None;}
 having_opt(A) ::= HAVING expr(X).  {A = Some(X);}
 
-%type limit_opt {Option<Limit>}
+%type limit_opt {Option<Box<Limit>>}
 
 // The destructor for limit_opt will never fire in the current grammar.
 // The limit_opt non-terminal only occurs at the end of a single production
@@ -749,11 +749,11 @@ having_opt(A) ::= HAVING expr(X).  {A = Some(X);}
 //%destructor limit_opt {sqlite3ExprDelete(pParse->db, $$);}
 limit_opt(A) ::= .       {A = None;}
 limit_opt(A) ::= LIMIT expr(X).
-                         {A = Some(Limit{ expr: X, offset: None });}
+                         {A = Some(Box::new(Limit{ expr: X, offset: None }));}
 limit_opt(A) ::= LIMIT expr(X) OFFSET expr(Y).
-                         {A = Some(Limit{ expr: X, offset: Some(Y) });}
+                         {A = Some(Box::new(Limit{ expr: X, offset: Some(Y) }));}
 limit_opt(A) ::= LIMIT expr(X) COMMA expr(Y).
-                         {A = Some(Limit{ expr: X, offset: Some(Y) });}
+                         {A = Some(Box::new(Limit{ expr: X, offset: Some(Y) }));}
 
 /////////////////////////// The DELETE statement /////////////////////////////
 //

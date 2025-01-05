@@ -172,7 +172,7 @@ pub enum Stmt {
         /// `ORDER BY`
         order_by: Option<Vec<SortedColumn>>,
         /// `LIMIT`
-        limit: Option<Limit>,
+        limit: Option<Box<Limit>>,
     },
     /// `DETACH DATABASE`: db name
     Detach(Expr), // TODO distinction between DETACH and DETACH DATABASE
@@ -260,7 +260,7 @@ pub enum Stmt {
         /// `ORDER BY`
         order_by: Option<Vec<SortedColumn>>,
         /// `LIMIT`
-        limit: Option<Limit>,
+        limit: Option<Box<Limit>>,
     },
     /// `VACUUM`: database name, into expr
     Vacuum(Option<Name>, Option<Expr>),
@@ -700,7 +700,7 @@ pub struct Select {
     /// `ORDER BY`
     pub order_by: Option<Vec<SortedColumn>>, // ORDER BY term does not match any column in the result set
     /// `LIMIT`
-    pub limit: Option<Limit>,
+    pub limit: Option<Box<Limit>>,
 }
 
 /// `SELECT` body
@@ -740,7 +740,7 @@ pub struct CompoundSelect {
     /// operator
     pub operator: CompoundOperator,
     /// select
-    pub select: OneSelect,
+    pub select: Box<OneSelect>,
 }
 
 /// Compound operators
@@ -1265,10 +1265,10 @@ impl ColumnDefinition {
             let mut split = col_type.name.split_ascii_whitespace();
             let truncate = if split
                 .next_back()
-                .map_or(false, |s| s.eq_ignore_ascii_case("ALWAYS"))
+                .is_some_and(|s| s.eq_ignore_ascii_case("ALWAYS"))
                 && split
                     .next_back()
-                    .map_or(false, |s| s.eq_ignore_ascii_case("GENERATED"))
+                    .is_some_and(|s| s.eq_ignore_ascii_case("GENERATED"))
             {
                 let mut generated = false;
                 for constraint in &cd.constraints {
