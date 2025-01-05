@@ -4,6 +4,9 @@ import org.github.tursodatabase.exceptions.ErrorCode;
 
 import java.lang.Exception;
 
+/**
+ * TODO: Deprecate classes under limbo package. We leave this source code for reference.
+ */
 public class Limbo {
 
     private static volatile boolean initialized;
