@@ -2,6 +2,7 @@ package org.github.tursodatabase.limbo;
 
 /**
  * Represents a database cursor.
+ * TODO: Deprecate classes under limbo package. We leave this source code for reference.
  */
 public class Cursor {
     private long cursorPtr;

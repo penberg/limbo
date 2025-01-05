@@ -6,6 +6,7 @@ package org.github.tursodatabase.exceptions;
  * that may occur while communicating with the JNI.
  * <p />
  * Refer to ErrorCode in rust package.
+ * TODO: Deprecate
  */
 public class ErrorCode {
     public static int CONNECTION_FAILURE = -1;

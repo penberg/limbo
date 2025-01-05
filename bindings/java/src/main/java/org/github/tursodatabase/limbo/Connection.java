@@ -4,6 +4,7 @@ import java.lang.Exception;
 
 /**
  * Represents a connection to the database.
+ * TODO: Deprecate classes under limbo package. We leave this source code for reference.
  */
 public class Connection {
 
