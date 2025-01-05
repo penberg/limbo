@@ -70,7 +70,7 @@ impl RowIterator {
     #[wasm_bindgen]
     pub fn next(&mut self) -> JsValue {
         match self.inner.borrow_mut().step() {
-            Ok(limbo_core::RowResult::Row(row)) => {
+            Ok(limbo_core::StepResult::Row(row)) => {
                 let row_array = Array::new();
                 for value in row.values {
                     let value = to_js_value(value);
@@ -78,11 +78,11 @@ impl RowIterator {
                 }
                 JsValue::from(row_array)
             }
-            Ok(limbo_core::RowResult::IO) => JsValue::UNDEFINED,
-            Ok(limbo_core::RowResult::Done) | Ok(limbo_core::RowResult::Interrupt) => {
+            Ok(limbo_core::StepResult::IO) => JsValue::UNDEFINED,
+            Ok(limbo_core::StepResult::Done) | Ok(limbo_core::StepResult::Interrupt) => {
                 JsValue::UNDEFINED
             }
-            Ok(limbo_core::RowResult::Busy) => JsValue::UNDEFINED,
+            Ok(limbo_core::StepResult::Busy) => JsValue::UNDEFINED,
             Err(e) => panic!("Error: {:?}", e),
         }
     }
