@@ -2075,8 +2075,8 @@ pub fn get_name(
     }
 }
 
-// Sanitaizes a string literal by removing single quote at front and back
-// and escaping double single quotes
+/// Sanitaizes a string literal by removing single quote at front and back
+/// and escaping double single quotes
 pub fn sanitize_string(input: &str) -> String {
     input[1..input.len() - 1].replace("''", "'").to_string()
 }
