@@ -1,3 +1,4 @@
+use js_sys::{Array, Object};
 use limbo_core::{
     maybe_init_database_file, BufferPool, OpenFlags, Pager, Result, WalFile, WalFileShared,
 };
@@ -52,6 +53,38 @@ impl Database {
     pub fn prepare(&self, _sql: &str) -> Statement {
         let stmt = self.conn.prepare(_sql).unwrap();
         Statement::new(RefCell::new(stmt), false)
+    }
+}
+
+#[wasm_bindgen]
+pub struct RowIterator {
+    inner: RefCell<limbo_core::Statement>,
+}
+
+#[wasm_bindgen]
+impl RowIterator {
+    fn new(inner: RefCell<limbo_core::Statement>) -> Self {
+        Self { inner }
+    }
+
+    #[wasm_bindgen]
+    pub fn next(&mut self) -> JsValue {
+        match self.inner.borrow_mut().step() {
+            Ok(limbo_core::RowResult::Row(row)) => {
+                let row_array = Array::new();
+                for value in row.values {
+                    let value = to_js_value(value);
+                    row_array.push(&value);
+                }
+                JsValue::from(row_array)
+            }
+            Ok(limbo_core::RowResult::IO) => JsValue::UNDEFINED,
+            Ok(limbo_core::RowResult::Done) | Ok(limbo_core::RowResult::Interrupt) => {
+                JsValue::UNDEFINED
+            }
+            Ok(limbo_core::RowResult::Busy) => JsValue::UNDEFINED,
+            Err(e) => panic!("Error: {:?}", e),
+        }
     }
 }
 
@@ -113,16 +146,35 @@ impl Statement {
         array
     }
 
-    pub fn iterate(&self) -> JsValue {
-        let all = self.all();
-        let iterator_fn = js_sys::Reflect::get(&all, &js_sys::Symbol::iterator())
-            .expect("Failed to get iterator function")
-            .dyn_into::<js_sys::Function>()
-            .expect("Symbol.iterator is not a function");
+    #[wasm_bindgen]
+    pub fn iterate(self) -> JsValue {
+        let iterator = RowIterator::new(self.inner);
+        let iterator_obj = Object::new();
 
-        iterator_fn
-            .call0(&all)
-            .expect("Failed to call iterator function")
+        // Define the next method that will be called by JavaScript
+        let next_fn = js_sys::Function::new_with_args(
+            "",
+            "const value = this.iterator.next();
+             const done = value === undefined;
+             return {
+                value,
+                done
+             };",
+        );
+
+        js_sys::Reflect::set(&iterator_obj, &JsValue::from_str("next"), &next_fn).unwrap();
+
+        js_sys::Reflect::set(
+            &iterator_obj,
+            &JsValue::from_str("iterator"),
+            &JsValue::from(iterator),
+        )
+        .unwrap();
+
+        let symbol_iterator = js_sys::Function::new_no_args("return this;");
+        js_sys::Reflect::set(&iterator_obj, &js_sys::Symbol::iterator(), &symbol_iterator).unwrap();
+
+        JsValue::from(iterator_obj)
     }
 }
 
