@@ -581,7 +581,10 @@ impl Limbo {
                                 break;
                             }
                             Err(err) => {
-                                let _ = self.write_fmt(format_args!("{}", err));
+                                let _ = self.write_fmt(format_args!(
+                                    "{:?}",
+                                    miette::Error::from(err).with_source_code(sql.to_owned())
+                                ));
                                 break;
                             }
                         }
@@ -595,7 +598,10 @@ impl Limbo {
             },
             Ok(None) => {}
             Err(err) => {
-                let _ = self.write_fmt(format_args!("{}", err));
+                let _ = self.write_fmt(format_args!(
+                    "{:?}",
+                    miette::Error::from(err).with_source_code(sql.to_owned())
+                ));
             }
         }
         // for now let's cache flush always

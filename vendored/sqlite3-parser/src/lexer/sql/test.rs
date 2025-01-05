@@ -361,7 +361,7 @@ fn expect_parser_err_msg(input: &[u8], error_msg: &str) {
 }
 fn expect_parser_err(input: &[u8], err: ParserError) {
     let r = parse(input);
-    if let Error::ParserError(e, _) = r.unwrap_err() {
+    if let Error::ParserError(e, _, _) = r.unwrap_err() {
         assert_eq!(e, err);
     } else {
         panic!("unexpected error type")
