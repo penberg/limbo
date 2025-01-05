@@ -38,10 +38,10 @@
 //
 %syntax_error {
   if TokenType::TK_EOF as YYCODETYPE == yymajor {
-    error!(target: TARGET, "incomplete input");
+    trace!(target: TARGET, "incomplete input");
     self.ctx.error = Some(ParserError::UnexpectedEof);
   } else {
-    error!(target: TARGET, "near \"{:?}\": syntax error", yyminor);
+    trace!(target: TARGET, "near \"{:?}\": syntax error", yyminor);
     self.ctx.error = Some(ParserError::SyntaxError(from_bytes(yyminor.1)));
   }
 }
@@ -59,7 +59,7 @@ use crate::parser::ast::*;
 use crate::parser::{Context, ParserError};
 use crate::dialect::{from_bytes, from_token, Token, TokenType};
 use indexmap::IndexMap;
-use log::error;
+use log::trace;
 
 #[expect(non_camel_case_types)]
 type sqlite3ParserError = crate::parser::ParserError;
