@@ -31,7 +31,7 @@ pub fn translate_select(
 }
 
 pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan> {
-    match select.body.select {
+    match *select.body.select {
         ast::OneSelect::Select {
             mut columns,
             from,
@@ -273,7 +273,7 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
             }
 
             // Parse the LIMIT clause
-            plan.limit = select.limit.and_then(parse_limit);
+            plan.limit = select.limit.and_then(|l| parse_limit(*l));
 
             // Return the unoptimized query plan
             Ok(Plan::Select(plan))

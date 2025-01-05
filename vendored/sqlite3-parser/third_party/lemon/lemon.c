@@ -4518,6 +4518,8 @@ void ReportTable(
   print_stack_union(out,lemp,&lineno);
   if( lemp->stacksize ){
     fprintf(out,"const YYSTACKDEPTH: usize = %s;\n",lemp->stacksize);  lineno++;
+  } else {
+    fprintf(out, "const YYSTACKDEPTH: usize = 128;\n"); lineno++;
   }
   if( lemp->errsym && lemp->errsym->useCnt ){
     fprintf(out,"const YYERRORSYMBOL: YYCODETYPE = %d;\n",lemp->errsym->index); lineno++;

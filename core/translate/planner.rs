@@ -289,7 +289,7 @@ fn parse_from_clause_table(
             ))
         }
         ast::SelectTable::Select(subselect, maybe_alias) => {
-            let Plan::Select(mut subplan) = prepare_select_plan(schema, subselect)? else {
+            let Plan::Select(mut subplan) = prepare_select_plan(schema, *subselect)? else {
                 unreachable!();
             };
             subplan.query_type = SelectQueryType::Subquery {

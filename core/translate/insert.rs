@@ -70,7 +70,7 @@ pub fn translate_insert(
         Table::Pseudo(_) => todo!(),
     };
     let values = match body {
-        InsertBody::Select(select, None) => match &select.body.select {
+        InsertBody::Select(select, None) => match &select.body.select.deref() {
             sqlite3_parser::ast::OneSelect::Values(values) => values,
             _ => todo!(),
         },

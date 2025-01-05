@@ -15,7 +15,7 @@ pub fn translate_delete(
     schema: &Schema,
     tbl_name: &QualifiedName,
     where_clause: Option<Expr>,
-    limit: Option<Limit>,
+    limit: Option<Box<Limit>>,
     database_header: Rc<RefCell<DatabaseHeader>>,
     connection: Weak<Connection>,
     syms: &SymbolTable,
@@ -29,7 +29,7 @@ pub fn prepare_delete_plan(
     schema: &Schema,
     tbl_name: &QualifiedName,
     where_clause: Option<Expr>,
-    limit: Option<Limit>,
+    limit: Option<Box<Limit>>,
 ) -> Result<Plan> {
     let table = match schema.get_table(tbl_name.name.0.as_str()) {
         Some(table) => table,
@@ -48,7 +48,7 @@ pub fn prepare_delete_plan(
     let resolved_where_clauses = parse_where(where_clause, &referenced_tables)?;
 
     // Parse the LIMIT clause
-    let resolved_limit = limit.and_then(parse_limit);
+    let resolved_limit = limit.and_then(|l| parse_limit(*l));
 
     let plan = DeletePlan {
         source: SourceOperator::Scan {
