@@ -1854,7 +1854,7 @@ pub fn translate_expr(
             }
             ast::Literal::String(s) => {
                 program.emit_insn(Insn::String8 {
-                    value: s[1..s.len() - 1].to_string(),
+                    value: sanitize_string(s),
                     dest: target_register,
                 });
                 Ok(target_register)
@@ -2073,4 +2073,10 @@ pub fn get_name(
         }
         _ => fallback(),
     }
+}
+
+/// Sanitaizes a string literal by removing single quote at front and back
+/// and escaping double single quotes
+pub fn sanitize_string(input: &str) -> String {
+    input[1..input.len() - 1].replace("''", "'").to_string()
 }
