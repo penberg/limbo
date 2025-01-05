@@ -144,7 +144,7 @@ pub enum Stmt {
         /// columns
         columns: Option<Vec<IndexedColumn>>,
         /// query
-        select: Select,
+        select: Box<Select>,
     },
     /// `CREATE VIRTUAL TABLE`
     CreateVirtualTable {
@@ -238,7 +238,7 @@ pub enum Stmt {
     /// `SAVEPOINT`: savepoint name
     Savepoint(Name),
     /// `SELECT`
-    Select(Select),
+    Select(Box<Select>),
     /// `UPDATE`
     Update {
         /// CTE
@@ -707,7 +707,7 @@ pub struct Select {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectBody {
     /// first select
-    pub select: OneSelect,
+    pub select: Box<OneSelect>,
     /// compounds
     pub compounds: Option<Vec<CompoundSelect>>,
 }
@@ -888,7 +888,7 @@ pub enum SelectTable {
     /// table function call
     TableCall(QualifiedName, Option<Vec<Expr>>, Option<As>),
     /// `SELECT` subquery
-    Select(Select, Option<As>),
+    Select(Box<Select>, Option<As>),
     /// subquery
     Sub(FromClause, Option<As>),
 }
@@ -1222,7 +1222,7 @@ pub enum CreateTableBody {
         options: TableOptions,
     },
     /// `AS` select
-    AsSelect(Select),
+    AsSelect(Box<Select>),
 }
 
 impl CreateTableBody {
@@ -1549,7 +1549,7 @@ pub struct Limit {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InsertBody {
     /// `SELECT` or `VALUES`
-    Select(Select, Option<Upsert>),
+    Select(Box<Select>, Option<Upsert>),
     /// `DEFAULT VALUES`
     DefaultValues,
 }
@@ -1649,7 +1649,7 @@ pub enum TriggerCmd {
         /// `COLUMNS`
         col_names: Option<DistinctNames>,
         /// `SELECT` or `VALUES`
-        select: Select,
+        select: Box<Select>,
         /// `ON CONLICT` clause
         upsert: Option<Upsert>,
         /// `RETURNING`
@@ -1663,7 +1663,7 @@ pub enum TriggerCmd {
         where_clause: Option<Expr>,
     },
     /// `SELECT`
-    Select(Select),
+    Select(Box<Select>),
 }
 
 /// Conflict resolution types
@@ -1714,7 +1714,7 @@ pub struct CommonTableExpr {
     /// `MATERIALIZED`
     pub materialized: Materialized,
     /// query
-    pub select: Select,
+    pub select: Box<Select>,
 }
 
 impl CommonTableExpr {
