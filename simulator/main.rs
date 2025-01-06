@@ -266,7 +266,7 @@ fn execute_plan(
         return Ok(());
     }
 
-    let interaction = &plan.plan[plan.interaction_pointer];
+    let interaction = &plan.plan[plan.interaction_pointer].interactions[plan.secondary_pointer];
 
     if let SimConnection::Disconnected = connection {
         log::info!("connecting {}", connection_index);
@@ -275,7 +275,14 @@ fn execute_plan(
         match execute_interaction(env, connection_index, interaction, &mut plan.stack) {
             Ok(_) => {
                 log::debug!("connection {} processed", connection_index);
-                plan.interaction_pointer += 1;
+                if plan.secondary_pointer + 1
+                    >= plan.plan[plan.interaction_pointer].interactions.len()
+                {
+                    plan.interaction_pointer += 1;
+                    plan.secondary_pointer = 0;
+                } else {
+                    plan.secondary_pointer += 1;
+                }
             }
             Err(err) => {
                 log::error!("error {}", err);

@@ -19,20 +19,53 @@ use super::{pick, pick_index};
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
 pub(crate) struct InteractionPlan {
-    pub(crate) plan: Vec<Interaction>,
+    pub(crate) plan: Vec<Property>,
     pub(crate) stack: Vec<ResultSet>,
     pub(crate) interaction_pointer: usize,
+    pub(crate) secondary_pointer: usize,
+}
+
+pub(crate) struct Property {
+    pub(crate) name: Option<String>,
+    pub(crate) interactions: Vec<Interaction>,
+}
+
+impl Property {
+    pub(crate) fn new(name: Option<String>, interactions: Vec<Interaction>) -> Self {
+        Self { name, interactions }
+    }
+
+    pub(crate) fn anonymous(interactions: Vec<Interaction>) -> Self {
+        Self {
+            name: None,
+            interactions,
+        }
+    }
 }
 
 impl Display for InteractionPlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for interaction in &self.plan {
-            match interaction {
-                Interaction::Query(query) => writeln!(f, "{};", query)?,
-                Interaction::Assertion(assertion) => {
-                    writeln!(f, "-- ASSERT: {};", assertion.message)?
+        for property in &self.plan {
+            if let Some(name) = &property.name {
+                writeln!(f, "-- begin testing '{}'", name)?;
+            }
+
+            for interaction in &property.interactions {
+                if property.name.is_some() {
+                    write!(f, "\t")?;
                 }
-                Interaction::Fault(fault) => writeln!(f, "-- FAULT: {};", fault)?,
+
+                match interaction {
+                    Interaction::Query(query) => writeln!(f, "{};", query)?,
+                    Interaction::Assertion(assertion) => {
+                        writeln!(f, "-- ASSERT: {};", assertion.message)?
+                    }
+                    Interaction::Fault(fault) => writeln!(f, "-- FAULT: {};", fault)?,
+                }
+            }
+
+            if let Some(name) = &property.name {
+                writeln!(f, "-- end testing '{}'", name)?;
             }
         }
 
@@ -93,11 +126,9 @@ impl Display for Fault {
     }
 }
 
-pub(crate) struct Interactions(Vec<Interaction>);
-
-impl Interactions {
+impl Property {
     pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
-        for interaction in &self.0 {
+        for interaction in &self.interactions {
             match interaction {
                 Interaction::Query(query) => match query {
                     Query::Create(create) => {
@@ -129,11 +160,8 @@ impl InteractionPlan {
             plan: Vec::new(),
             stack: Vec::new(),
             interaction_pointer: 0,
+            secondary_pointer: 0,
         }
-    }
-
-    pub(crate) fn push(&mut self, interaction: Interaction) {
-        self.plan.push(interaction);
     }
 
     pub(crate) fn stats(&self) -> InteractionStats {
@@ -142,16 +170,18 @@ impl InteractionPlan {
         let mut delete = 0;
         let mut create = 0;
 
-        for interaction in &self.plan {
-            match interaction {
-                Interaction::Query(query) => match query {
-                    Query::Select(_) => read += 1,
-                    Query::Insert(_) => write += 1,
-                    Query::Delete(_) => delete += 1,
-                    Query::Create(_) => create += 1,
-                },
-                Interaction::Assertion(_) => {}
-                Interaction::Fault(_) => {}
+        for property in &self.plan {
+            for interaction in &property.interactions {
+                match interaction {
+                    Interaction::Query(query) => match query {
+                        Query::Select(_) => read += 1,
+                        Query::Insert(_) => write += 1,
+                        Query::Delete(_) => delete += 1,
+                        Query::Create(_) => create += 1,
+                    },
+                    Interaction::Assertion(_) => {}
+                    Interaction::Fault(_) => {}
+                }
             }
         }
 
@@ -182,7 +212,11 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
         // First create at least one table
         let create_query = Create::arbitrary(rng);
         env.tables.push(create_query.table.clone());
-        plan.push(Interaction::Query(Query::Create(create_query)));
+
+        plan.plan.push(Property {
+            name: Some("initial table creation".to_string()),
+            interactions: vec![Interaction::Query(Query::Create(create_query))],
+        });
 
         while plan.plan.len() < num_interactions {
             log::debug!(
@@ -190,10 +224,10 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
                 plan.plan.len(),
                 num_interactions
             );
-            let interactions = Interactions::arbitrary_from(rng, &(&env, plan.stats()));
-            interactions.shadow(&mut env);
+            let property = Property::arbitrary_from(rng, &(&env, plan.stats()));
+            property.shadow(&mut env);
 
-            plan.plan.extend(interactions.0.into_iter());
+            plan.plan.push(property);
         }
 
         log::info!("Generated plan with {} interactions", plan.plan.len());
@@ -306,7 +340,7 @@ impl Interaction {
     }
 }
 
-fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
     // Get a random table
     let table = pick(&env.tables, rng);
     // Pick a random column
@@ -354,10 +388,13 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Inte
         }),
     });
 
-    Interactions(vec![insert_query, select_query, assertion])
+    Property::new(
+        Some("select contains inserted value".to_string()),
+        vec![insert_query, select_query, assertion],
+    )
 }
 
-fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
+fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Property {
     let create_query = Create::arbitrary(rng);
     let table_name = create_query.table.name.clone();
     let cq1 = Interaction::Query(Query::Create(create_query.clone()));
@@ -378,31 +415,34 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv
         }),
     });
 
-    Interactions(vec![cq1, cq2, assertion])
+    Property::new(
+        Some("creating the same table twice fails".to_string()),
+        vec![cq1, cq2, assertion],
+    )
 }
 
-fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
+fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Property {
     let create_query = Interaction::Query(Query::Create(Create::arbitrary(rng)));
-    Interactions(vec![create_query])
+    Property::anonymous(vec![create_query])
 }
 
-fn random_read<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn random_read<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
     let select_query = Interaction::Query(Query::Select(Select::arbitrary_from(rng, &env.tables)));
-    Interactions(vec![select_query])
+    Property::anonymous(vec![select_query])
 }
 
-fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
     let table = pick(&env.tables, rng);
     let insert_query = Interaction::Query(Query::Insert(Insert::arbitrary_from(rng, table)));
-    Interactions(vec![insert_query])
+    Property::anonymous(vec![insert_query])
 }
 
-fn random_fault<R: rand::Rng>(_rng: &mut R, _env: &SimulatorEnv) -> Interactions {
+fn random_fault<R: rand::Rng>(_rng: &mut R, _env: &SimulatorEnv) -> Property {
     let fault = Interaction::Fault(Fault::Disconnect);
-    Interactions(vec![fault])
+    Property::anonymous(vec![fault])
 }
 
-impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
+impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Property {
     fn arbitrary_from<R: rand::Rng>(
         rng: &mut R,
         (env, stats): &(&SimulatorEnv, InteractionStats),
