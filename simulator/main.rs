@@ -273,15 +273,27 @@ fn execute_plan(
         env.connections[connection_index] = SimConnection::Connected(env.db.connect());
     } else {
         match execute_interaction(env, connection_index, interaction, &mut plan.stack) {
-            Ok(_) => {
+            Ok(next_execution) => {
                 log::debug!("connection {} processed", connection_index);
-                if plan.secondary_pointer + 1
-                    >= plan.plan[plan.interaction_pointer].interactions.len()
-                {
-                    plan.interaction_pointer += 1;
-                    plan.secondary_pointer = 0;
-                } else {
-                    plan.secondary_pointer += 1;
+                // Move to the next interaction or property
+                match next_execution {
+                    ExecutionContinuation::NextInteraction => {
+                        if plan.secondary_pointer + 1
+                            >= plan.plan[plan.interaction_pointer].interactions.len()
+                        {
+                            // If we have reached the end of the interactions for this property, move to the next property
+                            plan.interaction_pointer += 1;
+                            plan.secondary_pointer = 0;
+                        } else {
+                            // Otherwise, move to the next interaction
+                            plan.secondary_pointer += 1;
+                        }
+                    }
+                    ExecutionContinuation::NextProperty => {
+                        // Skip to the next property
+                        plan.interaction_pointer += 1;
+                        plan.secondary_pointer = 0;
+                    }
                 }
             }
             Err(err) => {
@@ -294,12 +306,23 @@ fn execute_plan(
     Ok(())
 }
 
+/// The next point of control flow after executing an interaction.
+/// `execute_interaction` uses this type in conjunction with a result, where
+/// the `Err` case indicates a full-stop due to a bug, and the `Ok` case
+/// indicates the next step in the plan.
+enum ExecutionContinuation {
+    /// Default continuation, execute the next interaction.
+    NextInteraction,
+    /// Typically used in the case of preconditions failures, skip to the next property.
+    NextProperty,
+}
+
 fn execute_interaction(
     env: &mut SimulatorEnv,
     connection_index: usize,
     interaction: &Interaction,
     stack: &mut Vec<ResultSet>,
-) -> Result<()> {
+) -> Result<ExecutionContinuation> {
     log::info!("executing: {}", interaction);
     match interaction {
         generation::plan::Interaction::Query(_) => {
@@ -314,15 +337,24 @@ fn execute_interaction(
             stack.push(results);
         }
         generation::plan::Interaction::Assertion(_) => {
-            interaction.execute_assertion(stack)?;
+            interaction.execute_assertion(stack, env)?;
             stack.clear();
+        }
+        generation::plan::Interaction::Assumption(_) => {
+            let assumption_result = interaction.execute_assumption(stack, env);
+            stack.clear();
+
+            if assumption_result.is_err() {
+                log::warn!("assumption failed: {:?}", assumption_result);
+                return Ok(ExecutionContinuation::NextProperty);
+            }
         }
         Interaction::Fault(_) => {
             interaction.execute_fault(env, connection_index)?;
         }
     }
 
-    Ok(())
+    Ok(ExecutionContinuation::NextInteraction)
 }
 
 fn compare_equal_rows(a: &[Vec<Value>], b: &[Vec<Value>]) {

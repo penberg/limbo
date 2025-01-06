@@ -57,6 +57,9 @@ impl Display for InteractionPlan {
 
                 match interaction {
                     Interaction::Query(query) => writeln!(f, "{};", query)?,
+                    Interaction::Assumption(assumption) => {
+                        writeln!(f, "-- ASSUME: {};", assumption.message)?
+                    }
                     Interaction::Assertion(assertion) => {
                         writeln!(f, "-- ASSERT: {};", assertion.message)?
                     }
@@ -93,6 +96,7 @@ impl Display for InteractionStats {
 
 pub(crate) enum Interaction {
     Query(Query),
+    Assumption(Assertion),
     Assertion(Assertion),
     Fault(Fault),
 }
@@ -101,13 +105,14 @@ impl Display for Interaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Query(query) => write!(f, "{}", query),
+            Self::Assumption(assumption) => write!(f, "ASSUME: {}", assumption.message),
             Self::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
             Self::Fault(fault) => write!(f, "FAULT: {}", fault),
         }
     }
 }
 
-type AssertionFunc = dyn Fn(&Vec<ResultSet>) -> bool;
+type AssertionFunc = dyn Fn(&Vec<ResultSet>, &SimulatorEnv) -> bool;
 
 pub(crate) struct Assertion {
     pub(crate) func: Box<AssertionFunc>,
@@ -148,6 +153,7 @@ impl Property {
                     Query::Select(_) => {}
                 },
                 Interaction::Assertion(_) => {}
+                Interaction::Assumption(_) => {}
                 Interaction::Fault(_) => {}
             }
         }
@@ -180,6 +186,7 @@ impl InteractionPlan {
                         Query::Create(_) => create += 1,
                     },
                     Interaction::Assertion(_) => {}
+                    Interaction::Assumption(_) => {}
                     Interaction::Fault(_) => {}
                 }
             }
@@ -285,27 +292,63 @@ impl Interaction {
             Self::Assertion(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
-            Interaction::Fault(_) => {
+            Self::Assumption(_) => {
+                unreachable!("unexpected: this function should only be called on queries")
+            }
+            Self::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on queries")
             }
         }
     }
 
-    pub(crate) fn execute_assertion(&self, stack: &Vec<ResultSet>) -> Result<()> {
+    pub(crate) fn execute_assertion(
+        &self,
+        stack: &Vec<ResultSet>,
+        env: &SimulatorEnv,
+    ) -> Result<()> {
         match self {
             Self::Query(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
             }
             Self::Assertion(assertion) => {
-                if !assertion.func.as_ref()(stack) {
+                if !assertion.func.as_ref()(stack, env) {
                     return Err(limbo_core::LimboError::InternalError(
                         assertion.message.clone(),
                     ));
                 }
                 Ok(())
             }
+            Self::Assumption(_) => {
+                unreachable!("unexpected: this function should only be called on assertions")
+            }
             Self::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
+            }
+        }
+    }
+
+    pub(crate) fn execute_assumption(
+        &self,
+        stack: &Vec<ResultSet>,
+        env: &SimulatorEnv,
+    ) -> Result<()> {
+        match self {
+            Self::Query(_) => {
+                unreachable!("unexpected: this function should only be called on assumptions")
+            }
+            Self::Assertion(_) => {
+                unreachable!("unexpected: this function should only be called on assumptions")
+            }
+            Self::Assumption(assumption) => {
+                if !assumption.func.as_ref()(stack, env) {
+                    return Err(limbo_core::LimboError::InternalError(
+                        assumption.message.clone(),
+                    ));
+                }
+                Ok(())
+            }
+            Self::Fault(_) => {
+                unreachable!("unexpected: this function should only be called on assumptions")
             }
         }
     }
@@ -316,6 +359,9 @@ impl Interaction {
                 unreachable!("unexpected: this function should only be called on faults")
             }
             Self::Assertion(_) => {
+                unreachable!("unexpected: this function should only be called on faults")
+            }
+            Self::Assumption(_) => {
                 unreachable!("unexpected: this function should only be called on faults")
             }
             Self::Fault(fault) => {
@@ -358,6 +404,18 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prop
             row.push(value);
         }
     }
+
+    // Check that the table exists
+    let assumption = Interaction::Assumption(Assertion {
+        message: format!("table {} exists", table.name),
+        func: Box::new({
+            let table_name = table.name.clone();
+            move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
+                env.tables.iter().any(|t| t.name == table_name)
+            }
+        }),
+    });
+
     // Insert the row
     let insert_query = Interaction::Query(Query::Insert(Insert {
         table: table.name.clone(),
@@ -379,7 +437,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prop
             column.name,
             value,
         ),
-        func: Box::new(move |stack: &Vec<ResultSet>| {
+        func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
             let rows = stack.last().unwrap();
             match rows {
                 Ok(rows) => rows.iter().any(|r| r == &row),
@@ -390,7 +448,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prop
 
     Property::new(
         Some("select contains inserted value".to_string()),
-        vec![insert_query, select_query, assertion],
+        vec![assumption, insert_query, select_query, assertion],
     )
 }
 
@@ -404,7 +462,7 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv
         message:
             "creating two tables with the name should result in a failure for the second query"
                 .to_string(),
-        func: Box::new(move |stack: &Vec<ResultSet>| {
+        func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
             let last = stack.last().unwrap();
             match last {
                 Ok(_) => false,
