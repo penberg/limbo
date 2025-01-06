@@ -8,5 +8,5 @@ if [ "$TARGET" = "web" ]; then
     FEATURE="web"
 fi
 
-wasm-pack build --no-pack --target $TARGET --no-default-features --features $FEATURE
+npx wasm-pack build --no-pack --target $TARGET --no-default-features --features $FEATURE
 cp package.json pkg/package.json

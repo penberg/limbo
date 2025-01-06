@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 test("basic database operations", async () => {
+  await globalThis.beforeEachPromise;
   const page = globalThis.__page__;
   await page.goto("http://localhost:5173/limbo-test.html");
 

@@ -20,9 +20,12 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  context = await browser.newContext();
-  page = await context.newPage();
-  globalThis.__page__ = page;
+  globalThis.beforeEachPromise = (async () => {
+    context = await browser.newContext();
+    page = await context.newPage();
+    globalThis.__page__ = page;
+  })();
+  await globalThis.beforeEachPromise;
 });
 
 afterEach(async () => {
