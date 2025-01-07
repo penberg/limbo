@@ -1,50 +1,23 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-} from "vitest";
-import { chromium } from "playwright";
-import { createServer } from "vite";
+import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { setupTestEnvironment, teardownTestEnvironment } from "./helpers.js";
 
-let browser;
-let context;
-let page;
-let server;
+let testEnv;
 
 beforeAll(async () => {
-  server = await createServer({
-    configFile: "./vite.config.js",
-    root: ".",
-    server: {
-      port: 5174,
-    },
-  });
-  await server.listen();
-  browser = await chromium.launch();
+  testEnv = await setupTestEnvironment(5174);
 });
 
 beforeEach(async () => {
-  context = await browser.newContext();
-  page = await context.newPage();
-  globalThis.__page__ = page;
-});
-
-afterEach(async () => {
-  await context.close();
+  const { page } = testEnv;
+  await page.goto("http://localhost:5174/limbo-test.html");
 });
 
 afterAll(async () => {
-  await browser.close();
-  await server.close();
+  await teardownTestEnvironment(testEnv);
 });
 
 test("basic database operations", async () => {
-  const page = globalThis.__page__;
-  await page.goto("http://localhost:5174/limbo-test.html");
-
+  const { page } = testEnv;
   const result = await page.evaluate(async () => {
     const worker = new Worker("./src/limbo-worker.js", { type: "module" });
 
@@ -96,3 +69,4 @@ test("basic database operations", async () => {
   expect(result.result).toHaveLength(1);
   expect(result.result[0]).toEqual([1, "Alice", "alice@example.org"]);
 });
+

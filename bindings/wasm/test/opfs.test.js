@@ -1,51 +1,25 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "vitest";
-import { chromium } from "playwright";
-import { createServer } from "vite";
+// test/opfs.test.js
+import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
+import { setupTestEnvironment, teardownTestEnvironment } from "./helpers";
 
-let browser;
-let context;
-let page;
-let server;
+let testEnv;
 
 beforeAll(async () => {
-  server = await createServer({
-    configFile: "./vite.config.js",
-    root: ".",
-    server: {
-      port: 5173,
-    },
-  });
-  await server.listen();
-  browser = await chromium.launch();
+  testEnv = await setupTestEnvironment(5173);
 });
 
 beforeEach(async () => {
-  context = await browser.newContext();
-  page = await context.newPage();
-  globalThis.__page__ = page;
+  const { page } = testEnv;
   await page.goto("http://localhost:5173/index.html");
   await page.waitForFunction(() => window.VFSInterface !== undefined);
 });
 
-afterEach(async () => {
-  await context.close();
-});
-
 afterAll(async () => {
-  await browser.close();
-  await server.close();
+  await teardownTestEnvironment(testEnv);
 });
 
 test("basic read/write functionality", async () => {
-  const page = globalThis.__page__;
+  const { page } = testEnv;
   const result = await page.evaluate(async () => {
     const vfs = new window.VFSInterface("/src/opfs-worker.js");
     let fd;
@@ -71,7 +45,7 @@ test("basic read/write functionality", async () => {
 });
 
 test("larger data read/write", async () => {
-  const page = globalThis.__page__;
+  const { page } = testEnv;
   const result = await page.evaluate(async () => {
     const vfs = new window.VFSInterface("/src/opfs-worker.js");
     let fd;
@@ -98,7 +72,7 @@ test("larger data read/write", async () => {
 });
 
 test("partial reads and writes", async () => {
-  const page = globalThis.__page__;
+  const { page } = testEnv;
   const result = await page.evaluate(async () => {
     const vfs = new window.VFSInterface("/src/opfs-worker.js");
     let fd;
@@ -137,7 +111,7 @@ test("partial reads and writes", async () => {
 });
 
 test("file size operations", async () => {
-  const page = globalThis.__page__;
+  const { page } = testEnv;
   const result = await page.evaluate(async () => {
     const vfs = new window.VFSInterface("/src/opfs-worker.js");
     let fd;
@@ -163,3 +137,4 @@ test("file size operations", async () => {
   expect(Number(result.size1)).toBe(4);
   expect(Number(result.size2)).toBe(8);
 });
+
