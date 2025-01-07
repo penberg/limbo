@@ -388,12 +388,9 @@ fn translate_create_table(
     if schema.get_table(tbl_name.name.0.as_str()).is_some() {
         if if_not_exists {
             let init_label = program.allocate_label();
-            program.emit_insn_with_label_dependency(
-                Insn::Init {
-                    target_pc: init_label,
-                },
-                init_label,
-            );
+            program.emit_insn(Insn::Init {
+                target_pc: init_label,
+            });
             let start_offset = program.offset();
             program.emit_insn(Insn::Halt {
                 err_code: 0,
@@ -414,12 +411,9 @@ fn translate_create_table(
 
     let parse_schema_label = program.allocate_label();
     let init_label = program.allocate_label();
-    program.emit_insn_with_label_dependency(
-        Insn::Init {
-            target_pc: init_label,
-        },
-        init_label,
-    );
+    program.emit_insn(Insn::Init {
+        target_pc: init_label,
+    });
     let start_offset = program.offset();
     // TODO: ReadCookie
     // TODO: If
@@ -544,12 +538,9 @@ fn translate_pragma(
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
-    program.emit_insn_with_label_dependency(
-        Insn::Init {
-            target_pc: init_label,
-        },
-        init_label,
-    );
+    program.emit_insn(Insn::Init {
+        target_pc: init_label,
+    });
     let start_offset = program.offset();
     let mut write = false;
     match body {
@@ -581,7 +572,6 @@ fn translate_pragma(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
-    program.resolve_deferred_labels();
     Ok(program.build(database_header, connection))
 }
 

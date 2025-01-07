@@ -72,7 +72,7 @@ pub fn emit_subquery<'a>(
     t_ctx: &mut TranslateCtx<'a>,
 ) -> Result<usize> {
     let yield_reg = program.alloc_register();
-    let coroutine_implementation_start_offset = program.offset() + 1;
+    let coroutine_implementation_start_offset = program.offset().add(1u32);
     match &mut plan.query_type {
         SelectQueryType::Subquery {
             yield_reg: y,
@@ -100,14 +100,11 @@ pub fn emit_subquery<'a>(
         resolver: Resolver::new(t_ctx.resolver.symbol_table),
     };
     let subquery_body_end_label = program.allocate_label();
-    program.emit_insn_with_label_dependency(
-        Insn::InitCoroutine {
-            yield_reg,
-            jump_on_definition: subquery_body_end_label,
-            start_offset: coroutine_implementation_start_offset,
-        },
-        subquery_body_end_label,
-    );
+    program.emit_insn(Insn::InitCoroutine {
+        yield_reg,
+        jump_on_definition: subquery_body_end_label,
+        start_offset: coroutine_implementation_start_offset,
+    });
     // Normally we mark each LIMIT value as a constant insn that is emitted only once, but in the case of a subquery,
     // we need to initialize it every time the subquery is run; otherwise subsequent runs of the subquery will already
     // have the LIMIT counter at 0, and will never return rows.

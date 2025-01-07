@@ -110,15 +110,12 @@ pub fn emit_order_by(
         num_fields: num_columns_in_sorter,
     });
 
-    program.emit_insn_with_label_dependency(
-        Insn::SorterSort {
-            cursor_id: sort_cursor,
-            pc_if_empty: sort_loop_end_label,
-        },
-        sort_loop_end_label,
-    );
+    program.emit_insn(Insn::SorterSort {
+        cursor_id: sort_cursor,
+        pc_if_empty: sort_loop_end_label,
+    });
 
-    program.defer_label_resolution(sort_loop_start_label, program.offset() as usize);
+    program.resolve_label(sort_loop_start_label, program.offset());
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_cursor,
         dest_reg: reg_sorter_data,
@@ -140,13 +137,10 @@ pub fn emit_order_by(
 
     emit_result_row_and_limit(program, t_ctx, plan, start_reg, Some(sort_loop_end_label))?;
 
-    program.emit_insn_with_label_dependency(
-        Insn::SorterNext {
-            cursor_id: sort_cursor,
-            pc_if_next: sort_loop_start_label,
-        },
-        sort_loop_start_label,
-    );
+    program.emit_insn(Insn::SorterNext {
+        cursor_id: sort_cursor,
+        pc_if_next: sort_loop_start_label,
+    });
 
     program.resolve_label(sort_loop_end_label, program.offset());
 

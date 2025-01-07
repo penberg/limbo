@@ -7,6 +7,7 @@ use sqlite3_parser::ast::{
 
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::util::normalize_ident;
+use crate::vdbe::BranchOffset;
 use crate::{
     schema::{Column, Schema, Table},
     storage::sqlite3_ondisk::DatabaseHeader,
@@ -40,12 +41,9 @@ pub fn translate_insert(
     let mut program = ProgramBuilder::new();
     let resolver = Resolver::new(syms);
     let init_label = program.allocate_label();
-    program.emit_insn_with_label_dependency(
-        Insn::Init {
-            target_pc: init_label,
-        },
-        init_label,
-    );
+    program.emit_insn(Insn::Init {
+        target_pc: init_label,
+    });
     let start_offset = program.offset();
 
     // open table
@@ -104,7 +102,7 @@ pub fn translate_insert(
 
     let record_register = program.alloc_register();
     let halt_label = program.allocate_label();
-    let mut loop_start_offset = 0;
+    let mut loop_start_offset = BranchOffset::Offset(0);
 
     let inserting_multiple_rows = values.len() > 1;
 
@@ -112,14 +110,11 @@ pub fn translate_insert(
     if inserting_multiple_rows {
         let yield_reg = program.alloc_register();
         let jump_on_definition_label = program.allocate_label();
-        program.emit_insn_with_label_dependency(
-            Insn::InitCoroutine {
-                yield_reg,
-                jump_on_definition: jump_on_definition_label,
-                start_offset: program.offset() + 1,
-            },
-            jump_on_definition_label,
-        );
+        program.emit_insn(Insn::InitCoroutine {
+            yield_reg,
+            jump_on_definition: jump_on_definition_label,
+            start_offset: program.offset().add(1u32),
+        });
 
         for value in values {
             populate_column_registers(
@@ -133,7 +128,7 @@ pub fn translate_insert(
             )?;
             program.emit_insn(Insn::Yield {
                 yield_reg,
-                end_offset: 0,
+                end_offset: halt_label,
             });
         }
         program.emit_insn(Insn::EndCoroutine { yield_reg });
@@ -149,13 +144,10 @@ pub fn translate_insert(
         // FIXME: rollback is not implemented. E.g. if you insert 2 rows and one fails to unique constraint violation,
         // the other row will still be inserted.
         loop_start_offset = program.offset();
-        program.emit_insn_with_label_dependency(
-            Insn::Yield {
-                yield_reg,
-                end_offset: halt_label,
-            },
-            halt_label,
-        );
+        program.emit_insn(Insn::Yield {
+            yield_reg,
+            end_offset: halt_label,
+        });
     } else {
         // Single row - populate registers directly
         program.emit_insn(Insn::OpenWriteAsync {
@@ -194,13 +186,10 @@ pub fn translate_insert(
             program.emit_insn(Insn::SoftNull { reg });
         }
         // the user provided rowid value might itself be NULL. If it is, we create a new rowid on the next instruction.
-        program.emit_insn_with_label_dependency(
-            Insn::NotNull {
-                reg: rowid_reg,
-                target_pc: check_rowid_is_integer_label.unwrap(),
-            },
-            check_rowid_is_integer_label.unwrap(),
-        );
+        program.emit_insn(Insn::NotNull {
+            reg: rowid_reg,
+            target_pc: check_rowid_is_integer_label.unwrap(),
+        });
     }
 
     // Create new rowid if a) not provided by user or b) provided by user but is NULL
@@ -220,14 +209,11 @@ pub fn translate_insert(
     // When the DB allocates it there are no need for separate uniqueness checks.
     if has_user_provided_rowid {
         let make_record_label = program.allocate_label();
-        program.emit_insn_with_label_dependency(
-            Insn::NotExists {
-                cursor: cursor_id,
-                rowid_reg,
-                target_pc: make_record_label,
-            },
-            make_record_label,
-        );
+        program.emit_insn(Insn::NotExists {
+            cursor: cursor_id,
+            rowid_reg,
+            target_pc: make_record_label,
+        });
         let rowid_column_name = if let Some(index) = rowid_alias_index {
             table.column_index_to_name(index).unwrap()
         } else {
@@ -276,7 +262,6 @@ pub fn translate_insert(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
-    program.resolve_deferred_labels();
     Ok(program.build(database_header, connection))
 }
 

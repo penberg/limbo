@@ -11,23 +11,20 @@ use super::{BranchOffset, CursorID, Insn, InsnReference, Program, Table};
 #[allow(dead_code)]
 pub struct ProgramBuilder {
     next_free_register: usize,
-    next_free_label: BranchOffset,
+    next_free_label: i32,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
     // for temporarily storing instructions that will be put after Transaction opcode
     constant_insns: Vec<Insn>,
-    // Each label has a list of InsnReferences that must
-    // be resolved. Lists are indexed by: label.abs() - 1
-    unresolved_labels: Vec<Vec<InsnReference>>,
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
-    // List of deferred label resolutions. Each entry is a pair of (label, insn_reference).
-    deferred_label_resolutions: Vec<(BranchOffset, InsnReference)>,
+    // Hashmap of label to insn reference. Resolved in build().
+    label_to_resolved_offset: HashMap<i32, u32>,
     // Bitmask of cursors that have emitted a SeekRowid instruction.
     seekrowid_emitted_bitmask: u64,
     // map of instruction index to manual comment (used in EXPLAIN)
-    comments: HashMap<BranchOffset, &'static str>,
+    comments: HashMap<InsnReference, &'static str>,
 }
 
 impl ProgramBuilder {
@@ -37,11 +34,10 @@ impl ProgramBuilder {
             next_free_label: 0,
             next_free_cursor_id: 0,
             insns: Vec::new(),
-            unresolved_labels: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),
             constant_insns: Vec::new(),
-            deferred_label_resolutions: Vec::new(),
+            label_to_resolved_offset: HashMap::new(),
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
         }
@@ -71,20 +67,17 @@ impl ProgramBuilder {
         cursor
     }
 
-    fn _emit_insn(&mut self, insn: Insn) {
+    pub fn emit_insn(&mut self, insn: Insn) {
+        if let Some(label) = self.next_insn_label {
+            self.label_to_resolved_offset
+                .insert(label.to_label_value(), self.insns.len() as InsnReference);
+            self.next_insn_label = None;
+        }
         self.insns.push(insn);
     }
 
-    pub fn emit_insn(&mut self, insn: Insn) {
-        self._emit_insn(insn);
-        if let Some(label) = self.next_insn_label {
-            self.next_insn_label = None;
-            self.resolve_label(label, (self.insns.len() - 1) as BranchOffset);
-        }
-    }
-
     pub fn add_comment(&mut self, insn_index: BranchOffset, comment: &'static str) {
-        self.comments.insert(insn_index, comment);
+        self.comments.insert(insn_index.to_offset_int(), comment);
     }
 
     // Emit an instruction that will be put at the end of the program (after Transaction statement).
@@ -99,19 +92,13 @@ impl ProgramBuilder {
         self.insns.append(&mut self.constant_insns);
     }
 
-    pub fn emit_insn_with_label_dependency(&mut self, insn: Insn, label: BranchOffset) {
-        self._emit_insn(insn);
-        self.add_label_dependency(label, (self.insns.len() - 1) as BranchOffset);
-    }
-
     pub fn offset(&self) -> BranchOffset {
-        self.insns.len() as BranchOffset
+        BranchOffset::Offset(self.insns.len() as InsnReference)
     }
 
     pub fn allocate_label(&mut self) -> BranchOffset {
         self.next_free_label -= 1;
-        self.unresolved_labels.push(Vec::new());
-        self.next_free_label
+        BranchOffset::Label(self.next_free_label)
     }
 
     // Effectively a GOTO <next insn> without the need to emit an explicit GOTO instruction.
@@ -121,232 +108,187 @@ impl ProgramBuilder {
         self.next_insn_label = Some(label);
     }
 
-    fn label_to_index(&self, label: BranchOffset) -> usize {
-        (label.abs() - 1) as usize
-    }
-
-    pub fn add_label_dependency(&mut self, label: BranchOffset, insn_reference: BranchOffset) {
-        assert!(insn_reference >= 0);
-        assert!(label < 0);
-        let label_index = self.label_to_index(label);
-        assert!(label_index < self.unresolved_labels.len());
-        let insn_reference = insn_reference as InsnReference;
-        let label_references = &mut self.unresolved_labels[label_index];
-        label_references.push(insn_reference);
-    }
-
-    pub fn defer_label_resolution(&mut self, label: BranchOffset, insn_reference: InsnReference) {
-        self.deferred_label_resolutions
-            .push((label, insn_reference));
+    pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
+        assert!(matches!(label, BranchOffset::Label(_)));
+        assert!(matches!(to_offset, BranchOffset::Offset(_)));
+        self.label_to_resolved_offset
+            .insert(label.to_label_value(), to_offset.to_offset_int());
     }
 
     /// Resolve unresolved labels to a specific offset in the instruction list.
     ///
-    /// This function updates all instructions that reference the given label
-    /// to point to the specified offset. It ensures that the label and offset
-    /// are valid and updates the target program counter (PC) of each instruction
-    /// that references the label.
-    ///
-    /// # Arguments
-    ///
-    /// * `label` - The label to resolve.
-    /// * `to_offset` - The offset to which the labeled instructions should be resolved to.
-    pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
-        assert!(label < 0);
-        assert!(to_offset >= 0);
-        let label_index = self.label_to_index(label);
-        assert!(
-            label_index < self.unresolved_labels.len(),
-            "Forbidden resolve of an unexistent label!"
-        );
-
-        let label_references = &mut self.unresolved_labels[label_index];
-        for insn_reference in label_references.iter() {
-            let insn = &mut self.insns[*insn_reference];
+    /// This function scans all instructions and resolves any labels to their corresponding offsets.
+    /// It ensures that all labels are resolved correctly and updates the target program counter (PC)
+    /// of each instruction that references a label.
+    pub fn resolve_labels(&mut self) {
+        let resolve = |pc: &mut BranchOffset, insn_name: &str| {
+            if let BranchOffset::Label(label) = pc {
+                let to_offset = *self.label_to_resolved_offset.get(label).unwrap_or_else(|| {
+                    panic!("Reference to undefined label in {}: {}", insn_name, label)
+                });
+                *pc = BranchOffset::Offset(to_offset);
+            }
+        };
+        for insn in self.insns.iter_mut() {
             match insn {
                 Insn::Init { target_pc } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Init");
                 }
                 Insn::Eq {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Eq");
                 }
                 Insn::Ne {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Ne");
                 }
                 Insn::Lt {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Lt");
                 }
                 Insn::Le {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Le");
                 }
                 Insn::Gt {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Gt");
                 }
                 Insn::Ge {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Ge");
                 }
                 Insn::If {
                     reg: _reg,
                     target_pc,
                     null_reg: _,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "If");
                 }
                 Insn::IfNot {
                     reg: _reg,
                     target_pc,
                     null_reg: _,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "IfNot");
                 }
                 Insn::RewindAwait {
                     cursor_id: _cursor_id,
                     pc_if_empty,
                 } => {
-                    assert!(*pc_if_empty < 0);
-                    *pc_if_empty = to_offset;
+                    resolve(pc_if_empty, "RewindAwait");
                 }
                 Insn::LastAwait {
                     cursor_id: _cursor_id,
                     pc_if_empty,
                 } => {
-                    assert!(*pc_if_empty < 0);
-                    *pc_if_empty = to_offset;
+                    resolve(pc_if_empty, "LastAwait");
                 }
                 Insn::Goto { target_pc } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Goto");
                 }
                 Insn::DecrJumpZero {
                     reg: _reg,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "DecrJumpZero");
                 }
                 Insn::SorterNext {
                     cursor_id: _cursor_id,
                     pc_if_next,
                 } => {
-                    assert!(*pc_if_next < 0);
-                    *pc_if_next = to_offset;
+                    resolve(pc_if_next, "SorterNext");
                 }
                 Insn::SorterSort { pc_if_empty, .. } => {
-                    assert!(*pc_if_empty < 0);
-                    *pc_if_empty = to_offset;
+                    resolve(pc_if_empty, "SorterSort");
                 }
                 Insn::NotNull {
                     reg: _reg,
                     target_pc,
                 } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "NotNull");
                 }
                 Insn::IfPos { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "IfPos");
                 }
                 Insn::NextAwait { pc_if_next, .. } => {
-                    assert!(*pc_if_next < 0);
-                    *pc_if_next = to_offset;
+                    resolve(pc_if_next, "NextAwait");
                 }
                 Insn::PrevAwait { pc_if_next, .. } => {
-                    assert!(*pc_if_next < 0);
-                    *pc_if_next = to_offset;
+                    resolve(pc_if_next, "PrevAwait");
                 }
                 Insn::InitCoroutine {
                     yield_reg: _,
                     jump_on_definition,
                     start_offset: _,
                 } => {
-                    *jump_on_definition = to_offset;
+                    resolve(jump_on_definition, "InitCoroutine");
                 }
                 Insn::NotExists {
                     cursor: _,
                     rowid_reg: _,
                     target_pc,
                 } => {
-                    *target_pc = to_offset;
+                    resolve(target_pc, "NotExists");
                 }
                 Insn::Yield {
                     yield_reg: _,
                     end_offset,
                 } => {
-                    *end_offset = to_offset;
+                    resolve(end_offset, "Yield");
                 }
                 Insn::SeekRowid { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "SeekRowid");
                 }
                 Insn::Gosub { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "Gosub");
                 }
-                Insn::Jump { target_pc_eq, .. } => {
-                    // FIXME: this current implementation doesnt scale for insns that
-                    // have potentially multiple label dependencies.
-                    assert!(*target_pc_eq < 0);
-                    *target_pc_eq = to_offset;
+                Insn::Jump {
+                    target_pc_eq,
+                    target_pc_lt,
+                    target_pc_gt,
+                } => {
+                    resolve(target_pc_eq, "Jump");
+                    resolve(target_pc_lt, "Jump");
+                    resolve(target_pc_gt, "Jump");
                 }
                 Insn::SeekGE { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "SeekGE");
                 }
                 Insn::SeekGT { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "SeekGT");
                 }
                 Insn::IdxGE { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "IdxGE");
                 }
                 Insn::IdxGT { target_pc, .. } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "IdxGT");
                 }
                 Insn::IsNull { src: _, target_pc } => {
-                    assert!(*target_pc < 0);
-                    *target_pc = to_offset;
+                    resolve(target_pc, "IsNull");
                 }
-                _ => {
-                    todo!("missing resolve_label for {:?}", insn);
-                }
+                _ => continue,
             }
         }
-        label_references.clear();
+        self.label_to_resolved_offset.clear();
     }
 
     // translate table to cursor id
@@ -361,23 +303,12 @@ impl ProgramBuilder {
             .unwrap()
     }
 
-    pub fn resolve_deferred_labels(&mut self) {
-        for i in 0..self.deferred_label_resolutions.len() {
-            let (label, insn_reference) = self.deferred_label_resolutions[i];
-            self.resolve_label(label, insn_reference as BranchOffset);
-        }
-        self.deferred_label_resolutions.clear();
-    }
-
     pub fn build(
-        self,
+        mut self,
         database_header: Rc<RefCell<DatabaseHeader>>,
         connection: Weak<Connection>,
     ) -> Program {
-        assert!(
-            self.deferred_label_resolutions.is_empty(),
-            "deferred_label_resolutions is not empty when build() is called, did you forget to call resolve_deferred_labels()?"
-        );
+        self.resolve_labels();
         assert!(
             self.constant_insns.is_empty(),
             "constant_insns is not empty when build() is called, did you forget to call emit_constant_insns()?"

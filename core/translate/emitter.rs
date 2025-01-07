@@ -104,12 +104,9 @@ fn prologue<'a>(
     let mut program = ProgramBuilder::new();
     let init_label = program.allocate_label();
 
-    program.emit_insn_with_label_dependency(
-        Insn::Init {
-            target_pc: init_label,
-        },
-        init_label,
-    );
+    program.emit_insn(Insn::Init {
+        target_pc: init_label,
+    });
 
     let start_offset = program.offset();
 
@@ -150,8 +147,6 @@ fn epilogue(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
-
-    program.resolve_deferred_labels();
 
     Ok(())
 }
@@ -218,12 +213,9 @@ pub fn emit_query<'a>(
     let after_main_loop_label = program.allocate_label();
     t_ctx.label_main_loop_end = Some(after_main_loop_label);
     if plan.contains_constant_false_condition {
-        program.emit_insn_with_label_dependency(
-            Insn::Goto {
-                target_pc: after_main_loop_label,
-            },
-            after_main_loop_label,
-        );
+        program.emit_insn(Insn::Goto {
+            target_pc: after_main_loop_label,
+        });
     }
 
     // Allocate registers for result columns
@@ -281,12 +273,9 @@ fn emit_program_for_delete(
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
     let after_main_loop_label = program.allocate_label();
     if plan.contains_constant_false_condition {
-        program.emit_insn_with_label_dependency(
-            Insn::Goto {
-                target_pc: after_main_loop_label,
-            },
-            after_main_loop_label,
-        );
+        program.emit_insn(Insn::Goto {
+            target_pc: after_main_loop_label,
+        });
     }
 
     // Initialize cursors and other resources needed for query execution
@@ -356,13 +345,10 @@ fn emit_delete_insns<'a>(
             dest: limit_reg,
         });
         program.mark_last_insn_constant();
-        program.emit_insn_with_label_dependency(
-            Insn::DecrJumpZero {
-                reg: limit_reg,
-                target_pc: t_ctx.label_main_loop_end.unwrap(),
-            },
-            t_ctx.label_main_loop_end.unwrap(),
-        )
+        program.emit_insn(Insn::DecrJumpZero {
+            reg: limit_reg,
+            target_pc: t_ctx.label_main_loop_end.unwrap(),
+        })
     }
 
     Ok(())

@@ -294,7 +294,7 @@ fn parse_from_clause_table(
             };
             subplan.query_type = SelectQueryType::Subquery {
                 yield_reg: usize::MAX, // will be set later in bytecode emission
-                coroutine_implementation_start: BranchOffset::MAX, // will be set later in bytecode emission
+                coroutine_implementation_start: BranchOffset::Placeholder, // will be set later in bytecode emission
             };
             let identifier = maybe_alias
                 .map(|a| match a {
