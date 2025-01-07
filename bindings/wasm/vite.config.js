@@ -10,10 +10,6 @@ export default defineConfig({
     environment: "happy-dom",
     setupFiles: ["./test/setup.js"],
     include: ["test/*.test.js"],
-    sequence: {
-      shuffle: false,
-      concurrent: false,
-    },
   },
   server: {
     headers: {
