@@ -1432,10 +1432,17 @@ mod tests {
 
     #[test]
     fn test_subsec_modifier() {
-        let now = Utc::now().naive_utc();
-        let expected = now.format("%H:%M:%S%.3f").to_string();
+        let now = Utc::now().naive_utc().time();
         let result = exec_datetime(&[text("now"), text("subsec")], DateTimeOutput::Time);
-        assert_eq!(result, text(&expected));
+        let tolerance = TimeDelta::milliseconds(1);
+        let result =
+            chrono::NaiveTime::parse_from_str(&result.to_string(), "%H:%M:%S%.3f").unwrap();
+        assert!(
+            (now - result).num_milliseconds().abs() <= tolerance.num_milliseconds(),
+            "Expected: {}, Actual: {}",
+            now,
+            result
+        );
     }
 
     #[test]
@@ -1505,11 +1512,10 @@ mod tests {
     #[test]
     fn test_combined_modifiers() {
         let now = Utc::now().naive_utc();
-        let dt = now - TimeDelta::days(1)
+        let expected = now - TimeDelta::days(1)
             + TimeDelta::hours(5)
             + TimeDelta::minutes(30)
             + TimeDelta::seconds(15);
-        let expected = dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
         let result = exec_datetime(
             &[
                 text("now"),
@@ -1521,7 +1527,16 @@ mod tests {
             ],
             DateTimeOutput::DateTime,
         );
-        assert_eq!(result, text(&expected));
+        let tolerance = TimeDelta::milliseconds(1);
+        let result =
+            chrono::NaiveDateTime::parse_from_str(&result.to_string(), "%Y-%m-%d %H:%M:%S%.3f")
+                .unwrap();
+        assert!(
+            (result - expected).num_milliseconds().abs() <= tolerance.num_milliseconds(),
+            "Expected: {}, Actual: {}",
+            expected,
+            result
+        );
     }
 
     #[test]
