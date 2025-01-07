@@ -21,7 +21,7 @@ pub enum LimboError {
     IOError(#[from] std::io::Error),
     #[cfg(all(target_os = "linux", feature = "io_uring"))]
     #[error("I/O error: {0}")]
-    LinuxIOError(String),
+    UringIOError(String),
     #[error("Locking error: {0}")]
     LockingError(String),
     #[cfg(target_family = "unix")]

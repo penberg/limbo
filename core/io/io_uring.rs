@@ -165,7 +165,7 @@ impl IO for UringIO {
         while let Some(cqe) = ring.get_completion() {
             let result = cqe.result();
             if result < 0 {
-                return Err(LimboError::LinuxIOError(format!(
+                return Err(LimboError::UringIOError(format!(
                     "{} cqe: {:?}",
                     UringIOError::IOUringCQError(result),
                     cqe
