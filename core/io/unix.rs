@@ -14,13 +14,13 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, Write};
 use std::rc::Rc;
 
-pub struct DarwinIO {
+pub struct UnixIO {
     poller: Rc<RefCell<Poller>>,
     events: Rc<RefCell<Events>>,
     callbacks: Rc<RefCell<HashMap<usize, CompletionCallback>>>,
 }
 
-impl DarwinIO {
+impl UnixIO {
     pub fn new() -> Result<Self> {
         Ok(Self {
             poller: Rc::new(RefCell::new(Poller::new()?)),
@@ -30,7 +30,7 @@ impl DarwinIO {
     }
 }
 
-impl IO for DarwinIO {
+impl IO for UnixIO {
     fn open_file(&self, path: &str, flags: OpenFlags, _direct: bool) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
@@ -40,15 +40,15 @@ impl IO for DarwinIO {
             .create(matches!(flags, OpenFlags::Create))
             .open(path)?;
 
-        let darwin_file = Rc::new(DarwinFile {
+        let unix_file = Rc::new(UnixFile {
             file: Rc::new(RefCell::new(file)),
             poller: self.poller.clone(),
             callbacks: self.callbacks.clone(),
         });
         if std::env::var(common::ENV_DISABLE_FILE_LOCK).is_err() {
-            darwin_file.lock_file(true)?;
+            unix_file.lock_file(true)?;
         }
-        Ok(darwin_file)
+        Ok(unix_file)
     }
 
     fn run_once(&self) -> Result<()> {
@@ -127,13 +127,13 @@ enum CompletionCallback {
     ),
 }
 
-pub struct DarwinFile {
+pub struct UnixFile {
     file: Rc<RefCell<std::fs::File>>,
     poller: Rc<RefCell<polling::Poller>>,
     callbacks: Rc<RefCell<HashMap<usize, CompletionCallback>>>,
 }
 
-impl File for DarwinFile {
+impl File for UnixFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
         let fd = self.file.borrow().as_raw_fd();
         let flock = flock {
@@ -279,7 +279,7 @@ impl File for DarwinFile {
     }
 }
 
-impl Drop for DarwinFile {
+impl Drop for UnixFile {
     fn drop(&mut self) {
         self.unlock_file().expect("Failed to unlock file");
     }
@@ -291,6 +291,6 @@ mod tests {
 
     #[test]
     fn test_multiple_processes_cannot_open_file() {
-        common::tests::test_multiple_processes_cannot_open_file(DarwinIO::new);
+        common::tests::test_multiple_processes_cannot_open_file(UnixIO::new);
     }
 }

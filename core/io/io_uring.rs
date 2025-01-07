@@ -14,15 +14,15 @@ const MAX_IOVECS: usize = 128;
 const SQPOLL_IDLE: u32 = 1000;
 
 #[derive(Debug, Error)]
-enum LinuxIOError {
+enum UringIOError {
     IOUringCQError(i32),
 }
 
 // Implement the Display trait to customize error messages
-impl fmt::Display for LinuxIOError {
+impl fmt::Display for UringIOError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LinuxIOError::IOUringCQError(code) => write!(
+            UringIOError::IOUringCQError(code) => write!(
                 f,
                 "IOUring completion queue error occurred with code {}",
                 code
@@ -31,8 +31,8 @@ impl fmt::Display for LinuxIOError {
     }
 }
 
-pub struct LinuxIO {
-    inner: Rc<RefCell<InnerLinuxIO>>,
+pub struct UringIO {
+    inner: Rc<RefCell<InnerUringIO>>,
 }
 
 struct WrappedIOUring {
@@ -42,13 +42,13 @@ struct WrappedIOUring {
     key: u64,
 }
 
-struct InnerLinuxIO {
+struct InnerUringIO {
     ring: WrappedIOUring,
     iovecs: [iovec; MAX_IOVECS],
     next_iovec: usize,
 }
 
-impl LinuxIO {
+impl UringIO {
     pub fn new() -> Result<Self> {
         let ring = match io_uring::IoUring::builder()
             .setup_sqpoll(SQPOLL_IDLE)
@@ -57,7 +57,7 @@ impl LinuxIO {
             Ok(ring) => ring,
             Err(_) => io_uring::IoUring::new(MAX_IOVECS as u32)?,
         };
-        let inner = InnerLinuxIO {
+        let inner = InnerUringIO {
             ring: WrappedIOUring {
                 ring,
                 pending_ops: 0,
@@ -76,7 +76,7 @@ impl LinuxIO {
     }
 }
 
-impl InnerLinuxIO {
+impl InnerUringIO {
     pub fn get_iovec(&mut self, buf: *const u8, len: usize) -> &iovec {
         let iovec = &mut self.iovecs[self.next_iovec];
         iovec.iov_base = buf as *mut std::ffi::c_void;
@@ -125,7 +125,7 @@ impl WrappedIOUring {
     }
 }
 
-impl IO for LinuxIO {
+impl IO for UringIO {
     fn open_file(&self, path: &str, flags: OpenFlags, direct: bool) -> Result<Rc<dyn File>> {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
@@ -142,14 +142,14 @@ impl IO for LinuxIO {
                 Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
             };
         }
-        let linux_file = Rc::new(LinuxFile {
+        let uring_file = Rc::new(UringFile {
             io: self.inner.clone(),
             file,
         });
         if std::env::var(common::ENV_DISABLE_FILE_LOCK).is_err() {
-            linux_file.lock_file(true)?;
+            uring_file.lock_file(true)?;
         }
-        Ok(linux_file)
+        Ok(uring_file)
     }
 
     fn run_once(&self) -> Result<()> {
@@ -167,7 +167,7 @@ impl IO for LinuxIO {
             if result < 0 {
                 return Err(LimboError::LinuxIOError(format!(
                     "{} cqe: {:?}",
-                    LinuxIOError::IOUringCQError(result),
+                    UringIOError::IOUringCQError(result),
                     cqe
                 )));
             }
@@ -191,12 +191,12 @@ impl IO for LinuxIO {
     }
 }
 
-pub struct LinuxFile {
-    io: Rc<RefCell<InnerLinuxIO>>,
+pub struct UringFile {
+    io: Rc<RefCell<InnerUringIO>>,
     file: std::fs::File,
 }
 
-impl File for LinuxFile {
+impl File for UringFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
         let fd = self.file.as_raw_fd();
         let flock = flock {
@@ -306,7 +306,7 @@ impl File for LinuxFile {
     }
 }
 
-impl Drop for LinuxFile {
+impl Drop for UringFile {
     fn drop(&mut self) {
         self.unlock_file().expect("Failed to unlock file");
     }
@@ -319,6 +319,6 @@ mod tests {
 
     #[test]
     fn test_multiple_processes_cannot_open_file() {
-        common::tests::test_multiple_processes_cannot_open_file(LinuxIO::new);
+        common::tests::test_multiple_processes_cannot_open_file(UringIO::new);
     }
 }
