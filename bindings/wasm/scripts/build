@@ -1,4 +1,12 @@
 #!/bin/bash
 
-wasm-pack build --no-pack --target nodejs
+# get target as argument from cli, defaults to nodejs if no argument is supplied
+TARGET=${1:-nodejs}
+FEATURE="nodejs"
+
+if [ "$TARGET" = "web" ]; then
+    FEATURE="web"
+fi
+
+npx wasm-pack build --no-pack --target $TARGET --no-default-features --features $FEATURE
 cp package.json pkg/package.json

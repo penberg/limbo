@@ -47,7 +47,9 @@ impl Database {
     }
 
     #[wasm_bindgen]
-    pub fn exec(&self, _sql: &str) {}
+    pub fn exec(&self, _sql: &str) {
+        let _res = self.conn.execute(_sql).unwrap();
+    }
 
     #[wasm_bindgen]
     pub fn prepare(&self, _sql: &str) -> Statement {
@@ -352,10 +354,39 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
     }
 }
 
+#[cfg(all(feature = "web", feature = "nodejs"))]
+compile_error!("Features 'web' and 'nodejs' cannot be enabled at the same time");
+
+#[cfg(feature = "web")]
+#[wasm_bindgen(module = "/src/web-vfs.js")]
+extern "C" {
+    type VFS;
+    #[wasm_bindgen(constructor)]
+    fn new() -> VFS;
+
+    #[wasm_bindgen(method)]
+    fn open(this: &VFS, path: &str, flags: &str) -> i32;
+
+    #[wasm_bindgen(method)]
+    fn close(this: &VFS, fd: i32) -> bool;
+
+    #[wasm_bindgen(method)]
+    fn pwrite(this: &VFS, fd: i32, buffer: &[u8], offset: usize) -> i32;
+
+    #[wasm_bindgen(method)]
+    fn pread(this: &VFS, fd: i32, buffer: &mut [u8], offset: usize) -> i32;
+
+    #[wasm_bindgen(method)]
+    fn size(this: &VFS, fd: i32) -> u64;
+
+    #[wasm_bindgen(method)]
+    fn sync(this: &VFS, fd: i32);
+}
+
+#[cfg(feature = "nodejs")]
 #[wasm_bindgen(module = "/vfs.js")]
 extern "C" {
     type VFS;
-
     #[wasm_bindgen(constructor)]
     fn new() -> VFS;
 
