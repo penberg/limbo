@@ -1,8 +1,9 @@
 #![allow(clippy::arc_with_non_send_sync, dead_code)]
 use clap::Parser;
+use core::panic;
+use generation::pick_index;
 use generation::plan::{Interaction, InteractionPlan, ResultSet};
-use generation::{pick_index, ArbitraryFrom};
-use limbo_core::{Database, Result};
+use limbo_core::{Database, LimboError, Result};
 use model::table::Value;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
@@ -36,10 +37,12 @@ fn main() {
 
     let db_path = output_dir.join("simulator.db");
     let plan_path = output_dir.join("simulator.plan");
+    let history_path = output_dir.join("simulator.history");
 
     // Print the seed, the locations of the database and the plan file
     log::info!("database path: {:?}", db_path);
     log::info!("simulator plan path: {:?}", plan_path);
+    log::info!("simulator history path: {:?}", history_path);
     log::info!("seed: {}", seed);
 
     std::panic::set_hook(Box::new(move |info| {
@@ -73,28 +76,34 @@ fn main() {
             std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
 
         match (result, result2) {
-            (Ok(Ok(_)), Err(_)) => {
+            (Ok(ExecutionResult { error: None, .. }), Err(_)) => {
                 log::error!("doublecheck failed! first run succeeded, but second run panicked.");
             }
-            (Ok(Err(_)), Err(_)) => {
+            (Ok(ExecutionResult { error: Some(_), .. }), Err(_)) => {
                 log::error!(
                     "doublecheck failed! first run failed assertion, but second run panicked."
                 );
             }
-            (Err(_), Ok(Ok(_))) => {
+            (Err(_), Ok(ExecutionResult { error: None, .. })) => {
                 log::error!("doublecheck failed! first run panicked, but second run succeeded.");
             }
-            (Err(_), Ok(Err(_))) => {
+            (Err(_), Ok(ExecutionResult { error: Some(_), .. })) => {
                 log::error!(
                     "doublecheck failed! first run panicked, but second run failed assertion."
                 );
             }
-            (Ok(Ok(_)), Ok(Err(_))) => {
+            (
+                Ok(ExecutionResult { error: None, .. }),
+                Ok(ExecutionResult { error: Some(_), .. }),
+            ) => {
                 log::error!(
                     "doublecheck failed! first run succeeded, but second run failed assertion."
                 );
             }
-            (Ok(Err(_)), Ok(Ok(_))) => {
+            (
+                Ok(ExecutionResult { error: Some(_), .. }),
+                Ok(ExecutionResult { error: None, .. }),
+            ) => {
                 log::error!(
                     "doublecheck failed! first run failed assertion, but second run succeeded."
                 );
@@ -122,18 +131,32 @@ fn main() {
         std::fs::rename(&old_db_path, &db_path).unwrap();
         std::fs::rename(&old_plan_path, &plan_path).unwrap();
     } else if let Ok(result) = result {
-        match result {
-            Ok(_) => {
+        // No panic occurred, so write the history to a file
+        let f = std::fs::File::create(&history_path).unwrap();
+        let mut f = std::io::BufWriter::new(f);
+        for execution in result.history.history.iter() {
+            writeln!(
+                f,
+                "{} {} {}",
+                execution.connection_index, execution.interaction_index, execution.secondary_index
+            )
+            .unwrap();
+        }
+
+        match result.error {
+            None => {
                 log::info!("simulation completed successfully");
             }
-            Err(e) => {
+            Some(e) => {
                 log::error!("simulation failed: {:?}", e);
             }
         }
     }
+
     // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
     println!("database path: {:?}", db_path);
     println!("simulator plan path: {:?}", plan_path);
+    println!("simulator history path: {:?}", history_path);
     println!("seed: {}", seed);
 }
 
@@ -142,7 +165,7 @@ fn run_simulation(
     cli_opts: &SimulatorCLI,
     db_path: &Path,
     plan_path: &Path,
-) -> Result<()> {
+) -> ExecutionResult {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let (create_percent, read_percent, write_percent, delete_percent) = {
@@ -160,21 +183,15 @@ fn run_simulation(
     };
 
     if cli_opts.minimum_size < 1 {
-        return Err(limbo_core::LimboError::InternalError(
-            "minimum size must be at least 1".to_string(),
-        ));
+        panic!("minimum size must be at least 1");
     }
 
     if cli_opts.maximum_size < 1 {
-        return Err(limbo_core::LimboError::InternalError(
-            "maximum size must be at least 1".to_string(),
-        ));
+        panic!("maximum size must be at least 1");
     }
 
     if cli_opts.maximum_size < cli_opts.minimum_size {
-        return Err(limbo_core::LimboError::InternalError(
-            "maximum size must be greater than or equal to minimum size".to_string(),
-        ));
+        panic!("maximum size must be greater than or equal to minimum size");
     }
 
     let opts = SimulatorOpts {
@@ -212,7 +229,7 @@ fn run_simulation(
 
     log::info!("Generating database interaction plan...");
     let mut plans = (1..=env.opts.max_connections)
-        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
+        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
         .collect::<Vec<_>>();
 
     let mut f = std::fs::File::create(plan_path).unwrap();
@@ -224,9 +241,6 @@ fn run_simulation(
     log::info!("Executing database interaction plan...");
 
     let result = execute_plans(&mut env, &mut plans);
-    if result.is_err() {
-        log::error!("error executing plans: {:?}", result.as_ref().err());
-    }
 
     env.io.print_stats();
 
@@ -235,23 +249,76 @@ fn run_simulation(
     result
 }
 
-fn execute_plans(env: &mut SimulatorEnv, plans: &mut [InteractionPlan]) -> Result<()> {
+struct Execution {
+    connection_index: usize,
+    interaction_index: usize,
+    secondary_index: usize,
+}
+
+impl Execution {
+    fn new(connection_index: usize, interaction_index: usize, secondary_index: usize) -> Self {
+        Self {
+            connection_index,
+            interaction_index,
+            secondary_index,
+        }
+    }
+}
+
+struct ExecutionHistory {
+    history: Vec<Execution>,
+}
+
+impl ExecutionHistory {
+    fn new() -> Self {
+        Self {
+            history: Vec::new(),
+        }
+    }
+}
+
+struct ExecutionResult {
+    history: ExecutionHistory,
+    error: Option<limbo_core::LimboError>,
+}
+
+impl ExecutionResult {
+    fn new(history: ExecutionHistory, error: Option<LimboError>) -> Self {
+        Self { history, error }
+    }
+}
+
+fn execute_plans(env: &mut SimulatorEnv, plans: &mut [InteractionPlan]) -> ExecutionResult {
+    let mut history = ExecutionHistory::new();
     let now = std::time::Instant::now();
     // todo: add history here by recording which interaction was executed at which tick
     for _tick in 0..env.opts.ticks {
         // Pick the connection to interact with
         let connection_index = pick_index(env.connections.len(), &mut env.rng);
+        history.history.push(Execution::new(
+            connection_index,
+            plans[connection_index].interaction_pointer,
+            plans[connection_index].secondary_pointer,
+        ));
         // Execute the interaction for the selected connection
-        execute_plan(env, connection_index, plans)?;
+        match execute_plan(env, connection_index, plans) {
+            Ok(_) => {}
+            Err(err) => {
+                return ExecutionResult::new(history, Some(err));
+            }
+        }
         // Check if the maximum time for the simulation has been reached
         if now.elapsed().as_secs() >= env.opts.max_time_simulation as u64 {
-            return Err(limbo_core::LimboError::InternalError(
-                "maximum time for simulation reached".into(),
-            ));
+            return ExecutionResult::new(
+                history,
+                Some(limbo_core::LimboError::InternalError(
+                    "maximum time for simulation reached".into(),
+                )),
+            );
         }
     }
 
-    Ok(())
+    ExecutionResult::new(history, None)
 }
 
 fn execute_plan(

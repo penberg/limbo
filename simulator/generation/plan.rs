@@ -1,8 +1,6 @@
 use std::{fmt::Display, rc::Rc};
 
 use limbo_core::{Connection, Result, StepResult};
-use rand::SeedableRng;
-use rand_chacha::ChaCha8Rng;
 
 use crate::{
     model::{
@@ -201,18 +199,11 @@ impl InteractionPlan {
     }
 }
 
-impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
-    fn arbitrary_from<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Self {
+impl InteractionPlan {
+    // todo: This is a hack to get around the fact that `ArbitraryFrom<T>` can't take a mutable
+    // reference of T, so instead write a bespoke function without using the trait system.
+    pub(crate) fn arbitrary_from<R: rand::Rng>(rng: &mut R, env: &mut SimulatorEnv) -> Self {
         let mut plan = InteractionPlan::new();
-
-        let mut env = SimulatorEnv {
-            opts: env.opts.clone(),
-            tables: vec![],
-            connections: vec![],
-            io: env.io.clone(),
-            db: env.db.clone(),
-            rng: ChaCha8Rng::seed_from_u64(rng.next_u64()),
-        };
 
         let num_interactions = env.opts.max_interactions;
 
@@ -231,8 +222,8 @@ impl ArbitraryFrom<SimulatorEnv> for InteractionPlan {
                 plan.plan.len(),
                 num_interactions
             );
-            let property = Property::arbitrary_from(rng, &(&env, plan.stats()));
-            property.shadow(&mut env);
+            let property = Property::arbitrary_from(rng, &(env, plan.stats()));
+            property.shadow(env);
 
             plan.plan.push(property);
         }
