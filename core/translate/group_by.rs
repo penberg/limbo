@@ -93,13 +93,10 @@ pub fn init_group_by(
     program.add_comment(program.offset(), "go to clear accumulator subroutine");
 
     let reg_subrtn_acc_clear_return_offset = program.alloc_register();
-    program.emit_insn_with_label_dependency(
-        Insn::Gosub {
-            target_pc: label_subrtn_acc_clear,
-            return_reg: reg_subrtn_acc_clear_return_offset,
-        },
-        label_subrtn_acc_clear,
-    );
+    program.emit_insn(Insn::Gosub {
+        target_pc: label_subrtn_acc_clear,
+        return_reg: reg_subrtn_acc_clear_return_offset,
+    });
 
     t_ctx.reg_agg_start = Some(reg_agg_exprs_start);
 
@@ -187,15 +184,12 @@ pub fn emit_group_by<'a>(
     });
 
     // Sort the sorter based on the group by columns
-    program.emit_insn_with_label_dependency(
-        Insn::SorterSort {
-            cursor_id: sort_cursor,
-            pc_if_empty: label_grouping_loop_end,
-        },
-        label_grouping_loop_end,
-    );
+    program.emit_insn(Insn::SorterSort {
+        cursor_id: sort_cursor,
+        pc_if_empty: label_grouping_loop_end,
+    });
 
-    program.defer_label_resolution(label_grouping_loop_start, program.offset() as usize);
+    program.resolve_label(label_grouping_loop_start, program.offset());
     // Read a row from the sorted data in the sorter into the pseudo cursor
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_cursor,
@@ -229,14 +223,11 @@ pub fn emit_group_by<'a>(
         "start new group if comparison is not equal",
     );
     // If we are at a new group, continue. If we are at the same group, jump to the aggregation step (i.e. accumulate more values into the aggregations)
-    program.emit_insn_with_label_dependency(
-        Insn::Jump {
-            target_pc_lt: program.offset() + 1,
-            target_pc_eq: agg_step_label,
-            target_pc_gt: program.offset() + 1,
-        },
-        agg_step_label,
-    );
+    program.emit_insn(Insn::Jump {
+        target_pc_lt: program.offset().add(1u32),
+        target_pc_eq: agg_step_label,
+        target_pc_gt: program.offset().add(1u32),
+    });
 
     // New group, move current group by columns into the comparison register
     program.emit_insn(Insn::Move {
@@ -249,32 +240,23 @@ pub fn emit_group_by<'a>(
         program.offset(),
         "check if ended group had data, and output if so",
     );
-    program.emit_insn_with_label_dependency(
-        Insn::Gosub {
-            target_pc: label_subrtn_acc_output,
-            return_reg: reg_subrtn_acc_output_return_offset,
-        },
-        label_subrtn_acc_output,
-    );
+    program.emit_insn(Insn::Gosub {
+        target_pc: label_subrtn_acc_output,
+        return_reg: reg_subrtn_acc_output_return_offset,
+    });
 
     program.add_comment(program.offset(), "check abort flag");
-    program.emit_insn_with_label_dependency(
-        Insn::IfPos {
-            reg: reg_abort_flag,
-            target_pc: label_group_by_end,
-            decrement_by: 0,
-        },
-        label_group_by_end,
-    );
+    program.emit_insn(Insn::IfPos {
+        reg: reg_abort_flag,
+        target_pc: label_group_by_end,
+        decrement_by: 0,
+    });
 
     program.add_comment(program.offset(), "goto clear accumulator subroutine");
-    program.emit_insn_with_label_dependency(
-        Insn::Gosub {
-            target_pc: label_subrtn_acc_clear,
-            return_reg: reg_subrtn_acc_clear_return_offset,
-        },
-        label_subrtn_acc_clear,
-    );
+    program.emit_insn(Insn::Gosub {
+        target_pc: label_subrtn_acc_clear,
+        return_reg: reg_subrtn_acc_clear_return_offset,
+    });
 
     // Accumulate the values into the aggregations
     program.resolve_label(agg_step_label, program.offset());
@@ -299,14 +281,11 @@ pub fn emit_group_by<'a>(
         program.offset(),
         "don't emit group columns if continuing existing group",
     );
-    program.emit_insn_with_label_dependency(
-        Insn::If {
-            target_pc: label_acc_indicator_set_flag_true,
-            reg: reg_data_in_acc_flag,
-            null_reg: 0, // unused in this case
-        },
-        label_acc_indicator_set_flag_true,
-    );
+    program.emit_insn(Insn::If {
+        target_pc: label_acc_indicator_set_flag_true,
+        reg: reg_data_in_acc_flag,
+        null_reg: 0, // unused in this case
+    });
 
     // Read the group by columns for a finished group
     for i in 0..group_by.exprs.len() {
@@ -326,32 +305,23 @@ pub fn emit_group_by<'a>(
         dest: reg_data_in_acc_flag,
     });
 
-    program.emit_insn_with_label_dependency(
-        Insn::SorterNext {
-            cursor_id: sort_cursor,
-            pc_if_next: label_grouping_loop_start,
-        },
-        label_grouping_loop_start,
-    );
+    program.emit_insn(Insn::SorterNext {
+        cursor_id: sort_cursor,
+        pc_if_next: label_grouping_loop_start,
+    });
 
     program.resolve_label(label_grouping_loop_end, program.offset());
 
     program.add_comment(program.offset(), "emit row for final group");
-    program.emit_insn_with_label_dependency(
-        Insn::Gosub {
-            target_pc: label_subrtn_acc_output,
-            return_reg: reg_subrtn_acc_output_return_offset,
-        },
-        label_subrtn_acc_output,
-    );
+    program.emit_insn(Insn::Gosub {
+        target_pc: label_subrtn_acc_output,
+        return_reg: reg_subrtn_acc_output_return_offset,
+    });
 
     program.add_comment(program.offset(), "group by finished");
-    program.emit_insn_with_label_dependency(
-        Insn::Goto {
-            target_pc: label_group_by_end,
-        },
-        label_group_by_end,
-    );
+    program.emit_insn(Insn::Goto {
+        target_pc: label_group_by_end,
+    });
     program.emit_insn(Insn::Integer {
         value: 1,
         dest: reg_abort_flag,
@@ -363,19 +333,13 @@ pub fn emit_group_by<'a>(
     program.resolve_label(label_subrtn_acc_output, program.offset());
 
     program.add_comment(program.offset(), "output group by row subroutine start");
-    program.emit_insn_with_label_dependency(
-        Insn::IfPos {
-            reg: reg_data_in_acc_flag,
-            target_pc: label_agg_final,
-            decrement_by: 0,
-        },
-        label_agg_final,
-    );
+    program.emit_insn(Insn::IfPos {
+        reg: reg_data_in_acc_flag,
+        target_pc: label_agg_final,
+        decrement_by: 0,
+    });
     let group_by_end_without_emitting_row_label = program.allocate_label();
-    program.defer_label_resolution(
-        group_by_end_without_emitting_row_label,
-        program.offset() as usize,
-    );
+    program.resolve_label(group_by_end_without_emitting_row_label, program.offset());
     program.emit_insn(Insn::Return {
         return_reg: reg_subrtn_acc_output_return_offset,
     });
@@ -417,7 +381,7 @@ pub fn emit_group_by<'a>(
                 ConditionMetadata {
                     jump_if_condition_is_true: false,
                     jump_target_when_false: group_by_end_without_emitting_row_label,
-                    jump_target_when_true: i64::MAX, // unused
+                    jump_target_when_true: BranchOffset::Placeholder, // not used. FIXME: this is a bug. HAVING can have e.g. HAVING a OR b.
                 },
                 &t_ctx.resolver,
             )?;

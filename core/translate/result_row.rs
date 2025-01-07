@@ -54,7 +54,7 @@ pub fn emit_result_row_and_limit(
         SelectQueryType::Subquery { yield_reg, .. } => {
             program.emit_insn(Insn::Yield {
                 yield_reg: *yield_reg,
-                end_offset: 0,
+                end_offset: BranchOffset::Offset(0),
             });
         }
     }
@@ -71,13 +71,10 @@ pub fn emit_result_row_and_limit(
             dest: t_ctx.reg_limit.unwrap(),
         });
         program.mark_last_insn_constant();
-        program.emit_insn_with_label_dependency(
-            Insn::DecrJumpZero {
-                reg: t_ctx.reg_limit.unwrap(),
-                target_pc: label_on_limit_reached.unwrap(),
-            },
-            label_on_limit_reached.unwrap(),
-        );
+        program.emit_insn(Insn::DecrJumpZero {
+            reg: t_ctx.reg_limit.unwrap(),
+            target_pc: label_on_limit_reached.unwrap(),
+        });
     }
     Ok(())
 }

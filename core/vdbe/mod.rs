@@ -58,13 +58,75 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
 
-pub type BranchOffset = i64;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Represents a target for a jump instruction.
+/// Stores 32-bit ints to keep the enum word-sized.
+pub enum BranchOffset {
+    /// A label is a named location in the program.
+    /// If there are references to it, it must always be resolved to an Offset
+    /// via program.resolve_label().
+    Label(i32),
+    /// An offset is a direct index into the instruction list.
+    Offset(InsnReference),
+    /// A placeholder is a temporary value to satisfy the compiler.
+    /// It must be set later.
+    Placeholder,
+}
+
+impl BranchOffset {
+    /// Returns true if the branch offset is a label.
+    pub fn is_label(&self) -> bool {
+        matches!(self, BranchOffset::Label(_))
+    }
+
+    /// Returns true if the branch offset is an offset.
+    pub fn is_offset(&self) -> bool {
+        matches!(self, BranchOffset::Offset(_))
+    }
+
+    /// Returns the offset value. Panics if the branch offset is a label or placeholder.
+    pub fn to_offset_int(&self) -> InsnReference {
+        match self {
+            BranchOffset::Label(v) => unreachable!("Unresolved label: {}", v),
+            BranchOffset::Offset(v) => *v,
+            BranchOffset::Placeholder => unreachable!("Unresolved placeholder"),
+        }
+    }
+
+    /// Returns the label value. Panics if the branch offset is an offset or placeholder.
+    pub fn to_label_value(&self) -> i32 {
+        match self {
+            BranchOffset::Label(v) => *v,
+            BranchOffset::Offset(_) => unreachable!("Offset cannot be converted to label value"),
+            BranchOffset::Placeholder => unreachable!("Unresolved placeholder"),
+        }
+    }
+
+    /// Returns the branch offset as a signed integer.
+    /// Used in explain output, where we don't want to panic in case we have an unresolved
+    /// label or placeholder.
+    pub fn to_debug_int(&self) -> i32 {
+        match self {
+            BranchOffset::Label(v) => *v,
+            BranchOffset::Offset(v) => *v as i32,
+            BranchOffset::Placeholder => i32::MAX,
+        }
+    }
+
+    /// Adds an integer value to the branch offset.
+    /// Returns a new branch offset.
+    /// Panics if the branch offset is a label or placeholder.
+    pub fn add<N: Into<u32>>(self, n: N) -> BranchOffset {
+        BranchOffset::Offset(self.to_offset_int() + n.into())
+    }
+}
+
 pub type CursorID = usize;
 
 pub type PageIdx = usize;
 
 // Index of insn in list of insns
-type InsnReference = usize;
+type InsnReference = u32;
 
 pub enum StepResult<'a> {
     Done,
@@ -101,7 +163,7 @@ impl RegexCache {
 
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
-    pub pc: BranchOffset,
+    pub pc: InsnReference,
     cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
@@ -151,7 +213,7 @@ pub struct Program {
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
-    pub comments: HashMap<BranchOffset, &'static str>,
+    pub comments: HashMap<InsnReference, &'static str>,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
 }
@@ -189,8 +251,8 @@ impl Program {
             let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
-                    assert!(*target_pc >= 0);
-                    state.pc = *target_pc;
+                    assert!(target_pc.is_offset());
+                    state.pc = target_pc.to_offset_int();
                 }
                 Insn::Add { lhs, rhs, dest } => {
                     state.registers[*dest] =
@@ -278,6 +340,9 @@ impl Program {
                     target_pc_eq,
                     target_pc_gt,
                 } => {
+                    assert!(target_pc_lt.is_offset());
+                    assert!(target_pc_eq.is_offset());
+                    assert!(target_pc_gt.is_offset());
                     let cmp = state.last_compare.take();
                     if cmp.is_none() {
                         return Err(LimboError::InternalError(
@@ -289,8 +354,7 @@ impl Program {
                         std::cmp::Ordering::Equal => *target_pc_eq,
                         std::cmp::Ordering::Greater => *target_pc_gt,
                     };
-                    assert!(target_pc >= 0);
-                    state.pc = target_pc;
+                    state.pc = target_pc.to_offset_int();
                 }
                 Insn::Move {
                     source_reg,
@@ -313,12 +377,12 @@ impl Program {
                     target_pc,
                     decrement_by,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let reg = *reg;
                     let target_pc = *target_pc;
                     match &state.registers[reg] {
                         OwnedValue::Integer(n) if *n > 0 => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                             state.registers[reg] = OwnedValue::Integer(*n - *decrement_by as i64);
                         }
                         OwnedValue::Integer(_) => {
@@ -332,7 +396,7 @@ impl Program {
                     }
                 }
                 Insn::NotNull { reg, target_pc } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let reg = *reg;
                     let target_pc = *target_pc;
                     match &state.registers[reg] {
@@ -340,7 +404,7 @@ impl Program {
                             state.pc += 1;
                         }
                         _ => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                     }
                 }
@@ -350,17 +414,17 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                         _ => {
                             if state.registers[lhs] == state.registers[rhs] {
-                                state.pc = target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
                             }
@@ -372,17 +436,17 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                         _ => {
                             if state.registers[lhs] != state.registers[rhs] {
-                                state.pc = target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
                             }
@@ -394,17 +458,17 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                         _ => {
                             if state.registers[lhs] < state.registers[rhs] {
-                                state.pc = target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
                             }
@@ -416,17 +480,17 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                         _ => {
                             if state.registers[lhs] <= state.registers[rhs] {
-                                state.pc = target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
                             }
@@ -438,17 +502,17 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                         _ => {
                             if state.registers[lhs] > state.registers[rhs] {
-                                state.pc = target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
                             }
@@ -460,17 +524,17 @@ impl Program {
                     rhs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc;
+                            state.pc = target_pc.to_offset_int();
                         }
                         _ => {
                             if state.registers[lhs] >= state.registers[rhs] {
-                                state.pc = target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
                             }
@@ -482,9 +546,9 @@ impl Program {
                     target_pc,
                     null_reg,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     if exec_if(&state.registers[*reg], &state.registers[*null_reg], false) {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -494,9 +558,9 @@ impl Program {
                     target_pc,
                     null_reg,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     if exec_if(&state.registers[*reg], &state.registers[*null_reg], true) {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -539,10 +603,11 @@ impl Program {
                     cursor_id,
                     pc_if_empty,
                 } => {
+                    assert!(pc_if_empty.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
-                        state.pc = *pc_if_empty;
+                        state.pc = pc_if_empty.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -551,10 +616,11 @@ impl Program {
                     cursor_id,
                     pc_if_empty,
                 } => {
+                    assert!(pc_if_empty.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
-                        state.pc = *pc_if_empty;
+                        state.pc = pc_if_empty.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -620,11 +686,11 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
-                    assert!(*pc_if_next >= 0);
+                    assert!(pc_if_next.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
-                        state.pc = *pc_if_next;
+                        state.pc = pc_if_next.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -633,11 +699,11 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
-                    assert!(*pc_if_next >= 0);
+                    assert!(pc_if_next.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
-                        state.pc = *pc_if_next;
+                        state.pc = pc_if_next.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -705,24 +771,22 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Goto { target_pc } => {
-                    assert!(*target_pc >= 0);
-                    state.pc = *target_pc;
+                    assert!(target_pc.is_offset());
+                    state.pc = target_pc.to_offset_int();
                 }
                 Insn::Gosub {
                     target_pc,
                     return_reg,
                 } => {
-                    assert!(*target_pc >= 0);
-                    state.registers[*return_reg] = OwnedValue::Integer(state.pc + 1);
-                    state.pc = *target_pc;
+                    assert!(target_pc.is_offset());
+                    state.registers[*return_reg] = OwnedValue::Integer((state.pc + 1) as i64);
+                    state.pc = target_pc.to_offset_int();
                 }
                 Insn::Return { return_reg } => {
                     if let OwnedValue::Integer(pc) = state.registers[*return_reg] {
-                        if pc < 0 {
-                            return Err(LimboError::InternalError(
-                                "Return register is negative".to_string(),
-                            ));
-                        }
+                        let pc: u32 = pc
+                            .try_into()
+                            .unwrap_or_else(|_| panic!("Return register is negative: {}", pc));
                         state.pc = pc;
                     } else {
                         return Err(LimboError::InternalError(
@@ -779,11 +843,12 @@ impl Program {
                     src_reg,
                     target_pc,
                 } => {
+                    assert!(target_pc.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     let rowid = match &state.registers[*src_reg] {
                         OwnedValue::Integer(rowid) => *rowid as u64,
                         OwnedValue::Null => {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                             continue;
                         }
                         other => {
@@ -794,7 +859,7 @@ impl Program {
                     };
                     let found = return_if_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::EQ));
                     if !found {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -813,6 +878,7 @@ impl Program {
                     target_pc,
                     is_index,
                 } => {
+                    assert!(target_pc.is_offset());
                     if *is_index {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
@@ -821,7 +887,7 @@ impl Program {
                             cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GE)
                         );
                         if !found {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                         } else {
                             state.pc += 1;
                         }
@@ -844,7 +910,7 @@ impl Program {
                         let found =
                             return_if_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE));
                         if !found {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                         } else {
                             state.pc += 1;
                         }
@@ -857,6 +923,7 @@ impl Program {
                     target_pc,
                     is_index,
                 } => {
+                    assert!(target_pc.is_offset());
                     if *is_index {
                         let cursor = cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
@@ -865,7 +932,7 @@ impl Program {
                             cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GT)
                         );
                         if !found {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                         } else {
                             state.pc += 1;
                         }
@@ -888,7 +955,7 @@ impl Program {
                         let found =
                             return_if_io!(cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GT));
                         if !found {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                         } else {
                             state.pc += 1;
                         }
@@ -900,7 +967,7 @@ impl Program {
                     num_regs,
                     target_pc,
                 } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
@@ -909,12 +976,12 @@ impl Program {
                         if idx_record.values[..idx_record.values.len() - 1]
                             >= *record_from_regs.values
                         {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                         } else {
                             state.pc += 1;
                         }
                     } else {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     }
                 }
                 Insn::IdxGT {
@@ -923,6 +990,7 @@ impl Program {
                     num_regs,
                     target_pc,
                 } => {
+                    assert!(target_pc.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
@@ -931,21 +999,21 @@ impl Program {
                         if idx_record.values[..idx_record.values.len() - 1]
                             > *record_from_regs.values
                         {
-                            state.pc = *target_pc;
+                            state.pc = target_pc.to_offset_int();
                         } else {
                             state.pc += 1;
                         }
                     } else {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     }
                 }
                 Insn::DecrJumpZero { reg, target_pc } => {
-                    assert!(*target_pc >= 0);
+                    assert!(target_pc.is_offset());
                     match state.registers[*reg] {
                         OwnedValue::Integer(n) => {
                             let n = n - 1;
                             if n == 0 {
-                                state.pc = *target_pc;
+                                state.pc = target_pc.to_offset_int();
                             } else {
                                 state.registers[*reg] = OwnedValue::Integer(n);
                                 state.pc += 1;
@@ -1250,18 +1318,18 @@ impl Program {
                         cursor.rewind()?;
                         state.pc += 1;
                     } else {
-                        state.pc = *pc_if_empty;
+                        state.pc = pc_if_empty.to_offset_int();
                     }
                 }
                 Insn::SorterNext {
                     cursor_id,
                     pc_if_next,
                 } => {
-                    assert!(*pc_if_next >= 0);
+                    assert!(pc_if_next.is_offset());
                     let cursor = cursors.get_mut(cursor_id).unwrap();
                     return_if_io!(cursor.next());
                     if !cursor.is_empty() {
-                        state.pc = *pc_if_next;
+                        state.pc = pc_if_next.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -1726,18 +1794,23 @@ impl Program {
                     jump_on_definition,
                     start_offset,
                 } => {
-                    assert!(*jump_on_definition >= 0);
-                    state.registers[*yield_reg] = OwnedValue::Integer(*start_offset);
+                    assert!(jump_on_definition.is_offset());
+                    let start_offset = start_offset.to_offset_int();
+                    state.registers[*yield_reg] = OwnedValue::Integer(start_offset as i64);
                     state.ended_coroutine.insert(*yield_reg, false);
-                    state.pc = if *jump_on_definition == 0 {
+                    let jump_on_definition = jump_on_definition.to_offset_int();
+                    state.pc = if jump_on_definition == 0 {
                         state.pc + 1
                     } else {
-                        *jump_on_definition
+                        jump_on_definition
                     };
                 }
                 Insn::EndCoroutine { yield_reg } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
                         state.ended_coroutine.insert(*yield_reg, true);
+                        let pc: u32 = pc
+                            .try_into()
+                            .unwrap_or_else(|_| panic!("EndCoroutine: pc overflow: {}", pc));
                         state.pc = pc - 1; // yield jump is always next to yield. Here we substract 1 to go back to yield instruction
                     } else {
                         unreachable!();
@@ -1753,12 +1826,15 @@ impl Program {
                             .get(yield_reg)
                             .expect("coroutine not initialized")
                         {
-                            state.pc = *end_offset;
+                            state.pc = end_offset.to_offset_int();
                         } else {
+                            let pc: u32 = pc
+                                .try_into()
+                                .unwrap_or_else(|_| panic!("Yield: pc overflow: {}", pc));
                             // swap the program counter with the value in the yield register
                             // this is the mechanism that allows jumping back and forth between the coroutine and the caller
                             (state.pc, state.registers[*yield_reg]) =
-                                (pc, OwnedValue::Integer(state.pc + 1));
+                                (pc, OwnedValue::Integer((state.pc + 1) as i64));
                         }
                     } else {
                         unreachable!(
@@ -1842,7 +1918,7 @@ impl Program {
                     if exists {
                         state.pc += 1;
                     } else {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     }
                 }
                 // this cursor may be reused for next insert
@@ -1894,7 +1970,7 @@ impl Program {
                 }
                 Insn::IsNull { src, target_pc } => {
                     if matches!(state.registers[*src], OwnedValue::Null) {
-                        state.pc = *target_pc;
+                        state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
@@ -1976,7 +2052,7 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
             addr,
             insn,
             String::new(),
-            program.comments.get(&(addr as BranchOffset)).copied()
+            program.comments.get(&(addr as u32)).copied()
         )
     );
 }
@@ -1987,7 +2063,7 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
         addr,
         insn,
         indent,
-        program.comments.get(&(addr as BranchOffset)).copied(),
+        program.comments.get(&(addr as u32)).copied(),
     );
     println!("{}", s);
 }
