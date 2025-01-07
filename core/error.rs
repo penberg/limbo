@@ -19,12 +19,12 @@ pub enum LimboError {
     EnvVarError(#[from] std::env::VarError),
     #[error("I/O error: {0}")]
     IOError(#[from] std::io::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
     #[error("I/O error: {0}")]
-    LinuxIOError(String),
+    UringIOError(String),
     #[error("Locking error: {0}")]
     LockingError(String),
-    #[cfg(target_os = "macos")]
+    #[cfg(target_family = "unix")]
     #[error("I/O error: {0}")]
     RustixIOError(#[from] rustix::io::Errno),
     #[error("Parse error: {0}")]
