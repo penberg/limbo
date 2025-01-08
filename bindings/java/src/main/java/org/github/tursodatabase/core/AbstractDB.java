@@ -1,5 +1,9 @@
 package org.github.tursodatabase.core;
 
+import org.github.tursodatabase.LimboErrorCode;
+import org.github.tursodatabase.NativeInvocation;
+import org.github.tursodatabase.exceptions.LimboException;
+
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -10,18 +14,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * are not only to provide functionality, but to handle contractual
  * differences between the JDBC specification and the Limbo API.
  */
-public abstract class DB {
+public abstract class AbstractDB {
     private final String url;
     private final String fileName;
     private final AtomicBoolean closed = new AtomicBoolean(true);
 
-    public DB(String url, String fileName) throws SQLException {
+    public AbstractDB(String url, String filaName) throws SQLException {
         this.url = url;
-        this.fileName = fileName;
-    }
-
-    public String getUrl() {
-        return url;
+        this.fileName = filaName;
     }
 
     public boolean isClosed() {
@@ -36,7 +36,7 @@ public abstract class DB {
     /**
      * Executes an SQL statement.
      *
-     * @param sql SQL statement to be executed.
+     * @param sql        SQL statement to be executed.
      * @param autoCommit Whether to auto-commit the transaction.
      * @throws SQLException if a database access error occurs.
      */
@@ -47,16 +47,15 @@ public abstract class DB {
 
     /**
      * Creates an SQLite interface to a database for the given connection.
-     * @see <a href="https://www.sqlite.org/c3ref/c_open_autoproxy.html">SQLite Open Flags</a>
      *
-     * @param fileName The database.
      * @param openFlags Flags for opening the database.
      * @throws SQLException if a database access error occurs.
      */
-    public final synchronized void open(String fileName, int openFlags) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
+    public final synchronized void open(int openFlags) throws SQLException {
+        _open(fileName, openFlags);
     }
+
+    protected abstract void _open(String fileName, int openFlags) throws SQLException;
 
     /**
      * Closes a database connection and finalizes any remaining statements before the closing
@@ -95,13 +94,13 @@ public abstract class DB {
 
     /**
      * Creates an SQLite interface to a database with the provided open flags.
-     * @see <a href="https://www.sqlite.org/c3ref/c_open_autoproxy.html">SQLite Open Flags</a>
      *
-     * @param filename The database to open.
+     * @param fileName  The database to open.
      * @param openFlags Flags for opening the database.
+     * @return pointer to database instance
      * @throws SQLException if a database access error occurs.
      */
-    protected abstract void _open(String filename, int openFlags) throws SQLException;
+    protected abstract long _open_utf8(byte[] fileName, int openFlags) throws SQLException;
 
     /**
      * Closes the SQLite interface to a database.
@@ -173,4 +172,35 @@ public abstract class DB {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
+
+    /**
+     * Throws SQL Exception with error code.
+     *
+     * @param errorCode Error code to be passed.
+     * @throws SQLException Formatted SQLException with error code
+     */
+    @NativeInvocation
+    private LimboException newSQLException(int errorCode, long errorMessagePointer) throws SQLException {
+        throw newSQLException(errorCode, getErrorMessage(errorMessagePointer));
+    }
+
+    /**
+     * Throws formatted SQLException with error code and message.
+     *
+     * @param errorCode    Error code to be passed.
+     * @param errorMessage throw newSQLException(errorCode);Error message to be passed.
+     * @return Formatted SQLException with error code and message.
+     */
+    public static LimboException newSQLException(int errorCode, String errorMessage) {
+        LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
+        String msg;
+        if (code == LimboErrorCode.UNKNOWN_ERROR) {
+            msg = String.format("%s:%s (%s)", code, errorCode, errorMessage);
+        } else {
+            msg = String.format("%s (%s)", code, errorMessage);
+        }
+        return new LimboException(msg, code);
+    }
+
+    protected abstract String getErrorMessage(long errorMessagePointer);
 }
