@@ -743,9 +743,17 @@ impl Optimizable for ast::Expr {
                     rhs.check_index_scan(table_index, referenced_tables, available_indexes)?;
                 if rhs_index.is_some() {
                     // swap lhs and rhs
+                    let swapped_operator = match *op {
+                        ast::Operator::Equals => ast::Operator::Equals,
+                        ast::Operator::Greater => ast::Operator::Less,
+                        ast::Operator::GreaterEquals => ast::Operator::LessEquals,
+                        ast::Operator::Less => ast::Operator::Greater,
+                        ast::Operator::LessEquals => ast::Operator::GreaterEquals,
+                        _ => unreachable!(),
+                    };
                     let lhs_new = rhs.take_ownership();
                     let rhs_new = lhs.take_ownership();
-                    *self = Self::Binary(Box::new(lhs_new), *op, Box::new(rhs_new));
+                    *self = Self::Binary(Box::new(lhs_new), swapped_operator, Box::new(rhs_new));
                     return Ok(rhs_index);
                 }
                 Ok(None)
