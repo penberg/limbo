@@ -3,7 +3,7 @@ use crate::{
     opcodes_dictionary::OPCODE_DESCRIPTIONS,
 };
 use cli_table::{Cell, Table};
-use limbo_core::{Database, LimboError, StepResult, Value};
+use limbo_core::{Database, LimboError, Rows, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -304,8 +304,14 @@ impl Limbo {
     fn handle_first_input(&mut self, cmd: &str) {
         if cmd.trim().starts_with('.') {
             self.handle_dot_command(cmd);
-        } else if let Err(e) = self.query(cmd) {
-            eprintln!("{}", e);
+        } else {
+            let conn = self.conn.clone();
+            let runner = conn.query_runner(cmd.as_bytes());
+            for output in runner {
+                if let Err(e) = self.print_query_result(cmd, output) {
+                    let _ = self.writeln(e.to_string());
+                }
+            }
         }
         std::process::exit(0);
     }
@@ -443,17 +449,16 @@ impl Limbo {
             self.buffer_input(line);
             let buff = self.input_buff.clone();
             let echo = self.opts.echo;
-            buff.split(';')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .for_each(|stmt| {
-                    if echo {
-                        let _ = self.writeln(stmt);
-                    }
-                    if let Err(e) = self.query(stmt) {
-                        let _ = self.writeln(e.to_string());
-                    }
-                });
+            if echo {
+                let _ = self.writeln(&buff);
+            }
+            let conn = self.conn.clone();
+            let runner = conn.query_runner(buff.as_bytes());
+            for output in runner {
+                if let Err(e) = self.print_query_result(&buff, output) {
+                    let _ = self.writeln(e.to_string());
+                }
+            }
             self.reset_input();
         } else {
             self.buffer_input(line);
@@ -570,8 +575,12 @@ impl Limbo {
         }
     }
 
-    pub fn query(&mut self, sql: &str) -> anyhow::Result<()> {
-        match self.conn.query(sql) {
+    fn print_query_result(
+        &mut self,
+        sql: &str,
+        mut output: Result<Option<Rows>, LimboError>,
+    ) -> anyhow::Result<()> {
+        match output {
             Ok(Some(ref mut rows)) => match self.opts.output_mode {
                 OutputMode::Raw => loop {
                     if self.interrupt_count.load(Ordering::SeqCst) > 0 {

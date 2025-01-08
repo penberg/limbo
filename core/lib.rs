@@ -298,55 +298,63 @@ impl Connection {
     pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Rows>> {
         let sql = sql.into();
         trace!("Querying: {}", sql);
-        let db = self.db.clone();
-        let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
-        if let Some(cmd) = cmd {
-            match cmd {
-                Cmd::Stmt(stmt) => {
-                    let program = Rc::new(translate::translate(
-                        &self.schema.borrow(),
-                        stmt,
-                        self.header.clone(),
-                        self.pager.clone(),
-                        Rc::downgrade(self),
-                        syms,
-                    )?);
-                    let stmt = Statement::new(program, self.pager.clone());
-                    Ok(Some(Rows { stmt }))
-                }
-                Cmd::Explain(stmt) => {
-                    let program = translate::translate(
-                        &self.schema.borrow(),
-                        stmt,
-                        self.header.clone(),
-                        self.pager.clone(),
-                        Rc::downgrade(self),
-                        syms,
-                    )?;
-                    program.explain();
-                    Ok(None)
-                }
-                Cmd::ExplainQueryPlan(stmt) => {
-                    match stmt {
-                        ast::Stmt::Select(select) => {
-                            let mut plan = prepare_select_plan(
-                                &self.schema.borrow(),
-                                *select,
-                                &self.db.syms.borrow(),
-                            )?;
-                            optimize_plan(&mut plan)?;
-                            println!("{}", plan);
-                        }
-                        _ => todo!(),
-                    }
-                    Ok(None)
-                }
-            }
-        } else {
-            Ok(None)
+        match cmd {
+            Some(cmd) => self.run_cmd(cmd),
+            None => Ok(None),
         }
+    }
+
+    pub(crate) fn run_cmd(self: &Rc<Connection>, cmd: Cmd) -> Result<Option<Rows>> {
+        let db = self.db.clone();
+        let syms: &SymbolTable = &db.syms.borrow();
+
+        match cmd {
+            Cmd::Stmt(stmt) => {
+                let program = Rc::new(translate::translate(
+                    &self.schema.borrow(),
+                    stmt,
+                    self.header.clone(),
+                    self.pager.clone(),
+                    Rc::downgrade(self),
+                    syms,
+                )?);
+                let stmt = Statement::new(program, self.pager.clone());
+                Ok(Some(Rows { stmt }))
+            }
+            Cmd::Explain(stmt) => {
+                let program = translate::translate(
+                    &self.schema.borrow(),
+                    stmt,
+                    self.header.clone(),
+                    self.pager.clone(),
+                    Rc::downgrade(self),
+                    syms,
+                )?;
+                program.explain();
+                Ok(None)
+            }
+            Cmd::ExplainQueryPlan(stmt) => {
+                match stmt {
+                    ast::Stmt::Select(select) => {
+                        let mut plan = prepare_select_plan(
+                            &self.schema.borrow(),
+                            *select,
+                            &self.db.syms.borrow(),
+                        )?;
+                        optimize_plan(&mut plan)?;
+                        println!("{}", plan);
+                    }
+                    _ => todo!(),
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    pub fn query_runner<'a>(self: &'a Rc<Connection>, sql: &'a [u8]) -> QueryRunner<'a> {
+        QueryRunner::new(self, sql)
     }
 
     pub fn execute(self: &Rc<Connection>, sql: impl Into<String>) -> Result<()> {
@@ -558,5 +566,31 @@ impl SymbolTable {
         _arg_count: usize,
     ) -> Option<Rc<crate::function::ExternalFunc>> {
         self.functions.get(name).cloned()
+    }
+}
+
+pub struct QueryRunner<'a> {
+    parser: Parser<'a>,
+    conn: &'a Rc<Connection>,
+}
+
+impl<'a> QueryRunner<'a> {
+    pub(crate) fn new(conn: &'a Rc<Connection>, statements: &'a [u8]) -> Self {
+        Self {
+            parser: Parser::new(statements),
+            conn,
+        }
+    }
+}
+
+impl Iterator for QueryRunner<'_> {
+    type Item = Result<Option<Rows>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.parser.next() {
+            Ok(Some(cmd)) => Some(self.conn.run_cmd(cmd)),
+            Ok(None) => None,
+            Err(err) => Some(Result::Err(LimboError::from(err))),
+        }
     }
 }

@@ -1,3 +1,9 @@
 #!/usr/bin/env tclsh
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
+
+do_execsql_test_on_specific_db {:memory:} basic-insert {
+    create table temp (t1 integer, primary key (t1));
+    insert into temp values (1);
+    select * from temp;
+} {1}
