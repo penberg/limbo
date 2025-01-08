@@ -382,6 +382,7 @@ pub fn emit_group_by<'a>(
                     jump_if_condition_is_true: false,
                     jump_target_when_false: group_by_end_without_emitting_row_label,
                     jump_target_when_true: BranchOffset::Placeholder, // not used. FIXME: this is a bug. HAVING can have e.g. HAVING a OR b.
+                    parent_op: None,
                 },
                 &t_ctx.resolver,
             )?;

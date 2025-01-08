@@ -18,6 +18,7 @@ pub struct ConditionMetadata {
     pub jump_if_condition_is_true: bool,
     pub jump_target_when_true: BranchOffset,
     pub jump_target_when_false: BranchOffset,
+    pub parent_op: Option<ast::Operator>,
 }
 
 pub fn translate_condition_expr(
@@ -30,48 +31,87 @@ pub fn translate_condition_expr(
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
-            // In a binary AND, never jump to the 'jump_target_when_true' label on the first condition, because
-            // the second condition must also be true.
+            // We’re in an AND, so short-circuit on false:
             let _ = translate_condition_expr(
                 program,
                 referenced_tables,
                 lhs,
                 ConditionMetadata {
                     jump_if_condition_is_true: false,
+                    // Mark that the parent op for sub-expressions is AND
+                    parent_op: Some(ast::Operator::And),
                     ..condition_metadata
                 },
                 resolver,
             );
+            // Then evaluate RHS with the parent's metadata (still AND)
             let _ = translate_condition_expr(
                 program,
                 referenced_tables,
                 rhs,
-                condition_metadata,
+                ConditionMetadata {
+                    parent_op: Some(ast::Operator::And),
+                    ..condition_metadata
+                },
                 resolver,
             );
         }
         ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
-            let jump_target_when_false = program.allocate_label();
-            let _ = translate_condition_expr(
-                program,
-                referenced_tables,
-                lhs,
-                ConditionMetadata {
-                    // If the first condition is true, we don't need to evaluate the second condition.
+            if matches!(condition_metadata.parent_op, Some(ast::Operator::And)) {
+                // we are inside a bigger AND expression, so we do NOT jump to parent's 'true' if LHS or RHS is true.
+                // we only short-circuit the parent's false label if LHS and RHS are both false.
+                let local_true_label = program.allocate_label();
+                let local_false_label = program.allocate_label();
+
+                // evaluate LHS in normal OR fashion, short-circuit if true
+                let lhs_metadata = ConditionMetadata {
+                    jump_if_condition_is_true: true,
+                    jump_target_when_true: local_true_label,
+                    jump_target_when_false: local_false_label,
+                    parent_op: Some(ast::Operator::Or),
+                };
+                translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
+
+                // if lhs was false, we land here:
+                program.resolve_label(local_false_label, program.offset());
+
+                // evaluate rhs with normal OR: short-circuit if true, go to local_true
+                let rhs_metadata = ConditionMetadata {
+                    jump_if_condition_is_true: true,
+                    jump_target_when_true: local_true_label,
+                    jump_target_when_false: condition_metadata.jump_target_when_false,
+                    // if rhs is also false => parent's false
+                    parent_op: Some(ast::Operator::Or),
+                };
+                translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
+
+                // if we get here, both lhs+rhs are false: explicit jump to parent's false
+                program.emit_insn(Insn::Goto {
+                    target_pc: condition_metadata.jump_target_when_false,
+                });
+                // local_true means (C OR D) is true => we do *not* jump to parent's "true" label,
+                // because the parent is an AND, so we want to keep evaluating the rest:
+                program.resolve_label(local_true_label, program.offset());
+            } else {
+                let jump_target_when_false = program.allocate_label();
+
+                let lhs_metadata = ConditionMetadata {
                     jump_if_condition_is_true: true,
                     jump_target_when_false,
+                    parent_op: Some(ast::Operator::Or),
                     ..condition_metadata
-                },
-                resolver,
-            );
-            program.resolve_label(jump_target_when_false, program.offset());
-            let _ = translate_condition_expr(
-                program,
-                referenced_tables,
-                rhs,
-                condition_metadata,
-                resolver,
-            );
+                };
+
+                translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
+
+                // if LHS was false, we land here:
+                program.resolve_label(jump_target_when_false, program.offset());
+                let rhs_metadata = ConditionMetadata {
+                    parent_op: Some(ast::Operator::Or),
+                    ..condition_metadata
+                };
+                translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
+            }
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = program.alloc_register();
@@ -1917,7 +1957,6 @@ fn translate_variable_sized_function_parameter_list(
 
     for arg in args.iter() {
         translate_expr(program, referenced_tables, arg, current_reg, resolver)?;
-
         current_reg += 1;
     }
 
