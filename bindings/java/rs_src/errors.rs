@@ -16,9 +16,6 @@ pub struct ErrorCode;
 impl ErrorCode {
     // TODO: change CONNECTION_FAILURE_STATEMENT_IS_DML to appropriate error code number
     pub const STATEMENT_IS_DML: i32 = -1;
-
-    pub const UNKNOWN_ERROR: i32 = -1;
-    pub const ERROR_CODE_ETC: i32 = 9999;
 }
 
 impl From<jni::errors::Error> for CustomError {
