@@ -31,7 +31,8 @@ pub fn translate_condition_expr(
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
-            // We’re in an AND, so short-circuit on false:
+            // In a binary AND, never jump to the 'jump_target_when_true' label on the first condition, because
+            // the second condition must also be true.
             let _ = translate_condition_expr(
                 program,
                 referenced_tables,
@@ -44,7 +45,6 @@ pub fn translate_condition_expr(
                 },
                 resolver,
             );
-            // Then evaluate RHS with the parent's metadata (still AND)
             let _ = translate_condition_expr(
                 program,
                 referenced_tables,

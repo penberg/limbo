@@ -343,3 +343,25 @@ do_execsql_test where-between-true-and-2 {
     select id from users where id between true and 2;
 } {1
 2}
+
+do_execsql_test nested-parens-conditionals-or-and-or {
+    SELECT count(*) FROM users WHERE ((age > 25 OR age < 18) AND (city = 'Boston' OR state = 'MA'));
+} {146}
+
+do_execsql_test nested-parens-conditionals-and-or-and {
+    SELECT * FROM users WHERE (((age > 18 AND city = 'New Mario') OR age = 92) AND city = 'Lake Paul');
+} {{9989|Timothy|Harrison|woodsmichael@example.net|+1-447-830-5123|782 Wright Harbors|Lake Paul|ID|52330|92}}
+
+
+do_execsql_test nested-parens-conditionals-and-double-or {
+  SELECT * FROM users WHERE ((age > 30 OR age < 20) AND (state = 'NY' OR state = 'CA')) AND first_name glob 'An*' order by id;
+} {{1738|Angelica|Pena|jacksonjonathan@example.net|(867)536-1578x039|663 Jacqueline Estate Apt. 652|Clairehaven|NY|64172|74
+1811|Andrew|Mckee|jchen@example.net|359.939.9548|19809 Blair Junction Apt. 438|New Lawrencefort|NY|26240|42
+3773|Andrew|Peterson|cscott@example.com|(405)410-4972x90408|90513 Munoz Radial Apt. 786|Travisfurt|CA|52951|43
+3875|Anthony|Cordova|ocross@example.org|+1-356-999-4070x557|77081 Aguilar Turnpike|Michaelfurt|CA|73353|37
+4909|Andrew|Carson|michelle31@example.net|823.423.1516|78514 Luke Springs|Lake Crystal|CA|49481|74
+5498|Anna|Hall|elizabethheath@example.org|9778473725|5803 Taylor Tunnel|New Nicholaston|NY|21825|14
+6340|Angela|Freeman|juankelly@example.net|501.372.4720|3912 Ricardo Mission|West Nancyville|NY|60823|34
+8171|Andrea|Lee|dgarrison@example.com|001-594-430-0646|452 Anthony Stravenue|Sandraville|CA|28572|12
+9110|Anthony|Barrett|steven05@example.net|(562)928-9177x8454|86166 Foster Inlet Apt. 284|North Jeffreyburgh|CA|80147|97
+9279|Annette|Lynn|joanne37@example.com|(272)700-7181|2676 Laura Points Apt. 683|Tristanville|NY|48646|91}}
