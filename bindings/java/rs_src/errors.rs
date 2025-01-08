@@ -6,7 +6,7 @@ pub struct CustomError {
 }
 
 /// This struct defines error codes that correspond to the constants defined in the
-/// Java package `org.github.tursodatabase.exceptions.ErrorCode`.
+/// Java package `org.github.tursodatabase.LimboErrorCode`.
 ///
 /// These error codes are used to handle and represent specific error conditions
 /// that may occur within the Rust code and need to be communicated to the Java side.
@@ -14,9 +14,11 @@ pub struct CustomError {
 pub struct ErrorCode;
 
 impl ErrorCode {
-    pub const CONNECTION_FAILURE: i32 = -1;
-
+    // TODO: change CONNECTION_FAILURE_STATEMENT_IS_DML to appropriate error code number
     pub const STATEMENT_IS_DML: i32 = -1;
+
+    pub const UNKNOWN_ERROR: i32 = -1;
+    pub const ERROR_CODE_ETC: i32 = 9999;
 }
 
 impl From<jni::errors::Error> for CustomError {
