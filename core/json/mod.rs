@@ -121,17 +121,13 @@ pub fn json_array_length(
     json_value: &OwnedValue,
     json_path: Option<&OwnedValue>,
 ) -> crate::Result<OwnedValue> {
-    let path = match json_path {
-        Some(OwnedValue::Text(t)) => Some(t.value.to_string()),
-        Some(OwnedValue::Integer(i)) => Some(i.to_string()),
-        Some(OwnedValue::Float(f)) => Some(f.to_string()),
-        _ => None::<String>,
-    };
-
     let json = get_json_value(json_value)?;
 
-    let arr_val = if let Some(path) = path {
-        &json_extract_single(&json, path.as_str())?
+    let arr_val = if let Some(path) = json_path {
+        match json_extract_single(&json, path)? {
+            Some(val) => val,
+            None => return Ok(OwnedValue::Null),
+        }
     } else {
         &json
     };
@@ -161,10 +157,13 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 
     for path in paths {
         match path {
-            OwnedValue::Text(p) => {
-                let extracted = json_extract_single(&json, p.value.as_str())?;
+            OwnedValue::Null => {
+                return Ok(OwnedValue::Null);
+            }
+            _ => {
+                let extracted = json_extract_single(&json, path)?.unwrap_or_else(|| &Val::Null);
 
-                if paths.len() == 1 && extracted == Val::Null {
+                if paths.len() == 1 && extracted == &Val::Null {
                     return Ok(OwnedValue::Null);
                 }
 
@@ -173,8 +172,6 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
                     result.push(',');
                 }
             }
-            OwnedValue::Null => return Ok(OwnedValue::Null),
-            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
         }
     }
 
@@ -186,8 +183,49 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
 }
 
-fn json_extract_single(json: &Val, path: &str) -> crate::Result<Val> {
-    let json_path = json_path(path)?;
+pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result<OwnedValue> {
+    if let OwnedValue::Null = value {
+        return Ok(OwnedValue::Null);
+    }
+
+    let json = get_json_value(value)?;
+
+    let json = if let Some(path) = path {
+        match json_extract_single(&json, path)? {
+            Some(val) => val,
+            None => return Ok(OwnedValue::Null),
+        }
+    } else {
+        &json
+    };
+
+    let val = match json {
+        Val::Null => "null",
+        Val::Bool(v) => {
+            if *v {
+                "true"
+            } else {
+                "false"
+            }
+        }
+        Val::Integer(_) => "integer",
+        Val::Float(_) => "real",
+        Val::String(_) => "text",
+        Val::Array(_) => "array",
+        Val::Object(_) => "object",
+    };
+
+    Ok(OwnedValue::Text(LimboText::json(Rc::new(val.to_string()))))
+}
+
+/// Returns the value at the given JSON path. If the path does not exist, it returns None.
+/// If the path is an invalid path, returns an error.
+fn json_extract_single<'a>(json: &'a Val, path: &OwnedValue) -> crate::Result<Option<&'a Val>> {
+    let json_path = match path {
+        OwnedValue::Text(t) => json_path(t.value.as_str())?,
+        OwnedValue::Null => return Ok(None),
+        _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+    };
 
     let mut current_element = &Val::Null;
 
@@ -204,12 +242,10 @@ fn json_extract_single(json: &Val, path: &str) -> crate::Result<Val> {
                         if let Some(value) = map.get(key) {
                             current_element = value;
                         } else {
-                            return Ok(Val::Null);
+                            return Ok(None);
                         }
                     }
-                    _ => {
-                        return Ok(Val::Null);
-                    }
+                    _ => return Ok(None),
                 }
             }
             PathElement::ArrayLocator(idx) => match current_element {
@@ -223,16 +259,15 @@ fn json_extract_single(json: &Val, path: &str) -> crate::Result<Val> {
                     if idx < array.len() as i32 {
                         current_element = &array[idx as usize];
                     } else {
-                        return Ok(Val::Null);
+                        return Ok(None);
                     }
                 }
-                _ => {
-                    return Ok(Val::Null);
-                }
+                _ => return Ok(None),
             },
         }
     }
-    Ok(current_element.clone())
+
+    Ok(Some(&current_element))
 }
 
 #[cfg(test)]

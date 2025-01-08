@@ -789,7 +789,7 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
-                    JsonFunc::JsonArrayLength => {
+                    JsonFunc::JsonArrayLength | JsonFunc::JsonType => {
                         let args = if let Some(args) = args {
                             if args.len() > 2 {
                                 crate::bail_parse_error!(
@@ -837,7 +837,7 @@ pub fn translate_expr(
                         ScalarFunc::Changes => {
                             if let Some(_) = args {
                                 crate::bail_parse_error!(
-                                    "{} fucntion with more than 0 arguments",
+                                    "{} function with more than 0 arguments",
                                     srf
                                 );
                             }
