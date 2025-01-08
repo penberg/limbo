@@ -338,3 +338,8 @@ do_execsql_test between-price-range-with-names {
     AND (name = 'sweatshirt' OR name = 'sneakers');
 } {5|sweatshirt|74.0
 8|sneakers|82.0}
+
+do_execsql_test where-between-true-and-2 {
+    select id from users where id between true and 2;
+} {1
+2}
