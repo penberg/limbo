@@ -28,6 +28,7 @@ use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 #[cfg(feature = "uuid")]
 use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::json::{json_arrow_extract, json_arrow_shift_extract};
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::schema::Table;
@@ -1376,6 +1377,24 @@ impl Program {
                             };
 
                             match result {
+                                Ok(json) => state.registers[*dest] = json,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(
+                            func @ (JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract),
+                        ) => {
+                            assert_eq!(arg_count, 2);
+                            let json = &state.registers[*start_reg];
+                            let path = &state.registers[*start_reg + 1];
+                            let func = match func {
+                                JsonFunc::JsonArrowExtract => json_arrow_extract,
+                                JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
+                                _ => unreachable!(),
+                            };
+                            let json_str = func(json, path);
+                            match json_str {
                                 Ok(json) => state.registers[*dest] = json,
                                 Err(e) => return Err(e),
                             }

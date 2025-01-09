@@ -143,6 +143,53 @@ pub fn json_array_length(
     }
 }
 
+/// Implements the -> operator. Always returns a proper JSON value.
+/// https://sqlite.org/json1.html#the_and_operators
+pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Result<OwnedValue> {
+    if let OwnedValue::Null = value {
+        return Ok(OwnedValue::Null);
+    }
+
+    let json = get_json_value(value)?;
+
+    match path {
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        OwnedValue::Text(p) => {
+            let extracted = json_extract_single(&json, p.value.as_str())?;
+
+            let json = crate::json::to_string(&extracted).unwrap();
+            Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+        }
+        _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+    }
+}
+
+/// Implements the ->> operator. Always returns a SQL representation of the JSON subcomponent.
+/// https://sqlite.org/json1.html#the_and_operators
+pub fn json_arrow_shift_extract(
+    value: &OwnedValue,
+    path: &OwnedValue,
+) -> crate::Result<OwnedValue> {
+    if let OwnedValue::Null = value {
+        return Ok(OwnedValue::Null);
+    }
+
+    let json = get_json_value(value)?;
+
+    match path {
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        OwnedValue::Text(p) => {
+            let extracted = json_extract_single(&json, p.value.as_str())?;
+
+            convert_json_to_db_type(&extracted)
+        }
+        _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+    }
+}
+
+/// Extracts a JSON value from a JSON object or array.
+/// If there's only a single path, the return value might be either a TEXT or a database type.
+/// https://sqlite.org/json1.html#the_json_extract_function
 pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<OwnedValue> {
     if let OwnedValue::Null = value {
         return Ok(OwnedValue::Null);
@@ -153,11 +200,21 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
     }
 
     let json = get_json_value(value)?;
-    let mut result = "".to_string();
 
-    if paths.len() > 1 {
-        result.push('[');
+    if paths.len() == 1 {
+        match &paths[0] {
+            OwnedValue::Null => return Ok(OwnedValue::Null),
+            OwnedValue::Text(p) => {
+                let extracted = json_extract_single(&json, p.value.as_str())?;
+
+                return convert_json_to_db_type(&extracted);
+            }
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", paths[0].to_string()),
+        }
     }
+
+    // multiple paths - we should return an array
+    let mut result = "[".to_string();
 
     for path in paths {
         match path {
@@ -184,6 +241,34 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
     }
 
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+}
+
+/// Returns a value with type defined by SQLite documentation:
+///   > the SQL datatype of the result is NULL for a JSON null,
+///   > INTEGER or REAL for a JSON numeric value,
+///   > an INTEGER zero for a JSON false value,
+///   > an INTEGER one for a JSON true value,
+///   > the dequoted text for a JSON string value,
+///   > and a text representation for JSON object and array values.
+/// https://sqlite.org/json1.html#the_json_extract_function
+fn convert_json_to_db_type(extracted: &Val) -> crate::Result<OwnedValue> {
+    match extracted {
+        Val::Null => Ok(OwnedValue::Null),
+        Val::Float(f) => Ok(OwnedValue::Float(*f)),
+        Val::Integer(i) => Ok(OwnedValue::Integer(*i)),
+        Val::Bool(b) => {
+            if *b {
+                Ok(OwnedValue::Integer(1))
+            } else {
+                Ok(OwnedValue::Integer(0))
+            }
+        }
+        Val::String(s) => Ok(OwnedValue::Text(LimboText::json(Rc::new(s.clone())))),
+        _ => {
+            let json = crate::json::to_string(&extracted).unwrap();
+            Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+        }
+    }
 }
 
 fn json_extract_single(json: &Val, path: &str) -> crate::Result<Val> {
