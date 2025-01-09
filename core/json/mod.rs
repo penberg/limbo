@@ -131,7 +131,7 @@ pub fn json_array_length(
     let json = get_json_value(json_value)?;
 
     let arr_val = if let Some(path) = path {
-        &json_extract_single(&json, path.as_str())?
+        &json_extract_single(&json, path.as_str(), true)?
     } else {
         &json
     };
@@ -150,15 +150,20 @@ pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Resul
         return Ok(OwnedValue::Null);
     }
 
-    let json = get_json_value(value)?;
-
     match path {
         OwnedValue::Null => Ok(OwnedValue::Null),
         OwnedValue::Text(p) => {
-            let extracted = json_extract_single(&json, p.value.as_str())?;
+            let json = get_json_value(value)?;
+            let extracted = json_extract_single(&json, p.value.as_str(), false)?;
 
             let json = crate::json::to_string(&extracted).unwrap();
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+        }
+        OwnedValue::Integer(i) => {
+            let json = get_json_value(value)?;
+            let extracted = json_extract_single(&json, &i.to_string(), false)?;
+
+            convert_json_to_db_type(&extracted, true)
         }
         _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
     }
@@ -174,14 +179,13 @@ pub fn json_arrow_shift_extract(
         return Ok(OwnedValue::Null);
     }
 
-    let json = get_json_value(value)?;
-
     match path {
         OwnedValue::Null => Ok(OwnedValue::Null),
         OwnedValue::Text(p) => {
-            let extracted = json_extract_single(&json, p.value.as_str())?;
+            let json = get_json_value(value)?;
+            let extracted = json_extract_single(&json, p.value.as_str(), false)?;
 
-            convert_json_to_db_type(&extracted)
+            convert_json_to_db_type(&extracted, true)
         }
         _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
     }
@@ -197,48 +201,37 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 
     if paths.is_empty() {
         return Ok(OwnedValue::Null);
-    }
-
-    let json = get_json_value(value)?;
-
-    if paths.len() == 1 {
+    } else if paths.len() == 1 {
         match &paths[0] {
             OwnedValue::Null => return Ok(OwnedValue::Null),
             OwnedValue::Text(p) => {
-                let extracted = json_extract_single(&json, p.value.as_str())?;
+                let json = get_json_value(value)?;
+                let extracted = json_extract_single(&json, p.value.as_str(), true)?;
 
-                return convert_json_to_db_type(&extracted);
+                return convert_json_to_db_type(&extracted, false);
             }
             _ => crate::bail_constraint_error!("JSON path error near: {:?}", paths[0].to_string()),
         }
     }
 
-    // multiple paths - we should return an array
+    let json = get_json_value(value)?;
     let mut result = "[".to_string();
 
     for path in paths {
         match path {
             OwnedValue::Text(p) => {
-                let extracted = json_extract_single(&json, p.value.as_str())?;
-
-                if paths.len() == 1 && extracted == Val::Null {
-                    return Ok(OwnedValue::Null);
-                }
+                let extracted = json_extract_single(&json, p.value.as_str(), true)?;
 
                 result.push_str(&crate::json::to_string(&extracted).unwrap());
-                if paths.len() > 1 {
-                    result.push(',');
-                }
+                result.push(',');
             }
             OwnedValue::Null => return Ok(OwnedValue::Null),
             _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
         }
     }
 
-    if paths.len() > 1 {
-        result.pop(); // remove the final comma
-        result.push(']');
-    }
+    result.pop(); // remove the final comma
+    result.push(']');
 
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
 }
@@ -251,7 +244,9 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 ///   > the dequoted text for a JSON string value,
 ///   > and a text representation for JSON object and array values.
 /// https://sqlite.org/json1.html#the_json_extract_function
-fn convert_json_to_db_type(extracted: &Val) -> crate::Result<OwnedValue> {
+///
+/// *all_as_db* - if true, objects and arrays will be returned as pure TEXT without the JSON subtype
+fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<OwnedValue> {
     match extracted {
         Val::Null => Ok(OwnedValue::Null),
         Val::Float(f) => Ok(OwnedValue::Float(*f)),
@@ -263,16 +258,20 @@ fn convert_json_to_db_type(extracted: &Val) -> crate::Result<OwnedValue> {
                 Ok(OwnedValue::Integer(0))
             }
         }
-        Val::String(s) => Ok(OwnedValue::Text(LimboText::json(Rc::new(s.clone())))),
+        Val::String(s) => Ok(OwnedValue::Text(LimboText::new(Rc::new(s.clone())))),
         _ => {
             let json = crate::json::to_string(&extracted).unwrap();
-            Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+            if all_as_db {
+                Ok(OwnedValue::Text(LimboText::new(Rc::new(json))))
+            } else {
+                Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+            }
         }
     }
 }
 
-fn json_extract_single(json: &Val, path: &str) -> crate::Result<Val> {
-    let json_path = json_path(path)?;
+fn json_extract_single(json: &Val, path: &str, strict: bool) -> crate::Result<Val> {
+    let json_path = json_path(path, strict)?;
 
     let mut current_element = &Val::Null;
 
