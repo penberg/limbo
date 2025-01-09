@@ -27,6 +27,7 @@ pub enum JsonFunc {
     JsonArray,
     JsonExtract,
     JsonArrayLength,
+    JsonType,
 }
 
 #[cfg(feature = "json")]
@@ -40,6 +41,7 @@ impl Display for JsonFunc {
                 Self::JsonArray => "json_array".to_string(),
                 Self::JsonExtract => "json_extract".to_string(),
                 Self::JsonArrayLength => "json_array_length".to_string(),
+                Self::JsonType => "json_type".to_string(),
             }
         )
     }
@@ -371,6 +373,8 @@ impl Func {
             "json_array" => Ok(Self::Json(JsonFunc::JsonArray)),
             #[cfg(feature = "json")]
             "json_extract" => Ok(Func::Json(JsonFunc::JsonExtract)),
+            #[cfg(feature = "json")]
+            "json_type" => Ok(Func::Json(JsonFunc::JsonType)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),
