@@ -1,0 +1,8 @@
+{
+  "name": "test-limbo",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "limbo-wasm": "file:../"
+  }
+}

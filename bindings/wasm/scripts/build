@@ -1,12 +1,30 @@
 #!/bin/bash
+set -e
 
-# get target as argument from cli, defaults to nodejs if no argument is supplied
-TARGET=${1:-nodejs}
-FEATURE="nodejs"
+# Define final output directories
+NODE_DIR="dist/node"
+WEB_DIR="dist/web"
+rm -rf dist
+rm -rf pkg
 
-if [ "$TARGET" = "web" ]; then
-    FEATURE="web"
-fi
+mkdir -p $NODE_DIR $WEB_DIR pkg
 
-npx wasm-pack build --no-pack --target $TARGET --no-default-features --features $FEATURE
-cp package.json pkg/package.json
+# Build Node.js target
+npx wasm-pack build \
+  --target nodejs \
+  --out-name index \
+  --no-default-features \
+  --features nodejs
+mv pkg/* $NODE_DIR/
+mv $NODE_DIR/index.js $NODE_DIR/index.cjs
+rm -r pkg
+
+# Build web target
+npx wasm-pack build \
+  --target web \
+  --out-name index \
+  --no-default-features \
+  --features web
+mv pkg/* $WEB_DIR/
+cp src/opfs.js $WEB_DIR/
+rm -r pkg

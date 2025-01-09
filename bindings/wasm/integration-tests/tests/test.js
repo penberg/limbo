@@ -7,15 +7,15 @@ test.beforeEach(async (t) => {
         CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)
     `);
     db.exec(
-        "INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.org')"
+        "INSERT INTO users (id, name, email) VALUES (1, 'Alice', 'alice@example.org')",
     );
     db.exec(
-        "INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')"
+        "INSERT INTO users (id, name, email) VALUES (2, 'Bob', 'bob@example.com')",
     );
     t.context = {
         db,
         errorType,
-        provider
+        provider,
     };
 });
 
@@ -35,7 +35,9 @@ test.serial("Statement.raw().get()", async (t) => {
 
     const stmt = db.prepare("SELECT * FROM users");
     const expected = [
-        1, "Alice", "alice@example.org"
+        1,
+        "Alice",
+        "alice@example.org",
     ];
     t.deepEqual(stmt.raw().get(), expected);
 
@@ -54,13 +56,13 @@ test.serial("Statement.raw().iterate()", async (t) => {
     ];
 
     let iter = stmt.raw().iterate();
-    t.is(typeof iter[Symbol.iterator], 'function');
-    t.deepEqual(iter.next(), expected[0])
-    t.deepEqual(iter.next(), expected[1])
-    t.deepEqual(iter.next(), expected[2])
+    t.is(typeof iter[Symbol.iterator], "function");
+    t.deepEqual(iter.next(), expected[0]);
+    t.deepEqual(iter.next(), expected[1]);
+    t.deepEqual(iter.next(), expected[2]);
 
     const emptyStmt = db.prepare("SELECT * FROM users WHERE id = -1");
-    t.is(typeof emptyStmt[Symbol.iterator], 'undefined');
+    t.is(typeof emptyStmt[Symbol.iterator], "undefined");
     t.throws(() => emptyStmt.next(), { instanceOf: TypeError });
 });
 
@@ -69,7 +71,7 @@ const connect = async (path_opt) => {
     const provider = process.env.PROVIDER;
     if (provider === "limbo-wasm") {
         const database = process.env.LIBSQL_DATABASE ?? path;
-        const x = await import("limbo-wasm");
+        const x = await import("limbo-wasm/node");
         const options = {};
         const db = new x.Database(database, options);
         return [db, x.SqliteError, provider];
@@ -82,3 +84,4 @@ const connect = async (path_opt) => {
     }
     throw new Error("Unknown provider: " + provider);
 };
+

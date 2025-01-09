@@ -9,14 +9,15 @@
     "type": "git",
     "url": "https://github.com/penberg/limbo"
   },
-  "files": [
-    "snippets",
-    "limbo_wasm_bg.wasm",
-    "limbo_wasm.js",
-    "limbo_wasm.d.ts"
-  ],
-  "main": "limbo_wasm.js",
-  "types": "limbo_wasm.d.ts",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "import": "./dist/web/index.js",
+      "require": "./dist/node/index.cjs"
+    }
+  },
+  "main": "./dist/node/index.cjs",
+  "types": "./dist/node/index.d.ts",
   "type": "module",
   "scripts": {
     "dev": "vite",

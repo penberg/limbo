@@ -3,13 +3,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "test": "PROVIDER=better-sqlite3 ava tests/test.js && PROVIDER=limbo-wasm ava tests/test.js && rm *.db *.db-wal"
+    "test": "PROVIDER=better-sqlite3 npx ava tests/test.js && PROVIDER=limbo-wasm npx ava tests/test.js && rm *.db *.db-wal"
   },
   "devDependencies": {
     "ava": "^6.2.0"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "limbo-wasm": "../pkg"
+    "limbo-wasm": "../dist/"
   }
 }
