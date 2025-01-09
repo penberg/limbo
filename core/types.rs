@@ -1,8 +1,8 @@
-use std::fmt::Display;
-use std::rc::Rc;
-
 use crate::error::LimboError;
 use crate::Result;
+use extension_api::Value as ExtValue;
+use std::fmt::Display;
+use std::rc::Rc;
 
 use crate::storage::sqlite3_ondisk::write_varint;
 
@@ -13,6 +13,45 @@ pub enum Value<'a> {
     Float(f64),
     Text(&'a String),
     Blob(&'a Vec<u8>),
+}
+
+impl From<&OwnedValue> for extension_api::Value {
+    fn from(value: &OwnedValue) -> Self {
+        match value {
+            OwnedValue::Null => extension_api::Value::Null,
+            OwnedValue::Integer(i) => extension_api::Value::Integer(*i),
+            OwnedValue::Float(f) => extension_api::Value::Float(*f),
+            OwnedValue::Text(text) => extension_api::Value::Text(text.value.to_string()),
+            OwnedValue::Blob(blob) => extension_api::Value::Blob(blob.to_vec()),
+            OwnedValue::Agg(_) => {
+                panic!("Cannot convert Aggregate context to extension_api::Value")
+            } // Handle appropriately
+            OwnedValue::Record(_) => panic!("Cannot convert Record to extension_api::Value"), // Handle appropriately
+        }
+    }
+}
+impl From<ExtValue> for OwnedValue {
+    fn from(value: ExtValue) -> Self {
+        match value {
+            ExtValue::Null => OwnedValue::Null,
+            ExtValue::Integer(i) => OwnedValue::Integer(i),
+            ExtValue::Float(f) => OwnedValue::Float(f),
+            ExtValue::Text(text) => OwnedValue::Text(LimboText::new(Rc::new(text.to_string()))),
+            ExtValue::Blob(blob) => OwnedValue::Blob(Rc::new(blob.to_vec())),
+        }
+    }
+}
+
+impl<'a> From<&'a crate::Value<'a>> for ExtValue {
+    fn from(value: &'a crate::Value<'a>) -> Self {
+        match value {
+            crate::Value::Null => extension_api::Value::Null,
+            crate::Value::Integer(i) => extension_api::Value::Integer(*i),
+            crate::Value::Float(f) => extension_api::Value::Float(*f),
+            crate::Value::Text(t) => extension_api::Value::Text(t.to_string()),
+            crate::Value::Blob(b) => extension_api::Value::Blob(b.to_vec()),
+        }
+    }
 }
 
 impl Display for Value<'_> {

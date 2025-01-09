@@ -1872,8 +1872,13 @@ impl Program {
                             _ => unreachable!(), // when more extension types are added
                         },
                         crate::function::Func::External(f) => {
-                            let result = (f.func)(&[])?;
-                            state.registers[*dest] = result;
+                            let values = &state.registers[*start_reg..*start_reg + arg_count];
+                            let args: Vec<_> = values.into_iter().map(|v| v.into()).collect();
+                            let result = f
+                                .func
+                                .execute(args.as_slice())
+                                .map_err(|e| LimboError::ExtensionError(e.to_string()))?;
+                            state.registers[*dest] = result.into();
                         }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {

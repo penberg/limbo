@@ -17,7 +17,9 @@ mod vdbe;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use extension_api::{Extension, ExtensionApi};
 use fallible_iterator::FallibleIterator;
+use libloading::{Library, Symbol};
 use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
@@ -34,12 +36,11 @@ use storage::pager::allocate_page;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
+pub use types::Value;
 use util::parse_schema_rows;
 
-use translate::select::prepare_select_plan;
-use types::OwnedValue;
-
 pub use error::LimboError;
+use translate::select::prepare_select_plan;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
 
 use crate::translate::optimizer::optimize_plan;
@@ -56,8 +57,6 @@ pub use storage::pager::Page;
 pub use storage::pager::Pager;
 pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
-pub use types::Value;
-
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
 #[derive(Clone)]
@@ -135,11 +134,11 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
-        ext::init(&mut db);
+        // ext::init(&mut db);
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),
-            pager: pager,
+            pager,
             schema: schema.clone(),
             header,
             transaction_state: RefCell::new(TransactionState::None),
@@ -169,16 +168,31 @@ impl Database {
     pub fn define_scalar_function<S: AsRef<str>>(
         &self,
         name: S,
-        func: impl Fn(&[Value]) -> Result<OwnedValue> + 'static,
+        func: Arc<dyn extension_api::ScalarFunction>,
     ) {
         let func = function::ExternalFunc {
             name: name.as_ref().to_string(),
-            func: Box::new(func),
+            func: func.clone(),
         };
         self.syms
             .borrow_mut()
             .functions
-            .insert(name.as_ref().to_string(), Rc::new(func));
+            .insert(name.as_ref().to_string(), Arc::new(func));
+    }
+
+    pub fn load_extension(&self, path: &str) -> Result<()> {
+        let lib =
+            unsafe { Library::new(path).map_err(|e| LimboError::ExtensionError(e.to_string()))? };
+        unsafe {
+            let register: Symbol<unsafe extern "C" fn(&dyn ExtensionApi) -> Box<dyn Extension>> =
+                lib.get(b"register_extension")
+                    .map_err(|e| LimboError::ExtensionError(e.to_string()))?;
+            let extension = register(self);
+            extension
+                .load()
+                .map_err(|e| LimboError::ExtensionError(e.to_string()))?;
+        }
+        Ok(())
     }
 }
 
@@ -372,6 +386,10 @@ impl Connection {
         Ok(())
     }
 
+    pub fn load_extension(&self, path: &str) -> Result<()> {
+        Database::load_extension(self.db.as_ref(), path)
+    }
+
     /// Close a connection and checkpoint.
     pub fn close(&self) -> Result<()> {
         loop {
@@ -468,15 +486,24 @@ impl Rows {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct SymbolTable {
-    pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
+    pub functions: HashMap<String, Arc<crate::function::ExternalFunc>>,
+    extensions: Vec<Rc<dyn Extension>>,
+}
+
+impl std::fmt::Debug for SymbolTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SymbolTable")
+            .field("functions", &self.functions)
+            .finish()
+    }
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            extensions: Vec::new(),
         }
     }
 
@@ -484,7 +511,7 @@ impl SymbolTable {
         &self,
         name: &str,
         _arg_count: usize,
-    ) -> Option<Rc<crate::function::ExternalFunc>> {
+    ) -> Option<Arc<crate::function::ExternalFunc>> {
         self.functions.get(name).cloned()
     }
 }

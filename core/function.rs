@@ -1,11 +1,20 @@
 use crate::ext::ExtFunc;
 use std::fmt;
 use std::fmt::{Debug, Display};
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub struct ExternalFunc {
     pub name: String,
-    pub func: Box<dyn Fn(&[crate::types::Value]) -> crate::Result<crate::types::OwnedValue>>,
+    pub func: Arc<dyn extension_api::ScalarFunction>,
+}
+
+impl ExternalFunc {
+    pub fn new(name: &str, func: Arc<dyn extension_api::ScalarFunction>) -> Self {
+        Self {
+            name: name.to_string(),
+            func,
+        }
+    }
 }
 
 impl Debug for ExternalFunc {
@@ -300,7 +309,7 @@ pub enum Func {
     #[cfg(feature = "json")]
     Json(JsonFunc),
     Extension(ExtFunc),
-    External(Rc<ExternalFunc>),
+    External(Arc<ExternalFunc>),
 }
 
 impl Display for Func {

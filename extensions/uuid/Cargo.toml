@@ -1,0 +1,11 @@
+[package]
+name = "uuid"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+extension_api = { path = "../../extension_api"}
+uuid = { version = "1.11.0", features = ["v4", "v7"] }

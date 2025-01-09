@@ -129,6 +129,8 @@ pub enum Command {
     Tables,
     /// Import data from FILE into TABLE
     Import,
+    /// Loads an extension library
+    LoadExtension,
 }
 
 impl Command {
@@ -141,7 +143,12 @@ impl Command {
             | Self::ShowInfo
             | Self::Tables
             | Self::SetOutput => 0,
-            Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
+            Self::Open
+            | Self::OutputMode
+            | Self::Cwd
+            | Self::Echo
+            | Self::NullValue
+            | Self::LoadExtension => 1,
             Self::Import => 2,
         } + 1) // argv0
     }
@@ -160,6 +167,7 @@ impl Command {
             Self::NullValue => ".nullvalue <string>",
             Self::Echo => ".echo on|off",
             Self::Tables => ".tables",
+            Self::LoadExtension => ".load",
             Self::Import => &IMPORT_HELP,
         }
     }
@@ -182,6 +190,7 @@ impl FromStr for Command {
             ".nullvalue" => Ok(Self::NullValue),
             ".echo" => Ok(Self::Echo),
             ".import" => Ok(Self::Import),
+            ".load" => Ok(Self::LoadExtension),
             _ => Err("Unknown command".to_string()),
         }
     }
@@ -312,6 +321,16 @@ impl Limbo {
             n if n < 10 => format!("(x{}...> ", n),
             _ => String::from("(.....> "),
         };
+    }
+
+    fn handle_load_extension(&mut self) -> Result<(), String> {
+        let mut args = self.input_buff.split_whitespace();
+        let _ = args.next();
+        let lib = args
+            .next()
+            .ok_or("No library specified")
+            .map_err(|e| e.to_string())?;
+        self.conn.load_extension(lib).map_err(|e| e.to_string())
     }
 
     fn display_in_memory(&mut self) -> std::io::Result<()> {
@@ -536,6 +555,11 @@ impl Limbo {
                     if let Err(e) = import_file.import(&args) {
                         let _ = self.writeln(e.to_string());
                     };
+                }
+                Command::LoadExtension => {
+                    if let Err(e) = self.handle_load_extension() {
+                        let _ = self.writeln(e.to_string());
+                    }
                 }
             }
         } else {

@@ -136,9 +136,9 @@ fn uuid_to_unix(uuid: &[u8; 16]) -> u64 {
         | (uuid[5] as u64)
 }
 
-pub fn init(db: &mut Database) {
-    db.define_scalar_function("uuid4", |_args| exec_uuid4());
-}
+//pub fn init(db: &mut Database) {
+//    db.define_scalar_function("uuid4", |_args| exec_uuid4());
+//}
 
 #[cfg(test)]
 #[cfg(feature = "uuid")]

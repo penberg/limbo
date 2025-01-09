@@ -564,7 +564,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
- "uuid",
+ "uuid 1.11.0",
 ]
 
 [[package]]
@@ -693,6 +693,10 @@ dependencies = [
  "libc",
  "str-buf",
 ]
+
+[[package]]
+name = "extension_api"
+version = "0.0.11"
 
 [[package]]
 name = "fallible-iterator"
@@ -1138,6 +1142,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5aba8db14291edd000dfcc4d620c7ebfb122c613afb886ca8803fa4e128a20a"
 
 [[package]]
+name = "libloading"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
+dependencies = [
+ "cfg-if",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
 name = "libmimalloc-sys"
 version = "0.1.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1204,6 +1218,7 @@ dependencies = [
  "cfg_block",
  "chrono",
  "criterion",
+ "extension_api",
  "fallible-iterator 0.3.0",
  "getrandom",
  "hex",
@@ -1212,6 +1227,7 @@ dependencies = [
  "jsonb",
  "julian_day_converter",
  "libc",
+ "libloading",
  "limbo_macros",
  "log",
  "miette",
@@ -1232,7 +1248,7 @@ dependencies = [
  "sqlite3-parser",
  "tempfile",
  "thiserror 1.0.69",
- "uuid",
+ "uuid 1.11.0",
 ]
 
 [[package]]
@@ -2260,7 +2276,7 @@ dependencies = [
  "debugid",
  "memmap2",
  "stable_deref_trait",
- "uuid",
+ "uuid 1.11.0",
 ]
 
 [[package]]
@@ -2501,6 +2517,14 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "uuid"
+version = "0.0.11"
+dependencies = [
+ "extension_api",
+ "uuid 1.11.0",
+]
 
 [[package]]
 name = "uuid"
