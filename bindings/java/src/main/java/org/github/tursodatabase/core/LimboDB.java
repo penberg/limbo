@@ -31,6 +31,19 @@ public final class LimboDB extends AbstractDB {
     }
 
     /**
+     * Loads the SQLite interface backend.
+     */
+    public static void load() {
+        if (isLoaded) return;
+
+        try {
+            System.loadLibrary("_limbo_java");
+        } finally {
+            isLoaded = true;
+        }
+    }
+
+    /**
      * @param url      e.g. "jdbc:sqlite:fileName
      * @param fileName e.g. path to file
      */
@@ -41,19 +54,6 @@ public final class LimboDB extends AbstractDB {
     // TODO: receive config as argument
     private LimboDB(String url, String fileName) {
         super(url, fileName);
-    }
-
-    /**
-     * Loads the SQLite interface backend.
-     */
-    public void load() {
-        if (isLoaded) return;
-
-        try {
-            System.loadLibrary("_limbo_java");
-        } finally {
-            isLoaded = true;
-        }
     }
 
     // WRAPPER FUNCTIONS ////////////////////////////////////////////
