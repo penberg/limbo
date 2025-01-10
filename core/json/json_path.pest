@@ -6,5 +6,3 @@ relaxed_array_locator = ${ negative_index_indicator? ~ array_offset }
 root = ${ "$" }
 json_path_key = ${ identifier | string }
 path = ${ SOI ~ root ~ (array_locator | "." ~ json_path_key)* ~ EOI }
-
-relaxed_path = ${ SOI ~ ((root ~ (array_locator | "." ~ json_path_key)*) | json_path_key | relaxed_array_locator) ~ EOI }

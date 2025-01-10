@@ -6,7 +6,7 @@ mod ser;
 use std::rc::Rc;
 
 pub use crate::json::de::from_str;
-use crate::json::json_path::{json_path, PathElement};
+use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
 use indexmap::IndexMap;
@@ -147,10 +147,15 @@ pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Resul
     }
 
     let json = get_json_value(value)?;
-    let extracted = json_extract_single(&json, path, false)?.unwrap_or_else(|| &Val::Null);
-    let json = crate::json::to_string(extracted).unwrap();
+    let extracted = json_extract_single(&json, path, false)?;
 
-    Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+    if let Some(val) = extracted {
+        let json = crate::json::to_string(val).unwrap();
+
+        Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+    } else {
+        Ok(OwnedValue::Null)
+    }
 }
 
 /// Implements the ->> operator. Always returns a SQL representation of the JSON subcomponent.
@@ -290,10 +295,32 @@ fn json_extract_single<'a>(
     path: &OwnedValue,
     strict: bool,
 ) -> crate::Result<Option<&'a Val>> {
-    let json_path = match path {
-        OwnedValue::Text(t) => json_path(t.value.as_str(), strict)?,
-        OwnedValue::Null => return Ok(None),
-        _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+    let json_path = if strict {
+        match path {
+            OwnedValue::Text(t) => json_path(t.value.as_str())?,
+            OwnedValue::Null => return Ok(None),
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+        }
+    } else {
+        match path {
+            OwnedValue::Text(t) => {
+                if t.value.starts_with("$") {
+                    json_path(t.value.as_str())?
+                } else {
+                    JsonPath {
+                        elements: vec![PathElement::Root(), PathElement::Key(t.value.to_string())],
+                    }
+                }
+            }
+            OwnedValue::Null => return Ok(None),
+            OwnedValue::Integer(i) => JsonPath {
+                elements: vec![PathElement::Root(), PathElement::ArrayLocator(*i as i32)],
+            },
+            OwnedValue::Float(f) => JsonPath {
+                elements: vec![PathElement::Root(), PathElement::Key(f.to_string())],
+            },
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+        }
     };
 
     let mut current_element = &Val::Null;
