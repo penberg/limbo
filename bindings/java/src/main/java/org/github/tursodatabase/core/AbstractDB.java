@@ -172,35 +172,4 @@ public abstract class AbstractDB {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
-
-    /**
-     * Throws SQL Exception with error code.
-     *
-     * @param errorCode Error code to be passed.
-     * @throws SQLException Formatted SQLException with error code
-     */
-    @NativeInvocation
-    private LimboException newSQLException(int errorCode, long errorMessagePointer) throws SQLException {
-        throw newSQLException(errorCode, getErrorMessage(errorMessagePointer));
-    }
-
-    /**
-     * Throws formatted SQLException with error code and message.
-     *
-     * @param errorCode    Error code to be passed.
-     * @param errorMessage throw newSQLException(errorCode);Error message to be passed.
-     * @return Formatted SQLException with error code and message.
-     */
-    public static LimboException newSQLException(int errorCode, String errorMessage) {
-        LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
-        String msg;
-        if (code == LimboErrorCode.UNKNOWN_ERROR) {
-            msg = String.format("%s:%s (%s)", code, errorCode, errorMessage);
-        } else {
-            msg = String.format("%s (%s)", code, errorMessage);
-        }
-        return new LimboException(msg, code);
-    }
-
-    protected abstract String getErrorMessage(long errorMessagePointer);
 }
