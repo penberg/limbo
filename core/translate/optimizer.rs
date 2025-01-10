@@ -24,7 +24,7 @@ pub fn optimize_plan(plan: &mut Plan) -> Result<()> {
  */
 fn optimize_select_plan(plan: &mut SelectPlan) -> Result<()> {
     optimize_subqueries(&mut plan.source)?;
-    rewrite_exprs(&mut plan.source, &mut plan.where_clause)?;
+    rewrite_exprs_select(plan)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constants(&mut plan.source, &mut plan.where_clause)?
     {
@@ -55,7 +55,7 @@ fn optimize_select_plan(plan: &mut SelectPlan) -> Result<()> {
 }
 
 fn optimize_delete_plan(plan: &mut DeletePlan) -> Result<()> {
-    rewrite_exprs(&mut plan.source, &mut plan.where_clause)?;
+    rewrite_exprs_delete(plan)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constants(&mut plan.source, &mut plan.where_clause)?
     {
@@ -603,16 +603,45 @@ fn push_scan_direction(operator: &mut SourceOperator, direction: &Direction) {
     }
 }
 
-fn rewrite_exprs(
-    operator: &mut SourceOperator,
-    where_clauses: &mut Option<Vec<ast::Expr>>,
-) -> Result<()> {
-    if let Some(predicates) = where_clauses {
-        for expr in predicates.iter_mut() {
+fn rewrite_exprs_select(plan: &mut SelectPlan) -> Result<()> {
+    rewrite_source_operator_exprs(&mut plan.source)?;
+    for rc in plan.result_columns.iter_mut() {
+        rewrite_expr(&mut rc.expr)?;
+    }
+    for agg in plan.aggregates.iter_mut() {
+        rewrite_expr(&mut agg.original_expr)?;
+    }
+    if let Some(predicates) = &mut plan.where_clause {
+        for expr in predicates {
+            rewrite_expr(expr)?;
+        }
+    }
+    if let Some(group_by) = &mut plan.group_by {
+        for expr in group_by.exprs.iter_mut() {
+            rewrite_expr(expr)?;
+        }
+    }
+    if let Some(order_by) = &mut plan.order_by {
+        for (expr, _) in order_by.iter_mut() {
             rewrite_expr(expr)?;
         }
     }
 
+    Ok(())
+}
+
+fn rewrite_exprs_delete(plan: &mut DeletePlan) -> Result<()> {
+    rewrite_source_operator_exprs(&mut plan.source)?;
+    if let Some(predicates) = &mut plan.where_clause {
+        for expr in predicates {
+            rewrite_expr(expr)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn rewrite_source_operator_exprs(operator: &mut SourceOperator) -> Result<()> {
     match operator {
         SourceOperator::Join {
             left,
@@ -620,35 +649,37 @@ fn rewrite_exprs(
             predicates,
             ..
         } => {
-            rewrite_exprs(left, where_clauses)?;
-            rewrite_exprs(right, where_clauses)?;
+            rewrite_source_operator_exprs(left)?;
+            rewrite_source_operator_exprs(right)?;
 
             if let Some(predicates) = predicates {
                 for expr in predicates.iter_mut() {
                     rewrite_expr(expr)?;
                 }
             }
-        }
-        SourceOperator::Scan {
-            predicates: Some(preds),
-            ..
-        } => {
-            for expr in preds.iter_mut() {
-                rewrite_expr(expr)?;
-            }
-        }
-        SourceOperator::Search {
-            predicates: Some(preds),
-            ..
-        } => {
-            for expr in preds.iter_mut() {
-                rewrite_expr(expr)?;
-            }
-        }
-        _ => (),
-    }
 
-    Ok(())
+            Ok(())
+        }
+        SourceOperator::Scan { predicates, .. } | SourceOperator::Search { predicates, .. } => {
+            if let Some(predicates) = predicates {
+                for expr in predicates.iter_mut() {
+                    rewrite_expr(expr)?;
+                }
+            }
+
+            Ok(())
+        }
+        SourceOperator::Subquery { predicates, .. } => {
+            if let Some(predicates) = predicates {
+                for expr in predicates.iter_mut() {
+                    rewrite_expr(expr)?;
+                }
+            }
+
+            Ok(())
+        }
+        SourceOperator::Nothing { .. } => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

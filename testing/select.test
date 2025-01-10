@@ -11,6 +11,14 @@ do_execsql_test select-const-2 {
   SELECT 2
 } {2}
 
+do_execsql_test select-true {
+  SELECT true
+} {1}
+
+do_execsql_test select-false {
+  SELECT false
+} {0}
+
 do_execsql_test select-text-escape-1 {
   SELECT '''a'
 } {'a}
@@ -29,6 +37,15 @@ do_execsql_test select-blob-emoji {
 
 do_execsql_test select-limit-0 {
   SELECT id FROM users LIMIT 0;
+} {}
+
+# ORDER BY id here because sqlite uses age_idx here and we (yet) don't so force it to evaluate in ID order
+do_execsql_test select-limit-true {
+  SELECT id FROM users ORDER BY id LIMIT true;
+} {1}
+
+do_execsql_test select-limit-false {
+  SELECT id FROM users ORDER BY id LIMIT false;
 } {}
 
 do_execsql_test realify {
