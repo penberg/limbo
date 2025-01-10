@@ -457,9 +457,10 @@ pub fn translate_expr(
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
-            let e1_reg = program.alloc_register();
+            let e1_reg = program.alloc_registers(2);
+            let e2_reg = e1_reg + 1;
+
             translate_expr(program, referenced_tables, e1, e1_reg, resolver)?;
-            let e2_reg = program.alloc_register();
             translate_expr(program, referenced_tables, e2, e2_reg, resolver)?;
 
             match op {

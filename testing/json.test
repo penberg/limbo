@@ -331,6 +331,10 @@ do_execsql_test json_arrow_shift_implicit_real_cast {
 #  SELECT '[1,2,3]' ->> false
 #} {{1}}
 
+do_execsql_test json_arrow_chained {
+  select '{"a":2,"c":[4,5,{"f":7}]}' -> 'c' -> 2 ->> 'f'
+} {{7}}
+
 # TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
 do_execsql_test json_extract_multiple_null_paths {
     SELECT json_extract(1, null, null, null)

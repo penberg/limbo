@@ -290,6 +290,10 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
 
 /// Returns the value at the given JSON path. If the path does not exist, it returns None.
 /// If the path is an invalid path, returns an error.
+///
+/// *strict* - if false, we will try to resolve the path even if it does not start with "$"
+///   in a way that's compatible with the `->` and `->>` operators. See examples in the docs:
+///   https://sqlite.org/json1.html#the_and_operators
 fn json_extract_single<'a>(
     json: &'a Val,
     path: &OwnedValue,
