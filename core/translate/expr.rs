@@ -70,8 +70,9 @@ macro_rules! expect_arguments_exact {
         let args = if let Some(args) = $args {
             if args.len() != $expected_arguments {
                 crate::bail_parse_error!(
-                    "{} function with not exactly 2 arguments",
-                    $func.to_string()
+                    "{} function called with not exactly {} arguments",
+                    $func.to_string(),
+                    $expected_arguments,
                 );
             }
             args
@@ -92,8 +93,9 @@ macro_rules! expect_arguments_max {
         let args = if let Some(args) = $args {
             if args.len() > $expected_arguments {
                 crate::bail_parse_error!(
-                    "{} function with not exactly 2 arguments",
-                    $func.to_string()
+                    "{} function called with more than {} arguments",
+                    $func.to_string(),
+                    $expected_arguments,
                 );
             }
             args
