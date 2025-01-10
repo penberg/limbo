@@ -56,12 +56,14 @@ fn set_err_msg_and_throw_exception<'local>(
     err_code: i32,
     err_msg: String,
 ) {
-    let error_message_pointer = Box::into_raw(Box::new(err_msg)) as i64;
+    let error_message_bytes = env
+        .byte_array_from_slice(err_msg.as_bytes())
+        .expect("Failed to convert to byte array");
     match env.call_method(
         obj,
-        "newSQLException",
-        "(IJ)Lorg/github/tursodatabase/exceptions/LimboException;",
-        &[err_code.into(), error_message_pointer.into()],
+        "throwLimboException",
+        "(I[B)V",
+        &[err_code.into(), (&error_message_bytes).into()],
     ) {
         Ok(_) => {
             // do nothing because above method will always return Err
@@ -70,17 +72,4 @@ fn set_err_msg_and_throw_exception<'local>(
             // do nothing because our java app will handle Err
         }
     }
-}
-
-#[no_mangle]
-pub unsafe extern "system" fn Java_org_github_tursodatabase_core_LimboDB_getErrorMessageUtf8<
-    'local,
->(
-    env: JNIEnv<'local>,
-    _obj: JObject<'local>,
-    error_message_ptr: jlong,
-) -> JByteArray<'local> {
-    let error_message = Box::from_raw(error_message_ptr as *mut String);
-    let error_message_bytes = error_message.as_bytes();
-    env.byte_array_from_slice(error_message_bytes).unwrap()
 }

@@ -2,6 +2,8 @@ package org.github.tursodatabase.core;
 
 
 import org.github.tursodatabase.LimboErrorCode;
+import org.github.tursodatabase.NativeInvocation;
+import org.github.tursodatabase.exceptions.LimboException;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
@@ -30,8 +32,7 @@ public final class LimboDB extends AbstractDB {
     // url example: "jdbc:sqlite:{fileName}
 
     /**
-     *
-     * @param url e.g. "jdbc:sqlite:fileName
+     * @param url      e.g. "jdbc:sqlite:fileName
      * @param fileName e.g. path to file
      */
     public static LimboDB create(String url, String fileName) throws SQLException {
@@ -83,7 +84,7 @@ public final class LimboDB extends AbstractDB {
     @Override
     protected void _open(String fileName, int openFlags) throws SQLException {
         if (isOpen) {
-            throw newSQLException(LimboErrorCode.UNKNOWN_ERROR.code, "Already opened");
+            throwLimboException(LimboErrorCode.UNKNOWN_ERROR.code, "Already opened");
         }
         dbPtr = _open_utf8(stringToUtf8ByteArray(fileName), openFlags);
         isOpen = true;
@@ -103,12 +104,35 @@ public final class LimboDB extends AbstractDB {
     @Override
     public synchronized native int step(long stmt);
 
-    @Override
-    protected String getErrorMessage(long errorMessagePointer) {
-        return utf8ByteBufferToString(getErrorMessageUtf8(errorMessagePointer));
+    /**
+     * Throws formatted SQLException with error code and message.
+     *
+     * @param errorCode         Error code.
+     * @param errorMessageBytes Error message.
+     */
+    @NativeInvocation
+    private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
+        String errorMessage = utf8ByteBufferToString(errorMessageBytes);
+        throwLimboException(errorCode, errorMessage);
     }
 
-    private native byte[] getErrorMessageUtf8(long errorMessagePointer);
+    /**
+     * Throws formatted SQLException with error code and message.
+     *
+     * @param errorCode    Error code.
+     * @param errorMessage Error message.
+     */
+    public void throwLimboException(int errorCode, String errorMessage) throws SQLException {
+        LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
+        String msg;
+        if (code == LimboErrorCode.UNKNOWN_ERROR) {
+            msg = String.format("%s:%s (%s)", code, errorCode, errorMessage);
+        } else {
+            msg = String.format("%s (%s)", code, errorMessage);
+        }
+
+        throw new LimboException(msg, code);
+    }
 
     private static String utf8ByteBufferToString(byte[] buffer) {
         if (buffer == null) {
