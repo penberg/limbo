@@ -50,6 +50,20 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB__1open_1utf8<'
     Box::into_raw(Box::new(db)) as jlong
 }
 
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_throwJavaException<'local>(
+    mut env: JNIEnv<'local>,
+    obj: JObject<'local>,
+    error_code: jint,
+) {
+    set_err_msg_and_throw_exception(
+        &mut env,
+        obj,
+        error_code,
+        "throw java exception".to_string(),
+    );
+}
+
 fn set_err_msg_and_throw_exception<'local>(
     env: &mut JNIEnv<'local>,
     obj: JObject<'local>,

@@ -3,6 +3,7 @@ package org.github.tursodatabase.core;
 
 import org.github.tursodatabase.LimboErrorCode;
 import org.github.tursodatabase.NativeInvocation;
+import org.github.tursodatabase.VisibleForTesting;
 import org.github.tursodatabase.exceptions.LimboException;
 
 import java.nio.charset.StandardCharsets;
@@ -103,6 +104,9 @@ public final class LimboDB extends AbstractDB {
     // TODO: add support for JNI
     @Override
     public synchronized native int step(long stmt);
+
+    @VisibleForTesting
+    native void throwJavaException(int errorCode) throws SQLException;
 
     /**
      * Throws formatted SQLException with error code and message.
