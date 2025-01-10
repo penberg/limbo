@@ -7,8 +7,15 @@ import java.util.Properties;
 import java.util.logging.Logger;
 
 public class JDBC implements Driver {
-
     private static final String VALID_URL_PREFIX = "jdbc:limbo:";
+
+    static {
+        try {
+            DriverManager.registerDriver(new JDBC());
+        } catch (Exception e) {
+            // TODO: log
+        }
+    }
 
     public static LimboConnection createConnection(String url, Properties properties) throws SQLException {
         if (!isValidURL(url)) return null;
@@ -27,26 +34,28 @@ public class JDBC implements Driver {
 
     @Override
     public Connection connect(String url, Properties info) throws SQLException {
-        return null;
+        return createConnection(url, info);
     }
 
     @Override
     public boolean acceptsURL(String url) throws SQLException {
-        return false;
+        return isValidURL(url);
     }
 
     @Override
     public DriverPropertyInfo[] getPropertyInfo(String url, Properties info) throws SQLException {
-        return new DriverPropertyInfo[0];
+        return LimboConfig.getDriverPropertyInfo();
     }
 
     @Override
     public int getMajorVersion() {
+        // TODO
         return 0;
     }
 
     @Override
     public int getMinorVersion() {
+        // TODO
         return 0;
     }
 
@@ -57,6 +66,7 @@ public class JDBC implements Driver {
 
     @Override
     public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+        // TODO
         return null;
     }
 }
