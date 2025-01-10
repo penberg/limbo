@@ -544,6 +544,14 @@ fn parse_join(
 pub fn parse_limit(limit: Limit) -> Option<usize> {
     if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
         n.parse().ok()
+    } else if let Expr::Id(id) = limit.expr {
+        if id.0.eq_ignore_ascii_case("true") {
+            Some(1)
+        } else if id.0.eq_ignore_ascii_case("false") {
+            Some(0)
+        } else {
+            None
+        }
     } else {
         None
     }
