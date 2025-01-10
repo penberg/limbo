@@ -313,23 +313,21 @@ do_execsql_test json_arrow_shift_implicit_real_cast {
   SELECT '{"1.5":"abc"}' -> 1.5;
 } {{"abc"}}
 
-# TODO: There is a bug in Limbo that prevents using the true/false in SELECT
-# https://github.com/tursodatabase/limbo/issues/640
-#do_execsql_test json_arrow_implicit_true_cast {
-#  SELECT '[1,2,3]' -> true
-#} {{2}}
-#
-#do_execsql_test json_arrow_shift_implicit_true_cast {
-#  SELECT '[1,2,3]' ->> true
-#} {{2}}
-#
-#do_execsql_test json_arrow_implicit_false_cast {
-#  SELECT '[1,2,3]' -> false
-#} {{1}}
-#
-#do_execsql_test json_arrow_shift_implicit_false_cast {
-#  SELECT '[1,2,3]' ->> false
-#} {{1}}
+do_execsql_test json_arrow_implicit_true_cast {
+  SELECT '[1,2,3]' -> true
+} {{2}}
+
+do_execsql_test json_arrow_shift_implicit_true_cast {
+  SELECT '[1,2,3]' ->> true
+} {{2}}
+
+do_execsql_test json_arrow_implicit_false_cast {
+  SELECT '[1,2,3]' -> false
+} {{1}}
+
+do_execsql_test json_arrow_shift_implicit_false_cast {
+  SELECT '[1,2,3]' ->> false
+} {{1}}
 
 do_execsql_test json_arrow_chained {
   select '{"a":2,"c":[4,5,{"f":7}]}' -> 'c' -> 2 ->> 'f'
