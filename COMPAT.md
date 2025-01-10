@@ -281,8 +281,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | jsonb_replace(json,path,value,...) |         |                                                                                                                                              |
 | json_set(json,path,value,...)      |         |                                                                                                                                              |
 | jsonb_set(json,path,value,...)     |         |                                                                                                                                              |
-| json_type(json)                    |         |                                                                                                                                              |
-| json_type(json,path)               |         |                                                                                                                                              |
+| json_type(json)                    | Yes     |                                                                                                                                              |
+| json_type(json,path)               | Yes     |                                                                                                                                              |
 | json_valid(json)                   |         |                                                                                                                                              |
 | json_valid(json,flags)             |         |                                                                                                                                              |
 | json_quote(value)                  |         |                                                                                                                                              |

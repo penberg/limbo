@@ -25,10 +25,11 @@ impl Display for ExternalFunc {
 pub enum JsonFunc {
     Json,
     JsonArray,
-    JsonExtract,
+    JsonArrayLength,
     JsonArrowExtract,
     JsonArrowShiftExtract,
-    JsonArrayLength,
+    JsonExtract,
+    JsonType,
 }
 
 #[cfg(feature = "json")]
@@ -44,6 +45,7 @@ impl Display for JsonFunc {
                 Self::JsonArrayLength => "json_array_length".to_string(),
                 Self::JsonArrowExtract => "->".to_string(),
                 Self::JsonArrowShiftExtract => "->>".to_string(),
+                Self::JsonType => "json_type".to_string(),
             }
         )
     }
@@ -375,6 +377,8 @@ impl Func {
             "json_array" => Ok(Self::Json(JsonFunc::JsonArray)),
             #[cfg(feature = "json")]
             "json_extract" => Ok(Func::Json(JsonFunc::JsonExtract)),
+            #[cfg(feature = "json")]
+            "json_type" => Ok(Func::Json(JsonFunc::JsonType)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),

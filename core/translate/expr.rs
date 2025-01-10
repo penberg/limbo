@@ -18,6 +18,47 @@ pub struct ConditionMetadata {
     pub jump_if_condition_is_true: bool,
     pub jump_target_when_true: BranchOffset,
     pub jump_target_when_false: BranchOffset,
+    pub parent_op: Option<ast::Operator>,
+}
+
+fn emit_cond_jump(program: &mut ProgramBuilder, cond_meta: ConditionMetadata, reg: usize) {
+    if cond_meta.jump_if_condition_is_true {
+        program.emit_insn(Insn::If {
+            reg,
+            target_pc: cond_meta.jump_target_when_true,
+            null_reg: reg,
+        });
+    } else {
+        program.emit_insn(Insn::IfNot {
+            reg,
+            target_pc: cond_meta.jump_target_when_false,
+            null_reg: reg,
+        });
+    }
+}
+macro_rules! emit_cmp_insn {
+    (
+        $program:expr,
+        $cond:expr,
+        $op_true:ident,
+        $op_false:ident,
+        $lhs:expr,
+        $rhs:expr
+    ) => {{
+        if $cond.jump_if_condition_is_true {
+            $program.emit_insn(Insn::$op_true {
+                lhs: $lhs,
+                rhs: $rhs,
+                target_pc: $cond.jump_target_when_true,
+            });
+        } else {
+            $program.emit_insn(Insn::$op_false {
+                lhs: $lhs,
+                rhs: $rhs,
+                target_pc: $cond.jump_target_when_false,
+            });
+        }
+    }};
 }
 
 macro_rules! expect_arguments_exact {
@@ -82,6 +123,8 @@ pub fn translate_condition_expr(
                 lhs,
                 ConditionMetadata {
                     jump_if_condition_is_true: false,
+                    // Mark that the parent op for sub-expressions is AND
+                    parent_op: Some(ast::Operator::And),
                     ..condition_metadata
                 },
                 resolver,
@@ -90,134 +133,91 @@ pub fn translate_condition_expr(
                 program,
                 referenced_tables,
                 rhs,
-                condition_metadata,
+                ConditionMetadata {
+                    parent_op: Some(ast::Operator::And),
+                    ..condition_metadata
+                },
                 resolver,
             );
         }
         ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
-            let jump_target_when_false = program.allocate_label();
-            let _ = translate_condition_expr(
-                program,
-                referenced_tables,
-                lhs,
-                ConditionMetadata {
-                    // If the first condition is true, we don't need to evaluate the second condition.
+            if matches!(condition_metadata.parent_op, Some(ast::Operator::And)) {
+                // we are inside a bigger AND expression, so we do NOT jump to parent's 'true' if LHS or RHS is true.
+                // we only short-circuit the parent's false label if LHS and RHS are both false.
+                let local_true_label = program.allocate_label();
+                let local_false_label = program.allocate_label();
+
+                // evaluate LHS in normal OR fashion, short-circuit local if true
+                let lhs_metadata = ConditionMetadata {
+                    jump_if_condition_is_true: true,
+                    jump_target_when_true: local_true_label,
+                    jump_target_when_false: local_false_label,
+                    parent_op: Some(ast::Operator::Or),
+                };
+                translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
+
+                // if lhs was false, we land here:
+                program.resolve_label(local_false_label, program.offset());
+
+                // evaluate rhs with normal OR: short-circuit if true, go to local_true
+                let rhs_metadata = ConditionMetadata {
+                    jump_if_condition_is_true: true,
+                    jump_target_when_true: local_true_label,
+                    jump_target_when_false: condition_metadata.jump_target_when_false,
+                    // if rhs is also false => parent's false
+                    parent_op: Some(ast::Operator::Or),
+                };
+                translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
+
+                // if we get here, both lhs+rhs are false: explicit jump to parent's false
+                program.emit_insn(Insn::Goto {
+                    target_pc: condition_metadata.jump_target_when_false,
+                });
+                // local_true: we do not jump to parent's "true" label because the parent is AND,
+                // so we want to keep evaluating the rest
+                program.resolve_label(local_true_label, program.offset());
+            } else {
+                let jump_target_when_false = program.allocate_label();
+
+                let lhs_metadata = ConditionMetadata {
                     jump_if_condition_is_true: true,
                     jump_target_when_false,
+                    parent_op: Some(ast::Operator::Or),
                     ..condition_metadata
-                },
-                resolver,
-            );
-            program.resolve_label(jump_target_when_false, program.offset());
-            let _ = translate_condition_expr(
-                program,
-                referenced_tables,
-                rhs,
-                condition_metadata,
-                resolver,
-            );
+                };
+
+                translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
+
+                // if LHS was false, we land here:
+                program.resolve_label(jump_target_when_false, program.offset());
+                let rhs_metadata = ConditionMetadata {
+                    parent_op: Some(ast::Operator::Or),
+                    ..condition_metadata
+                };
+                translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
+            }
         }
         ast::Expr::Binary(lhs, op, rhs) => {
-            let lhs_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), lhs, lhs_reg, resolver);
-            if let ast::Expr::Literal(_) = lhs.as_ref() {
-                program.mark_last_insn_constant()
-            }
-            let rhs_reg = program.alloc_register();
-            let _ = translate_expr(program, Some(referenced_tables), rhs, rhs_reg, resolver);
-            if let ast::Expr::Literal(_) = rhs.as_ref() {
-                program.mark_last_insn_constant()
-            }
+            let lhs_reg = translate_and_mark(program, Some(referenced_tables), lhs, resolver)?;
+            let rhs_reg = translate_and_mark(program, Some(referenced_tables), rhs, resolver)?;
             match op {
                 ast::Operator::Greater => {
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Gt {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                        })
-                    } else {
-                        program.emit_insn(Insn::Le {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                        })
-                    }
+                    emit_cmp_insn!(program, condition_metadata, Gt, Le, lhs_reg, rhs_reg)
                 }
                 ast::Operator::GreaterEquals => {
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Ge {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                        })
-                    } else {
-                        program.emit_insn(Insn::Lt {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                        })
-                    }
+                    emit_cmp_insn!(program, condition_metadata, Ge, Lt, lhs_reg, rhs_reg)
                 }
                 ast::Operator::Less => {
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Lt {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                        })
-                    } else {
-                        program.emit_insn(Insn::Ge {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                        })
-                    }
+                    emit_cmp_insn!(program, condition_metadata, Lt, Ge, lhs_reg, rhs_reg)
                 }
                 ast::Operator::LessEquals => {
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Le {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                        })
-                    } else {
-                        program.emit_insn(Insn::Gt {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                        })
-                    }
+                    emit_cmp_insn!(program, condition_metadata, Le, Gt, lhs_reg, rhs_reg)
                 }
                 ast::Operator::Equals => {
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Eq {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                        })
-                    } else {
-                        program.emit_insn(Insn::Ne {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                        })
-                    }
+                    emit_cmp_insn!(program, condition_metadata, Eq, Ne, lhs_reg, rhs_reg)
                 }
                 ast::Operator::NotEquals => {
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::Ne {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                        })
-                    } else {
-                        program.emit_insn(Insn::Eq {
-                            lhs: lhs_reg,
-                            rhs: rhs_reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                        })
-                    }
+                    emit_cmp_insn!(program, condition_metadata, Ne, Eq, lhs_reg, rhs_reg)
                 }
                 ast::Operator::Is => todo!(),
                 ast::Operator::IsNot => todo!(),
@@ -235,19 +235,7 @@ pub fn translate_condition_expr(
                         value: int_value,
                         dest: reg,
                     });
-                    if condition_metadata.jump_if_condition_is_true {
-                        program.emit_insn(Insn::If {
-                            reg,
-                            target_pc: condition_metadata.jump_target_when_true,
-                            null_reg: reg,
-                        })
-                    } else {
-                        program.emit_insn(Insn::IfNot {
-                            reg,
-                            target_pc: condition_metadata.jump_target_when_false,
-                            null_reg: reg,
-                        })
-                    }
+                    emit_cond_jump(program, condition_metadata, reg);
                 } else {
                     crate::bail_parse_error!("unsupported literal type in condition");
                 }
@@ -258,19 +246,7 @@ pub fn translate_condition_expr(
                     value: string.clone(),
                     dest: reg,
                 });
-                if condition_metadata.jump_if_condition_is_true {
-                    program.emit_insn(Insn::If {
-                        reg,
-                        target_pc: condition_metadata.jump_target_when_true,
-                        null_reg: reg,
-                    })
-                } else {
-                    program.emit_insn(Insn::IfNot {
-                        reg,
-                        target_pc: condition_metadata.jump_target_when_false,
-                        null_reg: reg,
-                    })
-                }
+                emit_cond_jump(program, condition_metadata, reg);
             }
             unimpl => todo!("literal {:?} not implemented", unimpl),
         },
@@ -396,18 +372,8 @@ pub fn translate_condition_expr(
             match op {
                 ast::LikeOperator::Like | ast::LikeOperator::Glob => {
                     let pattern_reg = program.alloc_register();
-                    let column_reg = program.alloc_register();
                     let mut constant_mask = 0;
-                    let _ = translate_expr(
-                        program,
-                        Some(referenced_tables),
-                        lhs,
-                        column_reg,
-                        resolver,
-                    )?;
-                    if let ast::Expr::Literal(_) = lhs.as_ref() {
-                        program.mark_last_insn_constant();
-                    }
+                    let _ = translate_and_mark(program, Some(referenced_tables), lhs, resolver);
                     let _ = translate_expr(
                         program,
                         Some(referenced_tables),
@@ -415,7 +381,7 @@ pub fn translate_condition_expr(
                         pattern_reg,
                         resolver,
                     )?;
-                    if let ast::Expr::Literal(_) = rhs.as_ref() {
+                    if matches!(rhs.as_ref(), ast::Expr::Literal(_)) {
                         program.mark_last_insn_constant();
                         constant_mask = 1;
                     }
@@ -438,19 +404,7 @@ pub fn translate_condition_expr(
                 ast::LikeOperator::Regexp => todo!(),
             }
             if !*not {
-                if condition_metadata.jump_if_condition_is_true {
-                    program.emit_insn(Insn::If {
-                        reg: cur_reg,
-                        target_pc: condition_metadata.jump_target_when_true,
-                        null_reg: cur_reg,
-                    });
-                } else {
-                    program.emit_insn(Insn::IfNot {
-                        reg: cur_reg,
-                        target_pc: condition_metadata.jump_target_when_false,
-                        null_reg: cur_reg,
-                    });
-                }
+                emit_cond_jump(program, condition_metadata, cur_reg);
             } else if condition_metadata.jump_if_condition_is_true {
                 program.emit_insn(Insn::IfNot {
                     reg: cur_reg,
@@ -466,15 +420,17 @@ pub fn translate_condition_expr(
             }
         }
         ast::Expr::Parenthesized(exprs) => {
-            // TODO: this is probably not correct; multiple expressions in a parenthesized expression
-            // are reserved for special cases like `(a, b) IN ((1, 2), (3, 4))`.
-            for expr in exprs {
+            if exprs.len() == 1 {
                 let _ = translate_condition_expr(
                     program,
                     referenced_tables,
-                    expr,
+                    &exprs[0],
                     condition_metadata,
                     resolver,
+                );
+            } else {
+                crate::bail_parse_error!(
+                    "parenthesized condtional should have exactly one expression"
                 );
             }
         }
@@ -819,7 +775,7 @@ pub fn translate_expr(
                             "These two functions are only reachable via the -> and ->> operators"
                         )
                     }
-                    JsonFunc::JsonArrayLength => {
+                    JsonFunc::JsonArrayLength | JsonFunc::JsonType => {
                         let args = expect_arguments_max!(args, 2, j);
 
                         translate_function(
@@ -838,9 +794,9 @@ pub fn translate_expr(
                             unreachable!("this is always ast::Expr::Cast")
                         }
                         ScalarFunc::Changes => {
-                            if let Some(_) = args {
+                            if args.is_some() {
                                 crate::bail_parse_error!(
-                                    "{} fucntion with more than 0 arguments",
+                                    "{} function with more than 0 arguments",
                                     srf
                                 );
                             }
@@ -1065,12 +1021,8 @@ pub fn translate_expr(
                                 );
                             };
                             for arg in args {
-                                let reg = program.alloc_register();
                                 let _ =
-                                    translate_expr(program, referenced_tables, arg, reg, resolver)?;
-                                if let ast::Expr::Literal(_) = arg {
-                                    program.mark_last_insn_constant()
-                                }
+                                    translate_and_mark(program, referenced_tables, arg, resolver);
                             }
                             program.emit_insn(Insn::Function {
                                 // Only constant patterns for LIKE are supported currently, so this
@@ -1108,12 +1060,11 @@ pub fn translate_expr(
                                     srf.to_string()
                                 );
                             };
-
-                            let regs = program.alloc_register();
-                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
+                            let reg =
+                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: regs,
+                                start_reg: reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1139,12 +1090,10 @@ pub fn translate_expr(
                             if let Some(args) = args {
                                 for arg in args.iter() {
                                     // register containing result of each argument expression
-                                    let target_reg = program.alloc_register();
-                                    _ = translate_expr(
+                                    let _ = translate_and_mark(
                                         program,
                                         referenced_tables,
                                         arg,
-                                        target_reg,
                                         resolver,
                                     )?;
                                 }
@@ -1176,15 +1125,14 @@ pub fn translate_expr(
                             let str_reg = program.alloc_register();
                             let start_reg = program.alloc_register();
                             let length_reg = program.alloc_register();
-
-                            translate_expr(
+                            let str_reg = translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[0],
                                 str_reg,
                                 resolver,
                             )?;
-                            translate_expr(
+                            let _ = translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[1],
@@ -1200,7 +1148,6 @@ pub fn translate_expr(
                                     resolver,
                                 )?;
                             }
-
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: str_reg,
@@ -1220,8 +1167,8 @@ pub fn translate_expr(
                             } else {
                                 crate::bail_parse_error!("hex function with no arguments",);
                             };
-                            let regs = program.alloc_register();
-                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
+                            let regs =
+                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: regs,
@@ -1261,12 +1208,10 @@ pub fn translate_expr(
                             if let Some(args) = args {
                                 for arg in args.iter() {
                                     // register containing result of each argument expression
-                                    let target_reg = program.alloc_register();
-                                    _ = translate_expr(
+                                    let _ = translate_and_mark(
                                         program,
                                         referenced_tables,
                                         arg,
-                                        target_reg,
                                         resolver,
                                     )?;
                                 }
@@ -1280,7 +1225,7 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::TotalChanges => {
-                            if let Some(_) = args {
+                            if args.is_some() {
                                 crate::bail_parse_error!(
                                     "{} fucntion with more than 0 arguments",
                                     srf.to_string()
@@ -1316,11 +1261,7 @@ pub fn translate_expr(
                             };
 
                             for arg in args.iter() {
-                                let reg = program.alloc_register();
-                                translate_expr(program, referenced_tables, arg, reg, resolver)?;
-                                if let ast::Expr::Literal(_) = arg {
-                                    program.mark_last_insn_constant();
-                                }
+                                translate_and_mark(program, referenced_tables, arg, resolver)?;
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1342,12 +1283,7 @@ pub fn translate_expr(
                                 crate::bail_parse_error!("min function with no arguments");
                             };
                             for arg in args {
-                                let reg = program.alloc_register();
-                                let _ =
-                                    translate_expr(program, referenced_tables, arg, reg, resolver)?;
-                                if let ast::Expr::Literal(_) = arg {
-                                    program.mark_last_insn_constant()
-                                }
+                                translate_and_mark(program, referenced_tables, arg, resolver)?;
                             }
 
                             program.emit_insn(Insn::Function {
@@ -1370,12 +1306,7 @@ pub fn translate_expr(
                                 crate::bail_parse_error!("max function with no arguments");
                             };
                             for arg in args {
-                                let reg = program.alloc_register();
-                                let _ =
-                                    translate_expr(program, referenced_tables, arg, reg, resolver)?;
-                                if let ast::Expr::Literal(_) = arg {
-                                    program.mark_last_insn_constant()
-                                }
+                                translate_and_mark(program, referenced_tables, arg, resolver)?;
                             }
 
                             program.emit_insn(Insn::Function {
@@ -1411,7 +1342,7 @@ pub fn translate_expr(
                                 resolver,
                             )?;
                             let second_reg = program.alloc_register();
-                            translate_expr(
+                            let _ = translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[1],
@@ -1462,34 +1393,30 @@ pub fn translate_expr(
                                     srf.to_string()
                                 );
                             };
-
                             let str_reg = program.alloc_register();
                             let pattern_reg = program.alloc_register();
                             let replacement_reg = program.alloc_register();
-
-                            translate_expr(
+                            let _ = translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[0],
                                 str_reg,
                                 resolver,
                             )?;
-                            translate_expr(
+                            let _ = translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[1],
                                 pattern_reg,
                                 resolver,
                             )?;
-
-                            translate_expr(
+                            let _ = translate_expr(
                                 program,
                                 referenced_tables,
                                 &args[2],
                                 replacement_reg,
                                 resolver,
                             )?;
-
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: str_reg,
@@ -1556,12 +1483,12 @@ pub fn translate_expr(
                             };
                             let mut start_reg = None;
                             if let Some(arg) = args.first() {
-                                let reg = program.alloc_register();
-                                start_reg = Some(reg);
-                                translate_expr(program, referenced_tables, arg, reg, resolver)?;
-                                if let ast::Expr::Literal(_) = arg {
-                                    program.mark_last_insn_constant()
-                                }
+                                start_reg = Some(translate_and_mark(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    resolver,
+                                )?);
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
@@ -1603,10 +1530,8 @@ pub fn translate_expr(
                             crate::bail_parse_error!("{} function with no arguments", math_func);
                         };
 
-                        let reg = program.alloc_register();
-
-                        translate_expr(program, referenced_tables, &args[0], reg, resolver)?;
-
+                        let reg =
+                            translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
                             start_reg: reg,
@@ -1628,20 +1553,12 @@ pub fn translate_expr(
                         } else {
                             crate::bail_parse_error!("{} function with no arguments", math_func);
                         };
-
                         let reg1 = program.alloc_register();
+                        let _ =
+                            translate_expr(program, referenced_tables, &args[0], reg1, resolver)?;
                         let reg2 = program.alloc_register();
-
-                        translate_expr(program, referenced_tables, &args[0], reg1, resolver)?;
-                        if let ast::Expr::Literal(_) = &args[0] {
-                            program.mark_last_insn_constant();
-                        }
-
-                        translate_expr(program, referenced_tables, &args[1], reg2, resolver)?;
-                        if let ast::Expr::Literal(_) = &args[1] {
-                            program.mark_last_insn_constant();
-                        }
-
+                        let _ =
+                            translate_expr(program, referenced_tables, &args[1], reg2, resolver)?;
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
                             start_reg: target_register + 1,
@@ -1665,7 +1582,6 @@ pub fn translate_expr(
                         };
 
                         let regs = program.alloc_registers(args.len());
-
                         for (i, arg) in args.iter().enumerate() {
                             translate_expr(program, referenced_tables, arg, regs + i, resolver)?;
                         }
@@ -1913,7 +1829,6 @@ fn translate_function(
 
     for arg in args.iter() {
         translate_expr(program, referenced_tables, arg, current_reg, resolver)?;
-
         current_reg += 1;
     }
 
@@ -1951,6 +1866,20 @@ pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mu
             register: target_register,
         })
     }
+}
+
+pub fn translate_and_mark(
+    program: &mut ProgramBuilder,
+    referenced_tables: Option<&[TableReference]>,
+    expr: &ast::Expr,
+    resolver: &Resolver,
+) -> Result<usize> {
+    let target_register = program.alloc_register();
+    translate_expr(program, referenced_tables, expr, target_register, resolver)?;
+    if matches!(expr, ast::Expr::Literal(_)) {
+        program.mark_last_insn_constant();
+    }
+    Ok(target_register)
 }
 
 /// Get an appropriate name for an expression.

@@ -42,7 +42,7 @@ use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
 use crate::{
     function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
-    json::json_extract,
+    json::json_extract, json::json_type,
 };
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
@@ -1400,17 +1400,25 @@ impl Program {
                             }
                         }
                         #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonArrayLength) => {
+                        crate::function::Func::Json(
+                            func @ (JsonFunc::JsonArrayLength | JsonFunc::JsonType),
+                        ) => {
                             let json_value = &state.registers[*start_reg];
                             let path_value = if arg_count > 1 {
                                 Some(&state.registers[*start_reg + 1])
                             } else {
                                 None
                             };
-                            let json_array_length = json_array_length(json_value, path_value);
+                            let func_result = match func {
+                                JsonFunc::JsonArrayLength => {
+                                    json_array_length(json_value, path_value)
+                                }
+                                JsonFunc::JsonType => json_type(json_value, path_value),
+                                _ => unreachable!(),
+                            };
 
-                            match json_array_length {
-                                Ok(length) => state.registers[*dest] = length,
+                            match func_result {
+                                Ok(result) => state.registers[*dest] = result,
                                 Err(e) => return Err(e),
                             }
                         }

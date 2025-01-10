@@ -422,3 +422,51 @@ do_execsql_test json_array_length_via_bad_prop {
 do_execsql_test json_array_length_nested {
   SELECT json_array_length('{"one":[[1,2,3],2,3]}', '$.one[0]');
 } {{3}}
+
+do_execsql_test json_type_no_path {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}')
+} {{object}}
+
+do_execsql_test json_type_root_path {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$')
+} {{object}}
+
+do_execsql_test json_type_array {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a')
+} {{array}}
+
+do_execsql_test json_type_integer {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[0]')
+} {{integer}}
+
+do_execsql_test json_type_real {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[1]')
+} {{real}}
+
+do_execsql_test json_type_true {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[2]')
+} {{true}}
+
+do_execsql_test json_type_false {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[3]')
+} {{false}}
+
+do_execsql_test json_type_null {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[4]')
+} {{null}}
+
+do_execsql_test json_type_text {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[5]')
+} {{text}}
+
+do_execsql_test json_type_NULL {
+  select json_type('{"a":[2,3.5,true,false,null,"x"]}','$.a[6]')
+} {{}}
+
+do_execsql_test json_type_cast {
+  select json_type(1)
+} {{integer}}
+
+do_execsql_test json_type_null_arg {
+  select json_type(null)
+} {{}}
