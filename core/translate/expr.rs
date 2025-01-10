@@ -784,6 +784,31 @@ pub fn translate_expr(
                         });
                         Ok(target_register)
                     }
+                    JsonFunc::JsonErrorPosition => {
+                        let args = if let Some(args) = args {
+                            if args.len() != 1 {
+                                crate::bail_parse_error!(
+                                    "{} function with not exactly 1 argument",
+                                    j.to_string()
+                                );
+                            }
+                            args
+                        } else {
+                            crate::bail_parse_error!(
+                                "{} function with no arguments",
+                                j.to_string()
+                            );
+                        };
+                        let json_reg = program.alloc_register();
+                        translate_expr(program, referenced_tables, &args[0], json_reg, resolver)?;
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: json_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {

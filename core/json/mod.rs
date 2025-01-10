@@ -6,10 +6,12 @@ mod ser;
 use std::rc::Rc;
 
 pub use crate::json::de::from_str;
+use crate::json::error::Error as JsonError;
 use crate::json::json_path::{json_path, PathElement};
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
 use indexmap::IndexMap;
+use jsonb::Error as JsonbError;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -268,6 +270,32 @@ fn json_extract_single<'a>(json: &'a Val, path: &OwnedValue) -> crate::Result<Op
     }
 
     Ok(Some(&current_element))
+}
+
+pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
+    match json {
+        OwnedValue::Text(t) => match crate::json::from_str::<Val>(&t.value) {
+            Ok(_) => Ok(OwnedValue::Integer(0)),
+            Err(JsonError::Message { location, .. }) => {
+                if let Some(loc) = location {
+                    Ok(OwnedValue::Integer(loc.column as i64))
+                } else {
+                    Err(crate::error::LimboError::InternalError(
+                        "failed to determine json error position".into(),
+                    ))
+                }
+            }
+        },
+        OwnedValue::Blob(b) => match jsonb::from_slice(b) {
+            Ok(_) => Ok(OwnedValue::Integer(0)),
+            Err(JsonbError::Syntax(_, pos)) => Ok(OwnedValue::Integer(pos as i64)),
+            _ => Err(crate::error::LimboError::InternalError(
+                "failed to determine json error position".into(),
+            )),
+        },
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Integer(0)),
+    }
 }
 
 #[cfg(test)]
@@ -597,5 +625,61 @@ mod tests {
             Ok(_) => panic!("expected error"),
             Err(e) => assert!(e.to_string().contains("JSON path error")),
         }
+    }
+
+    #[test]
+    fn test_json_error_position_no_error() {
+        let input = OwnedValue::build_text(Rc::new("[1,2,3]".to_string()));
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(0));
+    }
+
+    #[test]
+    fn test_json_error_position_no_error_more() {
+        let input = OwnedValue::build_text(Rc::new(r#"{"a":55,"b":72 , }"#.to_string()));
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(0));
+    }
+
+    #[test]
+    fn test_json_error_position_object() {
+        let input = OwnedValue::build_text(Rc::new(r#"{"a":55,"b":72,,}"#.to_string()));
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(16));
+    }
+
+    #[test]
+    fn test_json_error_position_array() {
+        let input = OwnedValue::build_text(Rc::new(r#"["a",55,"b",72,,]"#.to_string()));
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(16));
+    }
+
+    #[test]
+    fn test_json_error_position_null() {
+        let input = OwnedValue::Null;
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Null);
+    }
+
+    #[test]
+    fn test_json_error_position_integer() {
+        let input = OwnedValue::Integer(5);
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(0));
+    }
+
+    #[test]
+    fn test_json_error_position_float() {
+        let input = OwnedValue::Float(-5.5);
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(0));
+    }
+
+    #[test]
+    fn test_json_error_position_blob() {
+        let input = OwnedValue::Blob(Rc::new(r#"["a",55,"b",72,,]"#.as_bytes().to_owned()));
+        let result = json_error_position(&input).unwrap();
+        assert_eq!(result, OwnedValue::Integer(16));
     }
 }
