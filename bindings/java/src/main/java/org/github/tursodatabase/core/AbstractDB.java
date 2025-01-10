@@ -1,9 +1,5 @@
 package org.github.tursodatabase.core;
 
-import org.github.tursodatabase.LimboErrorCode;
-import org.github.tursodatabase.NativeInvocation;
-import org.github.tursodatabase.exceptions.LimboException;
-
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,7 +15,7 @@ public abstract class AbstractDB {
     private final String fileName;
     private final AtomicBoolean closed = new AtomicBoolean(true);
 
-    public AbstractDB(String url, String filaName) throws SQLException {
+    public AbstractDB(String url, String filaName) {
         this.url = url;
         this.fileName = filaName;
     }
@@ -52,10 +48,10 @@ public abstract class AbstractDB {
      * @throws SQLException if a database access error occurs.
      */
     public final synchronized void open(int openFlags) throws SQLException {
-        _open(fileName, openFlags);
+        open0(fileName, openFlags);
     }
 
-    protected abstract void _open(String fileName, int openFlags) throws SQLException;
+    protected abstract void open0(String fileName, int openFlags) throws SQLException;
 
     /**
      * Closes a database connection and finalizes any remaining statements before the closing
@@ -100,14 +96,14 @@ public abstract class AbstractDB {
      * @return pointer to database instance
      * @throws SQLException if a database access error occurs.
      */
-    protected abstract long _open_utf8(byte[] fileName, int openFlags) throws SQLException;
+    protected abstract long openUtf8(byte[] fileName, int openFlags) throws SQLException;
 
     /**
      * Closes the SQLite interface to a database.
      *
      * @throws SQLException if a database access error occurs.
      */
-    protected abstract void _close() throws SQLException;
+    protected abstract void close0() throws SQLException;
 
     /**
      * Compiles, evaluates, executes and commits an SQL statement.
@@ -116,7 +112,7 @@ public abstract class AbstractDB {
      * @return Result code.
      * @throws SQLException if a database access error occurs.
      */
-    public abstract int _exec(String sql) throws SQLException;
+    public abstract int exec(String sql) throws SQLException;
 
     /**
      * Compiles an SQL statement.

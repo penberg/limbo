@@ -8,7 +8,7 @@ const ERROR_CODE_ETC: i32 = 9999;
 
 #[no_mangle]
 #[allow(clippy::arc_with_non_send_sync)]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB__1open_1utf8<'local>(
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
     file_name_byte_arr: JByteArray<'local>,
