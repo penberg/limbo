@@ -4,6 +4,7 @@ use anarchist_readable_name_generator_lib::readable_name_custom;
 use rand::{distributions::uniform::SampleUniform, Rng};
 
 pub mod plan;
+pub mod property;
 pub mod query;
 pub mod table;
 
@@ -21,7 +22,7 @@ pub(crate) fn frequency<
     R: rand::Rng,
     N: Sum + PartialOrd + Copy + Default + SampleUniform + SubAssign,
 >(
-    choices: Vec<(N, Box<dyn FnOnce(&mut R) -> T + 'a>)>,
+    choices: Vec<(N, Box<dyn Fn(&mut R) -> T + 'a>)>,
     rng: &mut R,
 ) -> T {
     let total = choices.iter().map(|(weight, _)| *weight).sum::<N>();

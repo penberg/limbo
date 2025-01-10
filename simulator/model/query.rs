@@ -53,7 +53,7 @@ impl Display for Predicate {
 }
 
 // This type represents the potential queries on the database.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Query {
     Create(Create),
     Select(Select),
@@ -61,6 +61,24 @@ pub(crate) enum Query {
     Delete(Delete),
 }
 
+impl Query {
+    pub(crate) fn dependencies(&self) -> Vec<String> {
+        match self {
+            Query::Create(_) => vec![],
+            Query::Select(Select { table, .. })
+            | Query::Insert(Insert { table, .. })
+            | Query::Delete(Delete { table, .. }) => vec![table.clone()],
+        }
+    }
+    pub(crate) fn uses(&self) -> Vec<String> {
+        match self {
+            Query::Create(Create { table }) => vec![table.name.clone()],
+            Query::Select(Select { table, .. })
+            | Query::Insert(Insert { table, .. })
+            | Query::Delete(Delete { table, .. }) => vec![table.clone()],
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub(crate) struct Create {
     pub(crate) table: Table,

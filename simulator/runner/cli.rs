@@ -35,4 +35,10 @@ pub struct SimulatorCLI {
         default_value_t = 60 * 60 // default to 1 hour
     )]
     pub maximum_time: usize,
+    #[clap(
+        short = 'm',
+        long,
+        help = "minimize(shrink) the failing counterexample"
+    )]
+    pub shrink: bool,
 }

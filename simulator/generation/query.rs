@@ -161,13 +161,13 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
             // An AND for false requires at least one of its children to be false
             if *predicate_value {
                 Predicate::And(
-                    (0..rng.gen_range(1..=3))
+                    (0..rng.gen_range(0..=3))
                         .map(|_| SimplePredicate::arbitrary_from(rng, &(*table, true)).0)
                         .collect(),
                 )
             } else {
                 // Create a vector of random booleans
-                let mut booleans = (0..rng.gen_range(1..=3))
+                let mut booleans = (0..rng.gen_range(0..=3))
                     .map(|_| rng.gen_bool(0.5))
                     .collect::<Vec<_>>();
 
@@ -190,7 +190,7 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
             // An OR for false requires each of its children to be false
             if *predicate_value {
                 // Create a vector of random booleans
-                let mut booleans = (0..rng.gen_range(1..=3))
+                let mut booleans = (0..rng.gen_range(0..=3))
                     .map(|_| rng.gen_bool(0.5))
                     .collect::<Vec<_>>();
                 let len = booleans.len();
@@ -207,7 +207,7 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                 )
             } else {
                 Predicate::Or(
-                    (0..rng.gen_range(1..=3))
+                    (0..rng.gen_range(0..=3))
                         .map(|_| SimplePredicate::arbitrary_from(rng, &(*table, false)).0)
                         .collect(),
                 )
@@ -243,5 +243,19 @@ impl ArbitraryFrom<(&str, &Value)> for Predicate {
             ],
             rng,
         )
+    }
+}
+
+impl ArbitraryFrom<(&Table, &Predicate)> for Predicate {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (t, p): &(&Table, &Predicate)) -> Self {
+        if rng.gen_bool(0.5) {
+            // produce a true predicate
+            let p_t = CompoundPredicate::arbitrary_from(rng, &(*t, true)).0;
+            Predicate::And(vec![p_t, (*p).clone()])
+        } else {
+            // produce a false predicate
+            let p_f = CompoundPredicate::arbitrary_from(rng, &(*t, false)).0;
+            Predicate::Or(vec![p_f, (*p).clone()])
+        }
     }
 }
