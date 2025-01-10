@@ -26,8 +26,8 @@ class JDBCTest {
 
     @Test
     void connection_can_be_retrieved_from_DriverManager() throws SQLException {
-        JDBC jdbc = new JDBC();
-        Connection connection = DriverManager.getConnection("jdbc:limbo:sample.db");
-        assertThat(connection).isNotNull();
+        try (Connection connection = DriverManager.getConnection("jdbc:limbo:sample.db")) {
+            assertThat(connection).isNotNull();
+        }
     }
 }
