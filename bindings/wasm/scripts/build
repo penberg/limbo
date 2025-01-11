@@ -2,12 +2,12 @@
 set -e
 
 # Define final output directories
-NODE_DIR="dist/node"
-WEB_DIR="dist/web"
-rm -rf dist
+NODE_DIR="packages/node"
+WEB_DIR="packages/web"
+rm -rf packages/
 rm -rf pkg
 
-mkdir -p $NODE_DIR $WEB_DIR pkg
+mkdir -p $NODE_DIR/dist $WEB_DIR/dist pkg
 
 # Build Node.js target
 npx wasm-pack build \
@@ -16,8 +16,7 @@ npx wasm-pack build \
   --no-default-features \
   --features nodejs
 rm -rf pkg/package.json # don't want generated package.json
-mv pkg/* $NODE_DIR/
-mv $NODE_DIR/index.js $NODE_DIR/index.cjs
+mv pkg/* $NODE_DIR/dist/
 rm -r pkg
 
 # Build web target
@@ -27,6 +26,11 @@ npx wasm-pack build \
   --no-default-features \
   --features web
 rm -rf pkg/package.json # don't want generated package.json
-mv pkg/* $WEB_DIR/
-# cp src/opfs.js $WEB_DIR/
+mv pkg/* $WEB_DIR/dist/
+
+cp node_package.json $NODE_DIR/package.json
+cp web_package.json $WEB_DIR/package.json
+
+# mv $WEB_DIR/index.js $WEB_DIR/index.mjs
+cp src/* $WEB_DIR/dist/
 rm -r pkg

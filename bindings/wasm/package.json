@@ -1,29 +1,22 @@
 {
   "name": "limbo-wasm",
-  "collaborators": [
-    "the Limbo authors"
+  "version": "0.0.11",
+  "workspaces": [
+    "packages/*"
   ],
-  "version": "0.0.12",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/penberg/limbo"
-  },
-  "files": ["dist", "src"],
+  "files": [
+    "packages"
+  ],
   "exports": {
-    ".": {
-      "import": "./dist/web/index.js",
-      "require": "./dist/node/index.cjs"
+    "./node": {
+      "require": "./packages/node/dist/index.js",
+      "types": "./packages/node/dist/index.d.ts"
     },
-    "./src/*": "./src/*"
-  },
-  "main": "./dist/node/index.cjs",
-  "types": "./dist/node/index.d.ts",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "test": "vitest --sequence.shuffle=false",
-    "test:ui": "vitest --ui"
+    "./web": {
+      "import": "./packages/web/dist/index.js",
+      "types": "./packages/web/dist/index.d.ts"
+    },
+    "./web/limbo-worker.js": "./packages/web/dist/limbo-worker.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",
