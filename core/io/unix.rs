@@ -88,8 +88,8 @@ impl IO for UnixIO {
                         }
                     }
                 };
-                match result {
-                    std::result::Result::Ok(n) => {
+                return match result {
+                    Ok(n) => {
                         match &cf {
                             CompletionCallback::Read(_, ref c, _) => {
                                 c.complete(0);
@@ -98,12 +98,10 @@ impl IO for UnixIO {
                                 c.complete(n as i32);
                             }
                         }
-                        return Ok(());
+                        Ok(())
                     }
-                    Err(e) => {
-                        return Err(e.into());
-                    }
-                }
+                    Err(e) => Err(e.into()),
+                };
             }
         }
         Ok(())
@@ -132,7 +130,7 @@ enum CompletionCallback {
 
 pub struct UnixFile {
     file: Rc<RefCell<std::fs::File>>,
-    poller: Rc<RefCell<polling::Poller>>,
+    poller: Rc<RefCell<Poller>>,
     callbacks: Rc<RefCell<HashMap<usize, CompletionCallback>>>,
 }
 
@@ -187,7 +185,7 @@ impl File for UnixFile {
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
         };
         match result {
-            std::result::Result::Ok(n) => {
+            Ok(n) => {
                 trace!("pread n: {}", n);
                 // Read succeeded immediately
                 c.complete(0);
@@ -224,7 +222,7 @@ impl File for UnixFile {
             rustix::io::pwrite(file.as_fd(), buf.as_slice(), pos as u64)
         };
         match result {
-            std::result::Result::Ok(n) => {
+            Ok(n) => {
                 trace!("pwrite n: {}", n);
                 // Read succeeded immediately
                 c.complete(n as i32);
@@ -253,7 +251,7 @@ impl File for UnixFile {
         let file = self.file.borrow();
         let result = fs::fsync(file.as_fd());
         match result {
-            std::result::Result::Ok(()) => {
+            Ok(()) => {
                 trace!("fsync");
                 c.complete(0);
                 Ok(())
@@ -264,7 +262,7 @@ impl File for UnixFile {
 
     fn size(&self) -> Result<u64> {
         let file = self.file.borrow();
-        Ok(file.metadata().unwrap().len())
+        Ok(file.metadata()?.len())
     }
 }
 
