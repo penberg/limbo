@@ -221,7 +221,7 @@ impl From<&Opts> for Settings {
                 .database
                 .as_ref()
                 .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string()),
-            io: opts.io.clone(),
+            io: opts.io,
         }
     }
 }
@@ -350,7 +350,7 @@ impl Limbo {
         let io = {
             match path {
                 ":memory:" => get_io(DbLocation::Memory, None)?,
-                _path => get_io(DbLocation::Path, Some(self.opts.io.clone()))?,
+                _path => get_io(DbLocation::Path, Some(self.opts.io))?,
             }
         };
         self.io = Arc::clone(&io);
