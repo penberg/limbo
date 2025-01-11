@@ -94,3 +94,18 @@ The `simulator` directory contains a deterministic simulator for testing.
 What this means is that the behavior of a test run is deterministic based on the seed value.
 If the simulator catches a bug, you can always reproduce the exact same sequence of events by passing the same seed.
 The simulator also performs fault injection to discover interesting bugs.
+
+## Python Bindings
+
+Limbo provides Python bindings built on top of the [PyO3](https://pyo3.rs) project.  
+To compile the Python bindings locally, you need to have [Maturin](https://pypi.org/project/maturin/) installed:
+
+```bash
+pip install maturin
+```
+
+Once Maturin is installed, you can build the crate and install it as a Python module directly into the current virtual environment by running:
+
+```bash
+cd bindings/python && maturin develop
+```
