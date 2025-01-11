@@ -107,6 +107,28 @@ macro_rules! expect_arguments_max {
     }};
 }
 
+macro_rules! expect_arguments_min {
+    (
+        $args:expr,
+        $expected_arguments:expr,
+        $func:ident
+    ) => {{
+        let args = if let Some(args) = $args {
+            if args.len() < $expected_arguments {
+                crate::bail_parse_error!(
+                    "{} function with less than {} arguments",
+                    $func.to_string(),
+                    $expected_arguments
+                );
+            }
+            args
+        } else {
+            crate::bail_parse_error!("{} function with no arguments", $func.to_string());
+        };
+        args
+    }};
+}
+
 pub fn translate_condition_expr(
     program: &mut ProgramBuilder,
     referenced_tables: &[TableReference],
@@ -821,20 +843,7 @@ pub fn translate_expr(
                             func_ctx,
                         ),
                         ScalarFunc::Coalesce => {
-                            let args = if let Some(args) = args {
-                                if args.len() < 2 {
-                                    crate::bail_parse_error!(
-                                        "{} function with less than 2 arguments",
-                                        srf.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = expect_arguments_min!(args, 2, srf);
 
                             // coalesce function is implemented as a series of not null checks
                             // whenever a not null check succeeds, we jump to the end of the series
@@ -892,17 +901,7 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::ConcatWs => {
-                            let args = match args {
-                                Some(args) if args.len() >= 2 => args,
-                                Some(_) => crate::bail_parse_error!(
-                                    "{} function requires at least 2 arguments",
-                                    srf.to_string()
-                                ),
-                                None => crate::bail_parse_error!(
-                                    "{} function requires arguments",
-                                    srf.to_string()
-                                ),
-                            };
+                            let args = expect_arguments_min!(args, 2, srf);
 
                             let temp_register = program.alloc_register();
                             for arg in args.iter() {
@@ -1049,20 +1048,7 @@ pub fn translate_expr(
                         | ScalarFunc::Sign
                         | ScalarFunc::Soundex
                         | ScalarFunc::ZeroBlob => {
-                            let args = if let Some(args) = args {
-                                if args.len() != 1 {
-                                    crate::bail_parse_error!(
-                                        "{} function with not exactly 1 argument",
-                                        srf.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = expect_arguments_exact!(args, 1, srf);
                             let reg =
                                 translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                             program.emit_insn(Insn::Function {
@@ -1248,20 +1234,7 @@ pub fn translate_expr(
                         | ScalarFunc::RTrim
                         | ScalarFunc::Round
                         | ScalarFunc::Unhex => {
-                            let args = if let Some(args) = args {
-                                if args.len() > 2 {
-                                    crate::bail_parse_error!(
-                                        "{} function with more than 2 arguments",
-                                        srf.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = expect_arguments_max!(args, 2, srf);
 
                             for arg in args.iter() {
                                 translate_and_mark(program, referenced_tables, arg, resolver)?;
@@ -1434,21 +1407,7 @@ pub fn translate_expr(
                     #[cfg(feature = "uuid")]
                     ExtFunc::Uuid(ref uuid_fn) => match uuid_fn {
                         UuidFunc::UuidStr | UuidFunc::UuidBlob | UuidFunc::Uuid7TS => {
-                            let args = if let Some(args) = args {
-                                if args.len() != 1 {
-                                    crate::bail_parse_error!(
-                                        "{} function with not exactly 1 argument",
-                                        ext_func.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    ext_func.to_string()
-                                );
-                            };
-
+                            let args = expect_arguments_exact!(args, 1, ext_func);
                             let regs = program.alloc_register();
                             translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
                             program.emit_insn(Insn::Function {
@@ -1476,14 +1435,7 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         UuidFunc::Uuid7 => {
-                            let args = match args {
-                                Some(args) if args.len() > 1 => crate::bail_parse_error!(
-                                    "{} function with more than 1 argument",
-                                    ext_func.to_string()
-                                ),
-                                Some(args) => args,
-                                None => &vec![],
-                            };
+                            let args = expect_arguments_max!(args, 1, ext_func);
                             let mut start_reg = None;
                             if let Some(arg) = args.first() {
                                 start_reg = Some(translate_and_mark(
@@ -1521,18 +1473,7 @@ pub fn translate_expr(
                     }
 
                     MathFuncArity::Unary => {
-                        let args = if let Some(args) = args {
-                            if args.len() != 1 {
-                                crate::bail_parse_error!(
-                                    "{} function with not exactly 1 argument",
-                                    math_func
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!("{} function with no arguments", math_func);
-                        };
-
+                        let args = expect_arguments_exact!(args, 1, math_func);
                         let reg =
                             translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                         program.emit_insn(Insn::Function {
@@ -1545,17 +1486,7 @@ pub fn translate_expr(
                     }
 
                     MathFuncArity::Binary => {
-                        let args = if let Some(args) = args {
-                            if args.len() != 2 {
-                                crate::bail_parse_error!(
-                                    "{} function with not exactly 2 arguments",
-                                    math_func
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!("{} function with no arguments", math_func);
-                        };
+                        let args = expect_arguments_exact!(args, 2, math_func);
                         let reg1 = program.alloc_register();
                         let _ =
                             translate_expr(program, referenced_tables, &args[0], reg1, resolver)?;
@@ -1572,17 +1503,7 @@ pub fn translate_expr(
                     }
 
                     MathFuncArity::UnaryOrBinary => {
-                        let args = if let Some(args) = args {
-                            if args.len() > 2 {
-                                crate::bail_parse_error!(
-                                    "{} function with more than 2 arguments",
-                                    math_func
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!("{} function with no arguments", math_func);
-                        };
+                        let args = expect_arguments_max!(args, 2, math_func);
 
                         let regs = program.alloc_registers(args.len());
                         for (i, arg) in args.iter().enumerate() {
