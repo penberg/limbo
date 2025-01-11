@@ -113,18 +113,18 @@ pub fn bind_column_references(
                         crate::bail_parse_error!("Column {} is ambiguous", id.0);
                     }
                     let col = table.columns().get(col_idx.unwrap()).unwrap();
-                    match_result = Some((tbl_idx, col_idx.unwrap(), col.primary_key));
+                    match_result = Some((tbl_idx, col_idx.unwrap(), col.is_rowid_alias));
                 }
             }
             if match_result.is_none() {
                 crate::bail_parse_error!("Column {} not found", id.0);
             }
-            let (tbl_idx, col_idx, is_primary_key) = match_result.unwrap();
+            let (tbl_idx, col_idx, is_rowid_alias) = match_result.unwrap();
             *expr = ast::Expr::Column {
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx,
-                is_rowid_alias: is_primary_key,
+                is_rowid_alias,
             };
             Ok(())
         }
@@ -294,7 +294,7 @@ fn parse_from_clause_table(
             };
             subplan.query_type = SelectQueryType::Subquery {
                 yield_reg: usize::MAX, // will be set later in bytecode emission
-                coroutine_implementation_start: BranchOffset::MAX, // will be set later in bytecode emission
+                coroutine_implementation_start: BranchOffset::Placeholder, // will be set later in bytecode emission
             };
             let identifier = maybe_alias
                 .map(|a| match a {
@@ -544,6 +544,14 @@ fn parse_join(
 pub fn parse_limit(limit: Limit) -> Option<usize> {
     if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
         n.parse().ok()
+    } else if let Expr::Id(id) = limit.expr {
+        if id.0.eq_ignore_ascii_case("true") {
+            Some(1)
+        } else if id.0.eq_ignore_ascii_case("false") {
+            Some(0)
+        } else {
+            None
+        }
     } else {
         None
     }

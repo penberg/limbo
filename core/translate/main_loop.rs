@@ -194,7 +194,7 @@ pub fn open_loop(
             // In case the subquery is an inner loop, it needs to be reinitialized on each iteration of the outer loop.
             program.emit_insn(Insn::InitCoroutine {
                 yield_reg,
-                jump_on_definition: 0,
+                jump_on_definition: BranchOffset::Offset(0),
                 start_offset: coroutine_implementation_start,
             });
             let LoopLabels {
@@ -205,18 +205,15 @@ pub fn open_loop(
                 .labels_main_loop
                 .get(id)
                 .expect("subquery has no loop labels");
-            program.defer_label_resolution(loop_start, program.offset() as usize);
+            program.resolve_label(loop_start, program.offset());
             // A subquery within the main loop of a parent query has no cursor, so instead of advancing the cursor,
             // it emits a Yield which jumps back to the main loop of the subquery itself to retrieve the next row.
             // When the subquery coroutine completes, this instruction jumps to the label at the top of the termination_label_stack,
             // which in this case is the end of the Yield-Goto loop in the parent query.
-            program.emit_insn_with_label_dependency(
-                Insn::Yield {
-                    yield_reg,
-                    end_offset: loop_end,
-                },
-                loop_end,
-            );
+            program.emit_insn(Insn::Yield {
+                yield_reg,
+                end_offset: loop_end,
+            });
 
             // These are predicates evaluated outside of the subquery,
             // so they are translated here.
@@ -228,6 +225,7 @@ pub fn open_loop(
                         jump_if_condition_is_true: false,
                         jump_target_when_true,
                         jump_target_when_false: next,
+                        parent_op: None,
                     };
                     translate_condition_expr(
                         program,
@@ -276,6 +274,7 @@ pub fn open_loop(
                     jump_if_condition_is_true: false,
                     jump_target_when_true,
                     jump_target_when_false,
+                    parent_op: None,
                 };
                 for predicate in predicates.iter() {
                     translate_condition_expr(
@@ -291,10 +290,7 @@ pub fn open_loop(
 
             if *outer {
                 let lj_meta = t_ctx.meta_left_joins.get(id).unwrap();
-                program.defer_label_resolution(
-                    lj_meta.label_match_flag_set_true,
-                    program.offset() as usize,
-                );
+                program.resolve_label(lj_meta.label_match_flag_set_true, program.offset());
                 program.emit_insn(Insn::Integer {
                     value: 1,
                     dest: lj_meta.reg_match_flag,
@@ -326,7 +322,7 @@ pub fn open_loop(
                 .labels_main_loop
                 .get(id)
                 .expect("scan has no loop labels");
-            program.emit_insn_with_label_dependency(
+            program.emit_insn(
                 if iter_dir
                     .as_ref()
                     .is_some_and(|dir| *dir == IterationDirection::Backwards)
@@ -341,9 +337,8 @@ pub fn open_loop(
                         pc_if_empty: loop_end,
                     }
                 },
-                loop_end,
             );
-            program.defer_label_resolution(loop_start, program.offset() as usize);
+            program.resolve_label(loop_start, program.offset());
 
             if let Some(preds) = predicates {
                 for expr in preds {
@@ -352,6 +347,7 @@ pub fn open_loop(
                         jump_if_condition_is_true: false,
                         jump_target_when_true,
                         jump_target_when_false: next,
+                        parent_op: None,
                     };
                     translate_condition_expr(
                         program,
@@ -420,28 +416,25 @@ pub fn open_loop(
                     _ => unreachable!(),
                 }
                 // If we try to seek to a key that is not present in the table/index, we exit the loop entirely.
-                program.emit_insn_with_label_dependency(
-                    match cmp_op {
-                        ast::Operator::Equals | ast::Operator::GreaterEquals => Insn::SeekGE {
-                            is_index: index_cursor_id.is_some(),
-                            cursor_id: index_cursor_id.unwrap_or(table_cursor_id),
-                            start_reg: cmp_reg,
-                            num_regs: 1,
-                            target_pc: loop_end,
-                        },
-                        ast::Operator::Greater
-                        | ast::Operator::Less
-                        | ast::Operator::LessEquals => Insn::SeekGT {
-                            is_index: index_cursor_id.is_some(),
-                            cursor_id: index_cursor_id.unwrap_or(table_cursor_id),
-                            start_reg: cmp_reg,
-                            num_regs: 1,
-                            target_pc: loop_end,
-                        },
-                        _ => unreachable!(),
+                program.emit_insn(match cmp_op {
+                    ast::Operator::Equals | ast::Operator::GreaterEquals => Insn::SeekGE {
+                        is_index: index_cursor_id.is_some(),
+                        cursor_id: index_cursor_id.unwrap_or(table_cursor_id),
+                        start_reg: cmp_reg,
+                        num_regs: 1,
+                        target_pc: loop_end,
                     },
-                    loop_end,
-                );
+                    ast::Operator::Greater | ast::Operator::Less | ast::Operator::LessEquals => {
+                        Insn::SeekGT {
+                            is_index: index_cursor_id.is_some(),
+                            cursor_id: index_cursor_id.unwrap_or(table_cursor_id),
+                            start_reg: cmp_reg,
+                            num_regs: 1,
+                            target_pc: loop_end,
+                        }
+                    }
+                    _ => unreachable!(),
+                });
                 if *cmp_op == ast::Operator::Less || *cmp_op == ast::Operator::LessEquals {
                     translate_expr(
                         program,
@@ -452,7 +445,7 @@ pub fn open_loop(
                     )?;
                 }
 
-                program.defer_label_resolution(loop_start, program.offset() as usize);
+                program.resolve_label(loop_start, program.offset());
                 // TODO: We are currently only handling ascending indexes.
                 // For conditions like index_key > 10, we have already seeked to the first key greater than 10, and can just scan forward.
                 // For conditions like index_key < 10, we are at the beginning of the index, and will scan forward and emit IdxGE(10) with a conditional jump to the end.
@@ -466,56 +459,44 @@ pub fn open_loop(
                 match cmp_op {
                     ast::Operator::Equals | ast::Operator::LessEquals => {
                         if let Some(index_cursor_id) = index_cursor_id {
-                            program.emit_insn_with_label_dependency(
-                                Insn::IdxGT {
-                                    cursor_id: index_cursor_id,
-                                    start_reg: cmp_reg,
-                                    num_regs: 1,
-                                    target_pc: loop_end,
-                                },
-                                loop_end,
-                            );
+                            program.emit_insn(Insn::IdxGT {
+                                cursor_id: index_cursor_id,
+                                start_reg: cmp_reg,
+                                num_regs: 1,
+                                target_pc: loop_end,
+                            });
                         } else {
                             let rowid_reg = program.alloc_register();
                             program.emit_insn(Insn::RowId {
                                 cursor_id: table_cursor_id,
                                 dest: rowid_reg,
                             });
-                            program.emit_insn_with_label_dependency(
-                                Insn::Gt {
-                                    lhs: rowid_reg,
-                                    rhs: cmp_reg,
-                                    target_pc: loop_end,
-                                },
-                                loop_end,
-                            );
+                            program.emit_insn(Insn::Gt {
+                                lhs: rowid_reg,
+                                rhs: cmp_reg,
+                                target_pc: loop_end,
+                            });
                         }
                     }
                     ast::Operator::Less => {
                         if let Some(index_cursor_id) = index_cursor_id {
-                            program.emit_insn_with_label_dependency(
-                                Insn::IdxGE {
-                                    cursor_id: index_cursor_id,
-                                    start_reg: cmp_reg,
-                                    num_regs: 1,
-                                    target_pc: loop_end,
-                                },
-                                loop_end,
-                            );
+                            program.emit_insn(Insn::IdxGE {
+                                cursor_id: index_cursor_id,
+                                start_reg: cmp_reg,
+                                num_regs: 1,
+                                target_pc: loop_end,
+                            });
                         } else {
                             let rowid_reg = program.alloc_register();
                             program.emit_insn(Insn::RowId {
                                 cursor_id: table_cursor_id,
                                 dest: rowid_reg,
                             });
-                            program.emit_insn_with_label_dependency(
-                                Insn::Ge {
-                                    lhs: rowid_reg,
-                                    rhs: cmp_reg,
-                                    target_pc: loop_end,
-                                },
-                                loop_end,
-                            );
+                            program.emit_insn(Insn::Ge {
+                                lhs: rowid_reg,
+                                rhs: cmp_reg,
+                                target_pc: loop_end,
+                            });
                         }
                     }
                     _ => {}
@@ -538,14 +519,11 @@ pub fn open_loop(
                     src_reg,
                     &t_ctx.resolver,
                 )?;
-                program.emit_insn_with_label_dependency(
-                    Insn::SeekRowid {
-                        cursor_id: table_cursor_id,
-                        src_reg,
-                        target_pc: next,
-                    },
-                    next,
-                );
+                program.emit_insn(Insn::SeekRowid {
+                    cursor_id: table_cursor_id,
+                    src_reg,
+                    target_pc: next,
+                });
             }
             if let Some(predicates) = predicates {
                 for predicate in predicates.iter() {
@@ -554,6 +532,7 @@ pub fn open_loop(
                         jump_if_condition_is_true: false,
                         jump_target_when_true,
                         jump_target_when_false: next,
+                        parent_op: None,
                     };
                     translate_condition_expr(
                         program,
@@ -748,12 +727,9 @@ pub fn close_loop(
             // A subquery has no cursor to call NextAsync on, so it just emits a Goto
             // to the Yield instruction, which in turn jumps back to the main loop of the subquery,
             // so that the next row from the subquery can be read.
-            program.emit_insn_with_label_dependency(
-                Insn::Goto {
-                    target_pc: loop_labels.loop_start,
-                },
-                loop_labels.loop_start,
-            );
+            program.emit_insn(Insn::Goto {
+                target_pc: loop_labels.loop_start,
+            });
         }
         SourceOperator::Join {
             id,
@@ -771,7 +747,7 @@ pub fn close_loop(
                 // If the left join match flag has been set to 1, we jump to the next row on the outer table,
                 // i.e. continue to the next row of t1 in our example.
                 program.resolve_label(lj_meta.label_match_flag_check_value, program.offset());
-                let jump_offset = program.offset() + 3;
+                let jump_offset = program.offset().add(3u32);
                 program.emit_insn(Insn::IfPos {
                     reg: lj_meta.reg_match_flag,
                     target_pc: jump_offset,
@@ -799,12 +775,9 @@ pub fn close_loop(
                 // and we will end up back in the IfPos instruction above, which will then
                 // check the match flag again, and since it is now 1, we will jump to the
                 // next row in the left table.
-                program.emit_insn_with_label_dependency(
-                    Insn::Goto {
-                        target_pc: lj_meta.label_match_flag_set_true,
-                    },
-                    lj_meta.label_match_flag_set_true,
-                );
+                program.emit_insn(Insn::Goto {
+                    target_pc: lj_meta.label_match_flag_set_true,
+                });
 
                 assert!(program.offset() == jump_offset);
             }
@@ -830,21 +803,15 @@ pub fn close_loop(
                 .as_ref()
                 .is_some_and(|dir| *dir == IterationDirection::Backwards)
             {
-                program.emit_insn_with_label_dependency(
-                    Insn::PrevAwait {
-                        cursor_id,
-                        pc_if_next: loop_labels.loop_start,
-                    },
-                    loop_labels.loop_start,
-                );
+                program.emit_insn(Insn::PrevAwait {
+                    cursor_id,
+                    pc_if_next: loop_labels.loop_start,
+                });
             } else {
-                program.emit_insn_with_label_dependency(
-                    Insn::NextAwait {
-                        cursor_id,
-                        pc_if_next: loop_labels.loop_start,
-                    },
-                    loop_labels.loop_start,
-                );
+                program.emit_insn(Insn::NextAwait {
+                    cursor_id,
+                    pc_if_next: loop_labels.loop_start,
+                });
             }
         }
         SourceOperator::Search {
@@ -866,13 +833,10 @@ pub fn close_loop(
             };
 
             program.emit_insn(Insn::NextAsync { cursor_id });
-            program.emit_insn_with_label_dependency(
-                Insn::NextAwait {
-                    cursor_id,
-                    pc_if_next: loop_labels.loop_start,
-                },
-                loop_labels.loop_start,
-            );
+            program.emit_insn(Insn::NextAwait {
+                cursor_id,
+                pc_if_next: loop_labels.loop_start,
+            });
         }
         SourceOperator::Nothing { .. } => {}
     };

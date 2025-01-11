@@ -78,6 +78,7 @@ macro_rules! return_if_locked {
 enum WriteState {
     Start,
     BalanceStart,
+    BalanceNonRoot,
     BalanceGetParentPage,
     BalanceMoveUp,
     Finish,
@@ -730,9 +731,10 @@ impl BTreeCursor {
                     }
                 }
                 WriteState::BalanceStart
+                | WriteState::BalanceNonRoot
                 | WriteState::BalanceMoveUp
                 | WriteState::BalanceGetParentPage => {
-                    return_if_io!(self.balance_leaf());
+                    return_if_io!(self.balance());
                 }
                 WriteState::Finish => {
                     self.write_info.state = WriteState::Start;
@@ -882,7 +884,7 @@ impl BTreeCursor {
     /// This is a naive algorithm that doesn't try to distribute cells evenly by content.
     /// It will try to split the page in half by keys not by content.
     /// Sqlite tries to have a page at least 40% full.
-    fn balance_leaf(&mut self) -> Result<CursorResult<()>> {
+    fn balance(&mut self) -> Result<CursorResult<()>> {
         let state = &self.write_info.state;
         match state {
             WriteState::BalanceStart => {
@@ -906,7 +908,31 @@ impl BTreeCursor {
                     self.balance_root();
                     return Ok(CursorResult::Ok(()));
                 }
-                debug!("Balancing leaf. leaf={}", current_page.get().id);
+
+                self.write_info.state = WriteState::BalanceNonRoot;
+                self.balance_non_root()
+            }
+            WriteState::BalanceNonRoot
+            | WriteState::BalanceGetParentPage
+            | WriteState::BalanceMoveUp => self.balance_non_root(),
+
+            _ => unreachable!("invalid balance leaf state {:?}", state),
+        }
+    }
+
+    fn balance_non_root(&mut self) -> Result<CursorResult<()>> {
+        let state = &self.write_info.state;
+        match state {
+            WriteState::Start => todo!(),
+            WriteState::BalanceStart => todo!(),
+            WriteState::BalanceNonRoot => {
+                // drop divider cells and find right pointer
+                // NOTE: since we are doing a simple split we only finding the pointer we want to update (right pointer).
+                // Right pointer means cell that points to the last page, as we don't really want to drop this one. This one
+                // can be a "rightmost pointer" or a "cell".
+                // we always asumme there is a parent
+                let current_page = self.stack.top();
+                debug!("balance_non_root(page={})", current_page.get().id);
 
                 // Copy of page used to reference cell bytes.
                 // This needs to be saved somewhere safe so taht references still point to here,
@@ -1186,8 +1212,7 @@ impl BTreeCursor {
                 let _ = self.write_info.page_copy.take();
                 Ok(CursorResult::Ok(()))
             }
-
-            _ => unreachable!("invalid balance leaf state {:?}", state),
+            WriteState::Finish => todo!(),
         }
     }
 

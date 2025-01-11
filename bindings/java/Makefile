@@ -1,7 +1,7 @@
-java_run: lib
-	export LIMBO_SYSTEM_PATH=../../target/debug && ./gradlew run
+.PHONY: test build_test
 
-.PHONY: lib
+test: build_test
+	./gradlew test
 
-lib:
-	cargo build
+build_test:
+	CARGO_TARGET_DIR=src/test/resources/limbo cargo build

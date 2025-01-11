@@ -13,11 +13,11 @@ pub fn insn_to_str(
             Insn::Init { target_pc } => (
                 "Init",
                 0,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("Start at {}", target_pc),
+                format!("Start at {}", target_pc.to_debug_int()),
             ),
             Insn::Add { lhs, rhs, dest } => (
                 "Add",
@@ -114,11 +114,11 @@ pub fn insn_to_str(
             Insn::NotNull { reg, target_pc } => (
                 "NotNull",
                 *reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("r[{}]!=NULL -> goto {}", reg, target_pc),
+                format!("r[{}]!=NULL -> goto {}", reg, target_pc.to_debug_int()),
             ),
             Insn::Compare {
                 start_reg_a,
@@ -145,9 +145,9 @@ pub fn insn_to_str(
                 target_pc_gt,
             } => (
                 "Jump",
-                *target_pc_lt as i32,
-                *target_pc_eq as i32,
-                *target_pc_gt as i32,
+                target_pc_lt.to_debug_int(),
+                target_pc_eq.to_debug_int(),
+                target_pc_gt.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 "".to_string(),
@@ -178,13 +178,16 @@ pub fn insn_to_str(
             } => (
                 "IfPos",
                 *reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 format!(
                     "r[{}]>0 -> r[{}]-={}, goto {}",
-                    reg, reg, decrement_by, target_pc
+                    reg,
+                    reg,
+                    decrement_by,
+                    target_pc.to_debug_int()
                 ),
             ),
             Insn::Eq {
@@ -195,10 +198,15 @@ pub fn insn_to_str(
                 "Eq",
                 *lhs as i32,
                 *rhs as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}]==r[{}] goto {}", lhs, rhs, target_pc),
+                format!(
+                    "if r[{}]==r[{}] goto {}",
+                    lhs,
+                    rhs,
+                    target_pc.to_debug_int()
+                ),
             ),
             Insn::Ne {
                 lhs,
@@ -208,10 +216,15 @@ pub fn insn_to_str(
                 "Ne",
                 *lhs as i32,
                 *rhs as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}]!=r[{}] goto {}", lhs, rhs, target_pc),
+                format!(
+                    "if r[{}]!=r[{}] goto {}",
+                    lhs,
+                    rhs,
+                    target_pc.to_debug_int()
+                ),
             ),
             Insn::Lt {
                 lhs,
@@ -221,10 +234,10 @@ pub fn insn_to_str(
                 "Lt",
                 *lhs as i32,
                 *rhs as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}]<r[{}] goto {}", lhs, rhs, target_pc),
+                format!("if r[{}]<r[{}] goto {}", lhs, rhs, target_pc.to_debug_int()),
             ),
             Insn::Le {
                 lhs,
@@ -234,10 +247,15 @@ pub fn insn_to_str(
                 "Le",
                 *lhs as i32,
                 *rhs as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}]<=r[{}] goto {}", lhs, rhs, target_pc),
+                format!(
+                    "if r[{}]<=r[{}] goto {}",
+                    lhs,
+                    rhs,
+                    target_pc.to_debug_int()
+                ),
             ),
             Insn::Gt {
                 lhs,
@@ -247,10 +265,10 @@ pub fn insn_to_str(
                 "Gt",
                 *lhs as i32,
                 *rhs as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}]>r[{}] goto {}", lhs, rhs, target_pc),
+                format!("if r[{}]>r[{}] goto {}", lhs, rhs, target_pc.to_debug_int()),
             ),
             Insn::Ge {
                 lhs,
@@ -260,10 +278,15 @@ pub fn insn_to_str(
                 "Ge",
                 *lhs as i32,
                 *rhs as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}]>=r[{}] goto {}", lhs, rhs, target_pc),
+                format!(
+                    "if r[{}]>=r[{}] goto {}",
+                    lhs,
+                    rhs,
+                    target_pc.to_debug_int()
+                ),
             ),
             Insn::If {
                 reg,
@@ -272,11 +295,11 @@ pub fn insn_to_str(
             } => (
                 "If",
                 *reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *null_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if r[{}] goto {}", reg, target_pc),
+                format!("if r[{}] goto {}", reg, target_pc.to_debug_int()),
             ),
             Insn::IfNot {
                 reg,
@@ -285,11 +308,11 @@ pub fn insn_to_str(
             } => (
                 "IfNot",
                 *reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *null_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if !r[{}] goto {}", reg, target_pc),
+                format!("if !r[{}] goto {}", reg, target_pc.to_debug_int()),
             ),
             Insn::OpenReadAsync {
                 cursor_id,
@@ -347,7 +370,7 @@ pub fn insn_to_str(
             } => (
                 "RewindAwait",
                 *cursor_id as i32,
-                *pc_if_empty as i32,
+                pc_if_empty.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -431,7 +454,7 @@ pub fn insn_to_str(
             } => (
                 "NextAwait",
                 *cursor_id as i32,
-                *pc_if_next as i32,
+                pc_if_next.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -461,7 +484,7 @@ pub fn insn_to_str(
             Insn::Goto { target_pc } => (
                 "Goto",
                 0,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -473,7 +496,7 @@ pub fn insn_to_str(
             } => (
                 "Gosub",
                 *return_reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -562,7 +585,7 @@ pub fn insn_to_str(
                 "SeekRowid",
                 *cursor_id as i32,
                 *src_reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 format!(
@@ -572,7 +595,7 @@ pub fn insn_to_str(
                         .0
                         .as_ref()
                         .unwrap_or(&format!("cursor {}", cursor_id)),
-                    target_pc
+                    target_pc.to_debug_int()
                 ),
             ),
             Insn::DeferredSeek {
@@ -596,7 +619,7 @@ pub fn insn_to_str(
             } => (
                 "SeekGT",
                 *cursor_id as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *start_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -611,7 +634,7 @@ pub fn insn_to_str(
             } => (
                 "SeekGE",
                 *cursor_id as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *start_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -625,7 +648,7 @@ pub fn insn_to_str(
             } => (
                 "IdxGT",
                 *cursor_id as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *start_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -639,7 +662,7 @@ pub fn insn_to_str(
             } => (
                 "IdxGE",
                 *cursor_id as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *start_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -648,11 +671,11 @@ pub fn insn_to_str(
             Insn::DecrJumpZero { reg, target_pc } => (
                 "DecrJumpZero",
                 *reg as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if (--r[{}]==0) goto {}", reg, target_pc),
+                format!("if (--r[{}]==0) goto {}", reg, target_pc.to_debug_int()),
             ),
             Insn::AggStep {
                 func,
@@ -742,7 +765,7 @@ pub fn insn_to_str(
             } => (
                 "SorterSort",
                 *cursor_id as i32,
-                *pc_if_empty as i32,
+                pc_if_empty.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -754,7 +777,7 @@ pub fn insn_to_str(
             } => (
                 "SorterNext",
                 *cursor_id as i32,
-                *pc_if_next as i32,
+                pc_if_next.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -792,8 +815,8 @@ pub fn insn_to_str(
             } => (
                 "InitCoroutine",
                 *yield_reg as i32,
-                *jump_on_definition as i32,
-                *start_offset as i32,
+                jump_on_definition.to_debug_int(),
+                start_offset.to_debug_int(),
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 "".to_string(),
@@ -813,7 +836,7 @@ pub fn insn_to_str(
             } => (
                 "Yield",
                 *yield_reg as i32,
-                *end_offset as i32,
+                end_offset.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -898,7 +921,7 @@ pub fn insn_to_str(
             } => (
                 "NotExists",
                 *cursor as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 *rowid_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
@@ -968,11 +991,11 @@ pub fn insn_to_str(
             Insn::IsNull { src, target_pc } => (
                 "IsNull",
                 *src as i32,
-                *target_pc as i32,
+                target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if (r[{}]==NULL) goto {}", src, target_pc),
+                format!("if (r[{}]==NULL) goto {}", src, target_pc.to_debug_int()),
             ),
             Insn::ParseSchema { db, where_clause } => (
                 "ParseSchema",

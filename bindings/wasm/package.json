@@ -16,5 +16,21 @@
     "limbo_wasm.d.ts"
   ],
   "main": "limbo_wasm.js",
-  "types": "limbo_wasm.d.ts"
+  "types": "limbo_wasm.d.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "test": "vitest --sequence.shuffle=false",
+    "test:ui": "vitest --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@vitest/ui": "^2.1.8",
+    "happy-dom": "^16.3.0",
+    "playwright": "^1.49.1",
+    "vite": "^6.0.7",
+    "vite-plugin-wasm": "^3.4.1",
+    "vitest": "^2.1.8",
+    "wasm-pack": "^0.13.1"
+  }
 }

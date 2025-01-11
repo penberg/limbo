@@ -1,65 +1,69 @@
 package org.github.tursodatabase.core;
 
 
+import org.github.tursodatabase.LimboErrorCode;
+import org.github.tursodatabase.NativeInvocation;
+import org.github.tursodatabase.VisibleForTesting;
+import org.github.tursodatabase.exceptions.LimboException;
+
+import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
 
 /**
  * This class provides a thin JNI layer over the SQLite3 C API.
  */
-public final class LimboDB extends DB {
-    /**
-     * SQLite connection handle.
-     */
-    private long pointer = 0;
+public final class LimboDB extends AbstractDB {
+
+    // Pointer to database instance
+    private long dbPtr;
+    private boolean isOpen;
 
     private static boolean isLoaded;
-    private static boolean loadSucceeded;
 
     static {
         if ("The Android Project".equals(System.getProperty("java.vm.vendor"))) {
-            System.loadLibrary("sqlitejdbc");
-            isLoaded = true;
-            loadSucceeded = true;
+            // TODO
         } else {
             // continue with non Android execution path
             isLoaded = false;
-            loadSucceeded = false;
         }
     }
 
+    // url example: "jdbc:sqlite:{fileName}
+
+    /**
+     * @param url      e.g. "jdbc:sqlite:fileName
+     * @param fileName e.g. path to file
+     */
+    public static LimboDB create(String url, String fileName) throws SQLException {
+        return new LimboDB(url, fileName);
+    }
+
     // TODO: receive config as argument
-    public LimboDB(String url, String fileName) throws SQLException {
+    private LimboDB(String url, String fileName) throws SQLException {
         super(url, fileName);
     }
 
     /**
      * Loads the SQLite interface backend.
-     *
-     * @return True if the SQLite JDBC driver is successfully loaded; false otherwise.
      */
-    public static boolean load() throws Exception {
-        if (isLoaded) return loadSucceeded;
+    public void load() {
+        if (isLoaded) return;
 
         try {
             System.loadLibrary("_limbo_java");
-            loadSucceeded = true;
+
         } finally {
             isLoaded = true;
         }
-        return loadSucceeded;
     }
 
     // WRAPPER FUNCTIONS ////////////////////////////////////////////
 
-    @Override
-    protected synchronized void _open(String file, int openFlags) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
-    }
-
     // TODO: add support for JNI
-    synchronized native void _open_utf8(byte[] fileUtf8, int openFlags) throws SQLException;
+    @Override
+    protected synchronized native long _open_utf8(byte[] file, int openFlags) throws SQLException;
 
     // TODO: add support for JNI
     @Override
@@ -79,6 +83,15 @@ public final class LimboDB extends DB {
     public native void interrupt();
 
     @Override
+    protected void _open(String fileName, int openFlags) throws SQLException {
+        if (isOpen) {
+            throwLimboException(LimboErrorCode.UNKNOWN_ERROR.code, "Already opened");
+        }
+        dbPtr = _open_utf8(stringToUtf8ByteArray(fileName), openFlags);
+        isOpen = true;
+    }
+
+    @Override
     protected synchronized SafeStmtPtr prepare(String sql) throws SQLException {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
@@ -91,4 +104,52 @@ public final class LimboDB extends DB {
     // TODO: add support for JNI
     @Override
     public synchronized native int step(long stmt);
+
+    @VisibleForTesting
+    native void throwJavaException(int errorCode) throws SQLException;
+
+    /**
+     * Throws formatted SQLException with error code and message.
+     *
+     * @param errorCode         Error code.
+     * @param errorMessageBytes Error message.
+     */
+    @NativeInvocation
+    private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
+        String errorMessage = utf8ByteBufferToString(errorMessageBytes);
+        throwLimboException(errorCode, errorMessage);
+    }
+
+    /**
+     * Throws formatted SQLException with error code and message.
+     *
+     * @param errorCode    Error code.
+     * @param errorMessage Error message.
+     */
+    public void throwLimboException(int errorCode, String errorMessage) throws SQLException {
+        LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
+        String msg;
+        if (code == LimboErrorCode.UNKNOWN_ERROR) {
+            msg = String.format("%s:%s (%s)", code, errorCode, errorMessage);
+        } else {
+            msg = String.format("%s (%s)", code, errorMessage);
+        }
+
+        throw new LimboException(msg, code);
+    }
+
+    private static String utf8ByteBufferToString(byte[] buffer) {
+        if (buffer == null) {
+            return null;
+        }
+
+        return new String(buffer, StandardCharsets.UTF_8);
+    }
+
+    private static byte[] stringToUtf8ByteArray(String str) {
+        if (str == null) {
+            return null;
+        }
+        return str.getBytes(StandardCharsets.UTF_8);
+    }
 }

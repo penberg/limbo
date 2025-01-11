@@ -164,14 +164,14 @@ impl Buffer {
 }
 
 cfg_block! {
-    #[cfg(target_os = "linux")] {
-        mod linux;
-        pub use linux::LinuxIO as PlatformIO;
+    #[cfg(all(target_os = "linux", feature = "io_uring"))] {
+        mod io_uring;
+        pub use io_uring::UringIO as PlatformIO;
     }
 
-    #[cfg(target_os = "macos")] {
-        mod darwin;
-        pub use darwin::DarwinIO as PlatformIO;
+    #[cfg(any(all(target_os = "linux",not(feature = "io_uring")), target_os = "macos"))] {
+        mod unix;
+        pub use unix::UnixIO as PlatformIO;
     }
 
     #[cfg(target_os = "windows")] {
