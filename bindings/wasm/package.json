@@ -9,12 +9,13 @@
     "type": "git",
     "url": "https://github.com/penberg/limbo"
   },
-  "files": ["dist"],
+  "files": ["dist", "src"],
   "exports": {
     ".": {
       "import": "./dist/web/index.js",
       "require": "./dist/node/index.cjs"
-    }
+    },
+    "./src/*": "./src/*"
   },
   "main": "./dist/node/index.cjs",
   "types": "./dist/node/index.d.ts",

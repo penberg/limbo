@@ -3,6 +3,13 @@
   "private": true,
   "type": "commonjs",
   "dependencies": {
-    "limbo-wasm": "file:../"
+    "limbo-wasm": "file:../limbo-wasm-0.0.11.tgz"
+  },
+  "scripts": {
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7",
+    "vite-plugin-wasm": "^3.4.1"
   }
 }
