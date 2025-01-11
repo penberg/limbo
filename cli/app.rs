@@ -255,11 +255,10 @@ impl Limbo {
             .as_ref()
             .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string());
 
-        let io_choice = opts.io.clone();
         let io = {
             match db_file.as_str() {
-                ":memory:" => get_io(DbLocation::Memory, None)?,
-                _path => get_io(DbLocation::Path, Some(io_choice))?,
+                ":memory:" => get_io(DbLocation::Memory, opts.io)?,
+                _path => get_io(DbLocation::Path, opts.io)?,
             }
         };
         let db = Database::open_file(io.clone(), &db_file)?;
@@ -349,8 +348,8 @@ impl Limbo {
         self.conn.close()?;
         let io = {
             match path {
-                ":memory:" => get_io(DbLocation::Memory, None)?,
-                _path => get_io(DbLocation::Path, Some(self.opts.io))?,
+                ":memory:" => get_io(DbLocation::Memory, self.opts.io)?,
+                _path => get_io(DbLocation::Path, self.opts.io)?,
             }
         };
         self.io = Arc::clone(&io);
@@ -787,14 +786,11 @@ fn get_writer(output: &str) -> Box<dyn Write> {
     }
 }
 
-fn get_io(
-    db_location: DbLocation,
-    io_choice: Option<Io>,
-) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
+fn get_io(db_location: DbLocation, io_choice: Io) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
     Ok(match db_location {
         DbLocation::Memory => Arc::new(limbo_core::MemoryIO::new()?),
         DbLocation::Path => {
-            match io_choice.unwrap() {
+            match io_choice {
                 Io::Syscall => {
                     // We are building for Linux/macOS and syscall backend has been selected
                     #[cfg(target_family = "unix")]
