@@ -49,13 +49,13 @@ pub struct Opts {
     pub io: Io,
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub enum DbLocation {
     Memory,
     Path,
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Copy, Clone, ValueEnum)]
 pub enum Io {
     Syscall,
     #[cfg(all(target_os = "linux", feature = "io_uring"))]
