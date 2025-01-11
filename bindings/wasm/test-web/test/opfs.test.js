@@ -1,6 +1,6 @@
 // test/opfs.test.js
 import { afterAll, beforeAll, beforeEach, expect, test } from "vitest";
-import { setupTestEnvironment, teardownTestEnvironment } from "./helpers";
+import { setupTestEnvironment, teardownTestEnvironment } from "./helpers.js";
 
 let testEnv;
 
@@ -21,7 +21,7 @@ afterAll(async () => {
 test("basic read/write functionality", async () => {
   const { page } = testEnv;
   const result = await page.evaluate(async () => {
-    const vfs = new window.VFSInterface("/src/opfs-worker.js");
+    const vfs = new window.VFSInterface("./opfs-worker.js");
     let fd;
     try {
       fd = await vfs.open("test.txt", {});
@@ -47,7 +47,7 @@ test("basic read/write functionality", async () => {
 test("larger data read/write", async () => {
   const { page } = testEnv;
   const result = await page.evaluate(async () => {
-    const vfs = new window.VFSInterface("/src/opfs-worker.js");
+    const vfs = new window.VFSInterface("./opfs-worker.js");
     let fd;
     try {
       fd = await vfs.open("large.txt", {});
@@ -74,7 +74,7 @@ test("larger data read/write", async () => {
 test("partial reads and writes", async () => {
   const { page } = testEnv;
   const result = await page.evaluate(async () => {
-    const vfs = new window.VFSInterface("/src/opfs-worker.js");
+    const vfs = new window.VFSInterface("./opfs-worker.js");
     let fd;
     try {
       fd = await vfs.open("partial.txt", {});
@@ -113,7 +113,7 @@ test("partial reads and writes", async () => {
 test("file size operations", async () => {
   const { page } = testEnv;
   const result = await page.evaluate(async () => {
-    const vfs = new window.VFSInterface("/src/opfs-worker.js");
+    const vfs = new window.VFSInterface("./opfs-worker.js");
     let fd;
     try {
       fd = await vfs.open("size.txt", {});
@@ -137,4 +137,3 @@ test("file size operations", async () => {
   expect(Number(result.size1)).toBe(4);
   expect(Number(result.size2)).toBe(8);
 });
-
