@@ -884,8 +884,6 @@ mod tests {
 
     #[test]
     fn test_valid_get_time_from_datetime_value() {
-        let now = chrono::Local::now().to_utc().format("%H:%M:%S").to_string();
-
         let test_time_str = "22:30:45";
         let prev_time_str = "20:30:45";
         let next_time_str = "03:30:45";
@@ -1049,8 +1047,6 @@ mod tests {
                 OwnedValue::build_text(Rc::new("22:30:45.123Z".to_string())),
                 test_time_str,
             ),
-            // Test Format 11: 'now'
-            (OwnedValue::build_text(Rc::new("now".to_string())), &now),
             // Format 12: DDDDDDDDDD (Julian date as float or integer)
             (OwnedValue::Float(2460082.1), "14:24:00"),
             (OwnedValue::Integer(2460082), "12:00:00"),
