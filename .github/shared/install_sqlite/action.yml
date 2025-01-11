@@ -1,0 +1,15 @@
+name: "Install SQLite"
+description: "Downloads SQLite directly from https://sqlite.org"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install SQLite
+      env:
+        SQLITE_VERSION: "3470200"
+        YEAR: 2024
+      run: |
+        curl -o /tmp/sqlite.zip https://www.sqlite.org/$YEAR/sqlite-tools-linux-x64-$SQLITE_VERSION.zip > /dev/null
+        unzip -j /tmp/sqlite.zip sqlite3 -d /usr/local/bin/
+        sqlite3 --version
+      shell: bash

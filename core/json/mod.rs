@@ -6,7 +6,7 @@ mod ser;
 use std::rc::Rc;
 
 pub use crate::json::de::from_str;
-use crate::json::json_path::{json_path, PathElement};
+use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
 use indexmap::IndexMap;
@@ -124,7 +124,7 @@ pub fn json_array_length(
     let json = get_json_value(json_value)?;
 
     let arr_val = if let Some(path) = json_path {
-        match json_extract_single(&json, path)? {
+        match json_extract_single(&json, path, true)? {
             Some(val) => val,
             None => return Ok(OwnedValue::Null),
         }
@@ -139,6 +139,44 @@ pub fn json_array_length(
     }
 }
 
+/// Implements the -> operator. Always returns a proper JSON value.
+/// https://sqlite.org/json1.html#the_and_operators
+pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Result<OwnedValue> {
+    if let OwnedValue::Null = value {
+        return Ok(OwnedValue::Null);
+    }
+
+    let json = get_json_value(value)?;
+    let extracted = json_extract_single(&json, path, false)?;
+
+    if let Some(val) = extracted {
+        let json = crate::json::to_string(val).unwrap();
+
+        Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+    } else {
+        Ok(OwnedValue::Null)
+    }
+}
+
+/// Implements the ->> operator. Always returns a SQL representation of the JSON subcomponent.
+/// https://sqlite.org/json1.html#the_and_operators
+pub fn json_arrow_shift_extract(
+    value: &OwnedValue,
+    path: &OwnedValue,
+) -> crate::Result<OwnedValue> {
+    if let OwnedValue::Null = value {
+        return Ok(OwnedValue::Null);
+    }
+
+    let json = get_json_value(value)?;
+    let extracted = json_extract_single(&json, path, false)?.unwrap_or_else(|| &Val::Null);
+
+    convert_json_to_db_type(extracted, true)
+}
+
+/// Extracts a JSON value from a JSON object or array.
+/// If there's only a single path, the return value might be either a TEXT or a database type.
+/// https://sqlite.org/json1.html#the_json_extract_function
 pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<OwnedValue> {
     if let OwnedValue::Null = value {
         return Ok(OwnedValue::Null);
@@ -146,14 +184,15 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 
     if paths.is_empty() {
         return Ok(OwnedValue::Null);
+    } else if paths.len() == 1 {
+        let json = get_json_value(value)?;
+        let extracted = json_extract_single(&json, &paths[0], true)?.unwrap_or_else(|| &Val::Null);
+
+        return convert_json_to_db_type(&extracted, false);
     }
 
     let json = get_json_value(value)?;
-    let mut result = "".to_string();
-
-    if paths.len() > 1 {
-        result.push('[');
-    }
+    let mut result = "[".to_string();
 
     for path in paths {
         match path {
@@ -161,26 +200,57 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
                 return Ok(OwnedValue::Null);
             }
             _ => {
-                let extracted = json_extract_single(&json, path)?.unwrap_or_else(|| &Val::Null);
+                let extracted =
+                    json_extract_single(&json, path, true)?.unwrap_or_else(|| &Val::Null);
 
                 if paths.len() == 1 && extracted == &Val::Null {
                     return Ok(OwnedValue::Null);
                 }
 
                 result.push_str(&crate::json::to_string(&extracted).unwrap());
-                if paths.len() > 1 {
-                    result.push(',');
-                }
+                result.push(',');
             }
         }
     }
 
-    if paths.len() > 1 {
-        result.pop(); // remove the final comma
-        result.push(']');
-    }
+    result.pop(); // remove the final comma
+    result.push(']');
 
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+}
+
+/// Returns a value with type defined by SQLite documentation:
+///   > the SQL datatype of the result is NULL for a JSON null,
+///   > INTEGER or REAL for a JSON numeric value,
+///   > an INTEGER zero for a JSON false value,
+///   > an INTEGER one for a JSON true value,
+///   > the dequoted text for a JSON string value,
+///   > and a text representation for JSON object and array values.
+/// https://sqlite.org/json1.html#the_json_extract_function
+///
+/// *all_as_db* - if true, objects and arrays will be returned as pure TEXT without the JSON subtype
+fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<OwnedValue> {
+    match extracted {
+        Val::Null => Ok(OwnedValue::Null),
+        Val::Float(f) => Ok(OwnedValue::Float(*f)),
+        Val::Integer(i) => Ok(OwnedValue::Integer(*i)),
+        Val::Bool(b) => {
+            if *b {
+                Ok(OwnedValue::Integer(1))
+            } else {
+                Ok(OwnedValue::Integer(0))
+            }
+        }
+        Val::String(s) => Ok(OwnedValue::Text(LimboText::new(Rc::new(s.clone())))),
+        _ => {
+            let json = crate::json::to_string(&extracted).unwrap();
+            if all_as_db {
+                Ok(OwnedValue::Text(LimboText::new(Rc::new(json))))
+            } else {
+                Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+            }
+        }
+    }
 }
 
 pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result<OwnedValue> {
@@ -191,7 +261,7 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
     let json = get_json_value(value)?;
 
     let json = if let Some(path) = path {
-        match json_extract_single(&json, path)? {
+        match json_extract_single(&json, path, true)? {
             Some(val) => val,
             None => return Ok(OwnedValue::Null),
         }
@@ -220,11 +290,41 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
 
 /// Returns the value at the given JSON path. If the path does not exist, it returns None.
 /// If the path is an invalid path, returns an error.
-fn json_extract_single<'a>(json: &'a Val, path: &OwnedValue) -> crate::Result<Option<&'a Val>> {
-    let json_path = match path {
-        OwnedValue::Text(t) => json_path(t.value.as_str())?,
-        OwnedValue::Null => return Ok(None),
-        _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+///
+/// *strict* - if false, we will try to resolve the path even if it does not start with "$"
+///   in a way that's compatible with the `->` and `->>` operators. See examples in the docs:
+///   https://sqlite.org/json1.html#the_and_operators
+fn json_extract_single<'a>(
+    json: &'a Val,
+    path: &OwnedValue,
+    strict: bool,
+) -> crate::Result<Option<&'a Val>> {
+    let json_path = if strict {
+        match path {
+            OwnedValue::Text(t) => json_path(t.value.as_str())?,
+            OwnedValue::Null => return Ok(None),
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+        }
+    } else {
+        match path {
+            OwnedValue::Text(t) => {
+                if t.value.starts_with("$") {
+                    json_path(t.value.as_str())?
+                } else {
+                    JsonPath {
+                        elements: vec![PathElement::Root(), PathElement::Key(t.value.to_string())],
+                    }
+                }
+            }
+            OwnedValue::Null => return Ok(None),
+            OwnedValue::Integer(i) => JsonPath {
+                elements: vec![PathElement::Root(), PathElement::ArrayLocator(*i as i32)],
+            },
+            OwnedValue::Float(f) => JsonPath {
+                elements: vec![PathElement::Root(), PathElement::Key(f.to_string())],
+            },
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+        }
     };
 
     let mut current_element = &Val::Null;
