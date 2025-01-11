@@ -1,5 +1,7 @@
 package org.github.tursodatabase;
 
+import org.github.tursodatabase.annotations.Nullable;
+
 import javax.sql.DataSource;
 import java.io.PrintWriter;
 import java.sql.Connection;
@@ -27,12 +29,14 @@ public class LimboDataSource implements DataSource {
     }
 
     @Override
+    @Nullable
     public Connection getConnection() throws SQLException {
         return getConnection(null, null);
     }
 
     @Override
-    public Connection getConnection(String username, String password) throws SQLException {
+    @Nullable
+    public Connection getConnection(@Nullable String username, @Nullable String password) throws SQLException {
         Properties properties = limboConfig.toProperties();
         if (username != null) properties.put("user", username);
         if (password != null) properties.put("pass", password);
@@ -40,6 +44,7 @@ public class LimboDataSource implements DataSource {
     }
 
     @Override
+    @Nullable
     public PrintWriter getLogWriter() throws SQLException {
         // TODO
         return null;
@@ -62,12 +67,14 @@ public class LimboDataSource implements DataSource {
     }
 
     @Override
+    @Nullable
     public Logger getParentLogger() throws SQLFeatureNotSupportedException {
         // TODO
         return null;
     }
 
     @Override
+    @Nullable
     public <T> T unwrap(Class<T> iface) throws SQLException {
         // TODO
         return null;

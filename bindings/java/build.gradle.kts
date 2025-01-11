@@ -50,7 +50,10 @@ tasks.test {
 
 tasks.withType<JavaCompile> {
     options.errorprone {
+        // Let's select which checks to perform. NullAway is enough for now.
+        disableAllChecks = true
         check("NullAway", CheckSeverity.ERROR)
+
         option("NullAway:AnnotatedPackages", "org.github.tursodatabase")
         option(
             "NullAway:CustomNullableAnnotations",
