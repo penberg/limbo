@@ -2,8 +2,8 @@ package org.github.tursodatabase.core;
 
 
 import org.github.tursodatabase.LimboErrorCode;
-import org.github.tursodatabase.NativeInvocation;
-import org.github.tursodatabase.VisibleForTesting;
+import org.github.tursodatabase.annotations.NativeInvocation;
+import org.github.tursodatabase.annotations.VisibleForTesting;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.exceptions.LimboException;
 
