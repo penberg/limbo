@@ -3,15 +3,17 @@ use crate::io::common;
 use crate::Result;
 
 use super::{Completion, File, OpenFlags, IO};
-use libc::{c_short, fcntl, flock, F_SETLK};
 use log::{debug, trace};
 use polling::{Event, Events, Poller};
-use rustix::fd::{AsFd, AsRawFd};
-use rustix::fs::OpenOptionsExt;
-use rustix::io::Errno;
+use rustix::{
+    fd::{AsFd, AsRawFd},
+    fs,
+    fs::{FlockOperation, OpenOptionsExt},
+    io::Errno,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io::{Read, Seek, Write};
+use std::io::{ErrorKind, Read, Seek, Write};
 use std::rc::Rc;
 
 pub struct UnixIO {
@@ -136,55 +138,41 @@ pub struct UnixFile {
 
 impl File for UnixFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
-        let fd = self.file.borrow().as_raw_fd();
-        let flock = flock {
-            l_type: if exclusive {
-                libc::F_WRLCK as c_short
-            } else {
-                libc::F_RDLCK as c_short
-            },
-            l_whence: libc::SEEK_SET as c_short,
-            l_start: 0,
-            l_len: 0, // Lock entire file
-            l_pid: 0,
-        };
-
+        let fd = self.file.borrow();
+        let fd = fd.as_fd();
         // F_SETLK is a non-blocking lock. The lock will be released when the file is closed
         // or the process exits or after an explicit unlock.
-        let lock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
-        if lock_result == -1 {
-            let err = std::io::Error::last_os_error();
-            if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError(
-                    "Failed locking file. File is locked by another process".to_string(),
-                ));
+        fs::fcntl_lock(
+            fd,
+            if exclusive {
+                FlockOperation::LockExclusive
             } else {
-                return Err(LimboError::LockingError(format!(
-                    "Failed locking file, {}",
-                    err
-                )));
-            }
-        }
+                FlockOperation::LockShared
+            },
+        )
+        .map_err(|e| {
+            let io_error = std::io::Error::from(e);
+            let message = match io_error.kind() {
+                ErrorKind::WouldBlock => {
+                    "Failed locking file. File is locked by another process".to_string()
+                }
+                _ => format!("Failed locking file, {}", io_error),
+            };
+            LimboError::LockingError(message)
+        })?;
+
         Ok(())
     }
 
     fn unlock_file(&self) -> Result<()> {
-        let fd = self.file.borrow().as_raw_fd();
-        let flock = flock {
-            l_type: libc::F_UNLCK as c_short,
-            l_whence: libc::SEEK_SET as c_short,
-            l_start: 0,
-            l_len: 0,
-            l_pid: 0,
-        };
-
-        let unlock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
-        if unlock_result == -1 {
-            return Err(LimboError::LockingError(format!(
+        let fd = self.file.borrow();
+        let fd = fd.as_fd();
+        fs::fcntl_lock(fd, FlockOperation::Unlock).map_err(|e| {
+            LimboError::LockingError(format!(
                 "Failed to release file lock: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
+                std::io::Error::from(e)
+            ))
+        })?;
         Ok(())
     }
 
@@ -263,7 +251,7 @@ impl File for UnixFile {
 
     fn sync(&self, c: Rc<Completion>) -> Result<()> {
         let file = self.file.borrow();
-        let result = rustix::fs::fsync(file.as_fd());
+        let result = fs::fsync(file.as_fd());
         match result {
             std::result::Result::Ok(()) => {
                 trace!("fsync");
