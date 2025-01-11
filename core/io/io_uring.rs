@@ -10,7 +10,7 @@ use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
 
-const MAX_IOVECS: usize = 128;
+const MAX_IOVECS: u32 = 128;
 const SQPOLL_IDLE: u32 = 1000;
 
 #[derive(Debug, Error)]
@@ -44,7 +44,7 @@ struct WrappedIOUring {
 
 struct InnerUringIO {
     ring: WrappedIOUring,
-    iovecs: [iovec; MAX_IOVECS],
+    iovecs: [iovec; MAX_IOVECS as usize],
     next_iovec: usize,
 }
 
@@ -52,10 +52,10 @@ impl UringIO {
     pub fn new() -> Result<Self> {
         let ring = match io_uring::IoUring::builder()
             .setup_sqpoll(SQPOLL_IDLE)
-            .build(MAX_IOVECS as u32)
+            .build(MAX_IOVECS)
         {
             Ok(ring) => ring,
-            Err(_) => io_uring::IoUring::new(MAX_IOVECS as u32)?,
+            Err(_) => io_uring::IoUring::new(MAX_IOVECS)?,
         };
         let inner = InnerUringIO {
             ring: WrappedIOUring {
@@ -67,7 +67,7 @@ impl UringIO {
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
                 iov_len: 0,
-            }; MAX_IOVECS],
+            }; MAX_IOVECS as usize],
             next_iovec: 0,
         };
         debug!("Using IO backend 'io-uring'");
@@ -82,7 +82,7 @@ impl InnerUringIO {
         let iovec = &mut self.iovecs[self.next_iovec];
         iovec.iov_base = buf as *mut std::ffi::c_void;
         iovec.iov_len = len;
-        self.next_iovec = (self.next_iovec + 1) % MAX_IOVECS;
+        self.next_iovec = (self.next_iovec + 1) % MAX_IOVECS as usize;
         iovec
     }
 }
