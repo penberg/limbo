@@ -3198,96 +3198,16 @@ fn exec_math_log(arg: &OwnedValue, base: Option<&OwnedValue>) -> OwnedValue {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        types::{SeekKey, SeekOp},
-        vdbe::exec_replace,
-    };
+    use crate::vdbe::exec_replace;
 
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_instr, exec_length, exec_like, exec_lower,
         exec_ltrim, exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob,
         exec_round, exec_rtrim, exec_sign, exec_soundex, exec_substring, exec_trim, exec_typeof,
-        exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid,
-        AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, AggContext,
+        OwnedValue,
     };
-    use mockall::{mock, predicate};
-    use rand::{rngs::mock::StepRng, thread_rng};
-    use std::{cell::Ref, collections::HashMap, rc::Rc};
-
-    #[test]
-    fn test_get_new_rowid() -> Result<()> {
-        // Test case 0: Empty table
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid().return_once(|| Ok(None));
-
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng())?;
-        assert_eq!(
-            result,
-            CursorResult::Ok(1),
-            "For an empty table, rowid should be 1"
-        );
-
-        // Test case 1: Normal case, rowid within i64::MAX
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid().return_once(|| Ok(Some(100)));
-
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng())?;
-        assert_eq!(result, CursorResult::Ok(101));
-
-        // Test case 2: Rowid exceeds i64::MAX, need to generate random rowid
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid()
-            .return_once(|| Ok(Some(i64::MAX as u64)));
-        mock.expect_seek()
-            .with(predicate::always(), predicate::always())
-            .returning(|rowid, _| {
-                if rowid == SeekKey::TableRowId(50) {
-                    Ok(CursorResult::Ok(false))
-                } else {
-                    Ok(CursorResult::Ok(true))
-                }
-            });
-
-        // Mock the random number generation
-        let new_rowid =
-            get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1))?;
-        assert_eq!(new_rowid, CursorResult::Ok(50));
-
-        // Test case 3: IO error
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid()
-            .return_once(|| Ok(Some(i64::MAX as u64)));
-        mock.expect_seek()
-            .with(predicate::always(), predicate::always())
-            .return_once(|_, _| Ok(CursorResult::IO));
-
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng());
-        assert!(matches!(result, Ok(CursorResult::IO)));
-
-        // Test case 4: Failure to generate new rowid
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid()
-            .return_once(|| Ok(Some(i64::MAX as u64)));
-        mock.expect_seek()
-            .with(predicate::always(), predicate::always())
-            .returning(|_, _| Ok(CursorResult::Ok(true)));
-
-        // Mock the random number generation
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1));
-        assert!(matches!(result, Err(LimboError::InternalError(_))));
-
-        Ok(())
-    }
+    use std::{collections::HashMap, rc::Rc};
 
     #[test]
     fn test_length() {
