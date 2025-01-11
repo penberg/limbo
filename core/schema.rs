@@ -135,6 +135,14 @@ impl Table {
             Self::Pseudo(_) => unimplemented!(),
         }
     }
+
+    pub fn btree(&self) -> Option<Rc<BTreeTable>> {
+        match self {
+            Self::BTree(table) => Some(table.clone()),
+            Self::Index(_) => None,
+            Self::Pseudo(_) => None,
+        }
+    }
 }
 
 impl PartialEq for Table {

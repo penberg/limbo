@@ -27,6 +27,7 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::translate::delete::translate_delete;
 use crate::util::PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX;
+use crate::vdbe::builder::CursorType;
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
@@ -463,9 +464,10 @@ fn translate_create_table(
 
     let table_id = "sqlite_schema".to_string();
     let table = schema.get_table(&table_id).unwrap();
-    let table = crate::schema::Table::BTree(table.clone());
-    let sqlite_schema_cursor_id =
-        program.alloc_cursor_id(Some(table_id.to_owned()), Some(table.to_owned()));
+    let sqlite_schema_cursor_id = program.alloc_cursor_id(
+        Some(table_id.to_owned()),
+        CursorType::BTreeTable(table.clone()),
+    );
     program.emit_insn(Insn::OpenWriteAsync {
         cursor_id: sqlite_schema_cursor_id,
         root_page: 1,

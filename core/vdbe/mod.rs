@@ -211,7 +211,7 @@ impl ProgramState {
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
-    pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
+    pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<InsnReference, &'static str>,
     pub connection: Weak<Connection>,
