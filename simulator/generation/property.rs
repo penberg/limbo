@@ -184,10 +184,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prop
     // Select the row
     let select_query = Select {
         table: table.name.clone(),
-        predicate: Predicate::arbitrary_from(
-            rng,
-            &(table, &Predicate::Eq(column.name.clone(), value.clone())),
-        ),
+        predicate: Predicate::arbitrary_from(rng, &(table, &row)),
     };
 
     Property::InsertSelect {

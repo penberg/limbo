@@ -42,3 +42,18 @@ pub struct SimulatorCLI {
     )]
     pub shrink: bool,
 }
+
+impl SimulatorCLI {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.minimum_size < 1 {
+            return Err("minimum size must be at least 1".to_string());
+        }
+        if self.maximum_size < 1 {
+            return Err("maximum size must be at least 1".to_string());
+        }
+        if self.minimum_size > self.maximum_size {
+            return Err("Minimum size cannot be greater than maximum size".to_string());
+        }
+        Ok(())
+    }
+}

@@ -3,6 +3,10 @@ use crate::{generation::plan::InteractionPlan, runner::execution::Execution};
 impl InteractionPlan {
     /// Create a smaller interaction plan by deleting a property
     pub(crate) fn shrink_interaction_plan(&self, failing_execution: &Execution) -> InteractionPlan {
+        // todo: this is a very naive implementation, next steps are;
+        // - Shrink to multiple values by removing random interactions
+        // - Shrink properties by removing their extensions, or shrinking their values
+
         let mut plan = self.clone();
         let failing_property = &self.plan[failing_execution.interaction_index];
         let depending_tables = failing_property.dependencies();

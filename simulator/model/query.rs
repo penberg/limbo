@@ -12,6 +12,16 @@ pub(crate) enum Predicate {
     Lt(String, Value),   // column < Value
 }
 
+impl Predicate {
+    pub(crate) fn true_() -> Self {
+        Self::And(vec![])
+    }
+
+    pub(crate) fn false_() -> Self {
+        Self::Or(vec![])
+    }
+}
+
 impl Display for Predicate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

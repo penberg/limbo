@@ -15,7 +15,7 @@ impl Arbitrary for Name {
 impl Arbitrary for Table {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
         let name = Name::arbitrary(rng).0;
-        let columns = (1..=rng.gen_range(1..5))
+        let columns = (1..=rng.gen_range(1..10))
             .map(|_| Column::arbitrary(rng))
             .collect();
         Table {
@@ -83,7 +83,7 @@ impl ArbitraryFrom<Value> for LTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
         match value {
             Value::Integer(i) => Self(Value::Integer(rng.gen_range(i64::MIN..*i - 1))),
-            Value::Float(f) => Self(Value::Float(rng.gen_range(-1e10..*f - 1.0))),
+            Value::Float(f) => Self(Value::Float(f - rng.gen_range(0.0..1e10))),
             Value::Text(t) => {
                 // Either shorten the string, or make at least one character smaller and mutate the rest
                 let mut t = t.clone();

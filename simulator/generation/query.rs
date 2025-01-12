@@ -3,6 +3,7 @@ use crate::generation::{one_of, Arbitrary, ArbitraryFrom};
 
 use crate::model::query::{Create, Delete, Insert, Predicate, Query, Select};
 use crate::model::table::{Table, Value};
+use rand::seq::SliceRandom as _;
 use rand::Rng;
 
 use super::{frequency, pick};
@@ -174,7 +175,7 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                 let len = booleans.len();
 
                 // Make sure at least one of them is false
-                if booleans.iter().all(|b| *b) {
+                if !booleans.is_empty() && booleans.iter().all(|b| *b) {
                     booleans[rng.gen_range(0..len)] = false;
                 }
 
@@ -195,7 +196,7 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                     .collect::<Vec<_>>();
                 let len = booleans.len();
                 // Make sure at least one of them is true
-                if booleans.iter().all(|b| !*b) {
+                if !booleans.is_empty() && booleans.iter().all(|b| !*b) {
                     booleans[rng.gen_range(0..len)] = true;
                 }
 
@@ -246,16 +247,155 @@ impl ArbitraryFrom<(&str, &Value)> for Predicate {
     }
 }
 
-impl ArbitraryFrom<(&Table, &Predicate)> for Predicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (t, p): &(&Table, &Predicate)) -> Self {
-        if rng.gen_bool(0.5) {
-            // produce a true predicate
-            let p_t = CompoundPredicate::arbitrary_from(rng, &(*t, true)).0;
-            Predicate::And(vec![p_t, (*p).clone()])
-        } else {
-            // produce a false predicate
-            let p_f = CompoundPredicate::arbitrary_from(rng, &(*t, false)).0;
-            Predicate::Or(vec![p_f, (*p).clone()])
+/// Produces a predicate that is true for the provided row in the given table
+fn produce_true_predicate<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)) -> Predicate {
+    // Pick a column
+    let column_index = rng.gen_range(0..t.columns.len());
+    let column = &t.columns[column_index];
+    let value = &row[column_index];
+    one_of(
+        vec![
+            Box::new(|_| Predicate::Eq(column.name.clone(), value.clone())),
+            Box::new(|rng| {
+                let v = loop {
+                    let v = Value::arbitrary_from(rng, &column.column_type);
+                    if &v != value {
+                        break v;
+                    }
+                };
+                Predicate::Neq(column.name.clone(), v)
+            }),
+            Box::new(|rng| {
+                Predicate::Gt(column.name.clone(), LTValue::arbitrary_from(rng, value).0)
+            }),
+            Box::new(|rng| {
+                Predicate::Lt(column.name.clone(), GTValue::arbitrary_from(rng, value).0)
+            }),
+        ],
+        rng,
+    )
+}
+
+/// Produces a predicate that is false for the provided row in the given table
+fn produce_false_predicate<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)) -> Predicate {
+    // Pick a column
+    let column_index = rng.gen_range(0..t.columns.len());
+    let column = &t.columns[column_index];
+    let value = &row[column_index];
+    one_of(
+        vec![
+            Box::new(|_| Predicate::Neq(column.name.clone(), value.clone())),
+            Box::new(|rng| {
+                let v = loop {
+                    let v = Value::arbitrary_from(rng, &column.column_type);
+                    if &v != value {
+                        break v;
+                    }
+                };
+                Predicate::Eq(column.name.clone(), v)
+            }),
+            Box::new(|rng| {
+                Predicate::Gt(column.name.clone(), GTValue::arbitrary_from(rng, value).0)
+            }),
+            Box::new(|rng| {
+                Predicate::Lt(column.name.clone(), LTValue::arbitrary_from(rng, value).0)
+            }),
+        ],
+        rng,
+    )
+}
+
+impl ArbitraryFrom<(&Table, &Vec<Value>)> for Predicate {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)) -> Self {
+        // We want to produce a predicate that is true for the row
+        // We can do this by creating several predicates that
+        // are true, some that are false, combiend them in ways that correspond to the creation of a true predicate
+
+        // Produce some true and false predicates
+        let mut true_predicates = (1..=rng.gen_range(1..=4))
+            .map(|_| produce_true_predicate(rng, &(*t, row)))
+            .collect::<Vec<_>>();
+
+        let false_predicates = (0..=rng.gen_range(0..=3))
+            .map(|_| produce_false_predicate(rng, &(*t, row)))
+            .collect::<Vec<_>>();
+
+        // Start building a top level predicate from a true predicate
+        let mut result = true_predicates.pop().unwrap();
+        println!("True predicate: {:?}", result);
+
+        let mut predicates = true_predicates
+            .iter()
+            .map(|p| (true, p.clone()))
+            .chain(false_predicates.iter().map(|p| (false, p.clone())))
+            .collect::<Vec<_>>();
+
+        predicates.shuffle(rng);
+
+        while !predicates.is_empty() {
+            // Create a new predicate from at least 1 and at most 3 predicates
+            let context =
+                predicates[0..rng.gen_range(0..=usize::min(3, predicates.len()))].to_vec();
+            // Shift `predicates` to remove the predicates in the context
+            predicates = predicates[context.len()..].to_vec();
+
+            // `result` is true, so we have the following three options to make a true predicate:
+            // T or F
+            // T or T
+            // T and T
+
+            result = one_of(
+                vec![
+                    // T or (X1 or X2 or ... or Xn)
+                    Box::new(|_| {
+                        Predicate::Or(vec![
+                            result.clone(),
+                            Predicate::Or(context.iter().map(|(_, p)| p.clone()).collect()),
+                        ])
+                    }),
+                    // T or (T1 and T2 and ... and Tn)
+                    Box::new(|_| {
+                        Predicate::Or(vec![
+                            result.clone(),
+                            Predicate::And(context.iter().map(|(_, p)| p.clone()).collect()),
+                        ])
+                    }),
+                    // T and T
+                    Box::new(|_| {
+                        // Check if all the predicates in the context are true
+                        if context.iter().all(|(b, _)| *b) {
+                            // T and (X1 or X2 or ... or Xn)
+                            Predicate::And(vec![
+                                result.clone(),
+                                Predicate::And(context.iter().map(|(_, p)| p.clone()).collect()),
+                            ])
+                        }
+                        // Check if there is at least one true predicate
+                        else if context.iter().any(|(b, _)| *b) {
+                            // T and (X1 or X2 or ... or Xn)
+                            Predicate::And(vec![
+                                result.clone(),
+                                Predicate::Or(context.iter().map(|(_, p)| p.clone()).collect()),
+                            ])
+                        } else {
+                            // T and (X1 or X2 or ... or Xn or TRUE)
+                            Predicate::And(vec![
+                                result.clone(),
+                                Predicate::Or(
+                                    context
+                                        .iter()
+                                        .map(|(_, p)| p.clone())
+                                        .chain(std::iter::once(Predicate::true_()))
+                                        .collect(),
+                                ),
+                            ])
+                        }
+                    }),
+                ],
+                rng,
+            );
         }
+
+        result
     }
 }

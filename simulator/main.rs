@@ -12,7 +12,7 @@ use runner::io::SimulatorIO;
 use std::any::Any;
 use std::backtrace::Backtrace;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
@@ -21,10 +21,48 @@ mod model;
 mod runner;
 mod shrink;
 
-fn main() {
+struct Paths {
+    db: PathBuf,
+    plan: PathBuf,
+    shrunk_plan: PathBuf,
+    history: PathBuf,
+    doublecheck_db: PathBuf,
+    shrunk_db: PathBuf,
+}
+
+impl Paths {
+    fn new(output_dir: &Path, shrink: bool, doublecheck: bool) -> Self {
+        let paths = Paths {
+            db: PathBuf::from(output_dir).join("simulator.db"),
+            plan: PathBuf::from(output_dir).join("simulator.plan"),
+            shrunk_plan: PathBuf::from(output_dir).join("simulator_shrunk.plan"),
+            history: PathBuf::from(output_dir).join("simulator.history"),
+            doublecheck_db: PathBuf::from(output_dir).join("simulator_double.db"),
+            shrunk_db: PathBuf::from(output_dir).join("simulator_shrunk.db"),
+        };
+
+        // Print the seed, the locations of the database and the plan file
+        log::info!("database path: {:?}", paths.db);
+        if doublecheck {
+            log::info!("doublecheck database path: {:?}", paths.doublecheck_db);
+        } else if shrink {
+            log::info!("shrunk database path: {:?}", paths.shrunk_db);
+        }
+        log::info!("simulator plan path: {:?}", paths.plan);
+        if shrink {
+            log::info!("shrunk plan path: {:?}", paths.shrunk_plan);
+        }
+        log::info!("simulator history path: {:?}", paths.history);
+
+        paths
+    }
+}
+
+fn main() -> Result<(), String> {
     let _ = env_logger::try_init();
 
     let cli_opts = SimulatorCLI::parse();
+    cli_opts.validate()?;
 
     let seed = match cli_opts.seed {
         Some(seed) => seed,
@@ -33,30 +71,10 @@ fn main() {
 
     let output_dir = match &cli_opts.output_dir {
         Some(dir) => Path::new(dir).to_path_buf(),
-        None => TempDir::new().unwrap().into_path(),
+        None => TempDir::new().map_err(|e| format!("{:?}", e))?.into_path(),
     };
 
-    let db_path = output_dir.join("simulator.db");
-    let doublecheck_db_path = db_path.with_extension("_doublecheck.db");
-    let shrunk_db_path = db_path.with_extension("_shrink.db");
-
-    let plan_path = output_dir.join("simulator.plan");
-    let shrunk_plan_path = plan_path.with_extension("_shrunk.plan");
-
-    let history_path = output_dir.join("simulator.history");
-
-    // Print the seed, the locations of the database and the plan file
-    log::info!("database path: {:?}", db_path);
-    if cli_opts.doublecheck {
-        log::info!("doublecheck database path: {:?}", doublecheck_db_path);
-    } else if cli_opts.shrink {
-        log::info!("shrunk database path: {:?}", shrunk_db_path);
-    }
-    log::info!("simulator plan path: {:?}", plan_path);
-    if cli_opts.shrink {
-        log::info!("shrunk plan path: {:?}", shrunk_plan_path);
-    }
-    log::info!("simulator history path: {:?}", history_path);
+    let paths = Paths::new(&output_dir, cli_opts.shrink, cli_opts.doublecheck);
     log::info!("seed: {}", seed);
 
     let last_execution = Arc::new(Mutex::new(Execution::new(0, 0, 0)));
@@ -82,8 +100,8 @@ fn main() {
             run_simulation(
                 seed,
                 &cli_opts,
-                &db_path,
-                &plan_path,
+                &paths.db,
+                &paths.plan,
                 last_execution.clone(),
                 None,
             )
@@ -98,8 +116,8 @@ fn main() {
                 run_simulation(
                     seed,
                     &cli_opts,
-                    &doublecheck_db_path,
-                    &plan_path,
+                    &paths.doublecheck_db,
+                    &paths.plan,
                     last_execution.clone(),
                     None,
                 )
@@ -138,8 +156,8 @@ fn main() {
             | (SandboxedResult::FoundBug { .. }, SandboxedResult::FoundBug { .. })
             | (SandboxedResult::Panicked { .. }, SandboxedResult::Panicked { .. }) => {
                 // Compare the two database files byte by byte
-                let db_bytes = std::fs::read(&db_path).unwrap();
-                let doublecheck_db_bytes = std::fs::read(&doublecheck_db_path).unwrap();
+                let db_bytes = std::fs::read(&paths.db).unwrap();
+                let doublecheck_db_bytes = std::fs::read(&paths.doublecheck_db).unwrap();
                 if db_bytes != doublecheck_db_bytes {
                     log::error!("doublecheck failed! database files are different.");
                 } else {
@@ -164,7 +182,7 @@ fn main() {
             } => {
                 if let SandboxedResult::FoundBug { history, .. } = &result {
                     // No panic occurred, so write the history to a file
-                    let f = std::fs::File::create(&history_path).unwrap();
+                    let f = std::fs::File::create(&paths.history).unwrap();
                     let mut f = std::io::BufWriter::new(f);
                     for execution in history.history.iter() {
                         writeln!(
@@ -190,8 +208,8 @@ fn main() {
                             run_simulation(
                                 seed,
                                 &cli_opts,
-                                &shrunk_db_path,
-                                &shrunk_plan_path,
+                                &paths.shrunk_db,
+                                &paths.shrunk_plan,
                                 last_execution.clone(),
                                 shrink,
                             )
@@ -225,8 +243,8 @@ fn main() {
                     }
 
                     // Write the shrunk plan to a file
-                    let shrunk_plan = std::fs::read(&shrunk_plan_path).unwrap();
-                    let mut f = std::fs::File::create(&shrunk_plan_path).unwrap();
+                    let shrunk_plan = std::fs::read(&paths.shrunk_plan).unwrap();
+                    let mut f = std::fs::File::create(&paths.shrunk_plan).unwrap();
                     f.write_all(&shrunk_plan).unwrap();
                 }
             }
@@ -234,18 +252,20 @@ fn main() {
     }
 
     // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
-    println!("database path: {:?}", db_path);
+    println!("database path: {:?}", paths.db);
     if cli_opts.doublecheck {
-        println!("doublecheck database path: {:?}", doublecheck_db_path);
+        println!("doublecheck database path: {:?}", paths.doublecheck_db);
     } else if cli_opts.shrink {
-        println!("shrunk database path: {:?}", shrunk_db_path);
+        println!("shrunk database path: {:?}", paths.shrunk_db);
     }
-    println!("simulator plan path: {:?}", plan_path);
+    println!("simulator plan path: {:?}", paths.plan);
     if cli_opts.shrink {
-        println!("shrunk plan path: {:?}", shrunk_plan_path);
+        println!("shrunk plan path: {:?}", paths.shrunk_plan);
     }
-    println!("simulator history path: {:?}", history_path);
+    println!("simulator history path: {:?}", paths.history);
     println!("seed: {}", seed);
+
+    Ok(())
 }
 
 fn move_db_and_plan_files(output_dir: &Path) {
@@ -345,18 +365,6 @@ fn run_simulation(
 
         (create_percent, read_percent, write_percent, delete_percent)
     };
-
-    if cli_opts.minimum_size < 1 {
-        panic!("minimum size must be at least 1");
-    }
-
-    if cli_opts.maximum_size < 1 {
-        panic!("maximum size must be at least 1");
-    }
-
-    if cli_opts.maximum_size < cli_opts.minimum_size {
-        panic!("maximum size must be greater than or equal to minimum size");
-    }
 
     let opts = SimulatorOpts {
         ticks: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
