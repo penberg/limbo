@@ -1,5 +1,5 @@
 use crate::error::LimboError;
-use crate::ext::{ExtBlob, ExtTextValue, ExtValue, ExtValueType};
+use crate::ext::{ExtValue, ExtValueType};
 use crate::storage::sqlite3_ondisk::write_varint;
 use crate::Result;
 use std::fmt::Display;
@@ -123,16 +123,17 @@ impl OwnedValue {
                 OwnedValue::Float(float)
             }
             ExtValueType::Text => {
-                let Some(text) = (unsafe { ExtTextValue::from_value(v) }) else {
+                let Some(text) = v.to_text() else {
                     return OwnedValue::Null;
                 };
                 OwnedValue::build_text(std::rc::Rc::new(unsafe { text.as_str().to_string() }))
             }
             ExtValueType::Blob => {
-                let blob_ptr = v.value as *mut ExtBlob;
+                let Some(blob_ptr) = v.to_blob() else {
+                    return OwnedValue::Null;
+                };
                 let blob = unsafe {
-                    let slice =
-                        std::slice::from_raw_parts((*blob_ptr).data, (*blob_ptr).size as usize);
+                    let slice = std::slice::from_raw_parts(blob_ptr.data, blob_ptr.size as usize);
                     slice.to_vec()
                 };
                 OwnedValue::Blob(std::rc::Rc::new(blob))

@@ -126,7 +126,7 @@ impl Database {
         let header = db_header;
         let schema = Rc::new(RefCell::new(Schema::new()));
         let syms = Rc::new(RefCell::new(SymbolTable::new()));
-        let mut db = Database {
+        let db = Database {
             pager: pager.clone(),
             schema: schema.clone(),
             header: header.clone(),
@@ -193,7 +193,9 @@ impl Database {
             self.syms.borrow_mut().extensions.push((lib, api_ptr));
             Ok(())
         } else {
-            let _ = unsafe { Box::from_raw(api_ptr.cast_mut()) }; // own this again so we dont leak
+            if !api_ptr.is_null() {
+                let _ = unsafe { Box::from_raw(api_ptr.cast_mut()) };
+            }
             Err(LimboError::ExtensionError(
                 "Extension registration failed".to_string(),
             ))

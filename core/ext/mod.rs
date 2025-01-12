@@ -1,8 +1,6 @@
 use crate::{function::ExternalFunc, Database};
-pub use limbo_extension::{
-    Blob as ExtBlob, TextValue as ExtTextValue, Value as ExtValue, ValueType as ExtValueType,
-};
 use limbo_extension::{ExtensionApi, ResultCode, ScalarFunction, RESULT_ERROR, RESULT_OK};
+pub use limbo_extension::{Value as ExtValue, ValueType as ExtValueType};
 use std::{
     ffi::{c_char, c_void, CStr},
     rc::Rc,
@@ -18,6 +16,9 @@ extern "C" fn register_scalar_function(
         Ok(s) => s.to_string(),
         Err(_) => return RESULT_ERROR,
     };
+    if ctx.is_null() {
+        return RESULT_ERROR;
+    }
     let db = unsafe { &*(ctx as *const Database) };
     db.register_scalar_function_impl(name_str, func)
 }

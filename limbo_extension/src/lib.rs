@@ -208,13 +208,6 @@ impl Blob {
     pub fn new(data: *const u8, size: u64) -> Self {
         Self { data, size }
     }
-
-    pub fn from_value(value: &Value) -> Option<&Self> {
-        if value.value_type != ValueType::Blob {
-            return None;
-        }
-        unsafe { Some(&*(value.value as *const Blob)) }
-    }
 }
 
 impl Value {
@@ -223,6 +216,46 @@ impl Value {
             value_type: ValueType::Null,
             value: std::ptr::null_mut(),
         }
+    }
+
+    pub fn to_float(&self) -> Option<f64> {
+        if self.value_type != ValueType::Float {
+            return None;
+        }
+        if self.value.is_null() {
+            return None;
+        }
+        Some(unsafe { *(self.value as *const f64) })
+    }
+
+    pub fn to_text(&self) -> Option<&TextValue> {
+        if self.value_type != ValueType::Text {
+            return None;
+        }
+        if self.value.is_null() {
+            return None;
+        }
+        unsafe { Some(&*(self.value as *const TextValue)) }
+    }
+
+    pub fn to_blob(&self) -> Option<&Blob> {
+        if self.value_type != ValueType::Blob {
+            return None;
+        }
+        if self.value.is_null() {
+            return None;
+        }
+        unsafe { Some(&*(self.value as *const Blob)) }
+    }
+
+    pub fn to_integer(&self) -> Option<i64> {
+        if self.value_type != ValueType::Integer {
+            return None;
+        }
+        if self.value.is_null() {
+            return None;
+        }
+        Some(unsafe { *(self.value as *const i64) })
     }
 
     pub fn from_integer(value: i64) -> Self {
