@@ -762,13 +762,23 @@ pub fn translate_expr(
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
                 Func::External(_) => {
-                    let regs = program.alloc_register();
+                    let regs = program.alloc_registers(args_count);
+                    for (i, arg_expr) in args.iter().enumerate() {
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &arg_expr[i],
+                            regs + i,
+                            resolver,
+                        )?;
+                    }
                     program.emit_insn(Insn::Function {
                         constant_mask: 0,
                         start_reg: regs,
                         dest: target_register,
                         func: func_ctx,
                     });
+
                     Ok(target_register)
                 }
                 #[cfg(feature = "json")]

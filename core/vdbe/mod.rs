@@ -55,7 +55,6 @@ use sorter::Sorter;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
-use std::os::raw::c_void;
 use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -145,6 +144,33 @@ macro_rules! return_if_io {
             CursorResult::IO => return Ok(StepResult::IO),
         }
     };
+}
+
+macro_rules! call_external_function {
+    (
+        $func_ptr:expr,
+        $dest_register:expr,
+        $state:expr,
+        $arg_count:expr,
+        $start_reg:expr
+    ) => {{
+        if $arg_count == 0 {
+            let result_c_value: ExtValue = ($func_ptr)(0, std::ptr::null());
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        } else {
+            let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
+            let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
+            for ov in register_slice.iter() {
+                let val = ov.to_ffi();
+                ext_values.push(val);
+            }
+            let argv_ptr = ext_values.as_ptr();
+            let result_c_value: ExtValue = ($func_ptr)($arg_count as i32, argv_ptr);
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        }
+    }};
 }
 
 struct RegexCache {
@@ -1839,19 +1865,7 @@ impl Program {
                             }
                         },
                         crate::function::Func::External(f) => {
-                            let values = &state.registers[*start_reg..*start_reg + arg_count];
-                            let c_values: Vec<*const c_void> = values
-                                .iter()
-                                .map(|ov| &ov.to_ffi() as *const _ as *const c_void)
-                                .collect();
-                            let argv_ptr = if c_values.is_empty() {
-                                std::ptr::null()
-                            } else {
-                                c_values.as_ptr()
-                            };
-                            let result_c_value: ExtValue = (f.func)(arg_count as i32, argv_ptr);
-                            let result_ov = OwnedValue::from_ffi(&result_c_value);
-                            state.registers[*dest] = result_ov;
+                            call_external_function! {f.func, *dest, state, arg_count, *start_reg };
                         }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {

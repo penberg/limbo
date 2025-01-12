@@ -1,5 +1,6 @@
 use limbo_extension::{
-    declare_scalar_functions, register_extension, register_scalar_functions, Blob, TextValue, Value,
+    declare_scalar_functions, register_extension, register_scalar_functions, Blob, TextValue,
+    Value, ValueType,
 };
 
 register_extension! {
@@ -10,6 +11,7 @@ register_extension! {
         "uuid7" => uuid7_blob,
         "uuid_str" => uuid_str,
         "uuid_blob" => uuid_blob,
+        "exec_ts_from_uuid7" => exec_ts_from_uuid7,
     },
 }
 
@@ -60,6 +62,26 @@ declare_scalar_functions! {
         Value::from_blob(bytes.to_vec())
     }
 
+    #[args(1)]
+    fn exec_ts_from_uuid7(args: &[Value]) -> Value {
+        match args[0].value_type {
+             ValueType::Blob => {
+                let blob = Blob::from_value(&args[0]).unwrap();
+                let slice = unsafe{ std::slice::from_raw_parts(blob.data, blob.size as usize)};
+                let uuid = uuid::Uuid::from_slice(slice).unwrap();
+                let unix = uuid_to_unix(uuid.as_bytes());
+                Value::from_integer(unix as i64)
+            }
+            ValueType::Text => {
+                let text = TextValue::from_value(&args[0]).unwrap();
+                let uuid = uuid::Uuid::parse_str(unsafe {text.as_str()}).unwrap();
+                let unix = uuid_to_unix(uuid.as_bytes());
+                Value::from_integer(unix as i64)
+            }
+            _ => Value::null(),
+        }
+    }
+
      #[args(1)]
     fn uuid_str(args: &[Value]) -> Value {
         if args[0].value_type != limbo_extension::ValueType::Blob {
@@ -95,4 +117,14 @@ declare_scalar_functions! {
             Value::null()
         }
     }
+}
+
+#[inline(always)]
+fn uuid_to_unix(uuid: &[u8; 16]) -> u64 {
+    ((uuid[0] as u64) << 40)
+        | ((uuid[1] as u64) << 32)
+        | ((uuid[2] as u64) << 24)
+        | ((uuid[3] as u64) << 16)
+        | ((uuid[4] as u64) << 8)
+        | (uuid[5] as u64)
 }

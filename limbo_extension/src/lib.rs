@@ -7,7 +7,7 @@ pub const RESULT_ERROR: ResultCode = 1;
 // TODO: more error types
 
 pub type ExtensionEntryPoint = extern "C" fn(api: *const ExtensionApi) -> ResultCode;
-pub type ScalarFunction = extern "C" fn(argc: i32, *const *const c_void) -> Value;
+pub type ScalarFunction = extern "C" fn(argc: i32, *const Value) -> Value;
 
 #[repr(C)]
 pub struct ExtensionApi {
@@ -54,12 +54,13 @@ macro_rules! register_scalar_functions {
 /// . e.g.
 /// ```
 ///  #[args(1)]
-///  fn scalar_func(args: &[Value]) -> Value {
-///     if args.len() != 1 {
-///          return Value::null();
-///     }
+///  fn scalar_double(args: &[Value]) -> Value {
 ///      Value::from_integer(args[0].integer * 2)
 ///  }
+///
+///  #[args(0..=2)]
+///  fn scalar_sum(args: &[Value]) -> Value {
+///     Value::from_integer(args.iter().map(|v| v.integer).sum())
 ///  ```
 ///
 #[macro_export]
@@ -73,7 +74,7 @@ macro_rules! declare_scalar_functions {
         $(
             extern "C" fn $func_name(
                 argc: i32,
-                argv: *const *const std::os::raw::c_void
+                argv: *const $crate::Value
             ) -> $crate::Value {
                 let valid_args = {
                     match argc {
@@ -85,22 +86,14 @@ macro_rules! declare_scalar_functions {
                     return $crate::Value::null();
                 }
                 if argc == 0 || argv.is_null() {
+                    log::debug!("{} was called with no arguments", stringify!($func_name));
                     let $args: &[$crate::Value] = &[];
                     $body
                 } else {
-                        let ptr_slice = unsafe{ std::slice::from_raw_parts(argv, argc as usize)};
-                        let mut values = Vec::with_capacity(argc as usize);
-                        for &ptr in ptr_slice {
-                            let val_ptr = ptr as *const $crate::Value;
-                            if val_ptr.is_null() {
-                                values.push($crate::Value::null());
-                            } else {
-                                unsafe{values.push(std::ptr::read(val_ptr))};
-                            }
-                        }
-                        let $args: &[$crate::Value] = &values[..];
-                        $body
-                    }
+                    let ptr_slice = unsafe{ std::slice::from_raw_parts(argv, argc as usize)};
+                    let $args: &[$crate::Value] = ptr_slice;
+                    $body
+                }
             }
         )*
     };
@@ -122,10 +115,40 @@ pub struct Value {
     pub value: *mut c_void,
 }
 
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.value_type {
+            ValueType::Null => write!(f, "Value {{ Null }}"),
+            ValueType::Integer => write!(f, "Value {{ Integer: {} }}", unsafe {
+                *(self.value as *const i64)
+            }),
+            ValueType::Float => write!(f, "Value {{ Float: {} }}", unsafe {
+                *(self.value as *const f64)
+            }),
+            ValueType::Text => write!(f, "Value {{ Text: {:?} }}", unsafe {
+                &*(self.value as *const TextValue)
+            }),
+            ValueType::Blob => write!(f, "Value {{ Blob: {:?} }}", unsafe {
+                &*(self.value as *const Blob)
+            }),
+        }
+    }
+}
+
 #[repr(C)]
 pub struct TextValue {
     pub text: *const u8,
     pub len: u32,
+}
+
+impl std::fmt::Debug for TextValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TextValue {{ text: {:?}, len: {} }}",
+            self.text, self.len
+        )
+    }
 }
 
 impl Default for TextValue {
@@ -170,6 +193,12 @@ pub struct Blob {
     pub size: u64,
 }
 
+impl std::fmt::Debug for Blob {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Blob {{ data: {:?}, size: {} }}", self.data, self.size)
+    }
+}
+
 impl Blob {
     pub fn new(data: *const u8, size: u64) -> Self {
         Self { data, size }
@@ -208,12 +237,15 @@ impl Value {
     }
 
     pub fn from_text(s: String) -> Self {
-        let text_value = TextValue::new(s.as_ptr(), s.len());
-        let boxed_text = Box::new(text_value);
-        std::mem::forget(s);
+        let buffer = s.into_boxed_str();
+        let ptr = buffer.as_ptr();
+        let len = buffer.len();
+        std::mem::forget(buffer);
+        let text_value = TextValue::new(ptr, len);
+        let text_box = Box::new(text_value);
         Self {
             value_type: ValueType::Text,
-            value: Box::into_raw(boxed_text) as *mut c_void,
+            value: Box::into_raw(text_box) as *mut c_void,
         }
     }
 

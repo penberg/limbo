@@ -148,10 +148,9 @@ pub fn prepare_select_plan(
                                     }
                                     Err(_) => {
                                         if syms.functions.contains_key(&name.0) {
-                                            // TODO: future extensions can be aggregate functions
-                                            log::debug!(
-                                                "Resolving {} function from symbol table",
-                                                name.0
+                                            let contains_aggregates = resolve_aggregates(
+                                                expr,
+                                                &mut aggregate_expressions,
                                             );
                                             plan.result_columns.push(ResultSetColumn {
                                                 name: get_name(
@@ -161,7 +160,7 @@ pub fn prepare_select_plan(
                                                     || format!("expr_{}", result_column_idx),
                                                 ),
                                                 expr: expr.clone(),
-                                                contains_aggregates: false,
+                                                contains_aggregates,
                                             });
                                         }
                                     }
@@ -202,7 +201,7 @@ pub fn prepare_select_plan(
                             }
                             expr => {
                                 let contains_aggregates =
-                                    resolve_aggregates(&expr, &mut aggregate_expressions);
+                                    resolve_aggregates(expr, &mut aggregate_expressions);
                                 plan.result_columns.push(ResultSetColumn {
                                     name: get_name(
                                         maybe_alias.as_ref(),
