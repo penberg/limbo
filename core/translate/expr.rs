@@ -129,6 +129,24 @@ macro_rules! expect_arguments_min {
     }};
 }
 
+macro_rules! expect_arguments_even {
+    (
+        $args:expr,
+        $func:ident
+    ) => {{
+        let args = $args.as_deref().unwrap_or_default();
+        if args.len() % 2 != 0 {
+            crate::bail_parse_error!(
+                "{} function requires an even number of arguments",
+                $func.to_string()
+            );
+        };
+        // The only function right now that requires an even number is `json_object` and it allows
+        // to have no arguments, so thats why in this macro we do not bail with teh `function with no arguments` error
+        args
+    }};
+}
+
 pub fn translate_condition_expr(
     program: &mut ProgramBuilder,
     referenced_tables: &[TableReference],
@@ -806,6 +824,18 @@ pub fn translate_expr(
                         translate_function(
                             program,
                             args,
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        )
+                    }
+                    JsonFunc::JsonObject => {
+                        let args = expect_arguments_even!(args, j);
+
+                        translate_function(
+                            program,
+                            &args,
                             referenced_tables,
                             resolver,
                             target_register,

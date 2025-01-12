@@ -29,6 +29,7 @@ pub enum JsonFunc {
     JsonArrowExtract,
     JsonArrowShiftExtract,
     JsonExtract,
+    JsonObject,
     JsonType,
 }
 
@@ -45,6 +46,7 @@ impl Display for JsonFunc {
                 Self::JsonArrayLength => "json_array_length".to_string(),
                 Self::JsonArrowExtract => "->".to_string(),
                 Self::JsonArrowShiftExtract => "->>".to_string(),
+                Self::JsonObject => "json_object".to_string(),
                 Self::JsonType => "json_type".to_string(),
             }
         )
