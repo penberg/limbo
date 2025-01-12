@@ -7,9 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 
 [dependencies]
 limbo_extension = { path = "../../limbo_extension"}
 uuid = { version = "1.11.0", features = ["v4", "v7"] }
+log = "0.4.20"

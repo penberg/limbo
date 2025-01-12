@@ -1260,6 +1260,9 @@ dependencies = [
 [[package]]
 name = "limbo_extension"
 version = "0.0.11"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "limbo_macros"
@@ -1294,6 +1297,7 @@ name = "limbo_uuid"
 version = "0.0.11"
 dependencies = [
  "limbo_extension",
+ "log",
  "uuid",
 ]
 

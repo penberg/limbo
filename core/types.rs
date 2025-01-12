@@ -1,5 +1,5 @@
 use crate::error::LimboError;
-use crate::ext::{ExtValue, ExtValueType};
+use crate::ext::{ExtBlob, ExtTextValue, ExtValue, ExtValueType};
 use crate::storage::sqlite3_ondisk::write_varint;
 use crate::Result;
 use std::fmt::Display;
@@ -92,37 +92,54 @@ impl Display for OwnedValue {
         }
     }
 }
+
 impl OwnedValue {
     pub fn to_ffi(&self) -> ExtValue {
         match self {
             Self::Null => ExtValue::null(),
             Self::Integer(i) => ExtValue::from_integer(*i),
             Self::Float(fl) => ExtValue::from_float(*fl),
-            Self::Text(s) => ExtValue::from_text(s.value.to_string()),
-            Self::Blob(b) => ExtValue::from_blob(b),
-            Self::Agg(_) => todo!(),
-            Self::Record(_) => todo!(),
+            Self::Text(text) => ExtValue::from_text(text.value.to_string()),
+            Self::Blob(blob) => ExtValue::from_blob(blob.to_vec()),
+            Self::Agg(_) => todo!("Aggregate values not yet supported"),
+            Self::Record(_) => todo!("Record values not yet supported"),
         }
     }
+
     pub fn from_ffi(v: &ExtValue) -> Self {
+        if v.value.is_null() {
+            return OwnedValue::Null;
+        }
         match v.value_type {
             ExtValueType::Null => OwnedValue::Null,
-            ExtValueType::Integer => OwnedValue::Integer(v.integer),
-            ExtValueType::Float => OwnedValue::Float(v.float),
+            ExtValueType::Integer => {
+                let int_ptr = v.value as *mut i64;
+                let integer = unsafe { *int_ptr };
+                OwnedValue::Integer(integer)
+            }
+            ExtValueType::Float => {
+                let float_ptr = v.value as *mut f64;
+                let float = unsafe { *float_ptr };
+                OwnedValue::Float(float)
+            }
             ExtValueType::Text => {
-                if v.text.is_null() {
+                if v.value.is_null() {
                     OwnedValue::Null
                 } else {
-                    OwnedValue::build_text(std::rc::Rc::new(v.text.to_string()))
+                    let Some(text) = ExtTextValue::from_value(v) else {
+                        return OwnedValue::Null;
+                    };
+                    OwnedValue::build_text(std::rc::Rc::new(unsafe { text.as_str().to_string() }))
                 }
             }
             ExtValueType::Blob => {
-                if v.blob.data.is_null() {
-                    OwnedValue::Null
-                } else {
-                    let bytes = unsafe { std::slice::from_raw_parts(v.blob.data, v.blob.size) };
-                    OwnedValue::Blob(std::rc::Rc::new(bytes.to_vec()))
-                }
+                let blob_ptr = v.value as *mut ExtBlob;
+                let blob = unsafe {
+                    let slice =
+                        std::slice::from_raw_parts((*blob_ptr).data, (*blob_ptr).size as usize);
+                    slice.to_vec()
+                };
+                OwnedValue::Blob(std::rc::Rc::new(blob))
             }
         }
     }

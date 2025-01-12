@@ -1,4 +1,3 @@
-use std::ffi::CString;
 use std::os::raw::{c_char, c_void};
 
 pub type ResultCode = i32;
@@ -76,8 +75,7 @@ macro_rules! declare_scalar_functions {
                 argv: *const *const std::os::raw::c_void
             ) -> $crate::Value {
                 if !($min_args..=$max_args).contains(&argc) {
-                    println!("{}: Invalid argument count", stringify!($func_name));
-                    return $crate::Value::null();// TODO: error code
+                    return $crate::Value::null();
                 }
                 if argc == 0 || argv.is_null() {
                     let $args: &[$crate::Value] = &[];
@@ -103,8 +101,8 @@ macro_rules! declare_scalar_functions {
     };
 }
 
-#[derive(PartialEq, Eq)]
 #[repr(C)]
+#[derive(PartialEq, Eq)]
 pub enum ValueType {
     Null,
     Integer,
@@ -113,45 +111,20 @@ pub enum ValueType {
     Blob,
 }
 
-// TODO: perf, these can be better expressed
 #[repr(C)]
 pub struct Value {
     pub value_type: ValueType,
-    pub integer: i64,
-    pub float: f64,
-    pub text: TextValue,
-    pub blob: Blob,
+    pub value: *mut c_void,
 }
 
 #[repr(C)]
 pub struct TextValue {
-    text: *const c_char,
-    len: usize,
+    pub text: *const u8,
+    pub len: u32,
 }
 
-impl std::fmt::Display for TextValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.text.is_null() {
-            return write!(f, "<null>");
-        }
-        let slice = unsafe { std::slice::from_raw_parts(self.text as *const u8, self.len) };
-        match std::str::from_utf8(slice) {
-            Ok(s) => write!(f, "{}", s),
-            Err(e) => write!(f, "<invalid UTF-8: {:?}>", e),
-        }
-    }
-}
-
-impl TextValue {
-    pub fn is_null(&self) -> bool {
-        self.text.is_null()
-    }
-
-    pub fn new(text: *const c_char, len: usize) -> Self {
-        Self { text, len }
-    }
-
-    pub fn null() -> Self {
+impl Default for TextValue {
+    fn default() -> Self {
         Self {
             text: std::ptr::null(),
             len: 0,
@@ -159,21 +132,49 @@ impl TextValue {
     }
 }
 
+impl TextValue {
+    pub fn new(text: *const u8, len: usize) -> Self {
+        Self {
+            text,
+            len: len as u32,
+        }
+    }
+
+    pub fn from_value(value: &Value) -> Option<&Self> {
+        if value.value_type != ValueType::Text {
+            return None;
+        }
+        unsafe { Some(&*(value.value as *const TextValue)) }
+    }
+
+    /// # Safety
+    /// The caller must ensure that the text is a valid UTF-8 string
+    pub unsafe fn as_str(&self) -> &str {
+        if self.text.is_null() {
+            return "";
+        }
+        unsafe {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.text, self.len as usize))
+        }
+    }
+}
+
 #[repr(C)]
 pub struct Blob {
     pub data: *const u8,
-    pub size: usize,
+    pub size: u64,
 }
 
 impl Blob {
-    pub fn new(data: *const u8, size: usize) -> Self {
+    pub fn new(data: *const u8, size: u64) -> Self {
         Self { data, size }
     }
-    pub fn null() -> Self {
-        Self {
-            data: std::ptr::null(),
-            size: 0,
+
+    pub fn from_value(value: &Value) -> Option<&Self> {
+        if value.value_type != ValueType::Blob {
+            return None;
         }
+        unsafe { Some(&*(value.value as *const Blob)) }
     }
 }
 
@@ -181,53 +182,65 @@ impl Value {
     pub fn null() -> Self {
         Self {
             value_type: ValueType::Null,
-            integer: 0,
-            float: 0.0,
-            text: TextValue::null(),
-            blob: Blob::null(),
+            value: std::ptr::null_mut(),
         }
     }
 
     pub fn from_integer(value: i64) -> Self {
+        let boxed = Box::new(value);
         Self {
             value_type: ValueType::Integer,
-            integer: value,
-            float: 0.0,
-            text: TextValue::null(),
-            blob: Blob::null(),
+            value: Box::into_raw(boxed) as *mut c_void,
         }
     }
+
     pub fn from_float(value: f64) -> Self {
+        let boxed = Box::new(value);
         Self {
             value_type: ValueType::Float,
-            integer: 0,
-            float: value,
-            text: TextValue::null(),
-            blob: Blob::null(),
+            value: Box::into_raw(boxed) as *mut c_void,
         }
     }
 
-    pub fn from_text(value: String) -> Self {
-        let cstr = CString::new(&*value).unwrap();
-        let ptr = cstr.as_ptr();
-        let len = value.len();
-        std::mem::forget(cstr);
+    pub fn from_text(s: String) -> Self {
+        let text_value = TextValue::new(s.as_ptr(), s.len());
+        let boxed_text = Box::new(text_value);
+        std::mem::forget(s);
         Self {
             value_type: ValueType::Text,
-            integer: 0,
-            float: 0.0,
-            text: TextValue::new(ptr, len),
-            blob: Blob::null(),
+            value: Box::into_raw(boxed_text) as *mut c_void,
         }
     }
 
-    pub fn from_blob(value: &[u8]) -> Self {
+    pub fn from_blob(value: Vec<u8>) -> Self {
+        let boxed = Box::new(Blob::new(value.as_ptr(), value.len() as u64));
+        std::mem::forget(value);
         Self {
             value_type: ValueType::Blob,
-            integer: 0,
-            float: 0.0,
-            text: TextValue::null(),
-            blob: Blob::new(value.as_ptr(), value.len()),
+            value: Box::into_raw(boxed) as *mut c_void,
         }
+    }
+
+    pub unsafe fn free(&mut self) {
+        if self.value.is_null() {
+            return;
+        }
+        match self.value_type {
+            ValueType::Integer => {
+                let _ = Box::from_raw(self.value as *mut i64);
+            }
+            ValueType::Float => {
+                let _ = Box::from_raw(self.value as *mut f64);
+            }
+            ValueType::Text => {
+                let _ = Box::from_raw(self.value as *mut TextValue);
+            }
+            ValueType::Blob => {
+                let _ = Box::from_raw(self.value as *mut Blob);
+            }
+            ValueType::Null => {}
+        }
+
+        self.value = std::ptr::null_mut();
     }
 }

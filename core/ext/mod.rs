@@ -1,6 +1,8 @@
 use crate::{function::ExternalFunc, Database};
+pub use limbo_extension::{
+    Blob as ExtBlob, TextValue as ExtTextValue, Value as ExtValue, ValueType as ExtValueType,
+};
 use limbo_extension::{ExtensionApi, ResultCode, ScalarFunction, RESULT_ERROR, RESULT_OK};
-pub use limbo_extension::{Value as ExtValue, ValueType as ExtValueType};
 use std::{
     ffi::{c_char, c_void, CStr},
     rc::Rc,
