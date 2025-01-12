@@ -53,6 +53,7 @@ macro_rules! register_scalar_functions {
 /// Provide a cleaner interface to define scalar functions to extension authors
 /// . e.g.
 /// ```
+///  #[args(1)]
 ///  fn scalar_func(args: &[Value]) -> Value {
 ///     if args.len() != 1 {
 ///          return Value::null();
@@ -65,7 +66,7 @@ macro_rules! register_scalar_functions {
 macro_rules! declare_scalar_functions {
     (
         $(
-            #[args(min = $min_args:literal, max = $max_args:literal)]
+            #[args($($args_count:tt)+)]
             fn $func_name:ident ($args:ident : &[Value]) -> Value $body:block
         )*
     ) => {
@@ -74,28 +75,32 @@ macro_rules! declare_scalar_functions {
                 argc: i32,
                 argv: *const *const std::os::raw::c_void
             ) -> $crate::Value {
-                if !($min_args..=$max_args).contains(&argc) {
+                let valid_args = {
+                    match argc {
+                        $($args_count)+ => true,
+                        _ => false,
+                    }
+                };
+                if !valid_args {
                     return $crate::Value::null();
                 }
                 if argc == 0 || argv.is_null() {
                     let $args: &[$crate::Value] = &[];
                     $body
                 } else {
-                    unsafe {
-                        let ptr_slice = std::slice::from_raw_parts(argv, argc as usize);
+                        let ptr_slice = unsafe{ std::slice::from_raw_parts(argv, argc as usize)};
                         let mut values = Vec::with_capacity(argc as usize);
                         for &ptr in ptr_slice {
                             let val_ptr = ptr as *const $crate::Value;
                             if val_ptr.is_null() {
                                 values.push($crate::Value::null());
                             } else {
-                                values.push(std::ptr::read(val_ptr));
+                                unsafe{values.push(std::ptr::read(val_ptr))};
                             }
                         }
                         let $args: &[$crate::Value] = &values[..];
                         $body
                     }
-                }
             }
         )*
     };
