@@ -91,7 +91,7 @@ impl InnerUringIO {
 
 impl WrappedIOUring {
     fn submit_entry(&mut self, entry: &io_uring::squeue::Entry, c: Rc<Completion>) {
-        log::trace!("submit_entry({:?})", entry);
+        trace!("submit_entry({:?})", entry);
         self.pending.insert(entry.get_user_data(), c);
         unsafe {
             self.ring
@@ -111,7 +111,7 @@ impl WrappedIOUring {
         // NOTE: This works because CompletionQueue's next function pops the head of the queue. This is not normal behaviour of iterators
         let entry = self.ring.completion().next();
         if entry.is_some() {
-            log::trace!("get_completion({:?})", entry);
+            trace!("get_completion({:?})", entry);
             // consumed an entry from completion queue, update pending_ops
             self.pending_ops -= 1;
         }
@@ -292,7 +292,7 @@ impl File for UringFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(self.file.metadata().unwrap().len())
+        Ok(self.file.metadata()?.len())
     }
 }
 
