@@ -20,6 +20,7 @@ pub fn translate_select(
     select: ast::Select,
     syms: &SymbolTable,
 ) -> Result<()> {
+    let mut select_plan = prepare_select_plan(schema, select, syms)?;
     optimize_plan(&mut select_plan)?;
     emit_program(program, select_plan, syms)
 }

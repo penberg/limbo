@@ -50,19 +50,6 @@ macro_rules! register_scalar_functions {
     }
 }
 
-/// Provide a cleaner interface to define scalar functions to extension authors
-/// . e.g.
-/// ```
-///  #[args(1)]
-///  fn scalar_double(args: &[Value]) -> Value {
-///      Value::from_integer(args[0].integer * 2)
-///  }
-///
-///  #[args(0..=2)]
-///  fn scalar_sum(args: &[Value]) -> Value {
-///     Value::from_integer(args.iter().map(|v| v.integer).sum())
-///  ```
-///
 #[macro_export]
 macro_rules! declare_scalar_functions {
     (
@@ -100,7 +87,7 @@ macro_rules! declare_scalar_functions {
 }
 
 #[repr(C)]
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum ValueType {
     Null,
     Integer,
@@ -111,8 +98,8 @@ pub enum ValueType {
 
 #[repr(C)]
 pub struct Value {
-    pub value_type: ValueType,
-    pub value: *mut c_void,
+    value_type: ValueType,
+    value: *mut c_void,
 }
 
 impl std::fmt::Debug for Value {
@@ -161,41 +148,27 @@ impl Default for TextValue {
 }
 
 impl TextValue {
-    pub fn new(text: *const u8, len: usize) -> Self {
+    pub(crate) fn new(text: *const u8, len: usize) -> Self {
         Self {
             text,
             len: len as u32,
         }
     }
 
-    /// # Safety
-    /// Safe to call if the pointer is null, returns None
-    /// if the value is not a text type or if the value is null
-    pub unsafe fn from_value(value: &Value) -> Option<&Self> {
-        if value.value_type != ValueType::Text {
-            return None;
-        }
-        if value.value.is_null() {
-            return None;
-        }
-        Some(&*(value.value as *const TextValue))
-    }
-
-    /// # Safety
-    /// If self.text is null we safely return an empty string but
-    /// the caller must ensure that the underlying value is valid utf8
-    pub unsafe fn as_str(&self) -> &str {
+    fn as_str(&self) -> &str {
         if self.text.is_null() {
             return "";
         }
-        std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.text, self.len as usize))
+        unsafe {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.text, self.len as usize))
+        }
     }
 }
 
 #[repr(C)]
 pub struct Blob {
-    pub data: *const u8,
-    pub size: u64,
+    data: *const u8,
+    size: u64,
 }
 
 impl std::fmt::Debug for Blob {
@@ -218,6 +191,10 @@ impl Value {
         }
     }
 
+    pub fn value_type(&self) -> ValueType {
+        self.value_type
+    }
+
     pub fn to_float(&self) -> Option<f64> {
         if self.value_type != ValueType::Float {
             return None;
@@ -228,24 +205,27 @@ impl Value {
         Some(unsafe { *(self.value as *const f64) })
     }
 
-    pub fn to_text(&self) -> Option<&TextValue> {
+    pub fn to_text(&self) -> Option<String> {
         if self.value_type != ValueType::Text {
             return None;
         }
         if self.value.is_null() {
             return None;
         }
-        unsafe { Some(&*(self.value as *const TextValue)) }
+        let txt = unsafe { &*(self.value as *const TextValue) };
+        Some(String::from(txt.as_str()))
     }
 
-    pub fn to_blob(&self) -> Option<&Blob> {
+    pub fn to_blob(&self) -> Option<Vec<u8>> {
         if self.value_type != ValueType::Blob {
             return None;
         }
         if self.value.is_null() {
             return None;
         }
-        unsafe { Some(&*(self.value as *const Blob)) }
+        let blob = unsafe { &*(self.value as *const Blob) };
+        let slice = unsafe { std::slice::from_raw_parts(blob.data, blob.size as usize) };
+        Some(slice.to_vec())
     }
 
     pub fn to_integer(&self) -> Option<i64> {

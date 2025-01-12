@@ -107,34 +107,29 @@ impl OwnedValue {
     }
 
     pub fn from_ffi(v: &ExtValue) -> Self {
-        if v.value.is_null() {
-            return OwnedValue::Null;
-        }
-        match v.value_type {
+        match v.value_type() {
             ExtValueType::Null => OwnedValue::Null,
             ExtValueType::Integer => {
-                let int_ptr = v.value as *mut i64;
-                let integer = unsafe { *int_ptr };
-                OwnedValue::Integer(integer)
+                let Some(int) = v.to_integer() else {
+                    return OwnedValue::Null;
+                };
+                OwnedValue::Integer(int)
             }
             ExtValueType::Float => {
-                let float_ptr = v.value as *mut f64;
-                let float = unsafe { *float_ptr };
+                let Some(float) = v.to_float() else {
+                    return OwnedValue::Null;
+                };
                 OwnedValue::Float(float)
             }
             ExtValueType::Text => {
                 let Some(text) = v.to_text() else {
                     return OwnedValue::Null;
                 };
-                OwnedValue::build_text(std::rc::Rc::new(unsafe { text.as_str().to_string() }))
+                OwnedValue::build_text(std::rc::Rc::new(text))
             }
             ExtValueType::Blob => {
-                let Some(blob_ptr) = v.to_blob() else {
+                let Some(blob) = v.to_blob() else {
                     return OwnedValue::Null;
-                };
-                let blob = unsafe {
-                    let slice = std::slice::from_raw_parts(blob_ptr.data, blob_ptr.size as usize);
-                    slice.to_vec()
                 };
                 OwnedValue::Blob(std::rc::Rc::new(blob))
             }

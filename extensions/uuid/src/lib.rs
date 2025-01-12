@@ -35,7 +35,7 @@ declare_scalar_functions! {
              uuid::Timestamp::now(ctx)
         } else {
             let arg = &args[0];
-            match arg.value_type {
+            match arg.value_type() {
             ValueType::Integer => {
                 let ctx = uuid::ContextV7::new();
                 let Some(int) = arg.to_integer() else {
@@ -47,8 +47,7 @@ declare_scalar_functions! {
             let Some(text) = arg.to_text() else {
                   return Value::null();
             };
-                let parsed = unsafe{text.as_str()}.parse::<i64>();
-                match parsed {
+                match text.parse::<i64>() {
                     Ok(unix) => {
                             if unix <= 0 {
                                 return Value::null();
@@ -70,7 +69,7 @@ declare_scalar_functions! {
         let timestamp = if args.is_empty() {
             let ctx = uuid::ContextV7::new();
              uuid::Timestamp::now(ctx)
-        } else if args[0].value_type == limbo_extension::ValueType::Integer {
+        } else if args[0].value_type() == limbo_extension::ValueType::Integer {
                 let ctx = uuid::ContextV7::new();
                 let Some(int) = args[0].to_integer() else {
                       return Value::null();
@@ -86,13 +85,12 @@ declare_scalar_functions! {
 
     #[args(1)]
     fn exec_ts_from_uuid7(args: &[Value]) -> Value {
-        match args[0].value_type {
+        match args[0].value_type() {
              ValueType::Blob => {
                 let Some(blob) = &args[0].to_blob() else {
                     return Value::null();
                 };
-                let slice = unsafe{ std::slice::from_raw_parts(blob.data, blob.size as usize)};
-                let uuid = uuid::Uuid::from_slice(slice).unwrap();
+                let uuid = uuid::Uuid::from_slice(blob.as_slice()).unwrap();
                 let unix = uuid_to_unix(uuid.as_bytes());
                 Value::from_integer(unix as i64)
             }
@@ -100,7 +98,7 @@ declare_scalar_functions! {
                 let Some(text) = args[0].to_text() else {
                     return Value::null();
                 };
-                let Ok(uuid) = uuid::Uuid::parse_str(unsafe {text.as_str()}) else {
+                let Ok(uuid) = uuid::Uuid::parse_str(&text) else {
                     return Value::null();
                 };
                 let unix = uuid_to_unix(uuid.as_bytes());
@@ -115,8 +113,7 @@ declare_scalar_functions! {
         let Some(blob) = args[0].to_blob() else {
             return Value::null();
         };
-        let slice = unsafe{ std::slice::from_raw_parts(blob.data, blob.size as usize)};
-        let parsed = uuid::Uuid::from_slice(slice).ok().map(|u| u.to_string());
+        let parsed = uuid::Uuid::from_slice(blob.as_slice()).ok().map(|u| u.to_string());
         match parsed {
             Some(s) => Value::from_text(s),
             None => Value::null()
@@ -128,7 +125,7 @@ declare_scalar_functions! {
         let Some(text) = args[0].to_text() else {
             return Value::null();
         };
-        match uuid::Uuid::parse_str(unsafe {text.as_str()}) {
+        match uuid::Uuid::parse_str(&text) {
             Ok(uuid) => {
                     Value::from_blob(uuid.as_bytes().to_vec())
                 }

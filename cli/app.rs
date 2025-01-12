@@ -323,6 +323,7 @@ impl Limbo {
         };
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn handle_load_extension(&mut self, path: &str) -> Result<(), String> {
         self.conn.load_extension(path).map_err(|e| e.to_string())
     }
@@ -550,7 +551,9 @@ impl Limbo {
                         let _ = self.writeln(e.to_string());
                     };
                 }
-                Command::LoadExtension => {
+                Command::LoadExtension =>
+                {
+                    #[cfg(not(target_family = "wasm"))]
                     if let Err(e) = self.handle_load_extension(args[1]) {
                         let _ = self.writeln(&e);
                     }

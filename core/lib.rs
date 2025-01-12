@@ -18,7 +18,9 @@ mod vdbe;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use fallible_iterator::FallibleIterator;
+#[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
+#[cfg(not(target_family = "wasm"))]
 use limbo_extension::{ExtensionApi, ExtensionEntryPoint, RESULT_OK};
 use log::trace;
 use schema::Schema;
@@ -179,6 +181,7 @@ impl Database {
             .insert(name.as_ref().to_string(), func.into());
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn load_extension(&self, path: &str) -> Result<()> {
         let api = Box::new(self.build_limbo_extension());
         let lib =
@@ -397,6 +400,7 @@ impl Connection {
         Ok(())
     }
 
+    #[cfg(not(target_family = "wasm"))]
     pub fn load_extension(&self, path: &str) -> Result<()> {
         Database::load_extension(self.db.as_ref(), path)
     }
@@ -499,6 +503,7 @@ impl Rows {
 
 pub(crate) struct SymbolTable {
     pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
+    #[cfg(not(target_family = "wasm"))]
     extensions: Vec<(libloading::Library, *const ExtensionApi)>,
 }
 
@@ -514,6 +519,8 @@ impl SymbolTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            // TODO: wasm libs will be very different
+            #[cfg(not(target_family = "wasm"))]
             extensions: Vec::new(),
         }
     }

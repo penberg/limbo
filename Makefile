@@ -62,10 +62,15 @@ limbo-wasm:
 	cargo build --package limbo-wasm --target wasm32-wasi
 .PHONY: limbo-wasm
 
-test: limbo test-compat test-sqlite3 test-shell
+test: limbo test-compat test-sqlite3 test-shell test-extensions
 .PHONY: test
 
-test-shell: limbo
+test-extensions: limbo
+	cargo build --package limbo_uuid
+	./testing/extensions.py
+.PHONY: test-extensions
+
+test-shell: limbo 
 	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/shelltests.py
 .PHONY: test-shell
 
