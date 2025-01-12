@@ -323,14 +323,8 @@ impl Limbo {
         };
     }
 
-    fn handle_load_extension(&mut self) -> Result<(), String> {
-        let mut args = self.input_buff.split_whitespace();
-        let _ = args.next();
-        let lib = args
-            .next()
-            .ok_or("No library specified")
-            .map_err(|e| e.to_string())?;
-        self.conn.load_extension(lib).map_err(|e| e.to_string())
+    fn handle_load_extension(&mut self, path: &str) -> Result<(), String> {
+        self.conn.load_extension(path).map_err(|e| e.to_string())
     }
 
     fn display_in_memory(&mut self) -> std::io::Result<()> {
@@ -557,8 +551,8 @@ impl Limbo {
                     };
                 }
                 Command::LoadExtension => {
-                    if let Err(e) = self.handle_load_extension() {
-                        let _ = self.writeln(e.to_string());
+                    if let Err(e) = self.handle_load_extension(args[1]) {
+                        let _ = self.writeln(&e);
                     }
                 }
             }

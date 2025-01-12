@@ -25,8 +25,7 @@ pub mod likeop;
 pub mod sorter;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
-#[cfg(feature = "uuid")]
-use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
+use crate::ext::ExtValue;
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
@@ -53,9 +52,10 @@ use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
 use sorter::Sorter;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::os::raw::c_void;
 use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1838,47 +1838,20 @@ impl Program {
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
                         },
-                        #[allow(unreachable_patterns)]
-                        crate::function::Func::Extension(extfn) => match extfn {
-                            #[cfg(feature = "uuid")]
-                            ExtFunc::Uuid(uuidfn) => match uuidfn {
-                                UuidFunc::Uuid4Str => {
-                                    state.registers[*dest] = exec_uuid(uuidfn, None)?
-                                }
-                                UuidFunc::Uuid7 => match arg_count {
-                                    0 => {
-                                        state.registers[*dest] =
-                                            exec_uuid(uuidfn, None).unwrap_or(OwnedValue::Null);
-                                    }
-                                    1 => {
-                                        let reg_value = state.registers[*start_reg].borrow();
-                                        state.registers[*dest] = exec_uuid(uuidfn, Some(reg_value))
-                                            .unwrap_or(OwnedValue::Null);
-                                    }
-                                    _ => unreachable!(),
-                                },
-                                _ => {
-                                    // remaining accept 1 arg
-                                    let reg_value = state.registers[*start_reg].borrow();
-                                    state.registers[*dest] = match uuidfn {
-                                        UuidFunc::Uuid7TS => Some(exec_ts_from_uuid7(reg_value)),
-                                        UuidFunc::UuidStr => exec_uuidstr(reg_value).ok(),
-                                        UuidFunc::UuidBlob => exec_uuidblob(reg_value).ok(),
-                                        _ => unreachable!(),
-                                    }
-                                    .unwrap_or(OwnedValue::Null);
-                                }
-                            },
-                            _ => unreachable!(), // when more extension types are added
-                        },
                         crate::function::Func::External(f) => {
                             let values = &state.registers[*start_reg..*start_reg + arg_count];
-                            let args: Vec<_> = values.into_iter().map(|v| v.into()).collect();
-                            let result = f
-                                .func
-                                .execute(args.as_slice())
-                                .map_err(|e| LimboError::ExtensionError(e.to_string()))?;
-                            state.registers[*dest] = result.into();
+                            let c_values: Vec<*const c_void> = values
+                                .iter()
+                                .map(|ov| &ov.to_ffi() as *const _ as *const c_void)
+                                .collect();
+                            let argv_ptr = if c_values.is_empty() {
+                                std::ptr::null()
+                            } else {
+                                c_values.as_ptr()
+                            };
+                            let result_c_value: ExtValue = (f.func)(arg_count as i32, argv_ptr);
+                            let result_ov = OwnedValue::from_ffi(&result_c_value);
+                            state.registers[*dest] = result_ov;
                         }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {

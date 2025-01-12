@@ -1,10 +1,9 @@
 use crate::error::LimboError;
+use crate::ext::{ExtValue, ExtValueType};
+use crate::storage::sqlite3_ondisk::write_varint;
 use crate::Result;
-use extension_api::Value as ExtValue;
 use std::fmt::Display;
 use std::rc::Rc;
-
-use crate::storage::sqlite3_ondisk::write_varint;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
@@ -13,45 +12,6 @@ pub enum Value<'a> {
     Float(f64),
     Text(&'a String),
     Blob(&'a Vec<u8>),
-}
-
-impl From<&OwnedValue> for extension_api::Value {
-    fn from(value: &OwnedValue) -> Self {
-        match value {
-            OwnedValue::Null => extension_api::Value::Null,
-            OwnedValue::Integer(i) => extension_api::Value::Integer(*i),
-            OwnedValue::Float(f) => extension_api::Value::Float(*f),
-            OwnedValue::Text(text) => extension_api::Value::Text(text.value.to_string()),
-            OwnedValue::Blob(blob) => extension_api::Value::Blob(blob.to_vec()),
-            OwnedValue::Agg(_) => {
-                panic!("Cannot convert Aggregate context to extension_api::Value")
-            } // Handle appropriately
-            OwnedValue::Record(_) => panic!("Cannot convert Record to extension_api::Value"), // Handle appropriately
-        }
-    }
-}
-impl From<ExtValue> for OwnedValue {
-    fn from(value: ExtValue) -> Self {
-        match value {
-            ExtValue::Null => OwnedValue::Null,
-            ExtValue::Integer(i) => OwnedValue::Integer(i),
-            ExtValue::Float(f) => OwnedValue::Float(f),
-            ExtValue::Text(text) => OwnedValue::Text(LimboText::new(Rc::new(text.to_string()))),
-            ExtValue::Blob(blob) => OwnedValue::Blob(Rc::new(blob.to_vec())),
-        }
-    }
-}
-
-impl<'a> From<&'a crate::Value<'a>> for ExtValue {
-    fn from(value: &'a crate::Value<'a>) -> Self {
-        match value {
-            crate::Value::Null => extension_api::Value::Null,
-            crate::Value::Integer(i) => extension_api::Value::Integer(*i),
-            crate::Value::Float(f) => extension_api::Value::Float(*f),
-            crate::Value::Text(t) => extension_api::Value::Text(t.to_string()),
-            crate::Value::Blob(b) => extension_api::Value::Blob(b.to_vec()),
-        }
-    }
 }
 
 impl Display for Value<'_> {
@@ -129,6 +89,41 @@ impl Display for OwnedValue {
                 AggContext::GroupConcat(s) => write!(f, "{}", s),
             },
             Self::Record(r) => write!(f, "{:?}", r),
+        }
+    }
+}
+impl OwnedValue {
+    pub fn to_ffi(&self) -> ExtValue {
+        match self {
+            Self::Null => ExtValue::null(),
+            Self::Integer(i) => ExtValue::from_integer(*i),
+            Self::Float(fl) => ExtValue::from_float(*fl),
+            Self::Text(s) => ExtValue::from_text(s.value.to_string()),
+            Self::Blob(b) => ExtValue::from_blob(b),
+            Self::Agg(_) => todo!(),
+            Self::Record(_) => todo!(),
+        }
+    }
+    pub fn from_ffi(v: &ExtValue) -> Self {
+        match v.value_type {
+            ExtValueType::Null => OwnedValue::Null,
+            ExtValueType::Integer => OwnedValue::Integer(v.integer),
+            ExtValueType::Float => OwnedValue::Float(v.float),
+            ExtValueType::Text => {
+                if v.text.is_null() {
+                    OwnedValue::Null
+                } else {
+                    OwnedValue::build_text(std::rc::Rc::new(v.text.to_string()))
+                }
+            }
+            ExtValueType::Blob => {
+                if v.blob.data.is_null() {
+                    OwnedValue::Null
+                } else {
+                    let bytes = unsafe { std::slice::from_raw_parts(v.blob.data, v.blob.size) };
+                    OwnedValue::Blob(std::rc::Rc::new(bytes.to_vec()))
+                }
+            }
         }
     }
 }

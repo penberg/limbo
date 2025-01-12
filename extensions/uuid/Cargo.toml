@@ -1,11 +1,15 @@
 [package]
-name = "uuid"
+name = "limbo_uuid"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+crate-type = ["cdylib"]
+
+
 [dependencies]
-extension_api = { path = "../../extension_api"}
+limbo_extension = { path = "../../limbo_extension"}
 uuid = { version = "1.11.0", features = ["v4", "v7"] }

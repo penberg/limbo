@@ -17,9 +17,9 @@ mod vdbe;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-use extension_api::{Extension, ExtensionApi};
 use fallible_iterator::FallibleIterator;
 use libloading::{Library, Symbol};
+use limbo_extension::{ExtensionApi, ExtensionEntryPoint, RESULT_OK};
 use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
@@ -134,7 +134,6 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
-        // ext::init(&mut db);
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),
@@ -168,31 +167,37 @@ impl Database {
     pub fn define_scalar_function<S: AsRef<str>>(
         &self,
         name: S,
-        func: Arc<dyn extension_api::ScalarFunction>,
+        func: limbo_extension::ScalarFunction,
     ) {
         let func = function::ExternalFunc {
             name: name.as_ref().to_string(),
-            func: func.clone(),
+            func,
         };
         self.syms
             .borrow_mut()
             .functions
-            .insert(name.as_ref().to_string(), Arc::new(func));
+            .insert(name.as_ref().to_string(), func.into());
     }
 
     pub fn load_extension(&self, path: &str) -> Result<()> {
+        let api = Box::new(self.build_limbo_extension());
         let lib =
             unsafe { Library::new(path).map_err(|e| LimboError::ExtensionError(e.to_string()))? };
-        unsafe {
-            let register: Symbol<unsafe extern "C" fn(&dyn ExtensionApi) -> Box<dyn Extension>> =
-                lib.get(b"register_extension")
-                    .map_err(|e| LimboError::ExtensionError(e.to_string()))?;
-            let extension = register(self);
-            extension
-                .load()
-                .map_err(|e| LimboError::ExtensionError(e.to_string()))?;
+        let entry: Symbol<ExtensionEntryPoint> = unsafe {
+            lib.get(b"register_extension")
+                .map_err(|e| LimboError::ExtensionError(e.to_string()))?
+        };
+        let api_ptr: *const ExtensionApi = Box::into_raw(api);
+        let result_code = entry(api_ptr);
+        if result_code == RESULT_OK {
+            self.syms.borrow_mut().extensions.push((lib, api_ptr));
+            Ok(())
+        } else {
+            let _ = unsafe { Box::from_raw(api_ptr.cast_mut()) }; // own this again so we dont leak
+            Err(LimboError::ExtensionError(
+                "Extension registration failed".to_string(),
+            ))
         }
-        Ok(())
     }
 }
 
@@ -321,7 +326,11 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let mut plan = prepare_select_plan(&self.schema.borrow(), *select)?;
+                            let mut plan = prepare_select_plan(
+                                &self.schema.borrow(),
+                                *select,
+                                &self.db.syms.borrow(),
+                            )?;
                             optimize_plan(&mut plan)?;
                             println!("{}", plan);
                         }
@@ -487,8 +496,8 @@ impl Rows {
 }
 
 pub(crate) struct SymbolTable {
-    pub functions: HashMap<String, Arc<crate::function::ExternalFunc>>,
-    extensions: Vec<Rc<dyn Extension>>,
+    pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
+    extensions: Vec<(libloading::Library, *const ExtensionApi)>,
 }
 
 impl std::fmt::Debug for SymbolTable {
@@ -511,7 +520,7 @@ impl SymbolTable {
         &self,
         name: &str,
         _arg_count: usize,
-    ) -> Option<Arc<crate::function::ExternalFunc>> {
+    ) -> Option<Rc<crate::function::ExternalFunc>> {
         self.functions.get(name).cloned()
     }
 }

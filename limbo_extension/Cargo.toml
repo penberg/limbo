@@ -1,5 +1,5 @@
 [package]
-name = "extension_api"
+name = "limbo_extension"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

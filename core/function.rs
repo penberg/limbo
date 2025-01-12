@@ -1,15 +1,16 @@
-use crate::ext::ExtFunc;
 use std::fmt;
 use std::fmt::{Debug, Display};
-use std::sync::Arc;
+use std::rc::Rc;
+
+use limbo_extension::ScalarFunction;
 
 pub struct ExternalFunc {
     pub name: String,
-    pub func: Arc<dyn extension_api::ScalarFunction>,
+    pub func: ScalarFunction,
 }
 
 impl ExternalFunc {
-    pub fn new(name: &str, func: Arc<dyn extension_api::ScalarFunction>) -> Self {
+    pub fn new(name: &str, func: ScalarFunction) -> Self {
         Self {
             name: name.to_string(),
             func,
@@ -308,8 +309,7 @@ pub enum Func {
     Math(MathFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
-    Extension(ExtFunc),
-    External(Arc<ExternalFunc>),
+    External(Rc<ExternalFunc>),
 }
 
 impl Display for Func {
@@ -320,7 +320,6 @@ impl Display for Func {
             Self::Math(math_func) => write!(f, "{}", math_func),
             #[cfg(feature = "json")]
             Self::Json(json_func) => write!(f, "{}", json_func),
-            Self::Extension(ext_func) => write!(f, "{}", ext_func),
             Self::External(generic_func) => write!(f, "{}", generic_func),
         }
     }
@@ -427,10 +426,7 @@ impl Func {
             "tan" => Ok(Self::Math(MathFunc::Tan)),
             "tanh" => Ok(Self::Math(MathFunc::Tanh)),
             "trunc" => Ok(Self::Math(MathFunc::Trunc)),
-            _ => match ExtFunc::resolve_function(name, arg_count) {
-                Some(ext_func) => Ok(Self::Extension(ext_func)),
-                None => Err(()),
-            },
+            _ => Err(()),
         }
     }
 }

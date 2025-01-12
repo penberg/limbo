@@ -35,7 +35,7 @@ rustix = "0.38.34"
 mimalloc = { version = "*", default-features = false }
 
 [dependencies]
-extension_api = { path = "../extension_api" }
+limbo_extension = { path = "../limbo_extension" }
 cfg_block = "0.1.1"
 fallible-iterator = "0.3.0"
 hex = "0.4.3"

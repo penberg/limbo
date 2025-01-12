@@ -564,7 +564,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bef552e6f588e446098f6ba40d89ac146c8c7b64aade83c051ee00bb5d2bc18d"
 dependencies = [
- "uuid 1.11.0",
+ "uuid",
 ]
 
 [[package]]
@@ -693,10 +693,6 @@ dependencies = [
  "libc",
  "str-buf",
 ]
-
-[[package]]
-name = "extension_api"
-version = "0.0.11"
 
 [[package]]
 name = "fallible-iterator"
@@ -1218,7 +1214,6 @@ dependencies = [
  "cfg_block",
  "chrono",
  "criterion",
- "extension_api",
  "fallible-iterator 0.3.0",
  "getrandom",
  "hex",
@@ -1228,6 +1223,7 @@ dependencies = [
  "julian_day_converter",
  "libc",
  "libloading",
+ "limbo_extension",
  "limbo_macros",
  "log",
  "miette",
@@ -1248,10 +1244,11 @@ dependencies = [
  "sqlite3-parser",
  "tempfile",
  "thiserror 1.0.69",
- "uuid 1.11.0",
+ "uuid",
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "limbo_libsql"
 version = "0.0.12"
 dependencies = [
@@ -1259,6 +1256,10 @@ dependencies = [
  "thiserror 2.0.9",
  "tokio",
 ]
+
+[[package]]
+name = "limbo_extension"
+version = "0.0.11"
 
 [[package]]
 name = "limbo_macros"
@@ -1286,6 +1287,14 @@ dependencies = [
  "libc",
  "limbo_core",
  "log",
+]
+
+[[package]]
+name = "limbo_uuid"
+version = "0.0.11"
+dependencies = [
+ "limbo_extension",
+ "uuid",
 ]
 
 [[package]]
@@ -2276,7 +2285,7 @@ dependencies = [
  "debugid",
  "memmap2",
  "stable_deref_trait",
- "uuid 1.11.0",
+ "uuid",
 ]
 
 [[package]]
@@ -2517,14 +2526,6 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
-
-[[package]]
-name = "uuid"
-version = "0.0.11"
-dependencies = [
- "extension_api",
- "uuid 1.11.0",
-]
 
 [[package]]
 name = "uuid"
