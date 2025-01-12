@@ -1343,84 +1343,79 @@ impl Program {
                     let arg_count = func.arg_count;
                     match &func.func {
                         #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::Json) => {
-                            let json_value = &state.registers[*start_reg];
-                            let json_str = get_json(json_value);
-                            match json_str {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonArray) => {
-                            let reg_values = &state.registers[*start_reg..*start_reg + arg_count];
-
-                            let json_array = json_array(reg_values);
-
-                            match json_array {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonExtract) => {
-                            let result = match arg_count {
-                                0 => json_extract(&OwnedValue::Null, &[]),
-                                _ => {
-                                    let val = &state.registers[*start_reg];
-                                    let reg_values =
-                                        &state.registers[*start_reg + 1..*start_reg + arg_count];
-
-                                    json_extract(val, reg_values)
+                        crate::function::Func::Json(json_func) => match json_func {
+                            JsonFunc::Json => {
+                                let json_value = &state.registers[*start_reg];
+                                let json_str = get_json(json_value);
+                                match json_str {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
                                 }
-                            };
+                            }
+                            JsonFunc::JsonArray => {
+                                let reg_values =
+                                    &state.registers[*start_reg..*start_reg + arg_count];
 
-                            match result {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(
-                            func @ (JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract),
-                        ) => {
-                            assert_eq!(arg_count, 2);
-                            let json = &state.registers[*start_reg];
-                            let path = &state.registers[*start_reg + 1];
-                            let func = match func {
-                                JsonFunc::JsonArrowExtract => json_arrow_extract,
-                                JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
-                                _ => unreachable!(),
-                            };
-                            let json_str = func(json, path);
-                            match json_str {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(
-                            func @ (JsonFunc::JsonArrayLength | JsonFunc::JsonType),
-                        ) => {
-                            let json_value = &state.registers[*start_reg];
-                            let path_value = if arg_count > 1 {
-                                Some(&state.registers[*start_reg + 1])
-                            } else {
-                                None
-                            };
-                            let func_result = match func {
-                                JsonFunc::JsonArrayLength => {
-                                    json_array_length(json_value, path_value)
+                                let json_array = json_array(reg_values);
+
+                                match json_array {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
                                 }
-                                JsonFunc::JsonType => json_type(json_value, path_value),
-                                _ => unreachable!(),
-                            };
-
-                            match func_result {
-                                Ok(result) => state.registers[*dest] = result,
-                                Err(e) => return Err(e),
                             }
-                        }
+                            JsonFunc::JsonExtract => {
+                                let result = match arg_count {
+                                    0 => json_extract(&OwnedValue::Null, &[]),
+                                    _ => {
+                                        let val = &state.registers[*start_reg];
+                                        let reg_values = &state.registers
+                                            [*start_reg + 1..*start_reg + arg_count];
+
+                                        json_extract(val, reg_values)
+                                    }
+                                };
+
+                                match result {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract => {
+                                assert_eq!(arg_count, 2);
+                                let json = &state.registers[*start_reg];
+                                let path = &state.registers[*start_reg + 1];
+                                let json_func = match json_func {
+                                    JsonFunc::JsonArrowExtract => json_arrow_extract,
+                                    JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
+                                    _ => unreachable!(),
+                                };
+                                let json_str = json_func(json, path);
+                                match json_str {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            JsonFunc::JsonArrayLength | JsonFunc::JsonType => {
+                                let json_value = &state.registers[*start_reg];
+                                let path_value = if arg_count > 1 {
+                                    Some(&state.registers[*start_reg + 1])
+                                } else {
+                                    None
+                                };
+                                let func_result = match json_func {
+                                    JsonFunc::JsonArrayLength => {
+                                        json_array_length(json_value, path_value)
+                                    }
+                                    JsonFunc::JsonType => json_type(json_value, path_value),
+                                    _ => unreachable!(),
+                                };
+
+                                match func_result {
+                                    Ok(result) => state.registers[*dest] = result,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                        },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
                                 assert!(arg_count == 2);
