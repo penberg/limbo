@@ -123,14 +123,10 @@ impl OwnedValue {
                 OwnedValue::Float(float)
             }
             ExtValueType::Text => {
-                if v.value.is_null() {
-                    OwnedValue::Null
-                } else {
-                    let Some(text) = ExtTextValue::from_value(v) else {
-                        return OwnedValue::Null;
-                    };
-                    OwnedValue::build_text(std::rc::Rc::new(unsafe { text.as_str().to_string() }))
-                }
+                let Some(text) = (unsafe { ExtTextValue::from_value(v) }) else {
+                    return OwnedValue::Null;
+                };
+                OwnedValue::build_text(std::rc::Rc::new(unsafe { text.as_str().to_string() }))
             }
             ExtValueType::Blob => {
                 let blob_ptr = v.value as *mut ExtBlob;

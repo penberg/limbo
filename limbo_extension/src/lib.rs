@@ -137,8 +137,8 @@ impl std::fmt::Debug for Value {
 
 #[repr(C)]
 pub struct TextValue {
-    pub text: *const u8,
-    pub len: u32,
+    text: *const u8,
+    len: u32,
 }
 
 impl std::fmt::Debug for TextValue {
@@ -168,22 +168,27 @@ impl TextValue {
         }
     }
 
-    pub fn from_value(value: &Value) -> Option<&Self> {
+    /// # Safety
+    /// Safe to call if the pointer is null, returns None
+    /// if the value is not a text type or if the value is null
+    pub unsafe fn from_value(value: &Value) -> Option<&Self> {
         if value.value_type != ValueType::Text {
             return None;
         }
-        unsafe { Some(&*(value.value as *const TextValue)) }
+        if value.value.is_null() {
+            return None;
+        }
+        Some(&*(value.value as *const TextValue))
     }
 
     /// # Safety
-    /// The caller must ensure that the text is a valid UTF-8 string
+    /// If self.text is null we safely return an empty string but
+    /// the caller must ensure that the underlying value is valid utf8
     pub unsafe fn as_str(&self) -> &str {
         if self.text.is_null() {
             return "";
         }
-        unsafe {
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.text, self.len as usize))
-        }
+        std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.text, self.len as usize))
     }
 }
 
@@ -258,7 +263,11 @@ impl Value {
         }
     }
 
-    pub unsafe fn free(&mut self) {
+    /// # Safety
+    /// consumes the value while freeing the underlying memory with null check.
+    /// however this does assume that the type was properly constructed with
+    /// the appropriate value_type and value.
+    pub unsafe fn free(self) {
         if self.value.is_null() {
             return;
         }
@@ -277,7 +286,5 @@ impl Value {
             }
             ValueType::Null => {}
         }
-
-        self.value = std::ptr::null_mut();
     }
 }

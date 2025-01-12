@@ -73,7 +73,9 @@ declare_scalar_functions! {
                 Value::from_integer(unix as i64)
             }
             ValueType::Text => {
-                let text = TextValue::from_value(&args[0]).unwrap();
+                let Some(text) = (unsafe {TextValue::from_value(&args[0])}) else {
+                    return Value::null();
+                };
                 let uuid = uuid::Uuid::parse_str(unsafe {text.as_str()}).unwrap();
                 let unix = uuid_to_unix(uuid.as_bytes());
                 Value::from_integer(unix as i64)
@@ -106,15 +108,14 @@ declare_scalar_functions! {
             log::debug!("uuid_blob was passed a non-text arg");
             return Value::null();
         }
-        if let Some(text) = TextValue::from_value(&args[0]) {
+        let Some(text) = (unsafe { TextValue::from_value(&args[0])}) else {
+            return Value::null();
+        };
         match uuid::Uuid::parse_str(unsafe {text.as_str()}) {
             Ok(uuid) => {
                     Value::from_blob(uuid.as_bytes().to_vec())
                 }
             Err(_) => Value::null()
-        }
-        } else {
-            Value::null()
         }
     }
 }
