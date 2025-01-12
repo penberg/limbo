@@ -100,7 +100,9 @@ declare_scalar_functions! {
                 let Some(text) = args[0].to_text() else {
                     return Value::null();
                 };
-                let uuid = uuid::Uuid::parse_str(unsafe {text.as_str()}).unwrap();
+                let Ok(uuid) = uuid::Uuid::parse_str(unsafe {text.as_str()}) else {
+                    return Value::null();
+                };
                 let unix = uuid_to_unix(uuid.as_bytes());
                 Value::from_integer(unix as i64)
             }
