@@ -98,7 +98,14 @@ The simulator also performs fault injection to discover interesting bugs.
 ## Python Bindings
 
 Limbo provides Python bindings built on top of the [PyO3](https://pyo3.rs) project.  
-To compile the Python bindings locally, you need to have [Maturin](https://pypi.org/project/maturin/) installed:
+To compile the Python bindings locally, you first need to create and activate a Python virtual environment (for example, with Python `3.12`):
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+```
+
+Then, install [Maturin](https://pypi.org/project/maturin/):
 
 ```bash
 pip install maturin
