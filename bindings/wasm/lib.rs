@@ -358,7 +358,7 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
 compile_error!("Features 'web' and 'nodejs' cannot be enabled at the same time");
 
 #[cfg(feature = "web")]
-#[wasm_bindgen(module = "/src/web-vfs.js")]
+#[wasm_bindgen(module = "/web/src/web-vfs.js")]
 extern "C" {
     type VFS;
     #[wasm_bindgen(constructor)]
@@ -384,7 +384,7 @@ extern "C" {
 }
 
 #[cfg(feature = "nodejs")]
-#[wasm_bindgen(module = "/vfs.js")]
+#[wasm_bindgen(module = "/node/src/vfs.js")]
 extern "C" {
     type VFS;
     #[wasm_bindgen(constructor)]

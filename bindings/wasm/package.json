@@ -2,21 +2,23 @@
   "name": "limbo-wasm",
   "version": "0.0.11",
   "workspaces": [
-    "packages/*"
+    "node",
+    "web"
   ],
   "files": [
-    "packages"
+    "node",
+    "web"
   ],
   "exports": {
     "./node": {
-      "require": "./packages/node/dist/index.js",
-      "types": "./packages/node/dist/index.d.ts"
+      "require": "./node/dist/index.js",
+      "types": "./node/dist/index.d.ts"
     },
     "./web": {
-      "import": "./packages/web/dist/index.js",
-      "types": "./packages/web/dist/index.d.ts"
+      "import": "./web/dist/index.js",
+      "types": "./web/dist/index.d.ts"
     },
-    "./web/limbo-worker.js": "./packages/web/dist/limbo-worker.js"
+    "./web/limbo-worker.js": "./web/src/limbo-worker.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",

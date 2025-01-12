@@ -1,5 +1,5 @@
 node_modules/
 *.wasm
-packages/
+**/dist/
 limbo-wasm*tgz
 claude.md

@@ -1,5 +1,5 @@
 import { VFS } from "./opfs.js";
-import init, { Database } from "./index.js";
+import init, { Database } from "../dist/index.js";
 
 let db = null;
 let currentStmt = null;
