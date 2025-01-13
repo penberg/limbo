@@ -3,26 +3,23 @@ use crate::translate::emitter::emit_program;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{DeletePlan, Plan, SourceOperator};
 use crate::translate::planner::{parse_limit, parse_where};
-use crate::{schema::Schema, storage::sqlite3_ondisk::DatabaseHeader, vdbe::Program};
-use crate::{Connection, Result, SymbolTable};
+use crate::vdbe::builder::ProgramBuilder;
+use crate::{schema::Schema, Result, SymbolTable};
 use sqlite3_parser::ast::{Expr, Limit, QualifiedName};
-use std::rc::Weak;
-use std::{cell::RefCell, rc::Rc};
 
 use super::plan::{TableReference, TableReferenceType};
 
 pub fn translate_delete(
+    program: &mut ProgramBuilder,
     schema: &Schema,
     tbl_name: &QualifiedName,
     where_clause: Option<Expr>,
     limit: Option<Box<Limit>>,
-    database_header: Rc<RefCell<DatabaseHeader>>,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
+) -> Result<()> {
     let mut delete_plan = prepare_delete_plan(schema, tbl_name, where_clause, limit)?;
     optimize_plan(&mut delete_plan)?;
-    emit_program(database_header, delete_plan, connection, syms)
+    emit_program(program, delete_plan, syms)
 }
 
 pub fn prepare_delete_plan(

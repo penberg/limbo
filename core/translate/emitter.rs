@@ -1,19 +1,16 @@
 // This module contains code for emitting bytecode instructions for SQL query execution.
 // It handles translating high-level SQL operations into low-level bytecode that can be executed by the virtual machine.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::{Rc, Weak};
 
 use sqlite3_parser::ast::{self};
 
 use crate::function::Func;
-use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::plan::{DeletePlan, Plan, Search};
 use crate::util::exprs_are_equivalent;
 use crate::vdbe::builder::ProgramBuilder;
-use crate::vdbe::{insn::Insn, BranchOffset, Program};
-use crate::{Connection, Result, SymbolTable};
+use crate::vdbe::{insn::Insn, BranchOffset};
+use crate::{Result, SymbolTable};
 
 use super::aggregation::emit_ungrouped_aggregation;
 use super::group_by::{emit_group_by, init_group_by, GroupByMetadata};
@@ -99,9 +96,9 @@ pub enum OperationMode {
 
 /// Initialize the program with basic setup and return initial metadata and labels
 fn prologue<'a>(
+    program: &mut ProgramBuilder,
     syms: &'a SymbolTable,
-) -> Result<(ProgramBuilder, TranslateCtx<'a>, BranchOffset, BranchOffset)> {
-    let mut program = ProgramBuilder::new();
+) -> Result<(TranslateCtx<'a>, BranchOffset, BranchOffset)> {
     let init_label = program.allocate_label();
 
     program.emit_insn(Insn::Init {
@@ -124,7 +121,7 @@ fn prologue<'a>(
         resolver: Resolver::new(syms),
     };
 
-    Ok((program, t_ctx, init_label, start_offset))
+    Ok((t_ctx, init_label, start_offset))
 }
 
 /// Clean up and finalize the program, resolving any remaining labels
@@ -154,40 +151,37 @@ fn epilogue(
 /// Main entry point for emitting bytecode for a SQL query
 /// Takes a query plan and generates the corresponding bytecode program
 pub fn emit_program(
-    database_header: Rc<RefCell<DatabaseHeader>>,
+    program: &mut ProgramBuilder,
     plan: Plan,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
+) -> Result<()> {
     match plan {
-        Plan::Select(plan) => emit_program_for_select(database_header, plan, connection, syms),
-        Plan::Delete(plan) => emit_program_for_delete(database_header, plan, connection, syms),
+        Plan::Select(plan) => emit_program_for_select(program, plan, syms),
+        Plan::Delete(plan) => emit_program_for_delete(program, plan, syms),
     }
 }
 
 fn emit_program_for_select(
-    database_header: Rc<RefCell<DatabaseHeader>>,
+    program: &mut ProgramBuilder,
     mut plan: SelectPlan,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
-    let (mut program, mut t_ctx, init_label, start_offset) = prologue(syms)?;
+) -> Result<()> {
+    let (mut t_ctx, init_label, start_offset) = prologue(program, syms)?;
 
     // Trivial exit on LIMIT 0
     if let Some(limit) = plan.limit {
         if limit == 0 {
-            epilogue(&mut program, init_label, start_offset)?;
-            return Ok(program.build(database_header, connection));
+            epilogue(program, init_label, start_offset)?;
         }
     }
 
     // Emit main parts of query
-    emit_query(&mut program, &mut plan, &mut t_ctx)?;
+    emit_query(program, &mut plan, &mut t_ctx)?;
 
     // Finalize program
-    epilogue(&mut program, init_label, start_offset)?;
+    epilogue(program, init_label, start_offset)?;
 
-    Ok(program.build(database_header, connection))
+    Ok(())
 }
 
 pub fn emit_query<'a>(
@@ -263,12 +257,11 @@ pub fn emit_query<'a>(
 }
 
 fn emit_program_for_delete(
-    database_header: Rc<RefCell<DatabaseHeader>>,
+    program: &mut ProgramBuilder,
     mut plan: DeletePlan,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
-    let (mut program, mut t_ctx, init_label, start_offset) = prologue(syms)?;
+) -> Result<()> {
+    let (mut t_ctx, init_label, start_offset) = prologue(program, syms)?;
 
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
     let after_main_loop_label = program.allocate_label();
@@ -280,7 +273,7 @@ fn emit_program_for_delete(
 
     // Initialize cursors and other resources needed for query execution
     init_loop(
-        &mut program,
+        program,
         &mut t_ctx,
         &plan.source,
         &OperationMode::DELETE,
@@ -288,23 +281,23 @@ fn emit_program_for_delete(
 
     // Set up main query execution loop
     open_loop(
-        &mut program,
+        program,
         &mut t_ctx,
         &mut plan.source,
         &plan.referenced_tables,
     )?;
 
-    emit_delete_insns(&mut program, &mut t_ctx, &plan.source, &plan.limit)?;
+    emit_delete_insns(program, &mut t_ctx, &plan.source, &plan.limit)?;
 
     // Clean up and close the main execution loop
-    close_loop(&mut program, &mut t_ctx, &plan.source)?;
+    close_loop(program, &mut t_ctx, &plan.source)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
     // Finalize program
-    epilogue(&mut program, init_label, start_offset)?;
+    epilogue(program, init_label, start_offset)?;
 
-    Ok(program.build(database_header, connection))
+    Ok(())
 }
 
 fn emit_delete_insns<'a>(
