@@ -229,7 +229,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 ### Date and Time Modifiers
 |  Modifier      | Status|  Comment                        |
 |----------------|-------|---------------------------------|
-| Days           | Yes 	 |                                 | 
+| Days           | Yes 	 |                                 |
 | Hours          | Yes	 |                                 |
 | Minutes        | Yes	 |                                 |
 | Seconds        | Yes	 |                                 |
@@ -270,7 +270,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | json ->> path                      | Yes     |                                                                                                                                              |
 | json_insert(json,path,value,...)   |         |                                                                                                                                              |
 | jsonb_insert(json,path,value,...)  |         |                                                                                                                                              |
-| json_object(label1,value1,...)     |         |                                                                                                                                              |
+| json_object(label1,value1,...)     | Yes     | When keys are duplicated, only the last one processed is returned. This differs from sqlite, where the keys in the output can be duplicated  |
 | jsonb_object(label1,value1,...)    |         |                                                                                                                                              |
 | json_patch(json1,json2)            |         |                                                                                                                                              |
 | jsonb_patch(json1,json2)           |         |                                                                                                                                              |
