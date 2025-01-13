@@ -615,9 +615,8 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use super::*;
+    use std::rc::Rc;
 
     #[test]
     fn test_valid_get_date_from_time_value() {
@@ -1399,7 +1398,6 @@ mod tests {
         OwnedValue::build_text(Rc::new(value.to_string()))
     }
 
-    // Basic helper to format NaiveDateTime for comparison
     fn format(dt: NaiveDateTime) -> String {
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     }
@@ -1409,18 +1407,25 @@ mod tests {
 
     #[test]
     fn test_single_modifier() {
-        let now = Utc::now().naive_utc();
-        let expected = format(now - TimeDelta::days(1));
-        let result = exec_datetime(&[text("now"), text("-1 day")], DateTimeOutput::DateTime);
+        let time = setup_datetime();
+        let expected = format(time - TimeDelta::days(1));
+        let result = exec_datetime(
+            &[text("2023-06-15 12:30:45"), text("-1 day")],
+            DateTimeOutput::DateTime,
+        );
         assert_eq!(result, text(&expected));
     }
 
     #[test]
     fn test_multiple_modifiers() {
-        let now = Utc::now().naive_utc();
-        let expected = format(now - TimeDelta::days(1) + TimeDelta::hours(3));
+        let time = setup_datetime();
+        let expected = format(time - TimeDelta::days(1) + TimeDelta::hours(3));
         let result = exec_datetime(
-            &[text("now"), text("-1 day"), text("+3 hours")],
+            &[
+                text("2023-06-15 12:30:45"),
+                text("-1 day"),
+                text("+3 hours"),
+            ],
             DateTimeOutput::DateTime,
         );
         assert_eq!(result, text(&expected));
@@ -1428,26 +1433,27 @@ mod tests {
 
     #[test]
     fn test_subsec_modifier() {
-        let now = Utc::now().naive_utc().time();
-        let result = exec_datetime(&[text("now"), text("subsec")], DateTimeOutput::Time);
-        let tolerance = TimeDelta::milliseconds(1);
+        let time = setup_datetime();
+        let result = exec_datetime(
+            &[text("2023-06-15 12:30:45"), text("subsec")],
+            DateTimeOutput::Time,
+        );
         let result =
             chrono::NaiveTime::parse_from_str(&result.to_string(), "%H:%M:%S%.3f").unwrap();
-        assert!(
-            (now - result).num_milliseconds().abs() <= tolerance.num_milliseconds(),
-            "Expected: {}, Actual: {}",
-            now,
-            result
-        );
+        assert_eq!(time.time(), result);
     }
 
     #[test]
     fn test_start_of_day_modifier() {
-        let now = Utc::now().naive_utc();
-        let start_of_day = now.date().and_hms_opt(0, 0, 0).unwrap();
+        let time = setup_datetime();
+        let start_of_day = time.date().and_hms_opt(0, 0, 0).unwrap();
         let expected = format(start_of_day - TimeDelta::days(1));
         let result = exec_datetime(
-            &[text("now"), text("start of day"), text("-1 day")],
+            &[
+                text("2023-06-15 12:30:45"),
+                text("start of day"),
+                text("-1 day"),
+            ],
             DateTimeOutput::DateTime,
         );
         assert_eq!(result, text(&expected));
@@ -1455,14 +1461,18 @@ mod tests {
 
     #[test]
     fn test_start_of_month_modifier() {
-        let now = Utc::now().naive_utc();
-        let start_of_month = NaiveDate::from_ymd_opt(now.year(), now.month(), 1)
+        let time = setup_datetime();
+        let start_of_month = NaiveDate::from_ymd_opt(time.year(), time.month(), 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();
         let expected = format(start_of_month + TimeDelta::days(1));
         let result = exec_datetime(
-            &[text("now"), text("start of month"), text("+1 day")],
+            &[
+                text("2023-06-15 12:30:45"),
+                text("start of month"),
+                text("+1 day"),
+            ],
             DateTimeOutput::DateTime,
         );
         assert_eq!(result, text(&expected));
@@ -1470,15 +1480,15 @@ mod tests {
 
     #[test]
     fn test_start_of_year_modifier() {
-        let now = Utc::now().naive_utc();
-        let start_of_year = NaiveDate::from_ymd_opt(now.year(), 1, 1)
+        let time = setup_datetime();
+        let start_of_year = NaiveDate::from_ymd_opt(time.year(), 1, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap();
         let expected = format(start_of_year + TimeDelta::days(30) + TimeDelta::hours(5));
         let result = exec_datetime(
             &[
-                text("now"),
+                text("2023-06-15 12:30:45"),
                 text("start of year"),
                 text("+30 days"),
                 text("+5 hours"),
@@ -1488,33 +1498,36 @@ mod tests {
         assert_eq!(result, text(&expected));
     }
 
-    /// Test 'localtime' and 'utc' modifiers
     #[test]
-    fn test_localtime_and_utc_modifiers() {
-        let local = chrono::Local::now().naive_local();
-        let expected = format(local);
-        let result = exec_datetime(&[text("now"), text("localtime")], DateTimeOutput::DateTime);
-        assert_eq!(result, text(&expected));
-
-        let utc = Utc::now().naive_utc();
-        let expected_utc = format(utc);
-        let result_utc = exec_datetime(
-            &[text(&local.to_string()), text("utc")],
+    fn test_timezone_modifiers() {
+        let dt = setup_datetime();
+        let result_local = exec_datetime(
+            &[text("2023-06-15 12:30:45"), text("localtime")],
             DateTimeOutput::DateTime,
         );
-        assert_eq!(result_utc, text(&expected_utc));
+        assert_eq!(
+            result_local,
+            text(
+                &dt.and_utc()
+                    .with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string()
+            )
+        );
+        // TODO: utc modifier assumes time given is not already utc
+        // add test when fixed in the future
     }
 
     #[test]
     fn test_combined_modifiers() {
-        let now = Utc::now().naive_utc();
-        let expected = now - TimeDelta::days(1)
+        let time = create_datetime(2000, 1, 1, 0, 0, 0);
+        let expected = time - TimeDelta::days(1)
             + TimeDelta::hours(5)
             + TimeDelta::minutes(30)
             + TimeDelta::seconds(15);
         let result = exec_datetime(
             &[
-                text("now"),
+                text("2000-01-01 00:00:00"),
                 text("-1 day"),
                 text("+5 hours"),
                 text("+30 minutes"),
@@ -1523,16 +1536,10 @@ mod tests {
             ],
             DateTimeOutput::DateTime,
         );
-        let tolerance = TimeDelta::milliseconds(1);
         let result =
             chrono::NaiveDateTime::parse_from_str(&result.to_string(), "%Y-%m-%d %H:%M:%S%.3f")
                 .unwrap();
-        assert!(
-            (result - expected).num_milliseconds().abs() <= tolerance.num_milliseconds(),
-            "Expected: {}, Actual: {}",
-            expected,
-            result
-        );
+        assert_eq!(expected, result);
     }
 
     #[test]
