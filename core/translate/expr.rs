@@ -61,6 +61,74 @@ macro_rules! emit_cmp_insn {
     }};
 }
 
+macro_rules! expect_arguments_exact {
+    (
+        $args:expr,
+        $expected_arguments:expr,
+        $func:ident
+    ) => {{
+        let args = if let Some(args) = $args {
+            if args.len() != $expected_arguments {
+                crate::bail_parse_error!(
+                    "{} function called with not exactly {} arguments",
+                    $func.to_string(),
+                    $expected_arguments,
+                );
+            }
+            args
+        } else {
+            crate::bail_parse_error!("{} function with no arguments", $func.to_string());
+        };
+
+        args
+    }};
+}
+
+macro_rules! expect_arguments_max {
+    (
+        $args:expr,
+        $expected_arguments:expr,
+        $func:ident
+    ) => {{
+        let args = if let Some(args) = $args {
+            if args.len() > $expected_arguments {
+                crate::bail_parse_error!(
+                    "{} function called with more than {} arguments",
+                    $func.to_string(),
+                    $expected_arguments,
+                );
+            }
+            args
+        } else {
+            crate::bail_parse_error!("{} function with no arguments", $func.to_string());
+        };
+
+        args
+    }};
+}
+
+macro_rules! expect_arguments_min {
+    (
+        $args:expr,
+        $expected_arguments:expr,
+        $func:ident
+    ) => {{
+        let args = if let Some(args) = $args {
+            if args.len() < $expected_arguments {
+                crate::bail_parse_error!(
+                    "{} function with less than {} arguments",
+                    $func.to_string(),
+                    $expected_arguments
+                );
+            }
+            args
+        } else {
+            crate::bail_parse_error!("{} function with no arguments", $func.to_string());
+        };
+        args
+    }};
+}
+
 pub fn translate_condition_expr(
     program: &mut ProgramBuilder,
     referenced_tables: &[TableReference],
@@ -413,9 +481,10 @@ pub fn translate_expr(
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(e1, op, e2) => {
-            let e1_reg = program.alloc_register();
+            let e1_reg = program.alloc_registers(2);
+            let e2_reg = e1_reg + 1;
+
             translate_expr(program, referenced_tables, e1, e1_reg, resolver)?;
-            let e2_reg = program.alloc_register();
             translate_expr(program, referenced_tables, e2, e2_reg, resolver)?;
 
             match op {
@@ -545,6 +614,24 @@ pub fn translate_expr(
                         rhs: e2_reg,
                         dest: target_register,
                     });
+                }
+                #[cfg(feature = "json")]
+                op @ (ast::Operator::ArrowRight | ast::Operator::ArrowRightShift) => {
+                    let json_func = match op {
+                        ast::Operator::ArrowRight => JsonFunc::JsonArrowExtract,
+                        ast::Operator::ArrowRightShift => JsonFunc::JsonArrowShiftExtract,
+                        _ => unreachable!(),
+                    };
+
+                    program.emit_insn(Insn::Function {
+                        constant_mask: 0,
+                        start_reg: e1_reg,
+                        dest: target_register,
+                        func: FuncCtx {
+                            func: Func::Json(json_func),
+                            arg_count: 2,
+                        },
+                    })
                 }
                 other_unimplemented => todo!("{:?}", other_unimplemented),
             }
@@ -689,100 +776,41 @@ pub fn translate_expr(
                 #[cfg(feature = "json")]
                 Func::Json(j) => match j {
                     JsonFunc::Json => {
-                        let args = if let Some(args) = args {
-                            if args.len() != 1 {
-                                crate::bail_parse_error!(
-                                    "{} function with not exactly 1 argument",
-                                    j.to_string()
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!(
-                                "{} function with no arguments",
-                                j.to_string()
-                            );
-                        };
-                        let regs = program.alloc_register();
-                        translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
-                        program.emit_insn(Insn::Function {
-                            constant_mask: 0,
-                            start_reg: regs,
-                            dest: target_register,
-                            func: func_ctx,
-                        });
-                        Ok(target_register)
-                    }
-                    JsonFunc::JsonArray => {
-                        let start_reg = translate_variable_sized_function_parameter_list(
+                        let args = expect_arguments_exact!(args, 1, j);
+
+                        translate_function(
                             program,
                             args,
                             referenced_tables,
                             resolver,
-                        )?;
-
-                        program.emit_insn(Insn::Function {
-                            constant_mask: 0,
-                            start_reg,
-                            dest: target_register,
-                            func: func_ctx,
-                        });
-                        Ok(target_register)
+                            target_register,
+                            func_ctx,
+                        )
                     }
-                    JsonFunc::JsonExtract => {
-                        let start_reg = translate_variable_sized_function_parameter_list(
-                            program,
-                            args,
-                            referenced_tables,
-                            resolver,
-                        )?;
-
-                        program.emit_insn(Insn::Function {
-                            constant_mask: 0,
-                            start_reg,
-                            dest: target_register,
-                            func: func_ctx,
-                        });
-                        Ok(target_register)
+                    JsonFunc::JsonArray | JsonFunc::JsonExtract => translate_function(
+                        program,
+                        args.as_deref().unwrap_or_default(),
+                        referenced_tables,
+                        resolver,
+                        target_register,
+                        func_ctx,
+                    ),
+                    JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract => {
+                        unreachable!(
+                            "These two functions are only reachable via the -> and ->> operators"
+                        )
                     }
                     JsonFunc::JsonArrayLength | JsonFunc::JsonType => {
-                        let args = if let Some(args) = args {
-                            if args.len() > 2 {
-                                crate::bail_parse_error!(
-                                    "{} function with wrong number of arguments",
-                                    j.to_string()
-                                )
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!(
-                                "{} function with no arguments",
-                                j.to_string()
-                            );
-                        };
+                        let args = expect_arguments_max!(args, 2, j);
 
-                        let json_reg = program.alloc_register();
-                        let path_reg = program.alloc_register();
-
-                        translate_expr(program, referenced_tables, &args[0], json_reg, resolver)?;
-
-                        if args.len() == 2 {
-                            translate_expr(
-                                program,
-                                referenced_tables,
-                                &args[1],
-                                path_reg,
-                                resolver,
-                            )?;
-                        }
-
-                        program.emit_insn(Insn::Function {
-                            constant_mask: 0,
-                            start_reg: json_reg,
-                            dest: target_register,
-                            func: func_ctx,
-                        });
-                        Ok(target_register)
+                        translate_function(
+                            program,
+                            args,
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        )
                     }
                     JsonFunc::JsonErrorPosition => {
                         let args = if let Some(args) = args {
@@ -831,37 +859,16 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
-                        ScalarFunc::Char => {
-                            let start_reg = translate_variable_sized_function_parameter_list(
-                                program,
-                                args,
-                                referenced_tables,
-                                resolver,
-                            )?;
-
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg,
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
+                        ScalarFunc::Char => translate_function(
+                            program,
+                            args.as_deref().unwrap_or_default(),
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        ),
                         ScalarFunc::Coalesce => {
-                            let args = if let Some(args) = args {
-                                if args.len() < 2 {
-                                    crate::bail_parse_error!(
-                                        "{} function with less than 2 arguments",
-                                        srf.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = expect_arguments_min!(args, 2, srf);
 
                             // coalesce function is implemented as a series of not null checks
                             // whenever a not null check succeeds, we jump to the end of the series
@@ -919,17 +926,7 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::ConcatWs => {
-                            let args = match args {
-                                Some(args) if args.len() >= 2 => args,
-                                Some(_) => crate::bail_parse_error!(
-                                    "{} function requires at least 2 arguments",
-                                    srf.to_string()
-                                ),
-                                None => crate::bail_parse_error!(
-                                    "{} function requires arguments",
-                                    srf.to_string()
-                                ),
-                            };
+                            let args = expect_arguments_min!(args, 2, srf);
 
                             let temp_register = program.alloc_register();
                             for arg in args.iter() {
@@ -1076,20 +1073,7 @@ pub fn translate_expr(
                         | ScalarFunc::Sign
                         | ScalarFunc::Soundex
                         | ScalarFunc::ZeroBlob => {
-                            let args = if let Some(args) = args {
-                                if args.len() != 1 {
-                                    crate::bail_parse_error!(
-                                        "{} function with not exactly 1 argument",
-                                        srf.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = expect_arguments_exact!(args, 1, srf);
                             let reg =
                                 translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                             program.emit_insn(Insn::Function {
@@ -1275,20 +1259,7 @@ pub fn translate_expr(
                         | ScalarFunc::RTrim
                         | ScalarFunc::Round
                         | ScalarFunc::Unhex => {
-                            let args = if let Some(args) = args {
-                                if args.len() > 2 {
-                                    crate::bail_parse_error!(
-                                        "{} function with more than 2 arguments",
-                                        srf.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    srf.to_string()
-                                );
-                            };
+                            let args = expect_arguments_max!(args, 2, srf);
 
                             for arg in args.iter() {
                                 translate_and_mark(program, referenced_tables, arg, resolver)?;
@@ -1461,21 +1432,7 @@ pub fn translate_expr(
                     #[cfg(feature = "uuid")]
                     ExtFunc::Uuid(ref uuid_fn) => match uuid_fn {
                         UuidFunc::UuidStr | UuidFunc::UuidBlob | UuidFunc::Uuid7TS => {
-                            let args = if let Some(args) = args {
-                                if args.len() != 1 {
-                                    crate::bail_parse_error!(
-                                        "{} function with not exactly 1 argument",
-                                        ext_func.to_string()
-                                    );
-                                }
-                                args
-                            } else {
-                                crate::bail_parse_error!(
-                                    "{} function with no arguments",
-                                    ext_func.to_string()
-                                );
-                            };
-
+                            let args = expect_arguments_exact!(args, 1, ext_func);
                             let regs = program.alloc_register();
                             translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
                             program.emit_insn(Insn::Function {
@@ -1503,14 +1460,7 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         UuidFunc::Uuid7 => {
-                            let args = match args {
-                                Some(args) if args.len() > 1 => crate::bail_parse_error!(
-                                    "{} function with more than 1 argument",
-                                    ext_func.to_string()
-                                ),
-                                Some(args) => args,
-                                None => &vec![],
-                            };
+                            let args = expect_arguments_max!(args, 1, ext_func);
                             let mut start_reg = None;
                             if let Some(arg) = args.first() {
                                 start_reg = Some(translate_and_mark(
@@ -1548,18 +1498,7 @@ pub fn translate_expr(
                     }
 
                     MathFuncArity::Unary => {
-                        let args = if let Some(args) = args {
-                            if args.len() != 1 {
-                                crate::bail_parse_error!(
-                                    "{} function with not exactly 1 argument",
-                                    math_func
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!("{} function with no arguments", math_func);
-                        };
-
+                        let args = expect_arguments_exact!(args, 1, math_func);
                         let reg =
                             translate_and_mark(program, referenced_tables, &args[0], resolver)?;
                         program.emit_insn(Insn::Function {
@@ -1572,17 +1511,7 @@ pub fn translate_expr(
                     }
 
                     MathFuncArity::Binary => {
-                        let args = if let Some(args) = args {
-                            if args.len() != 2 {
-                                crate::bail_parse_error!(
-                                    "{} function with not exactly 2 arguments",
-                                    math_func
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!("{} function with no arguments", math_func);
-                        };
+                        let args = expect_arguments_exact!(args, 2, math_func);
                         let reg1 = program.alloc_register();
                         let _ =
                             translate_expr(program, referenced_tables, &args[0], reg1, resolver)?;
@@ -1599,17 +1528,7 @@ pub fn translate_expr(
                     }
 
                     MathFuncArity::UnaryOrBinary => {
-                        let args = if let Some(args) = args {
-                            if args.len() > 2 {
-                                crate::bail_parse_error!(
-                                    "{} function with more than 2 arguments",
-                                    math_func
-                                );
-                            }
-                            args
-                        } else {
-                            crate::bail_parse_error!("{} function with no arguments", math_func);
-                        };
+                        let args = expect_arguments_max!(args, 2, math_func);
 
                         let regs = program.alloc_registers(args.len());
                         for (i, arg) in args.iter().enumerate() {
@@ -1843,25 +1762,33 @@ pub fn translate_expr(
     }
 }
 
-// Returns the starting register for the function.
-// TODO: Use this function for all functions with variable number of parameters in `translate_expr`
-fn translate_variable_sized_function_parameter_list(
+/// Emits a whole insn for a function call.
+/// Assumes the number of parameters is valid for the given function.
+/// Returns the target register for the function.
+fn translate_function(
     program: &mut ProgramBuilder,
-    args: &Option<Vec<ast::Expr>>,
+    args: &[ast::Expr],
     referenced_tables: Option<&[TableReference]>,
     resolver: &Resolver,
+    target_register: usize,
+    func_ctx: FuncCtx,
 ) -> Result<usize> {
-    let args = args.as_deref().unwrap_or_default();
-
-    let reg = program.alloc_registers(args.len());
-    let mut current_reg = reg;
+    let start_reg = program.alloc_registers(args.len());
+    let mut current_reg = start_reg;
 
     for arg in args.iter() {
         translate_expr(program, referenced_tables, arg, current_reg, resolver)?;
         current_reg += 1;
     }
 
-    Ok(reg)
+    program.emit_insn(Insn::Function {
+        constant_mask: 0,
+        start_reg,
+        dest: target_register,
+        func: func_ctx,
+    });
+
+    Ok(target_register)
 }
 
 fn wrap_eval_jump_expr(

@@ -266,8 +266,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | json_error_position(json)          | Yes     |                                                                                                                                              |
 | json_extract(json,path,...)        | Partial | Does not fully support unicode literal syntax and does not allow numbers > 2^127 - 1 (which SQLite truncates to i32), does not support BLOBs |
 | jsonb_extract(json,path,...)       |         |                                                                                                                                              |
-| json -> path                       |         |                                                                                                                                              |
-| json ->> path                      |         |                                                                                                                                              |
+| json -> path                       | Yes     |                                                                                                                                              |
+| json ->> path                      | Yes     |                                                                                                                                              |
 | json_insert(json,path,value,...)   |         |                                                                                                                                              |
 | jsonb_insert(json,path,value,...)  |         |                                                                                                                                              |
 | json_object(label1,value1,...)     |         |                                                                                                                                              |

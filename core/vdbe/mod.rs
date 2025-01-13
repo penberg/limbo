@@ -40,8 +40,9 @@ use crate::util::parse_schema_rows;
 use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
 use crate::{
-    function::JsonFunc,
-    json::{get_json, json_array, json_array_length, json_error_position, json_extract, json_type},
+    function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
+    json::json_arrow_extract, json::json_arrow_shift_extract, json::json_extract, json::json_type,
+    json::json_error_position,
 };
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
@@ -1376,6 +1377,24 @@ impl Program {
                             };
 
                             match result {
+                                Ok(json) => state.registers[*dest] = json,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        #[cfg(feature = "json")]
+                        crate::function::Func::Json(
+                            func @ (JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract),
+                        ) => {
+                            assert_eq!(arg_count, 2);
+                            let json = &state.registers[*start_reg];
+                            let path = &state.registers[*start_reg + 1];
+                            let func = match func {
+                                JsonFunc::JsonArrowExtract => json_arrow_extract,
+                                JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
+                                _ => unreachable!(),
+                            };
+                            let json_str = func(json, path);
+                            match json_str {
                                 Ok(json) => state.registers[*dest] = json,
                                 Err(e) => return Err(e),
                             }

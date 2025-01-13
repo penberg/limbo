@@ -25,8 +25,10 @@ impl Display for ExternalFunc {
 pub enum JsonFunc {
     Json,
     JsonArray,
-    JsonExtract,
     JsonArrayLength,
+    JsonArrowExtract,
+    JsonArrowShiftExtract,
+    JsonExtract,
     JsonType,
     JsonErrorPosition,
 }
@@ -42,6 +44,8 @@ impl Display for JsonFunc {
                 Self::JsonArray => "json_array".to_string(),
                 Self::JsonExtract => "json_extract".to_string(),
                 Self::JsonArrayLength => "json_array_length".to_string(),
+                Self::JsonArrowExtract => "->".to_string(),
+                Self::JsonArrowShiftExtract => "->>".to_string(),
                 Self::JsonType => "json_type".to_string(),
                 Self::JsonErrorPosition => "json_error_position".to_string(),
             }

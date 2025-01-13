@@ -89,6 +89,18 @@ do_execsql_test json_extract_null {
     SELECT json_extract(null, '$')
 } {{}}
 
+do_execsql_test json_extract_json_null_type {
+    SELECT typeof(json_extract('null', '$'))
+} {{null}}
+
+do_execsql_test json_arrow_json_null_type {
+    SELECT typeof('null' -> '$')
+} {{text}}
+
+do_execsql_test json_arrow_shift_json_null_type {
+    SELECT typeof('null' ->> '$')
+} {{null}}
+
 do_execsql_test json_extract_empty {
     SELECT json_extract()
 } {{}}
@@ -113,8 +125,36 @@ do_execsql_test json_extract_number {
     SELECT json_extract(1, '$')
 } {{1}}
 
+do_execsql_test json_extract_number_type {
+    SELECT typeof(json_extract(1, '$'))
+} {{integer}}
+
+do_execsql_test json_arrow_number {
+    SELECT 1 -> '$'
+} {{1}}
+
+do_execsql_test json_arrow_number_type {
+    SELECT typeof(1 -> '$')
+} {{text}}
+
+do_execsql_test json_arrow_shift_number {
+    SELECT 1 -> '$'
+} {{1}}
+
+do_execsql_test json_arrow_shift_number_type {
+    SELECT typeof(1 ->> '$')
+} {{integer}}
+
 do_execsql_test json_extract_object_1 {
     SELECT json_extract('{"a": [1,2,3]}', '$.a')
+} {{[1,2,3]}}
+
+do_execsql_test json_arrow_object {
+    SELECT '{"a": [1,2,3]}' -> '$.a'
+} {{[1,2,3]}}
+
+do_execsql_test json_arrow_shift_object {
+    SELECT '{"a": [1,2,3]}' ->> '$.a'
 } {{[1,2,3]}}
 
 do_execsql_test json_extract_object_2 {
@@ -140,10 +180,175 @@ do_execsql_test json_extract_null_path {
     SELECT json_extract(1, null)
 } {{}}
 
+do_execsql_test json_arrow_null_path {
+    SELECT 1 -> null
+} {{}}
+
+do_execsql_test json_arrow_shift_null_path {
+    SELECT 1 ->> null
+} {{}}
+
+do_execsql_test json_extract_float {
+  SELECT typeof(json_extract(1.0, '$'))
+} {{real}}
+
+do_execsql_test json_arrow_float {
+  SELECT typeof(1.0 -> '$')
+} {{text}}
+
+do_execsql_test json_arrow_shift_float {
+  SELECT typeof(1.0 ->> '$')
+} {{real}}
+
+do_execsql_test json_extract_true {
+  SELECT json_extract('true', '$')
+} {{1}}
+
+do_execsql_test json_extract_true_type {
+  SELECT typeof(json_extract('true', '$'))
+} {{integer}}
+
+do_execsql_test json_arrow_true {
+  SELECT 'true' -> '$'
+} {{true}}
+
+do_execsql_test json_arrow_true_type {
+  SELECT typeof('true' -> '$')
+} {{text}}
+
+do_execsql_test json_arrow_shift_true {
+  SELECT 'true' ->> '$'
+} {{1}}
+
+do_execsql_test json_arrow_shift_true_type {
+  SELECT typeof('true' ->> '$')
+} {{integer}}
+
+do_execsql_test json_extract_false {
+  SELECT json_extract('false', '$')
+} {{0}}
+
+do_execsql_test json_extract_false_type {
+  SELECT typeof(json_extract('false', '$'))
+} {{integer}}
+
+do_execsql_test json_arrow_false {
+  SELECT 'false' -> '$'
+} {{false}}
+
+do_execsql_test json_arrow_false_type {
+  SELECT typeof('false' -> '$')
+} {{text}}
+
+do_execsql_test json_arrow_shift_false {
+  SELECT 'false' ->> '$'
+} {{0}}
+
+do_execsql_test json_arrow_shift_false_type {
+  SELECT typeof('false' ->> '$')
+} {{integer}}
+
+do_execsql_test json_extract_string {
+  SELECT json_extract('"string"', '$')
+} {{string}}
+
+do_execsql_test json_extract_string_type {
+  SELECT typeof(json_extract('"string"', '$'))
+} {{text}}
+
+do_execsql_test json_arrow_string {
+  SELECT '"string"' -> '$'
+} {{"string"}}
+
+do_execsql_test json_arrow_string_type {
+  SELECT typeof('"string"' -> '$')
+} {{text}}
+
+do_execsql_test json_arrow_shift_string {
+  SELECT '"string"' ->> '$'
+} {{string}}
+
+do_execsql_test json_arrow_shift_string_type {
+  SELECT typeof('"string"' ->> '$')
+} {{text}}
+
+do_execsql_test json_arrow_implicit_root_path {
+  SELECT '{"a":1}' -> 'a';
+} {{1}}
+
+do_execsql_test json_arrow_shift_implicit_root_path {
+  SELECT '{"a":1}' ->> 'a';
+} {{1}}
+
+# TODO: fix me after rebasing on top of https://github.com/tursodatabase/limbo/pull/631 - use the Option value in json_extract_single
+#do_execsql_test json_arrow_implicit_root_path_undefined_key {
+#  SELECT '{"a":1}' -> 'x';
+#} {{}}
+
+do_execsql_test json_arrow_shift_implicit_root_path_undefined_key {
+  SELECT '{"a":1}' ->> 'x';
+} {{}}
+
+do_execsql_test json_arrow_implicit_root_path_array {
+  SELECT '[1,2,3]' -> 1;
+} {{2}}
+
+do_execsql_test json_arrow_shift_implicit_root_path_array {
+  SELECT '[1,2,3]' ->> 1;
+} {{2}}
+
+do_execsql_test json_arrow_implicit_root_path_array_negative_idx {
+  SELECT '[1,2,3]' -> -1;
+} {{3}}
+
+do_execsql_test json_arrow_shift_implicit_root_path_array_negative_idx {
+  SELECT '[1,2,3]' ->> -1;
+} {{3}}
+
+do_execsql_test json_arrow_implicit_real_cast {
+  SELECT '{"1.5":"abc"}' -> 1.5;
+} {{"abc"}}
+
+do_execsql_test json_arrow_shift_implicit_real_cast {
+  SELECT '{"1.5":"abc"}' -> 1.5;
+} {{"abc"}}
+
+do_execsql_test json_arrow_implicit_true_cast {
+  SELECT '[1,2,3]' -> true
+} {{2}}
+
+do_execsql_test json_arrow_shift_implicit_true_cast {
+  SELECT '[1,2,3]' ->> true
+} {{2}}
+
+do_execsql_test json_arrow_implicit_false_cast {
+  SELECT '[1,2,3]' -> false
+} {{1}}
+
+do_execsql_test json_arrow_shift_implicit_false_cast {
+  SELECT '[1,2,3]' ->> false
+} {{1}}
+
+do_execsql_test json_arrow_chained {
+  select '{"a":2,"c":[4,5,{"f":7}]}' -> 'c' -> 2 ->> 'f'
+} {{7}}
+
 # TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
 do_execsql_test json_extract_multiple_null_paths {
     SELECT json_extract(1, null, null, null)
 } {{}}
+
+do_execsql_test json_extract_array {
+  SELECT json_extract('[1,2,3]', '$')
+} {{[1,2,3]}}
+
+do_execsql_test json_arrow_array {
+  SELECT '[1,2,3]' -> '$'
+} {{[1,2,3]}}
+
+do_execsql_test json_arrow_shift_array {
+  SELECT '[1,2,3]' ->> '$'
+} {{[1,2,3]}}
 
 # TODO: fix me - this passes on SQLite and needs to be fixed in Limbo.
 #do_execsql_test json_extract_quote {
