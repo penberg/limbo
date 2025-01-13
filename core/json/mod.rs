@@ -83,6 +83,8 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     let mut s = String::new();
     s.push('[');
 
+    // TODO: use `convert_db_type_to_json` and map each value with that function,
+    // so we can construct a `Val::Array` with each value and then serialize it directly.
     for (idx, value) in values.iter().enumerate() {
         match value {
             OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
@@ -253,6 +255,27 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
     }
 }
 
+// TODO: maybe we should use impl `From<OwnedValue>` for `Val` here, instead of this?
+// the same with `convert_json_to_db_type`...
+fn convert_db_type_to_json(value: &OwnedValue) -> crate::Result<Val> {
+    let val = match value {
+        OwnedValue::Null => Val::Null,
+        OwnedValue::Float(f) => Val::Float(*f),
+        OwnedValue::Integer(i) => Val::Integer(*i),
+        OwnedValue::Text(t) => match t.subtype {
+            // Convert only to json if the subtype is json (got it from another json function)
+            TextSubtype::Json => get_json_value(value)?,
+            TextSubtype::Text => {
+                let text = t.value.to_string();
+                Val::String(text)
+            }
+        },
+        // TODO: is this error ok?
+        _ => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
+    };
+    Ok(val)
+}
+
 pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result<OwnedValue> {
     if let OwnedValue::Null = value {
         return Ok(OwnedValue::Null);
@@ -301,13 +324,13 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
                     _ => crate::bail_constraint_error!("labels must be TEXT"),
                 };
 
-                // TODO: check the part about interpreting json if the value comes from another json_object function
-                // FIXME: right now, this statement `select json_object('a','{"a":2}');` differs from sqlite3.
-                // We should only interpret json if it comes from a json function. The same goes to json_array.
-                // TODO: inspire from json_array func
-                let json_value = get_json_value(value)?;
+                // TODO: with `convert_db_type_to_json` we convert the value to JSON only if
+                // it was obtained from another JSON function.
+                // TODO: the `json_array` function should use something like this.
+                // That implementation could be a lot simpler with this function
+                let json_val = convert_db_type_to_json(value)?;
 
-                Ok((key, json_value))
+                Ok((key, json_val))
             }
             _ => crate::bail_constraint_error!("json_object requires an even number of values"),
         })
