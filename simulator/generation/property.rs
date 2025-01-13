@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    frequency, pick, pick_index,
+    frequency, pick,
     plan::{Assertion, Interaction, InteractionStats, ResultSet},
     ArbitraryFrom,
 };
@@ -66,6 +66,9 @@ impl Property {
             Property::DoubleCreateFailure { .. } => "Double-Create-Failure".to_string(),
         }
     }
+    /// interactions construct a list of interactions, which is an executable representation of the property.
+    /// the requirement of property -> vec<interaction> conversion emerges from the need to serialize the property,
+    /// and `interaction` cannot be serialized directly.
     pub(crate) fn interactions(&self) -> Vec<Interaction> {
         match self {
             Property::InsertSelect {
@@ -73,13 +76,16 @@ impl Property {
                 queries,
                 select,
             } => {
-                // Check that the row is there
-                let row = insert
-                    .values
-                    .first() // `.first` is safe, because we know we are inserting a row in the insert select property
-                    .expect("insert query should have at least 1 value")
-                    .clone();
+                // Check that the insert query has at least 1 value
+                assert!(
+                    !insert.values.is_empty(),
+                    "insert query should have at least 1 value"
+                );
 
+                // Pick a random row within the insert values
+                let row = pick(&insert.values, &mut rand::thread_rng()).clone();
+
+                // Assume that the table exists
                 let assumption = Interaction::Assumption(Assertion {
                     message: format!("table {} exists", insert.table),
                     func: Box::new({
@@ -190,26 +196,18 @@ fn property_insert_select<R: rand::Rng>(
 ) -> Property {
     // Get a random table
     let table = pick(&env.tables, rng);
-    // Pick a random column
-    let column_index = pick_index(table.columns.len(), rng);
-    let column = &table.columns[column_index].clone();
-    // Generate a random value of the column type
-    let value = Value::arbitrary_from(rng, &column.column_type);
-    // Create a whole new row
-    let mut row = Vec::new();
-    for (i, column) in table.columns.iter().enumerate() {
-        if i == column_index {
-            row.push(value.clone());
-        } else {
-            let value = Value::arbitrary_from(rng, &column.column_type);
-            row.push(value);
-        }
-    }
+    // Generate rows to insert
+    let rows = (0..rng.gen_range(1..=5))
+        .map(|_| Vec::<Value>::arbitrary_from(rng, table))
+        .collect::<Vec<_>>();
 
-    // Insert the row
+    // Pick a random row to select
+    let row = pick(&rows, rng).clone();
+
+    // Insert the rows
     let insert_query = Insert {
         table: table.name.clone(),
-        values: vec![row.clone()],
+        values: rows,
     };
 
     // Create random queries respecting the constraints

@@ -1,8 +1,6 @@
 use rand::Rng;
 
-use crate::generation::{
-    gen_random_text, pick, pick_index, readable_name_custom, Arbitrary, ArbitraryFrom,
-};
+use crate::generation::{gen_random_text, pick, readable_name_custom, Arbitrary, ArbitraryFrom};
 use crate::model::table::{Column, ColumnType, Name, Table, Value};
 
 impl Arbitrary for Name {
@@ -45,6 +43,17 @@ impl Arbitrary for ColumnType {
     }
 }
 
+impl ArbitraryFrom<&Table> for Vec<Value> {
+    fn arbitrary_from<R: rand::Rng>(rng: &mut R, table: &Table) -> Self {
+        let mut row = Vec::new();
+        for column in table.columns.iter() {
+            let value = Value::arbitrary_from(rng, &column.column_type);
+            row.push(value);
+        }
+        row
+    }
+}
+
 impl ArbitraryFrom<&Vec<&Value>> for Value {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Self>) -> Self {
         if values.is_empty() {
@@ -74,8 +83,8 @@ impl ArbitraryFrom<&Vec<&Value>> for LTValue {
             return Self(Value::Null);
         }
 
-        let index = pick_index(values.len(), rng);
-        Self::arbitrary_from(rng, values[index])
+        let value = pick(values, rng);
+        Self::arbitrary_from(rng, *value)
     }
 }
 
@@ -134,8 +143,8 @@ impl ArbitraryFrom<&Vec<&Value>> for GTValue {
             return Self(Value::Null);
         }
 
-        let index = pick_index(values.len(), rng);
-        Self::arbitrary_from(rng, values[index])
+        let value = pick(values, rng);
+        Self::arbitrary_from(rng, *value)
     }
 }
 
