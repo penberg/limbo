@@ -283,10 +283,8 @@ impl InteractionPlan {
     }
 }
 
-impl InteractionPlan {
-    // todo: This is a hack to get around the fact that `ArbitraryFrom<T>` can't take a mutable
-    // reference of T, so instead write a bespoke function without using the trait system.
-    pub(crate) fn arbitrary_from<R: rand::Rng>(rng: &mut R, env: &mut SimulatorEnv) -> Self {
+impl ArbitraryFrom<&mut SimulatorEnv> for InteractionPlan {
+    fn arbitrary_from<R: rand::Rng>(rng: &mut R, env: &mut SimulatorEnv) -> Self {
         let mut plan = InteractionPlan::new();
 
         let num_interactions = env.opts.max_interactions;
@@ -304,7 +302,7 @@ impl InteractionPlan {
                 plan.plan.len(),
                 num_interactions
             );
-            let interactions = Interactions::arbitrary_from(rng, &(env, plan.stats()));
+            let interactions = Interactions::arbitrary_from(rng, (env, plan.stats()));
             interactions.shadow(env);
 
             plan.plan.push(interactions);
@@ -471,7 +469,7 @@ fn random_fault<R: rand::Rng>(_rng: &mut R, _env: &SimulatorEnv) -> Interactions
 impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
     fn arbitrary_from<R: rand::Rng>(
         rng: &mut R,
-        (env, stats): &(&SimulatorEnv, InteractionStats),
+        (env, stats): (&SimulatorEnv, InteractionStats),
     ) -> Self {
         let remaining_read = ((env.opts.max_interactions as f64 * env.opts.read_percent / 100.0)
             - (stats.read_count as f64))
@@ -489,7 +487,7 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
                 (
                     f64::min(remaining_read, remaining_write) + remaining_create,
                     Box::new(|rng: &mut R| {
-                        Interactions::Property(Property::arbitrary_from(rng, &(env, stats)))
+                        Interactions::Property(Property::arbitrary_from(rng, (env, &stats)))
                     }),
                 ),
                 (

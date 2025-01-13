@@ -13,7 +13,7 @@ pub trait Arbitrary {
 }
 
 pub trait ArbitraryFrom<T> {
-    fn arbitrary_from<R: Rng>(rng: &mut R, t: &T) -> Self;
+    fn arbitrary_from<R: Rng>(rng: &mut R, t: T) -> Self;
 }
 
 pub(crate) fn frequency<

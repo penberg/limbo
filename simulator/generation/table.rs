@@ -45,7 +45,7 @@ impl Arbitrary for ColumnType {
     }
 }
 
-impl ArbitraryFrom<Vec<&Value>> for Value {
+impl ArbitraryFrom<&Vec<&Value>> for Value {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Self>) -> Self {
         if values.is_empty() {
             return Self::Null;
@@ -55,7 +55,7 @@ impl ArbitraryFrom<Vec<&Value>> for Value {
     }
 }
 
-impl ArbitraryFrom<ColumnType> for Value {
+impl ArbitraryFrom<&ColumnType> for Value {
     fn arbitrary_from<R: Rng>(rng: &mut R, column_type: &ColumnType) -> Self {
         match column_type {
             ColumnType::Integer => Self::Integer(rng.gen_range(i64::MIN..i64::MAX)),
@@ -68,7 +68,7 @@ impl ArbitraryFrom<ColumnType> for Value {
 
 pub(crate) struct LTValue(pub(crate) Value);
 
-impl ArbitraryFrom<Vec<&Value>> for LTValue {
+impl ArbitraryFrom<&Vec<&Value>> for LTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
         if values.is_empty() {
             return Self(Value::Null);
@@ -79,7 +79,7 @@ impl ArbitraryFrom<Vec<&Value>> for LTValue {
     }
 }
 
-impl ArbitraryFrom<Value> for LTValue {
+impl ArbitraryFrom<&Value> for LTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
         match value {
             Value::Integer(i) => Self(Value::Integer(rng.gen_range(i64::MIN..*i - 1))),
@@ -128,7 +128,7 @@ impl ArbitraryFrom<Value> for LTValue {
 
 pub(crate) struct GTValue(pub(crate) Value);
 
-impl ArbitraryFrom<Vec<&Value>> for GTValue {
+impl ArbitraryFrom<&Vec<&Value>> for GTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
         if values.is_empty() {
             return Self(Value::Null);
@@ -139,7 +139,7 @@ impl ArbitraryFrom<Vec<&Value>> for GTValue {
     }
 }
 
-impl ArbitraryFrom<Value> for GTValue {
+impl ArbitraryFrom<&Value> for GTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
         match value {
             Value::Integer(i) => Self(Value::Integer(rng.gen_range(*i..i64::MAX))),

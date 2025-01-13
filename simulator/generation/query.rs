@@ -17,7 +17,7 @@ impl Arbitrary for Create {
     }
 }
 
-impl ArbitraryFrom<Vec<Table>> for Select {
+impl ArbitraryFrom<&Vec<Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<Table>) -> Self {
         let table = pick(tables, rng);
         Self {
@@ -27,7 +27,7 @@ impl ArbitraryFrom<Vec<Table>> for Select {
     }
 }
 
-impl ArbitraryFrom<Vec<&Table>> for Select {
+impl ArbitraryFrom<&Vec<&Table>> for Select {
     fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<&Table>) -> Self {
         let table = pick(tables, rng);
         Self {
@@ -37,7 +37,7 @@ impl ArbitraryFrom<Vec<&Table>> for Select {
     }
 }
 
-impl ArbitraryFrom<Table> for Insert {
+impl ArbitraryFrom<&Table> for Insert {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         let num_rows = rng.gen_range(1..10);
         let values: Vec<Vec<Value>> = (0..num_rows)
@@ -56,7 +56,7 @@ impl ArbitraryFrom<Table> for Insert {
     }
 }
 
-impl ArbitraryFrom<Table> for Delete {
+impl ArbitraryFrom<&Table> for Delete {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         Self {
             table: table.name.clone(),
@@ -65,7 +65,7 @@ impl ArbitraryFrom<Table> for Delete {
     }
 }
 
-impl ArbitraryFrom<Table> for Query {
+impl ArbitraryFrom<&Table> for Query {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         frequency(
             vec![
@@ -89,7 +89,7 @@ impl ArbitraryFrom<Table> for Query {
 }
 
 impl ArbitraryFrom<(&Table, &Remaining)> for Query {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (table, remaining): &(&Table, &Remaining)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (table, remaining): (&Table, &Remaining)) -> Self {
         frequency(
             vec![
                 (
@@ -98,7 +98,7 @@ impl ArbitraryFrom<(&Table, &Remaining)> for Query {
                 ),
                 (
                     remaining.read,
-                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, &vec![*table]))),
+                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, &vec![table]))),
                 ),
                 (
                     remaining.write,
@@ -118,7 +118,7 @@ struct CompoundPredicate(Predicate);
 struct SimplePredicate(Predicate);
 
 impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): &(&Table, bool)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): (&Table, bool)) -> Self {
         // Pick a random column
         let column_index = rng.gen_range(0..table.columns.len());
         let column = &table.columns[column_index];
@@ -182,15 +182,15 @@ impl ArbitraryFrom<(&Table, bool)> for SimplePredicate {
 }
 
 impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): &(&Table, bool)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (table, predicate_value): (&Table, bool)) -> Self {
         // Decide if you want to create an AND or an OR
         Self(if rng.gen_bool(0.7) {
             // An AND for true requires each of its children to be true
             // An AND for false requires at least one of its children to be false
-            if *predicate_value {
+            if predicate_value {
                 Predicate::And(
                     (0..rng.gen_range(0..=3))
-                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*table, true)).0)
+                        .map(|_| SimplePredicate::arbitrary_from(rng, (table, true)).0)
                         .collect(),
                 )
             } else {
@@ -209,14 +209,14 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                 Predicate::And(
                     booleans
                         .iter()
-                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*table, *b)).0)
+                        .map(|b| SimplePredicate::arbitrary_from(rng, (table, *b)).0)
                         .collect(),
                 )
             }
         } else {
             // An OR for true requires at least one of its children to be true
             // An OR for false requires each of its children to be false
-            if *predicate_value {
+            if predicate_value {
                 // Create a vector of random booleans
                 let mut booleans = (0..rng.gen_range(0..=3))
                     .map(|_| rng.gen_bool(0.5))
@@ -230,13 +230,13 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
                 Predicate::Or(
                     booleans
                         .iter()
-                        .map(|b| SimplePredicate::arbitrary_from(rng, &(*table, *b)).0)
+                        .map(|b| SimplePredicate::arbitrary_from(rng, (table, *b)).0)
                         .collect(),
                 )
             } else {
                 Predicate::Or(
                     (0..rng.gen_range(0..=3))
-                        .map(|_| SimplePredicate::arbitrary_from(rng, &(*table, false)).0)
+                        .map(|_| SimplePredicate::arbitrary_from(rng, (table, false)).0)
                         .collect(),
                 )
             }
@@ -244,28 +244,28 @@ impl ArbitraryFrom<(&Table, bool)> for CompoundPredicate {
     }
 }
 
-impl ArbitraryFrom<Table> for Predicate {
+impl ArbitraryFrom<&Table> for Predicate {
     fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         let predicate_value = rng.gen_bool(0.5);
-        CompoundPredicate::arbitrary_from(rng, &(table, predicate_value)).0
+        CompoundPredicate::arbitrary_from(rng, (table, predicate_value)).0
     }
 }
 
 impl ArbitraryFrom<(&str, &Value)> for Predicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): &(&str, &Value)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (column_name, value): (&str, &Value)) -> Self {
         one_of(
             vec![
                 Box::new(|_| Predicate::Eq(column_name.to_string(), (*value).clone())),
                 Box::new(|rng| {
                     Self::Gt(
                         column_name.to_string(),
-                        GTValue::arbitrary_from(rng, *value).0,
+                        GTValue::arbitrary_from(rng, value).0,
                     )
                 }),
                 Box::new(|rng| {
                     Self::Lt(
                         column_name.to_string(),
-                        LTValue::arbitrary_from(rng, *value).0,
+                        LTValue::arbitrary_from(rng, value).0,
                     )
                 }),
             ],
@@ -275,7 +275,7 @@ impl ArbitraryFrom<(&str, &Value)> for Predicate {
 }
 
 /// Produces a predicate that is true for the provided row in the given table
-fn produce_true_predicate<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)) -> Predicate {
+fn produce_true_predicate<R: Rng>(rng: &mut R, (t, row): (&Table, &Vec<Value>)) -> Predicate {
     // Pick a column
     let column_index = rng.gen_range(0..t.columns.len());
     let column = &t.columns[column_index];
@@ -304,7 +304,7 @@ fn produce_true_predicate<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>))
 }
 
 /// Produces a predicate that is false for the provided row in the given table
-fn produce_false_predicate<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)) -> Predicate {
+fn produce_false_predicate<R: Rng>(rng: &mut R, (t, row): (&Table, &Vec<Value>)) -> Predicate {
     // Pick a column
     let column_index = rng.gen_range(0..t.columns.len());
     let column = &t.columns[column_index];
@@ -333,18 +333,18 @@ fn produce_false_predicate<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)
 }
 
 impl ArbitraryFrom<(&Table, &Vec<Value>)> for Predicate {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (t, row): &(&Table, &Vec<Value>)) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (t, row): (&Table, &Vec<Value>)) -> Self {
         // We want to produce a predicate that is true for the row
         // We can do this by creating several predicates that
         // are true, some that are false, combiend them in ways that correspond to the creation of a true predicate
 
         // Produce some true and false predicates
         let mut true_predicates = (1..=rng.gen_range(1..=4))
-            .map(|_| produce_true_predicate(rng, &(*t, row)))
+            .map(|_| produce_true_predicate(rng, (t, row)))
             .collect::<Vec<_>>();
 
         let false_predicates = (0..=rng.gen_range(0..=3))
-            .map(|_| produce_false_predicate(rng, &(*t, row)))
+            .map(|_| produce_false_predicate(rng, (t, row)))
             .collect::<Vec<_>>();
 
         // Start building a top level predicate from a true predicate

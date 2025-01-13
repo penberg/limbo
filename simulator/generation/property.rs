@@ -115,10 +115,7 @@ impl Property {
 
                 interactions
             }
-            Property::DoubleCreateFailure {
-                create,
-                queries,
-            } => {
+            Property::DoubleCreateFailure { create, queries } => {
                 let table_name = create.table.name.clone();
 
                 let assumption = Interaction::Assumption(Assertion {
@@ -186,7 +183,11 @@ fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> Remaining {
     }
 }
 
-fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaining: &Remaining) -> Property {
+fn property_insert_select<R: rand::Rng>(
+    rng: &mut R,
+    env: &SimulatorEnv,
+    remaining: &Remaining,
+) -> Property {
     // Get a random table
     let table = pick(&env.tables, rng);
     // Pick a random column
@@ -218,7 +219,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaini
     // - [ ] The inserted row will not be updated. (todo: add this constraint once UPDATE is implemented)
     // - [ ] The table `t` will not be renamed, dropped, or altered. (todo: add this constraint once ALTER or DROP is implemented)
     for _ in 0..rng.gen_range(0..3) {
-        let query = Query::arbitrary_from(rng, &(table, remaining));
+        let query = Query::arbitrary_from(rng, (table, remaining));
         match &query {
             Query::Delete(Delete {
                 table: t,
@@ -244,7 +245,7 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaini
     // Select the row
     let select_query = Select {
         table: table.name.clone(),
-        predicate: Predicate::arbitrary_from(rng, &(table, &row)),
+        predicate: Predicate::arbitrary_from(rng, (table, &row)),
     };
 
     Property::InsertSelect {
@@ -254,7 +255,11 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaini
     }
 }
 
-fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaining: &Remaining) -> Property {
+fn property_double_create_failure<R: rand::Rng>(
+    rng: &mut R,
+    env: &SimulatorEnv,
+    remaining: &Remaining,
+) -> Property {
     // Get a random table
     let table = pick(&env.tables, rng);
     // Create the table
@@ -268,7 +273,7 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv,
     // - [x] There will be no errors in the middle interactions.(best effort)
     // - [ ] Table `t` will not be renamed or dropped.(todo: add this constraint once ALTER or DROP is implemented)
     for _ in 0..rng.gen_range(0..3) {
-        let query = Query::arbitrary_from(rng, &(table, remaining));
+        let query = Query::arbitrary_from(rng, (table, remaining));
         match &query {
             Query::Create(Create { table: t }) => {
                 // There will be no errors in the middle interactions.
@@ -288,12 +293,10 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv,
     }
 }
 
-
-
 impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
     fn arbitrary_from<R: rand::Rng>(
         rng: &mut R,
-        (env, stats): &(&SimulatorEnv, &InteractionStats),
+        (env, stats): (&SimulatorEnv, &InteractionStats),
     ) -> Self {
         let remaining_ = remaining(env, stats);
         frequency(

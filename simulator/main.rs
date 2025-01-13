@@ -2,6 +2,7 @@
 use clap::Parser;
 use core::panic;
 use generation::plan::{InteractionPlan, InteractionPlanState};
+use generation::ArbitraryFrom;
 use limbo_core::Database;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
