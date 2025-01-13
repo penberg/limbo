@@ -81,7 +81,8 @@ impl<'a> ImportFile<'a> {
 
                 for r in record.iter() {
                     values_string.push('\'');
-                    values_string.push_str(r);
+                    // The string can have a single quote which needs to be escaped
+                    values_string.push_str(&r.replace("'", "''"));
                     values_string.push_str("',");
                 }
 

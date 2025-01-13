@@ -70,6 +70,7 @@ impl UringIO {
             }; MAX_IOVECS],
             next_iovec: 0,
         };
+        debug!("Using IO backend 'io-uring'");
         Ok(Self {
             inner: Rc::new(RefCell::new(inner)),
         })

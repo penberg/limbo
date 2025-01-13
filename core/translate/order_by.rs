@@ -3,10 +3,13 @@ use std::rc::Rc;
 use sqlite3_parser::ast;
 
 use crate::{
-    schema::{Column, PseudoTable, Table},
+    schema::{Column, PseudoTable},
     types::{OwnedRecord, OwnedValue},
     util::exprs_are_equivalent,
-    vdbe::{builder::ProgramBuilder, insn::Insn},
+    vdbe::{
+        builder::{CursorType, ProgramBuilder},
+        insn::Insn,
+    },
     Result,
 };
 
@@ -32,7 +35,7 @@ pub fn init_order_by(
     t_ctx: &mut TranslateCtx,
     order_by: &[(ast::Expr, Direction)],
 ) -> Result<()> {
-    let sort_cursor = program.alloc_cursor_id(None, None);
+    let sort_cursor = program.alloc_cursor_id(None, CursorType::Sorter);
     t_ctx.meta_sort = Some(SortMetadata {
         sort_cursor,
         reg_sorter_data: program.alloc_register(),
@@ -93,12 +96,10 @@ pub fn emit_order_by(
             .map(|v| v.len())
             .unwrap_or(0);
 
-    let pseudo_cursor = program.alloc_cursor_id(
-        None,
-        Some(Table::Pseudo(Rc::new(PseudoTable {
-            columns: pseudo_columns,
-        }))),
-    );
+    let pseudo_table = Rc::new(PseudoTable {
+        columns: pseudo_columns,
+    });
+    let pseudo_cursor = program.alloc_cursor_id(None, CursorType::Pseudo(pseudo_table.clone()));
     let SortMetadata {
         sort_cursor,
         reg_sorter_data,
