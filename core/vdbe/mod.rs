@@ -39,8 +39,8 @@ use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
 use crate::{
     function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
-    json::json_arrow_extract, json::json_arrow_shift_extract, json::json_extract, json::json_type,
-    json::json_error_position,
+    json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
+    json::json_extract, json::json_type,
 };
 use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
