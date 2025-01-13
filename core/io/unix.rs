@@ -7,8 +7,7 @@ use log::{debug, trace};
 use polling::{Event, Events, Poller};
 use rustix::{
     fd::{AsFd, AsRawFd},
-    fs,
-    fs::{FlockOperation, OpenOptionsExt},
+    fs::{self, FlockOperation, OFlags, OpenOptionsExt},
     io::Errno,
 };
 use std::cell::RefCell;
@@ -38,7 +37,7 @@ impl IO for UnixIO {
         trace!("open_file(path = {})", path);
         let file = std::fs::File::options()
             .read(true)
-            .custom_flags(libc::O_NONBLOCK)
+            .custom_flags(OFlags::NONBLOCK.bits() as i32)
             .write(true)
             .create(matches!(flags, OpenFlags::Create))
             .open(path)?;
