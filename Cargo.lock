@@ -1217,7 +1217,6 @@ dependencies = [
  "miette",
  "mimalloc",
  "mockall",
- "nix 0.29.0",
  "pest",
  "pest_derive",
  "polling",
