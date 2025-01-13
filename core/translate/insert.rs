@@ -6,13 +6,18 @@ use sqlite3_parser::ast::{
 };
 
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
+use crate::schema::BTreeTable;
 use crate::util::normalize_ident;
 use crate::vdbe::BranchOffset;
 use crate::{
-    schema::{Column, Schema, Table},
+    schema::{Column, Schema},
     storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
-    vdbe::{builder::ProgramBuilder, insn::Insn, Program},
+    vdbe::{
+        builder::{CursorType, ProgramBuilder},
+        insn::Insn,
+        Program,
+    },
     SymbolTable,
 };
 use crate::{Connection, Result};
@@ -53,20 +58,15 @@ pub fn translate_insert(
         Some(table) => table,
         None => crate::bail_corrupt_error!("Parse error: no such table: {}", table_name),
     };
-    let table = Rc::new(Table::BTree(table));
-    if !table.has_rowid() {
+    if !table.has_rowid {
         crate::bail_parse_error!("INSERT into WITHOUT ROWID table is not supported");
     }
 
     let cursor_id = program.alloc_cursor_id(
         Some(table_name.0.clone()),
-        Some(table.clone().deref().clone()),
+        CursorType::BTreeTable(table.clone()),
     );
-    let root_page = match table.as_ref() {
-        Table::BTree(btree) => btree.root_page,
-        Table::Index(index) => index.root_page,
-        Table::Pseudo(_) => todo!(),
-    };
+    let root_page = table.root_page;
     let values = match body {
         InsertBody::Select(select, None) => match &select.body.select.deref() {
             sqlite3_parser::ast::OneSelect::Values(values) => values,
@@ -77,9 +77,9 @@ pub fn translate_insert(
 
     let column_mappings = resolve_columns_for_insert(&table, columns, values)?;
     // Check if rowid was provided (through INTEGER PRIMARY KEY as a rowid alias)
-    let rowid_alias_index = table.columns().iter().position(|c| c.is_rowid_alias);
+    let rowid_alias_index = table.columns.iter().position(|c| c.is_rowid_alias);
     let has_user_provided_rowid = {
-        assert!(column_mappings.len() == table.columns().len());
+        assert!(column_mappings.len() == table.columns.len());
         if let Some(index) = rowid_alias_index {
             column_mappings[index].value_index.is_some()
         } else {
@@ -89,7 +89,7 @@ pub fn translate_insert(
 
     // allocate a register for each column in the table. if not provided by user, they will simply be set as null.
     // allocate an extra register for rowid regardless of whether user provided a rowid alias column.
-    let num_cols = table.columns().len();
+    let num_cols = table.columns.len();
     let rowid_reg = program.alloc_registers(num_cols + 1);
     let column_registers_start = rowid_reg + 1;
     let rowid_alias_reg = {
@@ -215,14 +215,14 @@ pub fn translate_insert(
             target_pc: make_record_label,
         });
         let rowid_column_name = if let Some(index) = rowid_alias_index {
-            table.column_index_to_name(index).unwrap()
+            &table.columns.get(index).unwrap().name
         } else {
             "rowid"
         };
 
         program.emit_insn(Insn::Halt {
             err_code: SQLITE_CONSTRAINT_PRIMARYKEY,
-            description: format!("{}.{}", table.get_name(), rowid_column_name),
+            description: format!("{}.{}", table_name.0, rowid_column_name),
         });
 
         program.resolve_label(make_record_label, program.offset());
@@ -293,7 +293,7 @@ struct ColumnMapping<'a> {
 ///    - Named columns map to their corresponding value index
 ///    - Unspecified columns map to None
 fn resolve_columns_for_insert<'a>(
-    table: &'a Table,
+    table: &'a BTreeTable,
     columns: &Option<DistinctNames>,
     values: &[Vec<Expr>],
 ) -> Result<Vec<ColumnMapping<'a>>> {
@@ -301,7 +301,7 @@ fn resolve_columns_for_insert<'a>(
         crate::bail_parse_error!("no values to insert");
     }
 
-    let table_columns = table.columns();
+    let table_columns = &table.columns;
 
     // Case 1: No columns specified - map values to columns in order
     if columns.is_none() {
@@ -309,7 +309,7 @@ fn resolve_columns_for_insert<'a>(
         if num_values > table_columns.len() {
             crate::bail_parse_error!(
                 "table {} has {} columns but {} values were supplied",
-                table.get_name(),
+                &table.name,
                 table_columns.len(),
                 num_values
             );
@@ -350,11 +350,7 @@ fn resolve_columns_for_insert<'a>(
             .position(|c| c.name.eq_ignore_ascii_case(&column_name));
 
         if table_index.is_none() {
-            crate::bail_parse_error!(
-                "table {} has no column named {}",
-                table.get_name(),
-                column_name
-            );
+            crate::bail_parse_error!("table {} has no column named {}", &table.name, column_name);
         }
 
         mappings[table_index.unwrap()].value_index = Some(value_index);

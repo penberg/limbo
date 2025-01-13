@@ -1,6 +1,7 @@
 use super::{Buffer, Completion, File, OpenFlags, IO};
 use crate::Result;
 
+use log::debug;
 use std::{
     cell::{RefCell, RefMut},
     collections::BTreeMap,
@@ -20,6 +21,7 @@ type MemPage = Box<[u8; PAGE_SIZE]>;
 impl MemoryIO {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Result<Arc<Self>> {
+        debug!("Using IO backend 'memory'");
         Ok(Arc::new(Self {
             pages: RefCell::new(BTreeMap::new()),
             size: RefCell::new(0),

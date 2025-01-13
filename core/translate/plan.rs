@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     function::AggFunc,
-    schema::{Column, Index, Table},
+    schema::{BTreeTable, Column, Index, Table},
     vdbe::BranchOffset,
     Result,
 };
@@ -255,6 +255,12 @@ pub struct TableReference {
 }
 
 impl TableReference {
+    pub fn btree(&self) -> Option<Rc<BTreeTable>> {
+        match self.reference_type {
+            TableReferenceType::BTreeTable => self.table.btree(),
+            TableReferenceType::Subquery { .. } => None,
+        }
+    }
     pub fn new_subquery(identifier: String, table_index: usize, plan: &SelectPlan) -> Self {
         Self {
             table: Table::Pseudo(Rc::new(PseudoTable::new_with_columns(

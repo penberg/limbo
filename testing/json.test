@@ -474,3 +474,35 @@ do_execsql_test json_type_cast {
 do_execsql_test json_type_null_arg {
   select json_type(null)
 } {{}}
+
+do_execsql_test json_error_position_valid {
+  SELECT json_error_position('{"a":55,"b":72,}');
+} {{0}}
+
+do_execsql_test json_error_position_valid_ws {
+  SELECT json_error_position('{"a":55,"b":72 , }');
+} {{0}}
+
+do_execsql_test json_error_position_object {
+  SELECT json_error_position('{"a":55,"b":72,,}');
+} {{16}}
+
+do_execsql_test json_error_position_array_valid {
+  SELECT json_error_position('["a",55,"b",72,]');
+} {{0}}
+
+do_execsql_test json_error_position_array_valid_ws {
+  SELECT json_error_position('["a",55,"b",72 , ]');
+} {{0}}
+
+do_execsql_test json_error_position_array {
+  SELECT json_error_position('["a",55,"b",72,,]');
+} {{16}}
+
+do_execsql_test json_error_position_null {
+  SELECT json_error_position(NULL);
+} {{}}
+
+do_execsql_test json_error_position_complex {
+  SELECT json_error_position('{a:null,{"h":[1,[1,2,3]],"j":"abc"}:true}');
+} {{9}}
