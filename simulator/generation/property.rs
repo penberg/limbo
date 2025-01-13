@@ -7,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    frequency, pick,
+    frequency, pick, pick_index,
     plan::{Assertion, Interaction, InteractionStats, ResultSet},
     ArbitraryFrom,
 };
@@ -34,6 +34,8 @@ pub(crate) enum Property {
     InsertSelect {
         /// The insert query
         insert: Insert,
+        /// Selected row index
+        row_index: usize,
         /// Additional interactions in the middle of the property
         queries: Vec<Query>,
         /// The select query
@@ -73,6 +75,7 @@ impl Property {
         match self {
             Property::InsertSelect {
                 insert,
+                row_index,
                 queries,
                 select,
             } => {
@@ -83,7 +86,7 @@ impl Property {
                 );
 
                 // Pick a random row within the insert values
-                let row = pick(&insert.values, &mut rand::thread_rng()).clone();
+                let row = insert.values[*row_index].clone();
 
                 // Assume that the table exists
                 let assumption = Interaction::Assumption(Assertion {
@@ -202,7 +205,8 @@ fn property_insert_select<R: rand::Rng>(
         .collect::<Vec<_>>();
 
     // Pick a random row to select
-    let row = pick(&rows, rng).clone();
+    let row_index = pick_index(rows.len(), rng).clone();
+    let row = rows[row_index].clone();
 
     // Insert the rows
     let insert_query = Insert {
@@ -248,6 +252,7 @@ fn property_insert_select<R: rand::Rng>(
 
     Property::InsertSelect {
         insert: insert_query,
+        row_index,
         queries,
         select: select_query,
     }

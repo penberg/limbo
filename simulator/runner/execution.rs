@@ -9,7 +9,7 @@ use crate::generation::{
 
 use super::env::{SimConnection, SimulatorEnv};
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Execution {
     pub(crate) connection_index: usize,
     pub(crate) interaction_index: usize,
@@ -30,6 +30,7 @@ impl Execution {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ExecutionHistory {
     pub(crate) history: Vec<Execution>,
 }

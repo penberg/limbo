@@ -218,7 +218,7 @@ fn main() -> Result<(), String> {
                         last_execution,
                     );
 
-                    match (shrunk, &result) {
+                    match (&shrunk, &result) {
                         (
                             SandboxedResult::Panicked { error: e1, .. },
                             SandboxedResult::Panicked { error: e2, .. },
@@ -227,7 +227,7 @@ fn main() -> Result<(), String> {
                             SandboxedResult::FoundBug { error: e1, .. },
                             SandboxedResult::FoundBug { error: e2, .. },
                         ) => {
-                            if &e1 != e2 {
+                            if e1 != e2 {
                                 log::error!(
                                     "shrinking failed, the error was not properly reproduced"
                                 );
@@ -291,6 +291,7 @@ fn revert_db_and_plan_files(output_dir: &Path) {
     std::fs::rename(&new_plan_path, &old_plan_path).unwrap();
 }
 
+#[derive(Debug)]
 enum SandboxedResult {
     Panicked {
         error: String,
