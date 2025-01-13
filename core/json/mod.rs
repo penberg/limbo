@@ -863,6 +863,8 @@ mod tests {
         let integer_value = OwnedValue::Integer(1);
         let float_key = OwnedValue::build_text(Rc::new("float_key".to_string()));
         let float_value = OwnedValue::Float(1.1);
+        let null_key = OwnedValue::build_text(Rc::new("null_key".to_string()));
+        let null_value = OwnedValue::Null;
 
         let input = vec![
             text_key,
@@ -873,6 +875,8 @@ mod tests {
             integer_value,
             float_key,
             float_value,
+            null_key,
+            null_value,
         ];
 
         let result = json_object(&input).unwrap();
@@ -881,7 +885,7 @@ mod tests {
         };
         assert_eq!(
             json_text.value.as_str(),
-            r#"{"text_key":"text_value","json_key":{"json":"value","number":1},"integer_key":1,"float_key":1.1}"#
+            r#"{"text_key":"text_value","json_key":{"json":"value","number":1},"integer_key":1,"float_key":1.1,"null_key":null}"#
         );
     }
 
