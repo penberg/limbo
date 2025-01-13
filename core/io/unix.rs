@@ -4,7 +4,7 @@ use crate::Result;
 
 use super::{Completion, File, OpenFlags, IO};
 use libc::{c_short, fcntl, flock, F_SETLK};
-use log::trace;
+use log::{debug, trace};
 use polling::{Event, Events, Poller};
 use rustix::fd::{AsFd, AsRawFd};
 use rustix::fs::OpenOptionsExt;
@@ -22,6 +22,7 @@ pub struct UnixIO {
 
 impl UnixIO {
     pub fn new() -> Result<Self> {
+        debug!("Using IO backend 'syscall'");
         Ok(Self {
             poller: Rc::new(RefCell::new(Poller::new()?)),
             events: Rc::new(RefCell::new(Events::new())),

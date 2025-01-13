@@ -1,5 +1,5 @@
 use crate::{Completion, File, LimboError, OpenFlags, Result, IO};
-use log::trace;
+use log::{debug, trace};
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
 use std::rc::Rc;
@@ -8,6 +8,7 @@ pub struct GenericIO {}
 
 impl GenericIO {
     pub fn new() -> Result<Self> {
+        debug!("Using IO backend 'generic'");
         Ok(Self {})
     }
 }
