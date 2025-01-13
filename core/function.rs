@@ -30,6 +30,7 @@ pub enum JsonFunc {
     JsonArrowShiftExtract,
     JsonExtract,
     JsonType,
+    JsonErrorPosition,
 }
 
 #[cfg(feature = "json")]
@@ -46,6 +47,7 @@ impl Display for JsonFunc {
                 Self::JsonArrowExtract => "->".to_string(),
                 Self::JsonArrowShiftExtract => "->>".to_string(),
                 Self::JsonType => "json_type".to_string(),
+                Self::JsonErrorPosition => "json_error_position".to_string(),
             }
         )
     }
@@ -379,6 +381,8 @@ impl Func {
             "json_extract" => Ok(Func::Json(JsonFunc::JsonExtract)),
             #[cfg(feature = "json")]
             "json_type" => Ok(Func::Json(JsonFunc::JsonType)),
+            #[cfg(feature = "json")]
+            "json_error_position" => Ok(Self::Json(JsonFunc::JsonErrorPosition)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),

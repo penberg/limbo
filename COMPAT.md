@@ -263,7 +263,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | jsonb_array(value1,value2,...)     |         |                                                                                                                                              |
 | json_array_length(json)            | Yes     |                                                                                                                                              |
 | json_array_length(json,path)       | Yes     |                                                                                                                                              |
-| json_error_position(json)          |         |                                                                                                                                              |
+| json_error_position(json)          | Yes     |                                                                                                                                              |
 | json_extract(json,path,...)        | Partial | Does not fully support unicode literal syntax and does not allow numbers > 2^127 - 1 (which SQLite truncates to i32), does not support BLOBs |
 | jsonb_extract(json,path,...)       |         |                                                                                                                                              |
 | json -> path                       | Yes     |                                                                                                                                              |

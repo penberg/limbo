@@ -4,9 +4,13 @@ use sqlite3_parser::ast;
 
 use crate::{
     function::AggFunc,
-    schema::{Column, PseudoTable, Table},
+    schema::{Column, PseudoTable},
     types::{OwnedRecord, OwnedValue},
-    vdbe::{builder::ProgramBuilder, insn::Insn, BranchOffset},
+    vdbe::{
+        builder::{CursorType, ProgramBuilder},
+        insn::Insn,
+        BranchOffset,
+    },
     Result,
 };
 
@@ -50,7 +54,7 @@ pub fn init_group_by(
 ) -> Result<()> {
     let num_aggs = aggregates.len();
 
-    let sort_cursor = program.alloc_cursor_id(None, None);
+    let sort_cursor = program.alloc_cursor_id(None, CursorType::Sorter);
 
     let reg_abort_flag = program.alloc_register();
     let reg_group_exprs_cmp = program.alloc_registers(group_by.exprs.len());
@@ -175,7 +179,7 @@ pub fn emit_group_by<'a>(
         columns: pseudo_columns,
     });
 
-    let pseudo_cursor = program.alloc_cursor_id(None, Some(Table::Pseudo(pseudo_table.clone())));
+    let pseudo_cursor = program.alloc_cursor_id(None, CursorType::Pseudo(pseudo_table.clone()));
 
     program.emit_insn(Insn::OpenPseudo {
         cursor_id: pseudo_cursor,
