@@ -319,6 +319,8 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
             [key, value] => {
                 let key = match key {
                     // TODO: is this tp_string call ok?
+                    // TODO: We can construct the IndexMap from Rc<String>, but we must enable the
+                    // serde's `rc` feature so we can serialize Rc<String>
                     OwnedValue::Text(t) => t.value.to_string(),
                     // TODO: I matched sqlite message error here. Is this ok?
                     _ => crate::bail_constraint_error!("labels must be TEXT"),
