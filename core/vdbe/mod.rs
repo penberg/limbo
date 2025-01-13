@@ -28,6 +28,7 @@ use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 #[cfg(feature = "uuid")]
 use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::json::json_object;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::schema::Table;
@@ -1352,12 +1353,19 @@ impl Program {
                             }
                         }
                         #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonArray) => {
+                        crate::function::Func::Json(
+                            func @ (JsonFunc::JsonArray | JsonFunc::JsonObject),
+                        ) => {
                             let reg_values = &state.registers[*start_reg..*start_reg + arg_count];
 
-                            let json_array = json_array(reg_values);
+                            let func = match func {
+                                JsonFunc::JsonArray => json_array,
+                                JsonFunc::JsonObject => json_object,
+                                _ => unreachable!(),
+                            };
+                            let json_result = func(reg_values);
 
-                            match json_array {
+                            match json_result {
                                 Ok(json) => state.registers[*dest] = json,
                                 Err(e) => return Err(e),
                             }

@@ -380,6 +380,8 @@ impl Func {
             #[cfg(feature = "json")]
             "json_extract" => Ok(Func::Json(JsonFunc::JsonExtract)),
             #[cfg(feature = "json")]
+            "json_object" => Ok(Func::Json(JsonFunc::JsonObject)),
+            #[cfg(feature = "json")]
             "json_type" => Ok(Func::Json(JsonFunc::JsonType)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),

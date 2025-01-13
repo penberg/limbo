@@ -288,6 +288,36 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
     Ok(OwnedValue::Text(LimboText::json(Rc::new(val.to_string()))))
 }
 
+// TODO: document this
+pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
+    let value_map = values
+        .chunks(2)
+        .map(|chunk| match chunk {
+            [key, value] => {
+                let key = match key {
+                    // TODO: is this tp_string call ok?
+                    OwnedValue::Text(t) => t.value.to_string(),
+                    // TODO: I matched sqlite message error here. Is this ok?
+                    _ => crate::bail_constraint_error!("labels must be TEXT"),
+                };
+
+                // TODO: check the part about interpreting json if the value comes from another json_object function
+                // FIXME: right now, this statement `select json_object('a','{"a":2}');` differs from sqlite3.
+                // We should only interpret json if it comes from a json function. The same goes to json_array.
+                // TODO: inspire from json_array func
+                let json_value = get_json_value(value)?;
+
+                Ok((key, json_value))
+            }
+            _ => crate::bail_constraint_error!("json_object requires an even number of values"),
+        })
+        // TODO: collecting into a IndexMap does not allow for repeated keys
+        .collect::<Result<IndexMap<String, Val>, _>>()?;
+
+    let result = crate::json::to_string(&value_map).unwrap();
+    Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+}
+
 /// Returns the value at the given JSON path. If the path does not exist, it returns None.
 /// If the path is an invalid path, returns an error.
 ///
