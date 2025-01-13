@@ -1,4 +1,7 @@
-use crate::{generation::plan::InteractionPlan, runner::execution::Execution};
+use crate::{
+    generation::plan::{Interaction, InteractionPlan, Interactions},
+    runner::execution::Execution,
+};
 
 impl InteractionPlan {
     /// Create a smaller interaction plan by deleting a property
@@ -19,6 +22,23 @@ impl InteractionPlan {
         plan.plan
             .retain(|p| p.uses().iter().any(|t| depending_tables.contains(t)));
 
+        // Remove the extensional parts of the properties
+        for interaction in plan.plan.iter_mut() {
+            if let Interactions::Property(p) = interaction {
+                match p {
+                    crate::generation::property::Property::InsertSelect {
+                        queries,
+                        ..
+                    } |
+                    crate::generation::property::Property::DoubleCreateFailure {
+                        queries,
+                        ..
+                    } => {
+                        queries.clear();
+                    }
+                }
+            }
+        }
         let after = plan.plan.len();
 
         log::info!(

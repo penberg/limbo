@@ -1,6 +1,6 @@
 use crate::{
     model::{
-        query::{Create, Insert, Predicate, Query, Select},
+        query::{Create, Delete, Insert, Predicate, Query, Select},
         table::Value,
     },
     runner::env::SimulatorEnv,
@@ -35,7 +35,7 @@ pub(crate) enum Property {
         /// The insert query
         insert: Insert,
         /// Additional interactions in the middle of the property
-        interactions: Vec<Query>,
+        queries: Vec<Query>,
         /// The select query
         select: Select,
     },
@@ -55,7 +55,7 @@ pub(crate) enum Property {
         /// The create query
         create: Create,
         /// Additional interactions in the middle of the property
-        interactions: Vec<Query>,
+        queries: Vec<Query>,
     },
 }
 
@@ -70,7 +70,7 @@ impl Property {
         match self {
             Property::InsertSelect {
                 insert,
-                interactions: _, // todo: add extensional interactions
+                queries,
                 select,
             } => {
                 // Check that the row is there
@@ -106,20 +106,33 @@ impl Property {
                     }),
                 });
 
-                vec![
-                    assumption,
-                    Interaction::Query(Query::Insert(insert.clone())),
-                    Interaction::Query(Query::Select(select.clone())),
-                    assertion,
-                ]
+                let mut interactions = Vec::new();
+                interactions.push(assumption);
+                interactions.push(Interaction::Query(Query::Insert(insert.clone())));
+                interactions.extend(queries.clone().into_iter().map(Interaction::Query));
+                interactions.push(Interaction::Query(Query::Select(select.clone())));
+                interactions.push(assertion);
+
+                interactions
             }
             Property::DoubleCreateFailure {
                 create,
-                interactions: _, // todo: add extensional interactions
+                queries,
             } => {
                 let table_name = create.table.name.clone();
+
+                let assumption = Interaction::Assumption(Assertion {
+                    message: "Double-Create-Failure should not be called on an existing table"
+                        .to_string(),
+                    func: Box::new(move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
+                        !env.tables.iter().any(|t| t.name == table_name)
+                    }),
+                });
+
                 let cq1 = Interaction::Query(Query::Create(create.clone()));
                 let cq2 = Interaction::Query(Query::Create(create.clone()));
+
+                let table_name = create.table.name.clone();
 
                 let assertion = Interaction::Assertion(Assertion {
                     message:
@@ -136,13 +149,26 @@ impl Property {
                     }),
                 });
 
-                vec![cq1, cq2, assertion]
+                let mut interactions = Vec::new();
+                interactions.push(assumption);
+                interactions.push(cq1);
+                interactions.extend(queries.clone().into_iter().map(Interaction::Query));
+                interactions.push(cq2);
+                interactions.push(assertion);
+
+                interactions
             }
         }
     }
 }
 
-fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> (f64, f64, f64) {
+pub(crate) struct Remaining {
+    pub(crate) read: f64,
+    pub(crate) write: f64,
+    pub(crate) create: f64,
+}
+
+fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> Remaining {
     let remaining_read = ((env.opts.max_interactions as f64 * env.opts.read_percent / 100.0)
         - (stats.read_count as f64))
         .max(0.0);
@@ -153,10 +179,14 @@ fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> (f64, f64, f64) {
         - (stats.create_count as f64))
         .max(0.0);
 
-    (remaining_read, remaining_write, remaining_create)
+    Remaining {
+        read: remaining_read,
+        write: remaining_write,
+        create: remaining_create,
+    }
 }
 
-fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
+fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaining: &Remaining) -> Property {
     // Get a random table
     let table = pick(&env.tables, rng);
     // Pick a random column
@@ -181,6 +211,36 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prop
         values: vec![row.clone()],
     };
 
+    // Create random queries respecting the constraints
+    let mut queries = Vec::new();
+    // - [x] There will be no errors in the middle interactions. (this constraint is impossible to check, so this is just best effort)
+    // - [x] The inserted row will not be deleted.
+    // - [ ] The inserted row will not be updated. (todo: add this constraint once UPDATE is implemented)
+    // - [ ] The table `t` will not be renamed, dropped, or altered. (todo: add this constraint once ALTER or DROP is implemented)
+    for _ in 0..rng.gen_range(0..3) {
+        let query = Query::arbitrary_from(rng, &(table, remaining));
+        match &query {
+            Query::Delete(Delete {
+                table: t,
+                predicate,
+            }) => {
+                // The inserted row will not be deleted.
+                if t == &table.name && predicate.test(&row, &table) {
+                    continue;
+                }
+            }
+            Query::Create(Create { table: t }) => {
+                // There will be no errors in the middle interactions.
+                // - Creating the same table is an error
+                if t.name == table.name {
+                    continue;
+                }
+            }
+            _ => (),
+        }
+        queries.push(query);
+    }
+
     // Select the row
     let select_query = Select {
         table: table.name.clone(),
@@ -189,12 +249,12 @@ fn property_insert_select<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prop
 
     Property::InsertSelect {
         insert: insert_query,
-        interactions: Vec::new(),
+        queries,
         select: select_query,
     }
 }
 
-fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
+fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv, remaining: &Remaining) -> Property {
     // Get a random table
     let table = pick(&env.tables, rng);
     // Create the table
@@ -202,27 +262,49 @@ fn property_double_create_failure<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv)
         table: table.clone(),
     };
 
+    // Create random queries respecting the constraints
+    let mut queries = Vec::new();
+    // The interactions in the middle has the following constraints;
+    // - [x] There will be no errors in the middle interactions.(best effort)
+    // - [ ] Table `t` will not be renamed or dropped.(todo: add this constraint once ALTER or DROP is implemented)
+    for _ in 0..rng.gen_range(0..3) {
+        let query = Query::arbitrary_from(rng, &(table, remaining));
+        match &query {
+            Query::Create(Create { table: t }) => {
+                // There will be no errors in the middle interactions.
+                // - Creating the same table is an error
+                if t.name == table.name {
+                    continue;
+                }
+            }
+            _ => (),
+        }
+        queries.push(query);
+    }
+
     Property::DoubleCreateFailure {
         create: create_query,
-        interactions: Vec::new(),
+        queries,
     }
 }
+
+
 
 impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
     fn arbitrary_from<R: rand::Rng>(
         rng: &mut R,
         (env, stats): &(&SimulatorEnv, &InteractionStats),
     ) -> Self {
-        let (remaining_read, remaining_write, remaining_create) = remaining(env, stats);
+        let remaining_ = remaining(env, stats);
         frequency(
             vec![
                 (
-                    f64::min(remaining_read, remaining_write),
-                    Box::new(|rng: &mut R| property_insert_select(rng, env)),
+                    f64::min(remaining_.read, remaining_.write),
+                    Box::new(|rng: &mut R| property_insert_select(rng, env, &remaining_)),
                 ),
                 (
-                    remaining_create / 2.0,
-                    Box::new(|rng: &mut R| property_double_create_failure(rng, env)),
+                    remaining_.create / 2.0,
+                    Box::new(|rng: &mut R| property_double_create_failure(rng, env, &remaining_)),
                 ),
             ],
             rng,

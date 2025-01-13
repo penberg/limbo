@@ -20,6 +20,26 @@ impl Predicate {
     pub(crate) fn false_() -> Self {
         Self::Or(vec![])
     }
+
+    pub(crate) fn test(&self, row: &[Value], table: &Table) -> bool {
+        let get_value = |name: &str| {
+            table
+                .columns
+                .iter()
+                .zip(row.iter())
+                .find(|(column, _)| column.name == name)
+                .map(|(_, value)| value)
+        };
+
+        match self {
+            Predicate::And(vec) => vec.iter().all(|p| p.test(row, table)),
+            Predicate::Or(vec) => vec.iter().any(|p| p.test(row, table)),
+            Predicate::Eq(column, value) => get_value(column) == Some(value),
+            Predicate::Neq(column, value) => get_value(column) != Some(value),
+            Predicate::Gt(column, value) => get_value(column).map(|v| v > value).unwrap_or(false),
+            Predicate::Lt(column, value) => get_value(column).map(|v| v < value).unwrap_or(false),
+        }
+    }
 }
 
 impl Display for Predicate {

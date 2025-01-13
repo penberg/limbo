@@ -6,6 +6,7 @@ use crate::model::table::{Table, Value};
 use rand::seq::SliceRandom as _;
 use rand::Rng;
 
+use super::property::Remaining;
 use super::{frequency, pick};
 
 impl Arbitrary for Create {
@@ -79,6 +80,32 @@ impl ArbitraryFrom<Table> for Query {
                 ),
                 (
                     0,
+                    Box::new(|rng| Self::Delete(Delete::arbitrary_from(rng, table))),
+                ),
+            ],
+            rng,
+        )
+    }
+}
+
+impl ArbitraryFrom<(&Table, &Remaining)> for Query {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (table, remaining): &(&Table, &Remaining)) -> Self {
+        frequency(
+            vec![
+                (
+                    remaining.create,
+                    Box::new(|rng| Self::Create(Create::arbitrary(rng))),
+                ),
+                (
+                    remaining.read,
+                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, &vec![*table]))),
+                ),
+                (
+                    remaining.write,
+                    Box::new(|rng| Self::Insert(Insert::arbitrary_from(rng, table))),
+                ),
+                (
+                    0.0,
                     Box::new(|rng| Self::Delete(Delete::arbitrary_from(rng, table))),
                 ),
             ],
@@ -322,7 +349,6 @@ impl ArbitraryFrom<(&Table, &Vec<Value>)> for Predicate {
 
         // Start building a top level predicate from a true predicate
         let mut result = true_predicates.pop().unwrap();
-        println!("True predicate: {:?}", result);
 
         let mut predicates = true_predicates
             .iter()
