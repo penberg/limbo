@@ -46,7 +46,7 @@ public abstract class LimboConnection implements Connection {
     }
 
     private static AbstractDB open(String url, String fileName, Properties properties) throws SQLException {
-        if (fileName.isBlank()) {
+        if (fileName.isEmpty()) {
             throw new IllegalArgumentException("fileName should not be empty");
         }
 
