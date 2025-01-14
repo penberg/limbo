@@ -1651,7 +1651,6 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
-                program.mark_last_insn_constant();
                 Ok(target_register)
             }
             (UnaryOperator::Negative | UnaryOperator::Positive, _) => {
@@ -1690,7 +1689,6 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
-                program.mark_last_insn_constant();
                 Ok(target_register)
             }
             (UnaryOperator::BitwiseNot, ast::Expr::Literal(ast::Literal::Null)) => {
@@ -1698,7 +1696,6 @@ pub fn translate_expr(
                     dest: target_register,
                     dest_end: None,
                 });
-                program.mark_last_insn_constant();
                 Ok(target_register)
             }
             (UnaryOperator::BitwiseNot, _) => {
