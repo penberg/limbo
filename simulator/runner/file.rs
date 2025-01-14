@@ -4,11 +4,22 @@ use limbo_core::{File, Result};
 pub(crate) struct SimulatorFile {
     pub(crate) inner: Rc<dyn File>,
     pub(crate) fault: RefCell<bool>,
+
+    /// Number of `pread` function calls (both success and failures).
+    pub(crate) nr_pread_calls: RefCell<usize>,
+
+    /// Number of `pread` function calls with injected fault.
     pub(crate) nr_pread_faults: RefCell<usize>,
+
+    /// Number of `pwrite` function calls (both success and failures).
+    pub(crate) nr_pwrite_calls: RefCell<usize>,
+
+    /// Number of `pwrite` function calls with injected fault.
     pub(crate) nr_pwrite_faults: RefCell<usize>,
-    pub(crate) writes: RefCell<usize>,
-    pub(crate) reads: RefCell<usize>,
-    pub(crate) syncs: RefCell<usize>,
+
+    /// Number of `sync` function calls (both success and failures).
+    pub(crate) nr_sync_calls: RefCell<usize>,
+
     pub(crate) page_size: usize,
 }
 
@@ -22,9 +33,9 @@ impl SimulatorFile {
             "pread faults: {}, pwrite faults: {}, reads: {}, writes: {}, syncs: {}",
             *self.nr_pread_faults.borrow(),
             *self.nr_pwrite_faults.borrow(),
-            *self.reads.borrow(),
-            *self.writes.borrow(),
-            *self.syncs.borrow(),
+            *self.nr_pread_calls.borrow(),
+            *self.nr_pwrite_calls.borrow(),
+            *self.nr_sync_calls.borrow(),
         );
     }
 }
@@ -49,13 +60,13 @@ impl limbo_core::File for SimulatorFile {
     }
 
     fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
+        *self.nr_pread_calls.borrow_mut() += 1;
         if *self.fault.borrow() {
             *self.nr_pread_faults.borrow_mut() += 1;
             return Err(limbo_core::LimboError::InternalError(
                 "Injected fault".into(),
             ));
         }
-        *self.reads.borrow_mut() += 1;
         self.inner.pread(pos, c)
     }
 
@@ -65,18 +76,18 @@ impl limbo_core::File for SimulatorFile {
         buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
         c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
+        *self.nr_pwrite_calls.borrow_mut() += 1;
         if *self.fault.borrow() {
             *self.nr_pwrite_faults.borrow_mut() += 1;
             return Err(limbo_core::LimboError::InternalError(
                 "Injected fault".into(),
             ));
         }
-        *self.writes.borrow_mut() += 1;
         self.inner.pwrite(pos, buffer, c)
     }
 
     fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
-        *self.syncs.borrow_mut() += 1;
+        *self.nr_sync_calls.borrow_mut() += 1;
         self.inner.sync(c)
     }
 
