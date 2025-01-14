@@ -1,8 +1,11 @@
 package org.github.tursodatabase;
 
+import org.github.tursodatabase.annotations.Nullable;
+import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.jdbc4.JDBC4Connection;
 
 import java.sql.*;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.logging.Logger;
 
@@ -17,6 +20,7 @@ public class JDBC implements Driver {
         }
     }
 
+    @Nullable
     public static LimboConnection createConnection(String url, Properties properties) throws SQLException {
         if (!isValidURL(url)) return null;
 
@@ -25,13 +29,14 @@ public class JDBC implements Driver {
     }
 
     private static boolean isValidURL(String url) {
-        return url != null && url.toLowerCase().startsWith(VALID_URL_PREFIX);
+        return url != null && url.toLowerCase(Locale.ROOT).startsWith(VALID_URL_PREFIX);
     }
 
     private static String extractAddress(String url) {
         return url.substring(VALID_URL_PREFIX.length());
     }
 
+    @Nullable
     @Override
     public Connection connect(String url, Properties info) throws SQLException {
         return createConnection(url, info);
@@ -65,6 +70,7 @@ public class JDBC implements Driver {
     }
 
     @Override
+    @SkipNullableCheck
     public Logger getParentLogger() throws SQLFeatureNotSupportedException {
         // TODO
         return null;

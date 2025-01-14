@@ -1,4 +1,4 @@
-package org.github.tursodatabase;
+package org.github.tursodatabase.annotations;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
