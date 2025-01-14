@@ -1,7 +1,6 @@
 use std::os::raw::{c_char, c_void};
-
 pub type ResultCode = i32;
-
+pub use limbo_macros::export_scalar;
 pub const RESULT_OK: ResultCode = 0;
 pub const RESULT_ERROR: ResultCode = 1;
 // TODO: more error types
@@ -48,42 +47,6 @@ macro_rules! register_scalar_functions {
             )*
         }
     }
-}
-
-#[macro_export]
-macro_rules! declare_scalar_functions {
-    (
-        $(
-            #[args($($args_count:tt)+)]
-            fn $func_name:ident ($args:ident : &[Value]) -> Value $body:block
-        )*
-    ) => {
-        $(
-            extern "C" fn $func_name(
-                argc: i32,
-                argv: *const $crate::Value
-            ) -> $crate::Value {
-                let valid_args = {
-                    match argc {
-                        $($args_count)+ => true,
-                        _ => false,
-                    }
-                };
-                if !valid_args {
-                    return $crate::Value::null();
-                }
-                if argc == 0 || argv.is_null() {
-                    log::debug!("{} was called with no arguments", stringify!($func_name));
-                    let $args: &[$crate::Value] = &[];
-                    $body
-                } else {
-                    let ptr_slice = unsafe{ std::slice::from_raw_parts(argv, argc as usize)};
-                    let $args: &[$crate::Value] = ptr_slice;
-                    $body
-                }
-            }
-        )*
-    };
 }
 
 #[repr(C)]
