@@ -150,11 +150,7 @@ fn epilogue(
 
 /// Main entry point for emitting bytecode for a SQL query
 /// Takes a query plan and generates the corresponding bytecode program
-pub fn emit_program(
-    program: &mut ProgramBuilder,
-    plan: Plan,
-    syms: &SymbolTable,
-) -> Result<()> {
+pub fn emit_program(program: &mut ProgramBuilder, plan: Plan, syms: &SymbolTable) -> Result<()> {
     match plan {
         Plan::Select(plan) => emit_program_for_select(program, plan, syms),
         Plan::Delete(plan) => emit_program_for_delete(program, plan, syms),
@@ -272,12 +268,7 @@ fn emit_program_for_delete(
     }
 
     // Initialize cursors and other resources needed for query execution
-    init_loop(
-        program,
-        &mut t_ctx,
-        &plan.source,
-        &OperationMode::DELETE,
-    )?;
+    init_loop(program, &mut t_ctx, &plan.source, &OperationMode::DELETE)?;
 
     // Set up main query execution loop
     open_loop(

@@ -8,13 +8,16 @@ use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::schema::BTreeTable;
 use crate::util::normalize_ident;
 use crate::vdbe::BranchOffset;
+use crate::Result;
 use crate::{
     schema::{Column, Schema},
     translate::expr::translate_expr,
-    vdbe::{builder::{CursorType, ProgramBuilder}, insn::Insn},
+    vdbe::{
+        builder::{CursorType, ProgramBuilder},
+        insn::Insn,
+    },
     SymbolTable,
 };
-use crate::Result;
 
 use super::emitter::Resolver;
 
