@@ -106,6 +106,14 @@ Jamie|coat
 Jamie|accessories
 Cindy|}
 
+do_execsql_test left-join-row-id {
+    select u.rowid, p.rowid from users u left join products as p on u.rowid = p.rowid where u.rowid >= 10 limit 5;
+} {10|10
+11|11
+12|
+13|
+14|}
+
 do_execsql_test left-join-constant-condition-true {
     select u.first_name, p.name from users u left join products as p on true limit 1;
 } {Jamie|hat}

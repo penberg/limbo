@@ -80,6 +80,14 @@ do_execsql_test select_with_quoting_2 {
   select "users".`id` from users where `users`.[id] = 5;
 } {5}
 
+do_execsql_test select-rowid {
+    select rowid, first_name from users u where rowid = 5;
+} {5|Edward}
+
+do_execsql_test select-rowid-2 {
+    select u.rowid, first_name from users u where rowid = 5;
+} {5|Edward}
+
 do_execsql_test seekrowid {
     select * from users u where u.id = 5;
 } {"5|Edward|Miller|christiankramer@example.com|725-281-1033|08522 English Plain|Lake Keith|ID|23283|15"}

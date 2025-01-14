@@ -1545,6 +1545,15 @@ pub fn translate_expr(
                 }
             }
         }
+        ast::Expr::RowId { database: _, table } => {
+            let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
+            let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
+            program.emit_insn(Insn::RowId {
+                cursor_id,
+                dest: target_register,
+            });
+            Ok(target_register)
+        }
         ast::Expr::InList { .. } => todo!(),
         ast::Expr::InSelect { .. } => todo!(),
         ast::Expr::InTable { .. } => todo!(),

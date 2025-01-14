@@ -728,6 +728,7 @@ impl ToTokens for Expr {
                 }
                 s.append(TK_RP, None)
             }
+            Self::RowId { .. } => Ok(()),
             Self::Subquery(query) => {
                 s.append(TK_LP, None)?;
                 query.to_tokens(s)?;

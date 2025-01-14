@@ -194,6 +194,9 @@ impl CreateTableBody {
         {
             let mut generated_count = 0;
             for c in columns.values() {
+                if c.col_name == "rowid" {
+                    return Err(custom_err!("cannot use reserved word: ROWID"));
+                }
                 for cs in &c.constraints {
                     if let ColumnConstraint::Generated { .. } = cs.constraint {
                         generated_count += 1;

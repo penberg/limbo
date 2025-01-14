@@ -12,6 +12,8 @@ use crate::{
 };
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit};
 
+pub const ROWID: &'static str = "rowid";
+
 pub struct OperatorIdCounter {
     id: usize,
 }
@@ -102,8 +104,18 @@ pub fn bind_column_references(
             if id.0.eq_ignore_ascii_case("true") || id.0.eq_ignore_ascii_case("false") {
                 return Ok(());
             }
-            let mut match_result = None;
             let normalized_id = normalize_ident(id.0.as_str());
+
+            if referenced_tables.len() > 0 {
+                if let Some(row_id_expr) =
+                    parse_row_id(&normalized_id, 0, || referenced_tables.len() != 1)?
+                {
+                    *expr = row_id_expr;
+
+                    return Ok(());
+                }
+            }
+            let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
                 let col_idx = table
                     .columns()
@@ -140,6 +152,12 @@ pub fn bind_column_references(
             }
             let tbl_idx = matching_tbl_idx.unwrap();
             let normalized_id = normalize_ident(id.0.as_str());
+
+            if let Some(row_id_expr) = parse_row_id(&normalized_id, tbl_idx, || false)? {
+                *expr = row_id_expr;
+
+                return Ok(());
+            }
             let col_idx = referenced_tables[tbl_idx]
                 .columns()
                 .iter()
@@ -209,7 +227,7 @@ pub fn bind_column_references(
             Ok(())
         }
         // Already bound earlier
-        ast::Expr::Column { .. } => Ok(()),
+        ast::Expr::Column { .. } | ast::Expr::RowId { .. } => Ok(()),
         ast::Expr::DoublyQualified(_, _, _) => todo!(),
         ast::Expr::Exists(_) => todo!(),
         ast::Expr::FunctionCallStar { .. } => Ok(()),
@@ -581,4 +599,21 @@ pub fn break_predicate_at_and_boundaries(
             out_predicates.push(predicate);
         }
     }
+}
+
+fn parse_row_id<F>(column_name: &str, table_id: usize, fn_check: F) -> Result<Option<ast::Expr>>
+where
+    F: FnOnce() -> bool,
+{
+    if column_name.eq_ignore_ascii_case(ROWID) {
+        if fn_check() {
+            crate::bail_parse_error!("ROWID is ambiguous");
+        }
+
+        return Ok(Some(ast::Expr::RowId {
+            database: None, // TODO: support different databases
+            table: table_id,
+        }));
+    }
+    Ok(None)
 }
