@@ -111,6 +111,73 @@ mod tests {
     }
 
     #[test]
+    /// There was a regression with inserting multiple rows with a column containing an unary operator :)
+    /// https://github.com/tursodatabase/limbo/pull/679
+    fn test_regression_multi_row_insert() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
+        let tmp_db = TempDatabase::new("CREATE TABLE test (x REAL);");
+        let conn = tmp_db.connect_limbo();
+
+        let insert_query = "INSERT INTO test VALUES (-2), (-3), (-1)";
+        let list_query = "SELECT * FROM test";
+
+        match conn.query(insert_query) {
+            Ok(Some(ref mut rows)) => loop {
+                match rows.next_row()? {
+                    StepResult::IO => {
+                        tmp_db.io.run_once()?;
+                    }
+                    StepResult::Done => break,
+                    _ => unreachable!(),
+                }
+            },
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("{}", err);
+            }
+        };
+
+        do_flush(&conn, &tmp_db)?;
+
+        let mut current_read_index = 1;
+        let expected_ids = vec![-3, -2, -1];
+        let mut actual_ids = Vec::new();
+        match conn.query(list_query) {
+            Ok(Some(ref mut rows)) => loop {
+                match rows.next_row()? {
+                    StepResult::Row(row) => {
+                        let first_value = row.values.first().expect("missing id");
+                        let id = match first_value {
+                            Value::Float(f) => *f as i32,
+                            _ => panic!("expected float"),
+                        };
+                        actual_ids.push(id);
+                        current_read_index += 1;
+                    }
+                    StepResult::IO => {
+                        tmp_db.io.run_once()?;
+                    }
+                    StepResult::Interrupt => break,
+                    StepResult::Done => break,
+                    StepResult::Busy => {
+                        panic!("Database is busy");
+                    }
+                }
+            },
+            Ok(None) => {}
+            Err(err) => {
+                eprintln!("{}", err);
+            }
+        }
+
+        assert_eq!(current_read_index, 4); // Verify we read all rows
+                                           // sort ids
+        actual_ids.sort();
+        assert_eq!(actual_ids, expected_ids);
+        Ok(())
+    }
+
+    #[test]
     fn test_simple_overflow_page() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
         let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
