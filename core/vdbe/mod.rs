@@ -41,7 +41,7 @@ use crate::{
     json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
     json::json_extract, json::json_type,
 };
-use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
+use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
@@ -1862,6 +1862,14 @@ impl Program {
                                 let pattern = &state.registers[*start_reg + 1];
                                 let replacement = &state.registers[*start_reg + 2];
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
+                            }
+                            #[cfg(not(target_family = "wasm"))]
+                            ScalarFunc::LoadExtension => {
+                                let extension = &state.registers[*start_reg];
+                                let ext = resolve_ext_path(&extension.to_string())?;
+                                if let Some(conn) = self.connection.upgrade() {
+                                    conn.load_extension(ext)?;
+                                }
                             }
                         },
                         crate::function::Func::External(f) => {

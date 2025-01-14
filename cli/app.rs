@@ -325,7 +325,10 @@ impl Limbo {
 
     #[cfg(not(target_family = "wasm"))]
     fn handle_load_extension(&mut self, path: &str) -> Result<(), String> {
-        self.conn.load_extension(path).map_err(|e| e.to_string())
+        let ext_path = limbo_core::resolve_ext_path(path).map_err(|e| e.to_string())?;
+        self.conn
+            .load_extension(ext_path)
+            .map_err(|e| e.to_string())
     }
 
     fn display_in_memory(&mut self) -> std::io::Result<()> {

@@ -1092,6 +1092,19 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        #[cfg(not(target_family = "wasm"))]
+                        ScalarFunc::LoadExtension => {
+                            let args = expect_arguments_exact!(args, 1, srf);
+                            let reg =
+                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: reg,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::Random => {
                             if args.is_some() {
                                 crate::bail_parse_error!(
