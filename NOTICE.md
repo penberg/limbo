@@ -20,7 +20,8 @@ This product depends on AssertJ, distributed by the AssertJ authors:
 
 This product depends on serde, distributed by the serde-rs project: 
 
-* License: licenses/core/serde-license.md (Apache License v2.0, MIT license)
+* License: licenses/core/serde-apache-license.md (Apache License v2.0)
+* License: licenses/core/serde-mit-license.md (MIT License)
 * Homepage: https://github.com/serde-rs/serde
 
 This product depends on serde_json5, distributed 
