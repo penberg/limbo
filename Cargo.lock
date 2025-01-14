@@ -417,7 +417,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core_tester"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "anyhow",
  "clap",
@@ -1059,7 +1059,7 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "java-limbo"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "anyhow",
  "jni",
@@ -1170,7 +1170,7 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "anyhow",
  "clap",
@@ -1186,7 +1186,7 @@ dependencies = [
 
 [[package]]
 name = "limbo-wasm"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_core"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "bumpalo",
  "cfg_block",
@@ -1238,7 +1238,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_libsql"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "limbo_core",
  "thiserror 2.0.9",
@@ -1247,11 +1247,11 @@ dependencies = [
 
 [[package]]
 name = "limbo_macros"
-version = "0.0.11"
+version = "0.0.12"
 
 [[package]]
 name = "limbo_sim"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "anarchist-readable-name-generator-lib",
  "clap",
@@ -1265,7 +1265,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sqlite3"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "env_logger 0.11.5",
  "libc",
@@ -1757,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "py-limbo"
-version = "0.0.11"
+version = "0.0.12"
 dependencies = [
  "anyhow",
  "limbo_core",
