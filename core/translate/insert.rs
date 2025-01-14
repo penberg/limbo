@@ -1,5 +1,4 @@
-use std::rc::Weak;
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::ops::Deref;
 
 use sqlite3_parser::ast::{
     DistinctNames, Expr, InsertBody, QualifiedName, ResolveType, ResultColumn, With,
@@ -9,23 +8,22 @@ use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::schema::BTreeTable;
 use crate::util::normalize_ident;
 use crate::vdbe::BranchOffset;
+use crate::Result;
 use crate::{
     schema::{Column, Schema},
-    storage::sqlite3_ondisk::DatabaseHeader,
     translate::expr::translate_expr,
     vdbe::{
         builder::{CursorType, ProgramBuilder},
         insn::Insn,
-        Program,
     },
     SymbolTable,
 };
-use crate::{Connection, Result};
 
 use super::emitter::Resolver;
 
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
+    program: &mut ProgramBuilder,
     schema: &Schema,
     with: &Option<With>,
     on_conflict: &Option<ResolveType>,
@@ -33,17 +31,14 @@ pub fn translate_insert(
     columns: &Option<DistinctNames>,
     body: &InsertBody,
     _returning: &Option<Vec<ResultColumn>>,
-    database_header: Rc<RefCell<DatabaseHeader>>,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
+) -> Result<()> {
     if with.is_some() {
         crate::bail_parse_error!("WITH clause is not supported");
     }
     if on_conflict.is_some() {
         crate::bail_parse_error!("ON CONFLICT clause is not supported");
     }
-    let mut program = ProgramBuilder::new();
     let resolver = Resolver::new(syms);
     let init_label = program.allocate_label();
     program.emit_insn(Insn::Init {
@@ -118,7 +113,7 @@ pub fn translate_insert(
 
         for value in values {
             populate_column_registers(
-                &mut program,
+                program,
                 value,
                 &column_mappings,
                 column_registers_start,
@@ -157,7 +152,7 @@ pub fn translate_insert(
         program.emit_insn(Insn::OpenWriteAwait {});
 
         populate_column_registers(
-            &mut program,
+            program,
             &values[0],
             &column_mappings,
             column_registers_start,
@@ -262,7 +257,8 @@ pub fn translate_insert(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
-    Ok(program.build(database_header, connection))
+
+    Ok(())
 }
 
 #[derive(Debug)]
