@@ -25,8 +25,7 @@ pub mod likeop;
 pub mod sorter;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
-#[cfg(feature = "uuid")]
-use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
+use crate::ext::ExtValue;
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
@@ -53,7 +52,7 @@ use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
 use sorter::Sorter;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
@@ -145,6 +144,33 @@ macro_rules! return_if_io {
             CursorResult::IO => return Ok(StepResult::IO),
         }
     };
+}
+
+macro_rules! call_external_function {
+    (
+        $func_ptr:expr,
+        $dest_register:expr,
+        $state:expr,
+        $arg_count:expr,
+        $start_reg:expr
+    ) => {{
+        if $arg_count == 0 {
+            let result_c_value: ExtValue = ($func_ptr)(0, std::ptr::null());
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        } else {
+            let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
+            let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
+            for ov in register_slice.iter() {
+                let val = ov.to_ffi();
+                ext_values.push(val);
+            }
+            let argv_ptr = ext_values.as_ptr();
+            let result_c_value: ExtValue = ($func_ptr)($arg_count as i32, argv_ptr);
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        }
+    }};
 }
 
 struct RegexCache {
@@ -1838,42 +1864,8 @@ impl Program {
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
                         },
-                        #[allow(unreachable_patterns)]
-                        crate::function::Func::Extension(extfn) => match extfn {
-                            #[cfg(feature = "uuid")]
-                            ExtFunc::Uuid(uuidfn) => match uuidfn {
-                                UuidFunc::Uuid4Str => {
-                                    state.registers[*dest] = exec_uuid(uuidfn, None)?
-                                }
-                                UuidFunc::Uuid7 => match arg_count {
-                                    0 => {
-                                        state.registers[*dest] =
-                                            exec_uuid(uuidfn, None).unwrap_or(OwnedValue::Null);
-                                    }
-                                    1 => {
-                                        let reg_value = state.registers[*start_reg].borrow();
-                                        state.registers[*dest] = exec_uuid(uuidfn, Some(reg_value))
-                                            .unwrap_or(OwnedValue::Null);
-                                    }
-                                    _ => unreachable!(),
-                                },
-                                _ => {
-                                    // remaining accept 1 arg
-                                    let reg_value = state.registers[*start_reg].borrow();
-                                    state.registers[*dest] = match uuidfn {
-                                        UuidFunc::Uuid7TS => Some(exec_ts_from_uuid7(reg_value)),
-                                        UuidFunc::UuidStr => exec_uuidstr(reg_value).ok(),
-                                        UuidFunc::UuidBlob => exec_uuidblob(reg_value).ok(),
-                                        _ => unreachable!(),
-                                    }
-                                    .unwrap_or(OwnedValue::Null);
-                                }
-                            },
-                            _ => unreachable!(), // when more extension types are added
-                        },
                         crate::function::Func::External(f) => {
-                            let result = (f.func)(&[])?;
-                            state.registers[*dest] = result;
+                            call_external_function! {f.func, *dest, state, arg_count, *start_reg };
                         }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {

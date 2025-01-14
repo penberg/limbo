@@ -1,0 +1,10 @@
+[package]
+name = "limbo_extension"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+log = "0.4.20"

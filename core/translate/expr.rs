@@ -1,7 +1,5 @@
 use sqlite3_parser::ast::{self, UnaryOperator};
 
-#[cfg(feature = "uuid")]
-use crate::ext::{ExtFunc, UuidFunc};
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
 use crate::function::{Func, FuncCtx, MathFuncArity, ScalarFunc};
@@ -764,13 +762,23 @@ pub fn translate_expr(
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
                 Func::External(_) => {
-                    let regs = program.alloc_register();
+                    let regs = program.alloc_registers(args_count);
+                    for (i, arg_expr) in args.iter().enumerate() {
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &arg_expr[i],
+                            regs + i,
+                            resolver,
+                        )?;
+                    }
                     program.emit_insn(Insn::Function {
                         constant_mask: 0,
                         start_reg: regs,
                         dest: target_register,
                         func: func_ctx,
                     });
+
                     Ok(target_register)
                 }
                 #[cfg(feature = "json")]
@@ -1428,60 +1436,6 @@ pub fn translate_expr(
                         }
                     }
                 }
-                Func::Extension(ext_func) => match ext_func {
-                    #[cfg(feature = "uuid")]
-                    ExtFunc::Uuid(ref uuid_fn) => match uuid_fn {
-                        UuidFunc::UuidStr | UuidFunc::UuidBlob | UuidFunc::Uuid7TS => {
-                            let args = expect_arguments_exact!(args, 1, ext_func);
-                            let regs = program.alloc_register();
-                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg: regs,
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
-                        UuidFunc::Uuid4Str => {
-                            if args.is_some() {
-                                crate::bail_parse_error!(
-                                    "{} function with arguments",
-                                    ext_func.to_string()
-                                );
-                            }
-                            let regs = program.alloc_register();
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg: regs,
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
-                        UuidFunc::Uuid7 => {
-                            let args = expect_arguments_max!(args, 1, ext_func);
-                            let mut start_reg = None;
-                            if let Some(arg) = args.first() {
-                                start_reg = Some(translate_and_mark(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    resolver,
-                                )?);
-                            }
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg: start_reg.unwrap_or(target_register),
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
-                    },
-                    #[allow(unreachable_patterns)]
-                    _ => unreachable!("{ext_func} not implemented yet"),
-                },
                 Func::Math(math_func) => match math_func.arity() {
                     MathFuncArity::Nullary => {
                         if args.is_some() {

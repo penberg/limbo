@@ -11,7 +11,7 @@ members = [
     "sqlite3",
     "core",
     "simulator",
-    "test", "macros",
+    "test", "macros", "limbo_extension", "extensions/uuid",
 ]
 exclude = ["perf/latency/limbo"]
 

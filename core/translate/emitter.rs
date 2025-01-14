@@ -35,14 +35,13 @@ impl<'a> Resolver<'a> {
     }
 
     pub fn resolve_function(&self, func_name: &str, arg_count: usize) -> Option<Func> {
-        let func_type = match Func::resolve_function(&func_name, arg_count).ok() {
+        match Func::resolve_function(func_name, arg_count).ok() {
             Some(func) => Some(func),
             None => self
                 .symbol_table
-                .resolve_function(&func_name, arg_count)
-                .map(|func| Func::External(func)),
-        };
-        func_type
+                .resolve_function(func_name, arg_count)
+                .map(|arg| Func::External(arg.clone())),
+        }
     }
 
     pub fn resolve_cached_expr_reg(&self, expr: &ast::Expr) -> Option<usize> {

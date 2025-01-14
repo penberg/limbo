@@ -18,6 +18,10 @@ mod vdbe;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use fallible_iterator::FallibleIterator;
+#[cfg(not(target_family = "wasm"))]
+use libloading::{Library, Symbol};
+#[cfg(not(target_family = "wasm"))]
+use limbo_extension::{ExtensionApi, ExtensionEntryPoint, RESULT_OK};
 use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
@@ -34,12 +38,11 @@ use storage::pager::allocate_page;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
+pub use types::Value;
 use util::parse_schema_rows;
 
-use translate::select::prepare_select_plan;
-use types::OwnedValue;
-
 pub use error::LimboError;
+use translate::select::prepare_select_plan;
 pub type Result<T> = std::result::Result<T, error::LimboError>;
 
 use crate::translate::optimizer::optimize_plan;
@@ -56,8 +59,6 @@ pub use storage::pager::Page;
 pub use storage::pager::Pager;
 pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
-pub use types::Value;
-
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
 #[derive(Clone)]
@@ -127,7 +128,7 @@ impl Database {
         let header = db_header;
         let schema = Rc::new(RefCell::new(Schema::new()));
         let syms = Rc::new(RefCell::new(SymbolTable::new()));
-        let mut db = Database {
+        let db = Database {
             pager: pager.clone(),
             schema: schema.clone(),
             header: header.clone(),
@@ -135,11 +136,10 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
-        ext::init(&mut db);
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),
-            pager: pager,
+            pager,
             schema: schema.clone(),
             header,
             transaction_state: RefCell::new(TransactionState::None),
@@ -169,16 +169,40 @@ impl Database {
     pub fn define_scalar_function<S: AsRef<str>>(
         &self,
         name: S,
-        func: impl Fn(&[Value]) -> Result<OwnedValue> + 'static,
+        func: limbo_extension::ScalarFunction,
     ) {
         let func = function::ExternalFunc {
             name: name.as_ref().to_string(),
-            func: Box::new(func),
+            func,
         };
         self.syms
             .borrow_mut()
             .functions
-            .insert(name.as_ref().to_string(), Rc::new(func));
+            .insert(name.as_ref().to_string(), func.into());
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn load_extension(&self, path: &str) -> Result<()> {
+        let api = Box::new(self.build_limbo_extension());
+        let lib =
+            unsafe { Library::new(path).map_err(|e| LimboError::ExtensionError(e.to_string()))? };
+        let entry: Symbol<ExtensionEntryPoint> = unsafe {
+            lib.get(b"register_extension")
+                .map_err(|e| LimboError::ExtensionError(e.to_string()))?
+        };
+        let api_ptr: *const ExtensionApi = Box::into_raw(api);
+        let result_code = entry(api_ptr);
+        if result_code == RESULT_OK {
+            self.syms.borrow_mut().extensions.push((lib, api_ptr));
+            Ok(())
+        } else {
+            if !api_ptr.is_null() {
+                let _ = unsafe { Box::from_raw(api_ptr.cast_mut()) };
+            }
+            Err(LimboError::ExtensionError(
+                "Extension registration failed".to_string(),
+            ))
+        }
     }
 }
 
@@ -307,7 +331,11 @@ impl Connection {
                 Cmd::ExplainQueryPlan(stmt) => {
                     match stmt {
                         ast::Stmt::Select(select) => {
-                            let mut plan = prepare_select_plan(&self.schema.borrow(), *select)?;
+                            let mut plan = prepare_select_plan(
+                                &self.schema.borrow(),
+                                *select,
+                                &self.db.syms.borrow(),
+                            )?;
                             optimize_plan(&mut plan)?;
                             println!("{}", plan);
                         }
@@ -370,6 +398,11 @@ impl Connection {
     pub fn checkpoint(&self) -> Result<()> {
         self.pager.clear_page_cache();
         Ok(())
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    pub fn load_extension(&self, path: &str) -> Result<()> {
+        Database::load_extension(self.db.as_ref(), path)
     }
 
     /// Close a connection and checkpoint.
@@ -468,15 +501,27 @@ impl Rows {
     }
 }
 
-#[derive(Debug)]
 pub(crate) struct SymbolTable {
     pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
+    #[cfg(not(target_family = "wasm"))]
+    extensions: Vec<(libloading::Library, *const ExtensionApi)>,
+}
+
+impl std::fmt::Debug for SymbolTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SymbolTable")
+            .field("functions", &self.functions)
+            .finish()
+    }
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            // TODO: wasm libs will be very different
+            #[cfg(not(target_family = "wasm"))]
+            extensions: Vec::new(),
         }
     }
 
