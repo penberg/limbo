@@ -114,14 +114,6 @@ do_execsql_test left-join-row-id {
 13|
 14|}
 
-do_execsql_test left-join-row-id-2 {
-    select u.rowid, p.rowid from users u left join products as p using(rowid) where u.rowid >= 10 limit 5;
-} {10|10
-11|11
-12|
-13|
-14|}
-
 do_execsql_test left-join-constant-condition-true {
     select u.first_name, p.name from users u left join products as p on true limit 1;
 } {Jamie|hat}

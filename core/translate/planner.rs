@@ -509,23 +509,17 @@ fn parse_join(
                     let left_tables = &tables[..table_index];
                     assert!(!left_tables.is_empty());
                     let right_table = &tables[table_index];
-                    let mut left_col =
-                        parse_row_id(&name_normalized, 0, || left_tables.len() != 1)?;
+                    let mut left_col = None;
                     for (left_table_idx, left_table) in left_tables.iter().enumerate() {
-                        if left_col.is_some() {
-                            break;
-                        }
                         left_col = left_table
                             .columns()
                             .iter()
                             .enumerate()
                             .find(|(_, col)| col.name == name_normalized)
-                            .map(|(idx, col)| ast::Expr::Column {
-                                database: None,
-                                table: left_table_idx,
-                                column: idx,
-                                is_rowid_alias: col.is_rowid_alias,
-                            });
+                            .map(|(idx, col)| (left_table_idx, idx, col));
+                        if left_col.is_some() {
+                            break;
+                        }
                     }
                     if left_col.is_none() {
                         crate::bail_parse_error!(
@@ -533,33 +527,33 @@ fn parse_join(
                             distinct_name.0
                         );
                     }
-                    let right_col =
-                        parse_row_id(&name_normalized, right_table.table_index, || false)?.or_else(
-                            || {
-                                right_table
-                                    .table
-                                    .columns()
-                                    .iter()
-                                    .enumerate()
-                                    .find(|(_, col)| col.name == name_normalized)
-                                    .map(|(i, col)| ast::Expr::Column {
-                                        database: None,
-                                        table: right_table.table_index,
-                                        column: i,
-                                        is_rowid_alias: col.is_rowid_alias,
-                                    })
-                            },
-                        );
+                    let right_col = right_table
+                        .columns()
+                        .iter()
+                        .enumerate()
+                        .find(|(_, col)| col.name == name_normalized);
                     if right_col.is_none() {
                         crate::bail_parse_error!(
                             "cannot join using column {} - column not present in all tables",
                             distinct_name.0
                         );
                     }
+                    let (left_table_idx, left_col_idx, left_col) = left_col.unwrap();
+                    let (right_col_idx, right_col) = right_col.unwrap();
                     using_predicates.push(ast::Expr::Binary(
-                        Box::new(left_col.unwrap()),
+                        Box::new(ast::Expr::Column {
+                            database: None,
+                            table: left_table_idx,
+                            column: left_col_idx,
+                            is_rowid_alias: left_col.is_rowid_alias,
+                        }),
                         ast::Operator::Equals,
-                        Box::new(right_col.unwrap()),
+                        Box::new(ast::Expr::Column {
+                            database: None,
+                            table: right_table.table_index,
+                            column: right_col_idx,
+                            is_rowid_alias: right_col.is_rowid_alias,
+                        }),
                     ));
                 }
                 predicates = Some(using_predicates);
