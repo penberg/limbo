@@ -4,15 +4,15 @@ import net.ltgt.gradle.errorprone.errorprone
 plugins {
     java
     application
-    id("net.ltgt.errorprone") version "4.1.0"
+    id("net.ltgt.errorprone") version "3.1.0"
 }
 
 group = "org.github.tursodatabase"
 version = "0.0.1-SNAPSHOT"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
 }
 
 repositories {
@@ -20,8 +20,8 @@ repositories {
 }
 
 dependencies {
-    errorprone("com.uber.nullaway:nullaway:0.12.3")
-    errorprone("com.google.errorprone:error_prone_core:2.36.0")
+    errorprone("com.uber.nullaway:nullaway:0.10.26") // maximum version which supports java 8
+    errorprone("com.google.errorprone:error_prone_core:2.11.0")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
