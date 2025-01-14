@@ -209,7 +209,7 @@ impl Interaction {
                 let rows = conn.query(&query_str);
                 if rows.is_err() {
                     let err = rows.err();
-                    log::error!(
+                    log::debug!(
                         "Error running query '{}': {:?}",
                         &query_str[0..query_str.len().min(4096)],
                         err
