@@ -20,7 +20,7 @@ mod model;
 mod runner;
 
 fn main() {
-    let _ = env_logger::try_init();
+    init_logger();
 
     let cli_opts = SimulatorCLI::parse();
 
@@ -325,4 +325,12 @@ fn compare_equal_rows(a: &[Vec<Value>], b: &[Vec<Value>]) {
             assert_eq!(v1, v2, "values are different");
         }
     }
+}
+
+fn init_logger() {
+    env_logger::Builder::from_env(env_logger::Env::default().filter_or("RUST_LOG", "info"))
+        .format_timestamp(None)
+        .format_module_path(false)
+        .format_target(false)
+        .init();
 }
