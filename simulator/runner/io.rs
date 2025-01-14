@@ -42,7 +42,10 @@ impl SimulatorIO {
     pub(crate) fn print_stats(&self) {
         println!("run_once faults: {}", self.nr_run_once_faults.borrow());
         for file in self.files.borrow().iter() {
+            println!();
+            println!("===========================");
             file.print_stats();
+            println!();
         }
     }
 }
