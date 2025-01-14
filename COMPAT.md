@@ -445,7 +445,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | SeekRowid      | Yes    |
 | Sequence       | No     |
 | SetCookie      | No     |
-| ShiftLeft      | No     |
+| ShiftLeft      | Yes    |
 | ShiftRight     | No     |
 | SoftNull       | Yes    |
 | Sort           | No     |
