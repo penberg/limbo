@@ -37,6 +37,8 @@ fn main() {
     let db_path = output_dir.join("simulator.db");
     let plan_path = output_dir.join("simulator.plan");
 
+    banner();
+
     // Print the seed, the locations of the database and the plan file
     log::info!("database path: {:?}", db_path);
     log::info!("simulator plan path: {:?}", plan_path);
@@ -334,3 +336,30 @@ fn init_logger() {
         .format_target(false)
         .init();
 }
+
+fn banner() {
+    println!("{}", BANNER);
+}
+
+const BANNER: &str = r#"
+  ,_______________________________.
+  | ,___________________________. |
+  | |                           | |
+  | | >HELLO                    | |
+  | |                           | |
+  | | >A STRANGE GAME.          | |
+  | | >THE ONLY WINNING MOVE IS | |
+  | | >NOT TO PLAY.             | |
+  | |___________________________| |
+  |                               |
+  |                               |
+  `-------------------------------`
+          |              |
+          |______________|
+      ,______________________.
+     / /====================\ \
+    / /======================\ \
+   /____________________________\
+   \____________________________/
+
+"#;
