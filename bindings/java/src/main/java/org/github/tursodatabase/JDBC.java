@@ -10,7 +10,7 @@ import java.util.Properties;
 import java.util.logging.Logger;
 
 public class JDBC implements Driver {
-    private static final String VALID_URL_PREFIX = "jdbc:limbo:";
+    private static final String VALID_URL_PREFIX = "jdbc:sqlite:";
 
     static {
         try {
