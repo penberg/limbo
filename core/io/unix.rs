@@ -142,9 +142,9 @@ impl File for UnixFile {
         fs::fcntl_lock(
             fd,
             if exclusive {
-                FlockOperation::LockExclusive
+                FlockOperation::NonBlockingLockExclusive
             } else {
-                FlockOperation::LockShared
+                FlockOperation::NonBlockingLockShared
             },
         )
         .map_err(|e| {
@@ -164,7 +164,7 @@ impl File for UnixFile {
     fn unlock_file(&self) -> Result<()> {
         let fd = self.file.borrow();
         let fd = fd.as_fd();
-        fs::fcntl_lock(fd, FlockOperation::Unlock).map_err(|e| {
+        fs::fcntl_lock(fd, FlockOperation::NonBlockingUnlock).map_err(|e| {
             LimboError::LockingError(format!(
                 "Failed to release file lock: {}",
                 std::io::Error::from(e)
