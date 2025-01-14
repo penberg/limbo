@@ -10,10 +10,10 @@ Dependencies
 
 This product depends on Error Prone, distributed by the Error Prone project:
 
-* License: licenses/LICENSE.errorprone.al20.txt (Apache License v2.0)
+* License: licenses/assertj-license.md (Apache License v2.0)
 * Homepage: https://github.com/google/error-prone
 
 This product depends on AssertJ, distributed by the AssertJ authors:
 
-* License: licenses/LICENSE.assertj.al20.txt (Apache License v2.0)
+* License: licenses/errorprone-license.md (Apache License v2.0)
 * Homepage: https://joel-costigliola.github.io/assertj/
