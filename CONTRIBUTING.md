@@ -143,3 +143,15 @@ Once Maturin is installed, you can build the crate and install it as a Python mo
 ```bash
 cd bindings/python && maturin develop
 ```
+
+## Adding Third Party Dependencies
+
+When you want to add third party dependencies, please follow these steps:
+
+1. Add Licenses: Place the appropriate licenses for the third-party dependencies under the licenses directory. Ensure
+   that each license is in a separate file and named appropriately.
+2. Update NOTICE.md: Specify the licenses for the third-party dependencies in the NOTICE.md file. Include the name of
+   the dependency, the license file path, and the homepage of the dependency.
+
+By following these steps, you ensure that all third-party dependencies are properly documented and their licenses are
+included in the project.
