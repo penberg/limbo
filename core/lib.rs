@@ -386,6 +386,7 @@ impl Connection {
                         Rc::downgrade(self),
                         syms,
                     )?;
+
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
                 }
@@ -473,7 +474,14 @@ impl Statement {
         Ok(Rows::new(stmt))
     }
 
-    pub fn reset(&self) {}
+    pub fn reset(&self) {
+        self.state.reset();
+    }
+
+    pub fn bind(&mut self, value: Value) {
+        self.state.bind(value.into());
+    }
+
 }
 
 pub enum StepResult<'a> {

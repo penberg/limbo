@@ -55,6 +55,7 @@ use sorter::Sorter;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZero;
 use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -200,6 +201,7 @@ pub struct ProgramState {
     ended_coroutine: HashMap<usize, bool>, // flag to indicate that a coroutine has ended (key is the yield register)
     regex_cache: RegexCache,
     interrupted: bool,
+    parameters: Vec<OwnedValue>,
 }
 
 impl ProgramState {
@@ -222,6 +224,7 @@ impl ProgramState {
             ended_coroutine: HashMap::new(),
             regex_cache: RegexCache::new(),
             interrupted: false,
+            parameters: Vec::new(),
         }
     }
 
@@ -239,6 +242,18 @@ impl ProgramState {
 
     pub fn is_interrupted(&self) -> bool {
         self.interrupted
+    }
+
+    pub fn bind(&mut self, value: OwnedValue) {
+        self.parameters.push(value);
+    }
+
+    pub fn get_parameter(&self, index: NonZero<usize>) -> Option<&OwnedValue> {
+        self.parameters.get(usize::from(index) - 1)
+    }
+
+    pub fn reset(&self) {
+        self.parameters.clear();
     }
 }
 
@@ -2180,6 +2195,13 @@ impl Program {
                 Insn::ShiftLeft { lhs, rhs, dest } => {
                     state.registers[*dest] =
                         exec_shift_left(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::Variable { index, dest } => {
+                    state.registers[*dest] = state
+                        .get_parameter(*index)
+                        .ok_or(LimboError::Unbound(*index))?
+                        .clone();
                     state.pc += 1;
                 }
             }

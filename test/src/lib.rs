@@ -40,7 +40,7 @@ impl TempDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use limbo_core::{CheckpointStatus, Connection, StepResult, Value};
+    use limbo_core::{CheckpointStatus, Connection, Rows, StepResult, Value};
     use log::debug;
 
     #[ignore]
@@ -570,6 +570,31 @@ mod tests {
         };
         assert_eq!(last_id, 5, "Explicit insert should have rowid 5");
         do_flush(&conn, &tmp_db)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_statement_bind() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
+        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+        let conn = tmp_db.connect_limbo();
+        let mut stmt = conn.prepare("select ?")?;
+        stmt.bind(Value::Text(&"hello".to_string()));
+        loop {
+            match stmt.step()? {
+                StepResult::Row(row) => {
+                    if let Value::Text(s) = row.values[0] {
+                        assert_eq!(s, "hello")
+                    }
+                }
+                StepResult::IO => {
+                    tmp_db.io.run_once()?;
+                }
+                StepResult::Interrupt => break,
+                StepResult::Done => break,
+                StepResult::Busy => panic!("Database is busy"),
+            };
+        }
         Ok(())
     }
 }

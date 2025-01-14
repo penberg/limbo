@@ -1,3 +1,5 @@
+use std::num::NonZero;
+
 use super::{AggFunc, BranchOffset, CursorID, FuncCtx, PageIdx};
 use crate::types::{OwnedRecord, OwnedValue};
 use limbo_macros::Description;
@@ -487,16 +489,24 @@ pub enum Insn {
         db: usize,
         where_clause: String,
     },
+
     // Place the result of lhs >> rhs in dest register.
     ShiftRight {
         lhs: usize,
         rhs: usize,
         dest: usize,
     },
+
     // Place the result of lhs << rhs in dest register.
     ShiftLeft {
         lhs: usize,
         rhs: usize,
+        dest: usize,
+    },
+
+    /// Get parameter variable.
+    Variable {
+        index: NonZero<usize>,
         dest: usize,
     },
 }

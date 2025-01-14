@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
+    num::NonZero,
     rc::{Rc, Weak},
 };
 
@@ -29,6 +30,8 @@ pub struct ProgramBuilder {
     seekrowid_emitted_bitmask: u64,
     // map of instruction index to manual comment (used in EXPLAIN)
     comments: HashMap<InsnReference, &'static str>,
+    named_parameters: HashMap<String, NonZero<usize>>,
+    next_free_parameter_index: NonZero<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +54,7 @@ impl ProgramBuilder {
             next_free_register: 1,
             next_free_label: 0,
             next_free_cursor_id: 0,
+            next_free_parameter_index: 1.into(),
             insns: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),
@@ -58,6 +62,7 @@ impl ProgramBuilder {
             label_to_resolved_offset: HashMap::new(),
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
+            named_parameters: HashMap::new(),
         }
     }
 
@@ -339,6 +344,29 @@ impl ProgramBuilder {
             comments: self.comments,
             connection,
             auto_commit: true,
+        }
+    }
+
+    fn next_parameter(&mut self) -> NonZero<usize> {
+        let index = self.next_free_parameter_index;
+        self.next_free_parameter_index.checked_add(1).unwrap();
+        index
+    }
+
+    pub fn get_parameter_index(&mut self, name: impl AsRef<str>) -> NonZero<usize> {
+        let name = name.as_ref();
+
+        if name == "" {
+            return self.next_parameter();
+        }
+
+        match self.named_parameters.get(name) {
+            Some(index) => *index,
+            None => {
+                let index = self.next_parameter();
+                self.named_parameters.insert(name.to_owned(), index);
+                index
+            }
         }
     }
 }
