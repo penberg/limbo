@@ -54,7 +54,7 @@ impl ProgramBuilder {
             next_free_register: 1,
             next_free_label: 0,
             next_free_cursor_id: 0,
-            next_free_parameter_index: 1.into(),
+            next_free_parameter_index: 1.try_into().unwrap(),
             insns: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),

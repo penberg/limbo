@@ -474,7 +474,7 @@ impl Statement {
         Ok(Rows::new(stmt))
     }
 
-    pub fn reset(&self) {
+    pub fn reset(&mut self) {
         self.state.reset();
     }
 

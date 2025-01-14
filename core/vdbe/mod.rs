@@ -252,7 +252,7 @@ impl ProgramState {
         self.parameters.get(usize::from(index) - 1)
     }
 
-    pub fn reset(&self) {
+    pub fn reset(&mut self) {
         self.parameters.clear();
     }
 }
