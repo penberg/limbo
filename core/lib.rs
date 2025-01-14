@@ -481,7 +481,6 @@ impl Statement {
     pub fn bind(&mut self, value: Value) {
         self.state.bind(value.into());
     }
-
 }
 
 pub enum StepResult<'a> {
