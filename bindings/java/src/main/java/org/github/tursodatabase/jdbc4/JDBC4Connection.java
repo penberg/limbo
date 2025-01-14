@@ -4,6 +4,7 @@ import org.github.tursodatabase.LimboConnection;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 
 import java.sql.*;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Executor;
@@ -150,7 +151,7 @@ public class JDBC4Connection extends LimboConnection {
     @Override
     public Map<String, Class<?>> getTypeMap() throws SQLException {
         // TODO
-        return Map.of();
+        return new HashMap<>();
     }
 
     @Override

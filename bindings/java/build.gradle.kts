@@ -21,7 +21,7 @@ repositories {
 
 dependencies {
     errorprone("com.uber.nullaway:nullaway:0.10.26") // maximum version which supports java 8
-    errorprone("com.google.errorprone:error_prone_core:2.11.0")
+    errorprone("com.google.errorprone:error_prone_core:2.10.0") // maximum version which supports java 8
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
