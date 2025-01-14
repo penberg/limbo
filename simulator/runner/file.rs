@@ -29,29 +29,29 @@ impl SimulatorFile {
     }
 
     pub(crate) fn print_stats(&self) {
-        println!("op           calls   faults");
-        println!("--------- -------- --------");
-        println!(
+        log::info!("op           calls   faults");
+        log::info!("--------- -------- --------");
+        log::info!(
             "pread     {:8} {:8}",
             *self.nr_pread_calls.borrow(),
             *self.nr_pread_faults.borrow()
         );
-        println!(
+        log::info!(
             "pwrite    {:8} {:8}",
             *self.nr_pwrite_calls.borrow(),
             *self.nr_pwrite_faults.borrow()
         );
-        println!(
+        log::info!(
             "sync      {:8} {:8}",
             *self.nr_sync_calls.borrow(),
             0 // No fault counter for sync
         );
-        println!("--------- -------- --------");
+        log::info!("--------- -------- --------");
         let sum_calls = *self.nr_pread_calls.borrow()
             + *self.nr_pwrite_calls.borrow()
             + *self.nr_sync_calls.borrow();
         let sum_faults = *self.nr_pread_faults.borrow() + *self.nr_pwrite_faults.borrow();
-        println!("total     {:8} {:8}", sum_calls, sum_faults);
+        log::info!("total     {:8} {:8}", sum_calls, sum_faults);
     }
 }
 
