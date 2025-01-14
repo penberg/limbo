@@ -253,10 +253,10 @@ def test_import_csv(test_name: str, options: str, import_output: str, table_outp
         table_output,
     )
 
-test_import_csv('no_options', '--csv', '', '1|2.0|String1\n3|4.0|String2')
+test_import_csv('no_options', '--csv', '', '1|2.0|String\'1\n3|4.0|String2')
 test_import_csv('verbose', '--csv -v', 
                 'Added 2 rows with 0 errors using 2 lines of input' 
-                ,'1|2.0|String1\n3|4.0|String2')
+                ,'1|2.0|String\'1\n3|4.0|String2')
 test_import_csv('skip', '--csv --skip 1', '' ,'3|4.0|String2')
 
 

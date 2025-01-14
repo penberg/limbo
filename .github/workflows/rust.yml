@@ -37,7 +37,7 @@ jobs:
       env:
         RUST_LOG: ${{ runner.debug && 'limbo_core::storage=trace' || '' }}
       run: cargo test --verbose
-      timeout-minutes: 5
+      timeout-minutes: 10
 
 
   clippy:
@@ -59,31 +59,29 @@ jobs:
   bench:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Bench
-      run: cargo bench
+      - uses: actions/checkout@v3
+      - name: Bench
+        run: cargo bench
 
   test-limbo:
     runs-on: ubuntu-latest
     steps:
-    - name: Install sqlite
-      run: sudo apt update && sudo apt install -y sqlite3 libsqlite3-dev
-    - name: Install cargo-c
-      env:
-        LINK: https://github.com/lu-zero/cargo-c/releases/download/v0.10.7
-        CARGO_C_FILE: cargo-c-x86_64-unknown-linux-musl.tar.gz
-      run: |
-        curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
+      - name: Install cargo-c
+        env:
+          LINK: https://github.com/lu-zero/cargo-c/releases/download/v0.10.7
+          CARGO_C_FILE: cargo-c-x86_64-unknown-linux-musl.tar.gz
+        run: |
+          curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
 
-    - uses: actions/checkout@v3
-    - name: Test
-      run: make test
+      - uses: actions/checkout@v3
+      - uses: "./.github/shared/install_sqlite"
+      - name: Test
+        run: make test
 
   test-sqlite:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Install sqlite
-      run: sudo apt update && sudo apt install -y sqlite3 libsqlite3-dev
-    - name: Test
-      run: SQLITE_EXEC="sqlite3" make test-compat
+      - uses: actions/checkout@v3
+      - uses: "./.github/shared/install_sqlite"
+      - name: Test
+        run: SQLITE_EXEC="sqlite3" make test-compat

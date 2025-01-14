@@ -1,9 +1,12 @@
 use sqlite3_parser::ast;
 
 use crate::{
-    schema::Table,
     translate::result_row::emit_select_result,
-    vdbe::{builder::ProgramBuilder, insn::Insn, BranchOffset},
+    vdbe::{
+        builder::{CursorType, ProgramBuilder},
+        insn::Insn,
+        BranchOffset,
+    },
     Result,
 };
 
@@ -81,7 +84,7 @@ pub fn init_loop(
         } => {
             let cursor_id = program.alloc_cursor_id(
                 Some(table_reference.table_identifier.clone()),
-                Some(table_reference.table.clone()),
+                CursorType::BTreeTable(table_reference.btree().unwrap().clone()),
             );
             let root_page = table_reference.table.get_root_page();
 
@@ -114,7 +117,7 @@ pub fn init_loop(
         } => {
             let table_cursor_id = program.alloc_cursor_id(
                 Some(table_reference.table_identifier.clone()),
-                Some(table_reference.table.clone()),
+                CursorType::BTreeTable(table_reference.btree().unwrap().clone()),
             );
 
             match mode {
@@ -138,8 +141,10 @@ pub fn init_loop(
             }
 
             if let Search::IndexSearch { index, .. } = search {
-                let index_cursor_id = program
-                    .alloc_cursor_id(Some(index.name.clone()), Some(Table::Index(index.clone())));
+                let index_cursor_id = program.alloc_cursor_id(
+                    Some(index.name.clone()),
+                    CursorType::BTreeIndex(index.clone()),
+                );
 
                 match mode {
                     OperationMode::SELECT => {

@@ -1,11 +1,7 @@
-use std::rc::Weak;
-use std::{cell::RefCell, rc::Rc};
-
 use super::emitter::emit_program;
 use super::expr::get_name;
 use super::plan::SelectQueryType;
 use crate::function::Func;
-use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{Aggregate, Direction, GroupBy, Plan, ResultSetColumn, SelectPlan};
 use crate::translate::planner::{
@@ -13,21 +9,20 @@ use crate::translate::planner::{
     parse_where, resolve_aggregates, OperatorIdCounter,
 };
 use crate::util::normalize_ident;
-use crate::{schema::Schema, vdbe::Program, Result};
-use crate::{Connection, SymbolTable};
+use crate::SymbolTable;
+use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
 use sqlite3_parser::ast;
 use sqlite3_parser::ast::ResultColumn;
 
 pub fn translate_select(
+    program: &mut ProgramBuilder,
     schema: &Schema,
     select: ast::Select,
-    database_header: Rc<RefCell<DatabaseHeader>>,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
+) -> Result<()> {
     let mut select_plan = prepare_select_plan(schema, select)?;
     optimize_plan(&mut select_plan)?;
-    emit_program(database_header, select_plan, connection, syms)
+    emit_program(program, select_plan, syms)
 }
 
 pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan> {

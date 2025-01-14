@@ -1,5 +1,5 @@
 use std::fmt::Display;
-use std::{cell::Ref, rc::Rc};
+use std::rc::Rc;
 
 use crate::error::LimboError;
 use crate::Result;
@@ -522,31 +522,6 @@ pub enum SeekOp {
 pub enum SeekKey<'a> {
     TableRowId(u64),
     IndexKey(&'a OwnedRecord),
-}
-
-pub trait Cursor {
-    fn is_empty(&self) -> bool;
-    fn root_page(&self) -> usize;
-    fn rewind(&mut self) -> Result<CursorResult<()>>;
-    fn last(&mut self) -> Result<CursorResult<()>>;
-    fn next(&mut self) -> Result<CursorResult<()>>;
-    fn prev(&mut self) -> Result<CursorResult<()>>;
-    fn wait_for_completion(&mut self) -> Result<()>;
-    fn rowid(&self) -> Result<Option<u64>>;
-    fn seek(&mut self, key: SeekKey, op: SeekOp) -> Result<CursorResult<bool>>;
-    fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
-    fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
-    fn insert(
-        &mut self,
-        key: &OwnedValue,
-        record: &OwnedRecord,
-        moved_before: bool, /* Tells inserter that it doesn't need to traverse in order to find leaf page */
-    ) -> Result<CursorResult<()>>; //
-    fn delete(&mut self) -> Result<CursorResult<()>>;
-    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
-    fn set_null_flag(&mut self, flag: bool);
-    fn get_null_flag(&self) -> bool;
-    fn btree_create(&mut self, flags: usize) -> u32;
 }
 
 #[cfg(test)]

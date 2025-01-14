@@ -1,6 +1,6 @@
-.PHONY: lib
+.PHONY: test build_test
 
-run_test: build_test
+test: build_test
 	./gradlew test
 
 build_test:

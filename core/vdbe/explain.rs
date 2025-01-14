@@ -1,3 +1,5 @@
+use crate::vdbe::builder::CursorType;
+
 use super::{Insn, InsnReference, OwnedValue, Program};
 use std::rc::Rc;
 
@@ -387,7 +389,19 @@ pub fn insn_to_str(
                 column,
                 dest,
             } => {
-                let (table_identifier, table) = &program.cursor_ref[*cursor_id];
+                let (table_identifier, cursor_type) = &program.cursor_ref[*cursor_id];
+                let column_name = match cursor_type {
+                    CursorType::BTreeTable(table) => {
+                        Some(&table.columns.get(*column).unwrap().name)
+                    }
+                    CursorType::BTreeIndex(index) => {
+                        Some(&index.columns.get(*column).unwrap().name)
+                    }
+                    CursorType::Pseudo(pseudo_table) => {
+                        Some(&pseudo_table.columns.get(*column).unwrap().name)
+                    }
+                    CursorType::Sorter => None,
+                };
                 (
                     "Column",
                     *cursor_id as i32,
@@ -401,10 +415,7 @@ pub fn insn_to_str(
                         table_identifier
                             .as_ref()
                             .unwrap_or(&format!("cursor {}", cursor_id)),
-                        table
-                            .as_ref()
-                            .and_then(|x| x.column_index_to_name(*column))
-                            .unwrap_or(format!("column {}", *column).as_str())
+                        column_name.unwrap_or(&format!("column {}", *column))
                     ),
                 )
             }
