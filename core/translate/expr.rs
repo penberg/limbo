@@ -1,7 +1,5 @@
 use sqlite3_parser::ast::{self, UnaryOperator};
 
-#[cfg(feature = "uuid")]
-use crate::ext::{ExtFunc, UuidFunc};
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
 use crate::function::{Func, FuncCtx, MathFuncArity, ScalarFunc};
@@ -18,7 +16,6 @@ pub struct ConditionMetadata {
     pub jump_if_condition_is_true: bool,
     pub jump_target_when_true: BranchOffset,
     pub jump_target_when_false: BranchOffset,
-    pub parent_op: Option<ast::Operator>,
 }
 
 fn emit_cond_jump(program: &mut ProgramBuilder, cond_meta: ConditionMetadata, reg: usize) {
@@ -157,87 +154,53 @@ pub fn translate_condition_expr(
     match expr {
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
-            // In a binary AND, never jump to the 'jump_target_when_true' label on the first condition, because
-            // the second condition must also be true.
-            let _ = translate_condition_expr(
+            // In a binary AND, never jump to the parent 'jump_target_when_true' label on the first condition, because
+            // the second condition MUST also be true. Instead we instruct the child expression to jump to a local
+            // true label.
+            let jump_target_when_true = program.allocate_label();
+            translate_condition_expr(
                 program,
                 referenced_tables,
                 lhs,
                 ConditionMetadata {
-                    jump_if_condition_is_true: false,
-                    // Mark that the parent op for sub-expressions is AND
-                    parent_op: Some(ast::Operator::And),
+                    jump_target_when_true,
                     ..condition_metadata
                 },
                 resolver,
-            );
-            let _ = translate_condition_expr(
+            )?;
+            program.resolve_label(jump_target_when_true, program.offset());
+            translate_condition_expr(
                 program,
                 referenced_tables,
                 rhs,
+                condition_metadata,
+                resolver,
+            )?;
+        }
+        ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
+            // In a binary OR, never jump to the parent 'jump_target_when_false' label on the first condition, because
+            // the second condition CAN also be true. Instead we instruct the child expression to jump to a local
+            // false label.
+            let jump_target_when_false = program.allocate_label();
+            translate_condition_expr(
+                program,
+                referenced_tables,
+                lhs,
                 ConditionMetadata {
-                    parent_op: Some(ast::Operator::And),
+                    jump_if_condition_is_true: true,
+                    jump_target_when_false,
                     ..condition_metadata
                 },
                 resolver,
-            );
-        }
-        ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
-            if matches!(condition_metadata.parent_op, Some(ast::Operator::And)) {
-                // we are inside a bigger AND expression, so we do NOT jump to parent's 'true' if LHS or RHS is true.
-                // we only short-circuit the parent's false label if LHS and RHS are both false.
-                let local_true_label = program.allocate_label();
-                let local_false_label = program.allocate_label();
-
-                // evaluate LHS in normal OR fashion, short-circuit local if true
-                let lhs_metadata = ConditionMetadata {
-                    jump_if_condition_is_true: true,
-                    jump_target_when_true: local_true_label,
-                    jump_target_when_false: local_false_label,
-                    parent_op: Some(ast::Operator::Or),
-                };
-                translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
-
-                // if lhs was false, we land here:
-                program.resolve_label(local_false_label, program.offset());
-
-                // evaluate rhs with normal OR: short-circuit if true, go to local_true
-                let rhs_metadata = ConditionMetadata {
-                    jump_if_condition_is_true: true,
-                    jump_target_when_true: local_true_label,
-                    jump_target_when_false: condition_metadata.jump_target_when_false,
-                    // if rhs is also false => parent's false
-                    parent_op: Some(ast::Operator::Or),
-                };
-                translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
-
-                // if we get here, both lhs+rhs are false: explicit jump to parent's false
-                program.emit_insn(Insn::Goto {
-                    target_pc: condition_metadata.jump_target_when_false,
-                });
-                // local_true: we do not jump to parent's "true" label because the parent is AND,
-                // so we want to keep evaluating the rest
-                program.resolve_label(local_true_label, program.offset());
-            } else {
-                let jump_target_when_false = program.allocate_label();
-
-                let lhs_metadata = ConditionMetadata {
-                    jump_if_condition_is_true: true,
-                    jump_target_when_false,
-                    parent_op: Some(ast::Operator::Or),
-                    ..condition_metadata
-                };
-
-                translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
-
-                // if LHS was false, we land here:
-                program.resolve_label(jump_target_when_false, program.offset());
-                let rhs_metadata = ConditionMetadata {
-                    parent_op: Some(ast::Operator::Or),
-                    ..condition_metadata
-                };
-                translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
-            }
+            )?;
+            program.resolve_label(jump_target_when_false, program.offset());
+            translate_condition_expr(
+                program,
+                referenced_tables,
+                rhs,
+                condition_metadata,
+                resolver,
+            )?;
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = translate_and_mark(program, Some(referenced_tables), lhs, resolver)?;
@@ -633,6 +596,20 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::RightShift => {
+                    program.emit_insn(Insn::ShiftRight {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
+                ast::Operator::LeftShift => {
+                    program.emit_insn(Insn::ShiftLeft {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 #[cfg(feature = "json")]
                 op @ (ast::Operator::ArrowRight | ast::Operator::ArrowRightShift) => {
                     let json_func = match op {
@@ -782,13 +759,23 @@ pub fn translate_expr(
                     crate::bail_parse_error!("aggregation function in non-aggregation context")
                 }
                 Func::External(_) => {
-                    let regs = program.alloc_register();
+                    let regs = program.alloc_registers(args_count);
+                    for (i, arg_expr) in args.iter().enumerate() {
+                        translate_expr(
+                            program,
+                            referenced_tables,
+                            &arg_expr[i],
+                            regs + i,
+                            resolver,
+                        )?;
+                    }
                     program.emit_insn(Insn::Function {
                         constant_mask: 0,
                         start_reg: regs,
                         dest: target_register,
                         func: func_ctx,
                     });
+
                     Ok(target_register)
                 }
                 #[cfg(feature = "json")]
@@ -1103,6 +1090,19 @@ pub fn translate_expr(
                         | ScalarFunc::Sign
                         | ScalarFunc::Soundex
                         | ScalarFunc::ZeroBlob => {
+                            let args = expect_arguments_exact!(args, 1, srf);
+                            let reg =
+                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: reg,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
+                        #[cfg(not(target_family = "wasm"))]
+                        ScalarFunc::LoadExtension => {
                             let args = expect_arguments_exact!(args, 1, srf);
                             let reg =
                                 translate_and_mark(program, referenced_tables, &args[0], resolver)?;
@@ -1458,60 +1458,6 @@ pub fn translate_expr(
                         }
                     }
                 }
-                Func::Extension(ext_func) => match ext_func {
-                    #[cfg(feature = "uuid")]
-                    ExtFunc::Uuid(ref uuid_fn) => match uuid_fn {
-                        UuidFunc::UuidStr | UuidFunc::UuidBlob | UuidFunc::Uuid7TS => {
-                            let args = expect_arguments_exact!(args, 1, ext_func);
-                            let regs = program.alloc_register();
-                            translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg: regs,
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
-                        UuidFunc::Uuid4Str => {
-                            if args.is_some() {
-                                crate::bail_parse_error!(
-                                    "{} function with arguments",
-                                    ext_func.to_string()
-                                );
-                            }
-                            let regs = program.alloc_register();
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg: regs,
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
-                        UuidFunc::Uuid7 => {
-                            let args = expect_arguments_max!(args, 1, ext_func);
-                            let mut start_reg = None;
-                            if let Some(arg) = args.first() {
-                                start_reg = Some(translate_and_mark(
-                                    program,
-                                    referenced_tables,
-                                    arg,
-                                    resolver,
-                                )?);
-                            }
-                            program.emit_insn(Insn::Function {
-                                constant_mask: 0,
-                                start_reg: start_reg.unwrap_or(target_register),
-                                dest: target_register,
-                                func: func_ctx,
-                            });
-                            Ok(target_register)
-                        }
-                    },
-                    #[allow(unreachable_patterns)]
-                    _ => unreachable!("{ext_func} not implemented yet"),
-                },
                 Func::Math(math_func) => match math_func.arity() {
                     MathFuncArity::Nullary => {
                         if args.is_some() {
@@ -1621,6 +1567,15 @@ pub fn translate_expr(
                 }
             }
         }
+        ast::Expr::RowId { database: _, table } => {
+            let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
+            let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
+            program.emit_insn(Insn::RowId {
+                cursor_id,
+                dest: target_register,
+            });
+            Ok(target_register)
+        }
         ast::Expr::InList { .. } => todo!(),
         ast::Expr::InSelect { .. } => todo!(),
         ast::Expr::InTable { .. } => todo!(),
@@ -1727,7 +1682,6 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
-                program.mark_last_insn_constant();
                 Ok(target_register)
             }
             (UnaryOperator::Negative | UnaryOperator::Positive, _) => {
@@ -1766,7 +1720,6 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
-                program.mark_last_insn_constant();
                 Ok(target_register)
             }
             (UnaryOperator::BitwiseNot, ast::Expr::Literal(ast::Literal::Null)) => {
@@ -1774,7 +1727,6 @@ pub fn translate_expr(
                     dest: target_register,
                     dest_end: None,
                 });
-                program.mark_last_insn_constant();
                 Ok(target_register)
             }
             (UnaryOperator::BitwiseNot, _) => {
@@ -1788,7 +1740,14 @@ pub fn translate_expr(
             }
             _ => todo!(),
         },
-        ast::Expr::Variable(_) => todo!(),
+        ast::Expr::Variable(name) => {
+            let index = program.parameters.push(name);
+            program.emit_insn(Insn::Variable {
+                index,
+                dest: target_register,
+            });
+            Ok(target_register)
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use crate::{
     opcodes_dictionary::OPCODE_DESCRIPTIONS,
 };
 use cli_table::{Cell, Table};
-use limbo_core::{Database, LimboError, StepResult, Value};
+use limbo_core::{Database, LimboError, Rows, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -129,6 +129,8 @@ pub enum Command {
     Tables,
     /// Import data from FILE into TABLE
     Import,
+    /// Loads an extension library
+    LoadExtension,
 }
 
 impl Command {
@@ -141,7 +143,12 @@ impl Command {
             | Self::ShowInfo
             | Self::Tables
             | Self::SetOutput => 0,
-            Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
+            Self::Open
+            | Self::OutputMode
+            | Self::Cwd
+            | Self::Echo
+            | Self::NullValue
+            | Self::LoadExtension => 1,
             Self::Import => 2,
         } + 1) // argv0
     }
@@ -160,6 +167,7 @@ impl Command {
             Self::NullValue => ".nullvalue <string>",
             Self::Echo => ".echo on|off",
             Self::Tables => ".tables",
+            Self::LoadExtension => ".load",
             Self::Import => &IMPORT_HELP,
         }
     }
@@ -182,6 +190,7 @@ impl FromStr for Command {
             ".nullvalue" => Ok(Self::NullValue),
             ".echo" => Ok(Self::Echo),
             ".import" => Ok(Self::Import),
+            ".load" => Ok(Self::LoadExtension),
             _ => Err("Unknown command".to_string()),
         }
     }
@@ -295,8 +304,14 @@ impl Limbo {
     fn handle_first_input(&mut self, cmd: &str) {
         if cmd.trim().starts_with('.') {
             self.handle_dot_command(cmd);
-        } else if let Err(e) = self.query(cmd) {
-            eprintln!("{}", e);
+        } else {
+            let conn = self.conn.clone();
+            let runner = conn.query_runner(cmd.as_bytes());
+            for output in runner {
+                if let Err(e) = self.print_query_result(cmd, output) {
+                    let _ = self.writeln(e.to_string());
+                }
+            }
         }
         std::process::exit(0);
     }
@@ -312,6 +327,14 @@ impl Limbo {
             n if n < 10 => format!("(x{}...> ", n),
             _ => String::from("(.....> "),
         };
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn handle_load_extension(&mut self, path: &str) -> Result<(), String> {
+        let ext_path = limbo_core::resolve_ext_path(path).map_err(|e| e.to_string())?;
+        self.conn
+            .load_extension(ext_path)
+            .map_err(|e| e.to_string())
     }
 
     fn display_in_memory(&mut self) -> std::io::Result<()> {
@@ -426,17 +449,16 @@ impl Limbo {
             self.buffer_input(line);
             let buff = self.input_buff.clone();
             let echo = self.opts.echo;
-            buff.split(';')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .for_each(|stmt| {
-                    if echo {
-                        let _ = self.writeln(stmt);
-                    }
-                    if let Err(e) = self.query(stmt) {
-                        let _ = self.writeln(e.to_string());
-                    }
-                });
+            if echo {
+                let _ = self.writeln(&buff);
+            }
+            let conn = self.conn.clone();
+            let runner = conn.query_runner(buff.as_bytes());
+            for output in runner {
+                if let Err(e) = self.print_query_result(&buff, output) {
+                    let _ = self.writeln(e.to_string());
+                }
+            }
             self.reset_input();
         } else {
             self.buffer_input(line);
@@ -537,6 +559,13 @@ impl Limbo {
                         let _ = self.writeln(e.to_string());
                     };
                 }
+                Command::LoadExtension =>
+                {
+                    #[cfg(not(target_family = "wasm"))]
+                    if let Err(e) = self.handle_load_extension(args[1]) {
+                        let _ = self.writeln(&e);
+                    }
+                }
             }
         } else {
             let _ = self.write_fmt(format_args!(
@@ -546,8 +575,12 @@ impl Limbo {
         }
     }
 
-    pub fn query(&mut self, sql: &str) -> anyhow::Result<()> {
-        match self.conn.query(sql) {
+    fn print_query_result(
+        &mut self,
+        sql: &str,
+        mut output: Result<Option<Rows>, LimboError>,
+    ) -> anyhow::Result<()> {
+        match output {
             Ok(Some(ref mut rows)) => match self.opts.output_mode {
                 OutputMode::Raw => loop {
                     if self.interrupt_count.load(Ordering::SeqCst) > 0 {

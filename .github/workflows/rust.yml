@@ -37,7 +37,7 @@ jobs:
       env:
         RUST_LOG: ${{ runner.debug && 'limbo_core::storage=trace' || '' }}
       run: cargo test --verbose
-      timeout-minutes: 5
+      timeout-minutes: 10
 
 
   clippy:

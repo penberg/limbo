@@ -15,16 +15,16 @@ public class LimboDBTest {
     @Test
     void db_should_open_normally() throws Exception {
         String dbPath = TestUtils.createTempFile();
+        LimboDB.load();
         LimboDB db = LimboDB.create("jdbc:sqlite" + dbPath, dbPath);
-        db.load();
         db.open(0);
     }
 
     @Test
     void should_throw_exception_when_opened_twice() throws Exception {
         String dbPath = TestUtils.createTempFile();
+        LimboDB.load();
         LimboDB db = LimboDB.create("jdbc:sqlite:" + dbPath, dbPath);
-        db.load();
         db.open(0);
 
         assertThatThrownBy(() -> db.open(0)).isInstanceOf(SQLException.class);
@@ -33,8 +33,8 @@ public class LimboDBTest {
     @Test
     void throwJavaException_should_throw_appropriate_java_exception() throws Exception {
         String dbPath = TestUtils.createTempFile();
+        LimboDB.load();
         LimboDB db = LimboDB.create("jdbc:sqlite:" + dbPath, dbPath);
-        db.load();
 
         final int limboExceptionCode = LimboErrorCode.ETC.code;
         try {

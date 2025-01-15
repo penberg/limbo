@@ -18,14 +18,14 @@ pub struct SimulatorCLI {
         short = 'n',
         long,
         help = "change the maximum size of the randomly generated sequence of interactions",
-        default_value_t = 1024
+        default_value_t = 5000
     )]
     pub maximum_size: usize,
     #[clap(
         short = 'k',
         long,
         help = "change the minimum size of the randomly generated sequence of interactions",
-        default_value_t = 1
+        default_value_t = 1000
     )]
     pub minimum_size: usize,
     #[clap(
@@ -35,4 +35,25 @@ pub struct SimulatorCLI {
         default_value_t = 60 * 60 // default to 1 hour
     )]
     pub maximum_time: usize,
+    #[clap(
+        short = 'm',
+        long,
+        help = "minimize(shrink) the failing counterexample"
+    )]
+    pub shrink: bool,
+}
+
+impl SimulatorCLI {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.minimum_size < 1 {
+            return Err("minimum size must be at least 1".to_string());
+        }
+        if self.maximum_size < 1 {
+            return Err("maximum size must be at least 1".to_string());
+        }
+        if self.minimum_size > self.maximum_size {
+            return Err("Minimum size cannot be greater than maximum size".to_string());
+        }
+        Ok(())
+    }
 }

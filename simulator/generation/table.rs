@@ -1,8 +1,6 @@
 use rand::Rng;
 
-use crate::generation::{
-    gen_random_text, pick, pick_index, readable_name_custom, Arbitrary, ArbitraryFrom,
-};
+use crate::generation::{gen_random_text, pick, readable_name_custom, Arbitrary, ArbitraryFrom};
 use crate::model::table::{Column, ColumnType, Name, Table, Value};
 
 impl Arbitrary for Name {
@@ -15,7 +13,7 @@ impl Arbitrary for Name {
 impl Arbitrary for Table {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
         let name = Name::arbitrary(rng).0;
-        let columns = (1..=rng.gen_range(1..5))
+        let columns = (1..=rng.gen_range(1..10))
             .map(|_| Column::arbitrary(rng))
             .collect();
         Table {
@@ -45,7 +43,18 @@ impl Arbitrary for ColumnType {
     }
 }
 
-impl ArbitraryFrom<Vec<&Value>> for Value {
+impl ArbitraryFrom<&Table> for Vec<Value> {
+    fn arbitrary_from<R: rand::Rng>(rng: &mut R, table: &Table) -> Self {
+        let mut row = Vec::new();
+        for column in table.columns.iter() {
+            let value = Value::arbitrary_from(rng, &column.column_type);
+            row.push(value);
+        }
+        row
+    }
+}
+
+impl ArbitraryFrom<&Vec<&Value>> for Value {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Self>) -> Self {
         if values.is_empty() {
             return Self::Null;
@@ -55,7 +64,7 @@ impl ArbitraryFrom<Vec<&Value>> for Value {
     }
 }
 
-impl ArbitraryFrom<ColumnType> for Value {
+impl ArbitraryFrom<&ColumnType> for Value {
     fn arbitrary_from<R: Rng>(rng: &mut R, column_type: &ColumnType) -> Self {
         match column_type {
             ColumnType::Integer => Self::Integer(rng.gen_range(i64::MIN..i64::MAX)),
@@ -68,22 +77,22 @@ impl ArbitraryFrom<ColumnType> for Value {
 
 pub(crate) struct LTValue(pub(crate) Value);
 
-impl ArbitraryFrom<Vec<&Value>> for LTValue {
+impl ArbitraryFrom<&Vec<&Value>> for LTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
         if values.is_empty() {
             return Self(Value::Null);
         }
 
-        let index = pick_index(values.len(), rng);
-        Self::arbitrary_from(rng, values[index])
+        let value = pick(values, rng);
+        Self::arbitrary_from(rng, *value)
     }
 }
 
-impl ArbitraryFrom<Value> for LTValue {
+impl ArbitraryFrom<&Value> for LTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
         match value {
             Value::Integer(i) => Self(Value::Integer(rng.gen_range(i64::MIN..*i - 1))),
-            Value::Float(f) => Self(Value::Float(rng.gen_range(-1e10..*f - 1.0))),
+            Value::Float(f) => Self(Value::Float(f - rng.gen_range(0.0..1e10))),
             Value::Text(t) => {
                 // Either shorten the string, or make at least one character smaller and mutate the rest
                 let mut t = t.clone();
@@ -128,18 +137,18 @@ impl ArbitraryFrom<Value> for LTValue {
 
 pub(crate) struct GTValue(pub(crate) Value);
 
-impl ArbitraryFrom<Vec<&Value>> for GTValue {
+impl ArbitraryFrom<&Vec<&Value>> for GTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, values: &Vec<&Value>) -> Self {
         if values.is_empty() {
             return Self(Value::Null);
         }
 
-        let index = pick_index(values.len(), rng);
-        Self::arbitrary_from(rng, values[index])
+        let value = pick(values, rng);
+        Self::arbitrary_from(rng, *value)
     }
 }
 
-impl ArbitraryFrom<Value> for GTValue {
+impl ArbitraryFrom<&Value> for GTValue {
     fn arbitrary_from<R: Rng>(rng: &mut R, value: &Value) -> Self {
         match value {
             Value::Integer(i) => Self(Value::Integer(rng.gen_range(*i..i64::MAX))),

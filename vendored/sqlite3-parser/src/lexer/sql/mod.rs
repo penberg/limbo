@@ -441,7 +441,12 @@ impl Splitter for Tokenizer {
                         // do not include the '?' in the token
                         Ok((Some((&data[1..=i], TK_VARIABLE)), i + 1))
                     }
-                    None => Ok((Some((&data[1..], TK_VARIABLE)), data.len())),
+                    None => {
+                        if !data[1..].is_empty() && data[1..].iter().all(|ch| *ch == b'0') {
+                            return Err(Error::BadVariableName(None, None));
+                        }
+                        Ok((Some((&data[1..], TK_VARIABLE)), data.len()))
+                    }
                 }
             }
             b'$' | b'@' | b'#' | b':' => {

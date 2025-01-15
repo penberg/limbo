@@ -2,8 +2,9 @@ package org.github.tursodatabase.core;
 
 
 import org.github.tursodatabase.LimboErrorCode;
-import org.github.tursodatabase.NativeInvocation;
-import org.github.tursodatabase.VisibleForTesting;
+import org.github.tursodatabase.annotations.NativeInvocation;
+import org.github.tursodatabase.annotations.VisibleForTesting;
+import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.exceptions.LimboException;
 
 import java.nio.charset.StandardCharsets;
@@ -31,6 +32,19 @@ public final class LimboDB extends AbstractDB {
     }
 
     /**
+     * Loads the SQLite interface backend.
+     */
+    public static void load() {
+        if (isLoaded) return;
+
+        try {
+            System.loadLibrary("_limbo_java");
+        } finally {
+            isLoaded = true;
+        }
+    }
+
+    /**
      * @param url      e.g. "jdbc:sqlite:fileName
      * @param fileName e.g. path to file
      */
@@ -41,19 +55,6 @@ public final class LimboDB extends AbstractDB {
     // TODO: receive config as argument
     private LimboDB(String url, String fileName) {
         super(url, fileName);
-    }
-
-    /**
-     * Loads the SQLite interface backend.
-     */
-    public void load() {
-        if (isLoaded) return;
-
-        try {
-            System.loadLibrary("_limbo_java");
-        } finally {
-            isLoaded = true;
-        }
     }
 
     // WRAPPER FUNCTIONS ////////////////////////////////////////////
@@ -82,9 +83,15 @@ public final class LimboDB extends AbstractDB {
     @Override
     protected void open0(String fileName, int openFlags) throws SQLException {
         if (isOpen) {
-            throwLimboException(LimboErrorCode.UNKNOWN_ERROR.code, "Already opened");
+            throw buildLimboException(LimboErrorCode.ETC.code, "Already opened");
         }
-        dbPtr = openUtf8(stringToUtf8ByteArray(fileName), openFlags);
+
+        byte[] fileNameBytes = stringToUtf8ByteArray(fileName);
+        if (fileNameBytes == null) {
+            throw buildLimboException(LimboErrorCode.ETC.code, "File name cannot be converted to byteArray. File name: " + fileName);
+        }
+
+        dbPtr = openUtf8(fileNameBytes, openFlags);
         isOpen = true;
     }
 
@@ -114,7 +121,7 @@ public final class LimboDB extends AbstractDB {
     @NativeInvocation
     private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
         String errorMessage = utf8ByteBufferToString(errorMessageBytes);
-        throwLimboException(errorCode, errorMessage);
+        throw buildLimboException(errorCode, errorMessage);
     }
 
     /**
@@ -123,7 +130,7 @@ public final class LimboDB extends AbstractDB {
      * @param errorCode    Error code.
      * @param errorMessage Error message.
      */
-    public void throwLimboException(int errorCode, String errorMessage) throws SQLException {
+    public LimboException buildLimboException(int errorCode, @Nullable String errorMessage) throws SQLException {
         LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
         String msg;
         if (code == LimboErrorCode.UNKNOWN_ERROR) {
@@ -132,10 +139,11 @@ public final class LimboDB extends AbstractDB {
             msg = String.format("%s (%s)", code, errorMessage);
         }
 
-        throw new LimboException(msg, code);
+        return new LimboException(msg, code);
     }
 
-    private static String utf8ByteBufferToString(byte[] buffer) {
+    @Nullable
+    private static String utf8ByteBufferToString(@Nullable byte[] buffer) {
         if (buffer == null) {
             return null;
         }
@@ -143,7 +151,8 @@ public final class LimboDB extends AbstractDB {
         return new String(buffer, StandardCharsets.UTF_8);
     }
 
-    private static byte[] stringToUtf8ByteArray(String str) {
+    @Nullable
+    private static byte[] stringToUtf8ByteArray(@Nullable String str) {
         if (str == null) {
             return null;
         }

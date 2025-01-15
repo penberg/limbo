@@ -25,8 +25,7 @@ pub mod likeop;
 pub mod sorter;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
-#[cfg(feature = "uuid")]
-use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
+use crate::ext::ExtValue;
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
@@ -42,20 +41,21 @@ use crate::{
     json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
     json::json_extract, json::json_object, json::json_type,
 };
-use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
+use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
-    exec_subtract,
+    exec_shift_left, exec_shift_right, exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
 use sorter::Sorter;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZero;
 use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -147,6 +147,33 @@ macro_rules! return_if_io {
     };
 }
 
+macro_rules! call_external_function {
+    (
+        $func_ptr:expr,
+        $dest_register:expr,
+        $state:expr,
+        $arg_count:expr,
+        $start_reg:expr
+    ) => {{
+        if $arg_count == 0 {
+            let result_c_value: ExtValue = ($func_ptr)(0, std::ptr::null());
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        } else {
+            let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
+            let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
+            for ov in register_slice.iter() {
+                let val = ov.to_ffi();
+                ext_values.push(val);
+            }
+            let argv_ptr = ext_values.as_ptr();
+            let result_c_value: ExtValue = ($func_ptr)($arg_count as i32, argv_ptr);
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        }
+    }};
+}
+
 struct RegexCache {
     like: HashMap<String, Regex>,
     glob: HashMap<String, Regex>,
@@ -174,6 +201,7 @@ pub struct ProgramState {
     ended_coroutine: HashMap<usize, bool>, // flag to indicate that a coroutine has ended (key is the yield register)
     regex_cache: RegexCache,
     interrupted: bool,
+    parameters: HashMap<NonZero<usize>, OwnedValue>,
 }
 
 impl ProgramState {
@@ -196,6 +224,7 @@ impl ProgramState {
             ended_coroutine: HashMap::new(),
             regex_cache: RegexCache::new(),
             interrupted: false,
+            parameters: HashMap::new(),
         }
     }
 
@@ -213,6 +242,18 @@ impl ProgramState {
 
     pub fn is_interrupted(&self) -> bool {
         self.interrupted
+    }
+
+    pub fn bind_at(&mut self, index: NonZero<usize>, value: OwnedValue) {
+        self.parameters.insert(index, value);
+    }
+
+    pub fn get_parameter(&self, index: NonZero<usize>) -> Option<&OwnedValue> {
+        self.parameters.get(&index)
+    }
+
+    pub fn reset(&mut self) {
+        self.parameters.clear();
     }
 }
 
@@ -236,6 +277,7 @@ pub struct Program {
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<InsnReference, &'static str>,
+    pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
 }
@@ -1459,99 +1501,91 @@ impl Program {
                     let arg_count = func.arg_count;
                     match &func.func {
                         #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::Json) => {
-                            let json_value = &state.registers[*start_reg];
-                            let json_str = get_json(json_value);
-                            match json_str {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(
-                            func @ (JsonFunc::JsonArray | JsonFunc::JsonObject),
-                        ) => {
-                            let reg_values = &state.registers[*start_reg..*start_reg + arg_count];
-
-                            let func = match func {
-                                JsonFunc::JsonArray => json_array,
-                                JsonFunc::JsonObject => json_object,
-                                _ => unreachable!(),
-                            };
-                            let json_result = func(reg_values);
-
-                            match json_result {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonExtract) => {
-                            let result = match arg_count {
-                                0 => json_extract(&OwnedValue::Null, &[]),
-                                _ => {
-                                    let val = &state.registers[*start_reg];
-                                    let reg_values =
-                                        &state.registers[*start_reg + 1..*start_reg + arg_count];
-
-                                    json_extract(val, reg_values)
+                        crate::function::Func::Json(json_func) => match json_func {
+                            JsonFunc::Json => {
+                                let json_value = &state.registers[*start_reg];
+                                let json_str = get_json(json_value);
+                                match json_str {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
                                 }
-                            };
+                            }
+                            JsonFunc::JsonArray | JsonFunc::JsonObject => {
+                                let reg_values =
+                                    &state.registers[*start_reg..*start_reg + arg_count];
 
-                            match result {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(
-                            func @ (JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract),
-                        ) => {
-                            assert_eq!(arg_count, 2);
-                            let json = &state.registers[*start_reg];
-                            let path = &state.registers[*start_reg + 1];
-                            let func = match func {
-                                JsonFunc::JsonArrowExtract => json_arrow_extract,
-                                JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
-                                _ => unreachable!(),
-                            };
-                            let json_str = func(json, path);
-                            match json_str {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(
-                            func @ (JsonFunc::JsonArrayLength | JsonFunc::JsonType),
-                        ) => {
-                            let json_value = &state.registers[*start_reg];
-                            let path_value = if arg_count > 1 {
-                                Some(&state.registers[*start_reg + 1])
-                            } else {
-                                None
-                            };
-                            let func_result = match func {
-                                JsonFunc::JsonArrayLength => {
-                                    json_array_length(json_value, path_value)
+                                let func = match func {
+                                    JsonFunc::JsonArray => json_array,
+                                    JsonFunc::JsonObject => json_object,
+                                    _ => unreachable!(),
+                                };
+                                let json_result = func(reg_values);
+
+                                match json_result {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
                                 }
-                                JsonFunc::JsonType => json_type(json_value, path_value),
-                                _ => unreachable!(),
-                            };
+                            }
+                            JsonFunc::JsonExtract => {
+                                let result = match arg_count {
+                                    0 => json_extract(&OwnedValue::Null, &[]),
+                                    _ => {
+                                        let val = &state.registers[*start_reg];
+                                        let reg_values = &state.registers
+                                            [*start_reg + 1..*start_reg + arg_count];
 
-                            match func_result {
-                                Ok(result) => state.registers[*dest] = result,
-                                Err(e) => return Err(e),
+                                        json_extract(val, reg_values)
+                                    }
+                                };
+
+                                match result {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
                             }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonErrorPosition) => {
-                            let json_value = &state.registers[*start_reg];
-                            match json_error_position(json_value) {
-                                Ok(pos) => state.registers[*dest] = pos,
-                                Err(e) => return Err(e),
+                            JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract => {
+                                assert_eq!(arg_count, 2);
+                                let json = &state.registers[*start_reg];
+                                let path = &state.registers[*start_reg + 1];
+                                let json_func = match json_func {
+                                    JsonFunc::JsonArrowExtract => json_arrow_extract,
+                                    JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
+                                    _ => unreachable!(),
+                                };
+                                let json_str = json_func(json, path);
+                                match json_str {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
                             }
-                        }
+                            JsonFunc::JsonArrayLength | JsonFunc::JsonType => {
+                                let json_value = &state.registers[*start_reg];
+                                let path_value = if arg_count > 1 {
+                                    Some(&state.registers[*start_reg + 1])
+                                } else {
+                                    None
+                                };
+                                let func_result = match json_func {
+                                    JsonFunc::JsonArrayLength => {
+                                        json_array_length(json_value, path_value)
+                                    }
+                                    JsonFunc::JsonType => json_type(json_value, path_value),
+                                    _ => unreachable!(),
+                                };
+
+                                match func_result {
+                                    Ok(result) => state.registers[*dest] = result,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            JsonFunc::JsonErrorPosition => {
+                                let json_value = &state.registers[*start_reg];
+                                match json_error_position(json_value) {
+                                    Ok(pos) => state.registers[*dest] = pos,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                        },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
                                 assert!(arg_count == 2);
@@ -1850,43 +1884,17 @@ impl Program {
                                 let replacement = &state.registers[*start_reg + 2];
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
-                        },
-                        #[allow(unreachable_patterns)]
-                        crate::function::Func::Extension(extfn) => match extfn {
-                            #[cfg(feature = "uuid")]
-                            ExtFunc::Uuid(uuidfn) => match uuidfn {
-                                UuidFunc::Uuid4Str => {
-                                    state.registers[*dest] = exec_uuid(uuidfn, None)?
+                            #[cfg(not(target_family = "wasm"))]
+                            ScalarFunc::LoadExtension => {
+                                let extension = &state.registers[*start_reg];
+                                let ext = resolve_ext_path(&extension.to_string())?;
+                                if let Some(conn) = self.connection.upgrade() {
+                                    conn.load_extension(ext)?;
                                 }
-                                UuidFunc::Uuid7 => match arg_count {
-                                    0 => {
-                                        state.registers[*dest] =
-                                            exec_uuid(uuidfn, None).unwrap_or(OwnedValue::Null);
-                                    }
-                                    1 => {
-                                        let reg_value = state.registers[*start_reg].borrow();
-                                        state.registers[*dest] = exec_uuid(uuidfn, Some(reg_value))
-                                            .unwrap_or(OwnedValue::Null);
-                                    }
-                                    _ => unreachable!(),
-                                },
-                                _ => {
-                                    // remaining accept 1 arg
-                                    let reg_value = state.registers[*start_reg].borrow();
-                                    state.registers[*dest] = match uuidfn {
-                                        UuidFunc::Uuid7TS => Some(exec_ts_from_uuid7(reg_value)),
-                                        UuidFunc::UuidStr => exec_uuidstr(reg_value).ok(),
-                                        UuidFunc::UuidBlob => exec_uuidblob(reg_value).ok(),
-                                        _ => unreachable!(),
-                                    }
-                                    .unwrap_or(OwnedValue::Null);
-                                }
-                            },
-                            _ => unreachable!(), // when more extension types are added
+                            }
                         },
                         crate::function::Func::External(f) => {
-                            let result = (f.func)(&[])?;
-                            state.registers[*dest] = result;
+                            call_external_function! {f.func, *dest, state, arg_count, *start_reg };
                         }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {
@@ -2051,11 +2059,25 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::MustBeInt { reg } => {
-                    match state.registers[*reg] {
+                    match &state.registers[*reg] {
                         OwnedValue::Integer(_) => {}
+                        OwnedValue::Float(f) => match cast_real_to_integer(*f) {
+                            Ok(i) => state.registers[*reg] = OwnedValue::Integer(i),
+                            Err(_) => crate::bail_parse_error!(
+                                "MustBeInt: the value in register cannot be cast to integer"
+                            ),
+                        },
+                        OwnedValue::Text(text) => match checked_cast_text_to_numeric(&text.value) {
+                            Ok(OwnedValue::Integer(i)) => {
+                                state.registers[*reg] = OwnedValue::Integer(i)
+                            }
+                            _ => crate::bail_parse_error!(
+                                "MustBeInt: the value in register cannot be cast to integer"
+                            ),
+                        },
                         _ => {
                             crate::bail_parse_error!(
-                                "MustBeInt: the value in the register is not an integer"
+                                "MustBeInt: the value in register cannot be cast to integer"
                             );
                         }
                     };
@@ -2169,6 +2191,23 @@ impl Program {
                     let mut schema = RefCell::borrow_mut(&conn.schema);
                     // TODO: This function below is synchronous, make it not async
                     parse_schema_rows(Some(rows), &mut schema, conn.pager.io.clone())?;
+                    state.pc += 1;
+                }
+                Insn::ShiftRight { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_shift_right(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::ShiftLeft { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_shift_left(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::Variable { index, dest } => {
+                    state.registers[*dest] = state
+                        .get_parameter(*index)
+                        .ok_or(LimboError::Unbound(*index))?
+                        .clone();
                     state.pc += 1;
                 }
             }
@@ -3082,23 +3121,38 @@ fn cast_text_to_real(text: &str) -> OwnedValue {
 /// IEEE 754 64-bit float and thus provides a 1-bit of margin for the text-to-float conversion operation.)
 /// Any text input that describes a value outside the range of a 64-bit signed integer yields a REAL result.
 /// Casting a REAL or INTEGER value to NUMERIC is a no-op, even if a real value could be losslessly converted to an integer.
-fn cast_text_to_numeric(text: &str) -> OwnedValue {
+fn checked_cast_text_to_numeric(text: &str) -> std::result::Result<OwnedValue, ()> {
     if !text.contains('.') && !text.contains('e') && !text.contains('E') {
         // Looks like an integer
         if let Ok(i) = text.parse::<i64>() {
-            return OwnedValue::Integer(i);
+            return Ok(OwnedValue::Integer(i));
         }
     }
     // Try as float
     if let Ok(f) = text.parse::<f64>() {
-        // Check if can be losslessly converted to 51-bit integer
-        let i = f as i64;
-        if f == i as f64 && i.abs() < (1i64 << 51) {
-            return OwnedValue::Integer(i);
-        }
-        return OwnedValue::Float(f);
+        return match cast_real_to_integer(f) {
+            Ok(i) => Ok(OwnedValue::Integer(i)),
+            Err(_) => Ok(OwnedValue::Float(f)),
+        };
     }
-    OwnedValue::Integer(0)
+    Err(())
+}
+
+// try casting to numeric if not possible return integer 0
+fn cast_text_to_numeric(text: &str) -> OwnedValue {
+    match checked_cast_text_to_numeric(text) {
+        Ok(value) => value,
+        Err(_) => OwnedValue::Integer(0),
+    }
+}
+
+// Check if float can be losslessly converted to 51-bit integer
+fn cast_real_to_integer(float: f64) -> std::result::Result<i64, ()> {
+    let i = float as i64;
+    if float == i as f64 && i.abs() < (1i64 << 51) {
+        return Ok(i);
+    }
+    Err(())
 }
 
 fn execute_sqlite_version(version_integer: i64) -> String {
