@@ -257,8 +257,6 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
     }
 }
 
-// TODO: maybe we should use impl `From<OwnedValue>` for `Val` here, instead of this?
-// the same with `convert_json_to_db_type`...
 /// Converts a DB value (`OwnedValue`) to a JSON representation (`Val`).
 /// Note that when the internal text value is a json,
 /// the returned `Val` will be an object. If the internal text value is a regular text,
