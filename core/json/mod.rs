@@ -431,10 +431,7 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
         .map(|chunk| match chunk {
             [key, value] => {
                 let key = match key {
-                    // TODO: We can construct the IndexMap from Rc<String>, but we must enable the
-                    // serde's `rc` feature so we can serialize Rc<String>
                     OwnedValue::Text(t) => t.value.to_string(),
-                    // TODO: I matched sqlite message error here. Is this ok?
                     _ => crate::bail_constraint_error!("labels must be TEXT"),
                 };
                 let json_val = convert_db_type_to_json(value)?;
