@@ -1,13 +1,23 @@
 package org.github.tursodatabase.jdbc4;
 
+import org.github.tursodatabase.LimboConnection;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
+import org.github.tursodatabase.core.CoreStatement;
 
 import java.sql.*;
 
 /**
  * Implementation of the {@link Statement} interface for JDBC 4.
  */
-public class JDBC4Statement implements Statement {
+public class JDBC4Statement extends CoreStatement implements Statement {
+
+    private boolean closed;
+    private boolean closeOnCompletion;
+
+    public JDBC4Statement(LimboConnection connection) {
+        super(connection);
+    }
+
     @Override
     @SkipNullableCheck
     public ResultSet executeQuery(String sql) throws SQLException {
@@ -23,7 +33,9 @@ public class JDBC4Statement implements Statement {
 
     @Override
     public void close() throws SQLException {
-        // TODO
+        clearGeneratedKeys();
+        internalClose();
+        closed = true;
     }
 
     @Override
@@ -242,13 +254,17 @@ public class JDBC4Statement implements Statement {
 
     @Override
     public void closeOnCompletion() throws SQLException {
-        // TODO
+        if (closed) throw new SQLException("statement is closed");
+        closeOnCompletion = true;
     }
 
+    /**
+     * Indicates whether the statement should be closed automatically when all its dependent result sets are closed.
+     */
     @Override
     public boolean isCloseOnCompletion() throws SQLException {
-        // TODO
-        return false;
+        if (closed) throw new SQLException("statement is closed");
+        return closeOnCompletion;
     }
 
     @Override
