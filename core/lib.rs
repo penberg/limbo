@@ -182,7 +182,7 @@ impl Database {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    pub fn load_extension(&self, path: &str) -> Result<()> {
+    pub fn load_extension<P: AsRef<std::ffi::OsStr>>(&self, path: P) -> Result<()> {
         let api = Box::new(self.build_limbo_extension());
         let lib =
             unsafe { Library::new(path).map_err(|e| LimboError::ExtensionError(e.to_string()))? };
@@ -401,7 +401,7 @@ impl Connection {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    pub fn load_extension(&self, path: &str) -> Result<()> {
+    pub fn load_extension<P: AsRef<std::ffi::OsStr>>(&self, path: P) -> Result<()> {
         Database::load_extension(self.db.as_ref(), path)
     }
 
@@ -512,6 +512,33 @@ impl std::fmt::Debug for SymbolTable {
         f.debug_struct("SymbolTable")
             .field("functions", &self.functions)
             .finish()
+    }
+}
+
+fn is_shared_library(path: &std::path::Path) -> bool {
+    path.extension()
+        .map_or(false, |ext| ext == "so" || ext == "dylib" || ext == "dll")
+}
+
+pub fn resolve_ext_path(extpath: &str) -> Result<std::path::PathBuf> {
+    let path = std::path::Path::new(extpath);
+    if !path.exists() {
+        if is_shared_library(path) {
+            return Err(LimboError::ExtensionError(format!(
+                "Extension file not found: {}",
+                extpath
+            )));
+        };
+        let maybe = path.with_extension(std::env::consts::DLL_EXTENSION);
+        maybe
+            .exists()
+            .then_some(maybe)
+            .ok_or(LimboError::ExtensionError(format!(
+                "Extension file not found: {}",
+                extpath
+            )))
+    } else {
+        Ok(path.to_path_buf())
     }
 }
 
