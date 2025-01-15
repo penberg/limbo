@@ -1,5 +1,7 @@
 mod args;
 use args::{ArgsAttr, ArgsSpec};
+use quote::{format_ident, quote};
+use syn::{parse_macro_input, Attribute, Block, DeriveInput, ItemFn, LitStr};
 extern crate proc_macro;
 use proc_macro::{token_stream::IntoIter, Group, TokenStream, TokenTree};
 use std::collections::HashMap;
@@ -136,8 +138,6 @@ fn generate_get_description(
     enum_impl.parse().unwrap()
 }
 
-use quote::quote;
-use syn::{parse_macro_input, Attribute, Block, ItemFn};
 /// Macro to transform the preferred API for scalar functions in extensions into
 /// an FFI-compatible function signature while validating argc
 #[proc_macro_attribute]
@@ -253,5 +253,78 @@ pub fn export_scalar(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
+    TokenStream::from(expanded)
+}
+
+#[proc_macro_attribute]
+pub fn declare_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let meta = parse_macro_input!(attr as ItemFn);
+    let mut aggregate_name = None;
+    for arg in meta.attrs.iter() {
+        if arg.path().is_ident("name") {
+            let _ = arg.parse_nested_meta(|nv| match nv.value() {
+                Ok(val) => {
+                    let s: LitStr = val.parse()?;
+                    aggregate_name = Some(s);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            });
+        }
+    }
+    let Some(aggregate_name) = aggregate_name else {
+        return syn::Error::new_spanned(
+            meta,
+            "Expected an attribute with a name: #[aggregate(name = \"sum\")]",
+        )
+        .to_compile_error()
+        .into();
+    };
+
+    let input = parse_macro_input!(item as DeriveInput);
+    let struct_name = &input.ident;
+
+    let step_fn_name = format_ident!("{}_step", struct_name.to_string().to_lowercase());
+    let finalize_fn_name = format_ident!("{}_finalize", struct_name.to_string().to_lowercase());
+    let register_fn_name = format_ident!("register_{}", struct_name.to_string().to_lowercase());
+
+    let expanded = quote! {
+        #input
+
+        extern "C" fn #step_fn_name(
+            ctx: *mut ::limbo_extension::AggregateCtx,
+            argc: i32,
+            argv: *const ::limbo_extension::Value,
+        ) {
+            unsafe {
+                let state = &mut *(ctx.state as *mut #struct_name);
+                let args = std::slice::from_raw_parts(argv, argc as usize);
+                state.step(args);
+            }
+        }
+
+        extern "C" fn #finalize_fn_name(
+            ctx: *mut ::limbo_extension::AggregateCtx
+        ) -> ::limbo_extension::Value {
+            unsafe {
+                let state = Box::from_raw(ctx.state as *mut #struct_name);
+                state.finalize()
+            }
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn #register_fn_name(
+            api: *const ::limbo_extension::ExtensionApi
+        ) -> ::limbo_extension::ResultCode {
+            let cname = std::ffi::CString::new(#aggregate_name).unwrap();
+            ((*api).register_aggregate_function)(
+                (*api).ctx,
+                cname.as_ptr(),
+                #step_fn_name,
+                #finalize_fn_name,
+            )
+        }
+    };
+
     TokenStream::from(expanded)
 }

@@ -11,8 +11,30 @@ pub type ScalarFunction = extern "C" fn(argc: i32, *const Value) -> Value;
 #[repr(C)]
 pub struct ExtensionApi {
     pub ctx: *mut c_void,
+
     pub register_scalar_function:
         extern "C" fn(ctx: *mut c_void, name: *const c_char, func: ScalarFunction) -> ResultCode,
+
+    pub register_aggregate_function: extern "C" fn(
+        ctx: *mut c_void,
+        name: *const c_char,
+        step_func: StepFunction,
+        finalize_func: FinalizeFunction,
+    ) -> ResultCode,
+}
+
+pub type StepFunction = extern "C" fn(ctx: *mut AggCtx, argc: i32, argv: *const Value);
+pub type FinalizeFunction = extern "C" fn(ctx: *mut AggCtx) -> Value;
+
+#[repr(C)]
+pub struct AggCtx {
+    state: *mut c_void,
+    free: Option<extern "C" fn(*mut c_void)>, // Optional destructor
+}
+
+pub trait AggFunc {
+    fn step(&mut self, args: &[Value]);
+    fn finalize(&mut self) -> Value;
 }
 
 #[macro_export]
@@ -35,6 +57,26 @@ macro_rules! register_extension {
             $crate::RESULT_OK
         }
     }
+}
+
+#[macro_export]
+macro_rules! register_aggregate_functions {
+    (
+        $api:expr,
+        $( $name:expr => ($step_func:ident, $finalize_func:ident) ),*
+    ) => {
+        unsafe {
+            $(
+                let cname = std::ffi::CString::new($name).unwrap();
+                ((*$api).register_aggregate_function)(
+                    (*$api).ctx,
+                    cname.as_ptr(),
+                    $step_func,
+                    $finalize_func,
+                );
+            )*
+        }
+    };
 }
 
 #[macro_export]
