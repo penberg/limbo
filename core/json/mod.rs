@@ -930,7 +930,7 @@ mod tests {
             r#"{"parent_key":{"key":"value"}}"#
         );
     }
-    // TODO: is this behaviour ok? it differs from sqlite
+
     #[test]
     fn test_json_object_duplicated_keys() {
         let key = OwnedValue::build_text(Rc::new("key".to_string()));
