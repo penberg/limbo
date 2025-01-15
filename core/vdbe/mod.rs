@@ -2038,11 +2038,25 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::MustBeInt { reg } => {
-                    match state.registers[*reg] {
+                    match &state.registers[*reg] {
                         OwnedValue::Integer(_) => {}
+                        OwnedValue::Float(f) => match cast_real_to_integer(*f) {
+                            Ok(i) => state.registers[*reg] = OwnedValue::Integer(i),
+                            Err(_) => crate::bail_parse_error!(
+                                "MustBeInt: the value in register cannot be cast to integer"
+                            ),
+                        },
+                        OwnedValue::Text(text) => match checked_cast_text_to_numeric(&text.value) {
+                            Ok(OwnedValue::Integer(i)) => {
+                                state.registers[*reg] = OwnedValue::Integer(i)
+                            }
+                            _ => crate::bail_parse_error!(
+                                "MustBeInt: the value in register cannot be cast to integer"
+                            ),
+                        },
                         _ => {
                             crate::bail_parse_error!(
-                                "MustBeInt: the value in the register is not an integer"
+                                "MustBeInt: the value in register cannot be cast to integer"
                             );
                         }
                     };
@@ -3079,23 +3093,38 @@ fn cast_text_to_real(text: &str) -> OwnedValue {
 /// IEEE 754 64-bit float and thus provides a 1-bit of margin for the text-to-float conversion operation.)
 /// Any text input that describes a value outside the range of a 64-bit signed integer yields a REAL result.
 /// Casting a REAL or INTEGER value to NUMERIC is a no-op, even if a real value could be losslessly converted to an integer.
-fn cast_text_to_numeric(text: &str) -> OwnedValue {
+fn checked_cast_text_to_numeric(text: &str) -> std::result::Result<OwnedValue, ()> {
     if !text.contains('.') && !text.contains('e') && !text.contains('E') {
         // Looks like an integer
         if let Ok(i) = text.parse::<i64>() {
-            return OwnedValue::Integer(i);
+            return Ok(OwnedValue::Integer(i));
         }
     }
     // Try as float
     if let Ok(f) = text.parse::<f64>() {
-        // Check if can be losslessly converted to 51-bit integer
-        let i = f as i64;
-        if f == i as f64 && i.abs() < (1i64 << 51) {
-            return OwnedValue::Integer(i);
-        }
-        return OwnedValue::Float(f);
+        return match cast_real_to_integer(f) {
+            Ok(i) => Ok(OwnedValue::Integer(i)),
+            Err(_) => Ok(OwnedValue::Float(f)),
+        };
     }
-    OwnedValue::Integer(0)
+    Err(())
+}
+
+// try casting to numeric if not possible return integer 0
+fn cast_text_to_numeric(text: &str) -> OwnedValue {
+    match checked_cast_text_to_numeric(text) {
+        Ok(value) => value,
+        Err(_) => OwnedValue::Integer(0),
+    }
+}
+
+// Check if float can be losslessly converted to 51-bit integer
+fn cast_real_to_integer(float: f64) -> std::result::Result<i64, ()> {
+    let i = float as i64;
+    if float == i as f64 && i.abs() < (1i64 << 51) {
+        return Ok(i);
+    }
+    Err(())
 }
 
 fn execute_sqlite_version(version_integer: i64) -> String {

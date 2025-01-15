@@ -7,3 +7,12 @@ do_execsql_test_on_specific_db {:memory:} basic-insert {
     insert into temp values (1);
     select * from temp;
 } {1}
+
+do_execsql_test_on_specific_db {:memory:} must-be-int-insert {
+    create table temp (t1 integer, primary key (t1));
+    insert into temp values (1),(2.0),('3'),('4.0');
+    select * from temp;
+} {1
+2
+3
+4}
