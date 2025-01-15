@@ -362,6 +362,12 @@ impl Program {
                     state.registers[*dest] = exec_bit_not(&state.registers[*reg]);
                     state.pc += 1;
                 }
+                Insn::Checkpoint { reg: _, dest } => {
+                    // Write 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
+                    // fixme currently hard coded not implemented
+                    state.registers[*dest] = OwnedValue::Integer(0);
+                    state.pc += 1;
+                }
                 Insn::Null { dest, dest_end } => {
                     if let Some(dest_end) = dest_end {
                         for i in *dest..=*dest_end {

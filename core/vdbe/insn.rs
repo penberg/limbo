@@ -66,6 +66,12 @@ pub enum Insn {
         reg: usize,
         dest: usize,
     },
+    // Checkpoint the database (applying wal file content to database file).
+    Checkpoint {
+        // TODO support registers as in sqlite
+        reg: usize,
+        dest: usize,
+    },
     // Divide lhs by rhs and place the remainder in dest register.
     Remainder {
         lhs: usize,

@@ -592,6 +592,10 @@ fn update_pragma(
             query_pragma("journal_mode", header, program)?;
             Ok(())
         }
+        PragmaName::WalCheckpoint => {
+            // TODO
+            Ok(())
+        }
     }
 }
 
@@ -615,6 +619,12 @@ fn query_pragma(
         PragmaName::JournalMode => {
             program.emit_insn(Insn::String8 {
                 value: "wal".into(),
+                dest: register,
+            });
+        }
+        PragmaName::WalCheckpoint => {
+            program.emit_insn(Insn::Checkpoint {
+                reg: 12, // TODO fix hard-coded
                 dest: register,
             });
         }
