@@ -12,6 +12,36 @@ pub(crate) enum Predicate {
     Lt(String, Value),   // column < Value
 }
 
+impl Predicate {
+    pub(crate) fn true_() -> Self {
+        Self::And(vec![])
+    }
+
+    pub(crate) fn false_() -> Self {
+        Self::Or(vec![])
+    }
+
+    pub(crate) fn test(&self, row: &[Value], table: &Table) -> bool {
+        let get_value = |name: &str| {
+            table
+                .columns
+                .iter()
+                .zip(row.iter())
+                .find(|(column, _)| column.name == name)
+                .map(|(_, value)| value)
+        };
+
+        match self {
+            Predicate::And(vec) => vec.iter().all(|p| p.test(row, table)),
+            Predicate::Or(vec) => vec.iter().any(|p| p.test(row, table)),
+            Predicate::Eq(column, value) => get_value(column) == Some(value),
+            Predicate::Neq(column, value) => get_value(column) != Some(value),
+            Predicate::Gt(column, value) => get_value(column).map(|v| v > value).unwrap_or(false),
+            Predicate::Lt(column, value) => get_value(column).map(|v| v < value).unwrap_or(false),
+        }
+    }
+}
+
 impl Display for Predicate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -53,7 +83,7 @@ impl Display for Predicate {
 }
 
 // This type represents the potential queries on the database.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Query {
     Create(Create),
     Select(Select),
@@ -61,6 +91,24 @@ pub(crate) enum Query {
     Delete(Delete),
 }
 
+impl Query {
+    pub(crate) fn dependencies(&self) -> Vec<String> {
+        match self {
+            Query::Create(_) => vec![],
+            Query::Select(Select { table, .. })
+            | Query::Insert(Insert { table, .. })
+            | Query::Delete(Delete { table, .. }) => vec![table.clone()],
+        }
+    }
+    pub(crate) fn uses(&self) -> Vec<String> {
+        match self {
+            Query::Create(Create { table }) => vec![table.name.clone()],
+            Query::Select(Select { table, .. })
+            | Query::Insert(Insert { table, .. })
+            | Query::Delete(Delete { table, .. }) => vec![table.clone()],
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub(crate) struct Create {
     pub(crate) table: Table,

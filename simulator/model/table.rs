@@ -53,6 +53,22 @@ pub(crate) enum Value {
     Blob(Vec<u8>),
 }
 
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::Null, Self::Null) => Some(std::cmp::Ordering::Equal),
+            (Self::Null, _) => Some(std::cmp::Ordering::Less),
+            (_, Self::Null) => Some(std::cmp::Ordering::Greater),
+            (Self::Integer(i1), Self::Integer(i2)) => i1.partial_cmp(i2),
+            (Self::Float(f1), Self::Float(f2)) => f1.partial_cmp(f2),
+            (Self::Text(t1), Self::Text(t2)) => t1.partial_cmp(t2),
+            (Self::Blob(b1), Self::Blob(b2)) => b1.partial_cmp(b2),
+            // todo: add type coercions here
+            _ => None,
+        }
+    }
+}
+
 fn to_sqlite_blob(bytes: &[u8]) -> String {
     format!(
         "X'{}'",

@@ -1,28 +1,68 @@
 #![allow(clippy::arc_with_non_send_sync, dead_code)]
 use clap::Parser;
-use generation::plan::{Interaction, InteractionPlan, ResultSet};
-use generation::{pick_index, ArbitraryFrom};
-use limbo_core::{Database, Result};
-use model::table::Value;
+use core::panic;
+use generation::plan::{InteractionPlan, InteractionPlanState};
+use generation::ArbitraryFrom;
+use limbo_core::Database;
 use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use runner::cli::SimulatorCLI;
 use runner::env::{SimConnection, SimulatorEnv, SimulatorOpts};
+use runner::execution::{execute_plans, Execution, ExecutionHistory, ExecutionResult};
 use runner::io::SimulatorIO;
+use std::any::Any;
 use std::backtrace::Backtrace;
 use std::io::Write;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 mod generation;
 mod model;
 mod runner;
+mod shrink;
+struct Paths {
+    db: PathBuf,
+    plan: PathBuf,
+    shrunk_plan: PathBuf,
+    history: PathBuf,
+    doublecheck_db: PathBuf,
+    shrunk_db: PathBuf,
+}
 
-fn main() {
+impl Paths {
+    fn new(output_dir: &Path, shrink: bool, doublecheck: bool) -> Self {
+        let paths = Paths {
+            db: PathBuf::from(output_dir).join("simulator.db"),
+            plan: PathBuf::from(output_dir).join("simulator.plan"),
+            shrunk_plan: PathBuf::from(output_dir).join("simulator_shrunk.plan"),
+            history: PathBuf::from(output_dir).join("simulator.history"),
+            doublecheck_db: PathBuf::from(output_dir).join("simulator_double.db"),
+            shrunk_db: PathBuf::from(output_dir).join("simulator_shrunk.db"),
+        };
+
+        // Print the seed, the locations of the database and the plan file
+        log::info!("database path: {:?}", paths.db);
+        if doublecheck {
+            log::info!("doublecheck database path: {:?}", paths.doublecheck_db);
+        } else if shrink {
+            log::info!("shrunk database path: {:?}", paths.shrunk_db);
+        }
+        log::info!("simulator plan path: {:?}", paths.plan);
+        if shrink {
+            log::info!("shrunk plan path: {:?}", paths.shrunk_plan);
+        }
+        log::info!("simulator history path: {:?}", paths.history);
+
+        paths
+    }
+}
+
+fn main() -> Result<(), String> {
     init_logger();
 
     let cli_opts = SimulatorCLI::parse();
+    cli_opts.validate()?;
 
     let seed = match cli_opts.seed {
         Some(seed) => seed,
@@ -31,18 +71,15 @@ fn main() {
 
     let output_dir = match &cli_opts.output_dir {
         Some(dir) => Path::new(dir).to_path_buf(),
-        None => TempDir::new().unwrap().into_path(),
+        None => TempDir::new().map_err(|e| format!("{:?}", e))?.into_path(),
     };
 
-    let db_path = output_dir.join("simulator.db");
-    let plan_path = output_dir.join("simulator.plan");
-
     banner();
+    let paths = Paths::new(&output_dir, cli_opts.shrink, cli_opts.doublecheck);
 
-    // Print the seed, the locations of the database and the plan file
-    log::info!("database path: {:?}", db_path);
-    log::info!("simulator plan path: {:?}", plan_path);
     log::info!("seed: {}", seed);
+
+    let last_execution = Arc::new(Mutex::new(Execution::new(0, 0, 0)));
 
     std::panic::set_hook(Box::new(move |info| {
         log::error!("panic occurred");
@@ -60,83 +97,252 @@ fn main() {
         log::error!("captured backtrace:\n{}", bt);
     }));
 
-    let result = std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
+    let result = SandboxedResult::from(
+        std::panic::catch_unwind(|| {
+            run_simulation(
+                seed,
+                &cli_opts,
+                &paths.db,
+                &paths.plan,
+                last_execution.clone(),
+                None,
+            )
+        }),
+        last_execution.clone(),
+    );
 
     if cli_opts.doublecheck {
-        // Move the old database and plan file to a new location
-        let old_db_path = db_path.with_extension("_old.db");
-        let old_plan_path = plan_path.with_extension("_old.plan");
-
-        std::fs::rename(&db_path, &old_db_path).unwrap();
-        std::fs::rename(&plan_path, &old_plan_path).unwrap();
-
         // Run the simulation again
-        let result2 =
-            std::panic::catch_unwind(|| run_simulation(seed, &cli_opts, &db_path, &plan_path));
+        let result2 = SandboxedResult::from(
+            std::panic::catch_unwind(|| {
+                run_simulation(
+                    seed,
+                    &cli_opts,
+                    &paths.doublecheck_db,
+                    &paths.plan,
+                    last_execution.clone(),
+                    None,
+                )
+            }),
+            last_execution.clone(),
+        );
 
         match (result, result2) {
-            (Ok(Ok(_)), Err(_)) => {
+            (SandboxedResult::Correct, SandboxedResult::Panicked { .. }) => {
                 log::error!("doublecheck failed! first run succeeded, but second run panicked.");
             }
-            (Ok(Err(_)), Err(_)) => {
+            (SandboxedResult::FoundBug { .. }, SandboxedResult::Panicked { .. }) => {
                 log::error!(
-                    "doublecheck failed! first run failed assertion, but second run panicked."
+                    "doublecheck failed! first run failed an assertion, but second run panicked."
                 );
             }
-            (Err(_), Ok(Ok(_))) => {
+            (SandboxedResult::Panicked { .. }, SandboxedResult::Correct) => {
                 log::error!("doublecheck failed! first run panicked, but second run succeeded.");
             }
-            (Err(_), Ok(Err(_))) => {
+            (SandboxedResult::Panicked { .. }, SandboxedResult::FoundBug { .. }) => {
                 log::error!(
-                    "doublecheck failed! first run panicked, but second run failed assertion."
+                    "doublecheck failed! first run panicked, but second run failed an assertion."
                 );
             }
-            (Ok(Ok(_)), Ok(Err(_))) => {
+            (SandboxedResult::Correct, SandboxedResult::FoundBug { .. }) => {
                 log::error!(
-                    "doublecheck failed! first run succeeded, but second run failed assertion."
+                    "doublecheck failed! first run succeeded, but second run failed an assertion."
                 );
             }
-            (Ok(Err(_)), Ok(Ok(_))) => {
+            (SandboxedResult::FoundBug { .. }, SandboxedResult::Correct) => {
                 log::error!(
-                    "doublecheck failed! first run failed assertion, but second run succeeded."
+                    "doublecheck failed! first run failed an assertion, but second run succeeded."
                 );
             }
-            (Err(_), Err(_)) | (Ok(_), Ok(_)) => {
+            (SandboxedResult::Correct, SandboxedResult::Correct)
+            | (SandboxedResult::FoundBug { .. }, SandboxedResult::FoundBug { .. })
+            | (SandboxedResult::Panicked { .. }, SandboxedResult::Panicked { .. }) => {
                 // Compare the two database files byte by byte
-                let old_db = std::fs::read(&old_db_path).unwrap();
-                let new_db = std::fs::read(&db_path).unwrap();
-                if old_db != new_db {
+                let db_bytes = std::fs::read(&paths.db).unwrap();
+                let doublecheck_db_bytes = std::fs::read(&paths.doublecheck_db).unwrap();
+                if db_bytes != doublecheck_db_bytes {
                     log::error!("doublecheck failed! database files are different.");
                 } else {
                     log::info!("doublecheck succeeded! database files are the same.");
                 }
             }
         }
-
-        // Move the new database and plan file to a new location
-        let new_db_path = db_path.with_extension("_double.db");
-        let new_plan_path = plan_path.with_extension("_double.plan");
-
-        std::fs::rename(&db_path, &new_db_path).unwrap();
-        std::fs::rename(&plan_path, &new_plan_path).unwrap();
-
-        // Move the old database and plan file back
-        std::fs::rename(&old_db_path, &db_path).unwrap();
-        std::fs::rename(&old_plan_path, &plan_path).unwrap();
-    } else if let Ok(result) = result {
-        match result {
-            Ok(_) => {
-                log::info!("simulation completed successfully");
+    } else {
+        // No doublecheck, run shrinking if panicking or found a bug.
+        match &result {
+            SandboxedResult::Correct => {
+                log::info!("simulation succeeded");
             }
-            Err(e) => {
-                log::error!("simulation failed: {:?}", e);
+            SandboxedResult::Panicked {
+                error,
+                last_execution,
+            }
+            | SandboxedResult::FoundBug {
+                error,
+                last_execution,
+                ..
+            } => {
+                if let SandboxedResult::FoundBug { history, .. } = &result {
+                    // No panic occurred, so write the history to a file
+                    let f = std::fs::File::create(&paths.history).unwrap();
+                    let mut f = std::io::BufWriter::new(f);
+                    for execution in history.history.iter() {
+                        writeln!(
+                            f,
+                            "{} {} {}",
+                            execution.connection_index,
+                            execution.interaction_index,
+                            execution.secondary_index
+                        )
+                        .unwrap();
+                    }
+                }
+
+                log::error!("simulation failed: '{}'", error);
+
+                if cli_opts.shrink {
+                    log::info!("Starting to shrink");
+                    let shrink = Some(last_execution);
+                    let last_execution = Arc::new(Mutex::new(*last_execution));
+
+                    let shrunk = SandboxedResult::from(
+                        std::panic::catch_unwind(|| {
+                            run_simulation(
+                                seed,
+                                &cli_opts,
+                                &paths.shrunk_db,
+                                &paths.shrunk_plan,
+                                last_execution.clone(),
+                                shrink,
+                            )
+                        }),
+                        last_execution,
+                    );
+
+                    match (&shrunk, &result) {
+                        (
+                            SandboxedResult::Panicked { error: e1, .. },
+                            SandboxedResult::Panicked { error: e2, .. },
+                        )
+                        | (
+                            SandboxedResult::FoundBug { error: e1, .. },
+                            SandboxedResult::FoundBug { error: e2, .. },
+                        ) => {
+                            if e1 != e2 {
+                                log::error!(
+                                    "shrinking failed, the error was not properly reproduced"
+                                );
+                            } else {
+                                log::info!("shrinking succeeded");
+                            }
+                        }
+                        (_, SandboxedResult::Correct) => {
+                            unreachable!("shrinking should never be called on a correct simulation")
+                        }
+                        _ => {
+                            log::error!("shrinking failed, the error was not properly reproduced");
+                        }
+                    }
+
+                    // Write the shrunk plan to a file
+                    let shrunk_plan = std::fs::read(&paths.shrunk_plan).unwrap();
+                    let mut f = std::fs::File::create(&paths.shrunk_plan).unwrap();
+                    f.write_all(&shrunk_plan).unwrap();
+                }
             }
         }
     }
+
     // Print the seed, the locations of the database and the plan file at the end again for easily accessing them.
-    println!("database path: {:?}", db_path);
-    println!("simulator plan path: {:?}", plan_path);
+    println!("database path: {:?}", paths.db);
+    if cli_opts.doublecheck {
+        println!("doublecheck database path: {:?}", paths.doublecheck_db);
+    } else if cli_opts.shrink {
+        println!("shrunk database path: {:?}", paths.shrunk_db);
+    }
+    println!("simulator plan path: {:?}", paths.plan);
+    if cli_opts.shrink {
+        println!("shrunk plan path: {:?}", paths.shrunk_plan);
+    }
+    println!("simulator history path: {:?}", paths.history);
     println!("seed: {}", seed);
+
+    Ok(())
+}
+
+fn move_db_and_plan_files(output_dir: &Path) {
+    let old_db_path = output_dir.join("simulator.db");
+    let old_plan_path = output_dir.join("simulator.plan");
+
+    let new_db_path = output_dir.join("simulator_double.db");
+    let new_plan_path = output_dir.join("simulator_double.plan");
+
+    std::fs::rename(&old_db_path, &new_db_path).unwrap();
+    std::fs::rename(&old_plan_path, &new_plan_path).unwrap();
+}
+
+fn revert_db_and_plan_files(output_dir: &Path) {
+    let old_db_path = output_dir.join("simulator.db");
+    let old_plan_path = output_dir.join("simulator.plan");
+
+    let new_db_path = output_dir.join("simulator_double.db");
+    let new_plan_path = output_dir.join("simulator_double.plan");
+
+    std::fs::rename(&new_db_path, &old_db_path).unwrap();
+    std::fs::rename(&new_plan_path, &old_plan_path).unwrap();
+}
+
+#[derive(Debug)]
+enum SandboxedResult {
+    Panicked {
+        error: String,
+        last_execution: Execution,
+    },
+    FoundBug {
+        error: String,
+        history: ExecutionHistory,
+        last_execution: Execution,
+    },
+    Correct,
+}
+
+impl SandboxedResult {
+    fn from(
+        result: Result<ExecutionResult, Box<dyn Any + Send>>,
+        last_execution: Arc<Mutex<Execution>>,
+    ) -> Self {
+        match result {
+            Ok(ExecutionResult { error: None, .. }) => SandboxedResult::Correct,
+            Ok(ExecutionResult { error: Some(e), .. }) => {
+                let error = format!("{:?}", e);
+                let last_execution = last_execution.lock().unwrap();
+                SandboxedResult::Panicked {
+                    error,
+                    last_execution: *last_execution,
+                }
+            }
+            Err(payload) => {
+                log::error!("panic occurred");
+                let err = if let Some(s) = payload.downcast_ref::<&str>() {
+                    log::error!("{}", s);
+                    s.to_string()
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    log::error!("{}", s);
+                    s.to_string()
+                } else {
+                    log::error!("unknown panic payload");
+                    "unknown panic payload".to_string()
+                };
+
+                last_execution.clear_poison();
+
+                SandboxedResult::Panicked {
+                    error: err,
+                    last_execution: *last_execution.lock().unwrap(),
+                }
+            }
+        }
+    }
 }
 
 fn run_simulation(
@@ -144,7 +350,9 @@ fn run_simulation(
     cli_opts: &SimulatorCLI,
     db_path: &Path,
     plan_path: &Path,
-) -> Result<()> {
+    last_execution: Arc<Mutex<Execution>>,
+    shrink: Option<&Execution>,
+) -> ExecutionResult {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let (create_percent, read_percent, write_percent, delete_percent) = {
@@ -160,24 +368,6 @@ fn run_simulation(
 
         (create_percent, read_percent, write_percent, delete_percent)
     };
-
-    if cli_opts.minimum_size < 1 {
-        return Err(limbo_core::LimboError::InternalError(
-            "minimum size must be at least 1".to_string(),
-        ));
-    }
-
-    if cli_opts.maximum_size < 1 {
-        return Err(limbo_core::LimboError::InternalError(
-            "maximum size must be at least 1".to_string(),
-        ));
-    }
-
-    if cli_opts.maximum_size < cli_opts.minimum_size {
-        return Err(limbo_core::LimboError::InternalError(
-            "maximum size must be greater than or equal to minimum size".to_string(),
-        ));
-    }
 
     let opts = SimulatorOpts {
         ticks: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
@@ -214,119 +404,42 @@ fn run_simulation(
 
     log::info!("Generating database interaction plan...");
     let mut plans = (1..=env.opts.max_connections)
-        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &env))
+        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
         .collect::<Vec<_>>();
+    let mut states = plans
+        .iter()
+        .map(|_| InteractionPlanState {
+            stack: vec![],
+            interaction_pointer: 0,
+            secondary_pointer: 0,
+        })
+        .collect::<Vec<_>>();
+
+    let plan = if let Some(failing_execution) = shrink {
+        // todo: for now, we only use 1 connection, so it's safe to use the first plan.
+        println!("Interactions Before: {}", plans[0].plan.len());
+        let shrunk = plans[0].shrink_interaction_plan(failing_execution);
+        println!("Interactions After: {}", shrunk.plan.len());
+        shrunk
+    } else {
+        plans[0].clone()
+    };
 
     let mut f = std::fs::File::create(plan_path).unwrap();
     // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
-    f.write_all(plans[0].to_string().as_bytes()).unwrap();
+    f.write_all(plan.to_string().as_bytes()).unwrap();
 
-    log::info!("{}", plans[0].stats());
+    log::info!("{}", plan.stats());
 
     log::info!("Executing database interaction plan...");
 
-    let result = execute_plans(&mut env, &mut plans);
-    if result.is_err() {
-        log::error!("error executing plans: {:?}", result.as_ref().err());
-    }
+    let result = execute_plans(&mut env, &mut plans, &mut states, last_execution);
 
     env.io.print_stats();
 
     log::info!("Simulation completed");
 
     result
-}
-
-fn execute_plans(env: &mut SimulatorEnv, plans: &mut [InteractionPlan]) -> Result<()> {
-    let now = std::time::Instant::now();
-    // todo: add history here by recording which interaction was executed at which tick
-    for _tick in 0..env.opts.ticks {
-        // Pick the connection to interact with
-        let connection_index = pick_index(env.connections.len(), &mut env.rng);
-        // Execute the interaction for the selected connection
-        execute_plan(env, connection_index, plans)?;
-        // Check if the maximum time for the simulation has been reached
-        if now.elapsed().as_secs() >= env.opts.max_time_simulation as u64 {
-            return Err(limbo_core::LimboError::InternalError(
-                "maximum time for simulation reached".into(),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-fn execute_plan(
-    env: &mut SimulatorEnv,
-    connection_index: usize,
-    plans: &mut [InteractionPlan],
-) -> Result<()> {
-    let connection = &env.connections[connection_index];
-    let plan = &mut plans[connection_index];
-
-    if plan.interaction_pointer >= plan.plan.len() {
-        return Ok(());
-    }
-
-    let interaction = &plan.plan[plan.interaction_pointer];
-
-    if let SimConnection::Disconnected = connection {
-        log::trace!("connecting {}", connection_index);
-        env.connections[connection_index] = SimConnection::Connected(env.db.connect());
-    } else {
-        match execute_interaction(env, connection_index, interaction, &mut plan.stack) {
-            Ok(_) => {
-                log::debug!("connection {} processed", connection_index);
-                plan.interaction_pointer += 1;
-            }
-            Err(err) => {
-                log::error!("error {}", err);
-                return Err(err);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn execute_interaction(
-    env: &mut SimulatorEnv,
-    connection_index: usize,
-    interaction: &Interaction,
-    stack: &mut Vec<ResultSet>,
-) -> Result<()> {
-    log::trace!("executing: {}", interaction);
-    match interaction {
-        generation::plan::Interaction::Query(_) => {
-            let conn = match &mut env.connections[connection_index] {
-                SimConnection::Connected(conn) => conn,
-                SimConnection::Disconnected => unreachable!(),
-            };
-
-            log::debug!("{}", interaction);
-            let results = interaction.execute_query(conn);
-            log::debug!("{:?}", results);
-            stack.push(results);
-        }
-        generation::plan::Interaction::Assertion(_) => {
-            interaction.execute_assertion(stack)?;
-            stack.clear();
-        }
-        Interaction::Fault(_) => {
-            interaction.execute_fault(env, connection_index)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn compare_equal_rows(a: &[Vec<Value>], b: &[Vec<Value>]) {
-    assert_eq!(a.len(), b.len(), "lengths are different");
-    for (r1, r2) in a.iter().zip(b) {
-        for (v1, v2) in r1.iter().zip(r2) {
-            assert_eq!(v1, v2, "values are different");
-        }
-    }
 }
 
 fn init_logger() {
