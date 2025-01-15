@@ -474,10 +474,6 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
         (env, stats): (&SimulatorEnv, InteractionStats),
     ) -> Self {
         let remaining_ = remaining(env, &stats);
-        println!(
-            "remaining: {} {} {}",
-            remaining_.read, remaining_.write, remaining_.create
-        );
         frequency(
             vec![
                 (
