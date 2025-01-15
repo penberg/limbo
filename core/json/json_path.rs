@@ -122,7 +122,7 @@ mod tests {
             let path = json_path(value);
 
             match path {
-                Err(crate::error::LimboError::Constraint(e)) => {
+                Err(crate::error::LimboError::Constraint(_)) => {
                     // happy path
                 }
                 _ => panic!("Expected error for: {:?}, got: {:?}", value, path),

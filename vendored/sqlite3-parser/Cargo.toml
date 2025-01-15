@@ -10,7 +10,7 @@ readme = "README.md"
 categories = ["parser-implementations"]
 keywords = ["sql", "parser", "scanner", "tokenizer"]
 license = "Apache-2.0/MIT"
-build = "build.rs" # Lemon preprocessing
+build = "build.rs"                                   # Lemon preprocessing
 
 [badges]
 maintenance = { status = "experimental" }
@@ -41,3 +41,7 @@ cc = "1.0"
 phf_shared = { version = "0.11", features = ["uncased"] }
 phf_codegen = "0.11"
 uncased = "0.9.10"
+
+[lints.rust]
+dead_code = "allow"
+non_snake_case = "allow"
