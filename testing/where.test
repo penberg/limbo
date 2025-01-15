@@ -365,3 +365,21 @@ do_execsql_test nested-parens-conditionals-and-double-or {
 8171|Andrea|Lee|dgarrison@example.com|001-594-430-0646|452 Anthony Stravenue|Sandraville|CA|28572|12
 9110|Anthony|Barrett|steven05@example.net|(562)928-9177x8454|86166 Foster Inlet Apt. 284|North Jeffreyburgh|CA|80147|97
 9279|Annette|Lynn|joanne37@example.com|(272)700-7181|2676 Laura Points Apt. 683|Tristanville|NY|48646|91}}
+
+# Regression test for nested parens + OR + AND. This returned 0 rows before the fix.
+# It should always return 1 row because it is true for id = 6.
+do_execsql_test nested-parens-and-inside-or-regression-test {
+    SELECT count(1) FROM users 
+    WHERE (
+        (
+            (
+                (id != 5) 
+                AND 
+                (id = 5 OR TRUE)
+            ) 
+            OR FALSE
+        ) 
+        AND 
+        (id = 6 OR FALSE)
+    );
+} {1}
