@@ -515,6 +515,62 @@ foreach {testname lhs rhs ans} {
   do_execsql_test shift-left-$testname "SELECT $lhs << $rhs" $::ans
 }
 
+foreach {testname lhs rhs ans} {
+  int-int                 8     2       2 
+  int-neg_int             8     -2      32
+  int-float               8     1.0     4
+  int-text                8     'a'     8
+  int-text_float          8     '3.0'   1
+  int-text_int            8     '1'     4
+  int-null                8     NULL    {}
+  int-int-overflow        8     64      0
+  int-int-underflow       8     -64     0
+  int-float-overflow      8     64.0    0
+  int-float-underflow     8     -64.0   0
+} {
+  do_execsql_test shift-right-$testname "SELECT $lhs >> $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-int               8.0     2       2 
+  float-neg_int           8.0     -2      32
+  float-float             8.0     1.0     4
+  float-text              8.0     'a'     8
+  float-text_float        8.0     '3.0'   1
+  float-text_int          8.0     '1'     4
+  float-null              8.0     NULL    {}
+  float-int-overflow      8.0     64      0
+  float-int-underflow     8.0     -64     0
+  float-float-overflow    8.0     64.0    0
+  float-float-underflow   8.0     -64.0   0
+} {
+  do_execsql_test shift-right-$testname "SELECT $lhs >> $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-int                 'a'       2      0 
+   text-float               'a'       4.0    0
+   text-text                'a'       'a'    0
+   text_int-text_int        '8'       '1'    4
+   text_int-text_float      '8'       '3.0'  1
+   text_int-text            '8'       'a'    8
+   text_float-text_int      '8.0'     '1'    4
+   text_float-text_float    '8.0'     '3.0'  1
+   text_float-text          '8.0'     'a'    8
+   text-null                '8'       NULL   {}
+} {
+  do_execsql_test shift-right-$testname "SELECT $lhs >> $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   null-int         NULL       2      {} 
+   null-float       NULL       4.0    {}
+   null-text        NULL       'a'    {}
+   null-null        NULL       NULL   {}
+} {
+  do_execsql_test shift-right-$testname "SELECT $lhs >> $rhs" $::ans
+}
+
 do_execsql_test bitwise-not-null {
 	SELECT ~NULL
 } {}

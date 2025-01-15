@@ -1044,6 +1044,15 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::ShiftRight { lhs, rhs, dest } => (
+                "ShiftRight",
+                *rhs as i32,
+                *lhs as i32,
+                *dest as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=r[{}] >> r[{}]", dest, lhs, rhs),
+            ),
             Insn::ShiftLeft { lhs, rhs, dest } => (
                 "ShiftLeft",
                 *rhs as i32,
