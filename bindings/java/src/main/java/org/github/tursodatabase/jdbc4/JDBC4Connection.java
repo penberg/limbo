@@ -16,10 +16,25 @@ public class JDBC4Connection extends LimboConnection {
     }
 
     @Override
-    @SkipNullableCheck
     public Statement createStatement() throws SQLException {
-        // TODO
-        return null;
+        return createStatement(
+                ResultSet.TYPE_FORWARD_ONLY,
+                ResultSet.CONCUR_READ_ONLY,
+                ResultSet.CLOSE_CURSORS_AT_COMMIT
+        );
+    }
+
+    @Override
+    public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException {
+        return createStatement(resultSetType, resultSetConcurrency, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+    }
+
+    @Override
+    public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
+        checkOpen();
+        checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
+
+        return new JDBC4Statement(this);
     }
 
     @Override
@@ -129,13 +144,6 @@ public class JDBC4Connection extends LimboConnection {
 
     @Override
     @SkipNullableCheck
-    public Statement createStatement(int resultSetType, int resultSetConcurrency) throws SQLException {
-        // TODO
-        return null;
-    }
-
-    @Override
-    @SkipNullableCheck
     public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency) throws SQLException {
         // TODO
         return null;
@@ -191,13 +199,6 @@ public class JDBC4Connection extends LimboConnection {
     @Override
     public void releaseSavepoint(Savepoint savepoint) throws SQLException {
         // TODO
-    }
-
-    @Override
-    @SkipNullableCheck
-    public Statement createStatement(int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
-        // TODO
-        return null;
     }
 
     @Override
