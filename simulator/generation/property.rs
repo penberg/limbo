@@ -1,3 +1,5 @@
+use limbo_core::LimboError;
+
 use crate::{
     model::{
         query::{Create, Delete, Insert, Predicate, Query, Select},
@@ -94,7 +96,7 @@ impl Property {
                     func: Box::new({
                         let table_name = insert.table.clone();
                         move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                            env.tables.iter().any(|t| t.name == table_name)
+                            Ok(env.tables.iter().any(|t| t.name == table_name))
                         }
                     }),
                 });
@@ -109,8 +111,8 @@ impl Property {
                     func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
                         let rows = stack.last().unwrap();
                         match rows {
-                            Ok(rows) => rows.iter().any(|r| r == &row),
-                            Err(_) => false,
+                            Ok(rows) => Ok(rows.iter().any(|r| r == &row)),
+                            Err(err) => Err(LimboError::InternalError(err.to_string())),
                         }
                     }),
                 });
@@ -131,7 +133,7 @@ impl Property {
                     message: "Double-Create-Failure should not be called on an existing table"
                         .to_string(),
                     func: Box::new(move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                        !env.tables.iter().any(|t| t.name == table_name)
+                        Ok(!env.tables.iter().any(|t| t.name == table_name))
                     }),
                 });
 
@@ -147,10 +149,8 @@ impl Property {
                     func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
                         let last = stack.last().unwrap();
                         match last {
-                            Ok(_) => false,
-                            Err(e) => e
-                                .to_string()
-                                .contains(&format!("Table {table_name} already exists")),
+                            Ok(_) => Ok(false),
+                            Err(e) => Ok(e.to_string().contains(&format!("Table {table_name} already exists"))),
                         }
                     }),
                 });
