@@ -12,7 +12,10 @@ use crate::{
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
 
-use super::{pick, property::Property};
+use super::{
+    pick,
+    property::{remaining, Property},
+};
 
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
@@ -470,38 +473,39 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
         rng: &mut R,
         (env, stats): (&SimulatorEnv, InteractionStats),
     ) -> Self {
-        let remaining_read = ((env.opts.max_interactions as f64 * env.opts.read_percent / 100.0)
-            - (stats.read_count as f64))
-            .max(0.0);
-        let remaining_write = ((env.opts.max_interactions as f64 * env.opts.write_percent / 100.0)
-            - (stats.write_count as f64))
-            .max(0.0);
-        let remaining_create = ((env.opts.max_interactions as f64 * env.opts.create_percent
-            / 100.0)
-            - (stats.create_count as f64))
-            .max(0.0);
-
+        let remaining_ = remaining(env, &stats);
+        println!(
+            "remaining: {} {} {}",
+            remaining_.read, remaining_.write, remaining_.create
+        );
         frequency(
             vec![
                 (
-                    f64::min(remaining_read, remaining_write) + remaining_create,
+                    f64::min(remaining_.read, remaining_.write) + remaining_.create,
                     Box::new(|rng: &mut R| {
                         Interactions::Property(Property::arbitrary_from(rng, (env, &stats)))
                     }),
                 ),
                 (
-                    remaining_read,
+                    remaining_.read,
                     Box::new(|rng: &mut R| random_read(rng, env)),
                 ),
                 (
-                    remaining_write,
+                    remaining_.write,
                     Box::new(|rng: &mut R| random_write(rng, env)),
                 ),
                 (
-                    remaining_create,
+                    remaining_.create,
                     Box::new(|rng: &mut R| create_table(rng, env)),
                 ),
-                (1.0, Box::new(|rng: &mut R| random_fault(rng, env))),
+                (
+                    remaining_
+                        .read
+                        .min(remaining_.write)
+                        .min(remaining_.create)
+                        .max(1.0),
+                    Box::new(|rng: &mut R| random_fault(rng, env)),
+                ),
             ],
             rng,
         )

@@ -174,7 +174,7 @@ pub(crate) struct Remaining {
     pub(crate) create: f64,
 }
 
-fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> Remaining {
+pub(crate) fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> Remaining {
     let remaining_read = ((env.opts.max_interactions as f64 * env.opts.read_percent / 100.0)
         - (stats.read_count as f64))
         .max(0.0);

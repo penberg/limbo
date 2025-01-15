@@ -1,5 +1,6 @@
 use crate::{
     generation::plan::{InteractionPlan, Interactions},
+    model::query::Query,
     runner::execution::Execution,
 };
 
@@ -35,6 +36,10 @@ impl InteractionPlan {
                 }
             }
         }
+
+        plan.plan
+            .retain(|p| !matches!(p, Interactions::Query(Query::Select(_))));
+
         let after = plan.plan.len();
 
         log::info!(
