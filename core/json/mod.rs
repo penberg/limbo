@@ -257,21 +257,22 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
     }
 }
 
-// TODO: document this
 // TODO: maybe we should use impl `From<OwnedValue>` for `Val` here, instead of this?
 // the same with `convert_json_to_db_type`...
+/// Converts a DB value (`OwnedValue`) to a JSON representation (`Val`).
+/// Note that when the internal text value is a json,
+/// the returned `Val` will be an object. If the internal text value is a regular text,
+/// then a string will be returned. This is useful to track if the value came from a json
+/// function and therefore we must interpret it as json instead of raw text when working with it.
 fn convert_db_type_to_json(value: &OwnedValue) -> crate::Result<Val> {
     let val = match value {
         OwnedValue::Null => Val::Null,
         OwnedValue::Float(f) => Val::Float(*f),
         OwnedValue::Integer(i) => Val::Integer(*i),
         OwnedValue::Text(t) => match t.subtype {
-            // Convert only to json if the subtype is json (got it from another json function)
+            // Convert only to json if the subtype is json (if we got it from another json function)
             TextSubtype::Json => get_json_value(value)?,
-            TextSubtype::Text => {
-                let text = t.value.to_string();
-                Val::String(text)
-            }
+            TextSubtype::Text => Val::String(t.value.to_string()),
         },
         _ => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
     };
@@ -421,25 +422,21 @@ pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
     }
 }
 
-// TODO: document this
+/// Constructs a JSON object from a list of values that represent key-value pairs.
+/// The number of values must be even, and the first value of each pair (which represents the map key)
+/// must be a TEXT value. The second value of each pair can be any JSON value (which represents the map value)
 pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     let value_map = values
         .chunks(2)
         .map(|chunk| match chunk {
             [key, value] => {
                 let key = match key {
-                    // TODO: is this to_string call ok?
                     // TODO: We can construct the IndexMap from Rc<String>, but we must enable the
                     // serde's `rc` feature so we can serialize Rc<String>
                     OwnedValue::Text(t) => t.value.to_string(),
                     // TODO: I matched sqlite message error here. Is this ok?
                     _ => crate::bail_constraint_error!("labels must be TEXT"),
                 };
-
-                // TODO: with `convert_db_type_to_json` we convert the value to JSON only if
-                // it was obtained from another JSON function.
-                // TODO: the `json_array` function should use something like this.
-                // That implementation could be a lot simpler with this function
                 let json_val = convert_db_type_to_json(value)?;
 
                 Ok((key, json_val))
