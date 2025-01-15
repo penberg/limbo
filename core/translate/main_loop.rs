@@ -230,7 +230,6 @@ pub fn open_loop(
                         jump_if_condition_is_true: false,
                         jump_target_when_true,
                         jump_target_when_false: next,
-                        parent_op: None,
                     };
                     translate_condition_expr(
                         program,
@@ -279,7 +278,6 @@ pub fn open_loop(
                     jump_if_condition_is_true: false,
                     jump_target_when_true,
                     jump_target_when_false,
-                    parent_op: None,
                 };
                 for predicate in predicates.iter() {
                     translate_condition_expr(
@@ -352,7 +350,6 @@ pub fn open_loop(
                         jump_if_condition_is_true: false,
                         jump_target_when_true,
                         jump_target_when_false: next,
-                        parent_op: None,
                     };
                     translate_condition_expr(
                         program,
@@ -537,7 +534,6 @@ pub fn open_loop(
                         jump_if_condition_is_true: false,
                         jump_target_when_true,
                         jump_target_when_false: next,
-                        parent_op: None,
                     };
                     translate_condition_expr(
                         program,
