@@ -613,6 +613,13 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::LeftShift => {
+                    program.emit_insn(Insn::ShiftLeft {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 #[cfg(feature = "json")]
                 op @ (ast::Operator::ArrowRight | ast::Operator::ArrowRightShift) => {
                     let json_func = match op {
