@@ -47,6 +47,12 @@ jobs:
       - name: Clippy
         run: |
           cargo clippy --workspace --all-features --all-targets --exclude limbo-wasm --exclude sqlite3-parser -- -A clippy::all -W clippy::correctness -W clippy::perf -W clippy::suspicious --deny=warnings
+      - name: Clippy `limbo-wasm` crate `nodejs` feature
+        run: |
+          cargo clippy --package limbo-wasm --features nodejs --all-targets --no-deps -- -A clippy::all -W clippy::correctness -W clippy::perf -W clippy::suspicious --deny=warnings
+      - name: Clippy `limbo-wasm` crate `web` feature
+        run: |
+          cargo clippy --package limbo-wasm --no-default-features --features web --all-targets --no-deps -- -A clippy::all -W clippy::correctness -W clippy::perf -W clippy::suspicious --deny=warnings
 
   build-wasm:
     runs-on: ubuntu-latest
