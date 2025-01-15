@@ -137,10 +137,10 @@ pub fn translate_condition_expr(
         ast::Expr::Between { .. } => todo!(),
         ast::Expr::Binary(lhs, ast::Operator::And, rhs) => {
             // In a binary AND, never jump to the parent 'jump_target_when_true' label on the first condition, because
-            // the second condition must also be true. Instead we instruct the child expression to jump to a local
+            // the second condition MUST also be true. Instead we instruct the child expression to jump to a local
             // true label.
             let jump_target_when_true = program.allocate_label();
-            let _ = translate_condition_expr(
+            translate_condition_expr(
                 program,
                 referenced_tables,
                 lhs,
@@ -149,33 +149,40 @@ pub fn translate_condition_expr(
                     ..condition_metadata
                 },
                 resolver,
-            );
+            )?;
             program.resolve_label(jump_target_when_true, program.offset());
-            let _ = translate_condition_expr(
+            translate_condition_expr(
                 program,
                 referenced_tables,
                 rhs,
                 condition_metadata,
                 resolver,
-            );
+            )?;
         }
         ast::Expr::Binary(lhs, ast::Operator::Or, rhs) => {
+            // In a binary OR, never jump to the parent 'jump_target_when_false' label on the first condition, because
+            // the second condition CAN also be true. Instead we instruct the child expression to jump to a local
+            // false label.
             let jump_target_when_false = program.allocate_label();
-
-            let lhs_metadata = ConditionMetadata {
-                jump_if_condition_is_true: true,
-                jump_target_when_false,
-                ..condition_metadata
-            };
-
-            translate_condition_expr(program, referenced_tables, lhs, lhs_metadata, resolver)?;
-
-            // if LHS was false, we land here:
+            translate_condition_expr(
+                program,
+                referenced_tables,
+                lhs,
+                ConditionMetadata {
+                    jump_if_condition_is_true: true,
+                    jump_target_when_false,
+                    ..condition_metadata
+                },
+                resolver,
+            )?;
             program.resolve_label(jump_target_when_false, program.offset());
-            let rhs_metadata = ConditionMetadata {
-                ..condition_metadata
-            };
-            translate_condition_expr(program, referenced_tables, rhs, rhs_metadata, resolver)?;
+            translate_condition_expr(
+                program,
+                referenced_tables,
+                rhs,
+                condition_metadata,
+                resolver,
+            )?;
         }
         ast::Expr::Binary(lhs, op, rhs) => {
             let lhs_reg = translate_and_mark(program, Some(referenced_tables), lhs, resolver)?;
