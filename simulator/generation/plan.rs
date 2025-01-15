@@ -167,7 +167,7 @@ impl Display for Interaction {
     }
 }
 
-type AssertionFunc = dyn Fn(&Vec<ResultSet>, &SimulatorEnv) -> bool;
+type AssertionFunc = dyn Fn(&Vec<ResultSet>, &SimulatorEnv) -> Result<bool>;
 
 enum AssertionAST {
     Pick(),
@@ -375,12 +375,17 @@ impl Interaction {
                 unreachable!("unexpected: this function should only be called on assertions")
             }
             Self::Assertion(assertion) => {
-                if !assertion.func.as_ref()(stack, env) {
-                    return Err(limbo_core::LimboError::InternalError(
+                let result = assertion.func.as_ref()(stack, env);
+                match result {
+                    Ok(true) => Ok(()),
+                    Ok(false) => Err(limbo_core::LimboError::InternalError(
                         assertion.message.clone(),
-                    ));
+                    )),
+                    Err(err) => Err(limbo_core::LimboError::InternalError(format!(
+                        "{}. Inner error: {}",
+                        assertion.message, err
+                    ))),
                 }
-                Ok(())
             }
             Self::Assumption(_) => {
                 unreachable!("unexpected: this function should only be called on assertions")
@@ -404,12 +409,17 @@ impl Interaction {
                 unreachable!("unexpected: this function should only be called on assumptions")
             }
             Self::Assumption(assumption) => {
-                if !assumption.func.as_ref()(stack, env) {
-                    return Err(limbo_core::LimboError::InternalError(
+                let result = assumption.func.as_ref()(stack, env);
+                match result {
+                    Ok(true) => Ok(()),
+                    Ok(false) => Err(limbo_core::LimboError::InternalError(
                         assumption.message.clone(),
-                    ));
+                    )),
+                    Err(err) => Err(limbo_core::LimboError::InternalError(format!(
+                        "{}. Inner error: {}",
+                        assumption.message, err
+                    ))),
                 }
-                Ok(())
             }
             Self::Fault(_) => {
                 unreachable!("unexpected: this function should only be called on assumptions")
