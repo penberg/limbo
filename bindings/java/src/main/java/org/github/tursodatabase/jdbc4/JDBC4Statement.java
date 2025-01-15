@@ -14,8 +14,19 @@ public class JDBC4Statement extends CoreStatement implements Statement {
     private boolean closed;
     private boolean closeOnCompletion;
 
+    private final int resultSetType;
+    private final int resultSetConcurrency;
+    private final int resultSetHoldability;
+
     public JDBC4Statement(LimboConnection connection) {
+        this(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+    }
+
+    public JDBC4Statement(LimboConnection connection, int resultSetType, int resultSetConcurrency, int resultSetHoldability) {
         super(connection);
+        this.resultSetType = resultSetType;
+        this.resultSetConcurrency = resultSetConcurrency;
+        this.resultSetHoldability = resultSetHoldability;
     }
 
     @Override
@@ -146,15 +157,13 @@ public class JDBC4Statement extends CoreStatement implements Statement {
     }
 
     @Override
-    public int getResultSetConcurrency() throws SQLException {
-        // TODO
-        return 0;
+    public int getResultSetConcurrency() {
+        return resultSetConcurrency;
     }
 
     @Override
-    public int getResultSetType() throws SQLException {
-        // TODO
-        return 0;
+    public int getResultSetType() {
+        return resultSetType;
     }
 
     @Override
@@ -230,9 +239,8 @@ public class JDBC4Statement extends CoreStatement implements Statement {
     }
 
     @Override
-    public int getResultSetHoldability() throws SQLException {
-        // TODO
-        return 0;
+    public int getResultSetHoldability() {
+        return resultSetHoldability;
     }
 
     @Override
