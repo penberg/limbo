@@ -438,7 +438,6 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
             }
             _ => crate::bail_constraint_error!("json_object requires an even number of values"),
         })
-        // TODO: collecting into a IndexMap does not allow for repeated keys
         .collect::<Result<IndexMap<String, Val>, _>>()?;
 
     let result = crate::json::to_string(&value_map).unwrap();
