@@ -40,7 +40,7 @@ impl TempDatabase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use limbo_core::{CheckpointStatus, Connection, Rows, StepResult, Value};
+    use limbo_core::{CheckpointStatus, Connection, StepResult, Value};
     use log::debug;
 
     #[ignore]
@@ -576,15 +576,37 @@ mod tests {
     #[test]
     fn test_statement_bind() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
-        let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+        let tmp_db = TempDatabase::new("create table test (i integer);");
         let conn = tmp_db.connect_limbo();
-        let mut stmt = conn.prepare("select ?")?;
-        stmt.bind(Value::Text(&"hello".to_string()));
+
+        let mut stmt = conn.prepare("select ?, ?1, :named, ?4")?;
+
+        stmt.bind_at(1.try_into().unwrap(), Value::Text(&"hello".to_string()));
+
+        let i = stmt.parameter_index(":named").unwrap();
+        stmt.bind_at(i, Value::Integer(42));
+
+        stmt.bind_at(4.try_into().unwrap(), Value::Float(0.5));
+
+        assert_eq!(stmt.parameter_count(), 3);
+
         loop {
             match stmt.step()? {
                 StepResult::Row(row) => {
                     if let Value::Text(s) = row.values[0] {
                         assert_eq!(s, "hello")
+                    }
+
+                    if let Value::Text(s) = row.values[1] {
+                        assert_eq!(s, "hello")
+                    }
+
+                    if let Value::Integer(s) = row.values[2] {
+                        assert_eq!(s, 42)
+                    }
+
+                    if let Value::Float(s) = row.values[3] {
+                        assert_eq!(s, 0.5)
                     }
                 }
                 StepResult::IO => {

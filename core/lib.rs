@@ -28,6 +28,7 @@ use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::num::NonZero;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
@@ -474,12 +475,24 @@ impl Statement {
         Ok(Rows::new(stmt))
     }
 
-    pub fn reset(&mut self) {
-        self.state.reset();
+    pub fn parameter_count(&mut self) -> usize {
+        self.program.parameter_count()
     }
 
-    pub fn bind(&mut self, value: Value) {
-        self.state.bind(value.into());
+    pub fn parameter_name(&self, index: NonZero<usize>) -> Option<String> {
+        self.program.parameter_name(index)
+    }
+
+    pub fn parameter_index(&self, name: impl AsRef<str>) -> Option<NonZero<usize>> {
+        self.program.parameter_index(name)
+    }
+
+    pub fn bind_at(&mut self, index: NonZero<usize>, value: Value) {
+        self.state.bind_at(index, value.into());
+    }
+
+    pub fn reset(&mut self) {
+        self.state.reset();
     }
 }
 

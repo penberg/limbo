@@ -32,6 +32,8 @@ pub struct ProgramBuilder {
     comments: HashMap<InsnReference, &'static str>,
     named_parameters: HashMap<String, NonZero<usize>>,
     next_free_parameter_index: NonZero<usize>,
+    parameters: crate::translate::Parameters,
+    parameter_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +51,7 @@ impl CursorType {
 }
 
 impl ProgramBuilder {
-    pub fn new() -> Self {
+    pub fn new(parameters: crate::translate::Parameters) -> Self {
         Self {
             next_free_register: 1,
             next_free_label: 0,
@@ -63,6 +65,8 @@ impl ProgramBuilder {
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
             named_parameters: HashMap::new(),
+            parameters,
+            parameter_index: 0,
         }
     }
 
@@ -336,6 +340,7 @@ impl ProgramBuilder {
             self.constant_insns.is_empty(),
             "constant_insns is not empty when build() is called, did you forget to call emit_constant_insns()?"
         );
+        self.parameters.list.dedup();
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,
@@ -344,29 +349,13 @@ impl ProgramBuilder {
             comments: self.comments,
             connection,
             auto_commit: true,
+            parameters: self.parameters.list,
         }
     }
 
-    fn next_parameter(&mut self) -> NonZero<usize> {
-        let index = self.next_free_parameter_index;
-        self.next_free_parameter_index.checked_add(1).unwrap();
-        index
-    }
-
-    pub fn get_parameter_index(&mut self, name: impl AsRef<str>) -> NonZero<usize> {
-        let name = name.as_ref();
-
-        if name == "" {
-            return self.next_parameter();
-        }
-
-        match self.named_parameters.get(name) {
-            Some(index) => *index,
-            None => {
-                let index = self.next_parameter();
-                self.named_parameters.insert(name.to_owned(), index);
-                index
-            }
-        }
+    pub fn pop_index(&mut self) -> NonZero<usize> {
+        let parameter = self.parameters.get(self.parameter_index).unwrap();
+        self.parameter_index += 1;
+        return parameter.index();
     }
 }

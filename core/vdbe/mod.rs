@@ -201,7 +201,7 @@ pub struct ProgramState {
     ended_coroutine: HashMap<usize, bool>, // flag to indicate that a coroutine has ended (key is the yield register)
     regex_cache: RegexCache,
     interrupted: bool,
-    parameters: Vec<OwnedValue>,
+    parameters: HashMap<NonZero<usize>, OwnedValue>,
 }
 
 impl ProgramState {
@@ -224,7 +224,7 @@ impl ProgramState {
             ended_coroutine: HashMap::new(),
             regex_cache: RegexCache::new(),
             interrupted: false,
-            parameters: Vec::new(),
+            parameters: HashMap::new(),
         }
     }
 
@@ -244,12 +244,12 @@ impl ProgramState {
         self.interrupted
     }
 
-    pub fn bind(&mut self, value: OwnedValue) {
-        self.parameters.push(value);
+    pub fn bind_at(&mut self, index: NonZero<usize>, value: OwnedValue) {
+        self.parameters.insert(index, value);
     }
 
     pub fn get_parameter(&self, index: NonZero<usize>) -> Option<&OwnedValue> {
-        self.parameters.get(usize::from(index) - 1)
+        self.parameters.get(&index)
     }
 
     pub fn reset(&mut self) {
@@ -277,6 +277,7 @@ pub struct Program {
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<InsnReference, &'static str>,
+    pub parameters: Vec<crate::translate::Parameter>,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
 }
@@ -298,6 +299,38 @@ impl Program {
             );
             prev_insn = Some(insn);
         }
+    }
+
+    pub fn parameter_count(&self) -> usize {
+        self.parameters.len()
+    }
+
+    pub fn parameter_name(&self, index: NonZero<usize>) -> Option<String> {
+        use crate::translate::Parameter;
+        self.parameters.iter().find_map(|p| match p {
+            Parameter::Anonymous(i) if *i == index => Some("?".to_string()),
+            Parameter::Indexed(i) if *i == index => Some(format!("?{i}")),
+            Parameter::Named(name, i) if *i == index => Some(name.to_owned()),
+            _ => None,
+        })
+    }
+
+    pub fn parameter_index(&self, name: impl AsRef<str>) -> Option<NonZero<usize>> {
+        use crate::translate::Parameter;
+        self.parameters
+            .iter()
+            .find_map(|p| {
+                let Parameter::Named(parameter_name, index) = p else {
+                    return None;
+                };
+
+                if name.as_ref() == parameter_name {
+                    return Some(index);
+                }
+
+                None
+            })
+            .copied()
     }
 
     pub fn step<'a>(

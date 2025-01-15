@@ -32,11 +32,120 @@ use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
 use select::translate_select;
+use sqlite3_parser::ast::fmt::TokenStream;
 use sqlite3_parser::ast::{self, fmt::ToTokens, PragmaName};
+use sqlite3_parser::dialect::TokenType;
 use std::cell::RefCell;
 use std::fmt::Display;
+use std::num::NonZero;
 use std::rc::{Rc, Weak};
 use std::str::FromStr;
+
+#[derive(Clone, Debug)]
+pub enum Parameter {
+    Anonymous(NonZero<usize>),
+    Indexed(NonZero<usize>),
+    Named(String, NonZero<usize>),
+}
+
+impl PartialEq for Parameter {
+    fn eq(&self, other: &Self) -> bool {
+        self.index() == other.index()
+    }
+}
+
+impl Parameter {
+    pub fn index(&self) -> NonZero<usize> {
+        match self {
+            Parameter::Anonymous(index) => *index,
+            Parameter::Indexed(index) => *index,
+            Parameter::Named(_, index) => *index,
+        }
+    }
+}
+
+/// `?` or `$` Prepared statement arg placeholder(s)
+#[derive(Debug)]
+pub struct Parameters {
+    index: NonZero<usize>,
+    pub list: Vec<Parameter>,
+}
+
+impl Parameters {
+    pub fn new() -> Self {
+        Self {
+            index: 1.try_into().unwrap(),
+            list: vec![],
+        }
+    }
+
+    pub fn push(&mut self, value: Parameter) {
+        self.list.push(value);
+    }
+
+    pub fn next_index(&mut self) -> NonZero<usize> {
+        let index = self.index;
+        self.index = self.index.checked_add(1).unwrap();
+        index
+    }
+
+    pub fn get(&mut self, index: usize) -> Option<&Parameter> {
+        self.list.get(index)
+    }
+}
+
+// https://sqlite.org/lang_expr.html#parameters
+impl TokenStream for Parameters {
+    type Error = std::convert::Infallible;
+
+    fn append(
+        &mut self,
+        ty: TokenType,
+        value: Option<&str>,
+    ) -> std::result::Result<(), Self::Error> {
+        if ty == TokenType::TK_VARIABLE {
+            if let Some(variable) = value {
+                match variable.split_at(1) {
+                    ("?", "") => {
+                        let index = self.next_index();
+                        self.push(Parameter::Anonymous(index.try_into().unwrap()));
+                        log::trace!("anonymous parameter at {index}");
+                    }
+                    ("?", index) => {
+                        let index: NonZero<usize> = index.parse().unwrap();
+                        if index > self.index {
+                            self.index = index.checked_add(1).unwrap();
+                        }
+                        self.push(Parameter::Indexed(index.try_into().unwrap()));
+                        log::trace!("indexed parameter at {index}");
+                    }
+                    (_, _) => {
+                        match self.list.iter().find(|p| {
+                            let Parameter::Named(name, _) = p else {
+                                return false;
+                            };
+                            name == variable
+                        }) {
+                            Some(t) => {
+                                log::trace!("named parameter at {} as {}", t.index(), variable);
+                                self.push(t.clone());
+                            }
+                            None => {
+                                let index = self.next_index();
+                                self.push(Parameter::Named(
+                                    variable.to_owned(),
+                                    index.try_into().unwrap(),
+                                ));
+                                log::trace!("named parameter at {index} as {variable}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -47,7 +156,14 @@ pub fn translate(
     connection: Weak<Connection>,
     syms: &SymbolTable,
 ) -> Result<Program> {
-    let mut program = ProgramBuilder::new();
+    let mut parameters = Parameters::new();
+    stmt.to_tokens(&mut parameters).unwrap();
+
+    // dbg!(&parameters);
+    // dbg!(&parameters.list.clone().dedup());
+
+    let mut program = ProgramBuilder::new(parameters);
+
     match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
@@ -118,6 +234,7 @@ pub fn translate(
             )?;
         }
     }
+
     Ok(program.build(database_header, connection))
 }
 
