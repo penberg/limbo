@@ -32,8 +32,7 @@ use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
 use select::translate_select;
-use sqlite3_parser::ast::fmt::ToTokens;
-use sqlite3_parser::ast::{self, PragmaName};
+use sqlite3_parser::ast::{self, fmt::ToTokens, PragmaName};
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
@@ -49,6 +48,7 @@ pub fn translate(
     syms: &SymbolTable,
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
+
     match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
@@ -119,6 +119,7 @@ pub fn translate(
             )?;
         }
     }
+
     Ok(program.build(database_header, connection))
 }
 

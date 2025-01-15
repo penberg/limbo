@@ -1062,6 +1062,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=r[{}] << r[{}]", dest, lhs, rhs),
             ),
+            Insn::Variable { index, dest } => (
+                "Variable",
+                usize::from(*index) as i32,
+                *dest as i32,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=parameter({})", *dest, *index),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

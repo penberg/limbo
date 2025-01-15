@@ -55,6 +55,7 @@ use sorter::Sorter;
 use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::num::NonZero;
 use std::rc::{Rc, Weak};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -200,6 +201,7 @@ pub struct ProgramState {
     ended_coroutine: HashMap<usize, bool>, // flag to indicate that a coroutine has ended (key is the yield register)
     regex_cache: RegexCache,
     interrupted: bool,
+    parameters: HashMap<NonZero<usize>, OwnedValue>,
 }
 
 impl ProgramState {
@@ -222,6 +224,7 @@ impl ProgramState {
             ended_coroutine: HashMap::new(),
             regex_cache: RegexCache::new(),
             interrupted: false,
+            parameters: HashMap::new(),
         }
     }
 
@@ -239,6 +242,18 @@ impl ProgramState {
 
     pub fn is_interrupted(&self) -> bool {
         self.interrupted
+    }
+
+    pub fn bind_at(&mut self, index: NonZero<usize>, value: OwnedValue) {
+        self.parameters.insert(index, value);
+    }
+
+    pub fn get_parameter(&self, index: NonZero<usize>) -> Option<&OwnedValue> {
+        self.parameters.get(&index)
+    }
+
+    pub fn reset(&mut self) {
+        self.parameters.clear();
     }
 }
 
@@ -262,6 +277,7 @@ pub struct Program {
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<InsnReference, &'static str>,
+    pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
 }
@@ -2180,6 +2196,13 @@ impl Program {
                 Insn::ShiftLeft { lhs, rhs, dest } => {
                     state.registers[*dest] =
                         exec_shift_left(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::Variable { index, dest } => {
+                    state.registers[*dest] = state
+                        .get_parameter(*index)
+                        .ok_or(LimboError::Unbound(*index))?
+                        .clone();
                     state.pc += 1;
                 }
             }

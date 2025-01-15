@@ -269,7 +269,7 @@ pub fn bind_column_references(
             bind_column_references(expr, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Variable(_) => todo!(),
+        ast::Expr::Variable(_) => Ok(()),
     }
 }
 

@@ -4,6 +4,7 @@ mod function;
 mod io;
 #[cfg(feature = "json")]
 mod json;
+mod parameters;
 mod pseudo;
 mod result;
 mod schema;
@@ -28,6 +29,7 @@ use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::num::NonZero;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
@@ -43,7 +45,7 @@ use util::parse_schema_rows;
 
 pub use error::LimboError;
 use translate::select::prepare_select_plan;
-pub type Result<T> = std::result::Result<T, error::LimboError>;
+pub type Result<T, E = error::LimboError> = std::result::Result<T, E>;
 
 use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
@@ -386,6 +388,7 @@ impl Connection {
                         Rc::downgrade(self),
                         syms,
                     )?;
+
                     let mut state = vdbe::ProgramState::new(program.max_registers);
                     program.step(&mut state, self.pager.clone())?;
                 }
@@ -473,7 +476,18 @@ impl Statement {
         Ok(Rows::new(stmt))
     }
 
-    pub fn reset(&self) {}
+    pub fn parameters(&self) -> &parameters::Parameters {
+        &self.program.parameters
+    }
+
+    pub fn bind_at(&mut self, index: NonZero<usize>, value: Value) {
+        self.state.bind_at(index, value.into());
+    }
+
+    pub fn reset(&mut self) {
+        let state = vdbe::ProgramState::new(self.program.max_registers);
+        self.state = state
+    }
 }
 
 pub enum StepResult<'a> {

@@ -336,6 +336,18 @@ impl std::ops::DivAssign<OwnedValue> for OwnedValue {
     }
 }
 
+impl From<Value<'_>> for OwnedValue {
+    fn from(value: Value<'_>) -> Self {
+        match value {
+            Value::Null => OwnedValue::Null,
+            Value::Integer(i) => OwnedValue::Integer(i),
+            Value::Float(f) => OwnedValue::Float(f),
+            Value::Text(s) => OwnedValue::Text(LimboText::new(Rc::new(s.to_owned()))),
+            Value::Blob(b) => OwnedValue::Blob(Rc::new(b.to_owned())),
+        }
+    }
+}
+
 pub fn to_value(value: &OwnedValue) -> Value<'_> {
     match value {
         OwnedValue::Null => Value::Null,

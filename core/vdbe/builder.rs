@@ -5,13 +5,13 @@ use std::{
 };
 
 use crate::{
+    parameters::Parameters,
     schema::{BTreeTable, Index, PseudoTable},
     storage::sqlite3_ondisk::DatabaseHeader,
     Connection,
 };
 
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program};
-
 #[allow(dead_code)]
 pub struct ProgramBuilder {
     next_free_register: usize,
@@ -29,6 +29,7 @@ pub struct ProgramBuilder {
     seekrowid_emitted_bitmask: u64,
     // map of instruction index to manual comment (used in EXPLAIN)
     comments: HashMap<InsnReference, &'static str>,
+    pub parameters: Parameters,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +59,7 @@ impl ProgramBuilder {
             label_to_resolved_offset: HashMap::new(),
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
+            parameters: Parameters::new(),
         }
     }
 
@@ -331,6 +333,7 @@ impl ProgramBuilder {
             self.constant_insns.is_empty(),
             "constant_insns is not empty when build() is called, did you forget to call emit_constant_insns()?"
         );
+        self.parameters.list.dedup();
         Program {
             max_registers: self.next_free_register,
             insns: self.insns,
@@ -339,6 +342,7 @@ impl ProgramBuilder {
             comments: self.comments,
             connection,
             auto_commit: true,
+            parameters: self.parameters,
         }
     }
 }
