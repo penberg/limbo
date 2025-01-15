@@ -4,6 +4,7 @@ mod function;
 mod io;
 #[cfg(feature = "json")]
 mod json;
+mod parameters;
 mod pseudo;
 mod result;
 mod schema;
@@ -44,7 +45,7 @@ use util::parse_schema_rows;
 
 pub use error::LimboError;
 use translate::select::prepare_select_plan;
-pub type Result<T> = std::result::Result<T, error::LimboError>;
+pub type Result<T, E = error::LimboError> = std::result::Result<T, E>;
 
 use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
@@ -475,16 +476,8 @@ impl Statement {
         Ok(Rows::new(stmt))
     }
 
-    pub fn parameter_count(&mut self) -> usize {
-        self.program.parameter_count()
-    }
-
-    pub fn parameter_name(&self, index: NonZero<usize>) -> Option<String> {
-        self.program.parameter_name(index)
-    }
-
-    pub fn parameter_index(&self, name: impl AsRef<str>) -> Option<NonZero<usize>> {
-        self.program.parameter_index(name)
+    pub fn parameters(&self) -> &parameters::Parameters {
+        &self.program.parameters
     }
 
     pub fn bind_at(&mut self, index: NonZero<usize>, value: Value) {
@@ -492,7 +485,8 @@ impl Statement {
     }
 
     pub fn reset(&mut self) {
-        self.state.reset();
+        let state = vdbe::ProgramState::new(self.program.max_registers);
+        self.state = state
     }
 }
 

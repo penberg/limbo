@@ -1,18 +1,17 @@
 use std::{
     cell::RefCell,
     collections::HashMap,
-    num::NonZero,
     rc::{Rc, Weak},
 };
 
 use crate::{
+    parameters::Parameters,
     schema::{BTreeTable, Index, PseudoTable},
     storage::sqlite3_ondisk::DatabaseHeader,
     Connection,
 };
 
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program};
-
 #[allow(dead_code)]
 pub struct ProgramBuilder {
     next_free_register: usize,
@@ -30,10 +29,7 @@ pub struct ProgramBuilder {
     seekrowid_emitted_bitmask: u64,
     // map of instruction index to manual comment (used in EXPLAIN)
     comments: HashMap<InsnReference, &'static str>,
-    named_parameters: HashMap<String, NonZero<usize>>,
-    next_free_parameter_index: NonZero<usize>,
-    parameters: crate::translate::Parameters,
-    parameter_index: usize,
+    pub parameters: Parameters,
 }
 
 #[derive(Debug, Clone)]
@@ -51,12 +47,11 @@ impl CursorType {
 }
 
 impl ProgramBuilder {
-    pub fn new(parameters: crate::translate::Parameters) -> Self {
+    pub fn new() -> Self {
         Self {
             next_free_register: 1,
             next_free_label: 0,
             next_free_cursor_id: 0,
-            next_free_parameter_index: 1.try_into().unwrap(),
             insns: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),
@@ -64,9 +59,7 @@ impl ProgramBuilder {
             label_to_resolved_offset: HashMap::new(),
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
-            named_parameters: HashMap::new(),
-            parameters,
-            parameter_index: 0,
+            parameters: Parameters::new(),
         }
     }
 
@@ -349,13 +342,7 @@ impl ProgramBuilder {
             comments: self.comments,
             connection,
             auto_commit: true,
-            parameters: self.parameters.list,
+            parameters: self.parameters,
         }
-    }
-
-    pub fn pop_index(&mut self) -> NonZero<usize> {
-        let parameter = self.parameters.get(self.parameter_index).unwrap();
-        self.parameter_index += 1;
-        return parameter.index();
     }
 }

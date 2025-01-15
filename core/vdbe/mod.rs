@@ -277,7 +277,7 @@ pub struct Program {
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<InsnReference, &'static str>,
-    pub parameters: Vec<crate::translate::Parameter>,
+    pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
 }
@@ -299,38 +299,6 @@ impl Program {
             );
             prev_insn = Some(insn);
         }
-    }
-
-    pub fn parameter_count(&self) -> usize {
-        self.parameters.len()
-    }
-
-    pub fn parameter_name(&self, index: NonZero<usize>) -> Option<String> {
-        use crate::translate::Parameter;
-        self.parameters.iter().find_map(|p| match p {
-            Parameter::Anonymous(i) if *i == index => Some("?".to_string()),
-            Parameter::Indexed(i) if *i == index => Some(format!("?{i}")),
-            Parameter::Named(name, i) if *i == index => Some(name.to_owned()),
-            _ => None,
-        })
-    }
-
-    pub fn parameter_index(&self, name: impl AsRef<str>) -> Option<NonZero<usize>> {
-        use crate::translate::Parameter;
-        self.parameters
-            .iter()
-            .find_map(|p| {
-                let Parameter::Named(parameter_name, index) = p else {
-                    return None;
-                };
-
-                if name.as_ref() == parameter_name {
-                    return Some(index);
-                }
-
-                None
-            })
-            .copied()
     }
 
     pub fn step<'a>(

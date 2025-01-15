@@ -1710,8 +1710,8 @@ pub fn translate_expr(
             }
             _ => todo!(),
         },
-        ast::Expr::Variable(_) => {
-            let index = program.pop_index();
+        ast::Expr::Variable(name) => {
+            let index = program.parameters.push(name);
             program.emit_insn(Insn::Variable {
                 index,
                 dest: target_register,
