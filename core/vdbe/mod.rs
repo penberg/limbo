@@ -1514,12 +1514,12 @@ impl Program {
                                 let reg_values =
                                     &state.registers[*start_reg..*start_reg + arg_count];
 
-                                let func = match func {
+                                let json_func = match json_func {
                                     JsonFunc::JsonArray => json_array,
                                     JsonFunc::JsonObject => json_object,
                                     _ => unreachable!(),
                                 };
-                                let json_result = func(reg_values);
+                                let json_result = json_func(reg_values);
 
                                 match json_result {
                                     Ok(json) => state.registers[*dest] = json,
