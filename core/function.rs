@@ -1,11 +1,21 @@
-use crate::ext::ExtFunc;
 use std::fmt;
 use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
+use limbo_extension::ScalarFunction;
+
 pub struct ExternalFunc {
     pub name: String,
-    pub func: Box<dyn Fn(&[crate::types::Value]) -> crate::Result<crate::types::OwnedValue>>,
+    pub func: ScalarFunction,
+}
+
+impl ExternalFunc {
+    pub fn new(name: &str, func: ScalarFunction) -> Self {
+        Self {
+            name: name.to_string(),
+            func,
+        }
+    }
 }
 
 impl Debug for ExternalFunc {
@@ -25,9 +35,12 @@ impl Display for ExternalFunc {
 pub enum JsonFunc {
     Json,
     JsonArray,
-    JsonExtract,
     JsonArrayLength,
+    JsonArrowExtract,
+    JsonArrowShiftExtract,
+    JsonExtract,
     JsonType,
+    JsonErrorPosition,
 }
 
 #[cfg(feature = "json")]
@@ -41,7 +54,10 @@ impl Display for JsonFunc {
                 Self::JsonArray => "json_array".to_string(),
                 Self::JsonExtract => "json_extract".to_string(),
                 Self::JsonArrayLength => "json_array_length".to_string(),
+                Self::JsonArrowExtract => "->".to_string(),
+                Self::JsonArrowShiftExtract => "->>".to_string(),
                 Self::JsonType => "json_type".to_string(),
+                Self::JsonErrorPosition => "json_error_position".to_string(),
             }
         )
     }
@@ -120,6 +136,8 @@ pub enum ScalarFunc {
     ZeroBlob,
     LastInsertRowid,
     Replace,
+    #[cfg(not(target_family = "wasm"))]
+    LoadExtension,
 }
 
 impl Display for ScalarFunc {
@@ -169,6 +187,8 @@ impl Display for ScalarFunc {
             Self::LastInsertRowid => "last_insert_rowid".to_string(),
             Self::Replace => "replace".to_string(),
             Self::DateTime => "datetime".to_string(),
+            #[cfg(not(target_family = "wasm"))]
+            Self::LoadExtension => "load_extension".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -293,7 +313,6 @@ pub enum Func {
     Math(MathFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
-    Extension(ExtFunc),
     External(Rc<ExternalFunc>),
 }
 
@@ -305,7 +324,6 @@ impl Display for Func {
             Self::Math(math_func) => write!(f, "{}", math_func),
             #[cfg(feature = "json")]
             Self::Json(json_func) => write!(f, "{}", json_func),
-            Self::Extension(ext_func) => write!(f, "{}", ext_func),
             Self::External(generic_func) => write!(f, "{}", generic_func),
         }
     }
@@ -375,6 +393,8 @@ impl Func {
             "json_extract" => Ok(Func::Json(JsonFunc::JsonExtract)),
             #[cfg(feature = "json")]
             "json_type" => Ok(Func::Json(JsonFunc::JsonType)),
+            #[cfg(feature = "json")]
+            "json_error_position" => Ok(Self::Json(JsonFunc::JsonErrorPosition)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),
@@ -410,10 +430,9 @@ impl Func {
             "tan" => Ok(Self::Math(MathFunc::Tan)),
             "tanh" => Ok(Self::Math(MathFunc::Tanh)),
             "trunc" => Ok(Self::Math(MathFunc::Trunc)),
-            _ => match ExtFunc::resolve_function(name, arg_count) {
-                Some(ext_func) => Ok(Self::Extension(ext_func)),
-                None => Err(()),
-            },
+            #[cfg(not(target_family = "wasm"))]
+            "load_extension" => Ok(Self::Scalar(ScalarFunc::LoadExtension)),
+            _ => Err(()),
         }
     }
 }

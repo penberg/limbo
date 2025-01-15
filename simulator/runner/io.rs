@@ -40,8 +40,10 @@ impl SimulatorIO {
     }
 
     pub(crate) fn print_stats(&self) {
-        println!("run_once faults: {}", self.nr_run_once_faults.borrow());
+        log::info!("run_once faults: {}", self.nr_run_once_faults.borrow());
         for file in self.files.borrow().iter() {
+            log::info!("");
+            log::info!("===========================");
             file.print_stats();
         }
     }
@@ -60,9 +62,9 @@ impl IO for SimulatorIO {
             fault: RefCell::new(false),
             nr_pread_faults: RefCell::new(0),
             nr_pwrite_faults: RefCell::new(0),
-            reads: RefCell::new(0),
-            writes: RefCell::new(0),
-            syncs: RefCell::new(0),
+            nr_pread_calls: RefCell::new(0),
+            nr_pwrite_calls: RefCell::new(0),
+            nr_sync_calls: RefCell::new(0),
             page_size: self.page_size,
         });
         self.files.borrow_mut().push(file.clone());

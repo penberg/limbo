@@ -21,7 +21,6 @@ mod generation;
 mod model;
 mod runner;
 mod shrink;
-
 struct Paths {
     db: PathBuf,
     plan: PathBuf,
@@ -60,7 +59,7 @@ impl Paths {
 }
 
 fn main() -> Result<(), String> {
-    let _ = env_logger::try_init();
+    init_logger();
 
     let cli_opts = SimulatorCLI::parse();
     cli_opts.validate()?;
@@ -75,7 +74,9 @@ fn main() -> Result<(), String> {
         None => TempDir::new().map_err(|e| format!("{:?}", e))?.into_path(),
     };
 
+    banner();
     let paths = Paths::new(&output_dir, cli_opts.shrink, cli_opts.doublecheck);
+
     log::info!("seed: {}", seed);
 
     let last_execution = Arc::new(Mutex::new(Execution::new(0, 0, 0)));
@@ -440,3 +441,38 @@ fn run_simulation(
 
     result
 }
+
+fn init_logger() {
+    env_logger::Builder::from_env(env_logger::Env::default().filter_or("RUST_LOG", "info"))
+        .format_timestamp(None)
+        .format_module_path(false)
+        .format_target(false)
+        .init();
+}
+
+fn banner() {
+    println!("{}", BANNER);
+}
+
+const BANNER: &str = r#"
+  ,_______________________________.
+  | ,___________________________. |
+  | |                           | |
+  | | >HELLO                    | |
+  | |                           | |
+  | | >A STRANGE GAME.          | |
+  | | >THE ONLY WINNING MOVE IS | |
+  | | >NOT TO PLAY.             | |
+  | |___________________________| |
+  |                               |
+  |                               |
+  `-------------------------------`
+          |              |
+          |______________|
+      ,______________________.
+     / /====================\ \
+    / /======================\ \
+   /____________________________\
+   \____________________________/
+
+"#;

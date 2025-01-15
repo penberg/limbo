@@ -1,11 +1,7 @@
-use std::rc::Weak;
-use std::{cell::RefCell, rc::Rc};
-
 use super::emitter::emit_program;
 use super::expr::get_name;
 use super::plan::SelectQueryType;
 use crate::function::Func;
-use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{Aggregate, Direction, GroupBy, Plan, ResultSetColumn, SelectPlan};
 use crate::translate::planner::{
@@ -13,24 +9,27 @@ use crate::translate::planner::{
     parse_where, resolve_aggregates, OperatorIdCounter,
 };
 use crate::util::normalize_ident;
-use crate::{schema::Schema, vdbe::Program, Result};
-use crate::{Connection, SymbolTable};
+use crate::SymbolTable;
+use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
 use sqlite3_parser::ast;
 use sqlite3_parser::ast::ResultColumn;
 
 pub fn translate_select(
+    program: &mut ProgramBuilder,
     schema: &Schema,
     select: ast::Select,
-    database_header: Rc<RefCell<DatabaseHeader>>,
-    connection: Weak<Connection>,
     syms: &SymbolTable,
-) -> Result<Program> {
-    let mut select_plan = prepare_select_plan(schema, select)?;
+) -> Result<()> {
+    let mut select_plan = prepare_select_plan(schema, select, syms)?;
     optimize_plan(&mut select_plan)?;
-    emit_program(database_header, select_plan, connection, syms)
+    emit_program(program, select_plan, syms)
 }
 
-pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan> {
+pub fn prepare_select_plan(
+    schema: &Schema,
+    select: ast::Select,
+    syms: &SymbolTable,
+) -> Result<Plan> {
     match *select.body.select {
         ast::OneSelect::Select {
             mut columns,
@@ -47,7 +46,8 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
             let mut operator_id_counter = OperatorIdCounter::new();
 
             // Parse the FROM clause
-            let (source, referenced_tables) = parse_from(schema, from, &mut operator_id_counter)?;
+            let (source, referenced_tables) =
+                parse_from(schema, from, &mut operator_id_counter, syms)?;
 
             let mut plan = SelectPlan {
                 source,
@@ -147,7 +147,24 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                                             contains_aggregates,
                                         });
                                     }
-                                    _ => {}
+                                    Err(_) => {
+                                        if syms.functions.contains_key(&name.0) {
+                                            let contains_aggregates = resolve_aggregates(
+                                                expr,
+                                                &mut aggregate_expressions,
+                                            );
+                                            plan.result_columns.push(ResultSetColumn {
+                                                name: get_name(
+                                                    maybe_alias.as_ref(),
+                                                    expr,
+                                                    &plan.referenced_tables,
+                                                    || format!("expr_{}", result_column_idx),
+                                                ),
+                                                expr: expr.clone(),
+                                                contains_aggregates,
+                                            });
+                                        }
+                                    }
                                 }
                             }
                             ast::Expr::FunctionCallStar {
@@ -185,7 +202,7 @@ pub fn prepare_select_plan(schema: &Schema, select: ast::Select) -> Result<Plan>
                             }
                             expr => {
                                 let contains_aggregates =
-                                    resolve_aggregates(&expr, &mut aggregate_expressions);
+                                    resolve_aggregates(expr, &mut aggregate_expressions);
                                 plan.result_columns.push(ResultSetColumn {
                                     name: get_name(
                                         maybe_alias.as_ref(),

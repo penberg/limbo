@@ -912,7 +912,7 @@ fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8
 #[derive(Debug, PartialEq)]
 pub enum SerialType {
     Null,
-    UInt8,
+    Int8, // 8-bit twos-complement integer: https://www.sqlite.org/fileformat.html
     BEInt16,
     BEInt24,
     BEInt32,
@@ -931,7 +931,7 @@ impl TryFrom<u64> for SerialType {
     fn try_from(value: u64) -> Result<Self> {
         match value {
             0 => Ok(Self::Null),
-            1 => Ok(Self::UInt8),
+            1 => Ok(Self::Int8),
             2 => Ok(Self::BEInt16),
             3 => Ok(Self::BEInt24),
             4 => Ok(Self::BEInt32),
@@ -974,11 +974,12 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
 pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
     match *serial_type {
         SerialType::Null => Ok((OwnedValue::Null, 0)),
-        SerialType::UInt8 => {
+        SerialType::Int8 => {
             if buf.is_empty() {
                 crate::bail_corrupt_error!("Invalid UInt8 value");
             }
-            Ok((OwnedValue::Integer(buf[0] as i64), 1))
+            let val = buf[0] as i8;
+            Ok((OwnedValue::Integer(val as i64), 1))
         }
         SerialType::BEInt16 => {
             if buf.len() < 2 {
@@ -1244,7 +1245,6 @@ pub fn begin_write_wal_frame(
     *write_counter.borrow_mut() += 1;
     let write_complete = {
         let buf_copy = buffer.clone();
-        log::info!("finished");
         Box::new(move |bytes_written: i32| {
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
@@ -1377,7 +1377,7 @@ mod tests {
 
     #[rstest]
     #[case(0, SerialType::Null)]
-    #[case(1, SerialType::UInt8)]
+    #[case(1, SerialType::Int8)]
     #[case(2, SerialType::BEInt16)]
     #[case(3, SerialType::BEInt24)]
     #[case(4, SerialType::BEInt32)]
@@ -1403,8 +1403,9 @@ mod tests {
 
     #[rstest]
     #[case(&[], SerialType::Null, OwnedValue::Null)]
-    #[case(&[255], SerialType::UInt8, OwnedValue::Integer(255))]
+    #[case(&[255], SerialType::Int8, OwnedValue::Integer(-1))]
     #[case(&[0x12, 0x34], SerialType::BEInt16, OwnedValue::Integer(0x1234))]
+    #[case(&[0xFE], SerialType::Int8, OwnedValue::Integer(-2))]
     #[case(&[0x12, 0x34, 0x56], SerialType::BEInt24, OwnedValue::Integer(0x123456))]
     #[case(&[0x12, 0x34, 0x56, 0x78], SerialType::BEInt32, OwnedValue::Integer(0x12345678))]
     #[case(&[0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC], SerialType::BEInt48, OwnedValue::Integer(0x123456789ABC))]
@@ -1424,7 +1425,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(&[], SerialType::UInt8)]
+    #[case(&[], SerialType::Int8)]
     #[case(&[0x12], SerialType::BEInt16)]
     #[case(&[0x12, 0x34], SerialType::BEInt24)]
     #[case(&[0x12, 0x34, 0x56], SerialType::BEInt32)]

@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -e
+
+while true; do
+    cargo run -p limbo_sim
+done

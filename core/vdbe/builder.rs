@@ -4,9 +4,13 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use crate::{storage::sqlite3_ondisk::DatabaseHeader, Connection};
+use crate::{
+    schema::{BTreeTable, Index, PseudoTable},
+    storage::sqlite3_ondisk::DatabaseHeader,
+    Connection,
+};
 
-use super::{BranchOffset, CursorID, Insn, InsnReference, Program, Table};
+use super::{BranchOffset, CursorID, Insn, InsnReference, Program};
 
 #[allow(dead_code)]
 pub struct ProgramBuilder {
@@ -18,13 +22,27 @@ pub struct ProgramBuilder {
     constant_insns: Vec<Insn>,
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
-    pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
+    pub cursor_ref: Vec<(Option<String>, CursorType)>,
     // Hashmap of label to insn reference. Resolved in build().
     label_to_resolved_offset: HashMap<i32, u32>,
     // Bitmask of cursors that have emitted a SeekRowid instruction.
     seekrowid_emitted_bitmask: u64,
     // map of instruction index to manual comment (used in EXPLAIN)
     comments: HashMap<InsnReference, &'static str>,
+}
+
+#[derive(Debug, Clone)]
+pub enum CursorType {
+    BTreeTable(Rc<BTreeTable>),
+    BTreeIndex(Rc<Index>),
+    Pseudo(Rc<PseudoTable>),
+    Sorter,
+}
+
+impl CursorType {
+    pub fn is_index(&self) -> bool {
+        matches!(self, CursorType::BTreeIndex(_))
+    }
 }
 
 impl ProgramBuilder {
@@ -58,11 +76,11 @@ impl ProgramBuilder {
     pub fn alloc_cursor_id(
         &mut self,
         table_identifier: Option<String>,
-        table: Option<Table>,
+        cursor_type: CursorType,
     ) -> usize {
         let cursor = self.next_free_cursor_id;
         self.next_free_cursor_id += 1;
-        self.cursor_ref.push((table_identifier, table));
+        self.cursor_ref.push((table_identifier, cursor_type));
         assert!(self.cursor_ref.len() == self.next_free_cursor_id);
         cursor
     }

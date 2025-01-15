@@ -1,16 +1,18 @@
 use super::{common, Completion, File, OpenFlags, IO};
 use crate::{LimboError, Result};
-use libc::{c_short, fcntl, flock, iovec, F_SETLK};
 use log::{debug, trace};
-use nix::fcntl::{FcntlArg, OFlag};
+use rustix::fs::{self, FlockOperation, OFlags};
+use rustix::io_uring::iovec;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::io::ErrorKind;
+use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
 
-const MAX_IOVECS: usize = 128;
+const MAX_IOVECS: u32 = 128;
 const SQPOLL_IDLE: u32 = 1000;
 
 #[derive(Debug, Error)]
@@ -44,7 +46,7 @@ struct WrappedIOUring {
 
 struct InnerUringIO {
     ring: WrappedIOUring,
-    iovecs: [iovec; MAX_IOVECS],
+    iovecs: [iovec; MAX_IOVECS as usize],
     next_iovec: usize,
 }
 
@@ -52,10 +54,10 @@ impl UringIO {
     pub fn new() -> Result<Self> {
         let ring = match io_uring::IoUring::builder()
             .setup_sqpoll(SQPOLL_IDLE)
-            .build(MAX_IOVECS as u32)
+            .build(MAX_IOVECS)
         {
             Ok(ring) => ring,
-            Err(_) => io_uring::IoUring::new(MAX_IOVECS as u32)?,
+            Err(_) => io_uring::IoUring::new(MAX_IOVECS)?,
         };
         let inner = InnerUringIO {
             ring: WrappedIOUring {
@@ -67,9 +69,10 @@ impl UringIO {
             iovecs: [iovec {
                 iov_base: std::ptr::null_mut(),
                 iov_len: 0,
-            }; MAX_IOVECS],
+            }; MAX_IOVECS as usize],
             next_iovec: 0,
         };
+        debug!("Using IO backend 'io-uring'");
         Ok(Self {
             inner: Rc::new(RefCell::new(inner)),
         })
@@ -81,14 +84,14 @@ impl InnerUringIO {
         let iovec = &mut self.iovecs[self.next_iovec];
         iovec.iov_base = buf as *mut std::ffi::c_void;
         iovec.iov_len = len;
-        self.next_iovec = (self.next_iovec + 1) % MAX_IOVECS;
+        self.next_iovec = (self.next_iovec + 1) % MAX_IOVECS as usize;
         iovec
     }
 }
 
 impl WrappedIOUring {
     fn submit_entry(&mut self, entry: &io_uring::squeue::Entry, c: Rc<Completion>) {
-        log::trace!("submit_entry({:?})", entry);
+        trace!("submit_entry({:?})", entry);
         self.pending.insert(entry.get_user_data(), c);
         unsafe {
             self.ring
@@ -108,7 +111,7 @@ impl WrappedIOUring {
         // NOTE: This works because CompletionQueue's next function pops the head of the queue. This is not normal behaviour of iterators
         let entry = self.ring.completion().next();
         if entry.is_some() {
-            log::trace!("get_completion({:?})", entry);
+            trace!("get_completion({:?})", entry);
             // consumed an entry from completion queue, update pending_ops
             self.pending_ops -= 1;
         }
@@ -135,12 +138,12 @@ impl IO for UringIO {
             .open(path)?;
         // Let's attempt to enable direct I/O. Not all filesystems support it
         // so ignore any errors.
-        let fd = file.as_raw_fd();
+        let fd = file.as_fd();
         if direct {
-            match nix::fcntl::fcntl(fd, FcntlArg::F_SETFL(OFlag::O_DIRECT)) {
-                Ok(_) => {},
+            match fs::fcntl_setfl(fd, OFlags::DIRECT) {
+                Ok(_) => {}
                 Err(error) => debug!("Error {error:?} returned when setting O_DIRECT flag to read file. The performance of the system may be affected"),
-            };
+            }
         }
         let uring_file = Rc::new(UringFile {
             io: self.inner.clone(),
@@ -198,52 +201,39 @@ pub struct UringFile {
 
 impl File for UringFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
-        let fd = self.file.as_raw_fd();
-        let flock = flock {
-            l_type: if exclusive {
-                libc::F_WRLCK as c_short
-            } else {
-                libc::F_RDLCK as c_short
-            },
-            l_whence: libc::SEEK_SET as c_short,
-            l_start: 0,
-            l_len: 0, // Lock entire file
-            l_pid: 0,
-        };
-
+        let fd = self.file.as_fd();
         // F_SETLK is a non-blocking lock. The lock will be released when the file is closed
         // or the process exits or after an explicit unlock.
-        let lock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
-        if lock_result == -1 {
-            let err = std::io::Error::last_os_error();
-            if err.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(LimboError::LockingError(
-                    "File is locked by another process".into(),
-                ));
+        fs::fcntl_lock(
+            fd,
+            if exclusive {
+                FlockOperation::NonBlockingLockExclusive
             } else {
-                return Err(LimboError::IOError(err));
-            }
-        }
+                FlockOperation::NonBlockingLockShared
+            },
+        )
+        .map_err(|e| {
+            let io_error = std::io::Error::from(e);
+            let message = match io_error.kind() {
+                ErrorKind::WouldBlock => {
+                    "Failed locking file. File is locked by another process".to_string()
+                }
+                _ => format!("Failed locking file, {}", io_error),
+            };
+            LimboError::LockingError(message)
+        })?;
+
         Ok(())
     }
 
     fn unlock_file(&self) -> Result<()> {
-        let fd = self.file.as_raw_fd();
-        let flock = flock {
-            l_type: libc::F_UNLCK as c_short,
-            l_whence: libc::SEEK_SET as c_short,
-            l_start: 0,
-            l_len: 0,
-            l_pid: 0,
-        };
-
-        let unlock_result = unsafe { fcntl(fd, F_SETLK, &flock) };
-        if unlock_result == -1 {
-            return Err(LimboError::LockingError(format!(
+        let fd = self.file.as_fd();
+        fs::fcntl_lock(fd, FlockOperation::NonBlockingUnlock).map_err(|e| {
+            LimboError::LockingError(format!(
                 "Failed to release file lock: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
+                std::io::Error::from(e)
+            ))
+        })?;
         Ok(())
     }
 
@@ -260,7 +250,7 @@ impl File for UringFile {
             let len = buf.len();
             let buf = buf.as_mut_ptr();
             let iovec = io.get_iovec(buf, len);
-            io_uring::opcode::Readv::new(fd, iovec, 1)
+            io_uring::opcode::Readv::new(fd, iovec as *const iovec as *const libc::iovec, 1)
                 .offset(pos as u64)
                 .build()
                 .user_data(io.ring.get_key())
@@ -281,7 +271,7 @@ impl File for UringFile {
             let buf = buffer.borrow();
             trace!("pwrite(pos = {}, length = {})", pos, buf.len());
             let iovec = io.get_iovec(buf.as_ptr(), buf.len());
-            io_uring::opcode::Writev::new(fd, iovec, 1)
+            io_uring::opcode::Writev::new(fd, iovec as *const iovec as *const libc::iovec, 1)
                 .offset(pos as u64)
                 .build()
                 .user_data(io.ring.get_key())
@@ -302,7 +292,7 @@ impl File for UringFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(self.file.metadata().unwrap().len())
+        Ok(self.file.metadata()?.len())
     }
 }
 

@@ -1,3 +1,5 @@
+mod args;
+use args::{ArgsAttr, ArgsSpec};
 extern crate proc_macro;
 use proc_macro::{token_stream::IntoIter, Group, TokenStream, TokenTree};
 use std::collections::HashMap;
@@ -132,4 +134,124 @@ fn generate_get_description(
         enum_name, all_enum_arms
     );
     enum_impl.parse().unwrap()
+}
+
+use quote::quote;
+use syn::{parse_macro_input, Attribute, Block, ItemFn};
+/// Macro to transform the preferred API for scalar functions in extensions into
+/// an FFI-compatible function signature while validating argc
+#[proc_macro_attribute]
+pub fn export_scalar(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut input_fn = parse_macro_input!(item as ItemFn);
+
+    let fn_name = &input_fn.sig.ident;
+    let fn_body: &Block = &input_fn.block;
+
+    let mut extracted_spec: Option<ArgsSpec> = None;
+    let mut arg_err = None;
+    let kept_attrs: Vec<Attribute> = input_fn
+        .attrs
+        .into_iter()
+        .filter_map(|attr| {
+            if attr.path().is_ident("args") {
+                let parsed_attr = match attr.parse_args::<ArgsAttr>() {
+                    Ok(p) => p,
+                    Err(err) => {
+                        arg_err = Some(err.to_compile_error());
+                        return None;
+                    }
+                };
+                extracted_spec = Some(parsed_attr.spec);
+                None
+            } else {
+                Some(attr)
+            }
+        })
+        .collect();
+    input_fn.attrs = kept_attrs;
+    if let Some(arg_err) = arg_err {
+        return arg_err.into();
+    }
+    let spec = match extracted_spec {
+        Some(s) => s,
+        None => {
+            return syn::Error::new_spanned(
+                fn_name,
+                "Expected an attribute with integer or range: #[args(1)] #[args(0..2)], etc.",
+            )
+            .to_compile_error()
+            .into()
+        }
+    };
+    let arg_check = match spec {
+        ArgsSpec::Exact(exact_count) => {
+            quote! {
+                if argc != #exact_count {
+                    log::error!(
+                        "{} was called with {} arguments, expected exactly {}",
+                        stringify!(#fn_name),
+                        argc,
+                        #exact_count
+                    );
+                    return ::limbo_extension::Value::null();
+                }
+            }
+        }
+        ArgsSpec::Range {
+            lower,
+            upper,
+            inclusive: true,
+        } => {
+            quote! {
+                if !(#lower..=#upper).contains(&argc) {
+                    log::error!(
+                        "{} was called with {} arguments, expected {}..={} range",
+                        stringify!(#fn_name),
+                        argc,
+                        #lower,
+                        #upper
+                    );
+                    return ::limbo_extension::Value::null();
+                }
+            }
+        }
+        ArgsSpec::Range {
+            lower,
+            upper,
+            inclusive: false,
+        } => {
+            quote! {
+                if !(#lower..#upper).contains(&argc) {
+                    log::error!(
+                        "{} was called with {} arguments, expected {}..{} (exclusive)",
+                        stringify!(#fn_name),
+                        argc,
+                        #lower,
+                        #upper
+                    );
+                    return ::limbo_extension::Value::null();
+                }
+            }
+        }
+    };
+    let expanded = quote! {
+        #[export_name = stringify!(#fn_name)]
+        extern "C" fn #fn_name(argc: i32, argv: *const ::limbo_extension::Value) -> ::limbo_extension::Value {
+            #arg_check
+
+            // from_raw_parts doesn't currently accept null ptr
+            if argc == 0 || argv.is_null() {
+                log::debug!("{} was called with no arguments", stringify!(#fn_name));
+                let args: &[::limbo_extension::Value] = &[];
+                #fn_body
+            } else {
+                let ptr_slice = unsafe {
+                    std::slice::from_raw_parts(argv, argc as usize)
+                };
+                let args: &[::limbo_extension::Value] = ptr_slice;
+                #fn_body
+            }
+        }
+    };
+    TokenStream::from(expanded)
 }

@@ -25,25 +25,23 @@ pub mod likeop;
 pub mod sorter;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
-#[cfg(feature = "uuid")]
-use crate::ext::{exec_ts_from_uuid7, exec_uuid, exec_uuidblob, exec_uuidstr, ExtFunc, UuidFunc};
+use crate::ext::ExtValue;
 use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
-use crate::schema::Table;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
-use crate::types::{
-    AggContext, Cursor, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
-};
+use crate::types::{AggContext, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp};
 use crate::util::parse_schema_rows;
+use crate::vdbe::builder::CursorType;
 use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
 use crate::{
     function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
+    json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
     json::json_extract, json::json_type,
 };
-use crate::{Connection, Result, Rows, TransactionState, DATABASE_VERSION};
+use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
@@ -53,7 +51,8 @@ use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
-use std::borrow::{Borrow, BorrowMut};
+use sorter::Sorter;
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::{Rc, Weak};
@@ -147,6 +146,33 @@ macro_rules! return_if_io {
     };
 }
 
+macro_rules! call_external_function {
+    (
+        $func_ptr:expr,
+        $dest_register:expr,
+        $state:expr,
+        $arg_count:expr,
+        $start_reg:expr
+    ) => {{
+        if $arg_count == 0 {
+            let result_c_value: ExtValue = ($func_ptr)(0, std::ptr::null());
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        } else {
+            let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
+            let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
+            for ov in register_slice.iter() {
+                let val = ov.to_ffi();
+                ext_values.push(val);
+            }
+            let argv_ptr = ext_values.as_ptr();
+            let result_c_value: ExtValue = ($func_ptr)($arg_count as i32, argv_ptr);
+            let result_ov = OwnedValue::from_ffi(&result_c_value);
+            $state.registers[$dest_register] = result_ov;
+        }
+    }};
+}
+
 struct RegexCache {
     like: HashMap<String, Regex>,
     glob: HashMap<String, Regex>,
@@ -164,7 +190,10 @@ impl RegexCache {
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: InsnReference,
-    cursors: RefCell<BTreeMap<CursorID, Box<dyn Cursor>>>,
+    btree_table_cursors: RefCell<BTreeMap<CursorID, BTreeCursor>>,
+    btree_index_cursors: RefCell<BTreeMap<CursorID, BTreeCursor>>,
+    pseudo_cursors: RefCell<BTreeMap<CursorID, PseudoCursor>>,
+    sorter_cursors: RefCell<BTreeMap<CursorID, Sorter>>,
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
     deferred_seek: Option<(CursorID, CursorID)>,
@@ -175,12 +204,18 @@ pub struct ProgramState {
 
 impl ProgramState {
     pub fn new(max_registers: usize) -> Self {
-        let cursors = RefCell::new(BTreeMap::new());
+        let btree_table_cursors = RefCell::new(BTreeMap::new());
+        let btree_index_cursors = RefCell::new(BTreeMap::new());
+        let pseudo_cursors = RefCell::new(BTreeMap::new());
+        let sorter_cursors = RefCell::new(BTreeMap::new());
         let mut registers = Vec::with_capacity(max_registers);
         registers.resize(max_registers, OwnedValue::Null);
         Self {
             pc: 0,
-            cursors,
+            btree_table_cursors,
+            btree_index_cursors,
+            pseudo_cursors,
+            sorter_cursors,
             registers,
             last_compare: None,
             deferred_seek: None,
@@ -207,11 +242,24 @@ impl ProgramState {
     }
 }
 
+macro_rules! must_be_btree_cursor {
+    ($cursor_id:expr, $cursor_ref:expr, $btree_table_cursors:expr, $btree_index_cursors:expr, $insn_name:expr) => {{
+        let (_, cursor_type) = $cursor_ref.get($cursor_id).unwrap();
+        let cursor = match cursor_type {
+            CursorType::BTreeTable(_) => $btree_table_cursors.get_mut(&$cursor_id).unwrap(),
+            CursorType::BTreeIndex(_) => $btree_index_cursors.get_mut(&$cursor_id).unwrap(),
+            CursorType::Pseudo(_) => panic!("{} on pseudo cursor", $insn_name),
+            CursorType::Sorter => panic!("{} on sorter cursor", $insn_name),
+        };
+        cursor
+    }};
+}
+
 #[derive(Debug)]
 pub struct Program {
     pub max_registers: usize,
     pub insns: Vec<Insn>,
-    pub cursor_ref: Vec<(Option<String>, Option<Table>)>,
+    pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
     pub comments: HashMap<InsnReference, &'static str>,
     pub connection: Weak<Connection>,
@@ -248,7 +296,10 @@ impl Program {
             }
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
-            let mut cursors = state.cursors.borrow_mut();
+            let mut btree_table_cursors = state.btree_table_cursors.borrow_mut();
+            let mut btree_index_cursors = state.btree_index_cursors.borrow_mut();
+            let mut pseudo_cursors = state.pseudo_cursors.borrow_mut();
+            let mut sorter_cursors = state.sorter_cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
                     assert!(target_pc.is_offset());
@@ -304,7 +355,13 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::NullRow { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "NullRow"
+                    );
                     cursor.set_null_flag(true);
                     state.pc += 1;
                 }
@@ -569,12 +626,23 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(
-                        pager.clone(),
-                        *root_page,
-                        self.database_header.clone(),
-                    ));
-                    cursors.insert(*cursor_id, cursor);
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let cursor =
+                        BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
+                    match cursor_type {
+                        CursorType::BTreeTable(_) => {
+                            btree_table_cursors.insert(*cursor_id, cursor);
+                        }
+                        CursorType::BTreeIndex(_) => {
+                            btree_index_cursors.insert(*cursor_id, cursor);
+                        }
+                        CursorType::Pseudo(_) => {
+                            panic!("OpenReadAsync on pseudo cursor");
+                        }
+                        CursorType::Sorter => {
+                            panic!("OpenReadAsync on sorter cursor");
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::OpenReadAwait => {
@@ -585,17 +653,29 @@ impl Program {
                     content_reg: _,
                     num_fields: _,
                 } => {
-                    let cursor = Box::new(PseudoCursor::new());
-                    cursors.insert(*cursor_id, cursor);
+                    let cursor = PseudoCursor::new();
+                    pseudo_cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "RewindAsync"
+                    );
                     return_if_io!(cursor.rewind());
                     state.pc += 1;
                 }
                 Insn::LastAsync { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "LastAsync"
+                    );
                     return_if_io!(cursor.last());
                     state.pc += 1;
                 }
@@ -604,7 +684,13 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "LastAwait"
+                    );
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
                         state.pc = pc_if_empty.to_offset_int();
@@ -617,7 +703,13 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "RewindAwait"
+                    );
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
                         state.pc = pc_if_empty.to_offset_int();
@@ -631,9 +723,9 @@ impl Program {
                     dest,
                 } => {
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
-                        let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
+                        let index_cursor = btree_index_cursors.get_mut(&index_cursor_id).unwrap();
                         let rowid = index_cursor.rowid()?;
-                        let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
+                        let table_cursor = btree_table_cursors.get_mut(&table_cursor_id).unwrap();
                         match table_cursor.seek(SeekKey::TableRowId(rowid.unwrap()), SeekOp::EQ)? {
                             CursorResult::Ok(_) => {}
                             CursorResult::IO => {
@@ -642,18 +734,45 @@ impl Program {
                             }
                         }
                     }
-
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
-                    if let Some(ref record) = *cursor.record()? {
-                        let null_flag = cursor.get_null_flag();
-                        state.registers[*dest] = if null_flag {
-                            OwnedValue::Null
-                        } else {
-                            record.values[*column].clone()
-                        };
-                    } else {
-                        state.registers[*dest] = OwnedValue::Null;
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    match cursor_type {
+                        CursorType::BTreeTable(_) | CursorType::BTreeIndex(_) => {
+                            let cursor = must_be_btree_cursor!(
+                                *cursor_id,
+                                self.cursor_ref,
+                                btree_table_cursors,
+                                btree_index_cursors,
+                                "Column"
+                            );
+                            let record = cursor.record()?;
+                            if let Some(record) = record.as_ref() {
+                                state.registers[*dest] = if cursor.get_null_flag() {
+                                    OwnedValue::Null
+                                } else {
+                                    record.values[*column].clone()
+                                };
+                            } else {
+                                state.registers[*dest] = OwnedValue::Null;
+                            }
+                        }
+                        CursorType::Sorter => {
+                            let cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                            if let Some(record) = cursor.record() {
+                                state.registers[*dest] = record.values[*column].clone();
+                            } else {
+                                state.registers[*dest] = OwnedValue::Null;
+                            }
+                        }
+                        CursorType::Pseudo(_) => {
+                            let cursor = pseudo_cursors.get_mut(cursor_id).unwrap();
+                            if let Some(record) = cursor.record() {
+                                state.registers[*dest] = record.values[*column].clone();
+                            } else {
+                                state.registers[*dest] = OwnedValue::Null;
+                            }
+                        }
                     }
+
                     state.pc += 1;
                 }
                 Insn::MakeRecord {
@@ -671,13 +790,25 @@ impl Program {
                     return Ok(StepResult::Row(record));
                 }
                 Insn::NextAsync { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "NextAsync"
+                    );
                     cursor.set_null_flag(false);
                     return_if_io!(cursor.next());
                     state.pc += 1;
                 }
                 Insn::PrevAsync { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "PrevAsync"
+                    );
                     cursor.set_null_flag(false);
                     return_if_io!(cursor.prev());
                     state.pc += 1;
@@ -687,7 +818,13 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "PrevAwait"
+                    );
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
                         state.pc = pc_if_next.to_offset_int();
@@ -700,7 +837,13 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor_id,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "NextAwait"
+                    );
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
                         state.pc = pc_if_next.to_offset_int();
@@ -818,9 +961,9 @@ impl Program {
                 }
                 Insn::RowId { cursor_id, dest } => {
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
-                        let index_cursor = cursors.get_mut(&index_cursor_id).unwrap();
+                        let index_cursor = btree_index_cursors.get_mut(&index_cursor_id).unwrap();
                         let rowid = index_cursor.rowid()?;
-                        let table_cursor = cursors.get_mut(&table_cursor_id).unwrap();
+                        let table_cursor = btree_table_cursors.get_mut(&table_cursor_id).unwrap();
                         match table_cursor.seek(SeekKey::TableRowId(rowid.unwrap()), SeekOp::EQ)? {
                             CursorResult::Ok(_) => {}
                             CursorResult::IO => {
@@ -830,7 +973,7 @@ impl Program {
                         }
                     }
 
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                     if let Some(ref rowid) = cursor.rowid()? {
                         state.registers[*dest] = OwnedValue::Integer(*rowid as i64);
                     } else {
@@ -844,7 +987,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                     let rowid = match &state.registers[*src_reg] {
                         OwnedValue::Integer(rowid) => *rowid as u64,
                         OwnedValue::Null => {
@@ -880,7 +1023,7 @@ impl Program {
                 } => {
                     assert!(target_pc.is_offset());
                     if *is_index {
-                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let found = return_if_io!(
@@ -892,7 +1035,7 @@ impl Program {
                             state.pc += 1;
                         }
                     } else {
-                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
@@ -925,7 +1068,7 @@ impl Program {
                 } => {
                     assert!(target_pc.is_offset());
                     if *is_index {
-                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let found = return_if_io!(
@@ -937,7 +1080,7 @@ impl Program {
                             state.pc += 1;
                         }
                     } else {
-                        let cursor = cursors.get_mut(cursor_id).unwrap();
+                        let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
@@ -968,7 +1111,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
@@ -991,7 +1134,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
@@ -1275,47 +1418,46 @@ impl Program {
                             _ => unreachable!(),
                         })
                         .collect();
-                    let cursor = Box::new(sorter::Sorter::new(order));
-                    cursors.insert(*cursor_id, cursor);
+                    let cursor = sorter::Sorter::new(order);
+                    sorter_cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
                 Insn::SorterData {
                     cursor_id,
                     dest_reg,
-                    pseudo_cursor: sorter_cursor,
+                    pseudo_cursor,
                 } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
-                    let record = match *cursor.record()? {
-                        Some(ref record) => record.clone(),
+                    let sorter_cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                    let record = match sorter_cursor.record() {
+                        Some(record) => record.clone(),
                         None => {
                             state.pc += 1;
                             continue;
                         }
                     };
                     state.registers[*dest_reg] = OwnedValue::Record(record.clone());
-                    let sorter_cursor = cursors.get_mut(sorter_cursor).unwrap();
-                    sorter_cursor.insert(&OwnedValue::Integer(0), &record, false)?; // fix key later
+                    let pseudo_cursor = pseudo_cursors.get_mut(pseudo_cursor).unwrap();
+                    pseudo_cursor.insert(record);
                     state.pc += 1;
                 }
                 Insn::SorterInsert {
                     cursor_id,
                     record_reg,
                 } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = sorter_cursors.get_mut(cursor_id).unwrap();
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(record) => record,
                         _ => unreachable!("SorterInsert on non-record register"),
                     };
-                    // TODO: set correct key
-                    cursor.insert(&OwnedValue::Integer(0), record, false)?;
+                    cursor.insert(record);
                     state.pc += 1;
                 }
                 Insn::SorterSort {
                     cursor_id,
                     pc_if_empty,
                 } => {
-                    if let Some(cursor) = cursors.get_mut(cursor_id) {
-                        cursor.rewind()?;
+                    if let Some(cursor) = sorter_cursors.get_mut(cursor_id) {
+                        cursor.sort();
                         state.pc += 1;
                     } else {
                         state.pc = pc_if_empty.to_offset_int();
@@ -1326,8 +1468,8 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
-                    return_if_io!(cursor.next());
+                    let cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                    cursor.next();
                     if !cursor.is_empty() {
                         state.pc = pc_if_next.to_offset_int();
                     } else {
@@ -1343,66 +1485,86 @@ impl Program {
                     let arg_count = func.arg_count;
                     match &func.func {
                         #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::Json) => {
-                            let json_value = &state.registers[*start_reg];
-                            let json_str = get_json(json_value);
-                            match json_str {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonArray) => {
-                            let reg_values = &state.registers[*start_reg..*start_reg + arg_count];
-
-                            let json_array = json_array(reg_values);
-
-                            match json_array {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(JsonFunc::JsonExtract) => {
-                            let result = match arg_count {
-                                0 => json_extract(&OwnedValue::Null, &[]),
-                                _ => {
-                                    let val = &state.registers[*start_reg];
-                                    let reg_values =
-                                        &state.registers[*start_reg + 1..*start_reg + arg_count];
-
-                                    json_extract(val, reg_values)
+                        crate::function::Func::Json(json_func) => match json_func {
+                            JsonFunc::Json => {
+                                let json_value = &state.registers[*start_reg];
+                                let json_str = get_json(json_value);
+                                match json_str {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
                                 }
-                            };
-
-                            match result {
-                                Ok(json) => state.registers[*dest] = json,
-                                Err(e) => return Err(e),
                             }
-                        }
-                        #[cfg(feature = "json")]
-                        crate::function::Func::Json(
-                            func @ (JsonFunc::JsonArrayLength | JsonFunc::JsonType),
-                        ) => {
-                            let json_value = &state.registers[*start_reg];
-                            let path_value = if arg_count > 1 {
-                                Some(&state.registers[*start_reg + 1])
-                            } else {
-                                None
-                            };
-                            let func_result = match func {
-                                JsonFunc::JsonArrayLength => {
-                                    json_array_length(json_value, path_value)
+                            JsonFunc::JsonArray => {
+                                let reg_values =
+                                    &state.registers[*start_reg..*start_reg + arg_count];
+
+                                let json_array = json_array(reg_values);
+
+                                match json_array {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
                                 }
-                                JsonFunc::JsonType => json_type(json_value, path_value),
-                                _ => unreachable!(),
-                            };
-
-                            match func_result {
-                                Ok(result) => state.registers[*dest] = result,
-                                Err(e) => return Err(e),
                             }
-                        }
+                            JsonFunc::JsonExtract => {
+                                let result = match arg_count {
+                                    0 => json_extract(&OwnedValue::Null, &[]),
+                                    _ => {
+                                        let val = &state.registers[*start_reg];
+                                        let reg_values = &state.registers
+                                            [*start_reg + 1..*start_reg + arg_count];
+
+                                        json_extract(val, reg_values)
+                                    }
+                                };
+
+                                match result {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract => {
+                                assert_eq!(arg_count, 2);
+                                let json = &state.registers[*start_reg];
+                                let path = &state.registers[*start_reg + 1];
+                                let json_func = match json_func {
+                                    JsonFunc::JsonArrowExtract => json_arrow_extract,
+                                    JsonFunc::JsonArrowShiftExtract => json_arrow_shift_extract,
+                                    _ => unreachable!(),
+                                };
+                                let json_str = json_func(json, path);
+                                match json_str {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            JsonFunc::JsonArrayLength | JsonFunc::JsonType => {
+                                let json_value = &state.registers[*start_reg];
+                                let path_value = if arg_count > 1 {
+                                    Some(&state.registers[*start_reg + 1])
+                                } else {
+                                    None
+                                };
+                                let func_result = match json_func {
+                                    JsonFunc::JsonArrayLength => {
+                                        json_array_length(json_value, path_value)
+                                    }
+                                    JsonFunc::JsonType => json_type(json_value, path_value),
+                                    _ => unreachable!(),
+                                };
+
+                                match func_result {
+                                    Ok(result) => state.registers[*dest] = result,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            JsonFunc::JsonErrorPosition => {
+                                let json_value = &state.registers[*start_reg];
+                                match json_error_position(json_value) {
+                                    Ok(pos) => state.registers[*dest] = pos,
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                        },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
                                 assert!(arg_count == 2);
@@ -1701,43 +1863,17 @@ impl Program {
                                 let replacement = &state.registers[*start_reg + 2];
                                 state.registers[*dest] = exec_replace(source, pattern, replacement);
                             }
-                        },
-                        #[allow(unreachable_patterns)]
-                        crate::function::Func::Extension(extfn) => match extfn {
-                            #[cfg(feature = "uuid")]
-                            ExtFunc::Uuid(uuidfn) => match uuidfn {
-                                UuidFunc::Uuid4Str => {
-                                    state.registers[*dest] = exec_uuid(uuidfn, None)?
+                            #[cfg(not(target_family = "wasm"))]
+                            ScalarFunc::LoadExtension => {
+                                let extension = &state.registers[*start_reg];
+                                let ext = resolve_ext_path(&extension.to_string())?;
+                                if let Some(conn) = self.connection.upgrade() {
+                                    conn.load_extension(ext)?;
                                 }
-                                UuidFunc::Uuid7 => match arg_count {
-                                    0 => {
-                                        state.registers[*dest] =
-                                            exec_uuid(uuidfn, None).unwrap_or(OwnedValue::Null);
-                                    }
-                                    1 => {
-                                        let reg_value = state.registers[*start_reg].borrow();
-                                        state.registers[*dest] = exec_uuid(uuidfn, Some(reg_value))
-                                            .unwrap_or(OwnedValue::Null);
-                                    }
-                                    _ => unreachable!(),
-                                },
-                                _ => {
-                                    // remaining accept 1 arg
-                                    let reg_value = state.registers[*start_reg].borrow();
-                                    state.registers[*dest] = match uuidfn {
-                                        UuidFunc::Uuid7TS => Some(exec_ts_from_uuid7(reg_value)),
-                                        UuidFunc::UuidStr => exec_uuidstr(reg_value).ok(),
-                                        UuidFunc::UuidBlob => exec_uuidblob(reg_value).ok(),
-                                        _ => unreachable!(),
-                                    }
-                                    .unwrap_or(OwnedValue::Null);
-                                }
-                            },
-                            _ => unreachable!(), // when more extension types are added
+                            }
                         },
                         crate::function::Func::External(f) => {
-                            let result = (f.func)(&[])?;
-                            state.registers[*dest] = result;
+                            call_external_function! {f.func, *dest, state, arg_count, *start_reg };
                         }
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {
@@ -1857,7 +1993,7 @@ impl Program {
                     record_reg,
                     flag: _,
                 } => {
-                    let cursor = cursors.get_mut(cursor).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor).unwrap();
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(r) => r,
                         _ => unreachable!("Not a record! Cannot insert a non record value."),
@@ -1867,7 +2003,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     // Only update last_insert_rowid for regular table inserts, not schema modifications
                     if cursor.root_page() != 1 {
@@ -1883,19 +2019,19 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::DeleteAsync { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                     return_if_io!(cursor.delete());
                     state.pc += 1;
                 }
                 Insn::DeleteAwait { cursor_id } => {
-                    let cursor = cursors.get_mut(cursor_id).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
                     state.pc += 1;
                 }
                 Insn::NewRowid {
                     cursor, rowid_reg, ..
                 } => {
-                    let cursor = cursors.get_mut(cursor).unwrap();
+                    let cursor = btree_table_cursors.get_mut(cursor).unwrap();
                     // TODO: make io handle rng
                     let rowid = return_if_io!(get_new_rowid(cursor, thread_rng()));
                     state.registers[*rowid_reg] = OwnedValue::Integer(rowid);
@@ -1921,7 +2057,13 @@ impl Program {
                     rowid_reg,
                     target_pc,
                 } => {
-                    let cursor = cursors.get_mut(cursor).unwrap();
+                    let cursor = must_be_btree_cursor!(
+                        *cursor,
+                        self.cursor_ref,
+                        btree_table_cursors,
+                        btree_index_cursors,
+                        "NotExists"
+                    );
                     let exists = return_if_io!(cursor.exists(&state.registers[*rowid_reg]));
                     if exists {
                         state.pc += 1;
@@ -1936,12 +2078,15 @@ impl Program {
                     cursor_id,
                     root_page,
                 } => {
-                    let cursor = Box::new(BTreeCursor::new(
-                        pager.clone(),
-                        *root_page,
-                        self.database_header.clone(),
-                    ));
-                    cursors.insert(*cursor_id, cursor);
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let is_index = cursor_type.is_index();
+                    let cursor =
+                        BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
+                    if is_index {
+                        btree_index_cursors.insert(*cursor_id, cursor);
+                    } else {
+                        btree_table_cursors.insert(*cursor_id, cursor);
+                    }
                     state.pc += 1;
                 }
                 Insn::OpenWriteAwait {} => {
@@ -1973,7 +2118,21 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Close { cursor_id } => {
-                    cursors.remove(cursor_id);
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    match cursor_type {
+                        CursorType::BTreeTable(_) => {
+                            let _ = btree_table_cursors.remove(cursor_id);
+                        }
+                        CursorType::BTreeIndex(_) => {
+                            let _ = btree_index_cursors.remove(cursor_id);
+                        }
+                        CursorType::Pseudo(_) => {
+                            let _ = pseudo_cursors.remove(cursor_id);
+                        }
+                        CursorType::Sorter => {
+                            let _ = sorter_cursors.remove(cursor_id);
+                        }
+                    }
                     state.pc += 1;
                 }
                 Insn::IsNull { src, target_pc } => {
@@ -2004,7 +2163,7 @@ impl Program {
     }
 }
 
-fn get_new_rowid<R: Rng>(cursor: &mut Box<dyn Cursor>, mut rng: R) -> Result<CursorResult<i64>> {
+fn get_new_rowid<R: Rng>(cursor: &mut BTreeCursor, mut rng: R) -> Result<CursorResult<i64>> {
     match cursor.seek_to_last()? {
         CursorResult::Ok(()) => {}
         CursorResult::IO => return Ok(CursorResult::IO),
@@ -3042,180 +3201,16 @@ fn exec_math_log(arg: &OwnedValue, base: Option<&OwnedValue>) -> OwnedValue {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        types::{SeekKey, SeekOp},
-        vdbe::exec_replace,
-    };
+    use crate::vdbe::exec_replace;
 
     use super::{
         exec_abs, exec_char, exec_hex, exec_if, exec_instr, exec_length, exec_like, exec_lower,
         exec_ltrim, exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob,
         exec_round, exec_rtrim, exec_sign, exec_soundex, exec_substring, exec_trim, exec_typeof,
-        exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, get_new_rowid,
-        AggContext, Cursor, CursorResult, LimboError, OwnedRecord, OwnedValue, Result,
+        exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, AggContext,
+        OwnedValue,
     };
-    use mockall::{mock, predicate};
-    use rand::{rngs::mock::StepRng, thread_rng};
-    use std::{cell::Ref, collections::HashMap, rc::Rc};
-
-    mock! {
-        Cursor {
-            fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
-            fn seek<'a>(&mut self, key: SeekKey<'a>, op: SeekOp) -> Result<CursorResult<bool>>;
-            fn rowid(&self) -> Result<Option<u64>>;
-            fn seek_rowid(&mut self, rowid: u64) -> Result<CursorResult<bool>>;
-        }
-    }
-
-    impl Cursor for MockCursor {
-        fn root_page(&self) -> usize {
-            unreachable!()
-        }
-
-        fn seek_to_last(&mut self) -> Result<CursorResult<()>> {
-            self.seek_to_last()
-        }
-
-        fn rowid(&self) -> Result<Option<u64>> {
-            self.rowid()
-        }
-
-        fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> Result<CursorResult<bool>> {
-            self.seek(key, op)
-        }
-
-        fn rewind(&mut self) -> Result<CursorResult<()>> {
-            unimplemented!()
-        }
-
-        fn next(&mut self) -> Result<CursorResult<()>> {
-            unimplemented!()
-        }
-
-        fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
-            unimplemented!()
-        }
-
-        fn is_empty(&self) -> bool {
-            unimplemented!()
-        }
-
-        fn set_null_flag(&mut self, _flag: bool) {
-            unimplemented!()
-        }
-
-        fn get_null_flag(&self) -> bool {
-            unimplemented!()
-        }
-
-        fn insert(
-            &mut self,
-            _key: &OwnedValue,
-            _record: &OwnedRecord,
-            _is_leaf: bool,
-        ) -> Result<CursorResult<()>> {
-            unimplemented!()
-        }
-
-        fn delete(&mut self) -> Result<CursorResult<()>> {
-            unimplemented!()
-        }
-
-        fn wait_for_completion(&mut self) -> Result<()> {
-            unimplemented!()
-        }
-
-        fn exists(&mut self, _key: &OwnedValue) -> Result<CursorResult<bool>> {
-            unimplemented!()
-        }
-
-        fn btree_create(&mut self, _flags: usize) -> u32 {
-            unimplemented!()
-        }
-
-        fn last(&mut self) -> Result<CursorResult<()>> {
-            todo!()
-        }
-
-        fn prev(&mut self) -> Result<CursorResult<()>> {
-            todo!()
-        }
-    }
-
-    #[test]
-    fn test_get_new_rowid() -> Result<()> {
-        // Test case 0: Empty table
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid().return_once(|| Ok(None));
-
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng())?;
-        assert_eq!(
-            result,
-            CursorResult::Ok(1),
-            "For an empty table, rowid should be 1"
-        );
-
-        // Test case 1: Normal case, rowid within i64::MAX
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid().return_once(|| Ok(Some(100)));
-
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng())?;
-        assert_eq!(result, CursorResult::Ok(101));
-
-        // Test case 2: Rowid exceeds i64::MAX, need to generate random rowid
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid()
-            .return_once(|| Ok(Some(i64::MAX as u64)));
-        mock.expect_seek()
-            .with(predicate::always(), predicate::always())
-            .returning(|rowid, _| {
-                if rowid == SeekKey::TableRowId(50) {
-                    Ok(CursorResult::Ok(false))
-                } else {
-                    Ok(CursorResult::Ok(true))
-                }
-            });
-
-        // Mock the random number generation
-        let new_rowid =
-            get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1))?;
-        assert_eq!(new_rowid, CursorResult::Ok(50));
-
-        // Test case 3: IO error
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid()
-            .return_once(|| Ok(Some(i64::MAX as u64)));
-        mock.expect_seek()
-            .with(predicate::always(), predicate::always())
-            .return_once(|_, _| Ok(CursorResult::IO));
-
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), thread_rng());
-        assert!(matches!(result, Ok(CursorResult::IO)));
-
-        // Test case 4: Failure to generate new rowid
-        let mut mock = MockCursor::new();
-        mock.expect_seek_to_last()
-            .return_once(|| Ok(CursorResult::Ok(())));
-        mock.expect_rowid()
-            .return_once(|| Ok(Some(i64::MAX as u64)));
-        mock.expect_seek()
-            .with(predicate::always(), predicate::always())
-            .returning(|_, _| Ok(CursorResult::Ok(true)));
-
-        // Mock the random number generation
-        let result = get_new_rowid(&mut (Box::new(mock) as Box<dyn Cursor>), StepRng::new(1, 1));
-        assert!(matches!(result, Err(LimboError::InternalError(_))));
-
-        Ok(())
-    }
+    use std::{collections::HashMap, rc::Rc};
 
     #[test]
     fn test_length() {

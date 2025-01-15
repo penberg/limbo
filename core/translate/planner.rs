@@ -1,6 +1,7 @@
 use super::{
     plan::{Aggregate, Plan, SelectQueryType, SourceOperator, TableReference, TableReferenceType},
     select::prepare_select_plan,
+    SymbolTable,
 };
 use crate::{
     function::Func,
@@ -10,6 +11,8 @@ use crate::{
     Result,
 };
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit};
+
+pub const ROWID: &'static str = "rowid";
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -101,8 +104,18 @@ pub fn bind_column_references(
             if id.0.eq_ignore_ascii_case("true") || id.0.eq_ignore_ascii_case("false") {
                 return Ok(());
             }
-            let mut match_result = None;
             let normalized_id = normalize_ident(id.0.as_str());
+
+            if referenced_tables.len() > 0 {
+                if let Some(row_id_expr) =
+                    parse_row_id(&normalized_id, 0, || referenced_tables.len() != 1)?
+                {
+                    *expr = row_id_expr;
+
+                    return Ok(());
+                }
+            }
+            let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
                 let col_idx = table
                     .columns()
@@ -139,6 +152,12 @@ pub fn bind_column_references(
             }
             let tbl_idx = matching_tbl_idx.unwrap();
             let normalized_id = normalize_ident(id.0.as_str());
+
+            if let Some(row_id_expr) = parse_row_id(&normalized_id, tbl_idx, || false)? {
+                *expr = row_id_expr;
+
+                return Ok(());
+            }
             let col_idx = referenced_tables[tbl_idx]
                 .columns()
                 .iter()
@@ -208,7 +227,7 @@ pub fn bind_column_references(
             Ok(())
         }
         // Already bound earlier
-        ast::Expr::Column { .. } => Ok(()),
+        ast::Expr::Column { .. } | ast::Expr::RowId { .. } => Ok(()),
         ast::Expr::DoublyQualified(_, _, _) => todo!(),
         ast::Expr::Exists(_) => todo!(),
         ast::Expr::FunctionCallStar { .. } => Ok(()),
@@ -259,6 +278,7 @@ fn parse_from_clause_table(
     table: ast::SelectTable,
     operator_id_counter: &mut OperatorIdCounter,
     cur_table_index: usize,
+    syms: &SymbolTable,
 ) -> Result<(TableReference, SourceOperator)> {
     match table {
         ast::SelectTable::Table(qualified_name, maybe_alias, _) => {
@@ -289,7 +309,7 @@ fn parse_from_clause_table(
             ))
         }
         ast::SelectTable::Select(subselect, maybe_alias) => {
-            let Plan::Select(mut subplan) = prepare_select_plan(schema, *subselect)? else {
+            let Plan::Select(mut subplan) = prepare_select_plan(schema, *subselect, syms)? else {
                 unreachable!();
             };
             subplan.query_type = SelectQueryType::Subquery {
@@ -322,6 +342,7 @@ pub fn parse_from(
     schema: &Schema,
     mut from: Option<FromClause>,
     operator_id_counter: &mut OperatorIdCounter,
+    syms: &SymbolTable,
 ) -> Result<(SourceOperator, Vec<TableReference>)> {
     if from.as_ref().and_then(|f| f.select.as_ref()).is_none() {
         return Ok((
@@ -339,7 +360,7 @@ pub fn parse_from(
     let select_owned = *std::mem::take(&mut from_owned.select).unwrap();
     let joins_owned = std::mem::take(&mut from_owned.joins).unwrap_or_default();
     let (table_reference, mut operator) =
-        parse_from_clause_table(schema, select_owned, operator_id_counter, table_index)?;
+        parse_from_clause_table(schema, select_owned, operator_id_counter, table_index, syms)?;
 
     tables.push(table_reference);
     table_index += 1;
@@ -350,7 +371,14 @@ pub fn parse_from(
             is_outer_join: outer,
             using,
             predicates,
-        } = parse_join(schema, join, operator_id_counter, &mut tables, table_index)?;
+        } = parse_join(
+            schema,
+            join,
+            operator_id_counter,
+            &mut tables,
+            table_index,
+            syms,
+        )?;
         operator = SourceOperator::Join {
             left: Box::new(operator),
             right: Box::new(right),
@@ -394,6 +422,7 @@ fn parse_join(
     operator_id_counter: &mut OperatorIdCounter,
     tables: &mut Vec<TableReference>,
     table_index: usize,
+    syms: &SymbolTable,
 ) -> Result<JoinParseResult> {
     let ast::JoinedSelectTable {
         operator: join_operator,
@@ -402,7 +431,7 @@ fn parse_join(
     } = join;
 
     let (table_reference, source_operator) =
-        parse_from_clause_table(schema, table, operator_id_counter, table_index)?;
+        parse_from_clause_table(schema, table, operator_id_counter, table_index, syms)?;
 
     tables.push(table_reference);
 
@@ -570,4 +599,21 @@ pub fn break_predicate_at_and_boundaries(
             out_predicates.push(predicate);
         }
     }
+}
+
+fn parse_row_id<F>(column_name: &str, table_id: usize, fn_check: F) -> Result<Option<ast::Expr>>
+where
+    F: FnOnce() -> bool,
+{
+    if column_name.eq_ignore_ascii_case(ROWID) {
+        if fn_check() {
+            crate::bail_parse_error!("ROWID is ambiguous");
+        }
+
+        return Ok(Some(ast::Expr::RowId {
+            database: None, // TODO: support different databases
+            table: table_id,
+        }));
+    }
+    Ok(None)
 }

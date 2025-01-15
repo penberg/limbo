@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.0.12 - 2025-01-14
+
+### Added
+
+**Core:**
+
+* Improve JSON function support (Kacper Madej, Peter Sooley)
+
+* Support nested parenthesized conditional expressions (Preston Thorpe)
+
+* Add support for changes() and total_changes() functions (Lemon-Peppermint)
+
+* Auto-create index in CREATE TABLE when necessary (Jussi Saurio)
+
+* Add partial support for datetime() function (Preston Thorpe)
+
+* SQL parser performance improvements (Jussi Saurio)
+
+**Shell:**
+
+* Show pretty parse errors in the shell (Samyak Sarnayak)
+
+* Add CSV import support to shell (Vrishabh)
+
+* Selectable IO backend with --io={syscall,io-uring} argument (Jorge López Tello)
+
+**Bindings:**
+
+* Initial version of Java bindings (Kim Seon Woo)
+
+* Initial version of Rust bindings (Pekka Enberg)
+
+* Add OPFS support to Wasm bindings (Elijah Morgan)
+
+* Support uncorrelated FROM clause subqueries (Jussi Saurio)
+
+* In-memory support to `sqlite3_open()` (Pekka Enberg)
+
+### Fixed
+
+* Make iterate() lazy in JavaScript bindings (Diego Reis)
+
+* Fix integer overflow output to be same as sqlite3 (Vrishabh)
+
+* Fix 8-bit serial type to encoding (Preston Thorpe)
+
+* Query plan optimizer bug fixes (Jussi Saurio)
+
+* B-Tree balancing fixes (Pere Diaz Bou)
+
+* Fix index seek wrong on `SeekOp::LT`\`SeekOp::GT` (Kould)
+
+* Fix arithmetic operations for text values' from Vrishabh
+
+* Fix quote escape in SQL literals (Vrishabh)
+
 ## 0.0.11 - 2024-12-31
 
 ### Added

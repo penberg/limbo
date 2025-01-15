@@ -22,7 +22,7 @@ json = [
     "dep:pest_derive",
 ]
 uuid = ["dep:uuid"]
-io_uring = ["dep:io-uring"]
+io_uring = ["dep:io-uring", "rustix/io_uring"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.6.1", optional = true }
@@ -35,12 +35,12 @@ rustix = "0.38.34"
 mimalloc = { version = "*", default-features = false }
 
 [dependencies]
+limbo_extension = { path = "../limbo_extension" }
 cfg_block = "0.1.1"
 fallible-iterator = "0.3.0"
 hex = "0.4.3"
 libc = "0.2.155"
 log = "0.4.20"
-nix = { version = "0.29.0", features = ["fs"] }
 sieve-cache = "0.1.4"
 sqlite3-parser = { path = "../vendored/sqlite3-parser" }
 thiserror = "1.0.61"
@@ -50,7 +50,7 @@ regex-syntax = { version = "0.8.5", default-features = false, features = ["unico
 chrono = "0.4.38"
 julian_day_converter = "0.3.2"
 jsonb = { version = "0.4.4", optional = true }
-indexmap = { version="2.2.6", features = ["serde"] }
+indexmap = { version = "2.2.6", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 pest = { version = "2.0", optional = true }
 pest_derive = { version = "2.0", optional = true }
@@ -59,6 +59,7 @@ bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
 limbo_macros = { path = "../macros" }
 uuid = { version = "1.11.0", features = ["v4", "v7"], optional = true }
 miette = "7.4.0"
+libloading = "0.8.6"
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }

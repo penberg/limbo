@@ -39,6 +39,8 @@ pub enum LimboError {
     InvalidModifier(String),
     #[error("Runtime error: {0}")]
     Constraint(String),
+    #[error("Extension error: {0}")]
+    ExtensionError(String),
 }
 
 #[macro_export]

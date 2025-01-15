@@ -27,6 +27,7 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::translate::delete::translate_delete;
 use crate::util::PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX;
+use crate::vdbe::builder::CursorType;
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
@@ -47,6 +48,7 @@ pub fn translate(
     connection: Weak<Connection>,
     syms: &SymbolTable,
 ) -> Result<Program> {
+    let mut program = ProgramBuilder::new();
     match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
@@ -63,14 +65,8 @@ pub fn translate(
             if temporary {
                 bail_parse_error!("TEMPORARY table not supported yet");
             }
-            translate_create_table(
-                tbl_name,
-                body,
-                if_not_exists,
-                database_header,
-                connection,
-                schema,
-            )
+
+            translate_create_table(&mut program, tbl_name, body, if_not_exists, schema)?;
         }
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
         ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
@@ -82,29 +78,23 @@ pub fn translate(
             where_clause,
             limit,
             ..
-        } => translate_delete(
-            schema,
-            &tbl_name,
-            where_clause,
-            limit,
-            database_header,
-            connection,
-            syms,
-        ),
+        } => {
+            translate_delete(&mut program, schema, &tbl_name, where_clause, limit, syms)?;
+        }
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
         ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
         ast::Stmt::Pragma(name, body) => {
-            translate_pragma(&name, body, database_header, pager, connection)
+            translate_pragma(&mut program, &name, body, database_header.clone(), pager)?;
         }
         ast::Stmt::Reindex { .. } => bail_parse_error!("REINDEX not supported yet"),
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
         ast::Stmt::Rollback { .. } => bail_parse_error!("ROLLBACK not supported yet"),
         ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
         ast::Stmt::Select(select) => {
-            translate_select(schema, *select, database_header, connection, syms)
+            translate_select(&mut program, schema, *select, syms)?;
         }
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
@@ -115,19 +105,21 @@ pub fn translate(
             columns,
             body,
             returning,
-        } => translate_insert(
-            schema,
-            &with,
-            &or_conflict,
-            &tbl_name,
-            &columns,
-            &body,
-            &returning,
-            database_header,
-            connection,
-            syms,
-        ),
+        } => {
+            translate_insert(
+                &mut program,
+                schema,
+                &with,
+                &or_conflict,
+                &tbl_name,
+                &columns,
+                &body,
+                &returning,
+                syms,
+            )?;
+        }
     }
+    Ok(program.build(database_header, connection))
 }
 
 /* Example:
@@ -377,14 +369,12 @@ fn check_automatic_pk_index_required(
 }
 
 fn translate_create_table(
+    program: &mut ProgramBuilder,
     tbl_name: ast::QualifiedName,
     body: ast::CreateTableBody,
     if_not_exists: bool,
-    database_header: Rc<RefCell<DatabaseHeader>>,
-    connection: Weak<Connection>,
     schema: &Schema,
-) -> Result<Program> {
-    let mut program = ProgramBuilder::new();
+) -> Result<()> {
     if schema.get_table(tbl_name.name.0.as_str()).is_some() {
         if if_not_exists {
             let init_label = program.allocate_label();
@@ -402,7 +392,8 @@ fn translate_create_table(
             program.emit_insn(Insn::Goto {
                 target_pc: start_offset,
             });
-            return Ok(program.build(database_header, connection));
+
+            return Ok(());
         }
         bail_parse_error!("Table {} already exists", tbl_name);
     }
@@ -452,7 +443,7 @@ fn translate_create_table(
     // https://github.com/sqlite/sqlite/blob/95f6df5b8d55e67d1e34d2bff217305a2f21b1fb/src/build.c#L2856-L2871
     // https://github.com/sqlite/sqlite/blob/95f6df5b8d55e67d1e34d2bff217305a2f21b1fb/src/build.c#L1334C5-L1336C65
 
-    let index_root_reg = check_automatic_pk_index_required(&body, &mut program, &tbl_name.name.0)?;
+    let index_root_reg = check_automatic_pk_index_required(&body, program, &tbl_name.name.0)?;
     if let Some(index_root_reg) = index_root_reg {
         program.emit_insn(Insn::CreateBtree {
             db: 0,
@@ -463,9 +454,10 @@ fn translate_create_table(
 
     let table_id = "sqlite_schema".to_string();
     let table = schema.get_table(&table_id).unwrap();
-    let table = crate::schema::Table::BTree(table.clone());
-    let sqlite_schema_cursor_id =
-        program.alloc_cursor_id(Some(table_id.to_owned()), Some(table.to_owned()));
+    let sqlite_schema_cursor_id = program.alloc_cursor_id(
+        Some(table_id.to_owned()),
+        CursorType::BTreeTable(table.clone()),
+    );
     program.emit_insn(Insn::OpenWriteAsync {
         cursor_id: sqlite_schema_cursor_id,
         root_page: 1,
@@ -474,7 +466,7 @@ fn translate_create_table(
 
     // Add the table entry to sqlite_schema
     emit_schema_entry(
-        &mut program,
+        program,
         sqlite_schema_cursor_id,
         SchemaEntryType::Table,
         &tbl_name.name.0,
@@ -490,7 +482,7 @@ fn translate_create_table(
             PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX, tbl_name.name.0
         );
         emit_schema_entry(
-            &mut program,
+            program,
             sqlite_schema_cursor_id,
             SchemaEntryType::Index,
             &index_name,
@@ -521,7 +513,8 @@ fn translate_create_table(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
-    Ok(program.build(database_header, connection))
+
+    Ok(())
 }
 
 enum PrimaryKeyDefinitionType<'a> {
@@ -530,13 +523,12 @@ enum PrimaryKeyDefinitionType<'a> {
 }
 
 fn translate_pragma(
+    program: &mut ProgramBuilder,
     name: &ast::QualifiedName,
     body: Option<ast::PragmaBody>,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
-    connection: Weak<Connection>,
-) -> Result<Program> {
-    let mut program = ProgramBuilder::new();
+) -> Result<()> {
     let init_label = program.allocate_label();
     program.emit_insn(Insn::Init {
         target_pc: init_label,
@@ -546,17 +538,11 @@ fn translate_pragma(
     match body {
         None => {
             let pragma_name = &name.name.0;
-            query_pragma(pragma_name, database_header.clone(), &mut program)?;
+            query_pragma(pragma_name, database_header.clone(), program)?;
         }
         Some(ast::PragmaBody::Equals(value)) => {
             write = true;
-            update_pragma(
-                &name.name.0,
-                value,
-                database_header.clone(),
-                pager,
-                &mut program,
-            )?;
+            update_pragma(&name.name.0, value, database_header.clone(), pager, program)?;
         }
         Some(ast::PragmaBody::Call(_)) => {
             todo!()
@@ -572,7 +558,8 @@ fn translate_pragma(
     program.emit_insn(Insn::Goto {
         target_pc: start_offset,
     });
-    Ok(program.build(database_header, connection))
+
+    Ok(())
 }
 
 fn update_pragma(

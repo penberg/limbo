@@ -18,14 +18,14 @@ pub struct SimulatorCLI {
         short = 'n',
         long,
         help = "change the maximum size of the randomly generated sequence of interactions",
-        default_value_t = 1024
+        default_value_t = 20000
     )]
     pub maximum_size: usize,
     #[clap(
         short = 'k',
         long,
         help = "change the minimum size of the randomly generated sequence of interactions",
-        default_value_t = 1
+        default_value_t = 10000
     )]
     pub minimum_size: usize,
     #[clap(

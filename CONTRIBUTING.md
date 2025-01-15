@@ -121,3 +121,37 @@ The `simulator` directory contains a deterministic simulator for testing.
 What this means is that the behavior of a test run is deterministic based on the seed value.
 If the simulator catches a bug, you can always reproduce the exact same sequence of events by passing the same seed.
 The simulator also performs fault injection to discover interesting bugs.
+
+## Python Bindings
+
+Limbo provides Python bindings built on top of the [PyO3](https://pyo3.rs) project.  
+To compile the Python bindings locally, you first need to create and activate a Python virtual environment (for example, with Python `3.12`):
+
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+```
+
+Then, install [Maturin](https://pypi.org/project/maturin/):
+
+```bash
+pip install maturin
+```
+
+Once Maturin is installed, you can build the crate and install it as a Python module directly into the current virtual environment by running:
+
+```bash
+cd bindings/python && maturin develop
+```
+
+## Adding Third Party Dependencies
+
+When you want to add third party dependencies, please follow these steps:
+
+1. Add Licenses: Place the appropriate licenses for the third-party dependencies under the licenses directory. Ensure
+   that each license is in a separate file and named appropriately.
+2. Update NOTICE.md: Specify the licenses for the third-party dependencies in the NOTICE.md file. Include the name of
+   the dependency, the license file path, and the homepage of the dependency.
+
+By following these steps, you ensure that all third-party dependencies are properly documented and their licenses are
+included in the project.

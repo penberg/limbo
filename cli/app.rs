@@ -38,6 +38,52 @@ pub struct Opts {
     pub quiet: bool,
     #[clap(short, long, help = "Print commands before execution")]
     pub echo: bool,
+    #[clap(
+        default_value_t,
+        value_enum,
+        short,
+        long,
+        help = "Select I/O backend. The only other choice to 'syscall' is\n\
+        \t'io-uring' when built for Linux with feature 'io_uring'\n"
+    )]
+    pub io: Io,
+}
+
+#[derive(Copy, Clone)]
+pub enum DbLocation {
+    Memory,
+    Path,
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+pub enum Io {
+    Syscall,
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
+    IoUring,
+}
+
+impl Default for Io {
+    /// Custom Default impl with cfg! macro, to provide compile-time default to Clap based on platform
+    /// The cfg! could be elided, but Clippy complains
+    /// The default value can still be overridden with the Clap argument
+    fn default() -> Self {
+        match cfg!(all(target_os = "linux", feature = "io_uring")) {
+            true => {
+                #[cfg(all(target_os = "linux", feature = "io_uring"))]
+                {
+                    Io::IoUring
+                }
+                #[cfg(any(
+                    not(target_os = "linux"),
+                    all(target_os = "linux", not(feature = "io_uring"))
+                ))]
+                {
+                    Io::Syscall
+                }
+            }
+            false => Io::Syscall,
+        }
+    }
 }
 
 #[derive(ValueEnum, Copy, Clone, Debug, PartialEq, Eq)]
@@ -83,6 +129,8 @@ pub enum Command {
     Tables,
     /// Import data from FILE into TABLE
     Import,
+    /// Loads an extension library
+    LoadExtension,
 }
 
 impl Command {
@@ -95,7 +143,12 @@ impl Command {
             | Self::ShowInfo
             | Self::Tables
             | Self::SetOutput => 0,
-            Self::Open | Self::OutputMode | Self::Cwd | Self::Echo | Self::NullValue => 1,
+            Self::Open
+            | Self::OutputMode
+            | Self::Cwd
+            | Self::Echo
+            | Self::NullValue
+            | Self::LoadExtension => 1,
             Self::Import => 2,
         } + 1) // argv0
     }
@@ -114,6 +167,7 @@ impl Command {
             Self::NullValue => ".nullvalue <string>",
             Self::Echo => ".echo on|off",
             Self::Tables => ".tables",
+            Self::LoadExtension => ".load",
             Self::Import => &IMPORT_HELP,
         }
     }
@@ -136,6 +190,7 @@ impl FromStr for Command {
             ".nullvalue" => Ok(Self::NullValue),
             ".echo" => Ok(Self::Echo),
             ".import" => Ok(Self::Import),
+            ".load" => Ok(Self::LoadExtension),
             _ => Err("Unknown command".to_string()),
         }
     }
@@ -160,6 +215,7 @@ pub struct Settings {
     output_mode: OutputMode,
     echo: bool,
     is_stdout: bool,
+    io: Io,
 }
 
 impl From<&Opts> for Settings {
@@ -174,6 +230,7 @@ impl From<&Opts> for Settings {
                 .database
                 .as_ref()
                 .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string()),
+            io: opts.io,
         }
     }
 }
@@ -207,7 +264,12 @@ impl Limbo {
             .as_ref()
             .map_or(":memory:".to_string(), |p| p.to_string_lossy().to_string());
 
-        let io = get_io(&db_file)?;
+        let io = {
+            match db_file.as_str() {
+                ":memory:" => get_io(DbLocation::Memory, opts.io)?,
+                _path => get_io(DbLocation::Path, opts.io)?,
+            }
+        };
         let db = Database::open_file(io.clone(), &db_file)?;
         let conn = db.connect();
         let interrupt_count = Arc::new(AtomicUsize::new(0));
@@ -261,6 +323,14 @@ impl Limbo {
         };
     }
 
+    #[cfg(not(target_family = "wasm"))]
+    fn handle_load_extension(&mut self, path: &str) -> Result<(), String> {
+        let ext_path = limbo_core::resolve_ext_path(path).map_err(|e| e.to_string())?;
+        self.conn
+            .load_extension(ext_path)
+            .map_err(|e| e.to_string())
+    }
+
     fn display_in_memory(&mut self) -> std::io::Result<()> {
         if self.opts.db_file == ":memory:" {
             self.writeln("Connected to a transient in-memory database.")?;
@@ -293,24 +363,17 @@ impl Limbo {
 
     fn open_db(&mut self, path: &str) -> anyhow::Result<()> {
         self.conn.close()?;
-        match path {
-            ":memory:" => {
-                let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::MemoryIO::new()?);
-                self.io = Arc::clone(&io);
-                let db = Database::open_file(self.io.clone(), path)?;
-                self.conn = db.connect();
-                self.opts.db_file = ":memory:".to_string();
-                Ok(())
+        let io = {
+            match path {
+                ":memory:" => get_io(DbLocation::Memory, self.opts.io)?,
+                _path => get_io(DbLocation::Path, self.opts.io)?,
             }
-            path => {
-                let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new()?);
-                self.io = Arc::clone(&io);
-                let db = Database::open_file(self.io.clone(), path)?;
-                self.conn = db.connect();
-                self.opts.db_file = path.to_string();
-                Ok(())
-            }
-        }
+        };
+        self.io = Arc::clone(&io);
+        let db = Database::open_file(self.io.clone(), path)?;
+        self.conn = db.connect();
+        self.opts.db_file = path.to_string();
+        Ok(())
     }
 
     fn set_output_file(&mut self, path: &str) -> Result<(), String> {
@@ -490,6 +553,13 @@ impl Limbo {
                     if let Err(e) = import_file.import(&args) {
                         let _ = self.writeln(e.to_string());
                     };
+                }
+                Command::LoadExtension =>
+                {
+                    #[cfg(not(target_family = "wasm"))]
+                    if let Err(e) = self.handle_load_extension(args[1]) {
+                        let _ = self.writeln(&e);
+                    }
                 }
             }
         } else {
@@ -740,10 +810,28 @@ fn get_writer(output: &str) -> Box<dyn Write> {
     }
 }
 
-fn get_io(db: &str) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
-    Ok(match db {
-        ":memory:" => Arc::new(limbo_core::MemoryIO::new()?),
-        _ => Arc::new(limbo_core::PlatformIO::new()?),
+fn get_io(db_location: DbLocation, io_choice: Io) -> anyhow::Result<Arc<dyn limbo_core::IO>> {
+    Ok(match db_location {
+        DbLocation::Memory => Arc::new(limbo_core::MemoryIO::new()?),
+        DbLocation::Path => {
+            match io_choice {
+                Io::Syscall => {
+                    // We are building for Linux/macOS and syscall backend has been selected
+                    #[cfg(target_family = "unix")]
+                    {
+                        Arc::new(limbo_core::UnixIO::new()?)
+                    }
+                    // We are not building for Linux/macOS and syscall backend has been selected
+                    #[cfg(not(target_family = "unix"))]
+                    {
+                        Arc::new(limbo_core::PlatformIO::new()?)
+                    }
+                }
+                // We are building for Linux and io_uring backend has been selected
+                #[cfg(all(target_os = "linux", feature = "io_uring"))]
+                Io::IoUring => Arc::new(limbo_core::UringIO::new()?),
+            }
+        }
     })
 }
 

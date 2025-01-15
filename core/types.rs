@@ -1,10 +1,9 @@
-use std::fmt::Display;
-use std::{cell::Ref, rc::Rc};
-
 use crate::error::LimboError;
-use crate::Result;
-
+use crate::ext::{ExtValue, ExtValueType};
 use crate::storage::sqlite3_ondisk::write_varint;
+use crate::Result;
+use std::fmt::Display;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
@@ -90,6 +89,50 @@ impl Display for OwnedValue {
                 AggContext::GroupConcat(s) => write!(f, "{}", s),
             },
             Self::Record(r) => write!(f, "{:?}", r),
+        }
+    }
+}
+
+impl OwnedValue {
+    pub fn to_ffi(&self) -> ExtValue {
+        match self {
+            Self::Null => ExtValue::null(),
+            Self::Integer(i) => ExtValue::from_integer(*i),
+            Self::Float(fl) => ExtValue::from_float(*fl),
+            Self::Text(text) => ExtValue::from_text(text.value.to_string()),
+            Self::Blob(blob) => ExtValue::from_blob(blob.to_vec()),
+            Self::Agg(_) => todo!("Aggregate values not yet supported"),
+            Self::Record(_) => todo!("Record values not yet supported"),
+        }
+    }
+
+    pub fn from_ffi(v: &ExtValue) -> Self {
+        match v.value_type() {
+            ExtValueType::Null => OwnedValue::Null,
+            ExtValueType::Integer => {
+                let Some(int) = v.to_integer() else {
+                    return OwnedValue::Null;
+                };
+                OwnedValue::Integer(int)
+            }
+            ExtValueType::Float => {
+                let Some(float) = v.to_float() else {
+                    return OwnedValue::Null;
+                };
+                OwnedValue::Float(float)
+            }
+            ExtValueType::Text => {
+                let Some(text) = v.to_text() else {
+                    return OwnedValue::Null;
+                };
+                OwnedValue::build_text(std::rc::Rc::new(text))
+            }
+            ExtValueType::Blob => {
+                let Some(blob) = v.to_blob() else {
+                    return OwnedValue::Null;
+                };
+                OwnedValue::Blob(std::rc::Rc::new(blob))
+            }
         }
     }
 }
@@ -522,31 +565,6 @@ pub enum SeekOp {
 pub enum SeekKey<'a> {
     TableRowId(u64),
     IndexKey(&'a OwnedRecord),
-}
-
-pub trait Cursor {
-    fn is_empty(&self) -> bool;
-    fn root_page(&self) -> usize;
-    fn rewind(&mut self) -> Result<CursorResult<()>>;
-    fn last(&mut self) -> Result<CursorResult<()>>;
-    fn next(&mut self) -> Result<CursorResult<()>>;
-    fn prev(&mut self) -> Result<CursorResult<()>>;
-    fn wait_for_completion(&mut self) -> Result<()>;
-    fn rowid(&self) -> Result<Option<u64>>;
-    fn seek(&mut self, key: SeekKey, op: SeekOp) -> Result<CursorResult<bool>>;
-    fn seek_to_last(&mut self) -> Result<CursorResult<()>>;
-    fn record(&self) -> Result<Ref<Option<OwnedRecord>>>;
-    fn insert(
-        &mut self,
-        key: &OwnedValue,
-        record: &OwnedRecord,
-        moved_before: bool, /* Tells inserter that it doesn't need to traverse in order to find leaf page */
-    ) -> Result<CursorResult<()>>; //
-    fn delete(&mut self) -> Result<CursorResult<()>>;
-    fn exists(&mut self, key: &OwnedValue) -> Result<CursorResult<bool>>;
-    fn set_null_flag(&mut self, flag: bool);
-    fn get_null_flag(&self) -> bool;
-    fn btree_create(&mut self, flags: usize) -> u32;
 }
 
 #[cfg(test)]

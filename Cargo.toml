@@ -5,21 +5,22 @@ resolver = "2"
 members = [
     "bindings/java",
     "bindings/python",
+    "bindings/rust",
     "bindings/wasm",
     "cli",
     "sqlite3",
     "core",
     "simulator",
-    "test", "macros",
+    "test", "macros", "limbo_extension", "extensions/uuid",
 ]
 exclude = ["perf/latency/limbo"]
 
 [workspace.package]
-version = "0.0.11"
+version = "0.0.12"
 authors = ["the Limbo authors"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/penberg/limbo"
+repository = "https://github.com/tursodatabase/limbo"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]
