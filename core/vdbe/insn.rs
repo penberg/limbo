@@ -488,6 +488,12 @@ pub enum Insn {
         where_clause: String,
     },
     // Place the result of lhs >> rhs in dest register.
+    ShiftRight {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    // Place the result of lhs << rhs in dest register.
     ShiftLeft {
         lhs: usize,
         rhs: usize,
@@ -772,5 +778,53 @@ fn compute_shl(lhs: i64, rhs: i64) -> i64 {
         lhs >> (-rhs)
     } else {
         lhs << rhs
+    }
+}
+
+pub fn exec_shift_right(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+    match (lhs, rhs) {
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Integer(lh), OwnedValue::Integer(rh)) => {
+            OwnedValue::Integer(compute_shr(*lh, *rh))
+        }
+        (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => {
+            OwnedValue::Integer(compute_shr(*lh as i64, *rh))
+        }
+        (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => {
+            OwnedValue::Integer(compute_shr(*lh, *rh as i64))
+        }
+        (OwnedValue::Float(lh), OwnedValue::Float(rh)) => {
+            OwnedValue::Integer(compute_shr(*lh as i64, *rh as i64))
+        }
+        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_shift_right(
+            &cast_text_to_numerical(&lhs.value),
+            &cast_text_to_numerical(&rhs.value),
+        ),
+        (OwnedValue::Text(text), other) => {
+            exec_shift_right(&cast_text_to_numerical(&text.value), other)
+        }
+        (other, OwnedValue::Text(text)) => {
+            exec_shift_right(other, &cast_text_to_numerical(&text.value))
+        }
+        _ => todo!(),
+    }
+}
+
+fn compute_shr(lhs: i64, rhs: i64) -> i64 {
+    if rhs == 0 {
+        lhs
+    } else if rhs >= 64 || rhs <= -64 {
+        0
+    } else if rhs < 0 {
+        // if negative do left shift
+        lhs << (-rhs)
+    } else {
+        lhs >> rhs
     }
 }

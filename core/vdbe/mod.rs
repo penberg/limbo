@@ -45,7 +45,7 @@ use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABA
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
-    exec_shift_left, exec_subtract,
+    exec_shift_left, exec_shift_right, exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
@@ -2156,6 +2156,11 @@ impl Program {
                     let mut schema = RefCell::borrow_mut(&conn.schema);
                     // TODO: This function below is synchronous, make it not async
                     parse_schema_rows(Some(rows), &mut schema, conn.pager.io.clone())?;
+                    state.pc += 1;
+                }
+                Insn::ShiftRight { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_shift_right(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
                 Insn::ShiftLeft { lhs, rhs, dest } => {

@@ -578,6 +578,13 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::RightShift => {
+                    program.emit_insn(Insn::ShiftRight {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 ast::Operator::LeftShift => {
                     program.emit_insn(Insn::ShiftLeft {
                         lhs: e1_reg,
