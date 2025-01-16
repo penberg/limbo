@@ -742,14 +742,16 @@ pub fn translate_expr(
                 }
                 Func::External(_) => {
                     let regs = program.alloc_registers(args_count);
-                    for (i, arg_expr) in args.iter().enumerate() {
-                        translate_expr(
-                            program,
-                            referenced_tables,
-                            &arg_expr[i],
-                            regs + i,
-                            resolver,
-                        )?;
+                    if let Some(args) = args {
+                        for (i, arg_expr) in args.iter().enumerate() {
+                            translate_expr(
+                                program,
+                                referenced_tables,
+                                &arg_expr,
+                                regs + i,
+                                resolver,
+                            )?;
+                        }
                     }
                     program.emit_insn(Insn::Function {
                         constant_mask: 0,
