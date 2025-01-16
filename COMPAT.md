@@ -1,24 +1,33 @@
-# SQLite Compatibility
+# Compatibility with SQLite
 
-This document describes the SQLite compatibility status of Limbo:
+This document describes the compatibility of Limbo with SQLite.
 
-- [SQLite Compatibility](#sqlite-compatibility)
-    - [Limitations](#limitations)
-    - [SQL statements](#sql-statements)
-        - [SELECT Expressions](#select-expressions)
-    - [SQL functions](#sql-functions)
-        - [Scalar functions](#scalar-functions)
-        - [Aggregate functions](#aggregate-functions)
-        - [Date and time functions](#date-and-time-functions)
-        - [JSON functions](#json-functions)
-    - [SQLite API](#sqlite-api)
-    - [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+## Table of contents:
 
-## Limitations
+- [Features](#features)
+- [SQLite query language](#sqlite-query-language)
+    - [Statements](#statements)
+    - [Expressions](#expressions)
+    - [Functions](#functions)
+- [SQLite C API](#sqlite-c-api)
+- [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+- [Extensions](#extensions)
+    - [UUID](#uuid)
 
-* Limbo does not support database access from multiple processes.
+## Features
 
-## SQL statements
+Limbo aims to be fully compatible with SQLite, with opt-in features not supported by SQLite.
+
+The current status of Limbo is:
+
+* ✅ SQLite file format is fully supported.
+* 🚧 SQLite query language [[status](#sqlite-query-language)]
+* 🚧 SQLite C API [[status](#sqlite-c-api)].
+* ⛔️ Concurrent access from multiple processes is not supported.
+
+## SQLite query language
+
+### Statements
 
 | Statement                 | Status  | Comment |
 | ------------------------- | ------- | ------- |
@@ -69,7 +78,7 @@ This document describes the SQLite compatibility status of Limbo:
 | VACUUM                    | No      |         |
 | WITH clause               | No      |         |
 
-### SELECT Expressions
+### Expressions
 
 Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 
@@ -96,9 +105,9 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | CASE WHEN THEN ELSE END      | Yes     |         |
 | RAISE                        | No      |         |
 
-## SQL functions
+### SQL functions
 
-### Scalar functions
+#### Scalar functions
 
 | Function                     | Status | Comment |
 |------------------------------|--------|---------|
@@ -160,11 +169,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | upper(X)                     | Yes    |         |
 | zeroblob(N)                  | Yes    |         |
 
-
-
-
-
-### Mathematical functions
+#### Mathematical functions
 
 | Function   | Status | Comment |
 | ---------- | ------ | ------- |
@@ -199,7 +204,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | tanh(X)    | Yes    |         |
 | trunc(X)   | Yes    |         |
 
-### Aggregate functions
+#### Aggregate functions
 
 | Function                     | Status  | Comment |
 |------------------------------|---------|---------|
@@ -214,7 +219,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | sum(X)                       | Yes     |         |
 | total(X)                     | Yes     |         |
 
-### Date and time functions
+#### Date and time functions
 
 | Function    | Status  | Comment                      |
 |-------------|---------|------------------------------|
@@ -226,7 +231,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | strftime()  | No      |                              |
 | timediff()  | No      |                              |
 
-### Date and Time Modifiers
+Modifiers:
+
 |  Modifier      | Status|  Comment                        |
 |----------------|-------|---------------------------------|
 | Days           | Yes 	 |                                 | 
@@ -251,9 +257,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Utc            |Partial| requires fixes to avoid double conversions.|
 | Subsec         | Yes   |                                  |
 
-
-
-### JSON functions
+#### JSON functions
 
 | Function                           | Status  | Comment                                                                                                                                      |
 |------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------|
@@ -295,7 +299,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | json_tree(json)                    |         |                                                                                                                                              |
 | json_tree(json,path)               |         |                                                                                                                                              |
 
-## SQLite API
+## SQLite C API
 
 | Interface           | Status  | Comment |
 |---------------------|---------|---------|
@@ -480,12 +484,19 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | VerifyCookie   | No     |
 | Yield          | Yes    |
 
-| LibSql Compatibility / Extensions |     |                                                               |
-|-----------------------------------|-----|---------------------------------------------------------------|
-| **UUID**                          |     | UUID's in limbo are `blobs` by default                        |
-| uuid4()                           | Yes | uuid version 4                                                |
-| uuid4_str()                       | Yes | uuid v4 string alias `gen_random_uuid()` for PG compatibility |
-| uuid7(X?)                         | Yes | uuid version 7, Optional arg for seconds since epoch          |
-| uuid7_timestamp_ms(X)             | Yes | Convert a uuid v7 to milliseconds since epoch                 |
-| uuid_str(X)                       | Yes | Convert a valid uuid to string                                |
-| uuid_blob(X)                      | Yes | Convert a valid uuid to blob                                  |
+##  Extensions
+
+Limbo has in-tree extensions.
+
+### UUID
+
+UUID's in Limbo are `blobs` by default.
+
+| Function              | Status | Comment                                                       | 
+|-----------------------|--------|---------------------------------------------------------------|
+| uuid4()               | Yes    | UUID version 4                                                |
+| uuid4_str()           | Yes    | UUID v4 string alias `gen_random_uuid()` for PG compatibility |
+| uuid7(X?)             | Yes    | UUID version 7 (optional parameter for seconds since epoch)   |
+| uuid7_timestamp_ms(X) | Yes    | Convert a UUID v7 to milliseconds since epoch                 |
+| uuid_str(X)           | Yes    | Convert a valid UUID to string                                |
+| uuid_blob(X)          | Yes    | Convert a valid UUID to blob                                  |
