@@ -1,6 +1,4 @@
-use limbo_ext::{
-    export_scalar, register_extension, register_scalar_functions, Value, ValueType,
-};
+use limbo_ext::{export_scalar, register_extension, register_scalar_functions, Value, ValueType};
 
 register_extension! {
     scalars: {

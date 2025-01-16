@@ -168,11 +168,7 @@ impl Database {
         })
     }
 
-    pub fn define_scalar_function<S: AsRef<str>>(
-        &self,
-        name: S,
-        func: limbo_ext::ScalarFunction,
-    ) {
+    pub fn define_scalar_function<S: AsRef<str>>(&self, name: S, func: limbo_ext::ScalarFunction) {
         let func = function::ExternalFunc {
             name: name.as_ref().to_string(),
             func,
