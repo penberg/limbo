@@ -1,3 +1,5 @@
+use limbo_ext::{AggCtx, FinalizeFunction, StepFunction};
+
 use crate::error::LimboError;
 use crate::ext::{ExtValue, ExtValueType};
 use crate::storage::sqlite3_ondisk::write_varint;
@@ -72,6 +74,22 @@ impl OwnedValue {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExternalAggState {
+    pub state: *mut AggCtx,
+    pub argc: usize,
+    pub step_fn: StepFunction,
+    pub finalize_fn: FinalizeFunction,
+    pub finalized_value: Option<OwnedValue>,
+}
+
+impl ExternalAggState {
+    pub fn cache_final_value(&mut self, value: OwnedValue) -> &OwnedValue {
+        self.finalized_value = Some(value);
+        self.finalized_value.as_ref().unwrap()
+    }
+}
+
 impl Display for OwnedValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -87,6 +105,9 @@ impl Display for OwnedValue {
                 AggContext::Max(max) => write!(f, "{}", max.as_ref().unwrap_or(&Self::Null)),
                 AggContext::Min(min) => write!(f, "{}", min.as_ref().unwrap_or(&Self::Null)),
                 AggContext::GroupConcat(s) => write!(f, "{}", s),
+                AggContext::External(v) => {
+                    write!(f, "{}", v.finalized_value.as_ref().unwrap_or(&Self::Null))
+                }
             },
             Self::Record(r) => write!(f, "{:?}", r),
         }
@@ -101,7 +122,7 @@ impl OwnedValue {
             Self::Float(fl) => ExtValue::from_float(*fl),
             Self::Text(text) => ExtValue::from_text(text.value.to_string()),
             Self::Blob(blob) => ExtValue::from_blob(blob.to_vec()),
-            Self::Agg(_) => todo!("Aggregate values not yet supported"),
+            Self::Agg(_) => todo!(),
             Self::Record(_) => todo!("Record values not yet supported"),
         }
     }
@@ -145,11 +166,21 @@ pub enum AggContext {
     Max(Option<OwnedValue>),
     Min(Option<OwnedValue>),
     GroupConcat(OwnedValue),
+    External(ExternalAggState),
 }
 
 const NULL: OwnedValue = OwnedValue::Null;
 
 impl AggContext {
+    pub fn compute_external(&mut self) {
+        if let Self::External(ext_state) = self {
+            if ext_state.finalized_value.is_none() {
+                let final_value = unsafe { (ext_state.finalize_fn)(ext_state.state) };
+                ext_state.cache_final_value(OwnedValue::from_ffi(&final_value));
+            }
+        }
+    }
+
     pub fn final_value(&self) -> &OwnedValue {
         match self {
             Self::Avg(acc, _count) => acc,
@@ -158,6 +189,7 @@ impl AggContext {
             Self::Max(max) => max.as_ref().unwrap_or(&NULL),
             Self::Min(min) => min.as_ref().unwrap_or(&NULL),
             Self::GroupConcat(s) => s,
+            Self::External(ext_state) => ext_state.finalized_value.as_ref().unwrap_or(&NULL),
         }
     }
 }
@@ -376,6 +408,12 @@ pub fn to_value(value: &OwnedValue) -> Value<'_> {
                 None => Value::Null,
             },
             AggContext::GroupConcat(s) => to_value(s),
+            AggContext::External(ext_state) => to_value(
+                ext_state
+                    .finalized_value
+                    .as_ref()
+                    .unwrap_or(&OwnedValue::Null),
+            ),
         },
         OwnedValue::Record(_) => todo!(),
     }

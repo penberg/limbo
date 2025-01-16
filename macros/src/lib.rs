@@ -1,7 +1,7 @@
 mod args;
-use args::{ArgsAttr, ArgsSpec};
+use args::RegisterExtensionInput;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Attribute, Block, DeriveInput, ItemFn, LitStr};
+use syn::{parse_macro_input, DeriveInput};
 extern crate proc_macro;
 use proc_macro::{token_stream::IntoIter, Group, TokenStream, TokenTree};
 use std::collections::HashMap;
@@ -138,191 +138,191 @@ fn generate_get_description(
     enum_impl.parse().unwrap()
 }
 
-/// Macro to transform the preferred API for scalar functions in extensions into
-/// an FFI-compatible function signature while validating argc
-#[proc_macro_attribute]
-pub fn export_scalar(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mut input_fn = parse_macro_input!(item as ItemFn);
+#[proc_macro_derive(ScalarDerive)]
+pub fn derive_scalar(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    let struct_name = &ast.ident;
 
-    let fn_name = &input_fn.sig.ident;
-    let fn_body: &Block = &input_fn.block;
-
-    let mut extracted_spec: Option<ArgsSpec> = None;
-    let mut arg_err = None;
-    let kept_attrs: Vec<Attribute> = input_fn
-        .attrs
-        .into_iter()
-        .filter_map(|attr| {
-            if attr.path().is_ident("args") {
-                let parsed_attr = match attr.parse_args::<ArgsAttr>() {
-                    Ok(p) => p,
-                    Err(err) => {
-                        arg_err = Some(err.to_compile_error());
-                        return None;
-                    }
-                };
-                extracted_spec = Some(parsed_attr.spec);
-                None
-            } else {
-                Some(attr)
-            }
-        })
-        .collect();
-    input_fn.attrs = kept_attrs;
-    if let Some(arg_err) = arg_err {
-        return arg_err.into();
-    }
-    let spec = match extracted_spec {
-        Some(s) => s,
-        None => {
-            return syn::Error::new_spanned(
-                fn_name,
-                "Expected an attribute with integer or range: #[args(1)] #[args(0..2)], etc.",
-            )
-            .to_compile_error()
-            .into()
-        }
-    };
-    let arg_check = match spec {
-        ArgsSpec::Exact(exact_count) => {
-            quote! {
-                if argc != #exact_count {
-                    log::error!(
-                        "{} was called with {} arguments, expected exactly {}",
-                        stringify!(#fn_name),
-                        argc,
-                        #exact_count
-                    );
-                    return ::limbo_ext::Value::null();
-                }
-            }
-        }
-        ArgsSpec::Range {
-            lower,
-            upper,
-            inclusive: true,
-        } => {
-            quote! {
-                if !(#lower..=#upper).contains(&argc) {
-                    log::error!(
-                        "{} was called with {} arguments, expected {}..={} range",
-                        stringify!(#fn_name),
-                        argc,
-                        #lower,
-                        #upper
-                    );
-                    return ::limbo_ext::Value::null();
-                }
-            }
-        }
-        ArgsSpec::Range {
-            lower,
-            upper,
-            inclusive: false,
-        } => {
-            quote! {
-                if !(#lower..#upper).contains(&argc) {
-                    log::error!(
-                        "{} was called with {} arguments, expected {}..{} (exclusive)",
-                        stringify!(#fn_name),
-                        argc,
-                        #lower,
-                        #upper
-                    );
-                    return ::limbo_ext::Value::null();
-                }
-            }
-        }
-    };
-    let expanded = quote! {
-        #[export_name = stringify!(#fn_name)]
-        extern "C" fn #fn_name(argc: i32, argv: *const ::limbo_ext::Value) -> ::limbo_ext::Value {
-            #arg_check
-
-            // from_raw_parts doesn't currently accept null ptr
-            if argc == 0 || argv.is_null() {
-                log::debug!("{} was called with no arguments", stringify!(#fn_name));
-                let args: &[::limbo_ext::Value] = &[];
-                #fn_body
-            } else {
-                let ptr_slice = unsafe {
-                    std::slice::from_raw_parts(argv, argc as usize)
-                };
-                let args: &[::limbo_ext::Value] = ptr_slice;
-                #fn_body
-            }
-        }
-    };
-    TokenStream::from(expanded)
-}
-
-#[proc_macro_attribute]
-pub fn declare_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let meta = parse_macro_input!(attr as ItemFn);
-    let mut aggregate_name = None;
-    for arg in meta.attrs.iter() {
-        if arg.path().is_ident("name") {
-            let _ = arg.parse_nested_meta(|nv| match nv.value() {
-                Ok(val) => {
-                    let s: LitStr = val.parse()?;
-                    aggregate_name = Some(s);
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            });
-        }
-    }
-    let Some(aggregate_name) = aggregate_name else {
-        return syn::Error::new_spanned(
-            meta,
-            "Expected an attribute with a name: #[aggregate(name = \"sum\")]",
-        )
-        .to_compile_error()
-        .into();
-    };
-
-    let input = parse_macro_input!(item as DeriveInput);
-    let struct_name = &input.ident;
-
-    let step_fn_name = format_ident!("{}_step", struct_name.to_string().to_lowercase());
-    let finalize_fn_name = format_ident!("{}_finalize", struct_name.to_string().to_lowercase());
-    let register_fn_name = format_ident!("register_{}", struct_name.to_string().to_lowercase());
+    let register_fn_name = format_ident!("register_{}", struct_name);
+    let exec_fn_name = format_ident!("{}_exec", struct_name);
 
     let expanded = quote! {
-        #input
+        impl #struct_name {
+            #[no_mangle]
+            pub unsafe extern "C" fn #register_fn_name(
+                api: *const ::limbo_ext::ExtensionApi
+            ) -> ::limbo_ext::ResultCode {
+                if api.is_null() {
+                    return ::limbo_ext::RESULT_ERROR;
+                }
+                let api = unsafe { &*api };
 
-        extern "C" fn #step_fn_name(
-            ctx: *mut ::limbo_extension::AggregateCtx,
-            argc: i32,
-            argv: *const ::limbo_extension::Value,
-        ) {
-            unsafe {
-                let state = &mut *(ctx.state as *mut #struct_name);
-                let args = std::slice::from_raw_parts(argv, argc as usize);
-                state.step(args);
-            }
-        }
+                let scalar = #struct_name;
+                let name = scalar.name();
+                let c_name = std::ffi::CString::new(name).unwrap();
 
-        extern "C" fn #finalize_fn_name(
-            ctx: *mut ::limbo_extension::AggregateCtx
-        ) -> ::limbo_extension::Value {
-            unsafe {
-                let state = Box::from_raw(ctx.state as *mut #struct_name);
-                state.finalize()
+                (api.register_scalar_function)(
+                    api.ctx,
+                    c_name.as_ptr(),
+                    #exec_fn_name,
+                );
+
+                ::limbo_ext::RESULT_OK
             }
         }
 
         #[no_mangle]
-        pub unsafe extern "C" fn #register_fn_name(
-            api: *const ::limbo_extension::ExtensionApi
-        ) -> ::limbo_extension::ResultCode {
-            let cname = std::ffi::CString::new(#aggregate_name).unwrap();
-            ((*api).register_aggregate_function)(
-                (*api).ctx,
-                cname.as_ptr(),
-                #step_fn_name,
-                #finalize_fn_name,
-            )
+        pub unsafe extern "C" fn #exec_fn_name(
+            argc: i32,
+            argv: *const ::limbo_ext::Value
+        ) -> ::limbo_ext::Value {
+            let scalar = #struct_name;
+            let args_slice = if argv.is_null() || argc <= 0 {
+                &[]
+            } else {
+                unsafe { std::slice::from_raw_parts(argv, argc as usize) }
+            };
+            scalar.call(args_slice)
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+#[proc_macro_derive(AggregateDerive)]
+pub fn derive_agg_func(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    let struct_name = &ast.ident;
+
+    let step_fn_name = format_ident!("{}_step", struct_name);
+    let finalize_fn_name = format_ident!("{}_finalize", struct_name);
+    let init_fn_name = format_ident!("{}_init", struct_name);
+    let free_fn_name = format_ident!("{}_free", struct_name);
+    let register_fn_name = format_ident!("register_{}", struct_name);
+
+    let expanded = quote! {
+        impl #struct_name {
+            #[no_mangle]
+            pub extern "C" fn #init_fn_name() -> *mut ::limbo_ext::AggCtx {
+                let state = Box::new(<#struct_name as ::limbo_ext::AggFunc>::State::default());
+                let ctx = Box::new(::limbo_ext::AggCtx {
+                    state: Box::into_raw(state) as *mut ::std::os::raw::c_void,
+                    free: Some(#struct_name::#free_fn_name),
+                });
+                Box::into_raw(ctx)
+            }
+
+            #[no_mangle]
+            pub extern "C" fn #free_fn_name(state: *mut ::std::os::raw::c_void) {
+                if !state.is_null() {
+                    unsafe {
+                        let _ = Box::from_raw(state as *mut <#struct_name as ::limbo_ext::AggFunc>::State);
+                    }
+                }
+            }
+
+            #[no_mangle]
+            pub extern "C" fn #step_fn_name(
+                ctx: *mut ::limbo_ext::AggCtx,
+                argc: i32,
+                argv: *const ::limbo_ext::Value,
+            ) {
+                unsafe {
+                    let ctx = &mut *ctx;
+                    let state = &mut *(ctx.state as *mut <#struct_name as ::limbo_ext::AggFunc>::State);
+                    let args = std::slice::from_raw_parts(argv, argc as usize);
+                    <#struct_name as ::limbo_ext::AggFunc>::step(state, args);
+                }
+            }
+
+            #[no_mangle]
+            pub extern "C" fn #finalize_fn_name(
+                ctx: *mut ::limbo_ext::AggCtx
+            ) -> ::limbo_ext::Value {
+                unsafe {
+                    let ctx = &mut *ctx;
+                    let state = Box::from_raw(ctx.state as *mut <#struct_name as ::limbo_ext::AggFunc>::State);
+                    <#struct_name as ::limbo_ext::AggFunc>::finalize(*state)
+                }
+            }
+
+            #[no_mangle]
+            pub unsafe extern "C" fn #register_fn_name(
+                api: *const ::limbo_ext::ExtensionApi
+            ) -> ::limbo_ext::ResultCode {
+                if api.is_null() {
+                    return ::limbo_ext::RESULT_ERROR;
+                }
+
+                let api = &*api;
+                let agg = #struct_name;
+                let name_str = agg.name();
+                let c_name = match std::ffi::CString::new(name_str) {
+                    Ok(cname) => cname,
+                    Err(_) => return ::limbo_ext::RESULT_ERROR,
+                };
+
+                (api.register_aggregate_function)(
+                    api.ctx,
+                    c_name.as_ptr(),
+                    agg.args(),
+                    #struct_name::#init_fn_name
+                        as ::limbo_ext::InitAggFunction,
+                    #struct_name::#step_fn_name
+                        as ::limbo_ext::StepFunction,
+                    #struct_name::#finalize_fn_name
+                        as ::limbo_ext::FinalizeFunction,
+                )
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+#[proc_macro]
+pub fn register_extension(input: TokenStream) -> TokenStream {
+    let input_ast = parse_macro_input!(input as RegisterExtensionInput);
+
+    let RegisterExtensionInput {
+        aggregates,
+        scalars,
+    } = input_ast;
+
+    let scalar_calls = scalars.iter().map(|scalar_ident| {
+        let register_fn =
+            syn::Ident::new(&format!("register_{}", scalar_ident), scalar_ident.span());
+        quote! {
+            {
+                let result = unsafe { #scalar_ident::#register_fn(api)};
+                if result != 0 {
+                    return result;
+                }
+            }
+        }
+    });
+
+    let aggregate_calls = aggregates.iter().map(|agg_ident| {
+        let register_fn = syn::Ident::new(&format!("register_{}", agg_ident), agg_ident.span());
+        quote! {
+            {
+                let result = unsafe{ #agg_ident::#register_fn(api)};
+                if result != 0 {
+                    return result;
+                }
+            }
+        }
+    });
+
+    let expanded = quote! {
+        #[no_mangle]
+        pub extern "C" fn register_extension(api: &::limbo_ext::ExtensionApi) -> i32 {
+            let api = unsafe { &*api };
+            #(#scalar_calls)*
+
+            #(#aggregate_calls)*
+
+            ::limbo_ext::RESULT_OK
         }
     };
 
