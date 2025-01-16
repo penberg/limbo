@@ -1,6 +1,5 @@
 package org.github.tursodatabase.core;
 
-import org.github.tursodatabase.LimboConnection;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.jdbc4.JDBC4ResultSet;
 
@@ -68,6 +67,6 @@ public abstract class CoreStatement {
             }
         }
 
-        return stmtPointer.safeRunInt(AbstractDB::columnCount) != 0;
+        return this.stmtPointer.columnCount() != 0;
     }
 }

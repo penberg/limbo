@@ -10,16 +10,16 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SafeStatementPointer {
 
     // Store a reference to database, so we can lock it before calling any safe functions.
-    private final AbstractDB database;
-    private final long databasePointer;
+    private final LimboConnection connection;
+    private final long statementPtr;
 
     private volatile boolean closed = false;
 
-    private final ReentrantLock databaseLock = new ReentrantLock();
+    private final ReentrantLock connectionLock = new ReentrantLock();
 
-    public SafeStatementPointer(AbstractDB database, long databasePointer) {
-        this.database = database;
-        this.databasePointer = databasePointer;
+    public SafeStatementPointer(LimboConnection connection, long statementPtr) {
+        this.connection = connection;
+        this.statementPtr = statementPtr;
     }
 
     /**
@@ -36,10 +36,10 @@ public class SafeStatementPointer {
      */
     public int close() throws SQLException {
         try {
-            databaseLock.lock();
+            connectionLock.lock();
             return internalClose();
         } finally {
-            databaseLock.unlock();
+            connectionLock.unlock();
         }
     }
 
@@ -48,24 +48,8 @@ public class SafeStatementPointer {
         return 0;
     }
 
-    public <E extends Throwable> int safeRunInt(SafePointerIntFunction<E> function) throws SQLException, E {
-        try {
-            databaseLock.lock();
-            this.ensureOpen();
-            return function.run(database, databasePointer);
-        } finally {
-            databaseLock.unlock();
-        }
-    }
-
-    private void ensureOpen() throws SQLException {
-        if (this.closed) {
-            throw new SQLException("Pointer is closed");
-        }
-    }
-
-    @FunctionalInterface
-    public interface SafePointerIntFunction<E extends Throwable> {
-        int run(AbstractDB database, long pointer) throws E;
+    public long columnCount() throws SQLException {
+        // TODO
+        return 0;
     }
 }

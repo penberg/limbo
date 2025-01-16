@@ -39,7 +39,8 @@ public enum LimboErrorCode {
     SQLITE_NULL(SqliteCode.SQLITE_NULL, "Null type"),
 
     UNKNOWN_ERROR(-1, "Unknown error"),
-    LIMBO_DATABASE_ALREADY_CLOSED(1000, "Database already closed"),
+    LIMBO_FAILED_TO_PARSE_BYTE_ARRAY(1100, "Failed to parse ut8 byte array"),
+    LIMBO_FAILED_TO_PREPARE_STATEMENT(1200, "Failed to prepare statement"),
     LIMBO_ETC(9999, "Unclassified error");
 
     public final int code;

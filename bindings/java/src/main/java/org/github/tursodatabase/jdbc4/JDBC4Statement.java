@@ -1,8 +1,7 @@
 package org.github.tursodatabase.jdbc4;
 
-import org.github.tursodatabase.LimboConnection;
+import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.AbstractDB;
 import org.github.tursodatabase.core.CoreStatement;
 
 import java.sql.*;
@@ -126,13 +125,12 @@ public class JDBC4Statement extends CoreStatement implements Statement {
 
         return this.withConnectionTimeout(
                 () -> {
-                    final AbstractDB database = connection.getDatabase();
                     try {
                         connectionLock.lock();
-                        database.prepare(this);
+                        connection.prepare(sql);
                         boolean result = exec();
                         updateGeneratedKeys();
-                        updateCount = database.changes();
+                        // TODO: updateCount = connection.changes();
                         exhaustedResults = false;
                         return result;
                     } finally {
