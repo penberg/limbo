@@ -434,6 +434,9 @@ impl Limbo {
         line: &str,
         rl: &mut rustyline::DefaultEditor,
     ) -> anyhow::Result<()> {
+        if line.trim_start().starts_with("--") {
+            return Ok(());
+        }
         if self.input_buff.is_empty() {
             if line.is_empty() {
                 return Ok(());
