@@ -1,3 +1,4 @@
+use crate::errors::{LimboError, Result};
 use jni::objects::{JByteArray, JObject};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
@@ -51,6 +52,31 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
 }
 
 #[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'local>(
+    mut env: JNIEnv<'local>,
+    obj: JObject<'local>,
+    db_pointer: jlong,
+) -> jlong {
+    let db = match to_db(db_pointer) {
+        Ok(db) => db,
+        Err(e) => {
+            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            return 0;
+        }
+    };
+
+    Box::into_raw(Box::new(db.connect())) as jlong
+}
+
+fn to_db(db_pointer: jlong) -> Result<&'static mut Arc<Database>> {
+    if db_pointer == 0 {
+        Err(LimboError::InvalidDatabasePointer)
+    } else {
+        unsafe { Ok(&mut *(db_pointer as *mut Arc<Database>)) }
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_throwJavaException<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
@@ -64,6 +90,31 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_throwJavaExcep
     );
 }
 
+fn utf8_byte_arr_to_str(env: &JNIEnv, bytes: JByteArray) -> Result<String> {
+    let bytes = env
+        .convert_byte_array(bytes)
+        .map_err(|e| LimboError::CustomError("Failed to retrieve bytes".to_string()))?;
+    let str = String::from_utf8(bytes).map_err(|e| {
+        LimboError::CustomError("Failed to convert utf8 byte array into string".to_string())
+    })?;
+    Ok(str)
+}
+
+/// Sets the error message and throws a Java exception.
+///
+/// This function converts the provided error message to a byte array and calls the
+/// `throwLimboException` method on the provided Java object to throw an exception.
+///
+/// # Parameters
+/// - `env`: The JNI environment.
+/// - `obj`: The Java object on which the exception will be thrown.
+/// - `err_code`: The error code corresponding to the exception. Refer to `org.github.tursodatabase.core.Codes` for the list of error codes.
+/// - `err_msg`: The error message to be included in the exception.
+///
+/// # Example
+/// ```rust
+/// set_err_msg_and_throw_exception(env, obj, Codes::SQLITE_ERROR, "An error occurred".to_string());
+/// ```
 fn set_err_msg_and_throw_exception<'local>(
     env: &mut JNIEnv<'local>,
     obj: JObject<'local>,

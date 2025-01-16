@@ -1,11 +1,11 @@
-use crate::errors::CustomError;
+use crate::errors::LimboError;
 use jni::objects::{JObject, JValue};
 use jni::JNIEnv;
 
 pub(crate) fn row_to_obj_array<'local>(
     env: &mut JNIEnv<'local>,
     row: &limbo_core::Row,
-) -> Result<JObject<'local>, CustomError> {
+) -> Result<JObject<'local>, LimboError> {
     let obj_array =
         env.new_object_array(row.values.len() as i32, "java/lang/Object", JObject::null())?;
 
