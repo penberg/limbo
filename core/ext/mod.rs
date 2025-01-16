@@ -1,6 +1,6 @@
 use crate::{function::ExternalFunc, Database};
-use limbo_extension::{ExtensionApi, ResultCode, ScalarFunction, RESULT_ERROR, RESULT_OK};
-pub use limbo_extension::{Value as ExtValue, ValueType as ExtValueType};
+use limbo_ext::{ExtensionApi, ResultCode, ScalarFunction, RESULT_ERROR, RESULT_OK};
+pub use limbo_ext::{Value as ExtValue, ValueType as ExtValueType};
 use std::{
     ffi::{c_char, c_void, CStr},
     rc::Rc,
@@ -35,7 +35,7 @@ impl Database {
         RESULT_OK
     }
 
-    pub fn build_limbo_extension(&self) -> ExtensionApi {
+    pub fn build_limbo_ext(&self) -> ExtensionApi {
         ExtensionApi {
             ctx: self as *const _ as *mut c_void,
             register_scalar_function,

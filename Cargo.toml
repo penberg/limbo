@@ -8,10 +8,13 @@ members = [
     "bindings/rust",
     "bindings/wasm",
     "cli",
-    "sqlite3",
     "core",
+    "extensions/core",
+    "extensions/uuid",
+    "macros",
     "simulator",
-    "test", "macros", "limbo_extension", "extensions/uuid",
+    "sqlite3",
+    "test",
 ]
 exclude = ["perf/latency/limbo"]
 

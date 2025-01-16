@@ -193,7 +193,7 @@ pub fn export_scalar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         argc,
                         #exact_count
                     );
-                    return ::limbo_extension::Value::null();
+                    return ::limbo_ext::Value::null();
                 }
             }
         }
@@ -211,7 +211,7 @@ pub fn export_scalar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         #lower,
                         #upper
                     );
-                    return ::limbo_extension::Value::null();
+                    return ::limbo_ext::Value::null();
                 }
             }
         }
@@ -229,26 +229,26 @@ pub fn export_scalar(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         #lower,
                         #upper
                     );
-                    return ::limbo_extension::Value::null();
+                    return ::limbo_ext::Value::null();
                 }
             }
         }
     };
     let expanded = quote! {
         #[export_name = stringify!(#fn_name)]
-        extern "C" fn #fn_name(argc: i32, argv: *const ::limbo_extension::Value) -> ::limbo_extension::Value {
+        extern "C" fn #fn_name(argc: i32, argv: *const ::limbo_ext::Value) -> ::limbo_ext::Value {
             #arg_check
 
             // from_raw_parts doesn't currently accept null ptr
             if argc == 0 || argv.is_null() {
                 log::debug!("{} was called with no arguments", stringify!(#fn_name));
-                let args: &[::limbo_extension::Value] = &[];
+                let args: &[::limbo_ext::Value] = &[];
                 #fn_body
             } else {
                 let ptr_slice = unsafe {
                     std::slice::from_raw_parts(argv, argc as usize)
                 };
-                let args: &[::limbo_extension::Value] = ptr_slice;
+                let args: &[::limbo_ext::Value] = ptr_slice;
                 #fn_body
             }
         }
