@@ -52,6 +52,7 @@ dist = false
 github-attestations = true
 
 [profile.release]
+debug = "line-tables-only"
 codegen-units = 1
 panic = "abort"
 lto = "off"
