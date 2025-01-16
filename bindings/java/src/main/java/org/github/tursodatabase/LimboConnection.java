@@ -78,7 +78,20 @@ public abstract class LimboConnection implements Connection {
         return database.isClosed();
     }
 
+    public AbstractDB getDatabase() {
+        return database;
+    }
+
+    /**
+     * @return busy timeout in milliseconds.
+     */
+    public int getBusyTimeout() {
+        // TODO: add support for busyTimeout
+        return 0;
+    }
+
     // TODO: check whether this is still valid for limbo
+
     /**
      * Checks whether the type, concurrency, and holdability settings for a {@link ResultSet} are
      * supported by the SQLite interface. Supported settings are:
@@ -100,5 +113,9 @@ public abstract class LimboConnection implements Connection {
             throw new SQLException("SQLite only supports CONCUR_READ_ONLY cursors");
         if (resultSetHoldability != ResultSet.CLOSE_CURSORS_AT_COMMIT)
             throw new SQLException("SQLite only supports closing cursors at commit");
+    }
+
+    public void setBusyTimeout(int busyTimeout) {
+        // TODO: add support for busy timeout
     }
 }

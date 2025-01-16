@@ -2,9 +2,11 @@ package org.github.tursodatabase.jdbc4;
 
 import org.github.tursodatabase.LimboConnection;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
+import org.github.tursodatabase.core.AbstractDB;
 import org.github.tursodatabase.core.CoreStatement;
 
 import java.sql.*;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Implementation of the {@link Statement} interface for JDBC 4.
@@ -17,6 +19,12 @@ public class JDBC4Statement extends CoreStatement implements Statement {
     private final int resultSetType;
     private final int resultSetConcurrency;
     private final int resultSetHoldability;
+
+    private int queryTimeoutSeconds;
+    private long updateCount;
+    private boolean exhaustedResults = false;
+
+    private ReentrantLock connectionLock = new ReentrantLock();
 
     public JDBC4Statement(LimboConnection connection) {
         this(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
@@ -84,7 +92,10 @@ public class JDBC4Statement extends CoreStatement implements Statement {
 
     @Override
     public void setQueryTimeout(int seconds) throws SQLException {
-        // TODO
+        if (seconds < 0) {
+            throw new SQLException("Query timeout must be greater than 0");
+        }
+        this.queryTimeoutSeconds = seconds;
     }
 
     @Override
@@ -111,8 +122,24 @@ public class JDBC4Statement extends CoreStatement implements Statement {
 
     @Override
     public boolean execute(String sql) throws SQLException {
-        // TODO
-        return false;
+        internalClose();
+
+        return this.withConnectionTimeout(
+                () -> {
+                    final AbstractDB database = connection.getDatabase();
+                    try {
+                        connectionLock.lock();
+                        database.prepare(this);
+                        boolean result = exec();
+                        updateGeneratedKeys();
+                        updateCount = database.changes();
+                        exhaustedResults = false;
+                        return result;
+                    } finally {
+                        connectionLock.unlock();
+                    }
+                }
+        );
     }
 
     @Override
@@ -286,5 +313,26 @@ public class JDBC4Statement extends CoreStatement implements Statement {
     public boolean isWrapperFor(Class<?> iface) throws SQLException {
         // TODO
         return false;
+    }
+
+    private <T> T withConnectionTimeout(SQLCallable<T> callable) throws SQLException {
+        final int originalBusyTimeoutMillis = connection.getBusyTimeout();
+        if (queryTimeoutSeconds > 0) {
+            // TODO: set busy timeout
+            connection.setBusyTimeout(1000 * queryTimeoutSeconds);
+        }
+
+        try {
+            return callable.call();
+        } finally {
+            if (queryTimeoutSeconds > 0) {
+                connection.setBusyTimeout(originalBusyTimeoutMillis);
+            }
+        }
+    }
+
+    @FunctionalInterface
+    protected interface SQLCallable<T> {
+        T call() throws SQLException;
     }
 }

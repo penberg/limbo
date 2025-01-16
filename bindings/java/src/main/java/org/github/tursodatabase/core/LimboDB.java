@@ -96,7 +96,7 @@ public final class LimboDB extends AbstractDB {
     }
 
     @Override
-    protected synchronized SafeStmtPtr prepare(String sql) throws SQLException {
+    protected synchronized SafeStatementPointer prepare(String sql) throws SQLException {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
@@ -108,6 +108,18 @@ public final class LimboDB extends AbstractDB {
     // TODO: add support for JNI
     @Override
     public synchronized native int step(long stmt);
+
+    @Override
+    public int columnCount(long stmt) throws SQLException {
+        // TODO
+        return 0;
+    }
+
+    @Override
+    public long changes() throws SQLException {
+        // TODO
+        return 0;
+    }
 
     @VisibleForTesting
     native void throwJavaException(int errorCode) throws SQLException;

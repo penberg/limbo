@@ -1,7 +1,11 @@
 package org.github.tursodatabase.core;
 
+import org.github.tursodatabase.annotations.Nullable;
+
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -14,6 +18,9 @@ public abstract class AbstractDB {
     private final String url;
     private final String fileName;
     private final AtomicBoolean closed = new AtomicBoolean(true);
+
+    // Tracer for statements to avoid unfinalized statements on db close.
+    private final Set<SafeStatementPointer> statementPointerSet = ConcurrentHashMap.newKeySet();
 
     public AbstractDB(String url, String filaName) {
         this.url = url;
@@ -70,9 +77,23 @@ public abstract class AbstractDB {
      * @param stmt The SQL statement to compile.
      * @throws SQLException if a database access error occurs.
      */
-    public final synchronized void prepare(CoreStatement stmt) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
+    public final void prepare(CoreStatement stmt) throws SQLException {
+        if (stmt.sql == null) {
+            throw new SQLException("Statement must not be null");
+        }
+
+        // TODO: check whether closing the pointer and replacing stamt.pointer should work atomically using locks etc
+        final SafeStatementPointer pointer = stmt.getStmtPointer();
+        if (pointer != null) {
+            pointer.close();
+        }
+
+        final SafeStatementPointer newPointer = prepare(stmt.sql);
+        stmt.setStmtPointer(newPointer);
+        final boolean added = statementPointerSet.add(newPointer);
+        if (!added) {
+            throw new IllegalStateException("The pointer is already added to statements set");
+        }
     }
 
     /**
@@ -83,7 +104,7 @@ public abstract class AbstractDB {
      * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
      * @throws SQLException if a database access error occurs.
      */
-    public synchronized int finalize(SafeStmtPtr safePtr, long ptr) throws SQLException {
+    public synchronized int finalize(SafeStatementPointer safePtr, long ptr) throws SQLException {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
@@ -121,7 +142,7 @@ public abstract class AbstractDB {
      * @return A SafeStmtPtr object.
      * @throws SQLException if a database access error occurs.
      */
-    protected abstract SafeStmtPtr prepare(String sql) throws SQLException;
+    protected abstract SafeStatementPointer prepare(String sql) throws SQLException;
 
     /**
      * Destroys a prepared statement.
@@ -150,7 +171,7 @@ public abstract class AbstractDB {
      * @throws SQLException if a database access error occurs.
      * @see <a href="https://www.sqlite.org/c_interface.html#sqlite_exec">SQLite Exec</a>
      */
-    public final synchronized boolean execute(CoreStatement stmt, Object[] vals) throws SQLException {
+    public final synchronized boolean execute(CoreStatement stmt, @Nullable Object[] vals) throws SQLException {
         throw new SQLFeatureNotSupportedException();
     }
 
@@ -168,4 +189,21 @@ public abstract class AbstractDB {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
+
+    /**
+     * @param stmt Pointer to the statement.
+     * @return Number of columns in the result set returned by the prepared statement.
+     * @throws SQLException
+     * @see <a
+     *     href="https://www.sqlite.org/c3ref/column_count.html">https://www.sqlite.org/c3ref/column_count.html</a>
+     */
+    public abstract int columnCount(long stmt) throws SQLException;
+
+    /**
+     * @return Number of rows that were changed, inserted or deleted by the last SQL statement
+     * @throws SQLException
+     * @see <a
+     *     href="https://www.sqlite.org/c3ref/changes.html">https://www.sqlite.org/c3ref/changes.html</a>
+     */
+    public abstract long changes() throws SQLException;
 }
