@@ -36,7 +36,7 @@ public class LimboDBTest {
         LimboDB.load();
         LimboDB db = LimboDB.create("jdbc:sqlite:" + dbPath, dbPath);
 
-        final int limboExceptionCode = LimboErrorCode.ETC.code;
+        final int limboExceptionCode = LimboErrorCode.LIMBO_ETC.code;
         try {
             db.throwJavaException(limboExceptionCode);
         } catch (Exception e)  {

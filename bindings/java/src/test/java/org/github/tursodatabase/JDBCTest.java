@@ -1,5 +1,6 @@
 package org.github.tursodatabase;
 
+import org.github.tursodatabase.core.LimboConnection;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Connection;
