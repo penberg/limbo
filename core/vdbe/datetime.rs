@@ -1627,6 +1627,7 @@ mod tests {
         assert_eq!(weekday_sunday_based(&dt), 5);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_apply_modifier_julianday() {
         let dt = create_datetime(2000, 1, 1, 12, 0, 0);
