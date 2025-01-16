@@ -272,7 +272,10 @@ fn convert_db_type_to_json(value: &OwnedValue) -> crate::Result<Val> {
             TextSubtype::Json => get_json_value(value)?,
             TextSubtype::Text => Val::String(t.value.to_string()),
         },
-        _ => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
+        OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
+        unsupported_value => crate::bail_constraint_error!(
+            "JSON cannot hold this type of value: {unsupported_value:?}"
+        ),
     };
     Ok(val)
 }
