@@ -54,7 +54,7 @@ github-attestations = true
 [profile.release]
 codegen-units = 1
 panic = "abort"
-lto = true
+lto = "off"
 
 [profile.bench-profile]
 inherits = "release"
@@ -62,4 +62,3 @@ debug = true
 
 [profile.dist]
 inherits = "release"
-lto = "thin"
