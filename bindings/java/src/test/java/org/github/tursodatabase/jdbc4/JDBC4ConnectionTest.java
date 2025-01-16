@@ -18,9 +18,9 @@ class JDBC4ConnectionTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        String fileUrl = TestUtils.createTempFile();
-        String url = "jdbc:sqlite:" + fileUrl;
-        connection = new JDBC4Connection(url, fileUrl, new Properties());
+        String filePath = TestUtils.createTempFile();
+        String url = "jdbc:sqlite:" + filePath;
+        connection = new JDBC4Connection(url, filePath, new Properties());
     }
 
     @Test

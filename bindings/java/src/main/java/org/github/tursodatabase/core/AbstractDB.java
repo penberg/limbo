@@ -15,16 +15,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * differences between the JDBC specification and the Limbo API.
  */
 public abstract class AbstractDB {
-    private final String url;
-    private final String fileName;
+    protected final String url;
+    protected final String filePath;
     private final AtomicBoolean closed = new AtomicBoolean(true);
 
     // Tracer for statements to avoid unfinalized statements on db close.
     private final Set<SafeStatementPointer> statementPointerSet = ConcurrentHashMap.newKeySet();
 
-    public AbstractDB(String url, String filaName) {
+    public AbstractDB(String url, String filePath) {
         this.url = url;
-        this.fileName = filaName;
+        this.filePath = filePath;
     }
 
     public boolean isClosed() {
@@ -55,7 +55,7 @@ public abstract class AbstractDB {
      * @throws SQLException if a database access error occurs.
      */
     public final synchronized void open(int openFlags) throws SQLException {
-        open0(fileName, openFlags);
+        open0(filePath, openFlags);
     }
 
     protected abstract void open0(String fileName, int openFlags) throws SQLException;
@@ -72,29 +72,36 @@ public abstract class AbstractDB {
     }
 
     /**
-     * Compiles an SQL statement.
+     * Connects to a database.
      *
-     * @param stmt The SQL statement to compile.
-     * @throws SQLException if a database access error occurs.
+     * @return Pointer to the connection.
      */
-    public final void prepare(CoreStatement stmt) throws SQLException {
-        if (stmt.sql == null) {
-            throw new SQLException("Statement must not be null");
-        }
+    public abstract long connect() throws SQLException;
 
-        // TODO: check whether closing the pointer and replacing stamt.pointer should work atomically using locks etc
-        final SafeStatementPointer pointer = stmt.getStmtPointer();
-        if (pointer != null) {
-            pointer.close();
-        }
-
-        final SafeStatementPointer newPointer = prepare(stmt.sql);
-        stmt.setStmtPointer(newPointer);
-        final boolean added = statementPointerSet.add(newPointer);
-        if (!added) {
-            throw new IllegalStateException("The pointer is already added to statements set");
-        }
-    }
+//    /**
+//     * Compiles an SQL statement.
+//     *
+//     * @param stmt The SQL statement to compile.
+//     * @throws SQLException if a database access error occurs.
+//     */
+//    public final void prepare(CoreStatement stmt) throws SQLException {
+//        if (stmt.sql == null) {
+//            throw new SQLException("Statement must not be null");
+//        }
+//
+//        // TODO: check whether closing the pointer and replacing stamt.pointer should work atomically using locks etc
+//        final SafeStatementPointer pointer = stmt.getStmtPointer();
+//        if (pointer != null) {
+//            pointer.close();
+//        }
+//
+//        final SafeStatementPointer newPointer = stmt.connection.prepare(stmt.sql);
+//        stmt.setStmtPointer(newPointer);
+//        final boolean added = statementPointerSet.add(newPointer);
+//        if (!added) {
+//            throw new IllegalStateException("The pointer is already added to statements set");
+//        }
+//    }
 
     /**
      * Destroys a statement.
@@ -134,15 +141,6 @@ public abstract class AbstractDB {
      * @throws SQLException if a database access error occurs.
      */
     public abstract int exec(String sql) throws SQLException;
-
-    /**
-     * Compiles an SQL statement.
-     *
-     * @param sql An SQL statement.
-     * @return A SafeStmtPtr object.
-     * @throws SQLException if a database access error occurs.
-     */
-    protected abstract SafeStatementPointer prepare(String sql) throws SQLException;
 
     /**
      * Destroys a prepared statement.
@@ -189,21 +187,4 @@ public abstract class AbstractDB {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
-
-    /**
-     * @param stmt Pointer to the statement.
-     * @return Number of columns in the result set returned by the prepared statement.
-     * @throws SQLException
-     * @see <a
-     *     href="https://www.sqlite.org/c3ref/column_count.html">https://www.sqlite.org/c3ref/column_count.html</a>
-     */
-    public abstract int columnCount(long stmt) throws SQLException;
-
-    /**
-     * @return Number of rows that were changed, inserted or deleted by the last SQL statement
-     * @throws SQLException
-     * @see <a
-     *     href="https://www.sqlite.org/c3ref/changes.html">https://www.sqlite.org/c3ref/changes.html</a>
-     */
-    public abstract long changes() throws SQLException;
 }

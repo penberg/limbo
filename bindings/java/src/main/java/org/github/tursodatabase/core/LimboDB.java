@@ -4,23 +4,28 @@ package org.github.tursodatabase.core;
 import org.github.tursodatabase.LimboErrorCode;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.VisibleForTesting;
-import org.github.tursodatabase.annotations.Nullable;
-import org.github.tursodatabase.exceptions.LimboException;
+import org.github.tursodatabase.utils.ByteArrayUtils;
+import org.github.tursodatabase.utils.LimboExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.util.concurrent.locks.ReentrantLock;
+
+import static org.github.tursodatabase.utils.ByteArrayUtils.stringToUtf8ByteArray;
 
 /**
  * This class provides a thin JNI layer over the SQLite3 C API.
  */
 public final class LimboDB extends AbstractDB {
-
+    private static final Logger logger = LoggerFactory.getLogger(LimboDB.class);
     // Pointer to database instance
-    private long dbPtr;
+    private long dbPointer;
     private boolean isOpen;
 
     private static boolean isLoaded;
+    private ReentrantLock dbLock = new ReentrantLock();
 
     static {
         if ("The Android Project".equals(System.getProperty("java.vm.vendor"))) {
@@ -46,80 +51,69 @@ public final class LimboDB extends AbstractDB {
 
     /**
      * @param url      e.g. "jdbc:sqlite:fileName
-     * @param fileName e.g. path to file
+     * @param filePath e.g. path to file
      */
-    public static LimboDB create(String url, String fileName) throws SQLException {
-        return new LimboDB(url, fileName);
+    public static LimboDB create(String url, String filePath) throws SQLException {
+        return new LimboDB(url, filePath);
     }
 
     // TODO: receive config as argument
-    private LimboDB(String url, String fileName) {
-        super(url, fileName);
+    private LimboDB(String url, String filePath) {
+        super(url, filePath);
     }
 
     // WRAPPER FUNCTIONS ////////////////////////////////////////////
 
     // TODO: add support for JNI
     @Override
-    protected synchronized native long openUtf8(byte[] file, int openFlags) throws SQLException;
+    protected native long openUtf8(byte[] file, int openFlags) throws SQLException;
 
     // TODO: add support for JNI
     @Override
-    protected synchronized native void close0() throws SQLException;
+    protected native void close0() throws SQLException;
 
     @Override
-    public synchronized int exec(String sql) throws SQLException {
+    public int exec(String sql) throws SQLException {
         // TODO: add implementation
         throw new SQLFeatureNotSupportedException();
     }
 
     // TODO: add support for JNI
-    synchronized native int execUtf8(byte[] sqlUtf8) throws SQLException;
+    native int execUtf8(byte[] sqlUtf8) throws SQLException;
 
     // TODO: add support for JNI
     @Override
     public native void interrupt();
 
     @Override
-    protected void open0(String fileName, int openFlags) throws SQLException {
+    protected void open0(String filePath, int openFlags) throws SQLException {
         if (isOpen) {
-            throw buildLimboException(LimboErrorCode.ETC.code, "Already opened");
+            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "Already opened");
         }
 
-        byte[] fileNameBytes = stringToUtf8ByteArray(fileName);
-        if (fileNameBytes == null) {
-            throw buildLimboException(LimboErrorCode.ETC.code, "File name cannot be converted to byteArray. File name: " + fileName);
+        byte[] filePathBytes = stringToUtf8ByteArray(filePath);
+        if (filePathBytes == null) {
+            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "File name cannot be converted to byteArray. File name: " + filePath);
         }
 
-        dbPtr = openUtf8(fileNameBytes, openFlags);
+        dbPointer = openUtf8(filePathBytes, openFlags);
         isOpen = true;
     }
 
     @Override
-    protected synchronized SafeStatementPointer prepare(String sql) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
+    public long connect() throws SQLException {
+         return connect0(ByteArrayUtils.stringToUtf8ByteArray(filePath), dbPointer);
     }
+
+    private native long connect0(byte[] path, long databasePtr) throws SQLException;
 
     // TODO: add support for JNI
     @Override
-    protected synchronized native int finalize(long stmt);
+    protected native int finalize(long stmt);
 
     // TODO: add support for JNI
     @Override
-    public synchronized native int step(long stmt);
-
-    @Override
-    public int columnCount(long stmt) throws SQLException {
-        // TODO
-        return 0;
-    }
-
-    @Override
-    public long changes() throws SQLException {
-        // TODO
-        return 0;
-    }
+    public native int step(long stmt);
 
     @VisibleForTesting
     native void throwJavaException(int errorCode) throws SQLException;
@@ -132,42 +126,6 @@ public final class LimboDB extends AbstractDB {
      */
     @NativeInvocation
     private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
-        String errorMessage = utf8ByteBufferToString(errorMessageBytes);
-        throw buildLimboException(errorCode, errorMessage);
-    }
-
-    /**
-     * Throws formatted SQLException with error code and message.
-     *
-     * @param errorCode    Error code.
-     * @param errorMessage Error message.
-     */
-    public LimboException buildLimboException(int errorCode, @Nullable String errorMessage) throws SQLException {
-        LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
-        String msg;
-        if (code == LimboErrorCode.UNKNOWN_ERROR) {
-            msg = String.format("%s:%s (%s)", code, errorCode, errorMessage);
-        } else {
-            msg = String.format("%s (%s)", code, errorMessage);
-        }
-
-        return new LimboException(msg, code);
-    }
-
-    @Nullable
-    private static String utf8ByteBufferToString(@Nullable byte[] buffer) {
-        if (buffer == null) {
-            return null;
-        }
-
-        return new String(buffer, StandardCharsets.UTF_8);
-    }
-
-    @Nullable
-    private static byte[] stringToUtf8ByteArray(@Nullable String str) {
-        if (str == null) {
-            return null;
-        }
-        return str.getBytes(StandardCharsets.UTF_8);
+        LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
     }
 }

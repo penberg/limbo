@@ -1,36 +1,38 @@
-package org.github.tursodatabase;
+package org.github.tursodatabase.core;
 
-import org.github.tursodatabase.core.AbstractDB;
-import org.github.tursodatabase.core.LimboDBFactory;
+import org.github.tursodatabase.annotations.NativeInvocation;
+import org.github.tursodatabase.utils.LimboExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Properties;
 
-public abstract class LimboConnection implements Connection {
+import static org.github.tursodatabase.utils.ByteArrayUtils.stringToUtf8ByteArray;
 
+public abstract class LimboConnection implements Connection {
+    private static final Logger logger = LoggerFactory.getLogger(LimboConnection.class);
+
+    private final long connectionPtr;
     private final AbstractDB database;
 
-    public LimboConnection(AbstractDB database) {
-        this.database = database;
-    }
-
-    public LimboConnection(String url, String fileName) throws SQLException {
-        this(url, fileName, new Properties());
+    public LimboConnection(String url, String filePath) throws SQLException {
+        this(url, filePath, new Properties());
     }
 
     /**
      * Creates a connection to limbo database.
      *
      * @param url      e.g. "jdbc:sqlite:fileName"
-     * @param fileName path to file
+     * @param filePath path to file
      */
-    public LimboConnection(String url, String fileName, Properties properties) throws SQLException {
+    public LimboConnection(String url, String filePath, Properties properties) throws SQLException {
         AbstractDB db = null;
 
         try {
-            db = open(url, fileName, properties);
+            db = open(url, filePath, properties);
         } catch (Throwable t) {
             try {
                 if (db != null) {
@@ -44,10 +46,11 @@ public abstract class LimboConnection implements Connection {
         }
 
         this.database = db;
+        this.connectionPtr = db.connect();
     }
 
-    private static AbstractDB open(String url, String fileName, Properties properties) throws SQLException {
-        return LimboDBFactory.open(url, fileName, properties);
+    private static AbstractDB open(String url, String filePath, Properties properties) throws SQLException {
+        return LimboDBFactory.open(url, filePath, properties);
     }
 
     protected void checkOpen() throws SQLException {
