@@ -1,7 +1,8 @@
 use crate::errors::LimboError;
-use jni::objects::{JObject, JValue};
+use jni::objects::{JByteArray, JObject, JValue};
 use jni::JNIEnv;
 
+#[allow(dead_code)]
 pub(crate) fn row_to_obj_array<'local>(
     env: &mut JNIEnv<'local>,
     row: &limbo_core::Row,
@@ -27,4 +28,17 @@ pub(crate) fn row_to_obj_array<'local>(
     }
 
     Ok(obj_array.into())
+}
+
+pub(crate) fn utf8_byte_arr_to_str(
+    env: &JNIEnv,
+    bytes: JByteArray,
+) -> crate::errors::Result<String> {
+    let bytes = env
+        .convert_byte_array(bytes)
+        .map_err(|_| LimboError::CustomError("Failed to retrieve bytes".to_string()))?;
+    let str = String::from_utf8(bytes).map_err(|_| {
+        LimboError::CustomError("Failed to convert utf8 byte array into string".to_string())
+    })?;
+    Ok(str)
 }

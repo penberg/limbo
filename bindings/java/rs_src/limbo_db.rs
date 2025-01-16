@@ -1,3 +1,4 @@
+use crate::connection::Connection;
 use crate::errors::{LimboError, Result};
 use jni::objects::{JByteArray, JObject};
 use jni::sys::{jint, jlong};
@@ -12,7 +13,7 @@ const ERROR_CODE_ETC: i32 = 9999;
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
-    file_name_byte_arr: JByteArray<'local>,
+    file_path_byte_arr: JByteArray<'local>,
     _open_flags: jint,
 ) -> jlong {
     let io = match limbo_core::PlatformIO::new() {
@@ -24,7 +25,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
     };
 
     let path = match env
-        .convert_byte_array(file_name_byte_arr)
+        .convert_byte_array(file_path_byte_arr)
         .map_err(|e| e.to_string())
     {
         Ok(bytes) => match String::from_utf8(bytes) {
@@ -52,9 +53,11 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
 }
 
 #[no_mangle]
+#[allow(clippy::arc_with_non_send_sync)]
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
+    file_path_byte_arr: JByteArray<'local>,
     db_pointer: jlong,
 ) -> jlong {
     let db = match to_db(db_pointer) {
@@ -65,7 +68,45 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
         }
     };
 
-    Box::into_raw(Box::new(db.connect())) as jlong
+    let path = match env
+        .convert_byte_array(file_path_byte_arr)
+        .map_err(|e| e.to_string())
+    {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(e) => {
+                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                return 0;
+            }
+        },
+        Err(e) => {
+            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            return 0;
+        }
+    };
+
+    let io: Arc<dyn limbo_core::IO> = match path.as_str() {
+        ":memory:" => match limbo_core::MemoryIO::new() {
+            Ok(io) => Arc::new(io),
+            Err(e) => {
+                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                return 0;
+            }
+        },
+        _ => match limbo_core::PlatformIO::new() {
+            Ok(io) => Arc::new(io),
+            Err(e) => {
+                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                return 0;
+            }
+        },
+    };
+    let conn = Connection {
+        conn: db.connect(),
+        io,
+    };
+
+    Box::into_raw(Box::new(conn)) as jlong
 }
 
 fn to_db(db_pointer: jlong) -> Result<&'static mut Arc<Database>> {
@@ -88,16 +129,6 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_throwJavaExcep
         error_code,
         "throw java exception".to_string(),
     );
-}
-
-fn utf8_byte_arr_to_str(env: &JNIEnv, bytes: JByteArray) -> Result<String> {
-    let bytes = env
-        .convert_byte_array(bytes)
-        .map_err(|e| LimboError::CustomError("Failed to retrieve bytes".to_string()))?;
-    let str = String::from_utf8(bytes).map_err(|e| {
-        LimboError::CustomError("Failed to convert utf8 byte array into string".to_string())
-    })?;
-    Ok(str)
 }
 
 /// Sets the error message and throws a Java exception.
