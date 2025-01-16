@@ -18,6 +18,7 @@ fn bench(c: &mut Criterion) {
 fn limbo_bench(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("limbo");
     group.throughput(Throughput::Elements(1));
+    #[allow(clippy::arc_with_non_send_sync)]
     let io = Arc::new(PlatformIO::new().unwrap());
     let db = Database::open_file(io.clone(), "../testing/testing.db").unwrap();
     let conn = db.connect();

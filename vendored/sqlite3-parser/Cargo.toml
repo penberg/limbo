@@ -41,3 +41,7 @@ cc = "1.0"
 phf_shared = { version = "0.11", features = ["uncased"] }
 phf_codegen = "0.11"
 uncased = "0.9.10"
+
+[lints.rust]
+dead_code = "allow"
+non_snake_case = "allow"
