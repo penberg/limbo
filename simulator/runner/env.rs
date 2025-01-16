@@ -8,6 +8,7 @@ use crate::model::table::Table;
 
 use crate::runner::io::SimulatorIO;
 
+#[derive(Clone)]
 pub(crate) struct SimulatorEnv {
     pub(crate) opts: SimulatorOpts,
     pub(crate) tables: Vec<Table>,

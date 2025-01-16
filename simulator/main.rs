@@ -97,32 +97,26 @@ fn main() -> Result<(), String> {
         log::error!("captured backtrace:\n{}", bt);
     }));
 
+    let (env, plans) = setup_simulation(seed, &cli_opts, &paths.db, &paths.plan);
+    let env = Arc::new(Mutex::new(env));
     let result = SandboxedResult::from(
         std::panic::catch_unwind(|| {
-            run_simulation(
-                seed,
-                &cli_opts,
-                &paths.db,
-                &paths.plan,
-                last_execution.clone(),
-                None,
-            )
+            run_simulation(env.clone(), &mut plans.clone(), last_execution.clone())
         }),
         last_execution.clone(),
     );
 
     if cli_opts.doublecheck {
+        {
+            let mut env_ = env.lock().unwrap();
+            env_.db = Database::open_file(env_.io.clone(), paths.doublecheck_db.to_str().unwrap())
+                .unwrap();
+        }
+
         // Run the simulation again
         let result2 = SandboxedResult::from(
             std::panic::catch_unwind(|| {
-                run_simulation(
-                    seed,
-                    &cli_opts,
-                    &paths.doublecheck_db,
-                    &paths.plan,
-                    last_execution.clone(),
-                    None,
-                )
+                run_simulation(env.clone(), &mut plans.clone(), last_execution.clone())
             }),
             last_execution.clone(),
         );
@@ -202,18 +196,24 @@ fn main() -> Result<(), String> {
 
                 if cli_opts.shrink {
                     log::info!("Starting to shrink");
-                    let shrink = Some(last_execution);
+
+                    let shrunk_plans = plans
+                        .iter()
+                        .map(|plan| {
+                            let shrunk = plan.shrink_interaction_plan(last_execution);
+                            log::info!("{}", shrunk.stats());
+                            shrunk
+                        })
+                        .collect::<Vec<_>>();
+
                     let last_execution = Arc::new(Mutex::new(*last_execution));
 
                     let shrunk = SandboxedResult::from(
                         std::panic::catch_unwind(|| {
                             run_simulation(
-                                seed,
-                                &cli_opts,
-                                &paths.shrunk_db,
-                                &paths.shrunk_plan,
+                                env.clone(),
+                                &mut shrunk_plans.clone(),
                                 last_execution.clone(),
-                                shrink,
                             )
                         }),
                         last_execution,
@@ -270,28 +270,6 @@ fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn move_db_and_plan_files(output_dir: &Path) {
-    let old_db_path = output_dir.join("simulator.db");
-    let old_plan_path = output_dir.join("simulator.plan");
-
-    let new_db_path = output_dir.join("simulator_double.db");
-    let new_plan_path = output_dir.join("simulator_double.plan");
-
-    std::fs::rename(&old_db_path, &new_db_path).unwrap();
-    std::fs::rename(&old_plan_path, &new_plan_path).unwrap();
-}
-
-fn revert_db_and_plan_files(output_dir: &Path) {
-    let old_db_path = output_dir.join("simulator.db");
-    let old_plan_path = output_dir.join("simulator.plan");
-
-    let new_db_path = output_dir.join("simulator_double.db");
-    let new_plan_path = output_dir.join("simulator_double.plan");
-
-    std::fs::rename(&new_db_path, &old_db_path).unwrap();
-    std::fs::rename(&new_plan_path, &old_plan_path).unwrap();
-}
-
 #[derive(Debug)]
 enum SandboxedResult {
     Panicked {
@@ -345,14 +323,12 @@ impl SandboxedResult {
     }
 }
 
-fn run_simulation(
+fn setup_simulation(
     seed: u64,
     cli_opts: &SimulatorCLI,
     db_path: &Path,
     plan_path: &Path,
-    last_execution: Arc<Mutex<Execution>>,
-    shrink: Option<&Execution>,
-) -> ExecutionResult {
+) -> (SimulatorEnv, Vec<InteractionPlan>) {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let (create_percent, read_percent, write_percent, delete_percent) = {
@@ -403,9 +379,32 @@ fn run_simulation(
     };
 
     log::info!("Generating database interaction plan...");
-    let mut plans = (1..=env.opts.max_connections)
+
+    let plans = (1..=env.opts.max_connections)
         .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
         .collect::<Vec<_>>();
+
+    // todo: for now, we only use 1 connection, so it's safe to use the first plan.
+    let plan = plans[0].clone();
+
+    let mut f = std::fs::File::create(plan_path).unwrap();
+    // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
+    f.write_all(plan.to_string().as_bytes()).unwrap();
+    let mut f = std::fs::File::create(plan_path.with_extension(".json")).unwrap();
+    f.write_all(serde_json::to_string(&plan).unwrap().as_bytes())
+        .unwrap();
+
+    log::info!("{}", plan.stats());
+
+    log::info!("Executing database interaction plan...");
+    (env, plans)
+}
+
+fn run_simulation(
+    env: Arc<Mutex<SimulatorEnv>>,
+    plans: &mut [InteractionPlan],
+    last_execution: Arc<Mutex<Execution>>,
+) -> ExecutionResult {
     let mut states = plans
         .iter()
         .map(|_| InteractionPlanState {
@@ -414,27 +413,9 @@ fn run_simulation(
             secondary_pointer: 0,
         })
         .collect::<Vec<_>>();
+    let result = execute_plans(env.clone(), plans, &mut states, last_execution);
 
-    let plan = if let Some(failing_execution) = shrink {
-        // todo: for now, we only use 1 connection, so it's safe to use the first plan.
-        println!("Interactions Before: {}", plans[0].plan.len());
-        let shrunk = plans[0].shrink_interaction_plan(failing_execution);
-        println!("Interactions After: {}", shrunk.plan.len());
-        shrunk
-    } else {
-        plans[0].clone()
-    };
-
-    let mut f = std::fs::File::create(plan_path).unwrap();
-    // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
-    f.write_all(plan.to_string().as_bytes()).unwrap();
-
-    log::info!("{}", plan.stats());
-
-    log::info!("Executing database interaction plan...");
-
-    let result = execute_plans(&mut env, &mut plans, &mut states, last_execution);
-
+    let env = env.lock().unwrap();
     env.io.print_stats();
 
     log::info!("Simulation completed");

@@ -1,4 +1,5 @@
 use limbo_core::LimboError;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
@@ -16,7 +17,7 @@ use super::{
 
 /// Properties are representations of executable specifications
 /// about the database behavior.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Property {
     /// Insert-Select is a property in which the inserted row
     /// must be in the resulting rows of a select query that has a
@@ -205,7 +206,7 @@ fn property_insert_select<R: rand::Rng>(
         .collect::<Vec<_>>();
 
     // Pick a random row to select
-    let row_index = pick_index(rows.len(), rng).clone();
+    let row_index = pick_index(rows.len(), rng);
     let row = rows[row_index].clone();
 
     // Insert the rows
@@ -228,7 +229,7 @@ fn property_insert_select<R: rand::Rng>(
                 predicate,
             }) => {
                 // The inserted row will not be deleted.
-                if t == &table.name && predicate.test(&row, &table) {
+                if t == &table.name && predicate.test(&row, table) {
                     continue;
                 }
             }

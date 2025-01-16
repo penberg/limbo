@@ -51,6 +51,7 @@ impl SimulatorCLI {
         if self.maximum_size < 1 {
             return Err("maximum size must be at least 1".to_string());
         }
+        // todo: fix an issue here where if minimum size is not defined, it prevents setting low maximum sizes.
         if self.minimum_size > self.maximum_size {
             return Err("Minimum size cannot be greater than maximum size".to_string());
         }

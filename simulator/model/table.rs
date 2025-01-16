@@ -1,5 +1,7 @@
 use std::{fmt::Display, ops::Deref};
 
+use serde::{Deserialize, Serialize};
+
 pub(crate) struct Name(pub(crate) String);
 
 impl Deref for Name {
@@ -10,14 +12,14 @@ impl Deref for Name {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Table {
     pub(crate) rows: Vec<Vec<Value>>,
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,
 }
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Column {
     pub(crate) name: String,
     pub(crate) column_type: ColumnType,
@@ -25,7 +27,7 @@ pub(crate) struct Column {
     pub(crate) unique: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum ColumnType {
     Integer,
     Float,
@@ -44,7 +46,7 @@ impl Display for ColumnType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum Value {
     Null,
     Integer(i64),

@@ -1,6 +1,7 @@
 use std::{fmt::Display, rc::Rc, vec};
 
 use limbo_core::{Connection, Result, StepResult};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
@@ -19,7 +20,7 @@ use super::{
 
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct InteractionPlan {
     pub(crate) plan: Vec<Interactions>,
 }
@@ -30,7 +31,7 @@ pub(crate) struct InteractionPlanState {
     pub(crate) secondary_pointer: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Interactions {
     Property(Property),
     Query(Query),
@@ -178,7 +179,7 @@ pub(crate) struct Assertion {
     pub(crate) message: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Fault {
     Disconnect,
 }
@@ -195,6 +196,29 @@ impl Interactions {
     pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
         match self {
             Interactions::Property(property) => {
+                match property {
+                    Property::InsertSelect {
+                        insert,
+                        row_index: _,
+                        queries,
+                        select,
+                    } => {
+                        insert.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
+                        select.shadow(env);
+                    }
+                    Property::DoubleCreateFailure { create, queries } => {
+                        if env.tables.iter().any(|t| t.name == create.table.name) {
+                            return;
+                        }
+                        create.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
+                    }
+                }
                 for interaction in property.interactions() {
                     match interaction {
                         Interaction::Query(query) => match query {
@@ -220,23 +244,7 @@ impl Interactions {
                     }
                 }
             }
-            Interactions::Query(query) => match query {
-                Query::Create(create) => {
-                    if !env.tables.iter().any(|t| t.name == create.table.name) {
-                        env.tables.push(create.table.clone());
-                    }
-                }
-                Query::Insert(insert) => {
-                    let table = env
-                        .tables
-                        .iter_mut()
-                        .find(|t| t.name == insert.table)
-                        .unwrap();
-                    table.rows.extend(insert.values.clone());
-                }
-                Query::Delete(_) => todo!(),
-                Query::Select(_) => {}
-            },
+            Interactions::Query(query) => query.shadow(env),
             Interactions::Fault(_) => {}
         }
     }
