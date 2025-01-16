@@ -1,7 +1,7 @@
 package org.github.tursodatabase;
 
 import org.github.tursodatabase.core.AbstractDB;
-import org.github.tursodatabase.core.LimboDB;
+import org.github.tursodatabase.core.LimboDBFactory;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -47,20 +47,7 @@ public abstract class LimboConnection implements Connection {
     }
 
     private static AbstractDB open(String url, String fileName, Properties properties) throws SQLException {
-        if (fileName.isEmpty()) {
-            throw new IllegalArgumentException("fileName should not be empty");
-        }
-
-        final AbstractDB database;
-        try {
-            LimboDB.load();
-            database = LimboDB.create(url, fileName);
-        } catch (Exception e) {
-            throw new SQLException("Error opening connection", e);
-        }
-
-        database.open(0);
-        return database;
+        return LimboDBFactory.open(url, fileName, properties);
     }
 
     protected void checkOpen() throws SQLException {
