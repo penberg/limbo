@@ -227,7 +227,7 @@ do_execshell_test(
     pipe,
     "test-can-switch-back-to-in-memory",
     ".schema users",
-    "Error: Table 'users' not found.",
+    "-- Error: Table 'users' not found.",
 )
 
 do_execshell_test(pipe, "test-verify-null-value", "select NULL;", "LIMBO")
