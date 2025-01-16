@@ -724,9 +724,9 @@ impl Limbo {
                 if !found {
                     if let Some(table_name) = table {
                         let _ = self
-                            .write_fmt(format_args!("Error: Table '{}' not found.", table_name));
+                            .write_fmt(format_args!("-- Error: Table '{}' not found.", table_name));
                     } else {
-                        let _ = self.writeln("No tables or indexes found in the database.");
+                        let _ = self.writeln("-- No tables or indexes found in the database.");
                     }
                 }
             }
