@@ -1275,6 +1275,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo_regexp"
+version = "0.0.12"
+dependencies = [
+ "limbo_ext",
+ "log",
+ "regex",
+]
+
+[[package]]
 name = "limbo_sim"
 version = "0.0.12"
 dependencies = [

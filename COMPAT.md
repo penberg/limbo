@@ -500,3 +500,13 @@ UUID's in Limbo are `blobs` by default.
 | uuid7_timestamp_ms(X) | Yes    | Convert a UUID v7 to milliseconds since epoch                 |
 | uuid_str(X)           | Yes    | Convert a valid UUID to string                                |
 | uuid_blob(X)          | Yes    | Convert a valid UUID to blob                                  |
+
+### REGEXP
+
+| Function                                       | Status | Comment | 
+|------------------------------------------------|--------|---------|
+| regexp(pattern, source)                        | Yes    |         |
+| regexp_like(source, pattern)                   | Yes    |         |
+| regexp_substr(source, pattern)                 | Yes    |         |
+| regexp_capture(source, pattern[, n])           | No     |         |
+| regexp_replace(source, pattern, replacement)   | No     |         |
