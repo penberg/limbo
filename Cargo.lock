@@ -1223,7 +1223,7 @@ dependencies = [
  "julian_day_converter",
  "libc",
  "libloading",
- "limbo_extension",
+ "limbo_ext",
  "limbo_macros",
  "log",
  "miette",
@@ -1248,7 +1248,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "limbo_extension"
+name = "limbo_ext"
 version = "0.0.12"
 dependencies = [
  "limbo_macros",
@@ -1301,7 +1301,7 @@ dependencies = [
 name = "limbo_uuid"
 version = "0.0.12"
 dependencies = [
- "limbo_extension",
+ "limbo_ext",
  "log",
  "uuid",
 ]

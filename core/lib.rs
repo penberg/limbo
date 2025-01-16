@@ -22,7 +22,7 @@ use fallible_iterator::FallibleIterator;
 #[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
 #[cfg(not(target_family = "wasm"))]
-use limbo_extension::{ExtensionApi, ExtensionEntryPoint, RESULT_OK};
+use limbo_ext::{ExtensionApi, ExtensionEntryPoint, RESULT_OK};
 use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
@@ -171,7 +171,7 @@ impl Database {
     pub fn define_scalar_function<S: AsRef<str>>(
         &self,
         name: S,
-        func: limbo_extension::ScalarFunction,
+        func: limbo_ext::ScalarFunction,
     ) {
         let func = function::ExternalFunc {
             name: name.as_ref().to_string(),
@@ -185,7 +185,7 @@ impl Database {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn load_extension<P: AsRef<std::ffi::OsStr>>(&self, path: P) -> Result<()> {
-        let api = Box::new(self.build_limbo_extension());
+        let api = Box::new(self.build_limbo_ext());
         let lib =
             unsafe { Library::new(path).map_err(|e| LimboError::ExtensionError(e.to_string()))? };
         let entry: Symbol<ExtensionEntryPoint> = unsafe {

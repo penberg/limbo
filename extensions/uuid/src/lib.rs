@@ -1,4 +1,4 @@
-use limbo_extension::{
+use limbo_ext::{
     export_scalar, register_extension, register_scalar_functions, Value, ValueType,
 };
 
@@ -73,7 +73,7 @@ fn uuid7_blob(args: &[Value]) -> Value {
     let timestamp = if args.is_empty() {
         let ctx = uuid::ContextV7::new();
         uuid::Timestamp::now(ctx)
-    } else if args[0].value_type() == limbo_extension::ValueType::Integer {
+    } else if args[0].value_type() == limbo_ext::ValueType::Integer {
         let ctx = uuid::ContextV7::new();
         let Some(int) = args[0].to_integer() else {
             return Value::null();

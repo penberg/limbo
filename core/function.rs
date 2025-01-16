@@ -2,7 +2,7 @@ use std::fmt;
 use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
-use limbo_extension::ScalarFunction;
+use limbo_ext::ScalarFunction;
 
 pub struct ExternalFunc {
     pub name: String,
