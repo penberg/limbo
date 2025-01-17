@@ -501,7 +501,9 @@ UUID's in Limbo are `blobs` by default.
 | uuid_str(X)           | Yes    | Convert a valid UUID to string                                |
 | uuid_blob(X)          | Yes    | Convert a valid UUID to blob                                  |
 
-### REGEXP
+### regexp
+
+The `regexp` extension is compatible with [sqlean-regexp](https://github.com/nalgeon/sqlean/blob/main/docs/regexp.md).
 
 | Function                                       | Status | Comment | 
 |------------------------------------------------|--------|---------|
