@@ -1,0 +1,13 @@
+[package]
+name = "limbo_median"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+limbo_ext = { path = "../core" }

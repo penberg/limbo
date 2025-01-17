@@ -7,6 +7,16 @@ import time
 sqlite_exec = "./target/debug/limbo"
 sqlite_flags = os.getenv("SQLITE_FLAGS", "-q").split(" ")
 
+test_data = """CREATE TABLE numbers ( id INTEGER PRIMARY KEY, value FLOAT NOT NULL);
+INSERT INTO numbers (value) VALUES (1.0);
+INSERT INTO numbers (value) VALUES (2.0);
+INSERT INTO numbers (value) VALUES (3.0);
+INSERT INTO numbers (value) VALUES (4.0);
+INSERT INTO numbers (value) VALUES (5.0);
+INSERT INTO numbers (value) VALUES (6.0);
+INSERT INTO numbers (value) VALUES (7.0);
+"""
+
 
 def init_limbo():
     pipe = subprocess.Popen(
@@ -16,6 +26,7 @@ def init_limbo():
         stderr=subprocess.PIPE,
         bufsize=0,
     )
+    write_to_pipe(pipe, test_data)
     return pipe
 
 
@@ -180,11 +191,39 @@ def test_regexp(pipe):
     )
 
 
+def validate_median(res):
+    return res == "4.0"
+
+
+def test_aggregates(pipe):
+    extension_path = "./target/debug/liblimbo_median.so"
+    # assert no function before extension loads
+    run_test(
+        pipe,
+        "SELECT median(1);",
+        returns_null,
+        "median agg function returns null when ext not loaded",
+    )
+    run_test(
+        pipe,
+        f".load {extension_path}",
+        returns_null,
+        "load extension command works properly",
+    )
+    run_test(
+        pipe,
+        "select median(value) from numbers;",
+        validate_median,
+        "median agg function works",
+    )
+
+
 def main():
     pipe = init_limbo()
     try:
         test_regexp(pipe)
         test_uuid(pipe)
+        test_aggregates(pipe)
     except Exception as e:
         print(f"Test FAILED: {e}")
         pipe.terminate()
