@@ -23,7 +23,7 @@ public abstract class LimboConnection implements Connection {
     }
 
     /**
-     * Creates a connection to limbo database.
+     * Creates a connection to limbo database
      *
      * @param url      e.g. "jdbc:sqlite:fileName"
      * @param filePath path to file

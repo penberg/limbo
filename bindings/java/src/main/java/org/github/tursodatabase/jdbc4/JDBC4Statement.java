@@ -1,10 +1,12 @@
 package org.github.tursodatabase.jdbc4;
 
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.LimboStatement;
 import org.github.tursodatabase.core.LimboConnection;
+import org.github.tursodatabase.core.LimboStatement;
 
 import java.sql.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -128,11 +130,10 @@ public class JDBC4Statement extends LimboStatement implements Statement {
                     try {
                         connectionLock.lock();
                         final long stmtPointer = connection.prepare(sql);
-                        boolean result = exec(stmtPointer);
+                        List<Object[]> result = execute(stmtPointer);
                         updateGeneratedKeys();
-                        // TODO: updateCount = connection.changes();
                         exhaustedResults = false;
-                        return result;
+                        return !result.isEmpty();
                     } finally {
                         connectionLock.unlock();
                     }

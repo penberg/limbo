@@ -127,10 +127,10 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
             }
         },
     };
-    let conn = LimboConnection {
-        conn: db.db.connect(),
+    let conn = LimboConnection::new(
+        db.db.connect(),
         io,
-    };
+    );
 
     conn.to_ptr()
 }

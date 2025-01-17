@@ -1,9 +1,13 @@
 package org.github.tursodatabase.core;
 
+import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.jdbc4.JDBC4ResultSet;
+import org.github.tursodatabase.utils.LimboExceptionUtils;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 
 public abstract class LimboStatement {
 
@@ -30,20 +34,33 @@ public abstract class LimboStatement {
         // TODO
     }
 
-    /**
-     * Calls sqlite3_step() and sets up results.
-     *
-     * @return true if the ResultSet has at least one row; false otherwise;
-     * @throws SQLException If the given SQL statement is nul or no database is open;
-     */
-    protected boolean exec(long stmtPointer) throws SQLException {
-        if (sql == null) throw new SQLException("SQL must not be null");
+    // TODO: enhance
+    protected List<Object[]> execute(long stmtPointer) throws SQLException {
+        List<Object[]> result = new ArrayList<>();
+        while (true) {
+            Object[] stepResult = step(stmtPointer);
+            if (stepResult != null) {
+                for (int i = 0; i < stepResult.length; i++) {
+                    System.out.println("stepResult" + i + ": " + stepResult[i]);
+                }
+            }
+            if (stepResult == null) break;
+            result.add(stepResult);
+        }
 
-        // TODO
-        return true;
+        return result;
     }
 
-    protected void step(long stmtPointer) throws SQLException {
-        // TODO
+    private native Object[] step(long stmtPointer) throws SQLException;
+
+    /**
+     * Throws formatted SQLException with error code and message.
+     *
+     * @param errorCode         Error code.
+     * @param errorMessageBytes Error message.
+     */
+    @NativeInvocation
+    private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
+        LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
     }
 }

@@ -2,21 +2,25 @@ use crate::errors::{
     LimboError, Result, LIMBO_ETC, LIMBO_FAILED_TO_PARSE_BYTE_ARRAY,
     LIMBO_FAILED_TO_PREPARE_STATEMENT,
 };
-use crate::limbo_statement::CoreStatement;
+use crate::limbo_statement::LimboStatement;
 use crate::utils::{set_err_msg_and_throw_exception, utf8_byte_arr_to_str};
-use jni::objects::{JByteArray, JClass, JObject};
+use jni::objects::{JByteArray, JObject};
 use jni::sys::jlong;
 use jni::JNIEnv;
+use limbo_core::Connection;
 use std::rc::Rc;
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub struct LimboConnection {
-    pub(crate) conn: Rc<limbo_core::Connection>,
+    pub(crate) conn: Rc<Connection>,
     pub(crate) io: Rc<dyn limbo_core::IO>,
 }
 
 impl LimboConnection {
+    pub fn new(conn: Rc<Connection>, io: Rc<dyn limbo_core::IO>) -> Self {
+        LimboConnection { conn, io }
+    }
+
     pub fn to_ptr(self) -> jlong {
         Box::into_raw(Box::new(self)) as jlong
     }
@@ -78,7 +82,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepar
     };
 
     match connection.conn.prepare(sql) {
-        Ok(stmt) => CoreStatement::new(stmt).to_ptr(),
+        Ok(stmt) => LimboStatement::new(stmt).to_ptr(),
         Err(e) => {
             set_err_msg_and_throw_exception(
                 &mut env,

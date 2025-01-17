@@ -64,7 +64,9 @@ class JDBC4ConnectionTest {
     @Test
     void exec_simple_create_table() throws Exception {
         Statement stmt = createDefaultStatement();
-        stmt.execute("CREATE TABLE users (id PRIMARY KEY INT, username TEXT)");
+        stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
+        stmt.execute("INSERT INTO users VALUES (1, 'seonwoo');");
+        stmt.execute("SELECT * FROM users;");
     }
 
     private Statement createDefaultStatement() throws SQLException {

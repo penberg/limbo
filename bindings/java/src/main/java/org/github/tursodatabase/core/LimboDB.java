@@ -4,7 +4,6 @@ package org.github.tursodatabase.core;
 import org.github.tursodatabase.LimboErrorCode;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.VisibleForTesting;
-import org.github.tursodatabase.utils.ByteArrayUtils;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

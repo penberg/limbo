@@ -1,34 +1,73 @@
-use crate::errors::LimboError;
 use crate::errors::Result;
+use crate::errors::{LimboError, LIMBO_ETC};
+use crate::utils::set_err_msg_and_throw_exception;
 use jni::objects::{JObject, JValue};
 use jni::sys::jlong;
 use jni::JNIEnv;
-use limbo_core::Statement;
+use limbo_core::{Statement, StepResult};
 
-pub struct CoreStatement {
+pub struct LimboStatement {
     pub(crate) stmt: Statement,
 }
 
-impl CoreStatement {
+impl LimboStatement {
+    pub fn new(stmt: Statement) -> Self {
+        LimboStatement { stmt }
+    }
+
     pub fn to_ptr(self) -> jlong {
         Box::into_raw(Box::new(self)) as jlong
     }
 
-    pub fn new(stmt: Statement) -> Self {
-        CoreStatement { stmt }
-    }
-
     #[allow(dead_code)]
     pub fn drop(ptr: jlong) {
-        let _boxed = unsafe { Box::from_raw(ptr as *mut CoreStatement) };
+        let _boxed = unsafe { Box::from_raw(ptr as *mut LimboStatement) };
     }
 }
 
-pub fn to_statement(ptr: jlong) -> Result<&'static mut CoreStatement> {
+pub fn to_limbo_statement(ptr: jlong) -> Result<&'static mut LimboStatement> {
     if ptr == 0 {
         Err(LimboError::InvalidConnectionPointer)
     } else {
-        unsafe { Ok(&mut *(ptr as *mut CoreStatement)) }
+        unsafe { Ok(&mut *(ptr as *mut LimboStatement)) }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'local>(
+    mut env: JNIEnv<'local>,
+    obj: JObject<'local>,
+    stmt_ptr: jlong,
+) -> JObject<'local> {
+    println!("statement pointer: {:?}", stmt_ptr);
+    let stmt = match to_limbo_statement(stmt_ptr) {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            println!("error occurred");
+            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
+
+            return JObject::null();
+        }
+    };
+
+    match stmt.stmt.step() {
+        Ok(StepResult::Row(row)) => match row_to_obj_array(&mut env, &row) {
+            Ok(row) => row,
+            Err(e) => {
+                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
+
+                JObject::null()
+            }
+        },
+        Ok(StepResult::IO) => match env.new_object_array(0, "java/lang/Object", JObject::null()) {
+            Ok(row) => row.into(),
+            Err(e) => {
+                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
+
+                JObject::null()
+            }
+        },
+        _ => JObject::null(),
     }
 }
 
