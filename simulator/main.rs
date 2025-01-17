@@ -1,15 +1,12 @@
 #![allow(clippy::arc_with_non_send_sync, dead_code)]
 use clap::Parser;
-use core::panic;
 use generation::plan::{InteractionPlan, InteractionPlanState};
 use generation::ArbitraryFrom;
 use limbo_core::Database;
 use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
 use runner::cli::SimulatorCLI;
-use runner::env::{SimConnection, SimulatorEnv, SimulatorOpts};
+use runner::env::SimulatorEnv;
 use runner::execution::{execute_plans, Execution, ExecutionHistory, ExecutionResult};
-use runner::io::SimulatorIO;
 use std::any::Any;
 use std::backtrace::Backtrace;
 use std::io::Write;
@@ -98,6 +95,7 @@ fn main() -> Result<(), String> {
     }));
 
     let (env, plans) = setup_simulation(seed, &cli_opts, &paths.db, &paths.plan);
+
     let env = Arc::new(Mutex::new(env));
     let result = SandboxedResult::from(
         std::panic::catch_unwind(|| {
@@ -261,6 +259,10 @@ fn main() -> Result<(), String> {
         println!("shrunk database path: {:?}", paths.shrunk_db);
     }
     println!("simulator plan path: {:?}", paths.plan);
+    println!(
+        "simulator plan serialized path: {:?}",
+        paths.plan.with_extension("plan.json")
+    );
     if cli_opts.shrink {
         println!("shrunk plan path: {:?}", paths.shrunk_plan);
     }
@@ -329,60 +331,24 @@ fn setup_simulation(
     db_path: &Path,
     plan_path: &Path,
 ) -> (SimulatorEnv, Vec<InteractionPlan>) {
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut env = SimulatorEnv::new(seed, cli_opts, db_path);
 
-    let (create_percent, read_percent, write_percent, delete_percent) = {
-        let mut remaining = 100.0;
-        let read_percent = rng.gen_range(0.0..=remaining);
-        remaining -= read_percent;
-        let write_percent = rng.gen_range(0.0..=remaining);
-        remaining -= write_percent;
-        let delete_percent = remaining;
-
-        let create_percent = write_percent / 10.0;
-        let write_percent = write_percent - create_percent;
-
-        (create_percent, read_percent, write_percent, delete_percent)
+    // todo: the loading works correctly because of a hacky decision
+    // Rigth now, the plan generation is the only point we use the rng, so the environment doesn't
+    // even need it. In the future, especially with multi-connections and multi-threading, we might
+    // use the RNG for more things such as scheduling, so this assumption will fail.  When that happens,
+    // we'll need to reachitect this logic by saving and loading RNG state.
+    let plans = if let Some(load) = &cli_opts.load {
+        log::info!("Loading database interaction plan...");
+        let plan = std::fs::read_to_string(load).unwrap();
+        let plan: InteractionPlan = serde_json::from_str(&plan).unwrap();
+        vec![plan]
+    } else {
+        log::info!("Generating database interaction plan...");
+        (1..=env.opts.max_connections)
+            .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
+            .collect::<Vec<_>>()
     };
-
-    let opts = SimulatorOpts {
-        ticks: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
-        max_connections: 1, // TODO: for now let's use one connection as we didn't implement
-        // correct transactions procesing
-        max_tables: rng.gen_range(0..128),
-        create_percent,
-        read_percent,
-        write_percent,
-        delete_percent,
-        page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
-        max_time_simulation: cli_opts.maximum_time,
-    };
-    let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
-
-    let db = match Database::open_file(io.clone(), db_path.to_str().unwrap()) {
-        Ok(db) => db,
-        Err(e) => {
-            panic!("error opening simulator test file {:?}: {:?}", db_path, e);
-        }
-    };
-
-    let connections = vec![SimConnection::Disconnected; opts.max_connections];
-
-    let mut env = SimulatorEnv {
-        opts,
-        tables: Vec::new(),
-        connections,
-        rng,
-        io,
-        db,
-    };
-
-    log::info!("Generating database interaction plan...");
-
-    let plans = (1..=env.opts.max_connections)
-        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
-        .collect::<Vec<_>>();
 
     // todo: for now, we only use 1 connection, so it's safe to use the first plan.
     let plan = plans[0].clone();
@@ -390,7 +356,9 @@ fn setup_simulation(
     let mut f = std::fs::File::create(plan_path).unwrap();
     // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
     f.write_all(plan.to_string().as_bytes()).unwrap();
-    let mut f = std::fs::File::create(plan_path.with_extension(".json")).unwrap();
+
+    let json_path = plan_path.with_extension("plan.json");
+    let mut f = std::fs::File::create(&json_path).unwrap();
     f.write_all(serde_json::to_string(&plan).unwrap().as_bytes())
         .unwrap();
 

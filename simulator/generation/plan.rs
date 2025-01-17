@@ -8,7 +8,8 @@ use crate::{
         query::{Create, Insert, Query, Select},
         table::Value,
     },
-    SimConnection, SimulatorEnv,
+    runner::env::SimConnection,
+    SimulatorEnv,
 };
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};

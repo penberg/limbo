@@ -41,6 +41,8 @@ pub struct SimulatorCLI {
         help = "minimize(shrink) the failing counterexample"
     )]
     pub shrink: bool,
+    #[clap(short = 'l', long, help = "load plan from a file")]
+    pub load: Option<String>,
 }
 
 impl SimulatorCLI {
@@ -55,6 +57,12 @@ impl SimulatorCLI {
         if self.minimum_size > self.maximum_size {
             return Err("Minimum size cannot be greater than maximum size".to_string());
         }
+
+        if let Some(plan_path) = &self.load {
+            std::fs::File::open(plan_path)
+                .map_err(|_| format!("Plan file '{}' could not be opened", plan_path))?;
+        }
+
         Ok(())
     }
 }
