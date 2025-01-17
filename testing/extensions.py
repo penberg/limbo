@@ -15,6 +15,14 @@ INSERT INTO numbers (value) VALUES (4.0);
 INSERT INTO numbers (value) VALUES (5.0);
 INSERT INTO numbers (value) VALUES (6.0);
 INSERT INTO numbers (value) VALUES (7.0);
+CREATE TABLE test (value REAL, percent REAL);
+INSERT INTO test values (10, 25);
+INSERT INTO test values (20, 25);
+INSERT INTO test values (30, 25);
+INSERT INTO test values (40, 25);
+INSERT INTO test values (50, 25);
+INSERT INTO test values (60, 25);
+INSERT INTO test values (70, 25);
 """
 
 
@@ -195,8 +203,24 @@ def validate_median(res):
     return res == "4.0"
 
 
+def validate_median_odd(res):
+    return res == "4.5"
+
+
+def validate_percentile1(res):
+    return res == "25.0"
+
+
+def validate_percentile2(res):
+    return res == "43.0"
+
+
+def validate_percentile_disc(res):
+    return res == "40.0"
+
+
 def test_aggregates(pipe):
-    extension_path = "./target/debug/liblimbo_median.so"
+    extension_path = "./target/debug/liblimbo_percentile.so"
     # assert no function before extension loads
     run_test(
         pipe,
@@ -215,6 +239,31 @@ def test_aggregates(pipe):
         "select median(value) from numbers;",
         validate_median,
         "median agg function works",
+    )
+    write_to_pipe(pipe, "INSERT INTO numbers (value) VALUES (8.0);\n")
+    run_test(
+        pipe,
+        "select median(value) from numbers;",
+        validate_median_odd,
+        "median agg function works with odd number of elements",
+    )
+    run_test(
+        pipe,
+        "SELECT percentile(value, percent) from test;",
+        validate_percentile1,
+        "test aggregate percentile function with 2 arguments works",
+    )
+    run_test(
+        pipe,
+        "SELECT percentile(value, 55) from test;",
+        validate_percentile2,
+        "test aggregate percentile function with 1 argument works",
+    )
+    run_test(
+        pipe, "SELECT percentile_cont(value, 0.25) from test;", validate_percentile1
+    )
+    run_test(
+        pipe, "SELECT percentile_disc(value, 0.55) from test;", validate_percentile_disc
     )
 
 

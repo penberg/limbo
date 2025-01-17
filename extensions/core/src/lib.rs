@@ -4,7 +4,6 @@ use std::os::raw::{c_char, c_void};
 pub type ResultCode = i32;
 pub const RESULT_OK: ResultCode = 0;
 pub const RESULT_ERROR: ResultCode = 1;
-pub const RESULT_INCORRECT_ARGS: ResultCode = 2;
 
 #[repr(C)]
 pub struct ExtensionApi {
@@ -33,13 +32,6 @@ pub type InitAggFunction = unsafe extern "C" fn() -> *mut AggCtx;
 pub type StepFunction = unsafe extern "C" fn(ctx: *mut AggCtx, argc: i32, argv: *const Value);
 pub type FinalizeFunction = unsafe extern "C" fn(ctx: *mut AggCtx) -> Value;
 
-pub enum ArgSpec {
-    Exact(i32),
-    Range(i32, i32),
-    Any,
-    None,
-}
-
 pub trait Scalar {
     fn call(&self, args: &[Value]) -> Value;
     fn name(&self) -> &'static str;
@@ -56,6 +48,7 @@ pub struct AggCtx {
 
 pub trait AggFunc {
     type State: Default;
+
     fn args(&self) -> i32 {
         1
     }
@@ -72,6 +65,7 @@ pub enum ValueType {
     Float,
     Text,
     Blob,
+    Error,
 }
 
 #[repr(C)]
@@ -95,6 +89,9 @@ impl std::fmt::Debug for Value {
             }),
             ValueType::Blob => write!(f, "Value {{ Blob: {:?} }}", unsafe {
                 &*(self.value as *const Blob)
+            }),
+            ValueType::Error => write!(f, "Value {{ Error: {:?} }}", unsafe {
+                &*(self.value as *const TextValue)
             }),
         }
     }
@@ -174,13 +171,18 @@ impl Value {
     }
 
     pub fn to_float(&self) -> Option<f64> {
-        if self.value_type != ValueType::Float {
-            return None;
-        }
         if self.value.is_null() {
             return None;
         }
-        Some(unsafe { *(self.value as *const f64) })
+        match self.value_type {
+            ValueType::Float => Some(unsafe { *(self.value as *const f64) }),
+            ValueType::Integer => Some(unsafe { *(self.value as *const i64) as f64 }),
+            ValueType::Text => {
+                let txt = unsafe { &*(self.value as *const TextValue) };
+                txt.as_str().parse().ok()
+            }
+            _ => None,
+        }
     }
 
     pub fn to_text(&self) -> Option<String> {
@@ -207,13 +209,29 @@ impl Value {
     }
 
     pub fn to_integer(&self) -> Option<i64> {
-        if self.value_type != ValueType::Integer {
+        if self.value.is_null() {
+            return None;
+        }
+        match self.value_type() {
+            ValueType::Integer => Some(unsafe { *(self.value as *const i64) }),
+            ValueType::Float => Some(unsafe { *(self.value as *const f64) } as i64),
+            ValueType::Text => {
+                let txt = unsafe { &*(self.value as *const TextValue) };
+                txt.as_str().parse().ok()
+            }
+            _ => None,
+        }
+    }
+
+    pub fn to_error(&self) -> Option<String> {
+        if self.value_type != ValueType::Error {
             return None;
         }
         if self.value.is_null() {
             return None;
         }
-        Some(unsafe { *(self.value as *const i64) })
+        let txt = unsafe { &*(self.value as *const TextValue) };
+        Some(String::from(txt.as_str()))
     }
 
     pub fn from_integer(value: i64) -> Self {
@@ -241,6 +259,19 @@ impl Value {
         let text_box = Box::new(text_value);
         Self {
             value_type: ValueType::Text,
+            value: Box::into_raw(text_box) as *mut c_void,
+        }
+    }
+
+    pub fn error(s: String) -> Self {
+        let buffer = s.into_boxed_str();
+        let ptr = buffer.as_ptr();
+        let len = buffer.len();
+        std::mem::forget(buffer);
+        let text_value = TextValue::new(ptr, len);
+        let text_box = Box::new(text_value);
+        Self {
+            value_type: ValueType::Error,
             value: Box::into_raw(text_box) as *mut c_void,
         }
     }
@@ -274,6 +305,9 @@ impl Value {
             }
             ValueType::Blob => {
                 let _ = Box::from_raw(self.value as *mut Blob);
+            }
+            ValueType::Error => {
+                let _ = Box::from_raw(self.value as *mut TextValue);
             }
             ValueType::Null => {}
         }

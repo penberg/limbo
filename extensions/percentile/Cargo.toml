@@ -1,5 +1,5 @@
 [package]
-name = "limbo_median"
+name = "limbo_percentile"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

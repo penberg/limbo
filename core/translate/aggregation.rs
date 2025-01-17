@@ -236,12 +236,20 @@ pub fn translate_aggregation_step(
                     "External aggregate function called with wrong number of arguments".to_string(),
                 )
             })?;
+            if argc != agg.args.len() {
+                crate::bail_parse_error!(
+                    "External aggregate function called with wrong number of arguments"
+                );
+            }
             for i in 0..argc {
+                if i != 0 {
+                    let _ = program.alloc_register();
+                }
                 let _ = translate_expr(
                     program,
                     Some(referenced_tables),
-                    &agg.args[i as usize],
-                    expr_reg + i as usize,
+                    &agg.args[i],
+                    expr_reg + i,
                     resolver,
                 )?;
             }

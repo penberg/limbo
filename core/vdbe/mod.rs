@@ -1429,29 +1429,22 @@ impl Program {
                 }
                 Insn::AggFinal { register, func } => {
                     match state.registers[*register].borrow_mut() {
-                        OwnedValue::Agg(agg) => {
-                            match func {
-                                AggFunc::Avg => {
-                                    let AggContext::Avg(acc, count) = agg.borrow_mut() else {
-                                        unreachable!();
-                                    };
-                                    *acc /= count.clone();
-                                }
-                                AggFunc::Sum | AggFunc::Total => {}
-                                AggFunc::Count => {}
-                                AggFunc::Max => {}
-                                AggFunc::Min => {}
-                                AggFunc::GroupConcat | AggFunc::StringAgg => {}
-                                AggFunc::External(_) => {
-                                    let AggContext::External(agg_state) = agg.borrow_mut() else {
-                                        unreachable!();
-                                    };
-                                    let final_value =
-                                        unsafe { (agg_state.finalize_fn)(agg_state.state) };
-                                    agg_state.cache_final_value(OwnedValue::from_ffi(&final_value));
-                                }
-                            };
-                        }
+                        OwnedValue::Agg(agg) => match func {
+                            AggFunc::Avg => {
+                                let AggContext::Avg(acc, count) = agg.borrow_mut() else {
+                                    unreachable!();
+                                };
+                                *acc /= count.clone();
+                            }
+                            AggFunc::Sum | AggFunc::Total => {}
+                            AggFunc::Count => {}
+                            AggFunc::Max => {}
+                            AggFunc::Min => {}
+                            AggFunc::GroupConcat | AggFunc::StringAgg => {}
+                            AggFunc::External(_) => {
+                                agg.compute_external();
+                            }
+                        },
                         OwnedValue::Null => {
                             // when the set is empty
                             match func {
