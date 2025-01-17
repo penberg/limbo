@@ -1,4 +1,4 @@
-use limbo_ext::{register_extension, ArgSpec, Scalar, ScalarDerive, Value, ValueType};
+use limbo_ext::{register_extension, Scalar, ScalarDerive, Value, ValueType};
 use regex::Regex;
 
 register_extension! {
@@ -11,9 +11,6 @@ struct Regexp;
 impl Scalar for Regexp {
     fn name(&self) -> &'static str {
         "regexp"
-    }
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Exact(2)
     }
     fn call(&self, args: &[Value]) -> Value {
         regex(&args[0], &args[1])
@@ -46,9 +43,6 @@ impl Scalar for RegexpLike {
     fn name(&self) -> &'static str {
         "regexp_like"
     }
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Exact(2)
-    }
     fn call(&self, args: &[Value]) -> Value {
         regex(&args[1], &args[0])
     }
@@ -58,8 +52,8 @@ impl Scalar for RegexpLike {
 struct RegexpSubstr;
 
 impl Scalar for RegexpSubstr {
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Exact(2)
+    fn name(&self) -> &'static str {
+        "regexp_substr"
     }
     fn call(&self, args: &[Value]) -> Value {
         match (args[0].value_type(), args[1].value_type()) {
@@ -81,8 +75,5 @@ impl Scalar for RegexpSubstr {
             }
             _ => Value::null(),
         }
-    }
-    fn name(&self) -> &'static str {
-        "regexp_substr"
     }
 }

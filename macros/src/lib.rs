@@ -146,6 +146,18 @@ pub fn derive_scalar(input: TokenStream) -> TokenStream {
     let register_fn_name = format_ident!("register_{}", struct_name);
     let exec_fn_name = format_ident!("{}_exec", struct_name);
 
+    let alias_check = quote! {
+       if let Some(alias) = scalar.alias() {
+            let alias_c_name = std::ffi::CString::new(alias).unwrap();
+
+            (api.register_scalar_function)(
+                api.ctx,
+                alias_c_name.as_ptr(),
+                #exec_fn_name,
+            );
+        }
+    };
+
     let expanded = quote! {
         impl #struct_name {
             #[no_mangle]
@@ -166,6 +178,8 @@ pub fn derive_scalar(input: TokenStream) -> TokenStream {
                     c_name.as_ptr(),
                     #exec_fn_name,
                 );
+
+                #alias_check
 
                 ::limbo_ext::RESULT_OK
             }

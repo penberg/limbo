@@ -3,7 +3,6 @@ import os
 import subprocess
 import select
 import time
-import uuid
 
 sqlite_exec = "./target/debug/limbo"
 sqlite_flags = os.getenv("SQLITE_FLAGS", "-q").split(" ")
@@ -46,9 +45,9 @@ def execute_sql(pipe, sql):
 
 
 def strip_each_line(lines: str) -> str:
-    lines = lines.split("\n")
-    lines = [line.strip() for line in lines if line != ""]
-    return "\n".join(lines)
+    split = lines.split("\n")
+    res = [line.strip() for line in split if line != ""]
+    return "\n".join(res)
 
 
 def write_to_pipe(pipe, command):
@@ -67,8 +66,8 @@ def exit_on_error(stderr):
     exit(1)
 
 
-def run_test(pipe, sql, validator=None):
-    print(f"Running test: {sql}")
+def run_test(pipe, sql, validator=None, name=None):
+    print(f"Running test {name}: {sql}")
     result = execute_sql(pipe, sql)
     if validator is not None:
         if not validator(result):
@@ -77,11 +76,14 @@ def run_test(pipe, sql, validator=None):
             raise Exception("Validation failed")
     print("Test PASSED")
 
+
 def validate_true(result):
     return result == "1"
 
+
 def validate_false(result):
     return result == "0"
+
 
 def validate_blob(result):
     # HACK: blobs are difficult to test because the shell
@@ -105,16 +107,31 @@ def assert_now_unixtime(result):
 def assert_specific_time(result):
     return result == "1736720789"
 
+
 def test_uuid(pipe):
     specific_time = "01945ca0-3189-76c0-9a8f-caf310fc8b8e"
     extension_path = "./target/debug/liblimbo_uuid.so"
 
     # before extension loads, assert no function
-    run_test(pipe, "SELECT uuid4();", returns_null)
+    run_test(
+        pipe,
+        "SELECT uuid4();",
+        returns_null,
+        "uuid functions return null when ext not loaded",
+    )
     run_test(pipe, "SELECT uuid4_str();", returns_null)
-    run_test(pipe, f".load {extension_path}", returns_null)
-    print(f"Extension {extension_path} loaded successfully.")
-    run_test(pipe, "SELECT hex(uuid4());", validate_blob)
+    run_test(
+        pipe,
+        f".load {extension_path}",
+        returns_null,
+        "load extension command works properly",
+    )
+    run_test(
+        pipe,
+        "SELECT hex(uuid4());",
+        validate_blob,
+        "uuid functions are registered properly with ext loaded",
+    )
     run_test(pipe, "SELECT uuid4_str();", validate_string_uuid)
     run_test(pipe, "SELECT hex(uuid7());", validate_blob)
     run_test(
@@ -130,6 +147,13 @@ def test_uuid(pipe):
         f"SELECT uuid7_timestamp_ms('{specific_time}') / 1000;",
         assert_specific_time,
     )
+    run_test(
+        pipe,
+        "SELECT gen_random_uuid();",
+        validate_string_uuid,
+        "scalar alias's are registered properly",
+    )
+
 
 def test_regexp(pipe):
     extension_path = "./target/debug/liblimbo_regexp.so"
@@ -143,11 +167,19 @@ def test_regexp(pipe):
     run_test(pipe, "SELECT regexp('[0-9]+', 'the year is 2021');", validate_true)
     run_test(pipe, "SELECT regexp('[0-9]+', 'the year is unknow');", validate_false)
     run_test(pipe, "SELECT regexp_like('the year is 2021', '[0-9]+');", validate_true)
-    run_test(pipe, "SELECT regexp_like('the year is unknow', '[0-9]+');", validate_false)
-    run_test(pipe, "SELECT regexp_substr('the year is 2021', '[0-9]+') = '2021';", validate_true)
-    run_test(pipe, "SELECT regexp_substr('the year is unknow', '[0-9]+');", returns_null)
+    run_test(
+        pipe, "SELECT regexp_like('the year is unknow', '[0-9]+');", validate_false
+    )
+    run_test(
+        pipe,
+        "SELECT regexp_substr('the year is 2021', '[0-9]+') = '2021';",
+        validate_true,
+    )
+    run_test(
+        pipe, "SELECT regexp_substr('the year is unknow', '[0-9]+');", returns_null
+    )
 
-    
+
 def main():
     pipe = init_limbo()
     try:

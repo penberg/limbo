@@ -43,9 +43,6 @@ pub enum ArgSpec {
 pub trait Scalar {
     fn call(&self, args: &[Value]) -> Value;
     fn name(&self) -> &'static str;
-    fn args(&self) -> ArgSpec {
-        ArgSpec::None
-    }
     fn alias(&self) -> Option<&'static str> {
         None
     }

@@ -1,4 +1,4 @@
-use limbo_ext::{register_extension, ArgSpec, Scalar, ScalarDerive, Value, ValueType};
+use limbo_ext::{register_extension, Scalar, ScalarDerive, Value, ValueType};
 
 register_extension! {
     scalars: { Uuid4Str, Uuid4Blob, Uuid7Str, Uuid7Blob, ExecTsFromUuid7, UuidStr, UuidBlob }
@@ -38,9 +38,6 @@ impl Scalar for Uuid4Blob {
 #[derive(ScalarDerive)]
 struct Uuid7Str;
 impl Scalar for Uuid7Str {
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Range(0, 1)
-    }
     fn name(&self) -> &'static str {
         "uuid7_str"
     }
@@ -83,9 +80,6 @@ impl Scalar for Uuid7Str {
 struct Uuid7Blob;
 
 impl Scalar for Uuid7Blob {
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Range(0, 1)
-    }
     fn name(&self) -> &'static str {
         "uuid7"
     }
@@ -114,9 +108,6 @@ impl Scalar for Uuid7Blob {
 #[derive(ScalarDerive)]
 struct ExecTsFromUuid7;
 impl Scalar for ExecTsFromUuid7 {
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Exact(1)
-    }
     fn name(&self) -> &'static str {
         "uuid7_timestamp_ms"
     }
@@ -149,9 +140,6 @@ impl Scalar for ExecTsFromUuid7 {
 struct UuidStr;
 
 impl Scalar for UuidStr {
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Exact(1)
-    }
     fn name(&self) -> &'static str {
         "uuid_str"
     }
@@ -175,9 +163,6 @@ struct UuidBlob;
 impl Scalar for UuidBlob {
     fn name(&self) -> &'static str {
         "uuid_blob"
-    }
-    fn args(&self) -> ArgSpec {
-        ArgSpec::Exact(1)
     }
     fn call(&self, args: &[Value]) -> Value {
         let Some(text) = args[0].to_text() else {
