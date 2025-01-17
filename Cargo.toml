@@ -11,6 +11,7 @@ members = [
     "core",
     "extensions/core",
     "extensions/uuid",
+    "extensions/regexp",
     "macros",
     "simulator",
     "sqlite3",

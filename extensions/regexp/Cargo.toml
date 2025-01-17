@@ -1,0 +1,16 @@
+[package]
+name = "limbo_regexp"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+
+[dependencies]
+limbo_ext = { path = "../core"}
+regex = "1.11.1"
+log = "0.4.20"

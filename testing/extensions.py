@@ -77,6 +77,11 @@ def run_test(pipe, sql, validator=None):
             raise Exception("Validation failed")
     print("Test PASSED")
 
+def validate_true(result):
+    return result == "1"
+
+def validate_false(result):
+    return result == "0"
 
 def validate_blob(result):
     # HACK: blobs are difficult to test because the shell
@@ -100,33 +105,54 @@ def assert_now_unixtime(result):
 def assert_specific_time(result):
     return result == "1736720789"
 
-
-def main():
+def test_uuid(pipe):
     specific_time = "01945ca0-3189-76c0-9a8f-caf310fc8b8e"
     extension_path = "./target/debug/liblimbo_uuid.so"
+
+    # before extension loads, assert no function
+    run_test(pipe, "SELECT uuid4();", returns_null)
+    run_test(pipe, "SELECT uuid4_str();", returns_null)
+    run_test(pipe, f".load {extension_path}", returns_null)
+    print(f"Extension {extension_path} loaded successfully.")
+    run_test(pipe, "SELECT hex(uuid4());", validate_blob)
+    run_test(pipe, "SELECT uuid4_str();", validate_string_uuid)
+    run_test(pipe, "SELECT hex(uuid7());", validate_blob)
+    run_test(
+        pipe,
+        "SELECT uuid7_timestamp_ms(uuid7()) / 1000;",
+    )
+    run_test(pipe, "SELECT uuid7_str();", validate_string_uuid)
+    run_test(pipe, "SELECT uuid_str(uuid7());", validate_string_uuid)
+    run_test(pipe, "SELECT hex(uuid_blob(uuid7_str()));", validate_blob)
+    run_test(pipe, "SELECT uuid_str(uuid_blob(uuid7_str()));", validate_string_uuid)
+    run_test(
+        pipe,
+        f"SELECT uuid7_timestamp_ms('{specific_time}') / 1000;",
+        assert_specific_time,
+    )
+
+def test_regexp(pipe):
+    extension_path = "./target/debug/liblimbo_regexp.so"
+
+    # before extension loads, assert no function
+    run_test(pipe, "SELECT regexp('a.c', 'abc');", returns_null)
+    run_test(pipe, f".load {extension_path}", returns_null)
+    print(f"Extension {extension_path} loaded successfully.")
+    run_test(pipe, "SELECT regexp('a.c', 'abc');", validate_true)
+    run_test(pipe, "SELECT regexp('a.c', 'ac');", validate_false)
+    run_test(pipe, "SELECT regexp('[0-9]+', 'the year is 2021');", validate_true)
+    run_test(pipe, "SELECT regexp('[0-9]+', 'the year is unknow');", validate_false)
+    run_test(pipe, "SELECT regexp_like('the year is 2021', '[0-9]+');", validate_true)
+    run_test(pipe, "SELECT regexp_like('the year is unknow', '[0-9]+');", validate_false)
+    run_test(pipe, "SELECT regexp_substr('the year is 2021', '[0-9]+') = '2021';", validate_true)
+    run_test(pipe, "SELECT regexp_substr('the year is unknow', '[0-9]+');", returns_null)
+
+    
+def main():
     pipe = init_limbo()
     try:
-        # before extension loads, assert no function
-        run_test(pipe, "SELECT uuid4();", returns_null)
-        run_test(pipe, "SELECT uuid4_str();", returns_null)
-        run_test(pipe, f".load {extension_path}", returns_null)
-        print("Extension loaded successfully.")
-        run_test(pipe, "SELECT hex(uuid4());", validate_blob)
-        run_test(pipe, "SELECT uuid4_str();", validate_string_uuid)
-        run_test(pipe, "SELECT hex(uuid7());", validate_blob)
-        run_test(
-            pipe,
-            "SELECT uuid7_timestamp_ms(uuid7()) / 1000;",
-        )
-        run_test(pipe, "SELECT uuid7_str();", validate_string_uuid)
-        run_test(pipe, "SELECT uuid_str(uuid7());", validate_string_uuid)
-        run_test(pipe, "SELECT hex(uuid_blob(uuid7_str()));", validate_blob)
-        run_test(pipe, "SELECT uuid_str(uuid_blob(uuid7_str()));", validate_string_uuid)
-        run_test(
-            pipe,
-            f"SELECT uuid7_timestamp_ms('{specific_time}') / 1000;",
-            assert_specific_time,
-        )
+        test_regexp(pipe)
+        test_uuid(pipe)
     except Exception as e:
         print(f"Test FAILED: {e}")
         pipe.terminate()
