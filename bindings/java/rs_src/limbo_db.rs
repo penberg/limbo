@@ -1,11 +1,38 @@
-use crate::connection::Connection;
 use crate::errors::{LimboError, Result, LIMBO_ETC};
+use crate::limbo_connection::LimboConnection;
 use jni::objects::{JByteArray, JObject};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
 use limbo_core::Database;
 use std::rc::Rc;
 use std::sync::Arc;
+
+struct LimboDB {
+    db: Arc<Database>,
+}
+
+impl LimboDB {
+    pub fn new(db: Arc<Database>) -> Self {
+        LimboDB { db }
+    }
+
+    pub fn to_ptr(self) -> jlong {
+        Box::into_raw(Box::new(self)) as jlong
+    }
+
+    #[allow(dead_code)]
+    pub fn drop(ptr: jlong) {
+        let _boxed = unsafe { Box::from_raw(ptr as *mut LimboDB) };
+    }
+}
+
+fn to_limbo_db(ptr: jlong) -> Result<&'static mut LimboDB> {
+    if ptr == 0 {
+        Err(LimboError::InvalidDatabasePointer)
+    } else {
+        unsafe { Ok(&mut *(ptr as *mut LimboDB)) }
+    }
+}
 
 #[no_mangle]
 #[allow(clippy::arc_with_non_send_sync)]
@@ -48,7 +75,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
         }
     };
 
-    Box::into_raw(Box::new(db)) as jlong
+    LimboDB::new(db).to_ptr()
 }
 
 #[no_mangle]
@@ -58,7 +85,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
     file_path_byte_arr: JByteArray<'local>,
     db_pointer: jlong,
 ) -> jlong {
-    let db = match to_db(db_pointer) {
+    let db = match to_limbo_db(db_pointer) {
         Ok(db) => db,
         Err(e) => {
             set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
@@ -99,20 +126,12 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
             }
         },
     };
-    let conn = Connection {
-        conn: db.connect(),
+    let conn = LimboConnection {
+        conn: db.db.connect(),
         io,
     };
 
-    Box::into_raw(Box::new(conn)) as jlong
-}
-
-pub fn to_db(db_pointer: jlong) -> Result<&'static mut Arc<Database>> {
-    if db_pointer == 0 {
-        Err(LimboError::InvalidDatabasePointer)
-    } else {
-        unsafe { Ok(&mut *(db_pointer as *mut Arc<Database>)) }
-    }
+    conn.to_ptr()
 }
 
 #[no_mangle]

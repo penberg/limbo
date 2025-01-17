@@ -2,6 +2,7 @@ use crate::errors::{
     LimboError, Result, LIMBO_ETC, LIMBO_FAILED_TO_PARSE_BYTE_ARRAY,
     LIMBO_FAILED_TO_PREPARE_STATEMENT,
 };
+use crate::limbo_statement::CoreStatement;
 use crate::utils::utf8_byte_arr_to_str;
 use jni::objects::{JByteArray, JClass, JObject};
 use jni::sys::jlong;
@@ -10,9 +11,28 @@ use std::rc::Rc;
 
 #[allow(dead_code)]
 #[derive(Clone)]
-pub struct Connection {
+pub struct LimboConnection {
     pub(crate) conn: Rc<limbo_core::Connection>,
     pub(crate) io: Rc<dyn limbo_core::IO>,
+}
+
+impl LimboConnection {
+    pub fn to_ptr(self) -> jlong {
+        Box::into_raw(Box::new(self)) as jlong
+    }
+
+    #[allow(dead_code)]
+    pub fn drop(ptr: jlong) {
+        let _boxed = unsafe { Box::from_raw(ptr as *mut LimboConnection) };
+    }
+}
+
+pub fn to_limbo_connection(ptr: jlong) -> Result<&'static mut LimboConnection> {
+    if ptr == 0 {
+        Err(LimboError::InvalidConnectionPointer)
+    } else {
+        unsafe { Ok(&mut *(ptr as *mut LimboConnection)) }
+    }
 }
 
 /// Returns a pointer to a `Cursor` object.
@@ -36,7 +56,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepar
     connection_ptr: jlong,
     sql_bytes: JByteArray<'local>,
 ) -> jlong {
-    let connection = match to_connection(connection_ptr) {
+    let connection = match to_limbo_connection(connection_ptr) {
         Ok(conn) => conn,
         Err(e) => {
             set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
@@ -58,7 +78,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepar
     };
 
     match connection.conn.prepare(sql) {
-        Ok(stmt) => Box::into_raw(Box::new(stmt)) as jlong,
+        Ok(stmt) => CoreStatement::new(stmt).to_ptr(),
         Err(e) => {
             set_err_msg_and_throw_exception(
                 &mut env,
@@ -87,15 +107,7 @@ pub unsafe extern "system" fn Java_org_github_tursodatabase_limbo_Connection_clo
     _class: JClass<'local>,
     connection_ptr: jlong,
 ) {
-    let _boxed_connection = Box::from_raw(connection_ptr as *mut Connection);
-}
-
-fn to_connection(connection_ptr: jlong) -> Result<&'static mut Connection> {
-    if connection_ptr == 0 {
-        Err(LimboError::InvalidConnectionPointer)
-    } else {
-        unsafe { Ok(&mut *(connection_ptr as *mut Connection)) }
-    }
+    LimboConnection::drop(connection_ptr);
 }
 
 fn set_err_msg_and_throw_exception<'local>(
