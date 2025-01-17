@@ -7,13 +7,12 @@ use jni::objects::{JByteArray, JClass, JObject};
 use jni::sys::jlong;
 use jni::JNIEnv;
 use std::rc::Rc;
-use std::sync::Arc;
 
 #[allow(dead_code)]
 #[derive(Clone)]
 pub struct Connection {
     pub(crate) conn: Rc<limbo_core::Connection>,
-    pub(crate) io: Arc<dyn limbo_core::IO>,
+    pub(crate) io: Rc<dyn limbo_core::IO>,
 }
 
 /// Returns a pointer to a `Cursor` object.
@@ -31,7 +30,7 @@ pub struct Connection {
 ///
 /// A `jlong` representing the pointer to the newly created `Cursor` object.
 #[no_mangle]
-pub extern "system" fn Java_org_github_tursodatabase_limbo_LimboConnection_prepareUtf8<'local>(
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepareUtf8<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
     connection_ptr: jlong,
@@ -91,11 +90,11 @@ pub unsafe extern "system" fn Java_org_github_tursodatabase_limbo_Connection_clo
     let _boxed_connection = Box::from_raw(connection_ptr as *mut Connection);
 }
 
-fn to_connection(connection_ptr: jlong) -> Result<&'static mut Rc<Connection>> {
+fn to_connection(connection_ptr: jlong) -> Result<&'static mut Connection> {
     if connection_ptr == 0 {
         Err(LimboError::InvalidConnectionPointer)
     } else {
-        unsafe { Ok(&mut *(connection_ptr as *mut Rc<Connection>)) }
+        unsafe { Ok(&mut *(connection_ptr as *mut Connection)) }
     }
 }
 

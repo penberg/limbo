@@ -1,6 +1,7 @@
 package org.github.tursodatabase.jdbc4;
 
 import org.github.tursodatabase.TestUtils;
+import org.github.tursodatabase.core.LimboConnection;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -54,5 +55,13 @@ class JDBC4ConnectionTest {
         assertThrows(SQLException.class, () -> {
             connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, -1);
         });
+    }
+
+    @Test
+    void prepare_simple_create_table() throws Exception {
+        String filePath = TestUtils.createTempFile();
+        String url = "jdbc:sqlite:" + filePath;
+        LimboConnection connection = new JDBC4Connection(url, filePath);
+        connection.prepare("CREATE TABLE users (id INT PRIMARY KEY, username TEXT)");
     }
 }

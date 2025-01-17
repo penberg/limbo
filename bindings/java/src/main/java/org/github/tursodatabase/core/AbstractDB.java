@@ -78,31 +78,6 @@ public abstract class AbstractDB {
      */
     public abstract long connect() throws SQLException;
 
-//    /**
-//     * Compiles an SQL statement.
-//     *
-//     * @param stmt The SQL statement to compile.
-//     * @throws SQLException if a database access error occurs.
-//     */
-//    public final void prepare(CoreStatement stmt) throws SQLException {
-//        if (stmt.sql == null) {
-//            throw new SQLException("Statement must not be null");
-//        }
-//
-//        // TODO: check whether closing the pointer and replacing stamt.pointer should work atomically using locks etc
-//        final SafeStatementPointer pointer = stmt.getStmtPointer();
-//        if (pointer != null) {
-//            pointer.close();
-//        }
-//
-//        final SafeStatementPointer newPointer = stmt.connection.prepare(stmt.sql);
-//        stmt.setStmtPointer(newPointer);
-//        final boolean added = statementPointerSet.add(newPointer);
-//        if (!added) {
-//            throw new IllegalStateException("The pointer is already added to statements set");
-//        }
-//    }
-
     /**
      * Destroys a statement.
      *

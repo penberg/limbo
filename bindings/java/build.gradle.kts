@@ -20,8 +20,8 @@ repositories {
 }
 
 dependencies {
-    implementation("ch.qos.logback:logback-classic:1.5.16")
-    implementation("ch.qos.logback:logback-core:1.5.16")
+    implementation("ch.qos.logback:logback-classic:1.2.13")
+    implementation("ch.qos.logback:logback-core:1.2.13")
 
     errorprone("com.uber.nullaway:nullaway:0.10.26") // maximum version which supports java 8
     errorprone("com.google.errorprone:error_prone_core:2.10.0") // maximum version which supports java 8

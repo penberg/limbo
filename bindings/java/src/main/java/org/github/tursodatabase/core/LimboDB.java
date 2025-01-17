@@ -93,7 +93,7 @@ public final class LimboDB extends AbstractDB {
 
         byte[] filePathBytes = stringToUtf8ByteArray(filePath);
         if (filePathBytes == null) {
-            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "File name cannot be converted to byteArray. File name: " + filePath);
+            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "File path cannot be converted to byteArray. File name: " + filePath);
         }
 
         dbPointer = openUtf8(filePathBytes, openFlags);
@@ -102,7 +102,11 @@ public final class LimboDB extends AbstractDB {
 
     @Override
     public long connect() throws SQLException {
-         return connect0(ByteArrayUtils.stringToUtf8ByteArray(filePath), dbPointer);
+        byte[] filePathBytes = stringToUtf8ByteArray(filePath);
+        if (filePathBytes == null) {
+            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "File path cannot be converted to byteArray. File name: " + filePath);
+        }
+        return connect0(filePathBytes, dbPointer);
     }
 
     private native long connect0(byte[] path, long databasePtr) throws SQLException;

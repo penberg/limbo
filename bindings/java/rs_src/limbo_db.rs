@@ -1,12 +1,11 @@
 use crate::connection::Connection;
-use crate::errors::{LimboError, Result};
+use crate::errors::{LimboError, Result, LIMBO_ETC};
 use jni::objects::{JByteArray, JObject};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
 use limbo_core::Database;
+use std::rc::Rc;
 use std::sync::Arc;
-
-const ERROR_CODE_ETC: i32 = 9999;
 
 #[no_mangle]
 #[allow(clippy::arc_with_non_send_sync)]
@@ -19,7 +18,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
     let io = match limbo_core::PlatformIO::new() {
         Ok(io) => Arc::new(io),
         Err(e) => {
-            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
             return -1;
         }
     };
@@ -31,12 +30,12 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
                 return -1;
             }
         },
         Err(e) => {
-            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
             return -1;
         }
     };
@@ -44,7 +43,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
     let db = match Database::open_file(io.clone(), &path) {
         Ok(db) => db,
         Err(e) => {
-            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
             return -1;
         }
     };
@@ -53,7 +52,6 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
 }
 
 #[no_mangle]
-#[allow(clippy::arc_with_non_send_sync)]
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
@@ -63,7 +61,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
     let db = match to_db(db_pointer) {
         Ok(db) => db,
         Err(e) => {
-            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
             return 0;
         }
     };
@@ -75,28 +73,28 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
                 return 0;
             }
         },
         Err(e) => {
-            set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
             return 0;
         }
     };
 
-    let io: Arc<dyn limbo_core::IO> = match path.as_str() {
+    let io: Rc<dyn limbo_core::IO> = match path.as_str() {
         ":memory:" => match limbo_core::MemoryIO::new() {
-            Ok(io) => Arc::new(io),
+            Ok(io) => Rc::new(io),
             Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
                 return 0;
             }
         },
         _ => match limbo_core::PlatformIO::new() {
-            Ok(io) => Arc::new(io),
+            Ok(io) => Rc::new(io),
             Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, ERROR_CODE_ETC, e.to_string());
+                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
                 return 0;
             }
         },
@@ -109,7 +107,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
     Box::into_raw(Box::new(conn)) as jlong
 }
 
-fn to_db(db_pointer: jlong) -> Result<&'static mut Arc<Database>> {
+pub fn to_db(db_pointer: jlong) -> Result<&'static mut Arc<Database>> {
     if db_pointer == 0 {
         Err(LimboError::InvalidDatabasePointer)
     } else {
