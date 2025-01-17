@@ -6,6 +6,7 @@ use jni::JNIEnv;
 use limbo_core::Database;
 use std::rc::Rc;
 use std::sync::Arc;
+use crate::utils::set_err_msg_and_throw_exception;
 
 struct LimboDB {
     db: Arc<Database>,
@@ -146,43 +147,4 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_throwJavaExcep
         error_code,
         "throw java exception".to_string(),
     );
-}
-
-/// Sets the error message and throws a Java exception.
-///
-/// This function converts the provided error message to a byte array and calls the
-/// `throwLimboException` method on the provided Java object to throw an exception.
-///
-/// # Parameters
-/// - `env`: The JNI environment.
-/// - `obj`: The Java object on which the exception will be thrown.
-/// - `err_code`: The error code corresponding to the exception. Refer to `org.github.tursodatabase.core.Codes` for the list of error codes.
-/// - `err_msg`: The error message to be included in the exception.
-///
-/// # Example
-/// ```rust
-/// set_err_msg_and_throw_exception(env, obj, Codes::SQLITE_ERROR, "An error occurred".to_string());
-/// ```
-fn set_err_msg_and_throw_exception<'local>(
-    env: &mut JNIEnv<'local>,
-    obj: JObject<'local>,
-    err_code: i32,
-    err_msg: String,
-) {
-    let error_message_bytes = env
-        .byte_array_from_slice(err_msg.as_bytes())
-        .expect("Failed to convert to byte array");
-    match env.call_method(
-        obj,
-        "throwLimboException",
-        "(I[B)V",
-        &[err_code.into(), (&error_message_bytes).into()],
-    ) {
-        Ok(_) => {
-            // do nothing because above method will always return Err
-        }
-        Err(_e) => {
-            // do nothing because our java app will handle Err
-        }
-    }
 }
