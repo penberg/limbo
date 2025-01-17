@@ -14,8 +14,16 @@ npx wasm-pack build \
   --out-name index \
   --no-default-features \
   --features nodejs
+
 rm -rf pkg/package.json # don't want generated package.json
 mv pkg/* $NODE_DIR/dist/
+cp -r $NODE_DIR/src/* $NODE_DIR/dist/
+cd node/dist/
+for f in *.js; do
+    cp "$f" "${f%.js}.cjs"
+done
+rm *.js
+cd ../../
 rm -r pkg
 
 # Build web target
@@ -24,8 +32,10 @@ npx wasm-pack build \
   --out-name index \
   --no-default-features \
   --features web
+
 rm -rf pkg/package.json # don't want generated package.json
 mv pkg/* $WEB_DIR/dist/
+cp -r $WEB_DIR/src/* $WEB_DIR/dist/
 
 
 # mv $WEB_DIR/index.js $WEB_DIR/index.mjs

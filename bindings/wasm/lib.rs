@@ -384,7 +384,7 @@ extern "C" {
 }
 
 #[cfg(feature = "nodejs")]
-#[wasm_bindgen(module = "/node/src/vfs.js")]
+#[wasm_bindgen(module = "/node/src/vfs.cjs")]
 extern "C" {
     type VFS;
     #[wasm_bindgen(constructor)]

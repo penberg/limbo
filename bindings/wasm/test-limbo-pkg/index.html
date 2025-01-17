@@ -24,7 +24,7 @@
             // const worker = new Worker('./src/limbo-worker.js', { type: 'module' });
             // const worker = new Worker('limbo-wasm/src/limbo-worker.js', { type: 'module' });
             // const worker = new Worker('./node_modules/limbo-wasm/src/limbo-worker.js', { type: 'module' });
-            const worker = new Worker(new URL('limbo-wasm/web/limbo-worker.js', import.meta.url), { type: 'module' });
+            const worker = new Worker(new URL('limbo-wasm/limbo-worker.js', import.meta.url), { type: 'module' });
             
             // Wait for ready then send createDb
             await waitForMessage(worker, 'ready');

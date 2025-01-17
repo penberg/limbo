@@ -3,11 +3,10 @@ import wasm from "vite-plugin-wasm";
 
 export default defineConfig({
   publicDir: "./html",
-  root: ".",
+  root: "./",
   plugins: [wasm()],
   test: {
     globals: true,
-    environment: "happy-dom",
     setupFiles: ["./test/setup.js"],
     include: ["test/*.test.js"],
   },

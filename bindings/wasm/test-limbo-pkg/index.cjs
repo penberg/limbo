@@ -1,6 +1,6 @@
 // import { Database } from "limbo-wasm/node";
 
-const { Database } = require("limbo-wasm/node");
+const { Database } = require("limbo-wasm");
 // Rest of your code...
 
 const db = new Database("test.db");
