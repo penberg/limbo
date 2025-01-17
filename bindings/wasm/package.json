@@ -1,6 +1,14 @@
 {
   "name": "limbo-wasm",
+  "collaborators": [
+    "the Limbo authors"
+  ],
   "version": "0.0.12",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/penberg/limbo"
+  },
   "type": "module",
   "main": "./node/dist/index.cjs",
   "module": "./web/dist/index.js",
