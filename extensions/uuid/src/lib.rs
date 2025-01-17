@@ -2,7 +2,6 @@ use limbo_ext::{register_extension, ArgSpec, Scalar, ScalarDerive, Value, ValueT
 
 register_extension! {
     scalars: { Uuid4Str, Uuid4Blob, Uuid7Str, Uuid7Blob, ExecTsFromUuid7, UuidStr, UuidBlob }
-    aggregates: { }
 }
 
 #[derive(ScalarDerive)]
@@ -119,7 +118,7 @@ impl Scalar for ExecTsFromUuid7 {
         ArgSpec::Exact(1)
     }
     fn name(&self) -> &'static str {
-        "exec_ts_from_uuid7"
+        "uuid7_timestamp_ms"
     }
     fn call(&self, args: &[Value]) -> Value {
         match args[0].value_type() {
