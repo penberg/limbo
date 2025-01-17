@@ -115,10 +115,6 @@ public final class LimboDB extends AbstractDB {
     @Override
     protected native int finalize(long stmt);
 
-    // TODO: add support for JNI
-    @Override
-    public native int step(long stmt);
-
     @VisibleForTesting
     native void throwJavaException(int errorCode) throws SQLException;
 

@@ -1,11 +1,7 @@
 package org.github.tursodatabase.core;
 
-import org.github.tursodatabase.annotations.Nullable;
-
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -18,9 +14,6 @@ public abstract class AbstractDB {
     protected final String url;
     protected final String filePath;
     private final AtomicBoolean closed = new AtomicBoolean(true);
-
-    // Tracer for statements to avoid unfinalized statements on db close.
-    private final Set<SafeStatementPointer> statementPointerSet = ConcurrentHashMap.newKeySet();
 
     public AbstractDB(String url, String filePath) {
         this.url = url;
@@ -79,19 +72,6 @@ public abstract class AbstractDB {
     public abstract long connect() throws SQLException;
 
     /**
-     * Destroys a statement.
-     *
-     * @param safePtr the pointer wrapper to remove from internal structures.
-     * @param ptr     the raw pointer to free.
-     * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
-     * @throws SQLException if a database access error occurs.
-     */
-    public synchronized int finalize(SafeStatementPointer safePtr, long ptr) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
-    }
-
-    /**
      * Creates an SQLite interface to a database with the provided open flags.
      *
      * @param fileName  The database to open.
@@ -125,41 +105,4 @@ public abstract class AbstractDB {
      * @throws SQLException if a database access error occurs.
      */
     protected abstract int finalize(long stmt) throws SQLException;
-
-    /**
-     * Evaluates a statement.
-     *
-     * @param stmt Pointer to the statement.
-     * @return Result code.
-     * @throws SQLException if a database access error occurs.
-     */
-    public abstract int step(long stmt) throws SQLException;
-
-    /**
-     * Executes a statement with the provided parameters.
-     *
-     * @param stmt Stmt object.
-     * @param vals Array of parameter values.
-     * @return True if a row of ResultSet is ready; false otherwise.
-     * @throws SQLException if a database access error occurs.
-     * @see <a href="https://www.sqlite.org/c_interface.html#sqlite_exec">SQLite Exec</a>
-     */
-    public final synchronized boolean execute(CoreStatement stmt, @Nullable Object[] vals) throws SQLException {
-        throw new SQLFeatureNotSupportedException();
-    }
-
-    /**
-     * Executes an SQL INSERT, UPDATE or DELETE statement with the Stmt object and an array of
-     * parameter values of the SQL statement.
-     *
-     * @param stmt Stmt object.
-     * @param vals Array of parameter values.
-     * @return Number of database rows that were changed or inserted or deleted by the most recently
-     * completed SQL.
-     * @throws SQLException if a database access error occurs.
-     */
-    public final synchronized long executeUpdate(CoreStatement stmt, Object[] vals) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
-    }
 }

@@ -76,16 +76,16 @@ public abstract class LimboConnection implements Connection {
      * Compiles an SQL statement.
      *
      * @param sql An SQL statement.
-     * @return A SafeStmtPtr object.
+     * @return Pointer to statement.
      * @throws SQLException if a database access error occurs.
      */
-    public SafeStatementPointer prepare(String sql) throws SQLException {
+    public long prepare(String sql) throws SQLException {
         logger.trace("DriverManager [{}] [SQLite EXEC] {}", Thread.currentThread().getName(), sql);
         byte[] sqlBytes = stringToUtf8ByteArray(sql);
         if (sqlBytes == null) {
             throw new SQLException("Failed to convert " + sql + " into bytes");
         }
-        return new SafeStatementPointer(this, prepareUtf8(connectionPtr, sqlBytes));
+        return prepareUtf8(connectionPtr, sqlBytes);
     }
 
     private native long prepareUtf8(long connectionPtr, byte[] sqlUtf8) throws SQLException;

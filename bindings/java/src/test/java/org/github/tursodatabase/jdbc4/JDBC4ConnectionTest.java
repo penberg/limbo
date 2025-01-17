@@ -11,7 +11,6 @@ import java.sql.Statement;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class JDBC4ConnectionTest {
 
@@ -59,9 +58,16 @@ class JDBC4ConnectionTest {
 
     @Test
     void prepare_simple_create_table() throws Exception {
-        String filePath = TestUtils.createTempFile();
-        String url = "jdbc:sqlite:" + filePath;
-        LimboConnection connection = new JDBC4Connection(url, filePath);
         connection.prepare("CREATE TABLE users (id INT PRIMARY KEY, username TEXT)");
+    }
+
+    @Test
+    void exec_simple_create_table() throws Exception {
+        Statement stmt = createDefaultStatement();
+        stmt.execute("CREATE TABLE users (id PRIMARY KEY INT, username TEXT)");
+    }
+
+    private Statement createDefaultStatement() throws SQLException {
+        return connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
     }
 }

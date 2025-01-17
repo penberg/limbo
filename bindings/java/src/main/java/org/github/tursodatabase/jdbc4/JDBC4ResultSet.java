@@ -1,8 +1,8 @@
 package org.github.tursodatabase.jdbc4;
 
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.CoreResultSet;
-import org.github.tursodatabase.core.CoreStatement;
+import org.github.tursodatabase.core.LimboResultSet;
+import org.github.tursodatabase.core.LimboStatement;
 
 import java.io.InputStream;
 import java.io.Reader;
@@ -12,9 +12,9 @@ import java.sql.*;
 import java.util.Calendar;
 import java.util.Map;
 
-public class JDBC4ResultSet extends CoreResultSet implements ResultSet {
+public class JDBC4ResultSet extends LimboResultSet implements ResultSet {
 
-    public JDBC4ResultSet(CoreStatement statement) {
+    public JDBC4ResultSet(LimboStatement statement) {
         super(statement);
     }
 

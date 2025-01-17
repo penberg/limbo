@@ -1,8 +1,8 @@
 package org.github.tursodatabase.jdbc4;
 
-import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.CoreStatement;
+import org.github.tursodatabase.core.LimboStatement;
+import org.github.tursodatabase.core.LimboConnection;
 
 import java.sql.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -10,7 +10,7 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Implementation of the {@link Statement} interface for JDBC 4.
  */
-public class JDBC4Statement extends CoreStatement implements Statement {
+public class JDBC4Statement extends LimboStatement implements Statement {
 
     private boolean closed;
     private boolean closeOnCompletion;
@@ -127,8 +127,8 @@ public class JDBC4Statement extends CoreStatement implements Statement {
                 () -> {
                     try {
                         connectionLock.lock();
-                        connection.prepare(sql);
-                        boolean result = exec();
+                        final long stmtPointer = connection.prepare(sql);
+                        boolean result = exec(stmtPointer);
                         updateGeneratedKeys();
                         // TODO: updateCount = connection.changes();
                         exhaustedResults = false;

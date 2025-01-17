@@ -5,9 +5,9 @@ import java.sql.SQLException;
 /**
  * JDBC ResultSet.
  */
-public abstract class CoreResultSet {
+public abstract class LimboResultSet {
 
-    protected final CoreStatement statement;
+    protected final LimboStatement statement;
 
     // Whether the result set does not have any rows.
     protected boolean isEmptyResultSet = false;
@@ -18,7 +18,7 @@ public abstract class CoreResultSet {
     // number of current row, starts at 1 (0 is used to represent loading data)
     protected int row = 0;
 
-    protected CoreResultSet(CoreStatement statement) {
+    protected LimboResultSet(LimboStatement statement) {
         this.statement = statement;
     }
 
