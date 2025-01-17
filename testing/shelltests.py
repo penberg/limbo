@@ -52,7 +52,9 @@ def execute_sql(pipe, sql):
 
     output = ""
     while True:
-        ready_to_read, _, error_in_pipe = select.select([stdout, stderr], [], [stdout, stderr])
+        ready_to_read, _, error_in_pipe = select.select(
+            [stdout, stderr], [], [stdout, stderr]
+        )
         ready_to_read_or_err = set(ready_to_read + error_in_pipe)
         if stderr in ready_to_read_or_err:
             exit_on_error(stderr)
@@ -66,6 +68,7 @@ def execute_sql(pipe, sql):
 
     output = strip_each_line(output)
     return output
+
 
 def strip_each_line(lines: str) -> str:
     lines = lines.split("\n")
@@ -237,8 +240,10 @@ csv_file = "./test_files/test.csv"
 write_to_pipe(".open :memory:")
 
 
-def test_import_csv(test_name: str, options: str, import_output: str, table_output: str):
-    csv_table_name = f'csv_table_{test_name}'
+def test_import_csv(
+    test_name: str, options: str, import_output: str, table_output: str
+):
+    csv_table_name = f"csv_table_{test_name}"
     write_to_pipe(f"CREATE TABLE {csv_table_name} (c1 INT, c2 REAL, c3 String);")
     do_execshell_test(
         pipe,
@@ -253,11 +258,15 @@ def test_import_csv(test_name: str, options: str, import_output: str, table_outp
         table_output,
     )
 
-test_import_csv('no_options', '--csv', '', '1|2.0|String\'1\n3|4.0|String2')
-test_import_csv('verbose', '--csv -v', 
-                'Added 2 rows with 0 errors using 2 lines of input' 
-                ,'1|2.0|String\'1\n3|4.0|String2')
-test_import_csv('skip', '--csv --skip 1', '' ,'3|4.0|String2')
+
+test_import_csv("no_options", "--csv", "", "1|2.0|String'1\n3|4.0|String2")
+test_import_csv(
+    "verbose",
+    "--csv -v",
+    "Added 2 rows with 0 errors using 2 lines of input",
+    "1|2.0|String'1\n3|4.0|String2",
+)
+test_import_csv("skip", "--csv --skip 1", "", "3|4.0|String2")
 
 
 # Verify the output file exists and contains expected content
@@ -297,6 +306,59 @@ else:
     print(f"File contents:\n{file_contents}")
     exit(1)
 
+do_execshell_test(
+    pipe,
+    "test-single-line-comment",
+    "-- this is a comment\nSELECT 1;",
+    "1",
+)
+
+do_execshell_test(
+    pipe,
+    "test-multi-line-single-line-comments-in-succession",
+    """-- First of the comments
+    -- Second line of the comments
+    SELECT 2;""",
+    "2",
+)
+do_execshell_test(
+    pipe,
+    "test-multi-line-comments",
+    """/*
+    This is a multi-line comment
+    */
+    SELECT 3;""",
+    "3",
+)
+
+# readd some data to test inline comments
+write_to_pipe("""
+CREATE TABLE users (id INTEGER PRIMARY KEY, first_name TEXT, last_name TEXT, age INTEGER);
+INSERT INTO users (id, first_name, last_name, age) VALUES
+(1, 'Alice', 'Smith', 30), (2, 'Bob', 'Johnson', 25), (3, 'Charlie', 'Brown', 66), (4, 'David', 'Nichols', 70);
+""")
+
+do_execshell_test(
+    pipe,
+    "test-inline-comments",
+    """SELECT id, -- this is a comment until newline 
+    first_name
+    FROM users
+    LIMIT 1; """,
+    "1|Alice",
+)
+
+do_execshell_test(
+    pipe,
+    "test-multiple-inline-comments",
+    """SELECT id, --first inline 
+    --second inline 
+    first_name
+    --third inline 
+    FROM users
+    LIMIT 1; """,
+    "1|Alice",
+)
 # Cleanup
 os.remove(filepath)
 pipe.terminate()
