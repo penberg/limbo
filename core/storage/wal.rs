@@ -66,7 +66,7 @@ impl LimboRwLock {
         }
     }
 
-    /// Locks exlusively. Returns true if it was successful, false if it couldn't lock it
+    /// Locks exclusively. Returns true if it was successful, false if it couldn't lock it
     pub fn write(&mut self) -> bool {
         let lock = self.lock.load(Ordering::SeqCst);
         match lock {
@@ -237,7 +237,7 @@ pub struct WalFileShared {
     pages_in_frames: Vec<u64>,
     last_checksum: (u32, u32), // Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
     file: Rc<dyn File>,
-    /// read_locks is a list of read locks that can coexist with the max_frame nubmer stored in
+    /// read_locks is a list of read locks that can coexist with the max_frame number stored in
     /// value. There is a limited amount because and unbounded amount of connections could be
     /// fatal. Therefore, for now we copy how SQLite behaves with limited amounts of read max
     /// frames that is equal to 5
@@ -669,7 +669,7 @@ impl WalFileShared {
             };
             let native = cfg!(target_endian = "big"); // if target_endian is
                                                       // already big then we don't care but if isn't, header hasn't yet been
-                                                      // encoded to big endian, therefore we wan't to swap bytes to compute this
+                                                      // encoded to big endian, therefore we want to swap bytes to compute this
                                                       // checksum.
             let checksums = (0, 0);
             let checksums = checksum_wal(

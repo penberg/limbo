@@ -295,7 +295,7 @@ impl Pager {
     }
 
     pub fn add_dirty(&self, page_id: usize) {
-        // TODO: cehck duplicates?
+        // TODO: check duplicates?
         let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
         dirty_pages.insert(page_id);
     }
@@ -437,7 +437,7 @@ impl Pager {
     }
 
     /*
-        Get's a new page that increasing the size of the page or uses a free page.
+        Gets a new page that increasing the size of the page or uses a free page.
         Currently free list pages are not yet supported.
     */
     #[allow(clippy::readonly_write_lock)]
