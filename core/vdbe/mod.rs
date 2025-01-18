@@ -362,16 +362,24 @@ impl Program {
                     state.registers[*dest] = exec_bit_not(&state.registers[*reg]);
                     state.pc += 1;
                 }
-                Insn::Checkpoint { database: _, checkpoint_mode: _, dest } => {
-                    // Write 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
-                    // fixme currently hard coded not implemented
-                    let result = self.connection
-                        .upgrade()
-                        .unwrap()
-                        .checkpoint();
+                Insn::Checkpoint {
+                    database: _,
+                    checkpoint_mode: _,
+                    dest,
+                } => {
+                    let result = self.connection.upgrade().unwrap().checkpoint();
                     match result {
-                        Ok(()) => state.registers[*dest] = OwnedValue::Integer(0),
-                        Err(err) => state.registers[*dest] = OwnedValue::Integer(1)
+                        Ok(()) => {
+                            // https://sqlite.org/pragma.html#pragma_wal_checkpoint
+                            // TODO make 2nd and 3rd cols available through checkpoint method
+                            // 1st col: 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
+                            state.registers[*dest] = OwnedValue::Integer(0);
+                            // 2nd col: # modified pages written to wal file
+                            state.registers[*dest + 1] = OwnedValue::Integer(0);
+                            // 3rd col: # pages moved to db after checkpoint
+                            state.registers[*dest + 2] = OwnedValue::Integer(0);
+                        }
+                        Err(_err) => state.registers[*dest] = OwnedValue::Integer(1),
                     }
 
                     state.pc += 1;

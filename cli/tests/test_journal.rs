@@ -4,7 +4,7 @@
 mod tests {
     use assert_cmd::cargo::cargo_bin;
     use rexpect::error::*;
-    use rexpect::session::spawn_command;
+    use rexpect::session::{spawn_command, PtySession};
     use std::process;
 
     #[test]
@@ -14,9 +14,7 @@ mod tests {
         child.exp_regex(".?")?;
         child.send_line("pragma journal_mode;")?;
         child.exp_string("wal")?;
-        child.send_line(".quit")?;
-        child.exp_eof()?;
-        Ok(())
+        quit(&mut child)
     }
 
     #[test]
@@ -26,6 +24,10 @@ mod tests {
         child.exp_regex(".?")?;
         child.send_line("pragma wal_checkpoint;")?;
         child.exp_string("0|0|0")?;
+        quit(&mut child)
+    }
+
+    fn quit(child: &mut PtySession) -> Result<(), Error> {
         child.send_line(".quit")?;
         child.exp_eof()?;
         Ok(())
@@ -33,7 +35,7 @@ mod tests {
 
     fn run_cli() -> process::Command {
         let bin_path = cargo_bin("limbo");
-        let mut cmd = process::Command::new(bin_path);
+        let cmd = process::Command::new(bin_path);
         cmd
     }
 }
