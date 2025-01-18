@@ -542,7 +542,7 @@ impl BTreeCursor {
             match contents.rightmost_pointer() {
                 Some(right_most_pointer) => {
                     self.stack.set_cell_index(contents.cell_count() as i32 + 1);
-                    let mem_page = self.pager.read_page(right_most_pointer as usize).unwrap();
+                    let mem_page = self.pager.read_page(right_most_pointer as usize)?;
                     self.stack.push(mem_page);
                     continue;
                 }
@@ -643,7 +643,7 @@ impl BTreeCursor {
                         };
                         if target_leaf_page_is_in_the_left_subtree {
                             // we don't advance in case of index tree internal nodes because we will visit this node going up
-                            let mem_page = self.pager.read_page(*left_child_page as usize).unwrap();
+                            let mem_page = self.pager.read_page(*left_child_page as usize)?;
                             self.stack.push(mem_page);
                             found_cell = true;
                             break;
@@ -663,7 +663,7 @@ impl BTreeCursor {
                 match contents.rightmost_pointer() {
                     Some(right_most_pointer) => {
                         self.stack.advance();
-                        let mem_page = self.pager.read_page(right_most_pointer as usize).unwrap();
+                        let mem_page = self.pager.read_page(right_most_pointer as usize)?;
                         self.stack.push(mem_page);
                         continue;
                     }
@@ -1027,15 +1027,13 @@ impl BTreeCursor {
                 // Right page pointer is u32 in right most pointer, and in cell is u32 too, so we can use a *u32 to hold where we want to change this value
                 let mut right_pointer = PAGE_HEADER_OFFSET_RIGHTMOST_PTR;
                 for cell_idx in 0..parent_contents.cell_count() {
-                    let cell = parent_contents
-                        .cell_get(
-                            cell_idx,
-                            self.pager.clone(),
-                            self.payload_overflow_threshold_max(page_type.clone()),
-                            self.payload_overflow_threshold_min(page_type.clone()),
-                            self.usable_space(),
-                        )
-                        .unwrap();
+                    let cell = parent_contents.cell_get(
+                        cell_idx,
+                        self.pager.clone(),
+                        self.payload_overflow_threshold_max(page_type.clone()),
+                        self.payload_overflow_threshold_min(page_type.clone()),
+                        self.usable_space(),
+                    )?;
                     let found = match cell {
                         BTreeCell::TableInteriorCell(interior) => {
                             interior._left_child_page as usize == current_idx
@@ -1138,6 +1136,13 @@ impl BTreeCursor {
                                 self.usable_space(),
                             )
                             .unwrap();
+                        let last_cell = contents.cell_get(
+                            contents.cell_count() - 1,
+                            self.pager.clone(),
+                            self.payload_overflow_threshold_max(contents.page_type()),
+                            self.payload_overflow_threshold_min(contents.page_type()),
+                            self.usable_space(),
+                        )?;
                         let last_cell_pointer = match last_cell {
                             BTreeCell::TableInteriorCell(interior) => interior._left_child_page,
                             _ => unreachable!(),
@@ -1170,8 +1175,7 @@ impl BTreeCursor {
                         self.payload_overflow_threshold_max(contents.page_type()),
                         self.payload_overflow_threshold_min(contents.page_type()),
                         self.usable_space(),
-                    )
-                    .unwrap();
+                    )?;
 
                     if is_leaf {
                         // create a new divider cell and push

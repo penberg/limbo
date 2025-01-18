@@ -194,7 +194,7 @@ impl Database {
 }
 
 pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result<()> {
-    if file.size().unwrap() == 0 {
+    if file.size()? == 0 {
         // init db
         let db_header = DatabaseHeader::default();
         let page1 = allocate_page(
@@ -223,8 +223,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 let completion = Completion::Write(WriteCompletion::new(Box::new(move |_| {
                     *flag_complete.borrow_mut() = true;
                 })));
-                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))
-                    .unwrap();
+                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))?;
             }
             let mut limit = 100;
             loop {

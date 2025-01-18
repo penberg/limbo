@@ -1564,7 +1564,7 @@ pub fn translate_expr(
                 } else {
                     // must be a float
                     program.emit_insn(Insn::Real {
-                        value: val.parse().unwrap(),
+                        value: val.parse()?,
                         dest: target_register,
                     });
                 }

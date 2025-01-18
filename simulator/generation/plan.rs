@@ -330,7 +330,7 @@ impl Interaction {
                 );
                 return Err(err.unwrap());
             }
-            let rows = rows.unwrap();
+            let rows = rows?;
             assert!(rows.is_some());
             let mut rows = rows.unwrap();
             let mut out = Vec::new();

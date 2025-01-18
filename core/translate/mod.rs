@@ -293,7 +293,7 @@ fn check_automatic_pk_index_required(
                             if let Err(e) = result {
                                 bail_parse_error!("{}", e);
                             }
-                            let column_name = result.unwrap();
+                            let column_name = result?;
                             let column_def = columns.get(&ast::Name(column_name.clone()));
                             if column_def.is_none() {
                                 bail_parse_error!("No such column: {}", column_name);
@@ -575,11 +575,11 @@ fn update_pragma(
         PragmaName::CacheSize => {
             let cache_size = match value {
                 ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
-                    numeric_value.parse::<i64>().unwrap()
+                    numeric_value.parse::<i64>()?
                 }
                 ast::Expr::Unary(ast::UnaryOperator::Negative, expr) => match *expr {
                     ast::Expr::Literal(ast::Literal::Numeric(numeric_value)) => {
-                        -numeric_value.parse::<i64>().unwrap()
+                        -numeric_value.parse::<i64>()?
                     }
                     _ => bail_parse_error!("Not a valid value"),
                 },

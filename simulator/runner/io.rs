@@ -78,7 +78,7 @@ impl IO for SimulatorIO {
                 "Injected fault".into(),
             ));
         }
-        self.inner.run_once().unwrap();
+        self.inner.run_once()?;
         Ok(())
     }
 
