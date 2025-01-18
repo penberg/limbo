@@ -19,3 +19,4 @@ source $testdir/scalar-functions-datetime.test
 source $testdir/select.test
 source $testdir/subquery.test
 source $testdir/where.test
+source $testdir/compare.test

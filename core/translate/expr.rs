@@ -592,6 +592,19 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::Is => {
+                    let if_true_label = program.allocate_label();
+                    wrap_eval_jump_expr(
+                        program,
+                        Insn::Eq {
+                            lhs: e1_reg,
+                            rhs: e2_reg,
+                            target_pc: if_true_label,
+                        },
+                        target_register,
+                        if_true_label,
+                    );
+                }
                 #[cfg(feature = "json")]
                 op @ (ast::Operator::ArrowRight | ast::Operator::ArrowRightShift) => {
                     let json_func = match op {

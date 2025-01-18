@@ -1,0 +1,163 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+foreach {testname lhs rhs ans} {
+  int-int-1               8     1       0 
+  int-int-2               8     8       1
+} {
+  do_execsql_test compare-eq-$testname "SELECT $lhs = $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             8.0     1.0     0
+  float-float-2             8.0     8.0     1
+} {
+  do_execsql_test compare-eq-$testname "SELECT $lhs = $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'a'       'b'    0
+   text-text-2                'a'       'a'    1
+} {
+  do_execsql_test compare-eq-$testname "SELECT $lhs = $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  int-int-1               8     1       1 
+  int-int-2               8     8       0
+} {
+  do_execsql_test compare-neq-$testname "SELECT $lhs <> $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             8.0     1.0     1
+  float-float-2             8.0     8.0     0
+} {
+  do_execsql_test compare-neq-$testname "SELECT $lhs <> $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'a'       'b'    1
+   text-text-2                'a'       'a'    0
+} {
+  do_execsql_test compare-neq-$testname "SELECT $lhs <> $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  int-int-1               1     8       0 
+  int-int-2               1     1       0
+  int-int-3               8     0       1
+} {
+  do_execsql_test compare-gt-$testname "SELECT $lhs > $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             1.0     2.0     0
+  float-float-2             1.0     1.0     0
+  float-float-3             7.0     6.0     1
+} {
+  do_execsql_test compare-gt-$testname "SELECT $lhs > $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'b'       'c'    0
+   text-text-2                'b'       'b'    0
+   text-text-3                'b'       'a'    1
+} {
+  do_execsql_test compare-gt-$testname "SELECT $lhs > $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  int-int-1               1     8       0 
+  int-int-2               1     1       1
+  int-int-3               8     0       1
+} {
+  do_execsql_test compare-gte-$testname "SELECT $lhs >= $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             1.0     2.0     0
+  float-float-2             1.0     1.0     1
+  float-float-3             7.0     6.0     1
+} {
+  do_execsql_test compare-gte-$testname "SELECT $lhs >= $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'b'       'c'    0
+   text-text-2                'b'       'b'    1
+   text-text-3                'b'       'a'    1
+} {
+  do_execsql_test compare-gte-$testname "SELECT $lhs >= $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  int-int-1               1     8       1 
+  int-int-2               1     1       0
+  int-int-3               8     0       0
+} {
+  do_execsql_test compare-lt-$testname "SELECT $lhs < $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             1.0     2.0     1
+  float-float-2             1.0     1.0     0
+  float-float-3             7.0     6.0     0
+} {
+  do_execsql_test compare-lt-$testname "SELECT $lhs < $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'b'       'c'    1
+   text-text-2                'b'       'b'    0
+   text-text-3                'b'       'a'    0
+} {
+  do_execsql_test compare-lt-$testname "SELECT $lhs < $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  int-int-1               1     8       1 
+  int-int-2               1     1       1
+  int-int-3               8     0       0
+} {
+  do_execsql_test compare-lte-$testname "SELECT $lhs <= $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             1.0     2.0     1
+  float-float-2             1.0     1.0     1
+  float-float-3             7.0     6.0     0
+} {
+  do_execsql_test compare-lte-$testname "SELECT $lhs <= $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'b'       'c'    1
+   text-text-2                'b'       'b'    1
+   text-text-3                'b'       'a'    0
+} {
+  do_execsql_test compare-lte-$testname "SELECT $lhs <= $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  int-int-1               8     1       0 
+  int-int-2               8     8       1
+} {
+  do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             8.0     1.0     0
+  float-float-2             8.0     8.0     1
+} {
+  do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'a'       'b'    0
+   text-text-2                'a'       'a'    1
+} {
+  do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
+}
