@@ -509,6 +509,13 @@ pub enum Insn {
         index: NonZero<usize>,
         dest: usize,
     },
+    /// If either register is null put null else put 0
+    ZeroOrNull {
+        /// Source register (P1).
+        rg1: usize,
+        rg2: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {

@@ -483,6 +483,7 @@ Modifiers:
 | Variable       | No     |
 | VerifyCookie   | No     |
 | Yield          | Yes    |
+| ZeroOrNull     | Yes    |
 
 ##  Extensions
 

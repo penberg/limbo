@@ -1071,6 +1071,18 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=parameter({})", *dest, *index),
             ),
+            Insn::ZeroOrNull { rg1, rg2, dest } => (
+                "ZeroOrNull",
+                *rg1 as i32,
+                *dest as i32,
+                *rg2 as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "((r[{}]=NULL)|(r[{}]=NULL)) ? r[{}]=NULL : r[{}]=0",
+                    rg1, rg2, dest, dest
+                ),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
