@@ -39,11 +39,9 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
     obj: JObject<'local>,
     stmt_ptr: jlong,
 ) -> JObject<'local> {
-    println!("statement pointer: {:?}", stmt_ptr);
     let stmt = match to_limbo_statement(stmt_ptr) {
         Ok(stmt) => stmt,
         Err(e) => {
-            println!("error occurred");
             set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
 
             return JObject::null();

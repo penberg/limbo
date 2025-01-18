@@ -34,7 +34,9 @@ public abstract class LimboStatement {
         // TODO
     }
 
-    // TODO: enhance
+    // TODO: associate the result with CoreResultSet
+    // TODO: we can make this async!!
+    // TODO: distinguish queries that return result or doesn't return result
     protected List<Object[]> execute(long stmtPointer) throws SQLException {
         List<Object[]> result = new ArrayList<>();
         while (true) {

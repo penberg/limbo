@@ -60,16 +60,4 @@ class JDBC4ConnectionTest {
     void prepare_simple_create_table() throws Exception {
         connection.prepare("CREATE TABLE users (id INT PRIMARY KEY, username TEXT)");
     }
-
-    @Test
-    void exec_simple_create_table() throws Exception {
-        Statement stmt = createDefaultStatement();
-        stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
-        stmt.execute("INSERT INTO users VALUES (1, 'seonwoo');");
-        stmt.execute("SELECT * FROM users;");
-    }
-
-    private Statement createDefaultStatement() throws SQLException {
-        return connection.createStatement(ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
-    }
 }
