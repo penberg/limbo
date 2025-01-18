@@ -2,6 +2,7 @@ package org.github.tursodatabase;
 
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
+import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.jdbc4.JDBC4Connection;
 
 import java.sql.*;

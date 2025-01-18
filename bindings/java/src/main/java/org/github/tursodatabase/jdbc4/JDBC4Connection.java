@@ -1,6 +1,6 @@
 package org.github.tursodatabase.jdbc4;
 
-import org.github.tursodatabase.LimboConnection;
+import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 
 import java.sql.*;
@@ -11,8 +11,12 @@ import java.util.concurrent.Executor;
 
 public class JDBC4Connection extends LimboConnection {
 
-    public JDBC4Connection(String url, String fileName, Properties properties) throws SQLException {
-        super(url, fileName, properties);
+    public JDBC4Connection(String url, String filePath) throws SQLException {
+        super(url, filePath);
+    }
+
+    public JDBC4Connection(String url, String filePath, Properties properties) throws SQLException {
+        super(url, filePath, properties);
     }
 
     @Override

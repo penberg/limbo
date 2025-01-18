@@ -1,30 +1,55 @@
-use crate::errors::CustomError;
-use jni::objects::{JObject, JValue};
+use crate::errors::LimboError;
+use jni::objects::{JByteArray, JObject};
 use jni::JNIEnv;
 
-pub(crate) fn row_to_obj_array<'local>(
-    env: &mut JNIEnv<'local>,
-    row: &limbo_core::Row,
-) -> Result<JObject<'local>, CustomError> {
-    let obj_array =
-        env.new_object_array(row.values.len() as i32, "java/lang/Object", JObject::null())?;
+pub(crate) fn utf8_byte_arr_to_str(
+    env: &JNIEnv,
+    bytes: JByteArray,
+) -> crate::errors::Result<String> {
+    let bytes = env
+        .convert_byte_array(bytes)
+        .map_err(|_| LimboError::CustomError("Failed to retrieve bytes".to_string()))?;
+    let str = String::from_utf8(bytes).map_err(|_| {
+        LimboError::CustomError("Failed to convert utf8 byte array into string".to_string())
+    })?;
+    Ok(str)
+}
 
-    for (i, value) in row.values.iter().enumerate() {
-        let obj = match value {
-            limbo_core::Value::Null => JObject::null(),
-            limbo_core::Value::Integer(i) => {
-                env.new_object("java/lang/Long", "(J)V", &[JValue::Long(*i)])?
-            }
-            limbo_core::Value::Float(f) => {
-                env.new_object("java/lang/Double", "(D)V", &[JValue::Double(*f)])?
-            }
-            limbo_core::Value::Text(s) => env.new_string(s)?.into(),
-            limbo_core::Value::Blob(b) => env.byte_array_from_slice(b)?.into(),
-        };
-        if let Err(e) = env.set_object_array_element(&obj_array, i as i32, obj) {
-            eprintln!("Error on parsing row: {:?}", e);
+/// Sets the error message and throws a Java exception.
+///
+/// This function converts the provided error message to a byte array and calls the
+/// `throwLimboException` method on the provided Java object to throw an exception.
+///
+/// # Parameters
+/// - `env`: The JNI environment.
+/// - `obj`: The Java object on which the exception will be thrown.
+/// - `err_code`: The error code corresponding to the exception. Refer to `org.github.tursodatabase.core.Codes` for the list of error codes.
+/// - `err_msg`: The error message to be included in the exception.
+///
+/// # Example
+/// ```rust
+/// set_err_msg_and_throw_exception(env, obj, Codes::SQLITE_ERROR, "An error occurred".to_string());
+/// ```
+pub fn set_err_msg_and_throw_exception<'local>(
+    env: &mut JNIEnv<'local>,
+    obj: JObject<'local>,
+    err_code: i32,
+    err_msg: String,
+) {
+    let error_message_bytes = env
+        .byte_array_from_slice(err_msg.as_bytes())
+        .expect("Failed to convert to byte array");
+    match env.call_method(
+        obj,
+        "throwLimboException",
+        "(I[B)V",
+        &[err_code.into(), (&error_message_bytes).into()],
+    ) {
+        Ok(_) => {
+            // do nothing because above method will always return Err
+        }
+        Err(_e) => {
+            // do nothing because our java app will handle Err
         }
     }
-
-    Ok(obj_array.into())
 }

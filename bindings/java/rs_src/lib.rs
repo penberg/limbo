@@ -1,6 +1,5 @@
-mod connection;
-mod cursor;
 mod errors;
+mod limbo_connection;
 mod limbo_db;
-mod macros;
+mod limbo_statement;
 mod utils;

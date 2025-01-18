@@ -15,7 +15,10 @@
  */
 package org.github.tursodatabase.core;
 
-public class Codes {
+/**
+ * Sqlite error codes.
+ */
+public class SqliteCode {
     /** Successful result */
     public static final int SQLITE_OK = 0;
 

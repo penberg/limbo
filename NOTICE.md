@@ -18,6 +18,11 @@ This product depends on AssertJ, distributed by the AssertJ authors:
 * License: licenses/bindings/java/errorprone-license.md (Apache License v2.0)
 * Homepage: https://joel-costigliola.github.io/assertj/
 
+This product depends on logback, distributed by the logback authors: 
+
+* License: licenses/bindings/java/logback-license.md (Apache License v2.0)
+* Homepage: https://github.com/qos-ch/logback?tab=License-1-ov-file 
+
 This product depends on serde, distributed by the serde-rs project: 
 
 * License: licenses/core/serde-apache-license.md (Apache License v2.0)
