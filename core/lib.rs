@@ -474,6 +474,7 @@ impl Statement {
     }
 }
 
+#[derive(PartialEq)]
 pub enum StepResult<'a> {
     Row(Row<'a>),
     IO,
@@ -482,6 +483,7 @@ pub enum StepResult<'a> {
     Busy,
 }
 
+#[derive(PartialEq)]
 pub struct Row<'a> {
     pub values: Vec<Value<'a>>,
 }
