@@ -140,3 +140,24 @@ foreach {testname lhs rhs ans} {
 } {
   do_execsql_test compare-lte-$testname "SELECT $lhs <= $rhs" $::ans
 }
+
+foreach {testname lhs rhs ans} {
+  int-int-1               8     1       0 
+  int-int-2               8     8       1
+} {
+  do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             8.0     1.0     0
+  float-float-2             8.0     8.0     1
+} {
+  do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'a'       'b'    0
+   text-text-2                'a'       'a'    1
+} {
+  do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
+}
