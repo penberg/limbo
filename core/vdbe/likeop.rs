@@ -143,7 +143,7 @@ fn construct_glob_regex(pattern: &str) -> Result<Regex, LimboError> {
                     }
                 };
 
-                while let Some(next_ch) = chars.next() {
+                for next_ch in chars.by_ref() {
                     match next_ch {
                         ']' => {
                             bracket_closed = true;
