@@ -1273,6 +1273,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo_percentile"
+version = "0.0.12"
+dependencies = [
+ "limbo_ext",
+]
+
+[[package]]
 name = "limbo_regexp"
 version = "0.0.12"
 dependencies = [

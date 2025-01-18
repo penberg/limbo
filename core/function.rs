@@ -1,19 +1,54 @@
+use limbo_ext::{FinalizeFunction, InitAggFunction, ScalarFunction, StepFunction};
 use std::fmt;
 use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
-use limbo_ext::ScalarFunction;
-
 pub struct ExternalFunc {
     pub name: String,
-    pub func: ScalarFunction,
+    pub func: ExtFunc,
+}
+
+#[derive(Debug, Clone)]
+pub enum ExtFunc {
+    Scalar(ScalarFunction),
+    Aggregate {
+        argc: usize,
+        init: InitAggFunction,
+        step: StepFunction,
+        finalize: FinalizeFunction,
+    },
+}
+
+impl ExtFunc {
+    pub fn agg_args(&self) -> Result<usize, ()> {
+        if let ExtFunc::Aggregate { argc, .. } = self {
+            return Ok(*argc);
+        }
+        Err(())
+    }
 }
 
 impl ExternalFunc {
-    pub fn new(name: &str, func: ScalarFunction) -> Self {
+    pub fn new_scalar(name: String, func: ScalarFunction) -> Self {
         Self {
-            name: name.to_string(),
-            func,
+            name,
+            func: ExtFunc::Scalar(func),
+        }
+    }
+
+    pub fn new_aggregate(
+        name: String,
+        argc: i32,
+        func: (InitAggFunction, StepFunction, FinalizeFunction),
+    ) -> Self {
+        Self {
+            name,
+            func: ExtFunc::Aggregate {
+                argc: argc as usize,
+                init: func.0,
+                step: func.1,
+                finalize: func.2,
+            },
         }
     }
 }
@@ -63,7 +98,7 @@ impl Display for JsonFunc {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum AggFunc {
     Avg,
     Count,
@@ -73,6 +108,24 @@ pub enum AggFunc {
     StringAgg,
     Sum,
     Total,
+    External(Rc<ExtFunc>),
+}
+
+impl PartialEq for AggFunc {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Avg, Self::Avg)
+            | (Self::Count, Self::Count)
+            | (Self::GroupConcat, Self::GroupConcat)
+            | (Self::Max, Self::Max)
+            | (Self::Min, Self::Min)
+            | (Self::StringAgg, Self::StringAgg)
+            | (Self::Sum, Self::Sum)
+            | (Self::Total, Self::Total) => true,
+            (Self::External(a), Self::External(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 impl AggFunc {
@@ -86,6 +139,7 @@ impl AggFunc {
             Self::StringAgg => "string_agg",
             Self::Sum => "sum",
             Self::Total => "total",
+            Self::External(_) => "extension function",
         }
     }
 }

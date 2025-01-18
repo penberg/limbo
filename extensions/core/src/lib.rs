@@ -1,52 +1,59 @@
+pub use limbo_macros::{register_extension, AggregateDerive, ScalarDerive};
 use std::os::raw::{c_char, c_void};
+
 pub type ResultCode = i32;
-pub use limbo_macros::export_scalar;
 pub const RESULT_OK: ResultCode = 0;
 pub const RESULT_ERROR: ResultCode = 1;
-// TODO: more error types
-
-pub type ExtensionEntryPoint = extern "C" fn(api: *const ExtensionApi) -> ResultCode;
-pub type ScalarFunction = extern "C" fn(argc: i32, *const Value) -> Value;
 
 #[repr(C)]
 pub struct ExtensionApi {
     pub ctx: *mut c_void,
-    pub register_scalar_function:
-        extern "C" fn(ctx: *mut c_void, name: *const c_char, func: ScalarFunction) -> ResultCode,
+
+    pub register_scalar_function: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        name: *const c_char,
+        func: ScalarFunction,
+    ) -> ResultCode,
+
+    pub register_aggregate_function: unsafe extern "C" fn(
+        ctx: *mut c_void,
+        name: *const c_char,
+        args: i32,
+        init_func: InitAggFunction,
+        step_func: StepFunction,
+        finalize_func: FinalizeFunction,
+    ) -> ResultCode,
 }
 
-#[macro_export]
-macro_rules! register_extension {
-    (
-        scalars: { $( $scalar_name:expr => $scalar_func:ident ),* $(,)? },
-        //aggregates: { $( $agg_name:expr => ($step_func:ident, $finalize_func:ident) ),* $(,)? },
-        //virtual_tables: { $( $vt_name:expr => $vt_impl:expr ),* $(,)? }
-    ) => {
-        #[no_mangle]
-        pub unsafe extern "C" fn register_extension(api: *const $crate::ExtensionApi) -> $crate::ResultCode {
-            if api.is_null() {
-                return $crate::RESULT_ERROR;
-            }
+pub type ExtensionEntryPoint = unsafe extern "C" fn(api: *const ExtensionApi) -> ResultCode;
+pub type ScalarFunction = unsafe extern "C" fn(argc: i32, *const Value) -> Value;
 
-            register_scalar_functions! { api, $( $scalar_name => $scalar_func ),* }
-            // TODO:
-            //register_aggregate_functions! { $( $agg_name => ($step_func, $finalize_func) ),* }
-            //register_virtual_tables! { $( $vt_name => $vt_impl ),* }
-            $crate::RESULT_OK
-        }
+pub type InitAggFunction = unsafe extern "C" fn() -> *mut AggCtx;
+pub type StepFunction = unsafe extern "C" fn(ctx: *mut AggCtx, argc: i32, argv: *const Value);
+pub type FinalizeFunction = unsafe extern "C" fn(ctx: *mut AggCtx) -> Value;
+
+pub trait Scalar {
+    fn call(&self, args: &[Value]) -> Value;
+    fn name(&self) -> &'static str;
+    fn alias(&self) -> Option<&'static str> {
+        None
     }
 }
 
-#[macro_export]
-macro_rules! register_scalar_functions {
-    ( $api:expr, $( $fname:expr => $fptr:ident ),* ) => {
-        unsafe {
-            $(
-                let cname = std::ffi::CString::new($fname).unwrap();
-                ((*$api).register_scalar_function)((*$api).ctx, cname.as_ptr(), $fptr);
-            )*
-        }
+#[repr(C)]
+pub struct AggCtx {
+    pub state: *mut c_void,
+}
+
+pub trait AggFunc {
+    type State: Default;
+
+    fn args(&self) -> i32 {
+        1
     }
+    fn name(&self) -> &'static str;
+    fn step(state: &mut Self::State, args: &[Value]);
+    fn finalize(state: Self::State) -> Value;
 }
 
 #[repr(C)]
@@ -57,6 +64,7 @@ pub enum ValueType {
     Float,
     Text,
     Blob,
+    Error,
 }
 
 #[repr(C)]
@@ -80,6 +88,9 @@ impl std::fmt::Debug for Value {
             }),
             ValueType::Blob => write!(f, "Value {{ Blob: {:?} }}", unsafe {
                 &*(self.value as *const Blob)
+            }),
+            ValueType::Error => write!(f, "Value {{ Error: {:?} }}", unsafe {
+                &*(self.value as *const TextValue)
             }),
         }
     }
@@ -159,13 +170,18 @@ impl Value {
     }
 
     pub fn to_float(&self) -> Option<f64> {
-        if self.value_type != ValueType::Float {
-            return None;
-        }
         if self.value.is_null() {
             return None;
         }
-        Some(unsafe { *(self.value as *const f64) })
+        match self.value_type {
+            ValueType::Float => Some(unsafe { *(self.value as *const f64) }),
+            ValueType::Integer => Some(unsafe { *(self.value as *const i64) as f64 }),
+            ValueType::Text => {
+                let txt = unsafe { &*(self.value as *const TextValue) };
+                txt.as_str().parse().ok()
+            }
+            _ => None,
+        }
     }
 
     pub fn to_text(&self) -> Option<String> {
@@ -192,13 +208,29 @@ impl Value {
     }
 
     pub fn to_integer(&self) -> Option<i64> {
-        if self.value_type != ValueType::Integer {
+        if self.value.is_null() {
+            return None;
+        }
+        match self.value_type() {
+            ValueType::Integer => Some(unsafe { *(self.value as *const i64) }),
+            ValueType::Float => Some(unsafe { *(self.value as *const f64) } as i64),
+            ValueType::Text => {
+                let txt = unsafe { &*(self.value as *const TextValue) };
+                txt.as_str().parse().ok()
+            }
+            _ => None,
+        }
+    }
+
+    pub fn to_error(&self) -> Option<String> {
+        if self.value_type != ValueType::Error {
             return None;
         }
         if self.value.is_null() {
             return None;
         }
-        Some(unsafe { *(self.value as *const i64) })
+        let txt = unsafe { &*(self.value as *const TextValue) };
+        Some(String::from(txt.as_str()))
     }
 
     pub fn from_integer(value: i64) -> Self {
@@ -226,6 +258,19 @@ impl Value {
         let text_box = Box::new(text_value);
         Self {
             value_type: ValueType::Text,
+            value: Box::into_raw(text_box) as *mut c_void,
+        }
+    }
+
+    pub fn error(s: String) -> Self {
+        let buffer = s.into_boxed_str();
+        let ptr = buffer.as_ptr();
+        let len = buffer.len();
+        std::mem::forget(buffer);
+        let text_value = TextValue::new(ptr, len);
+        let text_box = Box::new(text_value);
+        Self {
+            value_type: ValueType::Error,
             value: Box::into_raw(text_box) as *mut c_void,
         }
     }
@@ -259,6 +304,9 @@ impl Value {
             }
             ValueType::Blob => {
                 let _ = Box::from_raw(self.value as *mut Blob);
+            }
+            ValueType::Error => {
+                let _ = Box::from_raw(self.value as *mut TextValue);
             }
             ValueType::Null => {}
         }

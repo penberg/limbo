@@ -1,7 +1,7 @@
 use super::emitter::emit_program;
 use super::expr::get_name;
 use super::plan::SelectQueryType;
-use crate::function::Func;
+use crate::function::{AggFunc, ExtFunc, Func};
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{Aggregate, Direction, GroupBy, Plan, ResultSetColumn, SelectPlan};
 use crate::translate::planner::{
@@ -148,21 +148,41 @@ pub fn prepare_select_plan(
                                         });
                                     }
                                     Err(_) => {
-                                        if syms.functions.contains_key(&name.0) {
-                                            let contains_aggregates = resolve_aggregates(
-                                                expr,
-                                                &mut aggregate_expressions,
-                                            );
-                                            plan.result_columns.push(ResultSetColumn {
-                                                name: get_name(
-                                                    maybe_alias.as_ref(),
+                                        if let Some(f) = syms.resolve_function(&name.0, args_count)
+                                        {
+                                            if let ExtFunc::Scalar(_) = f.as_ref().func {
+                                                let contains_aggregates = resolve_aggregates(
                                                     expr,
-                                                    &plan.referenced_tables,
-                                                    || format!("expr_{}", result_column_idx),
-                                                ),
-                                                expr: expr.clone(),
-                                                contains_aggregates,
-                                            });
+                                                    &mut aggregate_expressions,
+                                                );
+                                                plan.result_columns.push(ResultSetColumn {
+                                                    name: get_name(
+                                                        maybe_alias.as_ref(),
+                                                        expr,
+                                                        &plan.referenced_tables,
+                                                        || format!("expr_{}", result_column_idx),
+                                                    ),
+                                                    expr: expr.clone(),
+                                                    contains_aggregates,
+                                                });
+                                            } else {
+                                                let agg = Aggregate {
+                                                    func: AggFunc::External(f.func.clone().into()),
+                                                    args: args.as_ref().unwrap().clone(),
+                                                    original_expr: expr.clone(),
+                                                };
+                                                aggregate_expressions.push(agg.clone());
+                                                plan.result_columns.push(ResultSetColumn {
+                                                    name: get_name(
+                                                        maybe_alias.as_ref(),
+                                                        expr,
+                                                        &plan.referenced_tables,
+                                                        || format!("expr_{}", result_column_idx),
+                                                    ),
+                                                    expr: expr.clone(),
+                                                    contains_aggregates: true,
+                                                });
+                                            }
                                         }
                                     }
                                 }

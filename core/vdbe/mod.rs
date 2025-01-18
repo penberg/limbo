@@ -26,12 +26,14 @@ pub mod sorter;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
-use crate::function::{AggFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
-use crate::types::{AggContext, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp};
+use crate::types::{
+    AggContext, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
+};
 use crate::util::parse_schema_rows;
 use crate::vdbe::builder::CursorType;
 use crate::vdbe::insn::Insn;
@@ -156,7 +158,7 @@ macro_rules! call_external_function {
         $start_reg:expr
     ) => {{
         if $arg_count == 0 {
-            let result_c_value: ExtValue = ($func_ptr)(0, std::ptr::null());
+            let result_c_value: ExtValue = unsafe { ($func_ptr)(0, std::ptr::null()) };
             let result_ov = OwnedValue::from_ffi(&result_c_value);
             $state.registers[$dest_register] = result_ov;
         } else {
@@ -167,7 +169,7 @@ macro_rules! call_external_function {
                 ext_values.push(val);
             }
             let argv_ptr = ext_values.as_ptr();
-            let result_c_value: ExtValue = ($func_ptr)($arg_count as i32, argv_ptr);
+            let result_c_value: ExtValue = unsafe { ($func_ptr)($arg_count as i32, argv_ptr) };
             let result_ov = OwnedValue::from_ffi(&result_c_value);
             $state.registers[$dest_register] = result_ov;
         }
@@ -1244,6 +1246,23 @@ impl Program {
                                     OwnedValue::build_text(Rc::new("".to_string())),
                                 )))
                             }
+                            AggFunc::External(func) => match func.as_ref() {
+                                ExtFunc::Aggregate {
+                                    init,
+                                    step,
+                                    finalize,
+                                    argc,
+                                } => OwnedValue::Agg(Box::new(AggContext::External(
+                                    ExternalAggState {
+                                        state: unsafe { (init)() },
+                                        argc: *argc,
+                                        step_fn: *step,
+                                        finalize_fn: *finalize,
+                                        finalized_value: None,
+                                    },
+                                ))),
+                                _ => unreachable!("scalar function called in aggregate context"),
+                            },
                         };
                     }
                     match func {
@@ -1383,26 +1402,49 @@ impl Program {
                                 *acc += col;
                             }
                         }
+                        AggFunc::External(_) => {
+                            let (step_fn, state_ptr, argc) = {
+                                let OwnedValue::Agg(agg) = &state.registers[*acc_reg] else {
+                                    unreachable!();
+                                };
+                                let AggContext::External(agg_state) = agg.as_ref() else {
+                                    unreachable!();
+                                };
+                                (agg_state.step_fn, agg_state.state, agg_state.argc)
+                            };
+                            if argc == 0 {
+                                unsafe { step_fn(state_ptr, 0, std::ptr::null()) };
+                            } else {
+                                let register_slice = &state.registers[*col..*col + argc];
+                                let mut ext_values: Vec<ExtValue> = Vec::with_capacity(argc);
+                                for ov in register_slice.iter() {
+                                    ext_values.push(ov.to_ffi());
+                                }
+                                let argv_ptr = ext_values.as_ptr();
+                                unsafe { step_fn(state_ptr, argc as i32, argv_ptr) };
+                            }
+                        }
                     };
                     state.pc += 1;
                 }
                 Insn::AggFinal { register, func } => {
                     match state.registers[*register].borrow_mut() {
-                        OwnedValue::Agg(agg) => {
-                            match func {
-                                AggFunc::Avg => {
-                                    let AggContext::Avg(acc, count) = agg.borrow_mut() else {
-                                        unreachable!();
-                                    };
-                                    *acc /= count.clone();
-                                }
-                                AggFunc::Sum | AggFunc::Total => {}
-                                AggFunc::Count => {}
-                                AggFunc::Max => {}
-                                AggFunc::Min => {}
-                                AggFunc::GroupConcat | AggFunc::StringAgg => {}
-                            };
-                        }
+                        OwnedValue::Agg(agg) => match func {
+                            AggFunc::Avg => {
+                                let AggContext::Avg(acc, count) = agg.borrow_mut() else {
+                                    unreachable!();
+                                };
+                                *acc /= count.clone();
+                            }
+                            AggFunc::Sum | AggFunc::Total => {}
+                            AggFunc::Count => {}
+                            AggFunc::Max => {}
+                            AggFunc::Min => {}
+                            AggFunc::GroupConcat | AggFunc::StringAgg => {}
+                            AggFunc::External(_) => {
+                                agg.compute_external();
+                            }
+                        },
                         OwnedValue::Null => {
                             // when the set is empty
                             match func {
@@ -1888,9 +1930,12 @@ impl Program {
                                 }
                             }
                         },
-                        crate::function::Func::External(f) => {
-                            call_external_function! {f.func, *dest, state, arg_count, *start_reg };
-                        }
+                        crate::function::Func::External(f) => match f.func {
+                            ExtFunc::Scalar(f) => {
+                                call_external_function! {f, *dest, state, arg_count, *start_reg };
+                            }
+                            _ => unreachable!("aggregate called in scalar context"),
+                        },
                         crate::function::Func::Math(math_func) => match math_func.arity() {
                             MathFuncArity::Nullary => match math_func {
                                 MathFunc::Pi => {

@@ -1,63 +1,46 @@
-use syn::parse::{Parse, ParseStream, Result as ParseResult};
-use syn::{LitInt, Token};
-#[derive(Debug)]
-pub enum ArgsSpec {
-    Exact(i32),
-    Range {
-        lower: i32,
-        upper: i32,
-        inclusive: bool,
-    },
+use syn::punctuated::Punctuated;
+use syn::{Ident, Token};
+
+pub(crate) struct RegisterExtensionInput {
+    pub aggregates: Vec<Ident>,
+    pub scalars: Vec<Ident>,
 }
 
-pub struct ArgsAttr {
-    pub spec: ArgsSpec,
-}
+impl syn::parse::Parse for RegisterExtensionInput {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mut aggregates = Vec::new();
+        let mut scalars = Vec::new();
 
-impl Parse for ArgsAttr {
-    fn parse(input: ParseStream) -> ParseResult<Self> {
-        if input.peek(LitInt) {
-            let start_lit = input.parse::<LitInt>()?;
-            let start_val = start_lit.base10_parse::<i32>()?;
+        while !input.is_empty() {
+            if input.peek(syn::Ident) && input.peek2(Token![:]) {
+                let section_name: Ident = input.parse()?;
+                input.parse::<Token![:]>()?;
+                let content;
+                syn::braced!(content in input);
 
-            if input.is_empty() {
-                return Ok(ArgsAttr {
-                    spec: ArgsSpec::Exact(start_val),
-                });
-            }
-            if input.peek(Token![..=]) {
-                let _dots = input.parse::<Token![..=]>()?;
-                let end_lit = input.parse::<LitInt>()?;
-                let end_val = end_lit.base10_parse::<i32>()?;
-                Ok(ArgsAttr {
-                    spec: ArgsSpec::Range {
-                        lower: start_val,
-                        upper: end_val,
-                        inclusive: true,
-                    },
-                })
-            } else if input.peek(Token![..]) {
-                let _dots = input.parse::<Token![..]>()?;
-                let end_lit = input.parse::<LitInt>()?;
-                let end_val = end_lit.base10_parse::<i32>()?;
-                Ok(ArgsAttr {
-                    spec: ArgsSpec::Range {
-                        lower: start_val,
-                        upper: end_val,
-                        inclusive: false,
-                    },
-                })
+                if section_name == "aggregates" {
+                    aggregates = Punctuated::<Ident, Token![,]>::parse_terminated(&content)?
+                        .into_iter()
+                        .collect();
+                } else if section_name == "scalars" {
+                    scalars = Punctuated::<Ident, Token![,]>::parse_terminated(&content)?
+                        .into_iter()
+                        .collect();
+                } else {
+                    return Err(syn::Error::new(section_name.span(), "Unknown section"));
+                }
             } else {
-                Err(syn::Error::new_spanned(
-                    start_lit,
-                    "Expected '..' or '..=' for a range, or nothing for a single integer.",
-                ))
+                return Err(input.error("Expected aggregates: or scalars: section"));
             }
-        } else {
-            Err(syn::Error::new(
-                input.span(),
-                "Expected an integer or a range expression, like `0`, `0..2`, or `0..=2`.",
-            ))
+
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
         }
+
+        Ok(Self {
+            aggregates,
+            scalars,
+        })
     }
 }

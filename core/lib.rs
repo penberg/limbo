@@ -168,17 +168,6 @@ impl Database {
         })
     }
 
-    pub fn define_scalar_function<S: AsRef<str>>(&self, name: S, func: limbo_ext::ScalarFunction) {
-        let func = function::ExternalFunc {
-            name: name.as_ref().to_string(),
-            func,
-        };
-        self.syms
-            .borrow_mut()
-            .functions
-            .insert(name.as_ref().to_string(), func.into());
-    }
-
     #[cfg(not(target_family = "wasm"))]
     pub fn load_extension<P: AsRef<std::ffi::OsStr>>(&self, path: P) -> Result<()> {
         let api = Box::new(self.build_limbo_ext());
@@ -189,7 +178,7 @@ impl Database {
                 .map_err(|e| LimboError::ExtensionError(e.to_string()))?
         };
         let api_ptr: *const ExtensionApi = Box::into_raw(api);
-        let result_code = entry(api_ptr);
+        let result_code = unsafe { entry(api_ptr) };
         if result_code == RESULT_OK {
             self.syms.borrow_mut().extensions.push((lib, api_ptr));
             Ok(())
