@@ -118,12 +118,12 @@ pub fn prepare_select_plan(
                                     args_count,
                                 ) {
                                     Ok(Func::Agg(f)) => {
-                                        let count_args = vec![ast::Expr::Literal(
-                                            ast::Literal::Numeric("1".to_string()),
-                                        )];
                                         let agg_args: Result<Vec<Expr>, LimboError> = match args {
                                             // if args is None and its COUNT
                                             None if name.0.to_uppercase() == "COUNT" => {
+                                                let count_args = vec![ast::Expr::Literal(
+                                                    ast::Literal::Numeric("1".to_string()),
+                                                )];
                                                 Ok(count_args)
                                             }
                                             // if args is None and the function is not COUNT
