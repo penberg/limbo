@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use limbo_core::{LimboError, Result};
 
 use crate::generation::{
-    self, pick_index,
+    pick_index,
     plan::{Interaction, InteractionPlan, InteractionPlanState, ResultSet},
 };
 
