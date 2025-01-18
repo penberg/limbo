@@ -1,5 +1,7 @@
 use std::{fmt::Display, os::raw::c_void};
 
+/// Error type is of type ExtError which can be
+/// either a user defined error or an error code
 #[repr(C)]
 pub enum ResultCode {
     OK = 0,
@@ -150,6 +152,7 @@ impl Blob {
 }
 
 impl Value {
+    /// Creates a new Value with type Null
     pub fn null() -> Self {
         Self {
             value_type: ValueType::Null,
@@ -157,10 +160,12 @@ impl Value {
         }
     }
 
+    /// Returns the value type of the Value
     pub fn value_type(&self) -> ValueType {
         self.value_type
     }
 
+    /// Returns the float value if the Value is the proper type
     pub fn to_float(&self) -> Option<f64> {
         if self.value.is_null() {
             return None;
@@ -175,7 +180,7 @@ impl Value {
             _ => None,
         }
     }
-
+    /// Returns the text value if the Value is the proper type
     pub fn to_text(&self) -> Option<String> {
         if self.value_type != ValueType::Text {
             return None;
@@ -187,6 +192,7 @@ impl Value {
         Some(String::from(txt.as_str()))
     }
 
+    /// Returns the blob value if the Value is the proper type
     pub fn to_blob(&self) -> Option<Vec<u8>> {
         if self.value_type != ValueType::Blob {
             return None;
@@ -199,6 +205,7 @@ impl Value {
         Some(slice.to_vec())
     }
 
+    /// Returns the integer value if the Value is the proper type
     pub fn to_integer(&self) -> Option<i64> {
         if self.value.is_null() {
             return None;
@@ -214,6 +221,7 @@ impl Value {
         }
     }
 
+    /// Returns the error message if the value is an error
     pub fn to_error(&self) -> Option<String> {
         if self.value_type != ValueType::Error {
             return None;
@@ -234,6 +242,7 @@ impl Value {
         }
     }
 
+    /// Creates a new integer Value from an i64
     pub fn from_integer(value: i64) -> Self {
         let boxed = Box::new(value);
         Self {
@@ -242,6 +251,7 @@ impl Value {
         }
     }
 
+    /// Creates a new float Value from an f64
     pub fn from_float(value: f64) -> Self {
         let boxed = Box::new(value);
         Self {
@@ -249,7 +259,7 @@ impl Value {
             value: Box::into_raw(boxed) as *mut c_void,
         }
     }
-
+    /// Creates a new text Value from a String
     pub fn from_text(s: String) -> Self {
         let buffer = s.into_boxed_str();
         let ptr = buffer.as_ptr();
@@ -263,6 +273,7 @@ impl Value {
         }
     }
 
+    /// Creates a new error Value from a ResultCode
     pub fn error(err: ResultCode) -> Self {
         let error = ExtError {
             error_type: ErrorType::ErrCode { code: err },
@@ -274,6 +285,7 @@ impl Value {
         }
     }
 
+    /// Create a new user defined error Value with a message
     pub fn custom_error(s: String) -> Self {
         let buffer = s.into_boxed_str();
         let ptr = buffer.as_ptr();
@@ -291,6 +303,7 @@ impl Value {
         }
     }
 
+    /// Creates a new blob Value from a Vec<u8>
     pub fn from_blob(value: Vec<u8>) -> Self {
         let boxed = Box::new(Blob::new(value.as_ptr(), value.len() as u64));
         std::mem::forget(value);
@@ -338,5 +351,8 @@ pub struct ExtError {
 #[repr(C)]
 pub enum ErrorType {
     User,
-    ErrCode { code: ResultCode },
+    /// User type has a user provided message
+    ErrCode {
+        code: ResultCode,
+    },
 }

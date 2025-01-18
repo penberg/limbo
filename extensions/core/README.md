@@ -48,7 +48,7 @@ use limbo_ext::{register_extension, Value, scalar};
 
 /// Annotate each with the scalar macro, specifying the name you would like to call it with
 /// and optionally, an alias.. e.g. SELECT double(4); or SELECT twice(4);
-# [scalar(name = "double", alias = "twice")]
+#[scalar(name = "double", alias = "twice")]
 fn double(&self, args: &[Value]) -> Value {
     if let Some(arg) = args.first() {
         match arg.value_type() {

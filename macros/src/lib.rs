@@ -138,6 +138,29 @@ fn generate_get_description(
     enum_impl.parse().unwrap()
 }
 
+/// Declare a scalar function for your extension. This requires the name:
+/// #[scalar(name = "example")] of what you wish to call your function with.
+/// Your function __must__ use the signature: `fn (args: &[Value]) -> Value`
+/// with proper spelling.
+/// ```ignore
+/// use limbo_ext::{scalar, Value};
+/// #[scalar(name = "double", alias = "twice")] // you can provide an <optional> alias
+/// fn double(args: &[Value]) -> Value {
+///       match arg.value_type() {
+///           ValueType::Float => {
+///               let val = arg.to_float().unwrap();
+///               Value::from_float(val * 2.0)
+///           }
+///           ValueType::Integer => {
+///               let val = arg.to_integer().unwrap();
+///               Value::from_integer(val * 2)
+///           }
+///       }
+///   } else {
+///       Value::null()
+///   }
+/// }
+/// ```
 #[proc_macro_attribute]
 pub fn scalar(attr: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as ItemFn);
@@ -199,6 +222,29 @@ pub fn scalar(attr: TokenStream, input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Define an aggregate function for your extension by deriving
+/// AggregateDerive on a struct that implements the AggFunc trait.
+/// ```ignore
+/// use limbo_ext::{register_extension, Value, AggregateDerive, AggFunc};
+///
+///#[derive(AggregateDerive)]
+///struct SumPlusOne;
+///
+///impl AggFunc for SumPlusOne {
+///   type State = i64;
+///   const NAME: &'static str = "sum_plus_one";
+///   const ARGS: i32 = 1;
+///   fn step(state: &mut Self::State, args: &[Value]) {
+///      let Some(val) = args[0].to_integer() else {
+///        return;
+///     };
+///     *state += val;
+///     }
+///     fn finalize(state: Self::State) -> Value {
+///        Value::from_integer(state + 1)
+///     }
+///}
+/// ```
 #[proc_macro_derive(AggregateDerive)]
 pub fn derive_agg_func(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
@@ -278,6 +324,38 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Register your extension with 'core' by providing the relevant functions
+///```ignore
+///use limbo_ext::{register_extension, scalar, Value, AggregateDerive, AggFunc};
+///
+/// register_extension!{ scalars: { return_one }, aggregates: { SumPlusOne } }
+///
+///#[scalar(name = "one")]
+///fn return_one(args: &[Value]) -> Value {
+///  return Value::from_integer(1);
+///}
+///
+///#[derive(AggregateDerive)]
+///struct SumPlusOne;
+///
+///impl AggFunc for SumPlusOne {
+///   type State = i64;
+///   const NAME: &'static str = "sum_plus_one";
+///   const ARGS: i32 = 1;
+///
+///   fn step(state: &mut Self::State, args: &[Value]) {
+///      let Some(val) = args[0].to_integer() else {
+///        return;
+///      };
+///      *state += val;
+///     }
+///
+///     fn finalize(state: Self::State) -> Value {
+///        Value::from_integer(state + 1)
+///     }
+///}
+///
+/// ```
 #[proc_macro]
 pub fn register_extension(input: TokenStream) -> TokenStream {
     let input_ast = parse_macro_input!(input as RegisterExtensionInput);
