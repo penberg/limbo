@@ -1625,7 +1625,7 @@ impl Program {
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
-                                assert!(arg_count == 2);
+                                assert_eq!(arg_count, 2);
                                 assert!(*start_reg + 1 < state.registers.len());
                                 let reg_value_argument = state.registers[*start_reg].clone();
                                 let OwnedValue::Text(reg_value_type) =
@@ -1915,7 +1915,7 @@ impl Program {
                                 state.registers[*dest] = OwnedValue::build_text(Rc::new(version));
                             }
                             ScalarFunc::Replace => {
-                                assert!(arg_count == 3);
+                                assert_eq!(arg_count, 3);
                                 let source = &state.registers[*start_reg];
                                 let pattern = &state.registers[*start_reg + 1];
                                 let replacement = &state.registers[*start_reg + 2];

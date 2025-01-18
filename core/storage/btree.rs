@@ -1126,16 +1126,7 @@ impl BTreeCursor {
                     for page in new_pages.iter_mut().take(new_pages_len - 1) {
                         let contents = page.get().contents.as_mut().unwrap();
 
-                        assert!(contents.cell_count() == 1);
-                        let last_cell = contents
-                            .cell_get(
-                                contents.cell_count() - 1,
-                                self.pager.clone(),
-                                self.payload_overflow_threshold_max(contents.page_type()),
-                                self.payload_overflow_threshold_min(contents.page_type()),
-                                self.usable_space(),
-                            )
-                            .unwrap();
+                        assert_eq!(contents.cell_count(), 1);
                         let last_cell = contents.cell_get(
                             contents.cell_count() - 1,
                             self.pager.clone(),
@@ -1509,8 +1500,8 @@ impl BTreeCursor {
             }
 
             // Next should always be 0 (NULL) at this point since we have reached the end of the freeblocks linked list
-            assert!(
-                next == 0,
+            assert_eq!(
+                next, 0,
                 "corrupted page: freeblocks list not in ascending order"
             );
 

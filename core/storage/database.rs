@@ -48,7 +48,7 @@ impl DatabaseStorage for FileStorage {
         let buffer_size = buffer.borrow().len();
         assert!(buffer_size >= 512);
         assert!(buffer_size <= 65536);
-        assert!((buffer_size & (buffer_size - 1)) == 0);
+        assert_eq!(buffer_size & (buffer_size - 1), 0);
         let pos = (page_idx - 1) * buffer_size;
         self.file.pwrite(pos, buffer, c)?;
         Ok(())

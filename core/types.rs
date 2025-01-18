@@ -660,7 +660,7 @@ mod tests {
         let header_length = record.values.len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
-        assert!(header[0] == header_length as u8); // Header should be larger than number of values
+        assert_eq!(header[0], header_length as u8); // Header should be larger than number of values
 
         // Check that correct serial types were chosen
         assert_eq!(header[1] as u64, u64::from(SerialType::I8));

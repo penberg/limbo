@@ -83,7 +83,7 @@ impl ProgramBuilder {
         let cursor = self.next_free_cursor_id;
         self.next_free_cursor_id += 1;
         self.cursor_ref.push((table_identifier, cursor_type));
-        assert!(self.cursor_ref.len() == self.next_free_cursor_id);
+        assert_eq!(self.cursor_ref.len(), self.next_free_cursor_id);
         cursor
     }
 
