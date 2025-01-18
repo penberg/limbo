@@ -3,6 +3,8 @@ use std::fmt;
 use std::fmt::{Debug, Display};
 use std::rc::Rc;
 
+use crate::LimboError;
+
 pub struct ExternalFunc {
     pub name: String,
     pub func: ExtFunc,
@@ -102,6 +104,7 @@ impl Display for JsonFunc {
 pub enum AggFunc {
     Avg,
     Count,
+    Count0,
     GroupConcat,
     Max,
     Min,
@@ -129,9 +132,25 @@ impl PartialEq for AggFunc {
 }
 
 impl AggFunc {
+    pub fn num_args(&self) -> usize {
+        match self {
+            Self::Avg => 1,
+            Self::Count0 => 0,
+            Self::Count => 1,
+            Self::GroupConcat => 1,
+            Self::Max => 1,
+            Self::Min => 1,
+            Self::StringAgg => 2,
+            Self::Sum => 1,
+            Self::Total => 1,
+            Self::External(func) => func.agg_args().unwrap_or(0),
+        }
+    }
+
     pub fn to_string(&self) -> &str {
         match self {
             Self::Avg => "avg",
+            Self::Count0 => "count",
             Self::Count => "count",
             Self::GroupConcat => "group_concat",
             Self::Max => "max",
@@ -390,19 +409,64 @@ pub struct FuncCtx {
 }
 
 impl Func {
-    pub fn resolve_function(name: &str, arg_count: usize) -> Result<Self, ()> {
+    pub fn resolve_function(name: &str, arg_count: usize) -> Result<Self, LimboError> {
         match name {
-            "avg" => Ok(Self::Agg(AggFunc::Avg)),
-            "count" => Ok(Self::Agg(AggFunc::Count)),
-            "group_concat" => Ok(Self::Agg(AggFunc::GroupConcat)),
-            "max" if arg_count == 0 || arg_count == 1 => Ok(Self::Agg(AggFunc::Max)),
+            "avg" => {
+                if arg_count != 1 {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::Avg))
+            }
+            "count" => {
+                // Handle both COUNT() and COUNT(expr) cases
+                if arg_count == 0 {
+                    Ok(Self::Agg(AggFunc::Count0)) // COUNT() case
+                } else if arg_count == 1 {
+                    Ok(Self::Agg(AggFunc::Count)) // COUNT(expr) case
+                } else {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+            }
+            "group_concat" => {
+                if arg_count != 1 && arg_count != 2 {
+                    println!("{}", arg_count);
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::GroupConcat))
+            }
             "max" if arg_count > 1 => Ok(Self::Scalar(ScalarFunc::Max)),
-            "min" if arg_count == 0 || arg_count == 1 => Ok(Self::Agg(AggFunc::Min)),
+            "max" => {
+                if arg_count < 1 {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::Max))
+            }
             "min" if arg_count > 1 => Ok(Self::Scalar(ScalarFunc::Min)),
+            "min" => {
+                if arg_count < 1 {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::Min))
+            }
             "nullif" if arg_count == 2 => Ok(Self::Scalar(ScalarFunc::Nullif)),
-            "string_agg" => Ok(Self::Agg(AggFunc::StringAgg)),
-            "sum" => Ok(Self::Agg(AggFunc::Sum)),
-            "total" => Ok(Self::Agg(AggFunc::Total)),
+            "string_agg" => {
+                if arg_count != 2 {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::StringAgg))
+            }
+            "sum" => {
+                if arg_count != 1 {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::Sum))
+            }
+            "total" => {
+                if arg_count != 1 {
+                    crate::bail_parse_error!("wrong number of arguments to function {}()", name)
+                }
+                Ok(Self::Agg(AggFunc::Total))
+            }
             "char" => Ok(Self::Scalar(ScalarFunc::Char)),
             "coalesce" => Ok(Self::Scalar(ScalarFunc::Coalesce)),
             "concat" => Ok(Self::Scalar(ScalarFunc::Concat)),
@@ -486,7 +550,7 @@ impl Func {
             "trunc" => Ok(Self::Math(MathFunc::Trunc)),
             #[cfg(not(target_family = "wasm"))]
             "load_extension" => Ok(Self::Scalar(ScalarFunc::LoadExtension)),
-            _ => Err(()),
+            _ => crate::bail_parse_error!("no such function: {}", name),
         }
     }
 }
