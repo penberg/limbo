@@ -454,22 +454,20 @@ fn parse_join(
         assert!(!left_tables.is_empty());
         let right_table = &tables[table_index];
         let right_cols = &right_table.columns();
-        let mut distinct_names = None;
+        let mut distinct_names: Option<ast::DistinctNames> = None;
         // TODO: O(n^2) maybe not great for large tables or big multiway joins
         for right_col in right_cols.iter() {
             let mut found_match = false;
             for left_table in left_tables.iter() {
                 for left_col in left_table.columns().iter() {
                     if left_col.name == right_col.name {
-                        if distinct_names.is_none() {
-                            distinct_names =
-                                Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
-                        } else {
+                        if let Some(distinct_names) = distinct_names.as_mut() {
                             distinct_names
-                                .as_mut()
-                                .unwrap()
                                 .insert(ast::Name(left_col.name.clone()))
                                 .unwrap();
+                        } else {
+                            distinct_names =
+                                Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
                         }
                         found_match = true;
                         break;
@@ -480,10 +478,11 @@ fn parse_join(
                 }
             }
         }
-        if distinct_names.is_none() {
+        if let Some(distinct_names) = distinct_names {
+            Some(ast::JoinConstraint::Using(distinct_names))
+        } else {
             crate::bail_parse_error!("No columns found to NATURAL join on");
         }
-        Some(ast::JoinConstraint::Using(distinct_names.unwrap()))
     } else {
         constraint
     };
