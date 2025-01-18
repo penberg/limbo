@@ -103,7 +103,7 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
             }
             let normalized_id = normalize_ident(id.0.as_str());
 
-            if referenced_tables.len() > 0 {
+            if !referenced_tables.is_empty() {
                 if let Some(row_id_expr) =
                     parse_row_id(&normalized_id, 0, || referenced_tables.len() != 1)?
                 {
