@@ -154,12 +154,9 @@ pub(crate) struct Insert {
 
 impl Insert {
     pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
-        let table = env
-            .tables
-            .iter_mut()
-            .find(|t| t.name == self.table)
-            .unwrap();
-        table.rows.extend(self.values.clone());
+        if let Some(t) = env.tables.iter_mut().find(|t| t.name == self.table) {
+            t.rows.extend(self.values.clone());
+        }
     }
 }
 

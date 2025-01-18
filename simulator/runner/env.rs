@@ -56,6 +56,11 @@ impl SimulatorEnv {
 
         let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
 
+        // Remove existing database file if it exists
+        if db_path.exists() {
+            std::fs::remove_file(db_path).unwrap();
+        }
+
         let db = match Database::open_file(io.clone(), db_path.to_str().unwrap()) {
             Ok(db) => db,
             Err(e) => {

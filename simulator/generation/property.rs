@@ -104,7 +104,6 @@ impl Property {
 
                 let assertion = Interaction::Assertion(Assertion {
                     message: format!(
-                        // todo: add the part inserting ({} = {})",
                         "row [{:?}] not found in table {}",
                         row.iter().map(|v| v.to_string()).collect::<Vec<String>>(),
                         insert.table,

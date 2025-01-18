@@ -43,6 +43,12 @@ pub struct SimulatorCLI {
     pub shrink: bool,
     #[clap(short = 'l', long, help = "load plan from a file")]
     pub load: Option<String>,
+    #[clap(
+        short = 'w',
+        long,
+        help = "enable watch mode that reruns the simulation on file changes"
+    )]
+    pub watch: bool,
 }
 
 impl SimulatorCLI {
@@ -56,6 +62,11 @@ impl SimulatorCLI {
         // todo: fix an issue here where if minimum size is not defined, it prevents setting low maximum sizes.
         if self.minimum_size > self.maximum_size {
             return Err("Minimum size cannot be greater than maximum size".to_string());
+        }
+
+        // Make sure uncompatible options are not set
+        if self.shrink && self.doublecheck {
+            return Err("Cannot use shrink and doublecheck at the same time".to_string());
         }
 
         if let Some(plan_path) = &self.load {

@@ -36,7 +36,7 @@ pub(crate) struct ExecutionHistory {
 }
 
 impl ExecutionHistory {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             history: Vec::new(),
         }
@@ -49,7 +49,7 @@ pub(crate) struct ExecutionResult {
 }
 
 impl ExecutionResult {
-    fn new(history: ExecutionHistory, error: Option<LimboError>) -> Self {
+    pub(crate) fn new(history: ExecutionHistory, error: Option<LimboError>) -> Self {
         Self { history, error }
     }
 }
@@ -156,14 +156,14 @@ fn execute_plan(
 /// `execute_interaction` uses this type in conjunction with a result, where
 /// the `Err` case indicates a full-stop due to a bug, and the `Ok` case
 /// indicates the next step in the plan.
-enum ExecutionContinuation {
+pub(crate) enum ExecutionContinuation {
     /// Default continuation, execute the next interaction.
     NextInteraction,
     /// Typically used in the case of preconditions failures, skip to the next property.
     NextProperty,
 }
 
-fn execute_interaction(
+pub(crate) fn execute_interaction(
     env: &mut SimulatorEnv,
     connection_index: usize,
     interaction: &Interaction,
