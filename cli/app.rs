@@ -434,9 +434,6 @@ impl Limbo {
         line: &str,
         rl: &mut rustyline::DefaultEditor,
     ) -> anyhow::Result<()> {
-        if line.trim_start().starts_with("--") {
-            return Ok(());
-        }
         if self.input_buff.is_empty() {
             if line.is_empty() {
                 return Ok(());
@@ -448,6 +445,42 @@ impl Limbo {
                 return Ok(());
             }
         }
+        if line.trim_start().starts_with("--") {
+            if let Some(remaining) = line.split_once('\n') {
+                let after_comment = remaining.1.trim();
+                if !after_comment.is_empty() {
+                    rl.add_history_entry(after_comment.to_owned())?;
+                    self.buffer_input(after_comment);
+
+                    if after_comment.ends_with(';') {
+                        if self.opts.echo {
+                            let _ = self.writeln(after_comment);
+                        }
+                        let conn = self.conn.clone();
+                        let runner = conn.query_runner(after_comment.as_bytes());
+                        for output in runner {
+                            if let Err(e) = self.print_query_result(after_comment, output) {
+                                let _ = self.writeln(e.to_string());
+                            }
+                        }
+                        self.reset_input();
+                    } else {
+                        self.set_multiline_prompt();
+                    }
+                    self.interrupt_count.store(0, Ordering::SeqCst);
+                    return Ok(());
+                }
+            }
+            return Ok(());
+        }
+
+        if let Some(comment_pos) = line.find("--") {
+            let before_comment = line[..comment_pos].trim();
+            if !before_comment.is_empty() {
+                return self.handle_input_line(before_comment, rl);
+            }
+        }
+
         if line.ends_with(';') {
             self.buffer_input(line);
             let buff = self.input_buff.clone();
