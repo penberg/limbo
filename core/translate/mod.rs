@@ -291,12 +291,12 @@ fn check_automatic_pk_index_required(
 
                         for result in primary_key_column_results {
                             if let Err(e) = result {
-                                crate::bail_parse_error!("{}", e);
+                                bail_parse_error!("{}", e);
                             }
                             let column_name = result.unwrap();
                             let column_def = columns.get(&ast::Name(column_name.clone()));
                             if column_def.is_none() {
-                                crate::bail_parse_error!("No such column: {}", column_name);
+                                bail_parse_error!("No such column: {}", column_name);
                             }
 
                             if matches!(
@@ -326,10 +326,7 @@ fn check_automatic_pk_index_required(
                         ast::ColumnConstraint::PrimaryKey { .. }
                     ) {
                         if primary_key_definition.is_some() {
-                            crate::bail_parse_error!(
-                                "table {} has more than one primary key",
-                                tbl_name
-                            );
+                            bail_parse_error!("table {} has more than one primary key", tbl_name);
                         }
                         let typename = col_def.col_type.as_ref().map(|t| t.name.as_str());
                         primary_key_definition =
@@ -340,7 +337,7 @@ fn check_automatic_pk_index_required(
 
             // Check if table has rowid
             if options.contains(ast::TableOptions::WITHOUT_ROWID) {
-                crate::bail_parse_error!("WITHOUT ROWID tables are not supported yet");
+                bail_parse_error!("WITHOUT ROWID tables are not supported yet");
             }
 
             // Check if we need an automatic index
@@ -364,7 +361,7 @@ fn check_automatic_pk_index_required(
             }
         }
         ast::CreateTableBody::AsSelect(_) => {
-            crate::bail_parse_error!("CREATE TABLE AS SELECT not supported yet")
+            bail_parse_error!("CREATE TABLE AS SELECT not supported yet")
         }
     }
 }

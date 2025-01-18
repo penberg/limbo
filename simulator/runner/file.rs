@@ -55,7 +55,7 @@ impl SimulatorFile {
     }
 }
 
-impl limbo_core::File for SimulatorFile {
+impl File for SimulatorFile {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
         if *self.fault.borrow() {
             return Err(limbo_core::LimboError::InternalError(
@@ -88,7 +88,7 @@ impl limbo_core::File for SimulatorFile {
     fn pwrite(
         &self,
         pos: usize,
-        buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
+        buffer: Rc<RefCell<limbo_core::Buffer>>,
         c: Rc<limbo_core::Completion>,
     ) -> Result<()> {
         *self.nr_pwrite_calls.borrow_mut() += 1;

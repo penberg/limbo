@@ -146,13 +146,13 @@ impl OwnedValue {
                 let Some(text) = v.to_text() else {
                     return OwnedValue::Null;
                 };
-                OwnedValue::build_text(std::rc::Rc::new(text))
+                OwnedValue::build_text(Rc::new(text))
             }
             ExtValueType::Blob => {
                 let Some(blob) = v.to_blob() else {
                     return OwnedValue::Null;
                 };
-                OwnedValue::Blob(std::rc::Rc::new(blob))
+                OwnedValue::Blob(Rc::new(blob))
             }
             ExtValueType::Error => {
                 let Some(err) = v.to_text() else {
@@ -241,7 +241,7 @@ impl PartialOrd<OwnedValue> for OwnedValue {
     }
 }
 
-impl std::cmp::PartialOrd<AggContext> for AggContext {
+impl PartialOrd<AggContext> for AggContext {
     fn partial_cmp(&self, other: &AggContext) -> Option<std::cmp::Ordering> {
         match (self, other) {
             (Self::Avg(a, _), Self::Avg(b, _)) => a.partial_cmp(b),
@@ -255,9 +255,9 @@ impl std::cmp::PartialOrd<AggContext> for AggContext {
     }
 }
 
-impl std::cmp::Eq for OwnedValue {}
+impl Eq for OwnedValue {}
 
-impl std::cmp::Ord for OwnedValue {
+impl Ord for OwnedValue {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap()
     }

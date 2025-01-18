@@ -197,7 +197,7 @@ struct OngoingCheckpoint {
 
 #[allow(dead_code)]
 pub struct WalFile {
-    io: Arc<dyn crate::io::IO>,
+    io: Arc<dyn IO>,
     buffer_pool: Rc<BufferPool>,
 
     sync_state: RefCell<SyncState>,
@@ -222,7 +222,7 @@ pub struct WalFile {
 /// that needs to be communicated between threads so this struct does the job.
 #[allow(dead_code)]
 pub struct WalFileShared {
-    wal_header: Arc<RwLock<sqlite3_ondisk::WalHeader>>,
+    wal_header: Arc<RwLock<WalHeader>>,
     min_frame: u64,
     max_frame: u64,
     nbackfills: u64,
@@ -293,7 +293,7 @@ impl Wal for WalFile {
         self.max_frame_read_lock_index = max_read_mark_index as usize;
         self.max_frame = max_read_mark as u64;
         self.min_frame = shared.nbackfills + 1;
-        log::trace!(
+        trace!(
             "begin_read_tx(min_frame={}, max_frame={}, lock={})",
             self.min_frame,
             self.max_frame,
@@ -424,7 +424,7 @@ impl Wal for WalFile {
         );
         'checkpoint_loop: loop {
             let state = self.ongoing_checkpoint.state;
-            log::debug!("checkpoint(state={:?})", state);
+            debug!("checkpoint(state={:?})", state);
             match state {
                 CheckpointState::Start => {
                     // TODO(pere): check what frames are safe to checkpoint between many readers!
@@ -447,7 +447,7 @@ impl Wal for WalFile {
                     self.ongoing_checkpoint.max_frame = max_safe_frame;
                     self.ongoing_checkpoint.current_page = 0;
                     self.ongoing_checkpoint.state = CheckpointState::ReadFrame;
-                    log::trace!(
+                    trace!(
                         "checkpoint_start(min_frame={}, max_frame={})",
                         self.ongoing_checkpoint.max_frame,
                         self.ongoing_checkpoint.min_frame
@@ -475,11 +475,9 @@ impl Wal for WalFile {
                         if *frame >= self.ongoing_checkpoint.min_frame
                             && *frame <= self.ongoing_checkpoint.max_frame
                         {
-                            log::debug!(
+                            debug!(
                                 "checkpoint page(state={:?}, page={}, frame={})",
-                                state,
-                                page,
-                                *frame
+                                state, page, *frame
                             );
                             self.ongoing_checkpoint.page.get().id = page as usize;
 
@@ -553,13 +551,13 @@ impl Wal for WalFile {
         match state {
             SyncState::NotSyncing => {
                 let shared = self.shared.write().unwrap();
-                log::debug!("wal_sync");
+                debug!("wal_sync");
                 {
                     let syncing = self.syncing.clone();
                     *syncing.borrow_mut() = true;
                     let completion = Completion::Sync(SyncCompletion {
                         complete: Box::new(move |_| {
-                            log::debug!("wal_sync finish");
+                            debug!("wal_sync finish");
                             *syncing.borrow_mut() = false;
                         }),
                     });

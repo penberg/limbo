@@ -716,7 +716,7 @@ impl BTreeCursor {
                     // insert
                     let overflow = {
                         let contents = page.get().contents.as_mut().unwrap();
-                        log::debug!(
+                        debug!(
                             "insert_into_page(overflow, cell_count={})",
                             contents.cell_count()
                         );
@@ -1353,7 +1353,7 @@ impl BTreeCursor {
 
     /// Defragment a page. This means packing all the cells to the end of the page.
     fn defragment_page(&self, page: &PageContent, db_header: Ref<DatabaseHeader>) {
-        log::debug!("defragment_page");
+        debug!("defragment_page");
         let cloned_page = page.clone();
         // TODO(pere): usable space should include offset probably
         let usable_space = (db_header.page_size - db_header.reserved_space as u16) as u64;
@@ -1555,7 +1555,7 @@ impl BTreeCursor {
         }
 
         let payload_overflow_threshold_max = self.payload_overflow_threshold_max(page_type.clone());
-        log::debug!(
+        debug!(
             "fill_cell_payload(record_size={}, payload_overflow_threshold_max={})",
             record_buf.len(),
             payload_overflow_threshold_max
@@ -1565,7 +1565,7 @@ impl BTreeCursor {
             cell_payload.extend_from_slice(record_buf.as_slice());
             return;
         }
-        log::debug!("fill_cell_payload(overflow)");
+        debug!("fill_cell_payload(overflow)");
 
         let payload_overflow_threshold_min = self.payload_overflow_threshold_min(page_type);
         // see e.g. https://github.com/sqlite/sqlite/blob/9591d3fe93936533c8c3b0dc4d025ac999539e11/src/dbstat.c#L371

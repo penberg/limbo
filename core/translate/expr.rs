@@ -1771,7 +1771,7 @@ fn wrap_eval_jump_expr(
 }
 
 pub fn maybe_apply_affinity(col_type: Type, target_register: usize, program: &mut ProgramBuilder) {
-    if col_type == crate::schema::Type::Real {
+    if col_type == Type::Real {
         program.emit_insn(Insn::RealAffinity {
             register: target_register,
         })

@@ -391,7 +391,7 @@ mod tests {
         // threshold is 1000 by default
 
         fn insert(i: usize, conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
-            log::debug!("inserting {}", i);
+            debug!("inserting {}", i);
             let insert_query = format!("INSERT INTO test VALUES ({})", i);
             match conn.query(insert_query) {
                 Ok(Some(ref mut rows)) => loop {
@@ -408,13 +408,13 @@ mod tests {
                     eprintln!("{}", err);
                 }
             };
-            log::debug!("inserted {}", i);
+            debug!("inserted {}", i);
             tmp_db.io.run_once()?;
             Ok(())
         }
 
         fn count(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<usize> {
-            log::debug!("counting");
+            debug!("counting");
             let list_query = "SELECT count(x) FROM test";
             loop {
                 if let Some(ref mut rows) = conn.query(list_query).unwrap() {
@@ -426,7 +426,7 @@ mod tests {
                                     Value::Integer(i) => *i as i32,
                                     _ => unreachable!(),
                                 };
-                                log::debug!("counted {}", count);
+                                debug!("counted {}", count);
                                 return Ok(count as usize);
                             }
                             StepResult::IO => {

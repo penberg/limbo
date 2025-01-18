@@ -44,7 +44,7 @@ impl Arbitrary for ColumnType {
 }
 
 impl ArbitraryFrom<&Table> for Vec<Value> {
-    fn arbitrary_from<R: rand::Rng>(rng: &mut R, table: &Table) -> Self {
+    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
         let mut row = Vec::new();
         for column in table.columns.iter() {
             let value = Value::arbitrary_from(rng, &column.column_type);

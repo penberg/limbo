@@ -195,7 +195,7 @@ pub enum ScalarFunc {
 }
 
 impl Display for ScalarFunc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
             Self::Cast => "cast".to_string(),
             Self::Changes => "changes".to_string(),
@@ -324,7 +324,7 @@ impl MathFunc {
 }
 
 impl Display for MathFunc {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
             Self::Acos => "acos".to_string(),
             Self::Acosh => "acosh".to_string(),

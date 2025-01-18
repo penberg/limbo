@@ -1401,7 +1401,7 @@ mod tests {
     fn format(dt: NaiveDateTime) -> String {
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     }
-    fn weekday_sunday_based(dt: &chrono::NaiveDateTime) -> u32 {
+    fn weekday_sunday_based(dt: &NaiveDateTime) -> u32 {
         dt.weekday().num_days_from_sunday()
     }
 
@@ -1438,8 +1438,7 @@ mod tests {
             &[text("2023-06-15 12:30:45"), text("subsec")],
             DateTimeOutput::Time,
         );
-        let result =
-            chrono::NaiveTime::parse_from_str(&result.to_string(), "%H:%M:%S%.3f").unwrap();
+        let result = NaiveTime::parse_from_str(&result.to_string(), "%H:%M:%S%.3f").unwrap();
         assert_eq!(time.time(), result);
     }
 
@@ -1537,8 +1536,7 @@ mod tests {
             DateTimeOutput::DateTime,
         );
         let result =
-            chrono::NaiveDateTime::parse_from_str(&result.to_string(), "%Y-%m-%d %H:%M:%S%.3f")
-                .unwrap();
+            NaiveDateTime::parse_from_str(&result.to_string(), "%Y-%m-%d %H:%M:%S%.3f").unwrap();
         assert_eq!(expected, result);
     }
 

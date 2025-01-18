@@ -903,12 +903,12 @@ impl Program {
                     let connection = self.connection.upgrade().unwrap();
                     let current_state = connection.transaction_state.borrow().clone();
                     let (new_transaction_state, updated) = match (&current_state, write) {
-                        (crate::TransactionState::Write, true) => (TransactionState::Write, false),
-                        (crate::TransactionState::Write, false) => (TransactionState::Write, false),
-                        (crate::TransactionState::Read, true) => (TransactionState::Write, true),
-                        (crate::TransactionState::Read, false) => (TransactionState::Read, false),
-                        (crate::TransactionState::None, true) => (TransactionState::Write, true),
-                        (crate::TransactionState::None, false) => (TransactionState::Read, true),
+                        (TransactionState::Write, true) => (TransactionState::Write, false),
+                        (TransactionState::Write, false) => (TransactionState::Write, false),
+                        (TransactionState::Read, true) => (TransactionState::Write, true),
+                        (TransactionState::Read, false) => (TransactionState::Read, false),
+                        (TransactionState::None, true) => (TransactionState::Write, true),
+                        (TransactionState::None, false) => (TransactionState::Read, true),
                     };
 
                     if updated && matches!(current_state, TransactionState::None) {
@@ -1476,7 +1476,7 @@ impl Program {
                             _ => unreachable!(),
                         })
                         .collect();
-                    let cursor = sorter::Sorter::new(order);
+                    let cursor = Sorter::new(order);
                     sorter_cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
@@ -1710,7 +1710,7 @@ impl Program {
                                             &state.registers[*start_reg + 2],
                                         ) {
                                             Ok(x) => x,
-                                            Err(e) => return Result::Err(e),
+                                            Err(e) => return Err(e),
                                         };
 
                                         OwnedValue::Integer(exec_like_with_escape(
