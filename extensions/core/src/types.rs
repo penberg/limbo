@@ -46,7 +46,7 @@ impl Display for ResultCode {
 }
 
 #[repr(C)]
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Debug, Eq, Clone, Copy)]
 pub enum ValueType {
     Null,
     Integer,
@@ -64,6 +64,9 @@ pub struct Value {
 
 impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.value.is_null() {
+            return write!(f, "{:?}: Null", self.value_type);
+        }
         match self.value_type {
             ValueType::Null => write!(f, "Value {{ Null }}"),
             ValueType::Integer => write!(f, "Value {{ Integer: {} }}", unsafe {
