@@ -116,21 +116,20 @@ pub fn prepare_select_plan(
                                     args_count,
                                 ) {
                                     Ok(Func::Agg(f)) => {
-                                        let agg_args: Result<Vec<Expr>, LimboError> = match args {
-                                            // if args is None and its COUNT
-                                            None if name.0.to_uppercase() == "COUNT" => {
-                                                let count_args = vec![ast::Expr::Literal(
-                                                    ast::Literal::Numeric("1".to_string()),
-                                                )];
-                                                Ok(count_args)
-                                            }
-                                            // if args is None and the function is not COUNT
-                                            None => crate::bail_parse_error!(
-                                                "Aggregate function {} requires arguments",
-                                                name.0
-                                            ),
-                                            Some(args) => Ok(args.clone()),
-                                        };
+                                        let agg_args: Result<Vec<Expr>, LimboError> =
+                                            match (args, &f) {
+                                                (None, crate::function::AggFunc::Count0) => {
+                                                    // COUNT() case
+                                                    Ok(vec![ast::Expr::Literal(
+                                                        ast::Literal::Numeric("1".to_string()),
+                                                    )])
+                                                }
+                                                (None, _) => crate::bail_parse_error!(
+                                                    "Aggregate function {} requires arguments",
+                                                    name.0
+                                                ),
+                                                (Some(args), _) => Ok(args.clone()),
+                                            };
 
                                         let agg = Aggregate {
                                             func: f,
@@ -163,8 +162,12 @@ pub fn prepare_select_plan(
                                             contains_aggregates,
                                         });
                                     }
-                                    Err(_) => {
-                                        if syms.functions.contains_key(&name.0) {
+                                    Err(e) => {
+                                        // Only handle the "no such function" case specially
+                                        // All other errors should be propagated as-is
+                                        if e.to_string().starts_with("no such function: ")
+                                            && syms.functions.contains_key(&name.0)
+                                        {
                                             let contains_aggregates = resolve_aggregates(
                                                 expr,
                                                 &mut aggregate_expressions,
@@ -179,7 +182,10 @@ pub fn prepare_select_plan(
                                                 expr: expr.clone(),
                                                 contains_aggregates,
                                             });
+                                            continue; // Continue with the normal flow instead of returning
                                         }
+                                        // Propagate the original error
+                                        return Err(e);
                                     }
                                 }
                             }

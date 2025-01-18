@@ -74,7 +74,7 @@ pub fn translate_aggregation_step(
             });
             target_register
         }
-        AggFunc::Count => {
+        AggFunc::Count | AggFunc::Count0 => {
             let expr_reg = if agg.args.is_empty() {
                 program.alloc_register()
             } else {
@@ -87,7 +87,11 @@ pub fn translate_aggregation_step(
                 acc_reg: target_register,
                 col: expr_reg,
                 delimiter: 0,
-                func: AggFunc::Count,
+                func: if matches!(agg.func, AggFunc::Count0) {
+                    AggFunc::Count0
+                } else {
+                    AggFunc::Count
+                },
             });
             target_register
         }
