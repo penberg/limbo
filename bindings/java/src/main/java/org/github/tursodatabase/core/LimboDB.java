@@ -71,12 +71,6 @@ public final class LimboDB extends AbstractDB {
     @Override
     protected native void close0() throws SQLException;
 
-    @Override
-    public int exec(String sql) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
-    }
-
     // TODO: add support for JNI
     native int execUtf8(byte[] sqlUtf8) throws SQLException;
 
@@ -109,10 +103,6 @@ public final class LimboDB extends AbstractDB {
     }
 
     private native long connect0(byte[] path, long databasePtr) throws SQLException;
-
-    // TODO: add support for JNI
-    @Override
-    protected native int finalize(long stmt);
 
     @VisibleForTesting
     native void throwJavaException(int errorCode) throws SQLException;

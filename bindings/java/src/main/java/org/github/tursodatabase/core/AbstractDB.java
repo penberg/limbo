@@ -30,18 +30,6 @@ public abstract class AbstractDB {
     public abstract void interrupt() throws SQLException;
 
     /**
-     * Executes an SQL statement.
-     *
-     * @param sql        SQL statement to be executed.
-     * @param autoCommit Whether to auto-commit the transaction.
-     * @throws SQLException if a database access error occurs.
-     */
-    public final synchronized void exec(String sql, boolean autoCommit) throws SQLException {
-        // TODO: add implementation
-        throw new SQLFeatureNotSupportedException();
-    }
-
-    /**
      * Creates an SQLite interface to a database for the given connection.
      *
      * @param openFlags Flags for opening the database.
@@ -87,22 +75,4 @@ public abstract class AbstractDB {
      * @throws SQLException if a database access error occurs.
      */
     protected abstract void close0() throws SQLException;
-
-    /**
-     * Compiles, evaluates, executes and commits an SQL statement.
-     *
-     * @param sql An SQL statement.
-     * @return Result code.
-     * @throws SQLException if a database access error occurs.
-     */
-    public abstract int exec(String sql) throws SQLException;
-
-    /**
-     * Destroys a prepared statement.
-     *
-     * @param stmt Pointer to the statement pointer.
-     * @return Result code.
-     * @throws SQLException if a database access error occurs.
-     */
-    protected abstract int finalize(long stmt) throws SQLException;
 }
