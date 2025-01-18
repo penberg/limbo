@@ -443,8 +443,6 @@ mod tests {
 
         {
             let conn = tmp_db.connect_limbo();
-            insert(1, &conn, &tmp_db).unwrap();
-            assert_eq!(count(&conn, &tmp_db).unwrap(), 1);
             insert(1, &conn, &tmp_db)?;
             assert_eq!(count(&conn, &tmp_db)?, 1);
             conn.close()?;
