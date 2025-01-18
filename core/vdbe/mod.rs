@@ -3180,10 +3180,7 @@ fn checked_cast_text_to_numeric(text: &str) -> std::result::Result<OwnedValue, (
 
 // try casting to numeric if not possible return integer 0
 fn cast_text_to_numeric(text: &str) -> OwnedValue {
-    match checked_cast_text_to_numeric(text) {
-        Ok(value) => value,
-        Err(_) => OwnedValue::Integer(0),
-    }
+    checked_cast_text_to_numeric(text).unwrap_or(OwnedValue::Integer(0))
 }
 
 // Check if float can be losslessly converted to 51-bit integer

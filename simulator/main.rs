@@ -64,10 +64,7 @@ fn main() -> Result<(), String> {
     let cli_opts = SimulatorCLI::parse();
     cli_opts.validate()?;
 
-    let seed = match cli_opts.seed {
-        Some(seed) => seed,
-        None => rand::thread_rng().next_u64(),
-    };
+    let seed = cli_opts.seed.unwrap_or_else(|| thread_rng().next_u64());
 
     let output_dir = match &cli_opts.output_dir {
         Some(dir) => Path::new(dir).to_path_buf(),
