@@ -211,7 +211,6 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
     let step_fn_name = format_ident!("{}_step", struct_name);
     let finalize_fn_name = format_ident!("{}_finalize", struct_name);
     let init_fn_name = format_ident!("{}_init", struct_name);
-    let free_fn_name = format_ident!("{}_free", struct_name);
     let register_fn_name = format_ident!("register_{}", struct_name);
 
     let expanded = quote! {
@@ -221,18 +220,8 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
                 let state = Box::new(<#struct_name as ::limbo_ext::AggFunc>::State::default());
                 let ctx = Box::new(::limbo_ext::AggCtx {
                     state: Box::into_raw(state) as *mut ::std::os::raw::c_void,
-                    free: Some(#struct_name::#free_fn_name),
                 });
                 Box::into_raw(ctx)
-            }
-
-            #[no_mangle]
-            pub extern "C" fn #free_fn_name(state: *mut ::std::os::raw::c_void) {
-                if !state.is_null() {
-                    unsafe {
-                        let _ = Box::from_raw(state as *mut <#struct_name as ::limbo_ext::AggFunc>::State);
-                    }
-                }
             }
 
             #[no_mangle]

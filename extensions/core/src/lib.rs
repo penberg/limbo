@@ -43,7 +43,6 @@ pub trait Scalar {
 #[repr(C)]
 pub struct AggCtx {
     pub state: *mut c_void,
-    pub free: Option<extern "C" fn(*mut c_void)>,
 }
 
 pub trait AggFunc {
