@@ -1,5 +1,3 @@
-use std::ops::Deref;
-
 use super::emitter::emit_program;
 use super::expr::get_name;
 use super::plan::SelectQueryType;
