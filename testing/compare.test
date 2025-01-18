@@ -161,3 +161,24 @@ foreach {testname lhs rhs ans} {
 } {
   do_execsql_test compare-is-$testname "SELECT $lhs is $rhs" $::ans
 }
+
+foreach {testname lhs rhs ans} {
+  int-int-1               8     1       1 
+  int-int-2               8     8       0
+} {
+  do_execsql_test compare-is-not-$testname "SELECT $lhs is not $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+  float-float-1             8.0     1.0     1
+  float-float-2             8.0     8.0     0
+} {
+  do_execsql_test compare-is-not-$testname "SELECT $lhs is not $rhs" $::ans
+}
+
+foreach {testname lhs rhs ans} {
+   text-text-1                'a'       'b'    1
+   text-text-2                'a'       'a'    0
+} {
+  do_execsql_test compare-is-not-$testname "SELECT $lhs is not $rhs" $::ans
+}
