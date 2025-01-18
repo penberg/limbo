@@ -362,10 +362,18 @@ impl Program {
                     state.registers[*dest] = exec_bit_not(&state.registers[*reg]);
                     state.pc += 1;
                 }
-                Insn::Checkpoint { reg: _, dest } => {
+                Insn::Checkpoint { database: _, checkpoint_mode: _, dest } => {
                     // Write 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
                     // fixme currently hard coded not implemented
-                    state.registers[*dest] = OwnedValue::Integer(0);
+                    let result = self.connection
+                        .upgrade()
+                        .unwrap()
+                        .checkpoint();
+                    match result {
+                        Ok(()) => state.registers[*dest] = OwnedValue::Integer(0),
+                        Err(err) => state.registers[*dest] = OwnedValue::Integer(1)
+                    }
+
                     state.pc += 1;
                 }
                 Insn::Null { dest, dest_end } => {

@@ -25,6 +25,7 @@ pub const NO_LOCK: u32 = 0;
 pub const SHARED_LOCK: u32 = 1;
 pub const WRITE_LOCK: u32 = 2;
 
+#[derive(Debug)]
 pub enum CheckpointMode {
     Passive,
     Full,

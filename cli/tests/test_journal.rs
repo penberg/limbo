@@ -19,7 +19,6 @@ mod tests {
         Ok(())
     }
 
-    #[ignore = "wal checkpoint not yet implemented"]
     #[test]
     fn test_pragma_wal_checkpoint() -> Result<(), Error> {
         let mut child = spawn_command(run_cli(), Some(1000))?;

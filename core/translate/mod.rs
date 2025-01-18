@@ -37,6 +37,7 @@ use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
 use std::str::FromStr;
+use crate::storage::wal::CheckpointMode;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -624,7 +625,8 @@ fn query_pragma(
         }
         PragmaName::WalCheckpoint => {
             program.emit_insn(Insn::Checkpoint {
-                reg: 12, // TODO fix hard-coded
+                database: 0,
+                checkpoint_mode: CheckpointMode::Passive,
                 dest: register,
             });
         }

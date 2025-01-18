@@ -2,6 +2,7 @@ use crate::vdbe::builder::CursorType;
 
 use super::{Insn, InsnReference, OwnedValue, Program};
 use std::rc::Rc;
+use crate::storage::wal::CheckpointMode;
 
 pub fn insn_to_str(
     program: &Program,
@@ -84,14 +85,14 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=~r[{}]", dest, reg),
             ),
-            Insn::Checkpoint { reg, dest } => (
+            Insn::Checkpoint { database, checkpoint_mode: _, dest } => (
                 "Checkpoint",
-                *reg as i32,
+                *database as i32,
                 *dest as i32,
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("r[{}]=~r[{}]", dest, reg),
+                format!("r[{}]=~r[{}]", dest, database),
             ),
             Insn::Remainder { lhs, rhs, dest } => (
                 "Remainder",
