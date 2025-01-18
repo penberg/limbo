@@ -1064,7 +1064,7 @@ version = "0.0.12"
 dependencies = [
  "jni",
  "limbo_core",
- "thiserror 2.0.9",
+ "thiserror 2.0.11",
 ]
 
 [[package]]

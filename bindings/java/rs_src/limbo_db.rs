@@ -1,12 +1,12 @@
 use crate::errors::{LimboError, Result, LIMBO_ETC};
 use crate::limbo_connection::LimboConnection;
+use crate::utils::set_err_msg_and_throw_exception;
 use jni::objects::{JByteArray, JObject};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
 use limbo_core::Database;
 use std::rc::Rc;
 use std::sync::Arc;
-use crate::utils::set_err_msg_and_throw_exception;
 
 struct LimboDB {
     db: Arc<Database>,
@@ -127,10 +127,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
             }
         },
     };
-    let conn = LimboConnection::new(
-        db.db.connect(),
-        io,
-    );
+    let conn = LimboConnection::new(db.db.connect(), io);
 
     conn.to_ptr()
 }

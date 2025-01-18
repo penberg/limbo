@@ -11,6 +11,7 @@ use limbo_core::Connection;
 use std::rc::Rc;
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct LimboConnection {
     pub(crate) conn: Rc<Connection>,
     pub(crate) io: Rc<dyn limbo_core::IO>,
@@ -39,20 +40,6 @@ pub fn to_limbo_connection(ptr: jlong) -> Result<&'static mut LimboConnection> {
     }
 }
 
-/// Returns a pointer to a `Cursor` object.
-///
-/// The Java application will pass this pointer to native functions,
-/// which will use it to reference the `Cursor` object.
-///
-/// # Arguments
-///
-/// * `_env` - The JNI environment pointer.
-/// * `_class` - The Java class calling this function.
-/// * `connection_ptr` - A pointer to the `Connection` object.
-///
-/// # Returns
-///
-/// A `jlong` representing the pointer to the newly created `Cursor` object.
 #[no_mangle]
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepareUtf8<'local>(
     mut env: JNIEnv<'local>,
