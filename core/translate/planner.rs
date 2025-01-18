@@ -12,7 +12,7 @@ use crate::{
 };
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit};
 
-pub const ROWID: &'static str = "rowid";
+pub const ROWID: &str = "rowid";
 
 pub struct OperatorIdCounter {
     id: usize,

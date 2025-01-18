@@ -190,7 +190,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
         let json = get_json_value(value)?;
         let extracted = json_extract_single(&json, &paths[0], true)?.unwrap_or_else(|| &Val::Null);
 
-        return convert_json_to_db_type(&extracted, false);
+        return convert_json_to_db_type(extracted, false);
     }
 
     let json = get_json_value(value)?;
@@ -369,7 +369,7 @@ fn json_extract_single<'a>(
         }
     }
 
-    Ok(Some(&current_element))
+    Ok(Some(current_element))
 }
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {

@@ -579,14 +579,14 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                     if parts[0].len() == digits_in_date {
                         let date = parse_modifier_date(parts[0])?;
                         Ok(Modifier::DateOffset {
-                            years: sign * date.year() as i32,
+                            years: sign * date.year(),
                             months: sign * date.month() as i32,
                             days: sign * date.day() as i32,
                         })
                     } else {
                         // time values are either 12, 8 or 5 digits
                         let time = parse_modifier_time(parts[0])?;
-                        let time_delta = (sign * (time.num_seconds_from_midnight() as i32)) as i32;
+                        let time_delta = sign * (time.num_seconds_from_midnight() as i32);
                         Ok(Modifier::TimeOffset(TimeDelta::seconds(time_delta.into())))
                     }
                 }
@@ -596,7 +596,7 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                     // Convert time to total seconds (with sign)
                     let time_delta = sign * (time.num_seconds_from_midnight() as i32);
                     Ok(Modifier::DateTimeOffset {
-                        years: sign * (date.year() as i32),
+                        years: sign * (date.year()),
                         months: sign * (date.month() as i32),
                         days: sign * date.day() as i32,
                         seconds: time_delta,

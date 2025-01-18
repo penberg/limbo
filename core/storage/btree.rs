@@ -167,7 +167,7 @@ impl BTreeCursor {
 
     /// Check if the table is empty.
     /// This is done by checking if the root page has no cells.
-    fn is_empty_table(&mut self) -> Result<CursorResult<bool>> {
+    fn is_empty_table(&self) -> Result<CursorResult<bool>> {
         let page = self.pager.read_page(self.root_page)?;
         return_if_locked!(page);
 
@@ -473,7 +473,7 @@ impl BTreeCursor {
                                 &record.values[..record.values.len() - 1] >= &index_key.values
                             }
                             SeekOp::EQ => {
-                                &record.values[..record.values.len() - 1] == &index_key.values
+                                record.values[..record.values.len() - 1] == index_key.values
                             }
                         };
                         self.stack.advance();

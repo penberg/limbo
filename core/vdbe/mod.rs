@@ -2311,7 +2311,7 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
             addr,
             insn,
             String::new(),
-            program.comments.get(&(addr as u32)).copied()
+            program.comments.get(&{ addr }).copied()
         )
     );
 }
@@ -2322,7 +2322,7 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
         addr,
         insn,
         indent,
-        program.comments.get(&(addr as u32)).copied(),
+        program.comments.get(&{ addr }).copied(),
     );
     println!("{}", s);
 }

@@ -76,7 +76,7 @@ impl Parameters {
                 log::trace!("anonymous parameter at {index}");
                 index
             }
-            name if name.starts_with(&['$', ':', '@', '#']) => {
+            name if name.starts_with(['$', ':', '@', '#']) => {
                 match self
                     .list
                     .iter()
