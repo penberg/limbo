@@ -155,7 +155,7 @@ impl OwnedValue {
                 OwnedValue::Blob(std::rc::Rc::new(blob))
             }
             ExtValueType::Error => {
-                let Some(err) = v.to_text() else {
+                let Some(err) = v.to_error() else {
                     return OwnedValue::Null;
                 };
                 OwnedValue::Text(LimboText::new(Rc::new(err)))

@@ -1,4 +1,4 @@
-use limbo_ext::{register_extension, AggFunc, AggregateDerive, Value};
+use limbo_ext::{register_extension, AggFunc, AggregateDerive, ResultCode, Value};
 
 register_extension! {
     aggregates: { Median, Percentile, PercentileCont, PercentileDisc }
@@ -9,12 +9,8 @@ struct Median;
 
 impl AggFunc for Median {
     type State = Vec<f64>;
-    fn name(&self) -> &'static str {
-        "median"
-    }
-    fn args(&self) -> i32 {
-        1
-    }
+    const NAME: &'static str = "median";
+    const ARGS: i32 = 1;
 
     fn step(state: &mut Self::State, args: &[Value]) {
         if let Some(val) = args.first().and_then(Value::to_float) {
@@ -45,15 +41,10 @@ impl AggFunc for Median {
 struct Percentile;
 
 impl AggFunc for Percentile {
-    type State = (Vec<f64>, Option<f64>, Option<String>);
+    type State = (Vec<f64>, Option<f64>, Option<()>);
 
-    fn name(&self) -> &'static str {
-        "percentile"
-    }
-
-    fn args(&self) -> i32 {
-        2
-    }
+    const NAME: &'static str = "percentile";
+    const ARGS: i32 = 2;
 
     fn step(state: &mut Self::State, args: &[Value]) {
         let (values, p_value, err_value) = state;
@@ -62,13 +53,13 @@ impl AggFunc for Percentile {
             args.get(1).and_then(Value::to_float),
         ) {
             if !(0.0..=100.0).contains(&p) {
-                err_value.get_or_insert("percentile value out of range".to_string());
+                err_value.get_or_insert(());
                 return;
             }
 
             if let Some(existing_p) = *p_value {
                 if (existing_p - p).abs() >= 0.001 {
-                    err_value.get_or_insert("percentile value out of range".to_string());
+                    err_value.get_or_insert(());
                     return;
                 }
             } else {
@@ -83,8 +74,8 @@ impl AggFunc for Percentile {
         if values.is_empty() {
             return Value::null();
         }
-        if let Some(err_value) = err_value {
-            return Value::error(err_value.clone());
+        if err_value.is_some() {
+            return Value::error(ResultCode::Error);
         }
         if values.len() == 1 {
             return Value::from_float(values[0]);
@@ -110,15 +101,10 @@ impl AggFunc for Percentile {
 struct PercentileCont;
 
 impl AggFunc for PercentileCont {
-    type State = (Vec<f64>, Option<f64>, Option<String>);
+    type State = (Vec<f64>, Option<f64>, Option<()>);
 
-    fn name(&self) -> &'static str {
-        "percentile_cont"
-    }
-
-    fn args(&self) -> i32 {
-        2
-    }
+    const NAME: &'static str = "percentile_cont";
+    const ARGS: i32 = 2;
 
     fn step(state: &mut Self::State, args: &[Value]) {
         let (values, p_value, err_state) = state;
@@ -127,13 +113,13 @@ impl AggFunc for PercentileCont {
             args.get(1).and_then(Value::to_float),
         ) {
             if !(0.0..=1.0).contains(&p) {
-                err_state.get_or_insert("percentile value out of range".to_string());
+                err_state.get_or_insert(());
                 return;
             }
 
             if let Some(existing_p) = *p_value {
                 if (existing_p - p).abs() >= 0.001 {
-                    err_state.get_or_insert("percentile value out of range".to_string());
+                    err_state.get_or_insert(());
                     return;
                 }
             } else {
@@ -148,8 +134,8 @@ impl AggFunc for PercentileCont {
         if values.is_empty() {
             return Value::null();
         }
-        if let Some(err_state) = err_state {
-            return Value::error(err_state.clone());
+        if err_state.is_some() {
+            return Value::error(ResultCode::Error);
         }
         if values.len() == 1 {
             return Value::from_float(values[0]);
@@ -175,15 +161,10 @@ impl AggFunc for PercentileCont {
 struct PercentileDisc;
 
 impl AggFunc for PercentileDisc {
-    type State = (Vec<f64>, Option<f64>, Option<String>);
+    type State = (Vec<f64>, Option<f64>, Option<()>);
 
-    fn name(&self) -> &'static str {
-        "percentile_disc"
-    }
-
-    fn args(&self) -> i32 {
-        2
-    }
+    const NAME: &'static str = "percentile_disc";
+    const ARGS: i32 = 2;
 
     fn step(state: &mut Self::State, args: &[Value]) {
         Percentile::step(state, args);
@@ -194,8 +175,8 @@ impl AggFunc for PercentileDisc {
         if values.is_empty() {
             return Value::null();
         }
-        if let Some(err_value) = err_value {
-            return Value::error(err_value.clone());
+        if err_value.is_some() {
+            return Value::error(ResultCode::Error);
         }
 
         let p = p_value.unwrap();
