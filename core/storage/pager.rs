@@ -404,12 +404,12 @@ impl Pager {
                 }
                 CheckpointState::CheckpointDone => {
                     let in_flight = self.checkpoint_inflight.clone();
-                    if *in_flight.borrow() > 0 {
-                        return Ok(CheckpointStatus::IO);
+                    return if *in_flight.borrow() > 0 {
+                        Ok(CheckpointStatus::IO)
                     } else {
                         self.checkpoint_state.replace(CheckpointState::Checkpoint);
-                        return Ok(CheckpointStatus::Done);
-                    }
+                        Ok(CheckpointStatus::Done)
+                    };
                 }
             }
         }

@@ -889,15 +889,15 @@ impl Program {
                         }
                     }
                     log::trace!("Halt auto_commit {}", self.auto_commit);
-                    if self.auto_commit {
-                        return match pager.end_tx() {
+                    return if self.auto_commit {
+                        match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
                             Ok(crate::storage::wal::CheckpointStatus::Done) => Ok(StepResult::Done),
                             Err(e) => Err(e),
-                        };
+                        }
                     } else {
-                        return Ok(StepResult::Done);
-                    }
+                        Ok(StepResult::Done)
+                    };
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();
