@@ -9,6 +9,9 @@ export default defineConfig({
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Resource-Policy": "cross-origin",
     },
+    fs: {
+      allow: ["../web/dist"],
+    },
   },
   worker: {
     format: "es",

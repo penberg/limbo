@@ -14,8 +14,9 @@
   "module": "./web/dist/index.js",
   "exports": {
     ".": {
-      "require": "./node/dist/index.cjs",
-      "import": "./web/dist/index.js"
+      "node": "./node/dist/index.cjs",
+      "browser": "./web/dist/index.js",
+      "default": "./web/dist/index.js"
     },
     "./limbo-worker.js": "./web/dist/limbo-worker.js"
   },
