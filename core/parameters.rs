@@ -29,6 +29,12 @@ pub struct Parameters {
     pub list: Vec<Parameter>,
 }
 
+impl Default for Parameters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Parameters {
     pub fn new() -> Self {
         Self {
