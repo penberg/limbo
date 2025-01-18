@@ -228,6 +228,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 ///   > an INTEGER one for a JSON true value,
 ///   > the dequoted text for a JSON string value,
 ///   > and a text representation for JSON object and array values.
+///
 /// https://sqlite.org/json1.html#the_json_extract_function
 ///
 /// *all_as_db* - if true, objects and arrays will be returned as pure TEXT without the JSON subtype
