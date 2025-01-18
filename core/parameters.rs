@@ -97,7 +97,7 @@ impl Parameters {
                 }
             }
             index => {
-                // SAFETY: Garanteed from parser that the index is bigger that 0.
+                // SAFETY: Guaranteed from parser that the index is bigger than 0.
                 let index: NonZero<usize> = index.parse().unwrap();
                 if index > self.index {
                     self.index = index.checked_add(1).unwrap();
