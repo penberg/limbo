@@ -116,24 +116,23 @@ pub fn prepare_select_plan(
                                     args_count,
                                 ) {
                                     Ok(Func::Agg(f)) => {
-                                        let agg_args: Result<Vec<Expr>, LimboError> =
-                                            match (args, &f) {
-                                                (None, crate::function::AggFunc::Count0) => {
-                                                    // COUNT() case
-                                                    Ok(vec![ast::Expr::Literal(
-                                                        ast::Literal::Numeric("1".to_string()),
-                                                    )])
-                                                }
-                                                (None, _) => crate::bail_parse_error!(
-                                                    "Aggregate function {} requires arguments",
-                                                    name.0
-                                                ),
-                                                (Some(args), _) => Ok(args.clone()),
-                                            };
+                                        let agg_args = match (args, &f) {
+                                            (None, crate::function::AggFunc::Count0) => {
+                                                // COUNT() case
+                                                vec![ast::Expr::Literal(ast::Literal::Numeric(
+                                                    "1".to_string(),
+                                                ))]
+                                            }
+                                            (None, _) => crate::bail_parse_error!(
+                                                "Aggregate function {} requires arguments",
+                                                name.0
+                                            ),
+                                            (Some(args), _) => args.clone(),
+                                        };
 
                                         let agg = Aggregate {
                                             func: f,
-                                            args: agg_args?.clone(),
+                                            args: agg_args.clone(),
                                             original_expr: expr.clone(),
                                         };
                                         aggregate_expressions.push(agg.clone());
