@@ -1,0 +1,23 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test_on_specific_db {:memory:} changes-on-basic-insert {
+    create table temp (t1 integer, primary key (t1));
+    insert into temp values (1);
+    select changes();
+} {1}
+
+do_execsql_test_on_specific_db {:memory:} changes-on-multiple-row-insert {
+    create table temp (t1 integer, primary key (t1));
+    insert into temp values (1), (2), (3);
+    select changes();
+} {3}
+
+do_execsql_test_on_specific_db {:memory:} changes-shows-most-recent {
+    create table temp (t1 integer, primary key (t1));
+    insert into temp values (1), (2), (3);
+    insert into temp values (4), (5), (6), (7);
+    select changes();
+} {4}
