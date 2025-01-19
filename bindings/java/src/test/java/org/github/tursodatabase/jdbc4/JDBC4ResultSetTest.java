@@ -40,7 +40,7 @@ class JDBC4ResultSetTest {
     }
 
     @Test
-    @Disabled("https://github.com/tursodatabase/limbo/pull/743#issuecomment-2600746904")
+    // @Disabled("https://github.com/tursodatabase/limbo/pull/743#issuecomment-2600746904")
     void invoking_next_after_the_last_row_should_return_false() throws Exception {
         stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
         stmt.execute("INSERT INTO users VALUES (1, 'sinwoo');");
@@ -50,11 +50,8 @@ class JDBC4ResultSetTest {
         stmt.execute("SELECT * FROM users");
         ResultSet resultSet = stmt.getResultSet();
 
-        long startTime = System.currentTimeMillis();
         while (resultSet.next()) {
-            if (System.currentTimeMillis() - startTime > 1000) {
-                throw new Exception("Should have finished now");
-            }
+            // run until next() returns false
         }
 
         // if the previous call to next() returned false, consecutive call to next() should return false as well

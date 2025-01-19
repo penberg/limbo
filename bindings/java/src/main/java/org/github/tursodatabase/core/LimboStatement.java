@@ -38,9 +38,13 @@ public class LimboStatement {
         return resultSet.hasLastStepReturnedRow();
     }
 
-    @Nullable
     LimboStepResult step() throws SQLException {
-        return step(this.statementPointer);
+        final LimboStepResult result = step(this.statementPointer);
+        if (result == null) {
+            throw new SQLException("step() returned null, which is only returned when an error occurs");
+        }
+
+        return result;
     }
 
     @Nullable

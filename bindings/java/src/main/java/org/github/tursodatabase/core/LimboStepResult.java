@@ -44,8 +44,27 @@ public class LimboStepResult {
     @Override
     public String toString() {
         return "LimboStepResult{" +
-               "stepResultId=" + stepResultId +
+               "stepResultName=" + getStepResultName() +
                ", result=" + Arrays.toString(result) +
                '}';
+    }
+
+    private String getStepResultName() {
+        switch (stepResultId) {
+            case STEP_RESULT_ID_ROW:
+                return "ROW";
+            case STEP_RESULT_ID_IO:
+                return "IO";
+            case STEP_RESULT_ID_DONE:
+                return "DONE";
+            case STEP_RESULT_ID_INTERRUPT:
+                return "INTERRUPT";
+            case STEP_RESULT_ID_BUSY:
+                return "BUSY";
+            case STEP_RESULT_ID_ERROR:
+                return "ERROR";
+            default:
+                return "UNKNOWN";
+        }
     }
 }
