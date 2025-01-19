@@ -10,9 +10,9 @@ use crate::translate::planner::{
 };
 use crate::util::normalize_ident;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
-use crate::{LimboError, SymbolTable};
+use crate::SymbolTable;
 use sqlite3_parser::ast::ResultColumn;
-use sqlite3_parser::ast::{self, Expr};
+use sqlite3_parser::ast::{self};
 
 pub fn translate_select(
     program: &mut ProgramBuilder,
