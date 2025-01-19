@@ -48,8 +48,11 @@ class JDBC4ResultSetTest {
         stmt.execute("SELECT * FROM users");
         ResultSet resultSet = stmt.getResultSet();
 
+        long startTime = System.currentTimeMillis();
         while (resultSet.next()) {
-            // this loop will break when resultSet returns false
+            if (System.currentTimeMillis() - startTime > 1000) {
+                throw new Exception("Should have finished now");
+            }
         }
 
         // if the previous call to next() returned false, consecutive call to next() should return false as well
