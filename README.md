@@ -11,6 +11,10 @@
   <a title="Build Status" target="_blank" href="https://github.com/tursodatabase/limbo/actions/workflows/rust.yml"><img src="https://img.shields.io/github/actions/workflow/status/tursodatabase/limbo/rust.yml?style=flat-square"></a>
   <a title="Releases" target="_blank" href="https://github.com/tursodatabase/limbo/releases"><img src="https://img.shields.io/github/release/tursodatabase/limbo?style=flat-square&color=9CF"></a>
   <a title="MIT" target="_blank" href="https://github.com/tursodatabase/limbo/blob/main/LICENSE.md"><img src="http://img.shields.io/badge/license-MIT-orange.svg?style=flat-square"></a>
+  <br>
+  <a title="GitHub Pull Requests" target="_blank" href="https://github.com/tursodatabase/limbo/pulls"><img src="https://img.shields.io/github/issues-pr-closed/tursodatabase/limbo.svg?style=flat-square&color=FF9966"></a>
+  <a title="GitHub Commits" target="_blank" href="https://github.com/tursodatabase/limbo/commits/main"><img src="https://img.shields.io/github/commit-activity/m/tursodatabase/limbo.svg?style=flat-square"></a>
+  <a title="Last Commit" target="_blank" href="https://github.com/tursodatabase/limbo/commits/main"><img src="https://img.shields.io/github/last-commit/tursodatabase/limbo.svg?style=flat-square&color=FF9900"></a>
 </p>
 <p align="center">
   <a title="Discord" target="_blank" href="[https://discord.gg/dmMbCqVX7G](https://discord.gg/jgjmyYgHwB)"><img alt="Chat on Discord" src="https://img.shields.io/discord/1258658826257961020?label=Discord&logo=Discord&style=social"></a>
