@@ -1,12 +1,12 @@
 package org.github.tursodatabase.utils;
 
-import org.github.tursodatabase.LimboErrorCode;
-import org.github.tursodatabase.annotations.Nullable;
-import org.github.tursodatabase.exceptions.LimboException;
+import static org.github.tursodatabase.utils.ByteArrayUtils.utf8ByteBufferToString;
 
 import java.sql.SQLException;
 
-import static org.github.tursodatabase.utils.ByteArrayUtils.utf8ByteBufferToString;
+import org.github.tursodatabase.LimboErrorCode;
+import org.github.tursodatabase.annotations.Nullable;
+import org.github.tursodatabase.exceptions.LimboException;
 
 public class LimboExceptionUtils {
     /**
@@ -37,19 +37,5 @@ public class LimboExceptionUtils {
         }
 
         return new LimboException(msg, code);
-    }
-
-    /**
-     * Ensures that the provided object is not null.
-     *
-     * @param object the object to check for nullity
-     * @param message the message to include in the exception if the object is null
-     *
-     * @throws IllegalArgumentException if the provided object is null
-     */
-    public static void requireNonNull(Object object, String message) {
-        if (object == null) {
-            throw new IllegalArgumentException(message);
-        }
     }
 }
