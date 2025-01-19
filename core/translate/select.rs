@@ -9,8 +9,8 @@ use crate::translate::planner::{
     parse_where, resolve_aggregates, OperatorIdCounter,
 };
 use crate::util::normalize_ident;
-use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
 use crate::SymbolTable;
+use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
 use sqlite3_parser::ast::ResultColumn;
 use sqlite3_parser::ast::{self};
 
