@@ -1,0 +1,15 @@
+{
+  "name": "test-limbo",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "limbo-wasm": "limbo-wasm@0.0.12"
+  },
+  "scripts": {
+    "dev": "vite"
+  },
+  "devDependencies": {
+    "vite": "^6.0.7",
+    "vite-plugin-wasm": "^3.4.1"
+  }
+}

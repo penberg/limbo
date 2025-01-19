@@ -10,6 +10,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
-    "limbo-wasm": "../pkg"
+    "limbo-wasm": "^0.0.12"
   }
 }

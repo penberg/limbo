@@ -1,9 +1,10 @@
 import test from "ava";
+import { unlinkSync, existsSync } from "node:fs"
 
 test.beforeEach(async (t) => {
     const [db, errorType, provider] = await connect();
+    // DROP TABLE IF EXISTS users;  <- is not supported in lib.rs yet
     db.exec(`
-        DROP TABLE IF EXISTS users;
         CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)
     `);
     db.exec(
@@ -65,6 +66,11 @@ test.serial("Statement.raw().iterate()", async (t) => {
 });
 
 const connect = async (path_opt) => {
+    // delete hello.db if it exists
+    if (existsSync("hello.db")) {
+        unlinkSync("hello.db");
+    }
+
     const path = path_opt ?? "hello.db";
     const provider = process.env.PROVIDER;
     if (provider === "limbo-wasm") {

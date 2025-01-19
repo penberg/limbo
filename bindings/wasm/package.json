@@ -9,19 +9,25 @@
     "type": "git",
     "url": "https://github.com/penberg/limbo"
   },
-  "files": [
-    "snippets",
-    "limbo_wasm_bg.wasm",
-    "limbo_wasm.js",
-    "limbo_wasm.d.ts"
-  ],
-  "main": "limbo_wasm.js",
-  "types": "limbo_wasm.d.ts",
   "type": "module",
+  "main": "./node/dist/index.cjs",
+  "module": "./web/dist/index.js",
+  "exports": {
+    ".": {
+      "node": "./node/dist/index.cjs",
+      "browser": "./web/dist/index.js",
+      "default": "./web/dist/index.js"
+    },
+    "./limbo-worker.js": "./web/dist/limbo-worker.js"
+  },
+  "files": [
+    "node/dist",
+    "web/dist"
+  ],
   "scripts": {
-    "dev": "vite",
-    "test": "vitest --sequence.shuffle=false",
-    "test:ui": "vitest --ui"
+    "dev": "cd web && vite",
+    "test": "cd web && vitest",
+    "test:ui": "cd web && vitest --ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.1",

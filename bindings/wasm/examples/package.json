@@ -13,6 +13,6 @@
   "dependencies": {
     "better-sqlite3": "^11.5.0",
     "drizzle-orm": "^0.36.3",
-    "limbo-wasm": "../pkg"
+    "limbo-wasm": "^0.0.12"
   }
 }

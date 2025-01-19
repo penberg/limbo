@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Limbo Test</title>
+</head>
+<body>
+    <script type="module">
+        function waitForMessage(worker, type, op) {
+            return new Promise((resolve, reject) => {
+                const handler = (e) => {
+                    if (e.data.type === type && (!op || e.data.op === op)) {
+                        worker.removeEventListener('message', handler);
+                        resolve(e.data);
+                    } else if (e.data.type === 'error') {
+                        worker.removeEventListener('message', handler);
+                        reject(e.data.error);
+                    }
+                };
+                worker.addEventListener('message', handler);
+            });
+        }
+
+        async function runTests() {
+            // const worker = new Worker('./src/limbo-worker.js', { type: 'module' });
+            // const worker = new Worker('limbo-wasm/src/limbo-worker.js', { type: 'module' });
+            // const worker = new Worker('./node_modules/limbo-wasm/src/limbo-worker.js', { type: 'module' });
+            const worker = new Worker(new URL('limbo-wasm/limbo-worker.js', import.meta.url), { type: 'module' });
+            
+            // Wait for ready then send createDb
+            await waitForMessage(worker, 'ready');
+            worker.postMessage({
+                op: 'createDb',
+                path: 'test.db'
+            });
+
+            // Wait for createDb success then send exec
+            await waitForMessage(worker, 'success', 'createDb');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT);
+                `
+            });
+            console.log("made it here");
+
+            // Wait for exec success then send prepare
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    INSERT INTO users VALUES (1, 'Alice', 'alice@example.org');
+                `
+            });
+
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    INSERT INTO users VALUES (2, 'Bob', 'bob@example.org');
+                `
+            });
+
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'exec',
+                sql: `
+                    INSERT INTO users VALUES (3, 'bill', 'bill@example.com');
+                `
+            });
+
+            // Wait for exec success then send prepare
+            await waitForMessage(worker, 'success', 'exec');
+            worker.postMessage({
+                op: 'prepare',
+                sql: 'SELECT * FROM users;'
+            });
+
+            const results = await waitForMessage(worker, 'result');
+            console.log('Query results:', results);
+        }
+
+        runTests().catch(console.error);
+    </script>
+</body>
+</html>
+
