@@ -8,11 +8,8 @@ use limbo_core::{Statement, StepResult};
 
 pub const STEP_RESULT_ID_ROW: i32 = 10;
 pub const STEP_RESULT_ID_IO: i32 = 20;
-#[allow(dead_code)]
 pub const STEP_RESULT_ID_DONE: i32 = 30;
-#[allow(dead_code)]
 pub const STEP_RESULT_ID_INTERRUPT: i32 = 40;
-#[allow(dead_code)]
 pub const STEP_RESULT_ID_BUSY: i32 = 50;
 pub const STEP_RESULT_ID_ERROR: i32 = 60;
 
@@ -73,6 +70,9 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
                 to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
             }
         },
+        Ok(StepResult::Done) => to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None),
+        Ok(StepResult::Interrupt) => to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None),
+        Ok(StepResult::Busy) => to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
         _ => to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
     }
 }
