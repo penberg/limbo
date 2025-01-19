@@ -55,7 +55,7 @@ use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
 use sorter::Sorter;
 use std::borrow::BorrowMut;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZero;
 use std::rc::{Rc, Weak};
@@ -282,6 +282,8 @@ pub struct Program {
     pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
+    pub n_change: Cell<i64>,
+    pub change_cnt_on: bool,
 }
 
 impl Program {
@@ -892,11 +894,24 @@ impl Program {
                     return if self.auto_commit {
                         match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
-                            Ok(crate::storage::wal::CheckpointStatus::Done) => Ok(StepResult::Done),
+                            Ok(crate::storage::wal::CheckpointStatus::Done) => {
+                                if self.change_cnt_on {
+                                    self.connection
+                                        .upgrade()
+                                        .unwrap()
+                                        .set_changes(self.n_change.get());
+                                }
+                                Ok(StepResult::Done)
+                            }
                             Err(e) => Err(e),
                         }
                     } else {
-                        Ok(StepResult::Done)
+                        if self.change_cnt_on {
+                            if let Some(conn) = self.connection.upgrade() {
+                                conn.set_changes(self.n_change.get());
+                            }
+                        }
+                        return Ok(StepResult::Done);
                     };
                 }
                 Insn::Transaction { write } => {
@@ -2076,10 +2091,9 @@ impl Program {
                         if let Some(rowid) = cursor.rowid()? {
                             if let Some(conn) = self.connection.upgrade() {
                                 conn.update_last_rowid(rowid);
-                                let prev_total_changes = conn.total_changes.get();
-                                conn.last_change.set(1);
-                                conn.total_changes.set(prev_total_changes + 1);
                             }
+                            let prev_changes = self.n_change.get();
+                            self.n_change.set(prev_changes + 1);
                         }
                     }
                     state.pc += 1;

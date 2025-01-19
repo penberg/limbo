@@ -48,6 +48,7 @@ pub fn translate(
     syms: &SymbolTable,
 ) -> Result<Program> {
     let mut program = ProgramBuilder::new();
+    let mut change_cnt_on = false;
 
     match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
@@ -79,6 +80,7 @@ pub fn translate(
             limit,
             ..
         } => {
+            change_cnt_on = true;
             translate_delete(&mut program, schema, &tbl_name, where_clause, limit, syms)?;
         }
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
@@ -106,6 +108,7 @@ pub fn translate(
             body,
             returning,
         } => {
+            change_cnt_on = true;
             translate_insert(
                 &mut program,
                 schema,
@@ -120,7 +123,7 @@ pub fn translate(
         }
     }
 
-    Ok(program.build(database_header, connection))
+    Ok(program.build(database_header, connection, change_cnt_on))
 }
 
 /* Example:

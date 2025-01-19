@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     rc::{Rc, Weak},
 };
@@ -327,6 +327,7 @@ impl ProgramBuilder {
         mut self,
         database_header: Rc<RefCell<DatabaseHeader>>,
         connection: Weak<Connection>,
+        change_cnt_on: bool,
     ) -> Program {
         self.resolve_labels();
         assert!(
@@ -343,6 +344,8 @@ impl ProgramBuilder {
             connection,
             auto_commit: true,
             parameters: self.parameters,
+            n_change: Cell::new(0),
+            change_cnt_on,
         }
     }
 }
