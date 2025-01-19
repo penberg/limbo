@@ -4,21 +4,16 @@
 </p>
 
 <p align="center">
-  Limbo is a work-in-progress, in-process OLTP database management system, compatible with SQLite.
+  Limbo is a <i>work-in-progress</i>, in-process OLTP database management system, compatible with SQLite.
 </p>
 
 <p align="center">
-  <a href="https://github.com/tursodatabase/limbo/actions">
-    <img src="https://github.com/tursodatabase/limbo/actions/workflows/rust.yml/badge.svg" alt="Build badge">
-  </a>
-  <a href="https://github.com/tursodatabase/limbo/blob/main/LICENSE.md">
-    <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT" title="MIT License" />
-  </a>
-  <a href="https://discord.gg/jgjmyYgHwB">
-    <img src="https://img.shields.io/discord/1258658826257961020" alt="Discord" title="Discord" />
-  </a>
-  
-
+  <a title="Build Status" target="_blank" href="https://github.com/tursodatabase/limbo/actions/workflows/rust.yml"><img src="https://img.shields.io/github/actions/workflow/status/tursodatabase/limbo/rust.yml?style=flat-square"></a>
+  <a title="Releases" target="_blank" href="https://github.com/tursodatabase/limbo/releases"><img src="https://img.shields.io/github/release/tursodatabase/limbo?style=flat-square&color=9CF"></a>
+  <a title="MIT" target="_blank" href="https://github.com/tursodatabase/limbo/blob/main/LICENSE.md"><img src="http://img.shields.io/badge/license-MIT-orange.svg?style=flat-square"></a>
+</p>
+<p align="center">
+  <a title="Discord" target="_blank" href="[https://discord.gg/dmMbCqVX7G](https://discord.gg/jgjmyYgHwB)"><img alt="Chat on Discord" src="https://img.shields.io/discord/1258658826257961020?label=Discord&logo=Discord&style=social"></a>
 </p>
 
 ---
