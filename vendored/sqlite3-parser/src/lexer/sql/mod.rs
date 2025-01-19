@@ -187,6 +187,16 @@ impl FallibleIterator for Parser<'_> {
                 }
                 (start, Some(tuple), end) => (start, tuple, end),
             };
+
+            if token_type == TK_ILLEGAL {
+                //  break out of parsing loop and return error
+                self.parser.sqlite3ParserFinalize();
+                return Err(Error::UnrecognizedToken(
+                    Some((self.scanner.line(), self.scanner.column())),
+                    Some(start.into())
+                ));
+            }
+
             let token = if token_type >= TK_WINDOW {
                 debug_assert!(
                     token_type == TK_OVER || token_type == TK_FILTER || token_type == TK_WINDOW
@@ -518,19 +528,23 @@ fn literal(data: &[u8], quote: u8) -> Result<(Option<Token<'_>>, usize), Error> 
 fn blob_literal(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
     debug_assert!(data[0] == b'x' || data[0] == b'X');
     debug_assert_eq!(data[1], b'\'');
-    if let Some((i, b)) = data
-        .iter()
-        .enumerate()
-        .skip(2)
-        .find(|&(_, &b)| !b.is_ascii_hexdigit())
-    {
-        if *b != b'\'' || i % 2 != 0 {
-            return Err(Error::MalformedBlobLiteral(None, None));
+    
+    let mut end = 2;
+    let mut valid = true;
+    while end < data.len() && data[end] != b'\'' {
+        if !data[end].is_ascii_hexdigit() {
+            valid = false;
         }
-        Ok((Some((&data[2..i], TK_BLOB)), i + 1))
-    } else {
-        Err(Error::MalformedBlobLiteral(None, None))
+        end += 1;
     }
+    
+    let total_len = if end < data.len() { end + 1 } else { end };
+    
+    if !valid || (end - 2) % 2 != 0 || end >= data.len() {
+        return Ok((Some((&data[..total_len], TokenType::TK_ILLEGAL)), total_len));
+    }
+    
+    Ok((Some((&data[2..end], TokenType::TK_BLOB)), total_len))
 }
 
 fn number(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
