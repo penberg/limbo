@@ -211,7 +211,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: wheels
+          name: linux-wheels
+      - uses: actions/download-artifact@v3
+        with:
+          name: macos-x86-wheels
+      - uses: actions/download-artifact@v3
+        with:
+          name: macos-arm64-wheels
+      - uses: actions/download-artifact@v3
+        with:
+          name: sdist-wheels
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
         env:
