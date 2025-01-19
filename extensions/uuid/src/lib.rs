@@ -1,7 +1,9 @@
 use limbo_ext::{register_extension, scalar, Value, ValueType};
 
+#[cfg(feature = "static")]
 register_extension! {
-    scalars: { uuid4_str, uuid4_blob, uuid7_str, uuid7, uuid7_ts, uuid_str, uuid_blob }
+    static_build: true,
+    scalars: {uuid4_str, uuid4_blob, uuid7_str, uuid7, uuid7_ts, uuid_str, uuid_blob },
 }
 
 #[scalar(name = "uuid4_str", alias = "gen_random_uuid")]
@@ -132,4 +134,10 @@ fn uuid_to_unix(uuid: &[u8; 16]) -> u64 {
         | ((uuid[3] as u64) << 16)
         | ((uuid[4] as u64) << 8)
         | (uuid[5] as u64)
+}
+
+#[cfg(not(feature = "static"))]
+register_extension! {
+    static_build: false,
+    scalars: { uuid4_str, uuid4_blob, uuid7_str, uuid7, uuid7_ts, uuid_str, uuid_blob }
 }

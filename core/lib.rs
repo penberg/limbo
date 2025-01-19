@@ -1,4 +1,5 @@
 mod error;
+#[cfg(not(target_family = "wasm"))]
 mod ext;
 mod function;
 mod io;
@@ -138,6 +139,9 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
+        if let Err(e) = db.register_builtins() {
+            return Err(LimboError::ExtensionError(e));
+        }
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),

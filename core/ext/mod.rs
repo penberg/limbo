@@ -73,4 +73,31 @@ impl Database {
             register_aggregate_function,
         }
     }
+
+    pub fn register_builtins(&self) -> Result<(), String> {
+        #[cfg(feature = "uuid")]
+        self.register_uuid()?;
+        #[cfg(feature = "percentile")]
+        self.register_percentile()?;
+        Ok(())
+    }
+
+    #[cfg(feature = "uuid")]
+    pub fn register_uuid(&self) -> Result<(), String> {
+        let ext_api = Box::new(self.build_limbo_ext());
+        if unsafe { !::limbo_uuid::register_extension_static(&ext_api).is_ok() } {
+            return Err("Failed to register uuid extension".to_string());
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "percentile")]
+    pub fn register_percentile(&self) -> Result<(), String> {
+        let ext_api = self.build_limbo_ext();
+        let res = unsafe { ::limbo_percentile::register_extension(&ext_api) };
+        if !res.is_ok() {
+            return Err("Failed to register percentile extension".to_string());
+        }
+        Ok(())
+    }
 }

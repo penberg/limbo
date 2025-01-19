@@ -9,8 +9,10 @@ repository.workspace = true
 [lib]
 crate-type = ["cdylib", "lib"]
 
+[features]
+static= []
 
 [dependencies]
-limbo_ext = { path = "../core"}
+limbo_ext = { path = "../core" }
 uuid = { version = "1.11.0", features = ["v4", "v7"] }
 log = "0.4.20"

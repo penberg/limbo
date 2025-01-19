@@ -1270,6 +1270,8 @@ dependencies = [
  "libloading",
  "limbo_ext",
  "limbo_macros",
+ "limbo_percentile",
+ "limbo_uuid",
  "log",
  "miette",
  "mimalloc",
