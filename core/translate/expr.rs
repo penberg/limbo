@@ -453,7 +453,7 @@ pub fn translate_expr(
             match op {
                 ast::Operator::NotEquals => {
                     let if_true_label = program.allocate_label();
-                    wrap_eval_jump_expr(
+                    wrap_eval_jump_expr_zero_or_null(
                         program,
                         Insn::Ne {
                             lhs: e1_reg,
@@ -462,11 +462,13 @@ pub fn translate_expr(
                         },
                         target_register,
                         if_true_label,
+                        e1_reg,
+                        e2_reg,
                     );
                 }
                 ast::Operator::Equals => {
                     let if_true_label = program.allocate_label();
-                    wrap_eval_jump_expr(
+                    wrap_eval_jump_expr_zero_or_null(
                         program,
                         Insn::Eq {
                             lhs: e1_reg,
@@ -475,11 +477,13 @@ pub fn translate_expr(
                         },
                         target_register,
                         if_true_label,
+                        e1_reg,
+                        e2_reg,
                     );
                 }
                 ast::Operator::Less => {
                     let if_true_label = program.allocate_label();
-                    wrap_eval_jump_expr(
+                    wrap_eval_jump_expr_zero_or_null(
                         program,
                         Insn::Lt {
                             lhs: e1_reg,
@@ -488,11 +492,13 @@ pub fn translate_expr(
                         },
                         target_register,
                         if_true_label,
+                        e1_reg,
+                        e2_reg,
                     );
                 }
                 ast::Operator::LessEquals => {
                     let if_true_label = program.allocate_label();
-                    wrap_eval_jump_expr(
+                    wrap_eval_jump_expr_zero_or_null(
                         program,
                         Insn::Le {
                             lhs: e1_reg,
@@ -501,11 +507,13 @@ pub fn translate_expr(
                         },
                         target_register,
                         if_true_label,
+                        e1_reg,
+                        e2_reg,
                     );
                 }
                 ast::Operator::Greater => {
                     let if_true_label = program.allocate_label();
-                    wrap_eval_jump_expr(
+                    wrap_eval_jump_expr_zero_or_null(
                         program,
                         Insn::Gt {
                             lhs: e1_reg,
@@ -514,11 +522,13 @@ pub fn translate_expr(
                         },
                         target_register,
                         if_true_label,
+                        e1_reg,
+                        e2_reg,
                     );
                 }
                 ast::Operator::GreaterEquals => {
                     let if_true_label = program.allocate_label();
-                    wrap_eval_jump_expr(
+                    wrap_eval_jump_expr_zero_or_null(
                         program,
                         Insn::Ge {
                             lhs: e1_reg,
@@ -527,6 +537,8 @@ pub fn translate_expr(
                         },
                         target_register,
                         if_true_label,
+                        e1_reg,
+                        e2_reg,
                     );
                 }
                 ast::Operator::Add => {
@@ -1791,6 +1803,27 @@ fn wrap_eval_jump_expr(
     program.emit_insn(insn);
     program.emit_insn(Insn::Integer {
         value: 0, // emit False if we reach this point (no jump)
+        dest: target_register,
+    });
+    program.preassign_label_to_next_insn(if_true_label);
+}
+
+fn wrap_eval_jump_expr_zero_or_null(
+    program: &mut ProgramBuilder,
+    insn: Insn,
+    target_register: usize,
+    if_true_label: BranchOffset,
+    e1_reg: usize,
+    e2_reg: usize,
+) {
+    program.emit_insn(Insn::Integer {
+        value: 1, // emit True by default
+        dest: target_register,
+    });
+    program.emit_insn(insn);
+    program.emit_insn(Insn::ZeroOrNull {
+        rg1: e1_reg,
+        rg2: e2_reg,
         dest: target_register,
     });
     program.preassign_label_to_next_insn(if_true_label);

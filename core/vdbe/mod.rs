@@ -495,7 +495,7 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc.to_offset_int();
+                            state.pc += 1;
                         }
                         _ => {
                             if state.registers[lhs] == state.registers[rhs] {
@@ -517,7 +517,7 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc.to_offset_int();
+                            state.pc += 1;
                         }
                         _ => {
                             if state.registers[lhs] != state.registers[rhs] {
@@ -539,7 +539,7 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc.to_offset_int();
+                            state.pc += 1;
                         }
                         _ => {
                             if state.registers[lhs] < state.registers[rhs] {
@@ -561,7 +561,7 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc.to_offset_int();
+                            state.pc += 1;
                         }
                         _ => {
                             if state.registers[lhs] <= state.registers[rhs] {
@@ -583,7 +583,7 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc.to_offset_int();
+                            state.pc += 1;
                         }
                         _ => {
                             if state.registers[lhs] > state.registers[rhs] {
@@ -605,7 +605,7 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc = target_pc.to_offset_int();
+                            state.pc += 1;
                         }
                         _ => {
                             if state.registers[lhs] >= state.registers[rhs] {
@@ -2253,6 +2253,16 @@ impl Program {
                         .get_parameter(*index)
                         .ok_or(LimboError::Unbound(*index))?
                         .clone();
+                    state.pc += 1;
+                }
+                Insn::ZeroOrNull { rg1, rg2, dest } => {
+                    if state.registers[*rg1] == OwnedValue::Null
+                        || state.registers[*rg2] == OwnedValue::Null
+                    {
+                        state.registers[*dest] = OwnedValue::Null
+                    } else {
+                        state.registers[*dest] = OwnedValue::Integer(0);
+                    }
                     state.pc += 1;
                 }
             }
