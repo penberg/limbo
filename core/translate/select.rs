@@ -9,10 +9,10 @@ use crate::translate::planner::{
     parse_where, resolve_aggregates, OperatorIdCounter,
 };
 use crate::util::normalize_ident;
-use crate::SymbolTable;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
-use sqlite3_parser::ast;
+use crate::SymbolTable;
 use sqlite3_parser::ast::ResultColumn;
+use sqlite3_parser::ast::{self};
 
 pub fn translate_select(
     program: &mut ProgramBuilder,
@@ -116,9 +116,23 @@ pub fn prepare_select_plan(
                                     args_count,
                                 ) {
                                     Ok(Func::Agg(f)) => {
+                                        let agg_args = match (args, &f) {
+                                            (None, crate::function::AggFunc::Count0) => {
+                                                // COUNT() case
+                                                vec![ast::Expr::Literal(ast::Literal::Numeric(
+                                                    "1".to_string(),
+                                                ))]
+                                            }
+                                            (None, _) => crate::bail_parse_error!(
+                                                "Aggregate function {} requires arguments",
+                                                name.0
+                                            ),
+                                            (Some(args), _) => args.clone(),
+                                        };
+
                                         let agg = Aggregate {
                                             func: f,
-                                            args: args.as_ref().unwrap().clone(),
+                                            args: agg_args.clone(),
                                             original_expr: expr.clone(),
                                         };
                                         aggregate_expressions.push(agg.clone());
@@ -147,7 +161,7 @@ pub fn prepare_select_plan(
                                             contains_aggregates,
                                         });
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
                                         if let Some(f) = syms.resolve_function(&name.0, args_count)
                                         {
                                             if let ExtFunc::Scalar(_) = f.as_ref().func {
@@ -183,6 +197,9 @@ pub fn prepare_select_plan(
                                                     contains_aggregates: true,
                                                 });
                                             }
+                                            continue; // Continue with the normal flow instead of returning
+                                        } else {
+                                            return Err(e);
                                         }
                                     }
                                 }

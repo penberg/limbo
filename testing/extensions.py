@@ -115,8 +115,12 @@ def validate_string_uuid(result):
     return len(result) == 36 and result.count("-") == 4
 
 
+def returns_error(result):
+    return "error: no such function: " in result
+
+
 def returns_null(result):
-    return result == "" or result == b"\n" or result == b""
+    return result == "" or result == "\n"
 
 
 def assert_now_unixtime(result):
@@ -135,10 +139,10 @@ def test_uuid(pipe):
     run_test(
         pipe,
         "SELECT uuid4();",
-        returns_null,
+        returns_error,
         "uuid functions return null when ext not loaded",
     )
-    run_test(pipe, "SELECT uuid4_str();", returns_null)
+    run_test(pipe, "SELECT uuid4_str();", returns_error)
     run_test(
         pipe,
         f".load {extension_path}",
@@ -178,7 +182,7 @@ def test_regexp(pipe):
     extension_path = "./target/debug/liblimbo_regexp.so"
 
     # before extension loads, assert no function
-    run_test(pipe, "SELECT regexp('a.c', 'abc');", returns_null)
+    run_test(pipe, "SELECT regexp('a.c', 'abc');", returns_error)
     run_test(pipe, f".load {extension_path}", returns_null)
     print(f"Extension {extension_path} loaded successfully.")
     run_test(pipe, "SELECT regexp('a.c', 'abc');", validate_true)
@@ -225,7 +229,7 @@ def test_aggregates(pipe):
     run_test(
         pipe,
         "SELECT median(1);",
-        returns_null,
+        returns_error,
         "median agg function returns null when ext not loaded",
     )
     run_test(

@@ -463,14 +463,18 @@ pub fn translate_aggregation_step_groupby(
             });
             target_register
         }
-        AggFunc::Count => {
+        AggFunc::Count | AggFunc::Count0 => {
             let expr_reg = program.alloc_register();
             emit_column(program, expr_reg);
             program.emit_insn(Insn::AggStep {
                 acc_reg: target_register,
                 col: expr_reg,
                 delimiter: 0,
-                func: AggFunc::Count,
+                func: if matches!(agg.func, AggFunc::Count0) {
+                    AggFunc::Count0
+                } else {
+                    AggFunc::Count
+                },
             });
             target_register
         }

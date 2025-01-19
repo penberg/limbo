@@ -1204,7 +1204,7 @@ impl Program {
                                 // Total() never throws an integer overflow.
                                 OwnedValue::Agg(Box::new(AggContext::Sum(OwnedValue::Float(0.0))))
                             }
-                            AggFunc::Count => {
+                            AggFunc::Count | AggFunc::Count0 => {
                                 OwnedValue::Agg(Box::new(AggContext::Count(OwnedValue::Integer(0))))
                             }
                             AggFunc::Max => {
@@ -1289,7 +1289,12 @@ impl Program {
                             };
                             *acc += col;
                         }
-                        AggFunc::Count => {
+                        AggFunc::Count | AggFunc::Count0 => {
+                            if matches!(&state.registers[*acc_reg], OwnedValue::Null) {
+                                state.registers[*acc_reg] = OwnedValue::Agg(Box::new(
+                                    AggContext::Count(OwnedValue::Integer(0)),
+                                ));
+                            }
                             let OwnedValue::Agg(agg) = state.registers[*acc_reg].borrow_mut()
                             else {
                                 unreachable!();
@@ -1437,7 +1442,7 @@ impl Program {
                                 *acc /= count.clone();
                             }
                             AggFunc::Sum | AggFunc::Total => {}
-                            AggFunc::Count => {}
+                            AggFunc::Count | AggFunc::Count0 => {}
                             AggFunc::Max => {}
                             AggFunc::Min => {}
                             AggFunc::GroupConcat | AggFunc::StringAgg => {}
@@ -1451,7 +1456,7 @@ impl Program {
                                 AggFunc::Total => {
                                     state.registers[*register] = OwnedValue::Float(0.0);
                                 }
-                                AggFunc::Count => {
+                                AggFunc::Count | AggFunc::Count0 => {
                                     state.registers[*register] = OwnedValue::Integer(0);
                                 }
                                 _ => {}
