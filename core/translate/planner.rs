@@ -12,7 +12,7 @@ use crate::{
 };
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit};
 
-pub const ROWID: &'static str = "rowid";
+pub const ROWID: &str = "rowid";
 
 pub struct OperatorIdCounter {
     id: usize,
@@ -29,7 +29,7 @@ impl OperatorIdCounter {
     }
 }
 
-pub fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
+pub fn resolve_aggregates(expr: &Expr, aggs: &mut Vec<Aggregate>) -> bool {
     if aggs
         .iter()
         .any(|a| exprs_are_equivalent(&a.original_expr, expr))
@@ -37,7 +37,7 @@ pub fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
         return true;
     }
     match expr {
-        ast::Expr::FunctionCall { name, args, .. } => {
+        Expr::FunctionCall { name, args, .. } => {
             let args_count = if let Some(args) = &args {
                 args.len()
             } else {
@@ -63,7 +63,7 @@ pub fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
                 }
             }
         }
-        ast::Expr::FunctionCallStar { name, .. } => {
+        Expr::FunctionCallStar { name, .. } => {
             if let Ok(Func::Agg(f)) =
                 Func::resolve_function(normalize_ident(name.0.as_str()).as_str(), 0)
             {
@@ -77,13 +77,13 @@ pub fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
                 false
             }
         }
-        ast::Expr::Binary(lhs, _, rhs) => {
+        Expr::Binary(lhs, _, rhs) => {
             let mut contains_aggregates = false;
             contains_aggregates |= resolve_aggregates(lhs, aggs);
             contains_aggregates |= resolve_aggregates(rhs, aggs);
             contains_aggregates
         }
-        ast::Expr::Unary(_, expr) => {
+        Expr::Unary(_, expr) => {
             let mut contains_aggregates = false;
             contains_aggregates |= resolve_aggregates(expr, aggs);
             contains_aggregates
@@ -93,12 +93,9 @@ pub fn resolve_aggregates(expr: &ast::Expr, aggs: &mut Vec<Aggregate>) -> bool {
     }
 }
 
-pub fn bind_column_references(
-    expr: &mut ast::Expr,
-    referenced_tables: &[TableReference],
-) -> Result<()> {
+pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReference]) -> Result<()> {
     match expr {
-        ast::Expr::Id(id) => {
+        Expr::Id(id) => {
             // true and false are special constants that are effectively aliases for 1 and 0
             // and not identifiers of columns
             if id.0.eq_ignore_ascii_case("true") || id.0.eq_ignore_ascii_case("false") {
@@ -106,7 +103,7 @@ pub fn bind_column_references(
             }
             let normalized_id = normalize_ident(id.0.as_str());
 
-            if referenced_tables.len() > 0 {
+            if !referenced_tables.is_empty() {
                 if let Some(row_id_expr) =
                     parse_row_id(&normalized_id, 0, || referenced_tables.len() != 1)?
                 {
@@ -133,7 +130,7 @@ pub fn bind_column_references(
                 crate::bail_parse_error!("Column {} not found", id.0);
             }
             let (tbl_idx, col_idx, is_rowid_alias) = match_result.unwrap();
-            *expr = ast::Expr::Column {
+            *expr = Expr::Column {
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx,
@@ -141,7 +138,7 @@ pub fn bind_column_references(
             };
             Ok(())
         }
-        ast::Expr::Qualified(tbl, id) => {
+        Expr::Qualified(tbl, id) => {
             let normalized_table_name = normalize_ident(tbl.0.as_str());
             let matching_tbl_idx = referenced_tables.iter().position(|t| {
                 t.table_identifier
@@ -169,7 +166,7 @@ pub fn bind_column_references(
                 .columns()
                 .get(col_idx.unwrap())
                 .unwrap();
-            *expr = ast::Expr::Column {
+            *expr = Expr::Column {
                 database: None, // TODO: support different databases
                 table: tbl_idx,
                 column: col_idx.unwrap(),
@@ -177,7 +174,7 @@ pub fn bind_column_references(
             };
             Ok(())
         }
-        ast::Expr::Between {
+        Expr::Between {
             lhs,
             not: _,
             start,
@@ -188,12 +185,12 @@ pub fn bind_column_references(
             bind_column_references(end, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Binary(expr, _operator, expr1) => {
+        Expr::Binary(expr, _operator, expr1) => {
             bind_column_references(expr, referenced_tables)?;
             bind_column_references(expr1, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Case {
+        Expr::Case {
             base,
             when_then_pairs,
             else_expr,
@@ -210,9 +207,9 @@ pub fn bind_column_references(
             }
             Ok(())
         }
-        ast::Expr::Cast { expr, type_name: _ } => bind_column_references(expr, referenced_tables),
-        ast::Expr::Collate(expr, _string) => bind_column_references(expr, referenced_tables),
-        ast::Expr::FunctionCall {
+        Expr::Cast { expr, type_name: _ } => bind_column_references(expr, referenced_tables),
+        Expr::Collate(expr, _string) => bind_column_references(expr, referenced_tables),
+        Expr::FunctionCall {
             name: _,
             distinctness: _,
             args,
@@ -227,11 +224,11 @@ pub fn bind_column_references(
             Ok(())
         }
         // Already bound earlier
-        ast::Expr::Column { .. } | ast::Expr::RowId { .. } => Ok(()),
-        ast::Expr::DoublyQualified(_, _, _) => todo!(),
-        ast::Expr::Exists(_) => todo!(),
-        ast::Expr::FunctionCallStar { .. } => Ok(()),
-        ast::Expr::InList { lhs, not: _, rhs } => {
+        Expr::Column { .. } | Expr::RowId { .. } => Ok(()),
+        Expr::DoublyQualified(_, _, _) => todo!(),
+        Expr::Exists(_) => todo!(),
+        Expr::FunctionCallStar { .. } => Ok(()),
+        Expr::InList { lhs, not: _, rhs } => {
             bind_column_references(lhs, referenced_tables)?;
             if let Some(rhs) = rhs {
                 for arg in rhs {
@@ -240,36 +237,36 @@ pub fn bind_column_references(
             }
             Ok(())
         }
-        ast::Expr::InSelect { .. } => todo!(),
-        ast::Expr::InTable { .. } => todo!(),
-        ast::Expr::IsNull(expr) => {
+        Expr::InSelect { .. } => todo!(),
+        Expr::InTable { .. } => todo!(),
+        Expr::IsNull(expr) => {
             bind_column_references(expr, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Like { lhs, rhs, .. } => {
+        Expr::Like { lhs, rhs, .. } => {
             bind_column_references(lhs, referenced_tables)?;
             bind_column_references(rhs, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Literal(_) => Ok(()),
-        ast::Expr::Name(_) => todo!(),
-        ast::Expr::NotNull(expr) => {
+        Expr::Literal(_) => Ok(()),
+        Expr::Name(_) => todo!(),
+        Expr::NotNull(expr) => {
             bind_column_references(expr, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Parenthesized(expr) => {
+        Expr::Parenthesized(expr) => {
             for e in expr.iter_mut() {
                 bind_column_references(e, referenced_tables)?;
             }
             Ok(())
         }
-        ast::Expr::Raise(_, _) => todo!(),
-        ast::Expr::Subquery(_) => todo!(),
-        ast::Expr::Unary(_, expr) => {
+        Expr::Raise(_, _) => todo!(),
+        Expr::Subquery(_) => todo!(),
+        Expr::Unary(_, expr) => {
             bind_column_references(expr, referenced_tables)?;
             Ok(())
         }
-        ast::Expr::Variable(_) => Ok(()),
+        Expr::Variable(_) => Ok(()),
     }
 }
 
@@ -413,7 +410,7 @@ struct JoinParseResult {
     source_operator: SourceOperator,
     is_outer_join: bool,
     using: Option<ast::DistinctNames>,
-    predicates: Option<Vec<ast::Expr>>,
+    predicates: Option<Vec<Expr>>,
 }
 
 fn parse_join(
@@ -457,22 +454,20 @@ fn parse_join(
         assert!(!left_tables.is_empty());
         let right_table = &tables[table_index];
         let right_cols = &right_table.columns();
-        let mut distinct_names = None;
+        let mut distinct_names: Option<ast::DistinctNames> = None;
         // TODO: O(n^2) maybe not great for large tables or big multiway joins
         for right_col in right_cols.iter() {
             let mut found_match = false;
             for left_table in left_tables.iter() {
                 for left_col in left_table.columns().iter() {
                     if left_col.name == right_col.name {
-                        if distinct_names.is_none() {
-                            distinct_names =
-                                Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
-                        } else {
+                        if let Some(distinct_names) = distinct_names.as_mut() {
                             distinct_names
-                                .as_mut()
-                                .unwrap()
                                 .insert(ast::Name(left_col.name.clone()))
                                 .unwrap();
+                        } else {
+                            distinct_names =
+                                Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
                         }
                         found_match = true;
                         break;
@@ -483,10 +478,11 @@ fn parse_join(
                 }
             }
         }
-        if distinct_names.is_none() {
+        if let Some(distinct_names) = distinct_names {
+            Some(ast::JoinConstraint::Using(distinct_names))
+        } else {
             crate::bail_parse_error!("No columns found to NATURAL join on");
         }
-        Some(ast::JoinConstraint::Using(distinct_names.unwrap()))
     } else {
         constraint
     };
@@ -540,15 +536,15 @@ fn parse_join(
                     }
                     let (left_table_idx, left_col_idx, left_col) = left_col.unwrap();
                     let (right_col_idx, right_col) = right_col.unwrap();
-                    using_predicates.push(ast::Expr::Binary(
-                        Box::new(ast::Expr::Column {
+                    using_predicates.push(Expr::Binary(
+                        Box::new(Expr::Column {
                             database: None,
                             table: left_table_idx,
                             column: left_col_idx,
                             is_rowid_alias: left_col.is_rowid_alias,
                         }),
                         ast::Operator::Equals,
-                        Box::new(ast::Expr::Column {
+                        Box::new(Expr::Column {
                             database: None,
                             table: right_table.table_index,
                             column: right_col_idx,
@@ -586,12 +582,9 @@ pub fn parse_limit(limit: Limit) -> Option<usize> {
     }
 }
 
-pub fn break_predicate_at_and_boundaries(
-    predicate: ast::Expr,
-    out_predicates: &mut Vec<ast::Expr>,
-) {
+pub fn break_predicate_at_and_boundaries(predicate: Expr, out_predicates: &mut Vec<Expr>) {
     match predicate {
-        ast::Expr::Binary(left, ast::Operator::And, right) => {
+        Expr::Binary(left, ast::Operator::And, right) => {
             break_predicate_at_and_boundaries(*left, out_predicates);
             break_predicate_at_and_boundaries(*right, out_predicates);
         }
@@ -601,7 +594,7 @@ pub fn break_predicate_at_and_boundaries(
     }
 }
 
-fn parse_row_id<F>(column_name: &str, table_id: usize, fn_check: F) -> Result<Option<ast::Expr>>
+fn parse_row_id<F>(column_name: &str, table_id: usize, fn_check: F) -> Result<Option<Expr>>
 where
     F: FnOnce() -> bool,
 {
@@ -610,7 +603,7 @@ where
             crate::bail_parse_error!("ROWID is ambiguous");
         }
 
-        return Ok(Some(ast::Expr::RowId {
+        return Ok(Some(Expr::RowId {
             database: None, // TODO: support different databases
             table: table_id,
         }));

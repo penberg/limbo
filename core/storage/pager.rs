@@ -216,7 +216,7 @@ impl Pager {
     }
 
     /// Reads a page from the database.
-    pub fn read_page(&self, page_idx: usize) -> crate::Result<PageRef> {
+    pub fn read_page(&self, page_idx: usize) -> Result<PageRef> {
         trace!("read_page(page_idx = {})", page_idx);
         let mut page_cache = self.page_cache.write().unwrap();
         let page_key = PageCacheKey::new(page_idx, Some(self.wal.borrow().get_max_frame()));
@@ -295,7 +295,7 @@ impl Pager {
     }
 
     pub fn add_dirty(&self, page_id: usize) {
-        // TODO: cehck duplicates?
+        // TODO: check duplicates?
         let mut dirty_pages = RefCell::borrow_mut(&self.dirty_pages);
         dirty_pages.insert(page_id);
     }
@@ -312,7 +312,7 @@ impl Pager {
                             PageCacheKey::new(*page_id, Some(self.wal.borrow().get_max_frame()));
                         let page = cache.get(&page_key).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
                         let page_type = page.get().contents.as_ref().unwrap().maybe_page_type();
-                        log::trace!("cacheflush(page={}, page_type={:?}", page_id, page_type);
+                        trace!("cacheflush(page={}, page_type={:?}", page_id, page_type);
                         self.wal.borrow_mut().append_frame(
                             page.clone(),
                             db_size,
@@ -374,7 +374,7 @@ impl Pager {
     pub fn checkpoint(&self) -> Result<CheckpointStatus> {
         loop {
             let state = self.checkpoint_state.borrow().clone();
-            log::trace!("pager_checkpoint(state={:?})", state);
+            trace!("pager_checkpoint(state={:?})", state);
             match state {
                 CheckpointState::Checkpoint => {
                     let in_flight = self.checkpoint_inflight.clone();
@@ -404,12 +404,12 @@ impl Pager {
                 }
                 CheckpointState::CheckpointDone => {
                     let in_flight = self.checkpoint_inflight.clone();
-                    if *in_flight.borrow() > 0 {
-                        return Ok(CheckpointStatus::IO);
+                    return if *in_flight.borrow() > 0 {
+                        Ok(CheckpointStatus::IO)
                     } else {
                         self.checkpoint_state.replace(CheckpointState::Checkpoint);
-                        return Ok(CheckpointStatus::Done);
-                    }
+                        Ok(CheckpointStatus::Done)
+                    };
                 }
             }
         }
@@ -437,7 +437,7 @@ impl Pager {
     }
 
     /*
-        Get's a new page that increasing the size of the page or uses a free page.
+        Gets a new page that increasing the size of the page or uses a free page.
         Currently free list pages are not yet supported.
     */
     #[allow(clippy::readonly_write_lock)]

@@ -4,7 +4,6 @@ use pest_derive::Parser;
 use serde::de;
 use serde::forward_to_deserialize_any;
 use std::collections::VecDeque;
-use std::f64;
 
 use crate::json::error::{self, Error, Result};
 

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use limbo_core::{LimboError, Result};
 
 use crate::generation::{
-    self, pick_index,
+    pick_index,
     plan::{Interaction, InteractionPlan, InteractionPlanState, ResultSet},
 };
 
@@ -45,7 +45,7 @@ impl ExecutionHistory {
 
 pub(crate) struct ExecutionResult {
     pub(crate) history: ExecutionHistory,
-    pub(crate) error: Option<limbo_core::LimboError>,
+    pub(crate) error: Option<LimboError>,
 }
 
 impl ExecutionResult {
@@ -87,7 +87,7 @@ pub(crate) fn execute_plans(
         if now.elapsed().as_secs() >= env.opts.max_time_simulation as u64 {
             return ExecutionResult::new(
                 history,
-                Some(limbo_core::LimboError::InternalError(
+                Some(LimboError::InternalError(
                     "maximum time for simulation reached".into(),
                 )),
             );
@@ -170,7 +170,7 @@ fn execute_interaction(
 ) -> Result<ExecutionContinuation> {
     log::info!("executing: {}", interaction);
     match interaction {
-        generation::plan::Interaction::Query(_) => {
+        Interaction::Query(_) => {
             let conn = match &mut env.connections[connection_index] {
                 SimConnection::Connected(conn) => conn,
                 SimConnection::Disconnected => unreachable!(),
@@ -181,11 +181,11 @@ fn execute_interaction(
             log::debug!("{:?}", results);
             stack.push(results);
         }
-        generation::plan::Interaction::Assertion(_) => {
+        Interaction::Assertion(_) => {
             interaction.execute_assertion(stack, env)?;
             stack.clear();
         }
-        generation::plan::Interaction::Assumption(_) => {
+        Interaction::Assumption(_) => {
             let assumption_result = interaction.execute_assumption(stack, env);
             stack.clear();
 

@@ -135,7 +135,7 @@ pub enum Command {
 
 impl Command {
     fn min_args(&self) -> usize {
-        (match self {
+        1 + match self {
             Self::Quit
             | Self::Schema
             | Self::Help
@@ -150,7 +150,7 @@ impl Command {
             | Self::NullValue
             | Self::LoadExtension => 1,
             Self::Import => 2,
-        } + 1) // argv0
+        } // argv0
     }
 
     fn usage(&self) -> &str {
@@ -337,7 +337,7 @@ impl Limbo {
             .map_err(|e| e.to_string())
     }
 
-    fn display_in_memory(&mut self) -> std::io::Result<()> {
+    fn display_in_memory(&mut self) -> io::Result<()> {
         if self.opts.db_file == ":memory:" {
             self.writeln("Connected to a transient in-memory database.")?;
             self.writeln("Use \".open FILENAME\" to reopen on a persistent database")?;
@@ -345,7 +345,7 @@ impl Limbo {
         Ok(())
     }
 
-    fn show_info(&mut self) -> std::io::Result<()> {
+    fn show_info(&mut self) -> io::Result<()> {
         let opts = format!("{}", self.opts);
         self.writeln(opts)
     }

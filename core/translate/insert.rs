@@ -74,7 +74,7 @@ pub fn translate_insert(
     // Check if rowid was provided (through INTEGER PRIMARY KEY as a rowid alias)
     let rowid_alias_index = table.columns.iter().position(|c| c.is_rowid_alias);
     let has_user_provided_rowid = {
-        assert!(column_mappings.len() == table.columns.len());
+        assert_eq!(column_mappings.len(), table.columns.len());
         if let Some(index) = rowid_alias_index {
             column_mappings[index].value_index.is_some()
         } else {

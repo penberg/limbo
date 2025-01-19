@@ -35,7 +35,7 @@ pub trait ArbitraryFrom<T> {
 pub(crate) fn frequency<
     'a,
     T,
-    R: rand::Rng,
+    R: Rng,
     N: Sum + PartialOrd + Copy + Default + SampleUniform + SubAssign,
 >(
     choices: Vec<(N, Box<dyn Fn(&mut R) -> T + 'a>)>,
@@ -55,23 +55,20 @@ pub(crate) fn frequency<
 }
 
 /// one_of is a helper function for composing different generators with equal probability of occurence.
-pub(crate) fn one_of<'a, T, R: rand::Rng>(
-    choices: Vec<Box<dyn Fn(&mut R) -> T + 'a>>,
-    rng: &mut R,
-) -> T {
+pub(crate) fn one_of<'a, T, R: Rng>(choices: Vec<Box<dyn Fn(&mut R) -> T + 'a>>, rng: &mut R) -> T {
     let index = rng.gen_range(0..choices.len());
     choices[index](rng)
 }
 
 /// pick is a helper function for uniformly picking a random element from a slice
-pub(crate) fn pick<'a, T, R: rand::Rng>(choices: &'a [T], rng: &mut R) -> &'a T {
+pub(crate) fn pick<'a, T, R: Rng>(choices: &'a [T], rng: &mut R) -> &'a T {
     let index = rng.gen_range(0..choices.len());
     &choices[index]
 }
 
 /// pick_index is typically used for picking an index from a slice to later refer to the element
 /// at that index.
-pub(crate) fn pick_index<R: rand::Rng>(choices: usize, rng: &mut R) -> usize {
+pub(crate) fn pick_index<R: Rng>(choices: usize, rng: &mut R) -> usize {
     rng.gen_range(0..choices)
 }
 

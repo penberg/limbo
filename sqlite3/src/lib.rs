@@ -46,7 +46,7 @@ pub struct sqlite3 {
     pub(crate) err_mask: ffi::c_int,
     pub(crate) malloc_failed: bool,
     pub(crate) e_open_state: u8,
-    pub(crate) p_err: *mut std::ffi::c_void,
+    pub(crate) p_err: *mut ffi::c_void,
 }
 
 impl sqlite3 {
@@ -107,7 +107,7 @@ pub unsafe extern "C" fn sqlite3_open(
     if db_out.is_null() {
         return SQLITE_MISUSE;
     }
-    let filename = ffi::CStr::from_ptr(filename);
+    let filename = CStr::from_ptr(filename);
     let filename = match filename.to_str() {
         Ok(s) => s,
         Err(_) => return SQLITE_MISUSE,
@@ -164,14 +164,9 @@ pub unsafe extern "C" fn sqlite3_trace_v2(
     _db: *mut sqlite3,
     _mask: ffi::c_uint,
     _callback: Option<
-        unsafe extern "C" fn(
-            ffi::c_uint,
-            *mut std::ffi::c_void,
-            *mut std::ffi::c_void,
-            *mut std::ffi::c_void,
-        ),
+        unsafe extern "C" fn(ffi::c_uint, *mut ffi::c_void, *mut ffi::c_void, *mut ffi::c_void),
     >,
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
 ) -> ffi::c_int {
     stub!();
 }
@@ -181,7 +176,7 @@ pub unsafe extern "C" fn sqlite3_progress_handler(
     _db: *mut sqlite3,
     _n: ffi::c_int,
     _callback: Option<unsafe extern "C" fn() -> ffi::c_int>,
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
 ) -> ffi::c_int {
     stub!();
 }
@@ -195,15 +190,13 @@ pub unsafe extern "C" fn sqlite3_busy_timeout(_db: *mut sqlite3, _ms: ffi::c_int
 pub unsafe extern "C" fn sqlite3_set_authorizer(
     _db: *mut sqlite3,
     _callback: Option<unsafe extern "C" fn() -> ffi::c_int>,
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
 ) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_context_db_handle(
-    _context: *mut std::ffi::c_void,
-) -> *mut std::ffi::c_void {
+pub unsafe extern "C" fn sqlite3_context_db_handle(_context: *mut ffi::c_void) -> *mut ffi::c_void {
     stub!();
 }
 
@@ -219,7 +212,7 @@ pub unsafe extern "C" fn sqlite3_prepare_v2(
         return SQLITE_MISUSE;
     }
     let db: &mut sqlite3 = &mut *db;
-    let sql = ffi::CStr::from_ptr(sql);
+    let sql = CStr::from_ptr(sql);
     let sql = match sql.to_str() {
         Ok(s) => s,
         Err(_) => return SQLITE_MISUSE,
@@ -242,7 +235,7 @@ pub unsafe extern "C" fn sqlite3_finalize(stmt: *mut sqlite3_stmt) -> ffi::c_int
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_int {
+pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> ffi::c_int {
     let stmt = &mut *stmt;
     if let Ok(result) = stmt.stmt.step() {
         match result {
@@ -262,10 +255,10 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> std::ffi::c_in
 
 type exec_callback = Option<
     unsafe extern "C" fn(
-        context: *mut std::ffi::c_void,
-        n_column: std::ffi::c_int,
-        argv: *mut *mut std::ffi::c_char,
-        colv: *mut *mut std::ffi::c_char,
+        context: *mut ffi::c_void,
+        n_column: ffi::c_int,
+        argv: *mut *mut ffi::c_char,
+        colv: *mut *mut ffi::c_char,
     ) -> ffi::c_int,
 >;
 
@@ -274,14 +267,14 @@ pub unsafe extern "C" fn sqlite3_exec(
     db: *mut sqlite3,
     sql: *const ffi::c_char,
     _callback: exec_callback,
-    _context: *mut std::ffi::c_void,
-    _err: *mut *mut std::ffi::c_char,
+    _context: *mut ffi::c_void,
+    _err: *mut *mut ffi::c_char,
 ) -> ffi::c_int {
     if db.is_null() || sql.is_null() {
         return SQLITE_MISUSE;
     }
     let db: &mut sqlite3 = &mut *db;
-    let sql = ffi::CStr::from_ptr(sql);
+    let sql = CStr::from_ptr(sql);
     let sql = match sql.to_str() {
         Ok(s) => s,
         Err(_) => return SQLITE_MISUSE,
@@ -317,8 +310,8 @@ pub unsafe extern "C" fn sqlite3_stmt_busy(_stmt: *mut sqlite3_stmt) -> ffi::c_i
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_serialize(
     _db: *mut sqlite3,
-    _schema: *const std::ffi::c_char,
-    _out: *mut *mut std::ffi::c_void,
+    _schema: *const ffi::c_char,
+    _out: *mut *mut ffi::c_void,
     _out_bytes: *mut ffi::c_int,
     _flags: ffi::c_uint,
 ) -> ffi::c_int {
@@ -328,8 +321,8 @@ pub unsafe extern "C" fn sqlite3_serialize(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_deserialize(
     _db: *mut sqlite3,
-    _schema: *const std::ffi::c_char,
-    _in_: *const std::ffi::c_void,
+    _schema: *const ffi::c_char,
+    _in_: *const ffi::c_void,
     _in_bytes: ffi::c_int,
     _flags: ffi::c_uint,
 ) -> ffi::c_int {
@@ -381,12 +374,12 @@ pub unsafe extern "C" fn sqlite3_limit(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_malloc64(_n: ffi::c_int) -> *mut std::ffi::c_void {
+pub unsafe extern "C" fn sqlite3_malloc64(_n: ffi::c_int) -> *mut ffi::c_void {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_free(_ptr: *mut std::ffi::c_void) {
+pub unsafe extern "C" fn sqlite3_free(_ptr: *mut ffi::c_void) {
     stub!();
 }
 
@@ -404,52 +397,50 @@ pub unsafe extern "C" fn sqlite3_errcode(_db: *mut sqlite3) -> ffi::c_int {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_errstr(_err: ffi::c_int) -> *const std::ffi::c_char {
+pub unsafe extern "C" fn sqlite3_errstr(_err: ffi::c_int) -> *const ffi::c_char {
     sqlite3_errstr_impl(_err)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_user_data(
-    _context: *mut std::ffi::c_void,
-) -> *mut std::ffi::c_void {
+pub unsafe extern "C" fn sqlite3_user_data(_context: *mut ffi::c_void) -> *mut ffi::c_void {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_backup_init(
     _dest_db: *mut sqlite3,
-    _dest_name: *const std::ffi::c_char,
+    _dest_name: *const ffi::c_char,
     _source_db: *mut sqlite3,
-    _source_name: *const std::ffi::c_char,
-) -> *mut std::ffi::c_void {
+    _source_name: *const ffi::c_char,
+) -> *mut ffi::c_void {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_backup_step(
-    _backup: *mut std::ffi::c_void,
+    _backup: *mut ffi::c_void,
     _n_pages: ffi::c_int,
 ) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_backup_remaining(_backup: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_backup_remaining(_backup: *mut ffi::c_void) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_backup_pagecount(_backup: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_backup_pagecount(_backup: *mut ffi::c_void) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_backup_finish(_backup: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_backup_finish(_backup: *mut ffi::c_void) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_expanded_sql(_stmt: *mut sqlite3_stmt) -> *mut std::ffi::c_char {
+pub unsafe extern "C" fn sqlite3_expanded_sql(_stmt: *mut sqlite3_stmt) -> *mut ffi::c_char {
     stub!();
 }
 
@@ -473,7 +464,7 @@ pub unsafe extern "C" fn sqlite3_bind_parameter_count(_stmt: *mut sqlite3_stmt) 
 pub unsafe extern "C" fn sqlite3_bind_parameter_name(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
-) -> *const std::ffi::c_char {
+) -> *const ffi::c_char {
     stub!();
 }
 
@@ -507,9 +498,9 @@ pub unsafe extern "C" fn sqlite3_bind_double(
 pub unsafe extern "C" fn sqlite3_bind_text(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
-    _text: *const std::ffi::c_char,
+    _text: *const ffi::c_char,
     _len: ffi::c_int,
-    _destroy: *mut std::ffi::c_void,
+    _destroy: *mut ffi::c_void,
 ) -> ffi::c_int {
     stub!();
 }
@@ -518,9 +509,9 @@ pub unsafe extern "C" fn sqlite3_bind_text(
 pub unsafe extern "C" fn sqlite3_bind_blob(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
-    _blob: *const std::ffi::c_void,
+    _blob: *const ffi::c_void,
     _len: ffi::c_int,
-    _destroy: *mut std::ffi::c_void,
+    _destroy: *mut ffi::c_void,
 ) -> ffi::c_int {
     stub!();
 }
@@ -542,7 +533,7 @@ pub unsafe extern "C" fn sqlite3_column_count(_stmt: *mut sqlite3_stmt) -> ffi::
 pub unsafe extern "C" fn sqlite3_column_decltype(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
-) -> *const std::ffi::c_char {
+) -> *const ffi::c_char {
     stub!();
 }
 
@@ -550,7 +541,7 @@ pub unsafe extern "C" fn sqlite3_column_decltype(
 pub unsafe extern "C" fn sqlite3_column_name(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
-) -> *const std::ffi::c_char {
+) -> *const ffi::c_char {
     stub!();
 }
 
@@ -568,7 +559,7 @@ pub unsafe extern "C" fn sqlite3_column_double(_stmt: *mut sqlite3_stmt, _idx: f
 pub unsafe extern "C" fn sqlite3_column_blob(
     _stmt: *mut sqlite3_stmt,
     _idx: ffi::c_int,
-) -> *const std::ffi::c_void {
+) -> *const ffi::c_void {
     stub!();
 }
 
@@ -581,7 +572,7 @@ pub unsafe extern "C" fn sqlite3_column_bytes(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_value_type(value: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_value_type(value: *mut ffi::c_void) -> ffi::c_int {
     let value = value as *mut limbo_core::Value;
     let value = &*value;
     match value {
@@ -594,7 +585,7 @@ pub unsafe extern "C" fn sqlite3_value_type(value: *mut std::ffi::c_void) -> ffi
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_value_int64(value: *mut std::ffi::c_void) -> i64 {
+pub unsafe extern "C" fn sqlite3_value_int64(value: *mut ffi::c_void) -> i64 {
     let value = value as *mut limbo_core::Value;
     let value = &*value;
     match value {
@@ -604,7 +595,7 @@ pub unsafe extern "C" fn sqlite3_value_int64(value: *mut std::ffi::c_void) -> i6
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_value_double(value: *mut std::ffi::c_void) -> f64 {
+pub unsafe extern "C" fn sqlite3_value_double(value: *mut ffi::c_void) -> f64 {
     let value = value as *mut limbo_core::Value;
     let value = &*value;
     match value {
@@ -614,9 +605,7 @@ pub unsafe extern "C" fn sqlite3_value_double(value: *mut std::ffi::c_void) -> f
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_value_text(
-    value: *mut std::ffi::c_void,
-) -> *const std::ffi::c_uchar {
+pub unsafe extern "C" fn sqlite3_value_text(value: *mut ffi::c_void) -> *const ffi::c_uchar {
     let value = value as *mut limbo_core::Value;
     let value = &*value;
     match value {
@@ -626,19 +615,17 @@ pub unsafe extern "C" fn sqlite3_value_text(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_value_blob(
-    value: *mut std::ffi::c_void,
-) -> *const std::ffi::c_void {
+pub unsafe extern "C" fn sqlite3_value_blob(value: *mut ffi::c_void) -> *const ffi::c_void {
     let value = value as *mut limbo_core::Value;
     let value = &*value;
     match value {
-        limbo_core::Value::Blob(blob) => blob.as_ptr() as *const std::ffi::c_void,
+        limbo_core::Value::Blob(blob) => blob.as_ptr() as *const ffi::c_void,
         _ => std::ptr::null(),
     }
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_value_bytes(value: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_value_bytes(value: *mut ffi::c_void) -> ffi::c_int {
     let value = value as *mut limbo_core::Value;
     let value = &*value;
     match value {
@@ -650,8 +637,8 @@ pub unsafe extern "C" fn sqlite3_value_bytes(value: *mut std::ffi::c_void) -> ff
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_column_text(
     stmt: *mut sqlite3_stmt,
-    idx: std::ffi::c_int,
-) -> *const std::ffi::c_uchar {
+    idx: ffi::c_int,
+) -> *const ffi::c_uchar {
     let stmt = &mut *stmt;
     let row = stmt.row.borrow();
     let row = match row.as_ref() {
@@ -665,11 +652,11 @@ pub unsafe extern "C" fn sqlite3_column_text(
 }
 
 pub struct TabResult {
-    az_result: Vec<*mut std::ffi::c_char>,
+    az_result: Vec<*mut ffi::c_char>,
     n_row: usize,
     n_column: usize,
     z_err_msg: Option<CString>,
-    rc: std::ffi::c_int,
+    rc: ffi::c_int,
 }
 
 impl TabResult {
@@ -697,11 +684,11 @@ impl TabResult {
 
 #[no_mangle]
 unsafe extern "C" fn sqlite_get_table_cb(
-    context: *mut std::ffi::c_void,
-    n_column: std::ffi::c_int,
-    argv: *mut *mut std::ffi::c_char,
-    colv: *mut *mut std::ffi::c_char,
-) -> std::ffi::c_int {
+    context: *mut ffi::c_void,
+    n_column: ffi::c_int,
+    argv: *mut *mut ffi::c_char,
+    colv: *mut *mut ffi::c_char,
+) -> ffi::c_int {
     let res = &mut *(context as *mut TabResult);
 
     if res.n_row == 0 {
@@ -729,7 +716,7 @@ unsafe extern "C" fn sqlite_get_table_cb(
         let value_cstring = if !value.is_null() {
             let len = libc::strlen(value);
             let mut buf = Vec::with_capacity(len + 1);
-            libc::strncpy(buf.as_mut_ptr() as *mut std::ffi::c_char, value, len);
+            libc::strncpy(buf.as_mut_ptr() as *mut ffi::c_char, value, len);
             buf.set_len(len + 1);
             CString::from_vec_with_nul(buf).unwrap()
         } else {
@@ -745,12 +732,12 @@ unsafe extern "C" fn sqlite_get_table_cb(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_get_table(
     db: *mut sqlite3,
-    sql: *const std::ffi::c_char,
-    paz_result: *mut *mut *mut std::ffi::c_char,
-    pn_row: *mut std::ffi::c_int,
-    pn_column: *mut std::ffi::c_int,
-    pz_err_msg: *mut *mut std::ffi::c_char,
-) -> std::ffi::c_int {
+    sql: *const ffi::c_char,
+    paz_result: *mut *mut *mut ffi::c_char,
+    pn_row: *mut ffi::c_int,
+    pn_column: *mut ffi::c_int,
+    pz_err_msg: *mut *mut ffi::c_char,
+) -> ffi::c_int {
     if db.is_null() || sql.is_null() || paz_result.is_null() {
         return SQLITE_ERROR;
     }
@@ -781,8 +768,8 @@ pub unsafe extern "C" fn sqlite3_get_table(
     }
 
     *paz_result = res.az_result.as_mut_ptr();
-    *pn_row = res.n_row as std::ffi::c_int;
-    *pn_column = res.n_column as std::ffi::c_int;
+    *pn_row = res.n_row as ffi::c_int;
+    *pn_column = res.n_column as ffi::c_int;
 
     std::mem::forget(res);
 
@@ -790,60 +777,60 @@ pub unsafe extern "C" fn sqlite3_get_table(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_free_table(paz_result: *mut *mut *mut std::ffi::c_char) {
+pub unsafe extern "C" fn sqlite3_free_table(paz_result: *mut *mut *mut ffi::c_char) {
     let res = &mut *(paz_result as *mut TabResult);
     res.free();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_result_null(_context: *mut std::ffi::c_void) {
+pub unsafe extern "C" fn sqlite3_result_null(_context: *mut ffi::c_void) {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_result_int64(_context: *mut std::ffi::c_void, _val: i64) {
+pub unsafe extern "C" fn sqlite3_result_int64(_context: *mut ffi::c_void, _val: i64) {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_result_double(_context: *mut std::ffi::c_void, _val: f64) {
+pub unsafe extern "C" fn sqlite3_result_double(_context: *mut ffi::c_void, _val: f64) {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_text(
-    _context: *mut std::ffi::c_void,
-    _text: *const std::ffi::c_char,
+    _context: *mut ffi::c_void,
+    _text: *const ffi::c_char,
     _len: ffi::c_int,
-    _destroy: *mut std::ffi::c_void,
+    _destroy: *mut ffi::c_void,
 ) {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_blob(
-    _context: *mut std::ffi::c_void,
-    _blob: *const std::ffi::c_void,
+    _context: *mut ffi::c_void,
+    _blob: *const ffi::c_void,
     _len: ffi::c_int,
-    _destroy: *mut std::ffi::c_void,
+    _destroy: *mut ffi::c_void,
 ) {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_result_error_nomem(_context: *mut std::ffi::c_void) {
+pub unsafe extern "C" fn sqlite3_result_error_nomem(_context: *mut ffi::c_void) {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_result_error_toobig(_context: *mut std::ffi::c_void) {
+pub unsafe extern "C" fn sqlite3_result_error_toobig(_context: *mut ffi::c_void) {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_result_error(
-    _context: *mut std::ffi::c_void,
-    _err: *const std::ffi::c_char,
+    _context: *mut ffi::c_void,
+    _err: *const ffi::c_char,
     _len: ffi::c_int,
 ) {
     stub!();
@@ -851,29 +838,29 @@ pub unsafe extern "C" fn sqlite3_result_error(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_aggregate_context(
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
     _n: ffi::c_int,
-) -> *mut std::ffi::c_void {
+) -> *mut ffi::c_void {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_blob_open(
     _db: *mut sqlite3,
-    _db_name: *const std::ffi::c_char,
-    _table_name: *const std::ffi::c_char,
-    _column_name: *const std::ffi::c_char,
+    _db_name: *const ffi::c_char,
+    _table_name: *const ffi::c_char,
+    _column_name: *const ffi::c_char,
     _rowid: i64,
     _flags: ffi::c_int,
-    _blob_out: *mut *mut std::ffi::c_void,
+    _blob_out: *mut *mut ffi::c_void,
 ) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_blob_read(
-    _blob: *mut std::ffi::c_void,
-    _data: *mut std::ffi::c_void,
+    _blob: *mut ffi::c_void,
+    _data: *mut ffi::c_void,
     _n: ffi::c_int,
     _offset: ffi::c_int,
 ) -> ffi::c_int {
@@ -882,8 +869,8 @@ pub unsafe extern "C" fn sqlite3_blob_read(
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_blob_write(
-    _blob: *mut std::ffi::c_void,
-    _data: *const std::ffi::c_void,
+    _blob: *mut ffi::c_void,
+    _data: *const ffi::c_void,
     _n: ffi::c_int,
     _offset: ffi::c_int,
 ) -> ffi::c_int {
@@ -891,19 +878,19 @@ pub unsafe extern "C" fn sqlite3_blob_write(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_blob_bytes(_blob: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_blob_bytes(_blob: *mut ffi::c_void) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_blob_close(_blob: *mut std::ffi::c_void) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_blob_close(_blob: *mut ffi::c_void) -> ffi::c_int {
     stub!();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_stricmp(
-    _a: *const std::ffi::c_char,
-    _b: *const std::ffi::c_char,
+    _a: *const ffi::c_char,
+    _b: *const ffi::c_char,
 ) -> ffi::c_int {
     stub!();
 }
@@ -911,9 +898,9 @@ pub unsafe extern "C" fn sqlite3_stricmp(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_create_collation_v2(
     _db: *mut sqlite3,
-    _name: *const std::ffi::c_char,
+    _name: *const ffi::c_char,
     _enc: ffi::c_int,
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
     _cmp: Option<unsafe extern "C" fn() -> ffi::c_int>,
     _destroy: Option<unsafe extern "C" fn()>,
 ) -> ffi::c_int {
@@ -923,10 +910,10 @@ pub unsafe extern "C" fn sqlite3_create_collation_v2(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_create_function_v2(
     _db: *mut sqlite3,
-    _name: *const std::ffi::c_char,
+    _name: *const ffi::c_char,
     _n_args: ffi::c_int,
     _enc: ffi::c_int,
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
     _func: Option<unsafe extern "C" fn()>,
     _step: Option<unsafe extern "C" fn()>,
     _final_: Option<unsafe extern "C" fn()>,
@@ -938,10 +925,10 @@ pub unsafe extern "C" fn sqlite3_create_function_v2(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_create_window_function(
     _db: *mut sqlite3,
-    _name: *const std::ffi::c_char,
+    _name: *const ffi::c_char,
     _n_args: ffi::c_int,
     _enc: ffi::c_int,
-    _context: *mut std::ffi::c_void,
+    _context: *mut ffi::c_void,
     _x_step: Option<unsafe extern "C" fn()>,
     _x_final: Option<unsafe extern "C" fn()>,
     _x_value: Option<unsafe extern "C" fn()>,
@@ -952,7 +939,7 @@ pub unsafe extern "C" fn sqlite3_create_window_function(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_errmsg(_db: *mut sqlite3) -> *const std::ffi::c_char {
+pub unsafe extern "C" fn sqlite3_errmsg(_db: *mut sqlite3) -> *const ffi::c_char {
     if _db.is_null() {
         return sqlite3_errstr(SQLITE_NOMEM);
     }
@@ -965,7 +952,7 @@ pub unsafe extern "C" fn sqlite3_errmsg(_db: *mut sqlite3) -> *const std::ffi::c
 
     let err_msg = if (*_db).err_code != SQLITE_OK {
         if !(*_db).p_err.is_null() {
-            (*_db).p_err as *const std::ffi::c_char
+            (*_db).p_err as *const ffi::c_char
         } else {
             std::ptr::null()
         }
@@ -994,7 +981,7 @@ pub unsafe extern "C" fn sqlite3_extended_errcode(_db: *mut sqlite3) -> ffi::c_i
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_complete(_sql: *const std::ffi::c_char) -> ffi::c_int {
+pub unsafe extern "C" fn sqlite3_complete(_sql: *const ffi::c_char) -> ffi::c_int {
     stub!();
 }
 
@@ -1004,7 +991,7 @@ pub unsafe extern "C" fn sqlite3_threadsafe() -> ffi::c_int {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sqlite3_libversion() -> *const std::ffi::c_char {
+pub unsafe extern "C" fn sqlite3_libversion() -> *const ffi::c_char {
     c"3.42.0".as_ptr()
 }
 
@@ -1013,7 +1000,7 @@ pub unsafe extern "C" fn sqlite3_libversion_number() -> ffi::c_int {
     3042000
 }
 
-fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
+fn sqlite3_errstr_impl(rc: i32) -> *const ffi::c_char {
     const ERROR_MESSAGES: [&str; 29] = [
         "not an error",                         // SQLITE_OK
         "SQL logic error",                      // SQLITE_ERROR
@@ -1055,18 +1042,18 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
     const NO_MORE_ROWS_AVAILABLE: &str = "no more rows available";
 
     match rc {
-        SQLITE_ABORT_ROLLBACK => ABORT_ROLLBACK.as_ptr() as *const std::ffi::c_char,
-        SQLITE_ROW => ANOTHER_ROW_AVAILABLE.as_ptr() as *const std::ffi::c_char,
-        SQLITE_DONE => NO_MORE_ROWS_AVAILABLE.as_ptr() as *const std::ffi::c_char,
+        SQLITE_ABORT_ROLLBACK => ABORT_ROLLBACK.as_ptr() as *const ffi::c_char,
+        SQLITE_ROW => ANOTHER_ROW_AVAILABLE.as_ptr() as *const ffi::c_char,
+        SQLITE_DONE => NO_MORE_ROWS_AVAILABLE.as_ptr() as *const ffi::c_char,
         _ => {
             let rc = rc & 0xff;
             if rc >= 0
                 && rc < ERROR_MESSAGES.len() as i32
                 && !ERROR_MESSAGES[rc as usize].is_empty()
             {
-                ERROR_MESSAGES[rc as usize].as_ptr() as *const std::ffi::c_char
+                ERROR_MESSAGES[rc as usize].as_ptr() as *const ffi::c_char
             } else {
-                UNKNOWN_ERROR.as_ptr() as *const std::ffi::c_char
+                UNKNOWN_ERROR.as_ptr() as *const ffi::c_char
             }
         }
     }
@@ -1075,7 +1062,7 @@ fn sqlite3_errstr_impl(rc: i32) -> *const std::ffi::c_char {
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_wal_checkpoint(
     _db: *mut sqlite3,
-    _db_name: *const std::ffi::c_char,
+    _db_name: *const ffi::c_char,
 ) -> ffi::c_int {
     sqlite3_wal_checkpoint_v2(
         _db,
@@ -1089,7 +1076,7 @@ pub unsafe extern "C" fn sqlite3_wal_checkpoint(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_wal_checkpoint_v2(
     db: *mut sqlite3,
-    _db_name: *const std::ffi::c_char,
+    _db_name: *const ffi::c_char,
     _mode: ffi::c_int,
     _log_size: *mut ffi::c_int,
     _checkpoint_count: *mut ffi::c_int,

@@ -889,26 +889,26 @@ impl Program {
                         }
                     }
                     log::trace!("Halt auto_commit {}", self.auto_commit);
-                    if self.auto_commit {
-                        return match pager.end_tx() {
+                    return if self.auto_commit {
+                        match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
                             Ok(crate::storage::wal::CheckpointStatus::Done) => Ok(StepResult::Done),
                             Err(e) => Err(e),
-                        };
+                        }
                     } else {
-                        return Ok(StepResult::Done);
-                    }
+                        Ok(StepResult::Done)
+                    };
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();
                     let current_state = connection.transaction_state.borrow().clone();
                     let (new_transaction_state, updated) = match (&current_state, write) {
-                        (crate::TransactionState::Write, true) => (TransactionState::Write, false),
-                        (crate::TransactionState::Write, false) => (TransactionState::Write, false),
-                        (crate::TransactionState::Read, true) => (TransactionState::Write, true),
-                        (crate::TransactionState::Read, false) => (TransactionState::Read, false),
-                        (crate::TransactionState::None, true) => (TransactionState::Write, true),
-                        (crate::TransactionState::None, false) => (TransactionState::Read, true),
+                        (TransactionState::Write, true) => (TransactionState::Write, false),
+                        (TransactionState::Write, false) => (TransactionState::Write, false),
+                        (TransactionState::Read, true) => (TransactionState::Write, true),
+                        (TransactionState::Read, false) => (TransactionState::Read, false),
+                        (TransactionState::None, true) => (TransactionState::Write, true),
+                        (TransactionState::None, false) => (TransactionState::Read, true),
                     };
 
                     if updated && matches!(current_state, TransactionState::None) {
@@ -1481,7 +1481,7 @@ impl Program {
                             _ => unreachable!(),
                         })
                         .collect();
-                    let cursor = sorter::Sorter::new(order);
+                    let cursor = Sorter::new(order);
                     sorter_cursors.insert(*cursor_id, cursor);
                     state.pc += 1;
                 }
@@ -1630,7 +1630,7 @@ impl Program {
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
-                                assert!(arg_count == 2);
+                                assert_eq!(arg_count, 2);
                                 assert!(*start_reg + 1 < state.registers.len());
                                 let reg_value_argument = state.registers[*start_reg].clone();
                                 let OwnedValue::Text(reg_value_type) =
@@ -1715,7 +1715,7 @@ impl Program {
                                             &state.registers[*start_reg + 2],
                                         ) {
                                             Ok(x) => x,
-                                            Err(e) => return Result::Err(e),
+                                            Err(e) => return Err(e),
                                         };
 
                                         OwnedValue::Integer(exec_like_with_escape(
@@ -1920,7 +1920,7 @@ impl Program {
                                 state.registers[*dest] = OwnedValue::build_text(Rc::new(version));
                             }
                             ScalarFunc::Replace => {
-                                assert!(arg_count == 3);
+                                assert_eq!(arg_count, 3);
                                 let source = &state.registers[*start_reg];
                                 let pattern = &state.registers[*start_reg + 1];
                                 let replacement = &state.registers[*start_reg + 2];
@@ -2326,7 +2326,7 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
             addr,
             insn,
             String::new(),
-            program.comments.get(&(addr as u32)).copied()
+            program.comments.get(&{ addr }).copied()
         )
     );
 }
@@ -2337,7 +2337,7 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
         addr,
         insn,
         indent,
-        program.comments.get(&(addr as u32)).copied(),
+        program.comments.get(&{ addr }).copied(),
     );
     println!("{}", s);
 }
@@ -3195,10 +3195,7 @@ fn checked_cast_text_to_numeric(text: &str) -> std::result::Result<OwnedValue, (
 
 // try casting to numeric if not possible return integer 0
 fn cast_text_to_numeric(text: &str) -> OwnedValue {
-    match checked_cast_text_to_numeric(text) {
-        Ok(value) => value,
-        Err(_) => OwnedValue::Integer(0),
-    }
+    checked_cast_text_to_numeric(text).unwrap_or(OwnedValue::Integer(0))
 }
 
 // Check if float can be losslessly converted to 51-bit integer

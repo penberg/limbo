@@ -328,7 +328,7 @@ pub mod tests {
             Add,
             Box::new(Expr::Literal(Literal::Numeric("826".to_string()))),
         );
-        assert!(super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(exprs_are_equivalent(&expr1, &expr2));
     }
 
     #[test]
@@ -343,7 +343,7 @@ pub mod tests {
             Add,
             Box::new(Expr::Literal(Literal::Numeric("123".to_string()))),
         );
-        assert!(super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(exprs_are_equivalent(&expr1, &expr2));
     }
 
     #[test]
@@ -358,7 +358,7 @@ pub mod tests {
             Subtract,
             Box::new(Expr::Literal(Literal::Numeric("364".to_string()))),
         );
-        assert!(!super::exprs_are_equivalent(&expr3, &expr4));
+        assert!(!exprs_are_equivalent(&expr3, &expr4));
     }
 
     #[test]
@@ -373,7 +373,7 @@ pub mod tests {
             Subtract,
             Box::new(Expr::Literal(Literal::Numeric("22.0".to_string()))),
         );
-        assert!(super::exprs_are_equivalent(&expr3, &expr4));
+        assert!(exprs_are_equivalent(&expr3, &expr4));
     }
 
     #[test]
@@ -392,7 +392,7 @@ pub mod tests {
             order_by: None,
             filter_over: None,
         };
-        assert!(super::exprs_are_equivalent(&func1, &func2));
+        assert!(exprs_are_equivalent(&func1, &func2));
 
         let func3 = Expr::FunctionCall {
             name: Id("SUM".to_string()),
@@ -401,7 +401,7 @@ pub mod tests {
             order_by: None,
             filter_over: None,
         };
-        assert!(!super::exprs_are_equivalent(&func1, &func3));
+        assert!(!exprs_are_equivalent(&func1, &func3));
     }
 
     #[test]
@@ -420,7 +420,7 @@ pub mod tests {
             order_by: None,
             filter_over: None,
         };
-        assert!(!super::exprs_are_equivalent(&sum, &sum_distinct));
+        assert!(!exprs_are_equivalent(&sum, &sum_distinct));
     }
 
     #[test]
@@ -435,7 +435,7 @@ pub mod tests {
             Multiply,
             Box::new(Expr::Literal(Literal::Numeric("42".to_string()))),
         );
-        assert!(super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(exprs_are_equivalent(&expr1, &expr2));
     }
 
     #[test]
@@ -450,7 +450,7 @@ pub mod tests {
             Add,
             Box::new(Expr::Literal(Literal::Numeric("683".to_string()))),
         );
-        assert!(super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(exprs_are_equivalent(&expr1, &expr2));
     }
     #[test]
     fn test_expressions_parenthesized_equivalent() {
@@ -464,7 +464,7 @@ pub mod tests {
             Add,
             Box::new(Expr::Literal(Literal::Numeric("7".to_string()))),
         );
-        assert!(super::exprs_are_equivalent(&expr7, &expr8));
+        assert!(exprs_are_equivalent(&expr7, &expr8));
     }
 
     #[test]
@@ -483,7 +483,7 @@ pub mod tests {
             rhs: Box::new(Expr::Literal(Literal::String("%john%".to_string()))),
             escape: Some(Box::new(Expr::Literal(Literal::String("\\".to_string())))),
         };
-        assert!(super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(exprs_are_equivalent(&expr1, &expr2));
     }
 
     #[test]
@@ -502,7 +502,7 @@ pub mod tests {
             rhs: Box::new(Expr::Literal(Literal::String("%john%".to_string()))),
             escape: Some(Box::new(Expr::Literal(Literal::String("#".to_string())))),
         };
-        assert!(!super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(!exprs_are_equivalent(&expr1, &expr2));
     }
     #[test]
     fn test_expressions_equivalent_between() {
@@ -518,7 +518,7 @@ pub mod tests {
             start: Box::new(Expr::Literal(Literal::Numeric("18".to_string()))),
             end: Box::new(Expr::Literal(Literal::Numeric("65".to_string()))),
         };
-        assert!(super::exprs_are_equivalent(&expr1, &expr2));
+        assert!(exprs_are_equivalent(&expr1, &expr2));
 
         // differing BETWEEN bounds
         let expr3 = Expr::Between {
@@ -527,7 +527,7 @@ pub mod tests {
             start: Box::new(Expr::Literal(Literal::Numeric("20".to_string()))),
             end: Box::new(Expr::Literal(Literal::Numeric("65".to_string()))),
         };
-        assert!(!super::exprs_are_equivalent(&expr1, &expr3));
+        assert!(!exprs_are_equivalent(&expr1, &expr3));
     }
     #[test]
     fn test_cast_exprs_equivalent() {
@@ -546,16 +546,16 @@ pub mod tests {
                 size: None,
             }),
         };
-        assert!(super::exprs_are_equivalent(&cast1, &cast2));
+        assert!(exprs_are_equivalent(&cast1, &cast2));
     }
 
     #[test]
     fn test_ident_equivalency() {
-        assert!(super::check_ident_equivalency("\"foo\"", "foo"));
-        assert!(super::check_ident_equivalency("[foo]", "foo"));
-        assert!(super::check_ident_equivalency("`FOO`", "foo"));
-        assert!(super::check_ident_equivalency("\"foo\"", "`FOO`"));
-        assert!(!super::check_ident_equivalency("\"foo\"", "[bar]"));
-        assert!(!super::check_ident_equivalency("foo", "\"bar\""));
+        assert!(check_ident_equivalency("\"foo\"", "foo"));
+        assert!(check_ident_equivalency("[foo]", "foo"));
+        assert!(check_ident_equivalency("`FOO`", "foo"));
+        assert!(check_ident_equivalency("\"foo\"", "`FOO`"));
+        assert!(!check_ident_equivalency("\"foo\"", "[bar]"));
+        assert!(!check_ident_equivalency("foo", "\"bar\""));
     }
 }

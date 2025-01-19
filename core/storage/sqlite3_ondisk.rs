@@ -263,7 +263,7 @@ fn finish_read_database_header(
 ) -> Result<()> {
     let buf = buf.borrow();
     let buf = buf.as_slice();
-    let mut header = std::cell::RefCell::borrow_mut(&header);
+    let mut header = RefCell::borrow_mut(&header);
     header.magic.copy_from_slice(&buf[0..16]);
     header.page_size = u16::from_be_bytes([buf[16], buf[17]]);
     header.write_version = buf[18];
@@ -705,12 +705,12 @@ pub fn begin_write_btree_page(
     page: &PageRef,
     write_counter: Rc<RefCell<usize>>,
 ) -> Result<()> {
-    log::trace!("begin_write_btree_page(page={})", page.get().id);
+    trace!("begin_write_btree_page(page={})", page.get().id);
     let page_source = &pager.page_io;
     let page_finish = page.clone();
 
     let page_id = page.get().id;
-    log::trace!("begin_write_btree_page(page_id={})", page_id);
+    trace!("begin_write_btree_page(page_id={})", page_id);
     let buffer = {
         let page = page.get();
         let contents = page.contents.as_ref().unwrap();
@@ -721,7 +721,7 @@ pub fn begin_write_btree_page(
     let write_complete = {
         let buf_copy = buffer.clone();
         Box::new(move |bytes_written: i32| {
-            log::trace!("finish_write_btree_page");
+            trace!("finish_write_btree_page");
             let buf_copy = buf_copy.clone();
             let buf_len = buf_copy.borrow().len();
             *write_counter.borrow_mut() -= 1;
@@ -926,7 +926,7 @@ pub enum SerialType {
 }
 
 impl TryFrom<u64> for SerialType {
-    type Error = crate::error::LimboError;
+    type Error = LimboError;
 
     fn try_from(value: u64) -> Result<Self> {
         match value {
@@ -1165,7 +1165,7 @@ pub fn begin_read_wal_frame(
     buffer_pool: Rc<BufferPool>,
     page: PageRef,
 ) -> Result<()> {
-    log::trace!(
+    trace!(
         "begin_read_wal_frame(offset={}, page={})",
         offset,
         page.get().id
@@ -1340,7 +1340,7 @@ pub fn checksum_wal(
     input: (u32, u32),
     native_endian: bool, // Sqlite interprets big endian as "native"
 ) -> (u32, u32) {
-    assert!(buf.len() % 8 == 0, "buffer must be a multiple of 8");
+    assert_eq!(buf.len() % 8, 0, "buffer must be a multiple of 8");
     let mut s0: u32 = input.0;
     let mut s1: u32 = input.1;
     let mut i = 0;
@@ -1366,7 +1366,7 @@ pub fn checksum_wal(
 
 impl WalHeader {
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe { std::mem::transmute::<&WalHeader, &[u8; std::mem::size_of::<WalHeader>()]>(self) }
+        unsafe { std::mem::transmute::<&WalHeader, &[u8; size_of::<WalHeader>()]>(self) }
     }
 }
 

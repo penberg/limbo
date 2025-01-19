@@ -97,7 +97,7 @@ pub struct DeletePlan {
 }
 
 impl Display for Plan {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Select(select_plan) => write!(f, "{}", select_plan.source),
             Delete(delete_plan) => write!(f, "{}", delete_plan.source),

@@ -69,10 +69,10 @@ pub fn prepare_select_plan(
             let mut aggregate_expressions = Vec::new();
             for (result_column_idx, column) in columns.iter_mut().enumerate() {
                 match column {
-                    ast::ResultColumn::Star => {
+                    ResultColumn::Star => {
                         plan.source.select_star(&mut plan.result_columns);
                     }
-                    ast::ResultColumn::TableStar(name) => {
+                    ResultColumn::TableStar(name) => {
                         let name_normalized = normalize_ident(name.0.as_str());
                         let referenced_table = plan
                             .referenced_tables
@@ -96,7 +96,7 @@ pub fn prepare_select_plan(
                             });
                         }
                     }
-                    ast::ResultColumn::Expr(ref mut expr, maybe_alias) => {
+                    ResultColumn::Expr(ref mut expr, maybe_alias) => {
                         bind_column_references(expr, &plan.referenced_tables)?;
                         match expr {
                             ast::Expr::FunctionCall {

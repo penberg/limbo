@@ -579,14 +579,14 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                     if parts[0].len() == digits_in_date {
                         let date = parse_modifier_date(parts[0])?;
                         Ok(Modifier::DateOffset {
-                            years: sign * date.year() as i32,
+                            years: sign * date.year(),
                             months: sign * date.month() as i32,
                             days: sign * date.day() as i32,
                         })
                     } else {
                         // time values are either 12, 8 or 5 digits
                         let time = parse_modifier_time(parts[0])?;
-                        let time_delta = (sign * (time.num_seconds_from_midnight() as i32)) as i32;
+                        let time_delta = sign * (time.num_seconds_from_midnight() as i32);
                         Ok(Modifier::TimeOffset(TimeDelta::seconds(time_delta.into())))
                     }
                 }
@@ -596,7 +596,7 @@ fn parse_modifier(modifier: &str) -> Result<Modifier> {
                     // Convert time to total seconds (with sign)
                     let time_delta = sign * (time.num_seconds_from_midnight() as i32);
                     Ok(Modifier::DateTimeOffset {
-                        years: sign * (date.year() as i32),
+                        years: sign * (date.year()),
                         months: sign * (date.month() as i32),
                         days: sign * date.day() as i32,
                         seconds: time_delta,
@@ -1401,7 +1401,7 @@ mod tests {
     fn format(dt: NaiveDateTime) -> String {
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     }
-    fn weekday_sunday_based(dt: &chrono::NaiveDateTime) -> u32 {
+    fn weekday_sunday_based(dt: &NaiveDateTime) -> u32 {
         dt.weekday().num_days_from_sunday()
     }
 
@@ -1438,8 +1438,7 @@ mod tests {
             &[text("2023-06-15 12:30:45"), text("subsec")],
             DateTimeOutput::Time,
         );
-        let result =
-            chrono::NaiveTime::parse_from_str(&result.to_string(), "%H:%M:%S%.3f").unwrap();
+        let result = NaiveTime::parse_from_str(&result.to_string(), "%H:%M:%S%.3f").unwrap();
         assert_eq!(time.time(), result);
     }
 
@@ -1537,8 +1536,7 @@ mod tests {
             DateTimeOutput::DateTime,
         );
         let result =
-            chrono::NaiveDateTime::parse_from_str(&result.to_string(), "%Y-%m-%d %H:%M:%S%.3f")
-                .unwrap();
+            NaiveDateTime::parse_from_str(&result.to_string(), "%Y-%m-%d %H:%M:%S%.3f").unwrap();
         assert_eq!(expected, result);
     }
 

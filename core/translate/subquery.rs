@@ -12,9 +12,9 @@ use super::{
 
 /// Emit the subqueries contained in the FROM clause.
 /// This is done first so the results can be read in the main query loop.
-pub fn emit_subqueries<'a>(
+pub fn emit_subqueries(
     program: &mut ProgramBuilder,
-    t_ctx: &mut TranslateCtx<'a>,
+    t_ctx: &mut TranslateCtx,
     referenced_tables: &mut [TableReference],
     source: &mut SourceOperator,
 ) -> Result<()> {

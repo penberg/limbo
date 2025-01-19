@@ -153,7 +153,7 @@ impl From<u32> for Value {
 }
 
 impl TryFrom<u64> for Value {
-    type Error = crate::Error;
+    type Error = Error;
 
     fn try_from(value: u64) -> Result<Value> {
         if value > i64::MAX as u64 {

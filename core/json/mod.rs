@@ -36,7 +36,7 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
             }
 
             let json_val = get_json_value(json_value)?;
-            let json = crate::json::to_string(&json_val).unwrap();
+            let json = to_string(&json_val).unwrap();
 
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
         }
@@ -52,7 +52,7 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
         OwnedValue::Null => Ok(OwnedValue::Null),
         _ => {
             let json_val = get_json_value(json_value)?;
-            let json = crate::json::to_string(&json_val).unwrap();
+            let json = to_string(&json_val).unwrap();
 
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
         }
@@ -61,7 +61,7 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
 
 fn get_json_value(json_value: &OwnedValue) -> crate::Result<Val> {
     match json_value {
-        OwnedValue::Text(ref t) => match crate::json::from_str::<Val>(&t.value) {
+        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
             Ok(json) => Ok(json),
             Err(_) => {
                 crate::bail_parse_error!("malformed JSON")
@@ -92,17 +92,17 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
                 if t.subtype == TextSubtype::Json {
                     s.push_str(&t.value);
                 } else {
-                    match crate::json::to_string(&*t.value) {
+                    match to_string(&*t.value) {
                         Ok(json) => s.push_str(&json),
                         Err(_) => crate::bail_parse_error!("malformed JSON"),
                     }
                 }
             }
-            OwnedValue::Integer(i) => match crate::json::to_string(&i) {
+            OwnedValue::Integer(i) => match to_string(&i) {
                 Ok(json) => s.push_str(&json),
                 Err(_) => crate::bail_parse_error!("malformed JSON"),
             },
-            OwnedValue::Float(f) => match crate::json::to_string(&f) {
+            OwnedValue::Float(f) => match to_string(&f) {
                 Ok(json) => s.push_str(&json),
                 Err(_) => crate::bail_parse_error!("malformed JSON"),
             },
@@ -152,7 +152,7 @@ pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Resul
     let extracted = json_extract_single(&json, path, false)?;
 
     if let Some(val) = extracted {
-        let json = crate::json::to_string(val).unwrap();
+        let json = to_string(val).unwrap();
 
         Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
     } else {
@@ -190,7 +190,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
         let json = get_json_value(value)?;
         let extracted = json_extract_single(&json, &paths[0], true)?.unwrap_or_else(|| &Val::Null);
 
-        return convert_json_to_db_type(&extracted, false);
+        return convert_json_to_db_type(extracted, false);
     }
 
     let json = get_json_value(value)?;
@@ -209,7 +209,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
                     return Ok(OwnedValue::Null);
                 }
 
-                result.push_str(&crate::json::to_string(&extracted).unwrap());
+                result.push_str(&to_string(&extracted).unwrap());
                 result.push(',');
             }
         }
@@ -228,6 +228,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 ///   > an INTEGER one for a JSON true value,
 ///   > the dequoted text for a JSON string value,
 ///   > and a text representation for JSON object and array values.
+///
 /// https://sqlite.org/json1.html#the_json_extract_function
 ///
 /// *all_as_db* - if true, objects and arrays will be returned as pure TEXT without the JSON subtype
@@ -245,7 +246,7 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
         }
         Val::String(s) => Ok(OwnedValue::Text(LimboText::new(Rc::new(s.clone())))),
         _ => {
-            let json = crate::json::to_string(&extracted).unwrap();
+            let json = to_string(&extracted).unwrap();
             if all_as_db {
                 Ok(OwnedValue::Text(LimboText::new(Rc::new(json))))
             } else {
@@ -369,12 +370,12 @@ fn json_extract_single<'a>(
         }
     }
 
-    Ok(Some(&current_element))
+    Ok(Some(current_element))
 }
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
     match json {
-        OwnedValue::Text(t) => match crate::json::from_str::<Val>(&t.value) {
+        OwnedValue::Text(t) => match from_str::<Val>(&t.value) {
             Ok(_) => Ok(OwnedValue::Integer(0)),
             Err(JsonError::Message { location, .. }) => {
                 if let Some(loc) = location {

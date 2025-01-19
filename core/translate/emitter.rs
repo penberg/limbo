@@ -290,9 +290,9 @@ fn emit_program_for_delete(
     Ok(())
 }
 
-fn emit_delete_insns<'a>(
+fn emit_delete_insns(
     program: &mut ProgramBuilder,
-    t_ctx: &mut TranslateCtx<'a>,
+    t_ctx: &mut TranslateCtx,
     source: &SourceOperator,
     limit: &Option<usize>,
 ) -> Result<()> {

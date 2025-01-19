@@ -45,7 +45,7 @@ use util::parse_schema_rows;
 
 pub use error::LimboError;
 use translate::select::prepare_select_plan;
-pub type Result<T, E = error::LimboError> = std::result::Result<T, E>;
+pub type Result<T, E = LimboError> = std::result::Result<T, E>;
 
 use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
@@ -86,7 +86,7 @@ impl Database {
     pub fn open_file(io: Arc<dyn IO>, path: &str) -> Result<Arc<Database>> {
         use storage::wal::WalFileShared;
 
-        let file = io.open_file(path, io::OpenFlags::Create, true)?;
+        let file = io.open_file(path, OpenFlags::Create, true)?;
         maybe_init_database_file(&file, &io)?;
         let page_io = Rc::new(FileStorage::new(file));
         let wal_path = format!("{}-wal", path);
@@ -194,7 +194,7 @@ impl Database {
 }
 
 pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result<()> {
-    if file.size().unwrap() == 0 {
+    if file.size()? == 0 {
         // init db
         let db_header = DatabaseHeader::default();
         let page1 = allocate_page(
@@ -223,8 +223,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 let completion = Completion::Write(WriteCompletion::new(Box::new(move |_| {
                     *flag_complete.borrow_mut() = true;
                 })));
-                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))
-                    .unwrap();
+                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))?;
             }
             let mut limit = 100;
             loop {
@@ -475,6 +474,7 @@ impl Statement {
     }
 }
 
+#[derive(PartialEq)]
 pub enum StepResult<'a> {
     Row(Row<'a>),
     IO,
@@ -483,12 +483,13 @@ pub enum StepResult<'a> {
     Busy,
 }
 
+#[derive(PartialEq)]
 pub struct Row<'a> {
     pub values: Vec<Value<'a>>,
 }
 
 impl<'a> Row<'a> {
-    pub fn get<T: crate::types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
+    pub fn get<T: types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
     }
@@ -509,9 +510,9 @@ impl Rows {
 }
 
 pub(crate) struct SymbolTable {
-    pub functions: HashMap<String, Rc<crate::function::ExternalFunc>>,
+    pub functions: HashMap<String, Rc<function::ExternalFunc>>,
     #[cfg(not(target_family = "wasm"))]
-    extensions: Vec<(libloading::Library, *const ExtensionApi)>,
+    extensions: Vec<(Library, *const ExtensionApi)>,
 }
 
 impl std::fmt::Debug for SymbolTable {
@@ -563,7 +564,7 @@ impl SymbolTable {
         &self,
         name: &str,
         _arg_count: usize,
-    ) -> Option<Rc<crate::function::ExternalFunc>> {
+    ) -> Option<Rc<function::ExternalFunc>> {
         self.functions.get(name).cloned()
     }
 }
@@ -589,7 +590,7 @@ impl Iterator for QueryRunner<'_> {
         match self.parser.next() {
             Ok(Some(cmd)) => Some(self.conn.run_cmd(cmd)),
             Ok(None) => None,
-            Err(err) => Some(Result::Err(LimboError::from(err))),
+            Err(err) => Some(Err(LimboError::from(err))),
         }
     }
 }

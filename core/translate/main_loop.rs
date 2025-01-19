@@ -780,7 +780,7 @@ pub fn close_loop(
                     target_pc: lj_meta.label_match_flag_set_true,
                 });
 
-                assert!(program.offset() == jump_offset);
+                assert_eq!(program.offset(), jump_offset);
             }
 
             close_loop(program, t_ctx, left)?;

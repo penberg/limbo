@@ -101,17 +101,16 @@ impl Cursor {
         // For DDL and DML statements,
         // we need to execute the statement immediately
         if stmt_is_ddl || stmt_is_dml {
-            loop {
-                match stmt.borrow_mut().step().map_err(|e| {
-                    PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
-                })? {
-                    limbo_core::StepResult::IO => {
-                        self.conn.io.run_once().map_err(|e| {
-                            PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
-                        })?;
-                    }
-                    _ => break,
-                }
+            while stmt
+                .borrow_mut()
+                .step()
+                .map_err(|e| PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e)))?
+                .eq(&limbo_core::StepResult::IO)
+            {
+                self.conn
+                    .io
+                    .run_once()
+                    .map_err(|e| PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e)))?;
             }
         }
 
@@ -268,20 +267,26 @@ impl Connection {
 #[allow(clippy::arc_with_non_send_sync)]
 #[pyfunction]
 pub fn connect(path: &str) -> Result<Connection> {
+    #[inline(always)]
+    fn open_or(
+        io: Arc<dyn limbo_core::IO>,
+        path: &str,
+    ) -> std::result::Result<Arc<limbo_core::Database>, PyErr> {
+        limbo_core::Database::open_file(io, path).map_err(|e| {
+            PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e))
+        })
+    }
+
     match path {
         ":memory:" => {
             let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::MemoryIO::new()?);
-            let db = limbo_core::Database::open_file(io.clone(), path).map_err(|e| {
-                PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e))
-            })?;
+            let db = open_or(io.clone(), path)?;
             let conn: Rc<limbo_core::Connection> = db.connect();
             Ok(Connection { conn, io })
         }
         path => {
             let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new()?);
-            let db = limbo_core::Database::open_file(io.clone(), path).map_err(|e| {
-                PyErr::new::<DatabaseError, _>(format!("Failed to open database: {:?}", e))
-            })?;
+            let db = open_or(io.clone(), path)?;
             let conn: Rc<limbo_core::Connection> = db.connect();
             Ok(Connection { conn, io })
         }
