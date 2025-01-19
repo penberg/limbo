@@ -2,8 +2,8 @@ use std::fmt::Display;
 
 /// Error type is of type ExtError which can be
 /// either a user defined error or an error code
-#[derive(Clone, Copy)]
 #[repr(C)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ResultCode {
     OK = 0,
     Error = 1,
@@ -20,6 +20,7 @@ pub enum ResultCode {
     Internal = 12,
     Unavailable = 13,
     CustomError = 14,
+    EOF = 15,
 }
 
 impl ResultCode {
@@ -50,6 +51,7 @@ impl Display for ResultCode {
             ResultCode::Internal => write!(f, "Internal Error"),
             ResultCode::Unavailable => write!(f, "Unavailable"),
             ResultCode::CustomError => write!(f, "Error "),
+            ResultCode::EOF => write!(f, "EOF"),
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::VirtualTable;
 use crate::{util::normalize_ident, Result};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
@@ -47,6 +48,7 @@ impl Schema {
 pub enum Table {
     BTree(Rc<BTreeTable>),
     Pseudo(Rc<PseudoTable>),
+    Virtual(Rc<VirtualTable>),
 }
 
 impl Table {
@@ -54,6 +56,7 @@ impl Table {
         match self {
             Table::BTree(table) => table.root_page,
             Table::Pseudo(_) => unimplemented!(),
+            Table::Virtual(_) => unimplemented!(),
         }
     }
 
@@ -61,6 +64,7 @@ impl Table {
         match self {
             Self::BTree(table) => &table.name,
             Self::Pseudo(_) => "",
+            Self::Virtual(table) => &table.name,
         }
     }
 
@@ -74,6 +78,10 @@ impl Table {
                 .columns
                 .get(index)
                 .expect("column index out of bounds"),
+            Self::Virtual(table) => table
+                .columns
+                .get(index)
+                .expect("column index out of bounds"),
         }
     }
 
@@ -81,6 +89,7 @@ impl Table {
         match self {
             Self::BTree(table) => &table.columns,
             Self::Pseudo(table) => &table.columns,
+            Self::Virtual(table) => &table.columns,
         }
     }
 
@@ -88,6 +97,13 @@ impl Table {
         match self {
             Self::BTree(table) => Some(table.clone()),
             Self::Pseudo(_) => None,
+            Self::Virtual(_) => None,
+        }
+    }
+    pub fn virtual_table(&self) -> Option<Rc<VirtualTable>> {
+        match self {
+            Self::Virtual(table) => Some(table.clone()),
+            _ => None,
         }
     }
 }
@@ -97,6 +113,7 @@ impl PartialEq for Table {
         match (self, other) {
             (Self::BTree(a), Self::BTree(b)) => Rc::ptr_eq(a, b),
             (Self::Pseudo(a), Self::Pseudo(b)) => Rc::ptr_eq(a, b),
+            (Self::Virtual(a), Self::Virtual(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }

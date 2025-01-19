@@ -9,6 +9,7 @@ use crate::{
     function::AggFunc,
     schema::{BTreeTable, Column, Index, Table},
     vdbe::BranchOffset,
+    VirtualTable,
 };
 use crate::{
     schema::{PseudoTable, Type},
@@ -197,11 +198,9 @@ pub struct TableReference {
     pub identifier: String,
     /// The join info for this table reference, if it is the right side of a join (which all except the first table reference have)
     pub join_info: Option<JoinInfo>,
+    pub reference_type: TableReferenceType,
 }
 
-/**
-  A SourceOperator is a reference in the query plan that reads data from a table.
-*/
 #[derive(Clone, Debug)]
 pub enum Operation {
     // Scan operation
@@ -226,10 +225,37 @@ pub enum Operation {
     },
 }
 
+/// The type of the table reference, either BTreeTable or Subquery
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TableReferenceType {
+    /// A BTreeTable is a table that is stored on disk in a B-tree index.
+    BTreeTable,
+    /// A subquery.
+    Subquery {
+        /// The index of the first register in the query plan that contains the result columns of the subquery.
+        result_columns_start_reg: usize,
+    },
+    /// A virtual table.
+    VirtualTable {
+        /// Arguments to pass e.g. generate_series(1, 10, 2)
+        args: Vec<ast::Expr>,
+    },
+}
+
 impl TableReference {
     /// Returns the btree table for this table reference, if it is a BTreeTable.
     pub fn btree(&self) -> Option<Rc<BTreeTable>> {
-        self.table.btree()
+        match &self.reference_type {
+            TableReferenceType::BTreeTable => self.table.btree(),
+            TableReferenceType::Subquery { .. } => None,
+            TableReferenceType::VirtualTable { .. } => None,
+        }
+    }
+    pub fn virtual_table(&self) -> Option<Rc<VirtualTable>> {
+        match &self.reference_type {
+            TableReferenceType::VirtualTable { .. } => self.table.virtual_table(),
+            _ => None,
+        }
     }
 
     /// Creates a new TableReference for a subquery.
@@ -254,6 +280,9 @@ impl TableReference {
                 result_columns_start_reg: 0, // Will be set in the bytecode emission phase
             },
             table,
+            reference_type: TableReferenceType::Subquery {
+                result_columns_start_reg: 0, // Will be set in the bytecode emission phase
+            },
             identifier: identifier.clone(),
             join_info,
         }

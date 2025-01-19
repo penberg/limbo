@@ -6,6 +6,7 @@ use crate::pseudo::PseudoCursor;
 use crate::storage::btree::BTreeCursor;
 use crate::storage::sqlite3_ondisk::write_varint;
 use crate::vdbe::sorter::Sorter;
+use crate::vdbe::VTabOpaqueCursor;
 use crate::Result;
 use std::fmt::Display;
 use std::rc::Rc;
@@ -670,6 +671,7 @@ pub enum Cursor {
     Index(BTreeCursor),
     Pseudo(PseudoCursor),
     Sorter(Sorter),
+    Virtual(VTabOpaqueCursor),
 }
 
 impl Cursor {
@@ -714,6 +716,13 @@ impl Cursor {
         match self {
             Self::Sorter(cursor) => cursor,
             _ => panic!("Cursor is not a sorter cursor"),
+        }
+    }
+
+    pub fn as_virtual_mut(&mut self) -> &mut VTabOpaqueCursor {
+        match self {
+            Self::Virtual(cursor) => cursor,
+            _ => panic!("Cursor is not a virtual cursor"),
         }
     }
 }

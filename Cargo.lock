@@ -1702,6 +1702,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo_series"
+version = "0.0.14"
+dependencies = [
+ "limbo_ext",
+ "log",
+]
+
+[[package]]
 name = "limbo_sim"
 version = "0.0.14"
 dependencies = [

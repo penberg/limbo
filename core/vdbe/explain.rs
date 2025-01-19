@@ -363,6 +363,62 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::VOpenAsync { cursor_id } => (
+                "VOpenAsync",
+                *cursor_id as i32,
+                0,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::VOpenAwait => (
+                "VOpenAwait",
+                0,
+                0,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::VFilter {
+                cursor_id,
+                arg_count,
+                args_reg,
+            } => (
+                "VFilter",
+                *cursor_id as i32,
+                *arg_count as i32,
+                *args_reg as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::VColumn {
+                cursor_id,
+                column,
+                dest,
+            } => (
+                "VColumn",
+                *cursor_id as i32,
+                *column as i32,
+                *dest as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
+            Insn::VNext {
+                cursor_id,
+                pc_if_next,
+            } => (
+                "VNext",
+                *cursor_id as i32,
+                pc_if_next.to_debug_int(),
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
             Insn::OpenPseudo {
                 cursor_id,
                 content_reg,
@@ -423,6 +479,7 @@ pub fn insn_to_str(
                         name
                     }
                     CursorType::Sorter => None,
+                    CursorType::VirtualTable(v) => v.columns.get(*column).unwrap().name.as_ref(),
                 };
                 (
                     "Column",

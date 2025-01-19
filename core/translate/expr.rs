@@ -13,7 +13,7 @@ use crate::vdbe::{
 use crate::Result;
 
 use super::emitter::Resolver;
-use super::plan::{Operation, TableReference};
+use super::plan::{Operation, TableReference, TableReferenceType};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConditionMetadata {
@@ -1824,22 +1824,45 @@ pub fn translate_expr(
                 // If we are reading a column from a table, we find the cursor that corresponds to
                 // the table and read the column from the cursor.
                 Operation::Scan { .. } | Operation::Search(_) => {
-                    let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
-                    if *is_rowid_alias {
-                        program.emit_insn(Insn::RowId {
-                            cursor_id,
-                            dest: target_register,
-                        });
-                    } else {
-                        program.emit_insn(Insn::Column {
-                            cursor_id,
-                            column: *column,
-                            dest: target_register,
-                        });
+                    match &table_reference.reference_type {
+                        TableReferenceType::BTreeTable => {
+                            let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
+                            if *is_rowid_alias {
+                                program.emit_insn(Insn::RowId {
+                                    cursor_id,
+                                    dest: target_register,
+                                });
+                            } else {
+                                program.emit_insn(Insn::Column {
+                                    cursor_id,
+                                    column: *column,
+                                    dest: target_register,
+                                });
+                            }
+                            let column = table_reference.table.get_column_at(*column);
+                            maybe_apply_affinity(column.ty, target_register, program);
+                            Ok(target_register)
+                        }
+                        TableReferenceType::VirtualTable { .. } => {
+                            let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
+                            program.emit_insn(Insn::VColumn {
+                                cursor_id,
+                                column: *column,
+                                dest: target_register,
+                            });
+                            Ok(target_register)
+                        }
+                        TableReferenceType::Subquery {
+                            result_columns_start_reg,
+                        } => {
+                            program.emit_insn(Insn::Copy {
+                                src_reg: result_columns_start_reg + *column,
+                                dst_reg: target_register,
+                                amount: 0,
+                            });
+                            Ok(target_register)
+                        }
                     }
-                    let column = table_reference.table.get_column_at(*column);
-                    maybe_apply_affinity(column.ty, target_register, program);
-                    Ok(target_register)
                 }
                 // If we are reading a column from a subquery, we instead copy the column from the
                 // subquery's result registers.

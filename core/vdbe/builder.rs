@@ -9,7 +9,7 @@ use crate::{
     schema::{BTreeTable, Index, PseudoTable},
     storage::sqlite3_ondisk::DatabaseHeader,
     translate::plan::{ResultSetColumn, TableReference},
-    Connection,
+    Connection, VirtualTable,
 };
 
 use super::{BranchOffset, CursorID, Insn, InsnReference, Program};
@@ -40,6 +40,7 @@ pub enum CursorType {
     BTreeIndex(Rc<Index>),
     Pseudo(Rc<PseudoTable>),
     Sorter,
+    VirtualTable(Rc<VirtualTable>),
 }
 
 impl CursorType {
@@ -405,6 +406,9 @@ impl ProgramBuilder {
                 }
                 Insn::IsNull { reg: _, target_pc } => {
                     resolve(target_pc, "IsNull");
+                }
+                Insn::VNext { pc_if_next, .. } => {
+                    resolve(pc_if_next, "VNext");
                 }
                 _ => continue,
             }

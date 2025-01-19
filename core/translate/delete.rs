@@ -7,7 +7,7 @@ use crate::vdbe::builder::{ProgramBuilder, ProgramBuilderOpts, QueryMode};
 use crate::{schema::Schema, Result, SymbolTable};
 use sqlite3_parser::ast::{Expr, Limit, QualifiedName};
 
-use super::plan::TableReference;
+use super::plan::{TableReference, TableReferenceType};
 
 pub fn translate_delete(
     query_mode: QueryMode,
@@ -48,6 +48,7 @@ pub fn prepare_delete_plan(
         identifier: table.name.clone(),
         op: Operation::Scan { iter_dir: None },
         join_info: None,
+        reference_type: TableReferenceType::BTreeTable,
     }];
 
     let mut where_predicates = vec![];

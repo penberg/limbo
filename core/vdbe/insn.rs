@@ -213,6 +213,35 @@ pub enum Insn {
     // Await for the completion of open cursor.
     OpenReadAwait,
 
+    /// Open a cursor for a virtual table.
+    VOpenAsync {
+        cursor_id: CursorID,
+    },
+
+    /// Await for the completion of open cursor for a virtual table.
+    VOpenAwait,
+
+    /// Initialize the position of the virtual table cursor.
+    VFilter {
+        cursor_id: CursorID,
+        arg_count: usize,
+        args_reg: usize,
+    },
+
+    /// Read a column from the current row of the virtual table cursor.
+    VColumn {
+        cursor_id: CursorID,
+        column: usize,
+        dest: usize,
+    },
+
+    /// Advance the virtual table cursor to the next row.
+    /// TODO: async
+    VNext {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
+    },
+
     // Open a cursor for a pseudo-table that contains a single row.
     OpenPseudo {
         cursor_id: CursorID,

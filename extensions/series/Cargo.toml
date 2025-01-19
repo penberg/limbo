@@ -1,0 +1,15 @@
+[package]
+name = "limbo_series"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+
+[dependencies]
+limbo_ext = { path = "../core"}
+log = "0.4.20"
