@@ -7,7 +7,7 @@ like traditional `sqlite3` extensions, but are able to be written in much more e
 
 ## Currently supported features
 
- - [ x ] **Scalar Functions**: Create scalar functions using the `ScalarDerive` derive macro and `Scalar` trait.
+ - [ x ] **Scalar Functions**: Create scalar functions using the `scalar` macro.
  - [ x ] **Aggregate Functions**: Define aggregate functions with `AggregateDerive` macro and `AggFunc` trait.
  - []  **Virtual tables**: TODO
 ---
@@ -37,41 +37,35 @@ Extensions can be registered with the `register_extension!` macro:
 ```rust
 
 register_extension!{
-    scalars: { Double },
+    scalars: { double }, // name of your function, if different from attribute name
     aggregates: { Percentile },
 }
 ```
 
 ### Scalar Example:
 ```rust
-use limbo_ext::{register_extension, Value, ScalarDerive, Scalar};
+use limbo_ext::{register_extension, Value, scalar};
 
-/// Annotate each with the ScalarDerive macro, and implement the Scalar trait on your struct
-#[derive(ScalarDerive)]
-struct Double;
-
-impl Scalar for Double {
-    fn name(&self) -> &'static str { "double" }
-    fn call(&self, args: &[Value]) -> Value {
-        if let Some(arg) = args.first() {
-            match arg.value_type() {
-                ValueType::Float => {
-                    let val = arg.to_float().unwrap();
-                    Value::from_float(val * 2.0)
-                }
-                ValueType::Integer => {
-                    let val = arg.to_integer().unwrap();
-                    Value::from_integer(val * 2)
-                }
+/// Annotate each with the scalar macro, specifying the name you would like to call it with
+/// and optionally, an alias.. e.g. SELECT double(4); or SELECT twice(4);
+#[scalar(name = "double", alias = "twice")]
+fn double(&self, args: &[Value]) -> Value {
+    if let Some(arg) = args.first() {
+        match arg.value_type() {
+            ValueType::Float => {
+                let val = arg.to_float().unwrap();
+                Value::from_float(val * 2.0)
             }
-        } else {
-            Value::null()
+            ValueType::Integer => {
+                let val = arg.to_integer().unwrap();
+                Value::from_integer(val * 2)
+            }
         }
+    } else {
+        Value::null()
     }
-    /// OPTIONAL: 'alias' if you would like to provide an additional name
-   fn alias(&self) -> &'static str { "twice" }
 }
-
+```
 
 ### Aggregates Example:
 
@@ -88,14 +82,11 @@ impl AggFunc for Percentile {
 
     /// Define the name you wish to call your function by. 
     /// e.g. SELECT percentile(value, 40);
-    fn name(&self) -> &'static str {
-        "percentile"
-    }
+     const NAME: &str = "percentile";
 
-    /// Define the number of arguments your function takes
-    fn args(&self) -> i32 {
-        2
-    }
+    /// Define the number of expected arguments for your function.
+     const ARGS: i32 = 2;
+
     /// Define a function called on each row/value in a relevant group/column
     fn step(state: &mut Self::State, args: &[Value]) {
         let (values, p_value, error) = state;
@@ -127,7 +118,7 @@ impl AggFunc for Percentile {
         let (mut values, p_value, error) = state;
 
         if let Some(error) = error {
-            return Value::error(error);
+            return Value::custom_error(error);
         }
 
         if values.is_empty() {

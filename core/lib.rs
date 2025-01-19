@@ -22,7 +22,7 @@ use fallible_iterator::FallibleIterator;
 #[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
 #[cfg(not(target_family = "wasm"))]
-use limbo_ext::{ExtensionApi, ExtensionEntryPoint, RESULT_OK};
+use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use log::trace;
 use schema::Schema;
 use sqlite3_parser::ast;
@@ -179,7 +179,7 @@ impl Database {
         };
         let api_ptr: *const ExtensionApi = Box::into_raw(api);
         let result_code = unsafe { entry(api_ptr) };
-        if result_code == RESULT_OK {
+        if result_code.is_ok() {
             self.syms.borrow_mut().extensions.push((lib, api_ptr));
             Ok(())
         } else {
