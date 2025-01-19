@@ -193,7 +193,7 @@ impl FallibleIterator for Parser<'_> {
                 self.parser.sqlite3ParserFinalize();
                 return Err(Error::UnrecognizedToken(
                     Some((self.scanner.line(), self.scanner.column())),
-                    Some(start.into())
+                    Some(start.into()),
                 ));
             }
 
@@ -528,7 +528,7 @@ fn literal(data: &[u8], quote: u8) -> Result<(Option<Token<'_>>, usize), Error> 
 fn blob_literal(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
     debug_assert!(data[0] == b'x' || data[0] == b'X');
     debug_assert_eq!(data[1], b'\'');
-    
+
     let mut end = 2;
     let mut valid = true;
     while end < data.len() && data[end] != b'\'' {
@@ -537,13 +537,13 @@ fn blob_literal(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
         }
         end += 1;
     }
-    
+
     let total_len = if end < data.len() { end + 1 } else { end };
-    
+
     if !valid || (end - 2) % 2 != 0 || end >= data.len() {
         return Ok((Some((&data[..total_len], TokenType::TK_ILLEGAL)), total_len));
     }
-    
+
     Ok((Some((&data[2..end], TokenType::TK_BLOB)), total_len))
 }
 
