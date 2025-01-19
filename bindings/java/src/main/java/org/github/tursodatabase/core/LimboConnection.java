@@ -85,7 +85,7 @@ public abstract class LimboConnection implements Connection {
         if (sqlBytes == null) {
             throw new SQLException("Failed to convert " + sql + " into bytes");
         }
-        return new LimboStatement(prepareUtf8(connectionPtr, sqlBytes));
+        return new LimboStatement(sql, prepareUtf8(connectionPtr, sqlBytes));
     }
 
     private native long prepareUtf8(long connectionPtr, byte[] sqlUtf8) throws SQLException;
@@ -133,7 +133,7 @@ public abstract class LimboConnection implements Connection {
      * @param errorCode         Error code.
      * @param errorMessageBytes Error message.
      */
-    @NativeInvocation
+    @NativeInvocation(invokedFrom = "limbo_connection.rs")
     private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
         LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
     }
