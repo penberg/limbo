@@ -1,18 +1,18 @@
 package org.github.tursodatabase.jdbc4;
 
+import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.core.LimboStatement;
 
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
-/**
- * Implementation of the {@link Statement} interface for JDBC 4.
- */
-public class JDBC4Statement extends LimboStatement implements Statement {
+public class JDBC4Statement implements Statement {
+
+    private final LimboConnection connection;
+    @Nullable
+    private LimboStatement statement = null;
 
     private boolean closed;
     private boolean closeOnCompletion;
@@ -32,7 +32,7 @@ public class JDBC4Statement extends LimboStatement implements Statement {
     }
 
     public JDBC4Statement(LimboConnection connection, int resultSetType, int resultSetConcurrency, int resultSetHoldability) {
-        super(connection);
+        this.connection = connection;
         this.resultSetType = resultSetType;
         this.resultSetConcurrency = resultSetConcurrency;
         this.resultSetHoldability = resultSetHoldability;
@@ -129,11 +129,12 @@ public class JDBC4Statement extends LimboStatement implements Statement {
                 () -> {
                     try {
                         connectionLock.lock();
-                        final long stmtPointer = connection.prepare(sql);
-                        List<Object[]> result = execute(stmtPointer);
+                        statement = connection.prepare(sql);
+                        statement.execute();
                         updateGeneratedKeys();
                         exhaustedResults = false;
-                        return !result.isEmpty();
+                        return true;
+                        // return !result.isEmpty();
                     } finally {
                         connectionLock.unlock();
                     }
@@ -312,6 +313,18 @@ public class JDBC4Statement extends LimboStatement implements Statement {
     public boolean isWrapperFor(Class<?> iface) throws SQLException {
         // TODO
         return false;
+    }
+
+    protected void internalClose() throws SQLException {
+        // TODO
+    }
+
+    protected void clearGeneratedKeys() throws SQLException {
+        // TODO
+    }
+
+    protected void updateGeneratedKeys() throws SQLException {
+        // TODO
     }
 
     private <T> T withConnectionTimeout(SQLCallable<T> callable) throws SQLException {
