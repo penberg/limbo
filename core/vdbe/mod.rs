@@ -1290,7 +1290,6 @@ impl Program {
                             *acc += col;
                         }
                         AggFunc::Count | AggFunc::Count0 => {
-                            // println!("here");
                             if matches!(&state.registers[*acc_reg], OwnedValue::Null) {
                                 state.registers[*acc_reg] = OwnedValue::Agg(Box::new(
                                     AggContext::Count(OwnedValue::Integer(0)),
