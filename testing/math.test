@@ -615,6 +615,22 @@ do_execsql_test bitwise-not-zero {
 	SELECT ~0
 } {-1}
 
+foreach {testname lhs ans} {
+  int-1           1        0 
+  int-2           2        0 
+  int-3           0        1 
+  float-1         1.0      0
+  float-2         2.0      0
+  float-3         0.0      1
+  text            'a'      1
+  text-int-1      '0'      1
+  text-int-2      '1'      0
+  text-float-1    '1.0'    0
+  text-float-2    '0.0'    1
+  null            NULL     {}
+} {
+  do_execsql_test boolean-not "SELECT not $lhs" $::ans
+}
 
 do_execsql_test_tolerance pi {
   SELECT pi()

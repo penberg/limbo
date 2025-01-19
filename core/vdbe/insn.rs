@@ -516,6 +516,11 @@ pub enum Insn {
         rg2: usize,
         dest: usize,
     },
+    /// Interpret the value in reg as boolean and store its compliment in destination
+    Not {
+        reg: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {
@@ -843,5 +848,18 @@ fn compute_shr(lhs: i64, rhs: i64) -> i64 {
         lhs << (-rhs)
     } else {
         lhs >> rhs
+    }
+}
+
+pub fn exec_boolean_not(mut reg: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = reg {
+        reg = agg.final_value();
+    }
+    match reg {
+        OwnedValue::Null => OwnedValue::Null,
+        OwnedValue::Integer(i) => OwnedValue::Integer((*i == 0) as i64),
+        OwnedValue::Float(f) => OwnedValue::Integer((*f == 0.0) as i64),
+        OwnedValue::Text(text) => exec_boolean_not(&cast_text_to_numerical(&text.value)),
+        _ => todo!(),
     }
 }

@@ -1748,7 +1748,15 @@ pub fn translate_expr(
                 });
                 Ok(target_register)
             }
-            _ => todo!(),
+            (UnaryOperator::Not, _) => {
+                let reg = program.alloc_register();
+                translate_expr(program, referenced_tables, expr, reg, resolver)?;
+                program.emit_insn(Insn::Not {
+                    reg,
+                    dest: target_register,
+                });
+                Ok(target_register)
+            }
         },
         ast::Expr::Variable(name) => {
             let index = program.parameters.push(name);
