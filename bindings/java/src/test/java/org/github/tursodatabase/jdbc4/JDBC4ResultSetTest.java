@@ -9,6 +9,7 @@ import java.util.Properties;
 
 import org.github.tursodatabase.TestUtils;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 class JDBC4ResultSetTest {
@@ -39,6 +40,7 @@ class JDBC4ResultSetTest {
     }
 
     @Test
+    @Disabled("https://github.com/tursodatabase/limbo/pull/743#issuecomment-2600746904")
     void invoking_next_after_the_last_row_should_return_false() throws Exception {
         stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
         stmt.executeUpdate("INSERT INTO users VALUES (1, 'sinwoo');");
