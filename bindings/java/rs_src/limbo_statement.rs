@@ -8,8 +8,11 @@ use limbo_core::{Statement, StepResult};
 
 pub const STEP_RESULT_ID_ROW: i32 = 10;
 pub const STEP_RESULT_ID_IO: i32 = 20;
+#[allow(dead_code)]
 pub const STEP_RESULT_ID_DONE: i32 = 30;
+#[allow(dead_code)]
 pub const STEP_RESULT_ID_INTERRUPT: i32 = 40;
+#[allow(dead_code)]
 pub const STEP_RESULT_ID_BUSY: i32 = 50;
 pub const STEP_RESULT_ID_ERROR: i32 = 60;
 
@@ -101,6 +104,22 @@ fn row_to_obj_array<'local>(
     Ok(obj_array.into())
 }
 
+/// Converts an optional `JObject` into Java's `LimboStepResult`.
+///
+/// This function takes an optional `JObject` and converts it into a Java object
+/// of type `LimboStepResult`. The conversion is done by creating a new Java object with the
+/// appropriate constructor arguments.
+///
+/// # Arguments
+///
+/// * `env` - A mutable reference to the JNI environment.
+/// * `id` - An integer representing the type of `StepResult`.
+/// * `result` - An optional `JObject` that contains the result data.
+///
+/// # Returns
+///
+/// A `JObject` representing the `LimboStepResult` in Java. If the object creation fails,
+/// a null `JObject` is returned
 fn to_limbo_step_result<'local>(
     env: &mut JNIEnv<'local>,
     id: i32,
@@ -114,13 +133,13 @@ fn to_limbo_step_result<'local>(
             "(I[Ljava/lang/Object;)V",
             &ctor_args,
         )
-            .unwrap_or_else(|_| JObject::null())
+        .unwrap_or_else(|_| JObject::null())
     } else {
         env.new_object(
             "org/github/tursodatabase/core/LimboStepResult",
             "(I[Ljava/lang/Object;)V",
             &ctor_args,
         )
-            .unwrap_or_else(|_| JObject::null())
+        .unwrap_or_else(|_| JObject::null())
     }
 }
