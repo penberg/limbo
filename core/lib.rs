@@ -14,22 +14,6 @@ mod types;
 mod util;
 mod vdbe;
 
-pub use error::LimboError;
-pub use io::OpenFlags;
-pub use io::PlatformIO;
-#[cfg(all(feature = "fs", target_family = "unix"))]
-pub use io::UnixIO;
-#[cfg(all(feature = "fs", target_os = "linux", feature = "io_uring"))]
-pub use io::UringIO;
-pub use io::{Buffer, Completion, File, MemoryIO, WriteCompletion, IO};
-pub use storage::buffer_pool::BufferPool;
-pub use storage::database::DatabaseStorage;
-pub use storage::pager::{Page, Pager};
-pub use storage::wal::{CheckpointStatus, Wal, WalFile, WalFileShared};
-pub use types::Value;
-
-pub type Result<T, E = error::LimboError> = std::result::Result<T, E>;
-
 #[cfg(not(target_family = "wasm"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -54,11 +38,29 @@ use storage::database::FileStorage;
 use storage::page_cache::DumbLruPageCache;
 use storage::pager::allocate_page;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
+pub use storage::wal::WalFile;
+pub use storage::wal::WalFileShared;
+pub use types::Value;
 use util::parse_schema_rows;
 
+pub use error::LimboError;
 use translate::select::prepare_select_plan;
+pub type Result<T, E = error::LimboError> = std::result::Result<T, E>;
 
 use crate::translate::optimizer::optimize_plan;
+pub use io::OpenFlags;
+pub use io::PlatformIO;
+#[cfg(all(feature = "fs", target_family = "unix"))]
+pub use io::UnixIO;
+#[cfg(all(feature = "fs", target_os = "linux", feature = "io_uring"))]
+pub use io::UringIO;
+pub use io::{Buffer, Completion, File, MemoryIO, WriteCompletion, IO};
+pub use storage::buffer_pool::BufferPool;
+pub use storage::database::DatabaseStorage;
+pub use storage::pager::Page;
+pub use storage::pager::Pager;
+pub use storage::wal::CheckpointStatus;
+pub use storage::wal::Wal;
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
 #[derive(Clone)]
