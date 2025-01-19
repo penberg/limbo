@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.0.13 - 2025-01-19
+
+### Added
+
+* Initial support for native Limbo extensions (Preston Thorpe)
+      
+* npm packaging for node and web (Elijah Morgan)
+
+* Add support for `rowid` keyword' (Kould)
+
+* Add support for shift left, shift right, is and is not operators (Vrishabh)
+
+* Add regexp extension (Vrishabh)
+      
+* Add counterexample minimization to simulator (Alperen Keleş)
+
+* Initial support for binding values to prepared statements (Levy A.)
+
+### Updated
+
+* Java binding improvements (Kim Seon Woo)
+
+* Reduce `liblimbo_sqlite3.a` size' (Pekka Enberg)
+
+### Fixed
+
+* Fix panics on invalid aggregate function arguments (Krishna Vishal)
+ 
+* Fix null compare operations not giving null (Vrishabh)
+
+* Run all statements from SQL argument in CLI (Vrishabh)
+
+* Fix MustBeInt opcode semantics (Vrishabh)
+
+* Fix recursive binary operation logic (Jussi Saurio)
+
+* Fix SQL comment parsing in Limbo shell (Diego Reis and Clyde)
+
 ## 0.0.12 - 2025-01-14
 
 ### Added
