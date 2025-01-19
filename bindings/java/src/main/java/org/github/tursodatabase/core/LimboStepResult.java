@@ -3,6 +3,7 @@ package org.github.tursodatabase.core;
 import java.util.Arrays;
 
 import org.github.tursodatabase.annotations.NativeInvocation;
+import org.github.tursodatabase.annotations.Nullable;
 
 /**
  * Represents the step result of limbo's statement's step function.
@@ -17,7 +18,14 @@ public class LimboStepResult {
 
     // Identifier for limbo's StepResult
     private final int stepResultId;
+    @Nullable
     private final Object[] result;
+
+    @NativeInvocation(invokedFrom = "limbo_statement.rs")
+    public LimboStepResult(int stepResultId) {
+        this.stepResultId = stepResultId;
+        this.result = null;
+    }
 
     @NativeInvocation(invokedFrom = "limbo_statement.rs")
     public LimboStepResult(int stepResultId, Object[] result) {

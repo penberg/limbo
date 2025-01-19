@@ -133,13 +133,12 @@ fn to_limbo_step_result<'local>(
             "(I[Ljava/lang/Object;)V",
             &ctor_args,
         )
-        .unwrap_or_else(|_| JObject::null())
     } else {
         env.new_object(
             "org/github/tursodatabase/core/LimboStepResult",
-            "(I[Ljava/lang/Object;)V",
+            "(I)V",
             &ctor_args,
         )
-        .unwrap_or_else(|_| JObject::null())
     }
+    .unwrap_or_else(|_| JObject::null())
 }
