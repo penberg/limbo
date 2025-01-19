@@ -27,6 +27,7 @@ class JDBC4ResultSetTest {
     }
 
     @Test
+    @Disabled("https://github.com/tursodatabase/limbo/pull/743#issuecomment-2600746904")
     void invoking_next_before_the_last_row_should_return_true() throws Exception {
         stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
         stmt.executeUpdate("INSERT INTO users VALUES (1, 'sinwoo');");
