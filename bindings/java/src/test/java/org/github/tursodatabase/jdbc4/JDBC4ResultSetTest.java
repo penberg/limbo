@@ -9,7 +9,6 @@ import java.util.Properties;
 
 import org.github.tursodatabase.TestUtils;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 class JDBC4ResultSetTest {
@@ -28,26 +27,25 @@ class JDBC4ResultSetTest {
 
     @Test
     void invoking_next_before_the_last_row_should_return_true() throws Exception {
-        stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
-        stmt.execute("INSERT INTO users VALUES (1, 'sinwoo');");
-        stmt.execute("INSERT INTO users VALUES (2, 'seonwoo');");
+        stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
+        stmt.executeUpdate("INSERT INTO users VALUES (1, 'sinwoo');");
+        stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
 
         // first call to next occur internally
-        stmt.execute("SELECT * FROM users");
+        stmt.executeQuery("SELECT * FROM users");
         ResultSet resultSet = stmt.getResultSet();
 
         assertTrue(resultSet.next());
     }
 
     @Test
-    // @Disabled("https://github.com/tursodatabase/limbo/pull/743#issuecomment-2600746904")
     void invoking_next_after_the_last_row_should_return_false() throws Exception {
-        stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
-        stmt.execute("INSERT INTO users VALUES (1, 'sinwoo');");
-        stmt.execute("INSERT INTO users VALUES (2, 'seonwoo');");
+        stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
+        stmt.executeUpdate("INSERT INTO users VALUES (1, 'sinwoo');");
+        stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
 
         // first call to next occur internally
-        stmt.execute("SELECT * FROM users");
+        stmt.executeQuery("SELECT * FROM users");
         ResultSet resultSet = stmt.getResultSet();
 
         while (resultSet.next()) {

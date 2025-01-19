@@ -12,6 +12,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
+import org.github.tursodatabase.core.LimboResultSet;
 import org.github.tursodatabase.core.LimboStatement;
 
 public class JDBC4Statement implements Statement {
@@ -47,15 +48,24 @@ public class JDBC4Statement implements Statement {
     }
 
     @Override
-    @SkipNullableCheck
     public ResultSet executeQuery(String sql) throws SQLException {
-        // TODO
-        return null;
+        execute(sql);
+
+        requireNonNull(statement, "statement should not be null after running execute method");
+        return new JDBC4ResultSet(statement.getResultSet());
     }
 
     @Override
     public int executeUpdate(String sql) throws SQLException {
-        // TODO
+        execute(sql);
+
+        requireNonNull(statement, "statement should not be null after running execute method");
+        final LimboResultSet resultSet = statement.getResultSet();
+        while (resultSet.isOpen()) {
+            resultSet.next();
+        }
+
+        // TODO: return update count;
         return 0;
     }
 
