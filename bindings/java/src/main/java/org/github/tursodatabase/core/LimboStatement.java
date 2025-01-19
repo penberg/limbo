@@ -1,10 +1,10 @@
 package org.github.tursodatabase.core;
 
+import java.sql.SQLException;
+
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
-
-import java.sql.SQLException;
 
 /**
  * By default, only one <code>resultSet</code> object per <code>LimboStatement</code> can be open at the same time.
@@ -13,14 +13,13 @@ import java.sql.SQLException;
  * implicitly close the current <code>resultSet</code> object of the statement if an open one exists.
  */
 public class LimboStatement {
-
+    private final String sql;
     private final long statementPointer;
     private final LimboResultSet resultSet;
 
-    @Nullable
-    protected String sql = null;
-
-    public LimboStatement(long statementPointer) {
+    // TODO: what if the statement we ran was DDL, update queries and etc. Should we still create a resultSet?
+    public LimboStatement(String sql, long statementPointer) {
+        this.sql = sql;
         this.statementPointer = statementPointer;
         this.resultSet = LimboResultSet.of(this);
     }
@@ -29,12 +28,18 @@ public class LimboStatement {
         return resultSet;
     }
 
-    public void execute() throws SQLException {
+    /**
+     * Expects a clean statement created right after prepare method is called.
+     *
+     * @return true if the ResultSet has at least one row; false otherwise.
+     */
+    public boolean execute() throws SQLException {
         resultSet.next();
+        return resultSet.hasLastStepReturnedRow();
     }
 
     @Nullable
-    public LimboStepResult step() throws SQLException {
+    LimboStepResult step() throws SQLException {
         return step(this.statementPointer);
     }
 
@@ -44,11 +49,19 @@ public class LimboStatement {
     /**
      * Throws formatted SQLException with error code and message.
      *
-     * @param errorCode         Error code.
+     * @param errorCode Error code.
      * @param errorMessageBytes Error message.
      */
-    @NativeInvocation
+    @NativeInvocation(invokedFrom = "limbo_statement.rs")
     private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
         LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
+    }
+
+    @Override
+    public String toString() {
+        return "LimboStatement{" +
+               "statementPointer=" + statementPointer +
+               ", sql='" + sql + '\'' +
+               '}';
     }
 }

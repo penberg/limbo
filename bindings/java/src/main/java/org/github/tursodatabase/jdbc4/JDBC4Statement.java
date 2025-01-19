@@ -135,10 +135,6 @@ public class JDBC4Statement implements Statement {
      * <code>getResultSet</code> or <code>getUpdateCount</code>
      * to retrieve the result, and <code>getMoreResults</code> to
      * move to any subsequent result(s).
-     *
-     * @return <code>true</code> if the first result is a <code>ResultSet</code>
-     * object; <code>false</code> if it is an update count or there are
-     * no results
      */
     @Override
     public boolean execute(String sql) throws SQLException {
@@ -147,13 +143,14 @@ public class JDBC4Statement implements Statement {
         return this.withConnectionTimeout(
                 () -> {
                     try {
+                        // TODO: if sql is a readOnly query, do we still need the locks?
                         connectionLock.lock();
                         statement = connection.prepare(sql);
-                        statement.execute();
+                        final boolean result = statement.execute();
                         updateGeneratedKeys();
                         exhaustedResults = false;
-                        // TODO: determine whether
-                        return true;
+
+                        return result;
                     } finally {
                         connectionLock.unlock();
                     }
