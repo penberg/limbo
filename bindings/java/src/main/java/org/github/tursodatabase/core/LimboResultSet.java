@@ -55,7 +55,6 @@ public class LimboResultSet {
         }
 
         lastStepResult = this.statement.step();
-        System.out.println(lastStepResult);
         pastLastRow = lastStepResult == null || lastStepResult.isDone();
         return !pastLastRow;
     }
