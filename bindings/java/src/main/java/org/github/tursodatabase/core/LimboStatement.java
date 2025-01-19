@@ -5,6 +5,8 @@ import java.sql.SQLException;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * By default, only one <code>resultSet</code> object per <code>LimboStatement</code> can be open at the same time.
@@ -13,6 +15,8 @@ import org.github.tursodatabase.utils.LimboExceptionUtils;
  * implicitly close the current <code>resultSet</code> object of the statement if an open one exists.
  */
 public class LimboStatement {
+    private static final Logger log = LoggerFactory.getLogger(LimboStatement.class);
+
     private final String sql;
     private final long statementPointer;
     private final LimboResultSet resultSet;
@@ -22,6 +26,7 @@ public class LimboStatement {
         this.sql = sql;
         this.statementPointer = statementPointer;
         this.resultSet = LimboResultSet.of(this);
+        log.debug("Creating statement with sql: {}", this.sql);
     }
 
     public LimboResultSet getResultSet() {
