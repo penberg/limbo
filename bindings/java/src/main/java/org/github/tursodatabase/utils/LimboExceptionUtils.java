@@ -12,7 +12,7 @@ public class LimboExceptionUtils {
     /**
      * Throws formatted SQLException with error code and message.
      *
-     * @param errorCode         Error code.
+     * @param errorCode Error code.
      * @param errorMessageBytes Error message.
      */
     public static void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
@@ -23,10 +23,11 @@ public class LimboExceptionUtils {
     /**
      * Throws formatted SQLException with error code and message.
      *
-     * @param errorCode    Error code.
+     * @param errorCode Error code.
      * @param errorMessage Error message.
      */
-    public static LimboException buildLimboException(int errorCode, @Nullable String errorMessage) throws SQLException {
+    public static LimboException buildLimboException(int errorCode, @Nullable String errorMessage)
+            throws SQLException {
         LimboErrorCode code = LimboErrorCode.getErrorCode(errorCode);
         String msg;
         if (code == LimboErrorCode.UNKNOWN_ERROR) {
@@ -36,5 +37,19 @@ public class LimboExceptionUtils {
         }
 
         return new LimboException(msg, code);
+    }
+
+    /**
+     * Ensures that the provided object is not null.
+     *
+     * @param object the object to check for nullity
+     * @param message the message to include in the exception if the object is null
+     *
+     * @throws IllegalArgumentException if the provided object is null
+     */
+    public static void requireNonNull(Object object, String message) {
+        if (object == null) {
+            throw new IllegalArgumentException(message);
+        }
     }
 }

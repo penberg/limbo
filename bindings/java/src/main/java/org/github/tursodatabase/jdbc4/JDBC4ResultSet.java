@@ -21,8 +21,7 @@ public class JDBC4ResultSet implements ResultSet {
 
     @Override
     public boolean next() throws SQLException {
-        // TODO
-        return false;
+        return resultSet.next();
     }
 
     @Override

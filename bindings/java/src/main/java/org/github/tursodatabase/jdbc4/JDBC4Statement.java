@@ -1,12 +1,18 @@
 package org.github.tursodatabase.jdbc4;
 
+import static java.util.Objects.requireNonNull;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLWarning;
+import java.sql.Statement;
+import java.util.concurrent.locks.ReentrantLock;
+
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.core.LimboStatement;
-
-import java.sql.*;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class JDBC4Statement implements Statement {
 
@@ -28,10 +34,12 @@ public class JDBC4Statement implements Statement {
     private ReentrantLock connectionLock = new ReentrantLock();
 
     public JDBC4Statement(LimboConnection connection) {
-        this(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+        this(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY,
+             ResultSet.CLOSE_CURSORS_AT_COMMIT);
     }
 
-    public JDBC4Statement(LimboConnection connection, int resultSetType, int resultSetConcurrency, int resultSetHoldability) {
+    public JDBC4Statement(LimboConnection connection, int resultSetType, int resultSetConcurrency,
+                          int resultSetHoldability) {
         this.connection = connection;
         this.resultSetType = resultSetType;
         this.resultSetConcurrency = resultSetConcurrency;
@@ -121,6 +129,17 @@ public class JDBC4Statement implements Statement {
         // TODO
     }
 
+    /**
+     * The <code>execute</code> method executes an SQL statement and indicates the
+     * form of the first result.  You must then use the methods
+     * <code>getResultSet</code> or <code>getUpdateCount</code>
+     * to retrieve the result, and <code>getMoreResults</code> to
+     * move to any subsequent result(s).
+     *
+     * @return <code>true</code> if the first result is a <code>ResultSet</code>
+     * object; <code>false</code> if it is an update count or there are
+     * no results
+     */
     @Override
     public boolean execute(String sql) throws SQLException {
         internalClose();
@@ -133,8 +152,8 @@ public class JDBC4Statement implements Statement {
                         statement.execute();
                         updateGeneratedKeys();
                         exhaustedResults = false;
+                        // TODO: determine whether
                         return true;
-                        // return !result.isEmpty();
                     } finally {
                         connectionLock.unlock();
                     }
@@ -143,10 +162,9 @@ public class JDBC4Statement implements Statement {
     }
 
     @Override
-    @SkipNullableCheck
     public ResultSet getResultSet() throws SQLException {
-        // TODO
-        return null;
+        requireNonNull(statement, "statement is null");
+        return new JDBC4ResultSet(statement.getResultSet());
     }
 
     @Override
@@ -289,7 +307,7 @@ public class JDBC4Statement implements Statement {
 
     @Override
     public void closeOnCompletion() throws SQLException {
-        if (closed) throw new SQLException("statement is closed");
+        if (closed) {throw new SQLException("statement is closed");}
         closeOnCompletion = true;
     }
 
@@ -298,7 +316,7 @@ public class JDBC4Statement implements Statement {
      */
     @Override
     public boolean isCloseOnCompletion() throws SQLException {
-        if (closed) throw new SQLException("statement is closed");
+        if (closed) {throw new SQLException("statement is closed");}
         return closeOnCompletion;
     }
 

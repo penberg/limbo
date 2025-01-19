@@ -1,5 +1,7 @@
 package org.github.tursodatabase.core;
 
+import org.github.tursodatabase.annotations.Nullable;
+
 import java.sql.SQLException;
 
 /**
@@ -21,8 +23,10 @@ public class LimboResultSet {
     private long maxRows;
     // number of current row, starts at 1 (0 is used to represent loading data)
     private int row = 0;
-
     private boolean pastLastRow = false;
+
+    @Nullable
+    private LimboStepResult lastResult;
 
     public static LimboResultSet of(LimboStatement statement) {
         return new LimboResultSet(statement);
@@ -33,6 +37,14 @@ public class LimboResultSet {
         this.statement = statement;
     }
 
+    /**
+     * Moves the cursor forward one row from its current position. A {@link LimboResultSet} cursor is initially positioned
+     * before the first fow; the first call to the method <code>next</code> makes the first row the current row; the second call
+     * makes the second row the current row, and so on.
+     * When a call to the <code>next</code> method returns <code>false</code>, the cursor is positioned after the last row.
+     * <p>
+     * Note that limbo only supports <code>ResultSet.TYPE_FORWARD_ONLY</code>, which means that the cursor can only move forward.
+     */
     public boolean next() throws SQLException {
         if (!open || isEmptyResultSet || pastLastRow) {
             return false; // completed ResultSet
@@ -42,10 +54,9 @@ public class LimboResultSet {
             return false;
         }
 
-        // TODO
-        // int statusCode = this.statement.step();
-        this.statement.step();
-        return true;
+        lastResult = this.statement.step();
+        pastLastRow = lastResult == null || lastResult.isDone();
+        return !pastLastRow;
     }
 
     /**

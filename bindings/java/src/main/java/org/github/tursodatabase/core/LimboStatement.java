@@ -25,21 +25,20 @@ public class LimboStatement {
         this.resultSet = LimboResultSet.of(this);
     }
 
-    public LimboResultSet resultSet() {
+    public LimboResultSet getResultSet() {
         return resultSet;
     }
 
     public void execute() throws SQLException {
-        LimboResultSet result = LimboResultSet.of(this);
-
-        // at least, run query minimally
-        result.next();
+        resultSet.next();
     }
 
+    @Nullable
     public LimboStepResult step() throws SQLException {
         return step(this.statementPointer);
     }
 
+    @Nullable
     private native LimboStepResult step(long stmtPointer) throws SQLException;
 
     /**

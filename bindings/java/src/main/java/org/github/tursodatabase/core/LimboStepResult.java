@@ -1,5 +1,7 @@
 package org.github.tursodatabase.core;
 
+import java.util.Arrays;
+
 import org.github.tursodatabase.annotations.NativeInvocation;
 
 /**
@@ -21,5 +23,17 @@ public class LimboStepResult {
     public LimboStepResult(int stepResultId, Object[] result) {
         this.stepResultId = stepResultId;
         this.result = result;
+    }
+
+    public boolean isDone() {
+        return stepResultId == STEP_RESULT_ID_DONE;
+    }
+
+    @Override
+    public String toString() {
+        return "LimboStepResult{" +
+               "stepResultId=" + stepResultId +
+               ", result=" + Arrays.toString(result) +
+               '}';
     }
 }
