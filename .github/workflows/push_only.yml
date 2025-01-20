@@ -17,7 +17,7 @@ jobs:
         run: cargo bench | tee output.txt
 
       - name: Analyze benchmark result with Nyrkiö
-        uses: nyrkio/github-action-benchmark
+        uses: nyrkio/github-action-benchmark@ec6fe57
         with:
           name: turso
           tool: criterion
