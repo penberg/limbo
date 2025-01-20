@@ -85,6 +85,8 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     let mut s = String::new();
     s.push('[');
 
+    // TODO: use `convert_db_type_to_json` and map each value with that function,
+    // so we can construct a `Val::Array` with each value and then serialize it directly.
     for (idx, value) in values.iter().enumerate() {
         match value {
             OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
@@ -256,6 +258,29 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
     }
 }
 
+/// Converts a DB value (`OwnedValue`) to a JSON representation (`Val`).
+/// Note that when the internal text value is a json,
+/// the returned `Val` will be an object. If the internal text value is a regular text,
+/// then a string will be returned. This is useful to track if the value came from a json
+/// function and therefore we must interpret it as json instead of raw text when working with it.
+fn convert_db_type_to_json(value: &OwnedValue) -> crate::Result<Val> {
+    let val = match value {
+        OwnedValue::Null => Val::Null,
+        OwnedValue::Float(f) => Val::Float(*f),
+        OwnedValue::Integer(i) => Val::Integer(*i),
+        OwnedValue::Text(t) => match t.subtype {
+            // Convert only to json if the subtype is json (if we got it from another json function)
+            TextSubtype::Json => get_json_value(value)?,
+            TextSubtype::Text => Val::String(t.value.to_string()),
+        },
+        OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
+        unsupported_value => crate::bail_constraint_error!(
+            "JSON cannot hold this type of value: {unsupported_value:?}"
+        ),
+    };
+    Ok(val)
+}
+
 pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result<OwnedValue> {
     if let OwnedValue::Null = value {
         return Ok(OwnedValue::Null);
@@ -397,6 +422,30 @@ pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
         OwnedValue::Null => Ok(OwnedValue::Null),
         _ => Ok(OwnedValue::Integer(0)),
     }
+}
+
+/// Constructs a JSON object from a list of values that represent key-value pairs.
+/// The number of values must be even, and the first value of each pair (which represents the map key)
+/// must be a TEXT value. The second value of each pair can be any JSON value (which represents the map value)
+pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
+    let value_map = values
+        .chunks(2)
+        .map(|chunk| match chunk {
+            [key, value] => {
+                let key = match key {
+                    OwnedValue::Text(t) => t.value.to_string(),
+                    _ => crate::bail_constraint_error!("labels must be TEXT"),
+                };
+                let json_val = convert_db_type_to_json(value)?;
+
+                Ok((key, json_val))
+            }
+            _ => crate::bail_constraint_error!("json_object requires an even number of values"),
+        })
+        .collect::<Result<IndexMap<String, Val>, _>>()?;
+
+    let result = crate::json::to_string(&value_map).unwrap();
+    Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
 }
 
 #[cfg(test)]
@@ -782,5 +831,156 @@ mod tests {
         let input = OwnedValue::Blob(Rc::new(r#"["a",55,"b",72,,]"#.as_bytes().to_owned()));
         let result = json_error_position(&input).unwrap();
         assert_eq!(result, OwnedValue::Integer(16));
+    }
+
+    #[test]
+    fn test_json_object_simple() {
+        let key = OwnedValue::build_text(Rc::new("key".to_string()));
+        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let input = vec![key, value];
+
+        let result = json_object(&input).unwrap();
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(json_text.value.as_str(), r#"{"key":"value"}"#);
+    }
+
+    #[test]
+    fn test_json_object_multiple_values() {
+        let text_key = OwnedValue::build_text(Rc::new("text_key".to_string()));
+        let text_value = OwnedValue::build_text(Rc::new("text_value".to_string()));
+        let json_key = OwnedValue::build_text(Rc::new("json_key".to_string()));
+        let json_value = OwnedValue::Text(LimboText::json(Rc::new(
+            r#"{"json":"value","number":1}"#.to_string(),
+        )));
+        let integer_key = OwnedValue::build_text(Rc::new("integer_key".to_string()));
+        let integer_value = OwnedValue::Integer(1);
+        let float_key = OwnedValue::build_text(Rc::new("float_key".to_string()));
+        let float_value = OwnedValue::Float(1.1);
+        let null_key = OwnedValue::build_text(Rc::new("null_key".to_string()));
+        let null_value = OwnedValue::Null;
+
+        let input = vec![
+            text_key,
+            text_value,
+            json_key,
+            json_value,
+            integer_key,
+            integer_value,
+            float_key,
+            float_value,
+            null_key,
+            null_value,
+        ];
+
+        let result = json_object(&input).unwrap();
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(
+            json_text.value.as_str(),
+            r#"{"text_key":"text_value","json_key":{"json":"value","number":1},"integer_key":1,"float_key":1.1,"null_key":null}"#
+        );
+    }
+
+    #[test]
+    fn test_json_object_json_value_is_rendered_as_json() {
+        let key = OwnedValue::build_text(Rc::new("key".to_string()));
+        let value = OwnedValue::Text(LimboText::json(Rc::new(r#"{"json":"value"}"#.to_string())));
+        let input = vec![key, value];
+
+        let result = json_object(&input).unwrap();
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(json_text.value.as_str(), r#"{"key":{"json":"value"}}"#);
+    }
+
+    #[test]
+    fn test_json_object_json_text_value_is_rendered_as_regular_text() {
+        let key = OwnedValue::build_text(Rc::new("key".to_string()));
+        let value = OwnedValue::Text(LimboText::new(Rc::new(r#"{"json":"value"}"#.to_string())));
+        let input = vec![key, value];
+
+        let result = json_object(&input).unwrap();
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(
+            json_text.value.as_str(),
+            r#"{"key":"{\"json\":\"value\"}"}"#
+        );
+    }
+
+    #[test]
+    fn test_json_object_nested() {
+        let key = OwnedValue::build_text(Rc::new("key".to_string()));
+        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let input = vec![key, value];
+
+        let parent_key = OwnedValue::build_text(Rc::new("parent_key".to_string()));
+        let parent_value = json_object(&input).unwrap();
+        let parent_input = vec![parent_key, parent_value];
+
+        let result = json_object(&parent_input).unwrap();
+
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(
+            json_text.value.as_str(),
+            r#"{"parent_key":{"key":"value"}}"#
+        );
+    }
+
+    #[test]
+    fn test_json_object_duplicated_keys() {
+        let key = OwnedValue::build_text(Rc::new("key".to_string()));
+        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let input = vec![key.clone(), value.clone(), key, value];
+
+        let result = json_object(&input).unwrap();
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(json_text.value.as_str(), r#"{"key":"value"}"#);
+    }
+
+    #[test]
+    fn test_json_object_empty() {
+        let input = vec![];
+
+        let result = json_object(&input).unwrap();
+        let OwnedValue::Text(json_text) = result else {
+            panic!("Expected OwnedValue::Text");
+        };
+        assert_eq!(json_text.value.as_str(), r#"{}"#);
+    }
+
+    #[test]
+    fn test_json_object_non_text_key() {
+        let key = OwnedValue::Integer(1);
+        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let input = vec![key, value];
+
+        match json_object(&input) {
+            Ok(_) => panic!("Expected error for non-TEXT key"),
+            Err(e) => assert!(e.to_string().contains("labels must be TEXT")),
+        }
+    }
+
+    #[test]
+    fn test_json_odd_number_of_values() {
+        let key = OwnedValue::build_text(Rc::new("key".to_string()));
+        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let input = vec![key.clone(), value, key];
+
+        match json_object(&input) {
+            Ok(_) => panic!("Expected error for odd number of values"),
+            Err(e) => assert!(e
+                .to_string()
+                .contains("json_object requires an even number of values")),
+        }
     }
 }

@@ -41,7 +41,7 @@ use crate::vdbe::insn::Insn;
 use crate::{
     function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
     json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
-    json::json_extract, json::json_type,
+    json::json_extract, json::json_object, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
@@ -1571,13 +1571,18 @@ impl Program {
                                     Err(e) => return Err(e),
                                 }
                             }
-                            JsonFunc::JsonArray => {
+                            JsonFunc::JsonArray | JsonFunc::JsonObject => {
                                 let reg_values =
                                     &state.registers[*start_reg..*start_reg + arg_count];
 
-                                let json_array = json_array(reg_values);
+                                let json_func = match json_func {
+                                    JsonFunc::JsonArray => json_array,
+                                    JsonFunc::JsonObject => json_object,
+                                    _ => unreachable!(),
+                                };
+                                let json_result = json_func(reg_values);
 
-                                match json_array {
+                                match json_result {
                                     Ok(json) => state.registers[*dest] = json,
                                     Err(e) => return Err(e),
                                 }
