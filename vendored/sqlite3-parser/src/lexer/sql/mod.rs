@@ -489,9 +489,19 @@ impl Splitter for Tokenizer {
                     Ok(self.identifierish(data))
                 }
             }
-            _ => Err(Error::UnrecognizedToken(None, None)),
+            // Return TK_ILLEGAL
+            _ => handle_unrecognized(data),
         }
     }
+}
+
+fn handle_unrecognized(data: &[u8]) -> Result<(Option<Token<'_>>, usize), Error> {
+    let mut end = 1;
+    while end < data.len() && !data[end].is_ascii_whitespace() {
+        end += 1;
+    }
+
+    Ok((Some((&data[..end], TokenType::TK_ILLEGAL)), end))
 }
 
 fn literal(data: &[u8], quote: u8) -> Result<(Option<Token<'_>>, usize), Error> {
