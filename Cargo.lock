@@ -454,12 +454,13 @@ name = "core_tester"
 version = "0.0.13"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "clap",
  "dirs",
  "env_logger 0.10.2",
  "limbo_core",
  "log",
- "rstest",
+ "rexpect",
  "rusqlite",
  "rustyline",
  "tempfile",
@@ -1227,7 +1228,6 @@ name = "limbo"
 version = "0.0.13"
 dependencies = [
  "anyhow",
- "assert_cmd",
  "clap",
  "cli-table",
  "csv",
@@ -1236,7 +1236,6 @@ dependencies = [
  "env_logger 0.10.2",
  "limbo_core",
  "miette",
- "rexpect",
  "rustyline",
 ]
 

@@ -32,8 +32,3 @@ miette = { version = "7.4.0", features = ["fancy"] }
 
 [features]
 io_uring = ["limbo_core/io_uring"]
-
-# not testing the cli on windows as rexpect does not support it.
-[target.'cfg(not(windows))'.dev-dependencies]
-assert_cmd = "^2"
-rexpect = "0.6.0"
