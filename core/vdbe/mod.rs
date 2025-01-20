@@ -676,11 +676,7 @@ impl Program {
                     jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
-                    if exec_if(
-                        &state.registers[*reg],
-                        &state.registers[*jump_if_null],
-                        false,
-                    ) {
+                    if exec_if(&state.registers[*reg], *jump_if_null, false) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
@@ -692,11 +688,7 @@ impl Program {
                     jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
-                    if exec_if(
-                        &state.registers[*reg],
-                        &state.registers[*jump_if_null],
-                        true,
-                    ) {
+                    if exec_if(&state.registers[*reg], *jump_if_null, true) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
@@ -3049,15 +3041,11 @@ fn exec_zeroblob(req: &OwnedValue) -> OwnedValue {
 }
 
 // exec_if returns whether you should jump
-fn exec_if(reg: &OwnedValue, jump_if_null: &OwnedValue, not: bool) -> bool {
+fn exec_if(reg: &OwnedValue, jump_if_null: bool, not: bool) -> bool {
     match reg {
         OwnedValue::Integer(0) | OwnedValue::Float(0.0) => not,
         OwnedValue::Integer(_) | OwnedValue::Float(_) => !not,
-        OwnedValue::Null => match jump_if_null {
-            OwnedValue::Integer(0) | OwnedValue::Float(0.0) => false,
-            OwnedValue::Integer(_) | OwnedValue::Float(_) => true,
-            _ => false,
-        },
+        OwnedValue::Null => jump_if_null,
         _ => false,
     }
 }
@@ -3879,29 +3867,24 @@ mod tests {
     #[test]
     fn test_exec_if() {
         let reg = OwnedValue::Integer(0);
-        let jump_if_null = OwnedValue::Integer(0);
-        assert!(!exec_if(&reg, &jump_if_null, false));
-        assert!(exec_if(&reg, &jump_if_null, true));
+        assert!(!exec_if(&reg, false, false));
+        assert!(exec_if(&reg, false, true));
 
         let reg = OwnedValue::Integer(1);
-        let jump_if_null = OwnedValue::Integer(0);
-        assert!(exec_if(&reg, &jump_if_null, false));
-        assert!(!exec_if(&reg, &jump_if_null, true));
+        assert!(exec_if(&reg, false, false));
+        assert!(!exec_if(&reg, false, true));
 
         let reg = OwnedValue::Null;
-        let jump_if_null = OwnedValue::Integer(0);
-        assert!(!exec_if(&reg, &jump_if_null, false));
-        assert!(!exec_if(&reg, &jump_if_null, true));
+        assert!(!exec_if(&reg, false, false));
+        assert!(!exec_if(&reg, false, true));
 
         let reg = OwnedValue::Null;
-        let jump_if_null = OwnedValue::Integer(1);
-        assert!(exec_if(&reg, &jump_if_null, false));
-        assert!(exec_if(&reg, &jump_if_null, true));
+        assert!(exec_if(&reg, true, false));
+        assert!(exec_if(&reg, true, true));
 
         let reg = OwnedValue::Null;
-        let jump_if_null = OwnedValue::Null;
-        assert!(!exec_if(&reg, &jump_if_null, false));
-        assert!(!exec_if(&reg, &jump_if_null, true));
+        assert!(!exec_if(&reg, false, false));
+        assert!(!exec_if(&reg, false, true));
     }
 
     #[test]

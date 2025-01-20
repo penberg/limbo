@@ -159,14 +159,14 @@ pub enum Insn {
         reg: usize,              // P1
         target_pc: BranchOffset, // P2
         /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
-        jump_if_null: usize,
+        jump_if_null: bool,
     },
     /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
     IfNot {
         reg: usize,              // P1
         target_pc: BranchOffset, // P2
         /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
-        jump_if_null: usize,
+        jump_if_null: bool,
     },
     // Open a cursor for reading.
     OpenReadAsync {
