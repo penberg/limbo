@@ -385,80 +385,25 @@ do_execsql_test nested-parens-and-inside-or-regression-test {
 } {1}
 
 # Regression tests for binary conditional jump comparisons where one operand is null
-do_execsql_test where-binary-one-operand-null-1 {
-    select * from users where first_name = NULL;
-} {}
+# Test behavior of binary comparisons (=,>,<,>=,<=,!=) when one operand is NULL
+# Each test has 3 variants:
+# 1. Simple comparison with NULL (should return empty)
+# 2. Comparison with NULL OR id=1 (should return Jamie)
+# 3. Comparison with NULL AND id=1 (should return empty)
+foreach {operator} {
+    =
+    >  
+    <
+    >=
+    <=
+    !=
+} {
+    # Simple NULL comparison
+    do_execsql_test where-binary-one-operand-null-$operator "select * from users where first_name $operator NULL" {}
 
-do_execsql_test where-binary-one-operand-null-2 {
-    select first_name from users where first_name = NULL OR id = 1;
-} {Jamie}
+    # NULL comparison OR id=1 
+    do_execsql_test where-binary-one-operand-null-or-$operator "select first_name from users where first_name $operator NULL OR id = 1" {Jamie}
 
-do_execsql_test where-binary-one-operand-null-3 {
-    select first_name from users where first_name = NULL AND id = 1;
-} {}
-
-do_execsql_test where-binary-one-operand-null-4 {
-    select * from users where first_name > NULL;
-} {}
-
-do_execsql_test where-binary-one-operand-null-5 {
-    select first_name from users where first_name > NULL OR id = 1;
-} {Jamie}
-
-do_execsql_test where-binary-one-operand-null-6 {
-    select first_name from users where first_name > NULL AND id = 1;
-} {}
-
-do_execsql_test where-binary-one-operand-null-7 {
-    select * from users where first_name < NULL;
-} {}
-
-do_execsql_test where-binary-one-operand-null-8 {
-    select first_name from users where first_name < NULL OR id = 1;
-} {Jamie}
-
-do_execsql_test where-binary-one-operand-null-9 {
-    select first_name from users where first_name < NULL AND id = 1;
-} {}
-
-do_execsql_test where-binary-one-operand-null-10 {
-    select * from users where first_name >= NULL;
-} {}
-
-do_execsql_test where-binary-one-operand-null-11 {
-    select first_name from users where first_name >= NULL OR id = 1;
-} {Jamie}
-
-do_execsql_test where-binary-one-operand-null-12 {
-    select first_name from users where first_name >= NULL AND id = 1;
-} {}
-
-do_execsql_test where-binary-one-operand-null-13 {
-    select * from users where first_name <= NULL;
-} {}
-
-do_execsql_test where-binary-one-operand-null-14 {
-    select first_name from users where first_name <= NULL OR id = 1;
-} {Jamie}
-
-do_execsql_test where-binary-one-operand-null-15 {
-    select first_name from users where first_name <= NULL AND id = 1;
-} {}
-
-do_execsql_test where-binary-one-operand-null-16 {
-    select * from users where first_name != NULL;
-} {}
-
-do_execsql_test where-binary-one-operand-null-17 {
-    select first_name from users where first_name != NULL OR id = 1;
-} {Jamie}
-
-do_execsql_test where-binary-one-operand-null-18 {
-    select first_name from users where first_name != NULL AND id = 1;
-} {}
-
-
-
-
-
-
+    # NULL comparison AND id=1
+    do_execsql_test where-binary-one-operand-null-and-$operator "select first_name from users where first_name $operator NULL AND id = 1" {}
+}
