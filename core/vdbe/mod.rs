@@ -896,10 +896,9 @@ impl Program {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
                             Ok(crate::storage::wal::CheckpointStatus::Done) => {
                                 if self.change_cnt_on {
-                                    self.connection
-                                        .upgrade()
-                                        .unwrap()
-                                        .set_changes(self.n_change.get());
+                                    if let Some(conn) = self.connection.upgrade() {
+                                        conn.set_changes(self.n_change.get());
+                                    }
                                 }
                                 Ok(StepResult::Done)
                             }
@@ -2106,6 +2105,8 @@ impl Program {
                 Insn::DeleteAwait { cursor_id } => {
                     let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
                     cursor.wait_for_completion()?;
+                    let prev_changes = self.n_change.get();
+                    self.n_change.set(prev_changes + 1);
                     state.pc += 1;
                 }
                 Insn::NewRowid {
