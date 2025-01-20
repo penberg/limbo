@@ -72,6 +72,18 @@ impl OwnedValue {
     pub fn build_text(text: Rc<String>) -> Self {
         Self::Text(LimboText::new(text))
     }
+
+    pub fn value_to_string(value: &OwnedValue) -> String {
+        match value {
+            OwnedValue::Text(text) => text.value.as_ref().clone(),
+            OwnedValue::Integer(i) => i.to_string(),
+            OwnedValue::Float(f) => f.to_string(),
+            OwnedValue::Agg(aggctx) => aggctx.final_value().to_string(),
+            OwnedValue::Null => String::new(),
+            OwnedValue::Blob(_) => todo!("TODO: Handle Blob conversion to String"),
+            OwnedValue::Record(_) => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

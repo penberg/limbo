@@ -48,6 +48,7 @@ use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_un
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_divide,
     exec_multiply, exec_remainder, exec_shift_left, exec_shift_right, exec_subtract,
+    exec_concat
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
@@ -1724,7 +1725,7 @@ impl Program {
                             }
                             ScalarFunc::Coalesce => {}
                             ScalarFunc::Concat => {
-                                let result = exec_concat(
+                                let result = exec_concat_strings(
                                     &state.registers[*start_reg..*start_reg + arg_count],
                                 );
                                 state.registers[*dest] = result;
@@ -2341,6 +2342,10 @@ impl Program {
                     state.registers[*dest] = exec_boolean_not(&state.registers[*reg]);
                     state.pc += 1;
                 }
+                Insn::Concat { lhs, rhs, dest } => {
+                    state.registers[*dest] = exec_concat(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
             }
         }
     }
@@ -2476,7 +2481,7 @@ fn exec_upper(reg: &OwnedValue) -> Option<OwnedValue> {
     }
 }
 
-fn exec_concat(registers: &[OwnedValue]) -> OwnedValue {
+fn exec_concat_strings(registers: &[OwnedValue]) -> OwnedValue {
     let mut result = String::new();
     for reg in registers {
         match reg {

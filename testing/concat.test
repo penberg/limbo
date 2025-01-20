@@ -1,0 +1,25 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test concat {
+    SELECT 'Hello' || ' ' || 'World';
+} {"Hello World"}
+
+do_execsql_test concat-2 {
+    SELECT 'Hello' || NULL;
+} {}
+
+do_execsql_test concat-3 {
+    SELECT 'Hello' || NULL;
+} {}
+
+do_execsql_test concat-4 {
+    SELECT 'A good ' || name FROM products WHERE name = 'hat';
+} {"A good hat"}
+
+
+do_execsql_test concat-4 {
+    SELECT 'A good ' || name FROM products WHERE name = 'watch';
+} {}

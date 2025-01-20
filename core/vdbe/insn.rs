@@ -1,4 +1,5 @@
 use std::num::NonZero;
+use std::rc::Rc;
 
 use super::{AggFunc, BranchOffset, CursorID, FuncCtx, PageIdx};
 use crate::storage::wal::CheckpointMode;
@@ -544,6 +545,12 @@ pub enum Insn {
         reg: usize,
         dest: usize,
     },
+    /// Concatenates the `rhs` and `lhs` values and stores the result in the third register.
+    Concat {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {
@@ -884,5 +891,17 @@ pub fn exec_boolean_not(mut reg: &OwnedValue) -> OwnedValue {
         OwnedValue::Float(f) => OwnedValue::Integer((*f == 0.0) as i64),
         OwnedValue::Text(text) => exec_boolean_not(&cast_text_to_numerical(&text.value)),
         _ => todo!(),
+    }
+}
+
+pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
+    let lhs_value = OwnedValue::value_to_string(lhs);
+    let rhs_value = OwnedValue::value_to_string(rhs);
+
+    if lhs_value.is_empty() || rhs_value.is_empty() {
+        OwnedValue::Null
+    } else {
+    let result = lhs_value + &rhs_value;
+        OwnedValue::build_text(Rc::new(result))
     }
 }
