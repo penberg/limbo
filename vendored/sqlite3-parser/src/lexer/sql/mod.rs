@@ -28,6 +28,7 @@ pub use error::Error;
 pub struct Parser<'input> {
     input: &'input [u8],
     scanner: Scanner<Tokenizer>,
+    /// lemon parser
     parser: yyParser<'input>,
 }
 
@@ -61,6 +62,11 @@ impl<'input> Parser<'input> {
     /// Current byte offset in input
     pub fn offset(&self) -> usize {
         self.scanner.offset()
+    }
+
+    /// Public API for sqlite3ParserFinalize()
+    pub fn finalize(&mut self) {
+        self.parser.sqlite3ParserFinalize();
     }
 }
 

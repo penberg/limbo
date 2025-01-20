@@ -596,7 +596,10 @@ impl Iterator for QueryRunner<'_> {
         match self.parser.next() {
             Ok(Some(cmd)) => Some(self.conn.run_cmd(cmd)),
             Ok(None) => None,
-            Err(err) => Some(Err(LimboError::from(err))),
+            Err(err) => {
+                self.parser.finalize();
+                Some(Result::Err(LimboError::from(err)))
+            }
         }
     }
 }
