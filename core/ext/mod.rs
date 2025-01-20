@@ -94,7 +94,7 @@ impl Database {
     #[cfg(feature = "percentile")]
     pub fn register_percentile(&self) -> Result<(), String> {
         let ext_api = self.build_limbo_ext();
-        let res = unsafe { ::limbo_percentile::register_extension(&ext_api) };
+        let res = unsafe { ::limbo_percentile::register_extension_static(&ext_api) };
         if !res.is_ok() {
             return Err("Failed to register percentile extension".to_string());
         }
