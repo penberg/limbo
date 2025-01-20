@@ -23,13 +23,13 @@ fn emit_cond_jump(program: &mut ProgramBuilder, cond_meta: ConditionMetadata, re
         program.emit_insn(Insn::If {
             reg,
             target_pc: cond_meta.jump_target_when_true,
-            null_reg: reg,
+            jump_if_null: reg,
         });
     } else {
         program.emit_insn(Insn::IfNot {
             reg,
             target_pc: cond_meta.jump_target_when_false,
-            null_reg: reg,
+            jump_if_null: reg,
         });
     }
 }
@@ -47,12 +47,14 @@ macro_rules! emit_cmp_insn {
                 lhs: $lhs,
                 rhs: $rhs,
                 target_pc: $cond.jump_target_when_true,
+                jump_if_null: false,
             });
         } else {
             $program.emit_insn(Insn::$op_false {
                 lhs: $lhs,
                 rhs: $rhs,
                 target_pc: $cond.jump_target_when_false,
+                jump_if_null: true,
             });
         }
     }};
@@ -324,6 +326,7 @@ pub fn translate_condition_expr(
                             lhs: lhs_reg,
                             rhs: rhs_reg,
                             target_pc: jump_target_when_true,
+                            jump_if_null: false,
                         });
                     } else {
                         // If this is the last condition, we need to jump to the 'jump_target_when_false' label if there is no match.
@@ -331,6 +334,7 @@ pub fn translate_condition_expr(
                             lhs: lhs_reg,
                             rhs: rhs_reg,
                             target_pc: condition_metadata.jump_target_when_false,
+                            jump_if_null: false,
                         });
                     }
                 }
@@ -351,6 +355,7 @@ pub fn translate_condition_expr(
                         lhs: lhs_reg,
                         rhs: rhs_reg,
                         target_pc: condition_metadata.jump_target_when_false,
+                        jump_if_null: false,
                     });
                 }
                 // If we got here, then none of the conditions were a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
@@ -414,13 +419,13 @@ pub fn translate_condition_expr(
                 program.emit_insn(Insn::IfNot {
                     reg: cur_reg,
                     target_pc: condition_metadata.jump_target_when_true,
-                    null_reg: cur_reg,
+                    jump_if_null: cur_reg,
                 });
             } else {
                 program.emit_insn(Insn::If {
                     reg: cur_reg,
                     target_pc: condition_metadata.jump_target_when_false,
-                    null_reg: cur_reg,
+                    jump_if_null: cur_reg,
                 });
             }
         }
@@ -477,6 +482,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -492,6 +498,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -507,6 +514,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -522,6 +530,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -537,6 +546,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -552,6 +562,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -630,6 +641,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -643,6 +655,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
+                            jump_if_null: false,
                         },
                         target_register,
                         if_true_label,
@@ -706,12 +719,13 @@ pub fn translate_expr(
                         lhs: base_reg,
                         rhs: expr_reg,
                         target_pc: next_case_label,
+                        jump_if_null: false,
                     }),
                     // CASE WHEN 0 THEN 0 ELSE 1 becomes ifnot 0 branch to next clause
                     None => program.emit_insn(Insn::IfNot {
                         reg: expr_reg,
                         target_pc: next_case_label,
-                        null_reg: 1,
+                        jump_if_null: 1,
                     }),
                 };
                 // THEN...
@@ -1065,7 +1079,7 @@ pub fn translate_expr(
                             program.emit_insn(Insn::IfNot {
                                 reg: temp_reg,
                                 target_pc: jump_target_when_false,
-                                null_reg: 1,
+                                jump_if_null: 1,
                             });
                             translate_expr(
                                 program,

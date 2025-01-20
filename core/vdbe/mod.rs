@@ -512,6 +512,7 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
@@ -519,7 +520,11 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc += 1;
+                            if *jump_if_null {
+                                state.pc = target_pc.to_offset_int();
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                         _ => {
                             if state.registers[lhs] == state.registers[rhs] {
@@ -534,6 +539,7 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
@@ -541,7 +547,11 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc += 1;
+                            if *jump_if_null {
+                                state.pc = target_pc.to_offset_int();
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                         _ => {
                             if state.registers[lhs] != state.registers[rhs] {
@@ -556,6 +566,7 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
@@ -563,7 +574,11 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc += 1;
+                            if *jump_if_null {
+                                state.pc = target_pc.to_offset_int();
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                         _ => {
                             if state.registers[lhs] < state.registers[rhs] {
@@ -578,6 +593,7 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
@@ -585,7 +601,11 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc += 1;
+                            if *jump_if_null {
+                                state.pc = target_pc.to_offset_int();
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                         _ => {
                             if state.registers[lhs] <= state.registers[rhs] {
@@ -600,6 +620,7 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
@@ -607,7 +628,11 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc += 1;
+                            if *jump_if_null {
+                                state.pc = target_pc.to_offset_int();
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                         _ => {
                             if state.registers[lhs] > state.registers[rhs] {
@@ -622,6 +647,7 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
@@ -629,7 +655,11 @@ impl Program {
                     let target_pc = *target_pc;
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            state.pc += 1;
+                            if *jump_if_null {
+                                state.pc = target_pc.to_offset_int();
+                            } else {
+                                state.pc += 1;
+                            }
                         }
                         _ => {
                             if state.registers[lhs] >= state.registers[rhs] {
@@ -643,10 +673,14 @@ impl Program {
                 Insn::If {
                     reg,
                     target_pc,
-                    null_reg,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
-                    if exec_if(&state.registers[*reg], &state.registers[*null_reg], false) {
+                    if exec_if(
+                        &state.registers[*reg],
+                        &state.registers[*jump_if_null],
+                        false,
+                    ) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
@@ -655,10 +689,14 @@ impl Program {
                 Insn::IfNot {
                     reg,
                     target_pc,
-                    null_reg,
+                    jump_if_null,
                 } => {
                     assert!(target_pc.is_offset());
-                    if exec_if(&state.registers[*reg], &state.registers[*null_reg], true) {
+                    if exec_if(
+                        &state.registers[*reg],
+                        &state.registers[*jump_if_null],
+                        true,
+                    ) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
@@ -3011,11 +3049,11 @@ fn exec_zeroblob(req: &OwnedValue) -> OwnedValue {
 }
 
 // exec_if returns whether you should jump
-fn exec_if(reg: &OwnedValue, null_reg: &OwnedValue, not: bool) -> bool {
+fn exec_if(reg: &OwnedValue, jump_if_null: &OwnedValue, not: bool) -> bool {
     match reg {
         OwnedValue::Integer(0) | OwnedValue::Float(0.0) => not,
         OwnedValue::Integer(_) | OwnedValue::Float(_) => !not,
-        OwnedValue::Null => match null_reg {
+        OwnedValue::Null => match jump_if_null {
             OwnedValue::Integer(0) | OwnedValue::Float(0.0) => false,
             OwnedValue::Integer(_) | OwnedValue::Float(_) => true,
             _ => false,
@@ -3841,29 +3879,29 @@ mod tests {
     #[test]
     fn test_exec_if() {
         let reg = OwnedValue::Integer(0);
-        let null_reg = OwnedValue::Integer(0);
-        assert!(!exec_if(&reg, &null_reg, false));
-        assert!(exec_if(&reg, &null_reg, true));
+        let jump_if_null = OwnedValue::Integer(0);
+        assert!(!exec_if(&reg, &jump_if_null, false));
+        assert!(exec_if(&reg, &jump_if_null, true));
 
         let reg = OwnedValue::Integer(1);
-        let null_reg = OwnedValue::Integer(0);
-        assert!(exec_if(&reg, &null_reg, false));
-        assert!(!exec_if(&reg, &null_reg, true));
+        let jump_if_null = OwnedValue::Integer(0);
+        assert!(exec_if(&reg, &jump_if_null, false));
+        assert!(!exec_if(&reg, &jump_if_null, true));
 
         let reg = OwnedValue::Null;
-        let null_reg = OwnedValue::Integer(0);
-        assert!(!exec_if(&reg, &null_reg, false));
-        assert!(!exec_if(&reg, &null_reg, true));
+        let jump_if_null = OwnedValue::Integer(0);
+        assert!(!exec_if(&reg, &jump_if_null, false));
+        assert!(!exec_if(&reg, &jump_if_null, true));
 
         let reg = OwnedValue::Null;
-        let null_reg = OwnedValue::Integer(1);
-        assert!(exec_if(&reg, &null_reg, false));
-        assert!(exec_if(&reg, &null_reg, true));
+        let jump_if_null = OwnedValue::Integer(1);
+        assert!(exec_if(&reg, &jump_if_null, false));
+        assert!(exec_if(&reg, &jump_if_null, true));
 
         let reg = OwnedValue::Null;
-        let null_reg = OwnedValue::Null;
-        assert!(!exec_if(&reg, &null_reg, false));
-        assert!(!exec_if(&reg, &null_reg, true));
+        let jump_if_null = OwnedValue::Null;
+        assert!(!exec_if(&reg, &jump_if_null, false));
+        assert!(!exec_if(&reg, &jump_if_null, true));
     }
 
     #[test]

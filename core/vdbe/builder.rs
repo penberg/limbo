@@ -158,6 +158,7 @@ impl ProgramBuilder {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
+                    ..
                 } => {
                     resolve(target_pc, "Eq");
                 }
@@ -165,6 +166,7 @@ impl ProgramBuilder {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
+                    ..
                 } => {
                     resolve(target_pc, "Ne");
                 }
@@ -172,6 +174,7 @@ impl ProgramBuilder {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
+                    ..
                 } => {
                     resolve(target_pc, "Lt");
                 }
@@ -179,6 +182,7 @@ impl ProgramBuilder {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
+                    ..
                 } => {
                     resolve(target_pc, "Le");
                 }
@@ -186,6 +190,7 @@ impl ProgramBuilder {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
+                    ..
                 } => {
                     resolve(target_pc, "Gt");
                 }
@@ -193,20 +198,21 @@ impl ProgramBuilder {
                     lhs: _lhs,
                     rhs: _rhs,
                     target_pc,
+                    ..
                 } => {
                     resolve(target_pc, "Ge");
                 }
                 Insn::If {
                     reg: _reg,
                     target_pc,
-                    null_reg: _,
+                    jump_if_null: _,
                 } => {
                     resolve(target_pc, "If");
                 }
                 Insn::IfNot {
                     reg: _reg,
                     target_pc,
-                    null_reg: _,
+                    jump_if_null: _,
                 } => {
                     resolve(target_pc, "IfNot");
                 }

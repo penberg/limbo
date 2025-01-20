@@ -107,50 +107,66 @@ pub enum Insn {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
+        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
+        /// <JUMP TO NEXT ROW IF id != NULL>
+        /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
+        /// This flag indicates that if either is null we should still jump.
+        jump_if_null: bool,
     },
     // Compare two registers and jump to the given PC if they are not equal.
     Ne {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
+        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        jump_if_null: bool,
     },
     // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
     Lt {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
+        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        jump_if_null: bool,
     },
     // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
     Le {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
+        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        jump_if_null: bool,
     },
     // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
     Gt {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
+        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        jump_if_null: bool,
     },
     // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
     Ge {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
+        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        jump_if_null: bool,
     },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
     If {
         reg: usize,              // P1
         target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
-        null_reg: usize,
+        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
+        jump_if_null: usize,
     },
-    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[null_reg\] != 0)
+    /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
     IfNot {
         reg: usize,              // P1
         target_pc: BranchOffset, // P2
-        /// P3. If r\[reg\] is null, jump iff r\[null_reg\] != 0
-        null_reg: usize,
+        /// P3. If r\[reg\] is null, jump iff r\[jump_if_null\] != 0
+        jump_if_null: usize,
     },
     // Open a cursor for reading.
     OpenReadAsync {
