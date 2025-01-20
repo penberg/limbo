@@ -1,14 +1,6 @@
 use limbo_ext::{register_extension, AggFunc, AggregateDerive, ResultCode, Value};
 
-#[cfg(feature = "static")]
 register_extension! {
-    static_build: true,
-    aggregates: { Median, Percentile, PercentileCont, PercentileDisc }
-}
-
-#[cfg(not(feature = "static"))]
-register_extension! {
-    static_build: true,
     aggregates: { Median, Percentile, PercentileCont, PercentileDisc }
 }
 

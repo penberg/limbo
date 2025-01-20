@@ -1,8 +1,6 @@
-#[cfg(not(target_family = "wasm"))]
 use limbo_ext::{AggCtx, FinalizeFunction, StepFunction};
 
 use crate::error::LimboError;
-#[cfg(not(target_family = "wasm"))]
 use crate::ext::{ExtValue, ExtValueType};
 use crate::storage::sqlite3_ondisk::write_varint;
 use crate::Result;
@@ -75,7 +73,7 @@ impl OwnedValue {
         Self::Text(LimboText::new(text))
     }
 }
-#[cfg(not(target_family = "wasm"))]
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExternalAggState {
     pub state: *mut AggCtx,
@@ -85,7 +83,6 @@ pub struct ExternalAggState {
     pub finalized_value: Option<OwnedValue>,
 }
 
-#[cfg(not(target_family = "wasm"))]
 impl ExternalAggState {
     pub fn cache_final_value(&mut self, value: OwnedValue) -> &OwnedValue {
         self.finalized_value = Some(value);
@@ -118,7 +115,6 @@ impl Display for OwnedValue {
 }
 
 impl OwnedValue {
-    #[cfg(not(target_family = "wasm"))]
     pub fn to_ffi(&self) -> ExtValue {
         match self {
             Self::Null => ExtValue::null(),
@@ -131,7 +127,6 @@ impl OwnedValue {
         }
     }
 
-    #[cfg(not(target_family = "wasm"))]
     pub fn from_ffi(v: &ExtValue) -> Self {
         match v.value_type() {
             ExtValueType::Null => OwnedValue::Null,
@@ -177,14 +172,12 @@ pub enum AggContext {
     Max(Option<OwnedValue>),
     Min(Option<OwnedValue>),
     GroupConcat(OwnedValue),
-    #[cfg(not(target_family = "wasm"))]
     External(ExternalAggState),
 }
 
 const NULL: OwnedValue = OwnedValue::Null;
 
 impl AggContext {
-    #[cfg(not(target_family = "wasm"))]
     pub fn compute_external(&mut self) {
         if let Self::External(ext_state) = self {
             if ext_state.finalized_value.is_none() {

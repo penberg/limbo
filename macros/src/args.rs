@@ -6,28 +6,19 @@ use syn::{Ident, LitStr, Token};
 pub(crate) struct RegisterExtensionInput {
     pub aggregates: Vec<Ident>,
     pub scalars: Vec<Ident>,
-    pub is_static: bool,
 }
 
 impl syn::parse::Parse for RegisterExtensionInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut aggregates = Vec::new();
         let mut scalars = Vec::new();
-        let mut is_static = false;
 
         while !input.is_empty() {
             if input.peek(syn::Ident) && input.peek2(Token![:]) {
                 let section_name: Ident = input.parse()?;
                 input.parse::<Token![:]>()?;
 
-                if section_name == "static_build" {
-                    let val: syn::LitBool = input.parse()?;
-                    is_static = val.value;
-
-                    if input.peek(Token![,]) {
-                        input.parse::<Token![,]>()?;
-                    }
-                } else if section_name == "aggregates" || section_name == "scalars" {
+                if section_name == "aggregates" || section_name == "scalars" {
                     let content;
                     syn::braced!(content in input);
 
@@ -55,7 +46,6 @@ impl syn::parse::Parse for RegisterExtensionInput {
         Ok(Self {
             aggregates,
             scalars,
-            is_static,
         })
     }
 }

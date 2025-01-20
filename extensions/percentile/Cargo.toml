@@ -10,7 +10,7 @@ repository.workspace = true
 crate-type = ["cdylib", "lib"]
 
 [features]
-static = []
+static = ["limbo_ext/static"]
 
 [dependencies]
-limbo_ext = { path = "../core" }
+limbo_ext = { path = "../core", features = ["static"] }

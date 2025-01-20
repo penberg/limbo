@@ -31,7 +31,6 @@ use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
-#[cfg(not(target_family = "wasm"))]
 use crate::types::ExternalAggState;
 use crate::types::{AggContext, CursorResult, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp};
 use crate::util::parse_schema_rows;
@@ -1312,8 +1311,6 @@ impl Program {
                                     OwnedValue::build_text(Rc::new("".to_string())),
                                 )))
                             }
-
-                            #[cfg(not(target_family = "wasm"))]
                             AggFunc::External(func) => match func.as_ref() {
                                 ExtFunc::Aggregate {
                                     init,
@@ -1475,8 +1472,6 @@ impl Program {
                                 *acc += col;
                             }
                         }
-
-                        #[cfg(not(target_family = "wasm"))]
                         AggFunc::External(_) => {
                             let (step_fn, state_ptr, argc) = {
                                 let OwnedValue::Agg(agg) = &state.registers[*acc_reg] else {
@@ -1516,7 +1511,6 @@ impl Program {
                             AggFunc::Max => {}
                             AggFunc::Min => {}
                             AggFunc::GroupConcat | AggFunc::StringAgg => {}
-                            #[cfg(not(target_family = "wasm"))]
                             AggFunc::External(_) => {
                                 agg.compute_external();
                             }
@@ -2011,7 +2005,6 @@ impl Program {
                                 }
                             }
                         },
-                        #[cfg(not(target_family = "wasm"))]
                         crate::function::Func::External(f) => match f.func {
                             ExtFunc::Scalar(f) => {
                                 call_external_function! {f, *dest, state, arg_count, *start_reg };

@@ -362,7 +362,6 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
     let RegisterExtensionInput {
         aggregates,
         scalars,
-        is_static,
     } = input_ast;
 
     let scalar_calls = scalars.iter().map(|scalar_ident| {
@@ -389,20 +388,21 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
             }
         }
     });
+    let static_aggregates = aggregate_calls.clone();
+    let static_scalars = scalar_calls.clone();
 
-    let expanded = if is_static {
-        quote! {
+    let expanded = quote! {
+        #[cfg(feature = "static")]
         pub unsafe extern "C" fn register_extension_static(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
             let api = unsafe { &*api };
-            #(#scalar_calls)*
+            #(#static_scalars)*
 
-            #(#aggregate_calls)*
+            #(#static_aggregates)*
 
             ::limbo_ext::ResultCode::OK
           }
-        }
-    } else {
-        quote! {
+
+        #[cfg(not(feature = "static"))]
             #[no_mangle]
             pub unsafe extern "C" fn register_extension(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
                 let api = unsafe { &*api };
@@ -412,7 +412,6 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
 
                 ::limbo_ext::ResultCode::OK
             }
-        }
     };
 
     TokenStream::from(expanded)

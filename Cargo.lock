@@ -1291,7 +1291,6 @@ dependencies = [
  "sqlite3-parser",
  "tempfile",
  "thiserror 1.0.69",
- "uuid",
 ]
 
 [[package]]
