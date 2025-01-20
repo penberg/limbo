@@ -48,7 +48,7 @@ impl Database {
 
     #[wasm_bindgen]
     pub fn exec(&self, _sql: &str) {
-        let _res = self.conn.execute(_sql).unwrap();
+        self.conn.execute(_sql).unwrap();
     }
 
     #[wasm_bindgen]

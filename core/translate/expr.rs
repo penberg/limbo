@@ -785,7 +785,7 @@ pub fn translate_expr(
                             translate_expr(
                                 program,
                                 referenced_tables,
-                                &arg_expr,
+                                arg_expr,
                                 regs + i,
                                 resolver,
                             )?;
