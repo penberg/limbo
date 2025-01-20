@@ -25,6 +25,7 @@ pub(crate) mod subquery;
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
+use crate::storage::wal::CheckpointMode;
 use crate::translate::delete::translate_delete;
 use crate::util::PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX;
 use crate::vdbe::builder::CursorType;
@@ -595,6 +596,10 @@ fn update_pragma(
             query_pragma("journal_mode", header, program)?;
             Ok(())
         }
+        PragmaName::WalCheckpoint => {
+            query_pragma("wal_checkpoint", header, program)?;
+            Ok(())
+        }
     }
 }
 
@@ -614,19 +619,38 @@ fn query_pragma(
                 value: database_header.borrow().default_page_cache_size.into(),
                 dest: register,
             });
+            program.emit_insn(Insn::ResultRow {
+                start_reg: register,
+                count: 1,
+            });
         }
         PragmaName::JournalMode => {
             program.emit_insn(Insn::String8 {
                 value: "wal".into(),
                 dest: register,
             });
+            program.emit_insn(Insn::ResultRow {
+                start_reg: register,
+                count: 1,
+            });
+        }
+        PragmaName::WalCheckpoint => {
+            // Checkpoint uses 3 registers: P1, P2, P3. Ref Insn::Checkpoint for more info.
+            // Allocate two more here as one was allocated at the top.
+            program.alloc_register();
+            program.alloc_register();
+            program.emit_insn(Insn::Checkpoint {
+                database: 0,
+                checkpoint_mode: CheckpointMode::Passive,
+                dest: register,
+            });
+            program.emit_insn(Insn::ResultRow {
+                start_reg: register,
+                count: 3,
+            });
         }
     }
 
-    program.emit_insn(Insn::ResultRow {
-        start_reg: register,
-        count: 1,
-    });
     Ok(())
 }
 

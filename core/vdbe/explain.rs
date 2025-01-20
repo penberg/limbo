@@ -84,6 +84,19 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=~r[{}]", dest, reg),
             ),
+            Insn::Checkpoint {
+                database,
+                checkpoint_mode: _,
+                dest,
+            } => (
+                "Checkpoint",
+                *database as i32,
+                *dest as i32,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=~r[{}]", dest, database),
+            ),
             Insn::Remainder { lhs, rhs, dest } => (
                 "Remainder",
                 *lhs as i32,

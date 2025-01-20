@@ -1,6 +1,7 @@
 use std::num::NonZero;
 
 use super::{AggFunc, BranchOffset, CursorID, FuncCtx, PageIdx};
+use crate::storage::wal::CheckpointMode;
 use crate::types::{OwnedRecord, OwnedValue};
 use limbo_macros::Description;
 
@@ -65,6 +66,12 @@ pub enum Insn {
     BitNot {
         reg: usize,
         dest: usize,
+    },
+    // Checkpoint the database (applying wal file content to database file).
+    Checkpoint {
+        database: usize,                 // checkpoint database P1
+        checkpoint_mode: CheckpointMode, // P2 checkpoint mode
+        dest: usize,                     // P3 checkpoint result
     },
     // Divide lhs by rhs and place the remainder in dest register.
     Remainder {

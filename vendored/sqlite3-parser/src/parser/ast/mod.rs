@@ -1591,6 +1591,8 @@ pub enum PragmaName {
     CacheSize,
     /// `journal_mode` pragma
     JournalMode,
+    /// trigger a checkpoint to run on database(s) if WAL is enabled
+    WalCheckpoint,
 }
 
 impl FromStr for PragmaName {
@@ -1599,6 +1601,7 @@ impl FromStr for PragmaName {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
             "cache_size" => Ok(PragmaName::CacheSize),
+            "wal_checkpoint" => Ok(PragmaName::WalCheckpoint),
             "journal_mode" => Ok(PragmaName::JournalMode),
             _ => Err(()),
         }
