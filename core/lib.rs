@@ -139,6 +139,7 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
+        #[cfg(not(target_family = "wasm"))]
         if let Err(e) = db.register_builtins() {
             return Err(LimboError::ExtensionError(e));
         }
