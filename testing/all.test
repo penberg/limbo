@@ -20,3 +20,5 @@ source $testdir/select.test
 source $testdir/subquery.test
 source $testdir/where.test
 source $testdir/compare.test
+source $testdir/changes.test
+source $testdir/total-changes.test

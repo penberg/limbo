@@ -112,7 +112,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | Function                     | Status | Comment |
 |------------------------------|--------|---------|
 | abs(X)                       | Yes    |         |
-| changes()                    | No     |         |
+| changes()                    | Partial| Still need to support update statements and triggers |
 | char(X1,X2,...,XN)           | Yes    |         |
 | coalesce(X,Y,...)            | Yes    |         |
 | concat(X,...)                | Yes    |         |
@@ -158,7 +158,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | substr(X,Y)                  | Yes    |         |
 | substring(X,Y,Z)             | Yes    |         |
 | substring(X,Y)               | Yes    |         |
-| total_changes()              | No     |         |
+| total_changes()              | Partial| Still need to support update statements and triggers |
 | trim(X)                      | Yes    |         |
 | trim(X,Y)                    | Yes    |         |
 | typeof(X)                    | Yes    |         |

@@ -422,6 +422,12 @@ impl Connection {
     fn update_last_rowid(&self, rowid: u64) {
         self.last_insert_rowid.set(rowid);
     }
+
+    pub fn set_changes(&self, nchange: i64) {
+        self.last_change.set(nchange);
+        let prev_total_changes = self.total_changes.get();
+        self.total_changes.set(prev_total_changes + nchange);
+    }
 }
 
 pub struct Statement {
