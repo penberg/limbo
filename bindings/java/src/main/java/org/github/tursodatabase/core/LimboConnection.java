@@ -79,13 +79,13 @@ public abstract class LimboConnection implements Connection {
      * @return Pointer to statement.
      * @throws SQLException if a database access error occurs.
      */
-    public long prepare(String sql) throws SQLException {
+    public LimboStatement prepare(String sql) throws SQLException {
         logger.trace("DriverManager [{}] [SQLite EXEC] {}", Thread.currentThread().getName(), sql);
         byte[] sqlBytes = stringToUtf8ByteArray(sql);
         if (sqlBytes == null) {
             throw new SQLException("Failed to convert " + sql + " into bytes");
         }
-        return prepareUtf8(connectionPtr, sqlBytes);
+        return new LimboStatement(sql, prepareUtf8(connectionPtr, sqlBytes));
     }
 
     private native long prepareUtf8(long connectionPtr, byte[] sqlUtf8) throws SQLException;
@@ -133,7 +133,7 @@ public abstract class LimboConnection implements Connection {
      * @param errorCode         Error code.
      * @param errorMessageBytes Error message.
      */
-    @NativeInvocation
+    @NativeInvocation(invokedFrom = "limbo_connection.rs")
     private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
         LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
     }

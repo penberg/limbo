@@ -6,6 +6,13 @@ use jni::sys::jlong;
 use jni::JNIEnv;
 use limbo_core::{Statement, StepResult};
 
+pub const STEP_RESULT_ID_ROW: i32 = 10;
+pub const STEP_RESULT_ID_IO: i32 = 20;
+pub const STEP_RESULT_ID_DONE: i32 = 30;
+pub const STEP_RESULT_ID_INTERRUPT: i32 = 40;
+pub const STEP_RESULT_ID_BUSY: i32 = 50;
+pub const STEP_RESULT_ID_ERROR: i32 = 60;
+
 pub struct LimboStatement {
     pub(crate) stmt: Statement,
 }
@@ -50,26 +57,26 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
 
     match stmt.stmt.step() {
         Ok(StepResult::Row(row)) => match row_to_obj_array(&mut env, &row) {
-            Ok(row) => row,
+            Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
             Err(e) => {
                 set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-
-                JObject::null()
+                to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
             }
         },
         Ok(StepResult::IO) => match env.new_object_array(0, "java/lang/Object", JObject::null()) {
-            Ok(row) => row.into(),
+            Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_IO, Some(row.into())),
             Err(e) => {
                 set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-
-                JObject::null()
+                to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
             }
         },
-        _ => JObject::null(),
+        Ok(StepResult::Done) => to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None),
+        Ok(StepResult::Interrupt) => to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None),
+        Ok(StepResult::Busy) => to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
+        _ => to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
     }
 }
 
-#[allow(dead_code)]
 fn row_to_obj_array<'local>(
     env: &mut JNIEnv<'local>,
     row: &limbo_core::Row,
@@ -95,4 +102,43 @@ fn row_to_obj_array<'local>(
     }
 
     Ok(obj_array.into())
+}
+
+/// Converts an optional `JObject` into Java's `LimboStepResult`.
+///
+/// This function takes an optional `JObject` and converts it into a Java object
+/// of type `LimboStepResult`. The conversion is done by creating a new Java object with the
+/// appropriate constructor arguments.
+///
+/// # Arguments
+///
+/// * `env` - A mutable reference to the JNI environment.
+/// * `id` - An integer representing the type of `StepResult`.
+/// * `result` - An optional `JObject` that contains the result data.
+///
+/// # Returns
+///
+/// A `JObject` representing the `LimboStepResult` in Java. If the object creation fails,
+/// a null `JObject` is returned
+fn to_limbo_step_result<'local>(
+    env: &mut JNIEnv<'local>,
+    id: i32,
+    result: Option<JObject<'local>>,
+) -> JObject<'local> {
+    let mut ctor_args = vec![JValue::Int(id)];
+    if let Some(res) = result {
+        ctor_args.push(JValue::Object(&res));
+        env.new_object(
+            "org/github/tursodatabase/core/LimboStepResult",
+            "(I[Ljava/lang/Object;)V",
+            &ctor_args,
+        )
+    } else {
+        env.new_object(
+            "org/github/tursodatabase/core/LimboStepResult",
+            "(I)V",
+            &ctor_args,
+        )
+    }
+    .unwrap_or_else(|_| JObject::null())
 }

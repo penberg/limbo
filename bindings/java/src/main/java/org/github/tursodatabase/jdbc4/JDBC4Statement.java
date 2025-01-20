@@ -1,18 +1,25 @@
 package org.github.tursodatabase.jdbc4;
 
-import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.LimboConnection;
-import org.github.tursodatabase.core.LimboStatement;
+import static java.util.Objects.requireNonNull;
 
-import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.SQLWarning;
+import java.sql.Statement;
 import java.util.concurrent.locks.ReentrantLock;
 
-/**
- * Implementation of the {@link Statement} interface for JDBC 4.
- */
-public class JDBC4Statement extends LimboStatement implements Statement {
+import org.github.tursodatabase.annotations.Nullable;
+import org.github.tursodatabase.annotations.SkipNullableCheck;
+import org.github.tursodatabase.core.LimboConnection;
+import org.github.tursodatabase.core.LimboResultSet;
+import org.github.tursodatabase.core.LimboStatement;
+
+public class JDBC4Statement implements Statement {
+
+    private final LimboConnection connection;
+    @Nullable
+    private LimboStatement statement = null;
 
     private boolean closed;
     private boolean closeOnCompletion;
@@ -28,26 +35,37 @@ public class JDBC4Statement extends LimboStatement implements Statement {
     private ReentrantLock connectionLock = new ReentrantLock();
 
     public JDBC4Statement(LimboConnection connection) {
-        this(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+        this(connection, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY,
+             ResultSet.CLOSE_CURSORS_AT_COMMIT);
     }
 
-    public JDBC4Statement(LimboConnection connection, int resultSetType, int resultSetConcurrency, int resultSetHoldability) {
-        super(connection);
+    public JDBC4Statement(LimboConnection connection, int resultSetType, int resultSetConcurrency,
+                          int resultSetHoldability) {
+        this.connection = connection;
         this.resultSetType = resultSetType;
         this.resultSetConcurrency = resultSetConcurrency;
         this.resultSetHoldability = resultSetHoldability;
     }
 
     @Override
-    @SkipNullableCheck
     public ResultSet executeQuery(String sql) throws SQLException {
-        // TODO
-        return null;
+        execute(sql);
+
+        requireNonNull(statement, "statement should not be null after running execute method");
+        return new JDBC4ResultSet(statement.getResultSet());
     }
 
     @Override
     public int executeUpdate(String sql) throws SQLException {
-        // TODO
+        execute(sql);
+
+        requireNonNull(statement, "statement should not be null after running execute method");
+        final LimboResultSet resultSet = statement.getResultSet();
+        while (resultSet.isOpen()) {
+            resultSet.next();
+        }
+
+        // TODO: return update count;
         return 0;
     }
 
@@ -121,6 +139,13 @@ public class JDBC4Statement extends LimboStatement implements Statement {
         // TODO
     }
 
+    /**
+     * The <code>execute</code> method executes an SQL statement and indicates the
+     * form of the first result.  You must then use the methods
+     * <code>getResultSet</code> or <code>getUpdateCount</code>
+     * to retrieve the result, and <code>getMoreResults</code> to
+     * move to any subsequent result(s).
+     */
     @Override
     public boolean execute(String sql) throws SQLException {
         internalClose();
@@ -128,12 +153,14 @@ public class JDBC4Statement extends LimboStatement implements Statement {
         return this.withConnectionTimeout(
                 () -> {
                     try {
+                        // TODO: if sql is a readOnly query, do we still need the locks?
                         connectionLock.lock();
-                        final long stmtPointer = connection.prepare(sql);
-                        List<Object[]> result = execute(stmtPointer);
+                        statement = connection.prepare(sql);
+                        final boolean result = statement.execute();
                         updateGeneratedKeys();
                         exhaustedResults = false;
-                        return !result.isEmpty();
+
+                        return result;
                     } finally {
                         connectionLock.unlock();
                     }
@@ -142,10 +169,9 @@ public class JDBC4Statement extends LimboStatement implements Statement {
     }
 
     @Override
-    @SkipNullableCheck
     public ResultSet getResultSet() throws SQLException {
-        // TODO
-        return null;
+        requireNonNull(statement, "statement is null");
+        return new JDBC4ResultSet(statement.getResultSet());
     }
 
     @Override
@@ -288,7 +314,7 @@ public class JDBC4Statement extends LimboStatement implements Statement {
 
     @Override
     public void closeOnCompletion() throws SQLException {
-        if (closed) throw new SQLException("statement is closed");
+        if (closed) {throw new SQLException("statement is closed");}
         closeOnCompletion = true;
     }
 
@@ -297,7 +323,7 @@ public class JDBC4Statement extends LimboStatement implements Statement {
      */
     @Override
     public boolean isCloseOnCompletion() throws SQLException {
-        if (closed) throw new SQLException("statement is closed");
+        if (closed) {throw new SQLException("statement is closed");}
         return closeOnCompletion;
     }
 
@@ -312,6 +338,18 @@ public class JDBC4Statement extends LimboStatement implements Statement {
     public boolean isWrapperFor(Class<?> iface) throws SQLException {
         // TODO
         return false;
+    }
+
+    protected void internalClose() throws SQLException {
+        // TODO
+    }
+
+    protected void clearGeneratedKeys() throws SQLException {
+        // TODO
+    }
+
+    protected void updateGeneratedKeys() throws SQLException {
+        // TODO
     }
 
     private <T> T withConnectionTimeout(SQLCallable<T> callable) throws SQLException {

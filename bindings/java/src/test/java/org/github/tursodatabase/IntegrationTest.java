@@ -22,7 +22,6 @@ public class IntegrationTest {
     }
 
     @Test
-    @Disabled("Doesn't work on workflow. Need investigation.")
     void create_table_multi_inserts_select() throws Exception {
         Statement stmt = createDefaultStatement();
         stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");

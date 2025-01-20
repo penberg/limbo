@@ -113,7 +113,7 @@ public final class LimboDB extends AbstractDB {
      * @param errorCode         Error code.
      * @param errorMessageBytes Error message.
      */
-    @NativeInvocation
+    @NativeInvocation(invokedFrom = "limbo_db.rs")
     private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
         LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
     }
