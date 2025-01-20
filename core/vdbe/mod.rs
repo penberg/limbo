@@ -46,8 +46,8 @@ use crate::{
 use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
 use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
 use insn::{
-    exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_divide, exec_multiply, exec_remainder,
-    exec_shift_left, exec_shift_right, exec_subtract,
+    exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_divide,
+    exec_multiply, exec_remainder, exec_shift_left, exec_shift_right, exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
@@ -2278,6 +2278,10 @@ impl Program {
                     } else {
                         state.registers[*dest] = OwnedValue::Integer(0);
                     }
+                    state.pc += 1;
+                }
+                Insn::Not { reg, dest } => {
+                    state.registers[*dest] = exec_boolean_not(&state.registers[*reg]);
                     state.pc += 1;
                 }
             }

@@ -1083,6 +1083,15 @@ pub fn insn_to_str(
                     rg1, rg2, dest, dest
                 ),
             ),
+            Insn::Not { reg, dest } => (
+                "Not",
+                *reg as i32,
+                *dest as i32,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!("r[{}]=!r[{}]", dest, reg),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
