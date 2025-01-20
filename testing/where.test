@@ -383,3 +383,27 @@ do_execsql_test nested-parens-and-inside-or-regression-test {
         (id = 6 OR FALSE)
     );
 } {1}
+
+# Regression tests for binary conditional jump comparisons where one operand is null
+# Test behavior of binary comparisons (=,>,<,>=,<=,!=) when one operand is NULL
+# Each test has 3 variants:
+# 1. Simple comparison with NULL (should return empty)
+# 2. Comparison with NULL OR id=1 (should return Jamie)
+# 3. Comparison with NULL AND id=1 (should return empty)
+foreach {operator} {
+    =
+    >  
+    <
+    >=
+    <=
+    !=
+} {
+    # Simple NULL comparison
+    do_execsql_test where-binary-one-operand-null-$operator "select * from users where first_name $operator NULL" {}
+
+    # NULL comparison OR id=1 
+    do_execsql_test where-binary-one-operand-null-or-$operator "select first_name from users where first_name $operator NULL OR id = 1" {Jamie}
+
+    # NULL comparison AND id=1
+    do_execsql_test where-binary-one-operand-null-and-$operator "select first_name from users where first_name $operator NULL AND id = 1" {}
+}

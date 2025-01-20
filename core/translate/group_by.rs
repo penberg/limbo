@@ -288,7 +288,7 @@ pub fn emit_group_by<'a>(
     program.emit_insn(Insn::If {
         target_pc: label_acc_indicator_set_flag_true,
         reg: reg_data_in_acc_flag,
-        null_reg: 0, // unused in this case
+        jump_if_null: false,
     });
 
     // Read the group by columns for a finished group

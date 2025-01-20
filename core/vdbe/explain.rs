@@ -209,6 +209,7 @@ pub fn insn_to_str(
                 lhs,
                 rhs,
                 target_pc,
+                ..
             } => (
                 "Eq",
                 *lhs as i32,
@@ -227,6 +228,7 @@ pub fn insn_to_str(
                 lhs,
                 rhs,
                 target_pc,
+                ..
             } => (
                 "Ne",
                 *lhs as i32,
@@ -245,6 +247,7 @@ pub fn insn_to_str(
                 lhs,
                 rhs,
                 target_pc,
+                ..
             } => (
                 "Lt",
                 *lhs as i32,
@@ -258,6 +261,7 @@ pub fn insn_to_str(
                 lhs,
                 rhs,
                 target_pc,
+                ..
             } => (
                 "Le",
                 *lhs as i32,
@@ -276,6 +280,7 @@ pub fn insn_to_str(
                 lhs,
                 rhs,
                 target_pc,
+                ..
             } => (
                 "Gt",
                 *lhs as i32,
@@ -289,6 +294,7 @@ pub fn insn_to_str(
                 lhs,
                 rhs,
                 target_pc,
+                ..
             } => (
                 "Ge",
                 *lhs as i32,
@@ -306,12 +312,12 @@ pub fn insn_to_str(
             Insn::If {
                 reg,
                 target_pc,
-                null_reg,
+                jump_if_null,
             } => (
                 "If",
                 *reg as i32,
                 target_pc.to_debug_int(),
-                *null_reg as i32,
+                *jump_if_null as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 format!("if r[{}] goto {}", reg, target_pc.to_debug_int()),
@@ -319,12 +325,12 @@ pub fn insn_to_str(
             Insn::IfNot {
                 reg,
                 target_pc,
-                null_reg,
+                jump_if_null,
             } => (
                 "IfNot",
                 *reg as i32,
                 target_pc.to_debug_int(),
-                *null_reg as i32,
+                *jump_if_null as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 format!("if !r[{}] goto {}", reg, target_pc.to_debug_int()),

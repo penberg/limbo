@@ -477,6 +477,7 @@ pub fn open_loop(
                                 lhs: rowid_reg,
                                 rhs: cmp_reg,
                                 target_pc: loop_end,
+                                jump_if_null: false,
                             });
                         }
                     }
@@ -498,6 +499,7 @@ pub fn open_loop(
                                 lhs: rowid_reg,
                                 rhs: cmp_reg,
                                 target_pc: loop_end,
+                                jump_if_null: false,
                             });
                         }
                     }
