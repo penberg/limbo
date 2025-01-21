@@ -679,6 +679,13 @@ pub fn translate_expr(
                         },
                     })
                 }
+                ast::Operator::Concat => {
+                    program.emit_insn(Insn::Concat {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 other_unimplemented => todo!("{:?}", other_unimplemented),
             }
             Ok(target_register)

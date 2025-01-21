@@ -1,4 +1,5 @@
 use std::num::NonZero;
+use std::rc::Rc;
 
 use super::{AggFunc, BranchOffset, CursorID, FuncCtx, PageIdx};
 use crate::storage::wal::CheckpointMode;
@@ -544,6 +545,12 @@ pub enum Insn {
         reg: usize,
         dest: usize,
     },
+    /// Concatenates the `rhs` and `lhs` values and stores the result in the third register.
+    Concat {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {
@@ -884,5 +891,67 @@ pub fn exec_boolean_not(mut reg: &OwnedValue) -> OwnedValue {
         OwnedValue::Float(f) => OwnedValue::Integer((*f == 0.0) as i64),
         OwnedValue::Text(text) => exec_boolean_not(&cast_text_to_numerical(&text.value)),
         _ => todo!(),
+    }
+}
+
+pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
+    match (lhs, rhs) {
+        (OwnedValue::Text(lhs_text), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_text.value.as_ref().clone() + &rhs_text.value))
+        }
+        (OwnedValue::Text(lhs_text), OwnedValue::Integer(rhs_int)) => OwnedValue::build_text(
+            Rc::new(lhs_text.value.as_ref().clone() + &rhs_int.to_string()),
+        ),
+        (OwnedValue::Text(lhs_text), OwnedValue::Float(rhs_float)) => OwnedValue::build_text(
+            Rc::new(lhs_text.value.as_ref().clone() + &rhs_float.to_string()),
+        ),
+        (OwnedValue::Text(lhs_text), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(Rc::new(
+            lhs_text.value.as_ref().clone() + &rhs_agg.final_value().to_string(),
+        )),
+
+        (OwnedValue::Integer(lhs_int), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_text.value))
+        }
+        (OwnedValue::Integer(lhs_int), OwnedValue::Integer(rhs_int)) => {
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_int.to_string()))
+        }
+        (OwnedValue::Integer(lhs_int), OwnedValue::Float(rhs_float)) => {
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_float.to_string()))
+        }
+        (OwnedValue::Integer(lhs_int), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(
+            Rc::new(lhs_int.to_string() + &rhs_agg.final_value().to_string()),
+        ),
+
+        (OwnedValue::Float(lhs_float), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_text.value))
+        }
+        (OwnedValue::Float(lhs_float), OwnedValue::Integer(rhs_int)) => {
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_int.to_string()))
+        }
+        (OwnedValue::Float(lhs_float), OwnedValue::Float(rhs_float)) => {
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_float.to_string()))
+        }
+        (OwnedValue::Float(lhs_float), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(
+            Rc::new(lhs_float.to_string() + &rhs_agg.final_value().to_string()),
+        ),
+
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_agg.final_value().to_string() + &rhs_text.value))
+        }
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Integer(rhs_int)) => OwnedValue::build_text(
+            Rc::new(lhs_agg.final_value().to_string() + &rhs_int.to_string()),
+        ),
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Float(rhs_float)) => OwnedValue::build_text(
+            Rc::new(lhs_agg.final_value().to_string() + &rhs_float.to_string()),
+        ),
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(Rc::new(
+            lhs_agg.final_value().to_string() + &rhs_agg.final_value().to_string(),
+        )),
+
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Blob(_), _) | (_, OwnedValue::Blob(_)) => {
+            todo!("TODO: Handle Blob conversion to String")
+        }
+        (OwnedValue::Record(_), _) | (_, OwnedValue::Record(_)) => unreachable!(),
     }
 }
