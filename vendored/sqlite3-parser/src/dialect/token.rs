@@ -177,4 +177,5 @@ pub enum TokenType {
     TK_WINDOW = 165,
     TK_OVER = 166,
     TK_FILTER = 167,
+    TK_ILLEGAL = 185,
 }
