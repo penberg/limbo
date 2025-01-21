@@ -975,7 +975,7 @@ pub fn translate_expr(
 
                         translate_function(
                             program,
-                            &args,
+                            args,
                             referenced_tables,
                             resolver,
                             target_register,
