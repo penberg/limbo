@@ -7,6 +7,7 @@ This document describes the compatibility of Limbo with SQLite.
 - [Features](#features)
 - [SQLite query language](#sqlite-query-language)
     - [Statements](#statements)
+      - [PRAGMA Statements](#pragma)
     - [Expressions](#expressions)
     - [Functions](#functions)
 - [SQLite C API](#sqlite-c-api)
@@ -52,8 +53,6 @@ The current status of Limbo is:
 | INDEXED BY                | No      |         |
 | INSERT                    | Partial |         |
 | ON CONFLICT clause        | No      |         |
-| PRAGMA                    | Partial |         |
-| PRAGMA cache_size         | Yes     |         |
 | REINDEX                   | No      |         |
 | RELEASE SAVEPOINT         | No      |         |
 | REPLACE                   | No      |         |
@@ -77,6 +76,87 @@ The current status of Limbo is:
 | UPSERT                    | No      |         |
 | VACUUM                    | No      |         |
 | WITH clause               | No      |         |
+
+#### [PRAGMA](https://www.sqlite.org/pragma.html)
+
+
+| Statement                        | Status     | Comment                                         |
+|----------------------------------|------------|-------------------------------------------------|
+| PRAGMA analysis_limit            | No         |                                                 |
+| PRAGMA application_id            | No         |                                                 |
+| PRAGMA auto_vacuum               | No         |                                                 |
+| PRAGMA automatic_index           | No         |                                                 |
+| PRAGMA busy_timeout              | No         |                                                 |
+| PRAGMA busy_timeout              | No         |                                                 |
+| PRAGMA cache_size                | Yes        |                                                 |
+| PRAGMA cache_spill               | No         |                                                 |
+| PRAGMA case_sensitive_like       | Not Needed | deprecated in SQLite                            |
+| PRAGMA cell_size_check           | No         |                                                 |
+| PRAGMA checkpoint_fullsync       | No         |                                                 |
+| PRAGMA collation_list            | No         |                                                 |
+| PRAGMA compile_options           | No         |                                                 |
+| PRAGMA count_changes             | Not Needed | deprecated in SQLite                            |
+| PRAGMA data_store_directory      | Not Needed | deprecated in SQLite                            |
+| PRAGMA data_version              | No         |                                                 |
+| PRAGMA database_list             | No         |                                                 |
+| PRAGMA default_cache_size        | Not Needed | deprecated in SQLite                            |
+| PRAGMA defer_foreign_keys        | No         |                                                 |
+| PRAGMA empty_result_callbacks    | Not Needed | deprecated in SQLite                            |
+| PRAGMA encoding                  | No         |                                                 |
+| PRAGMA foreign_key_check         | No         |                                                 |
+| PRAGMA foreign_key_list          | No         |                                                 |
+| PRAGMA foreign_keys              | No         |                                                 |
+| PRAGMA freelist_count            | No         |                                                 |
+| PRAGMA full_column_names         | Not Needed | deprecated in SQLite                            |
+| PRAGMA fullsync                  | No         |                                                 |
+| PRAGMA function_list             | No         |                                                 |
+| PRAGMA hard_heap_limit           | No         |                                                 |
+| PRAGMA ignore_check_constraints  | No         |                                                 |
+| PRAGMA incremental_vacuum        | No         |                                                 |
+| PRAGMA index_info                | No         |                                                 |
+| PRAGMA index_list                | No         |                                                 |
+| PRAGMA index_xinfo               | No         |                                                 |
+| PRAGMA integrity_check           | No         |                                                 |
+| PRAGMA journal_mode              | No         |                                                 |
+| PRAGMA journal_size_limit        | No         |                                                 |
+| PRAGMA legacy_alter_table        | No         |                                                 |
+| PRAGMA legacy_file_format        | No         |                                                 |
+| PRAGMA locking_mode              | No         |                                                 |
+| PRAGMA max_page_count            | No         |                                                 |
+| PRAGMA mmap_size                 | No         |                                                 |
+| PRAGMA module_list               | No         |                                                 |
+| PRAGMA optimize                  | No         |                                                 |
+| PRAGMA page_count                | No         |                                                 |
+| PRAGMA page_size                 | No         |                                                 |
+| PRAGMA parser_trace              | No         |                                                 |
+| PRAGMA pragma_list               | No         |                                                 |
+| PRAGMA query_only                | No         |                                                 |
+| PRAGMA quick_check               | No         |                                                 |
+| PRAGMA read_uncommitted          | No         |                                                 |
+| PRAGMA recursive_triggers        | No         |                                                 |
+| PRAGMA reverse_unordered_selects | No         |                                                 |
+| PRAGMA schema_version            | No         |                                                 |
+| PRAGMA secure_delete             | No         |                                                 |
+| PRAGMA short_column_names        | Not Needed | deprecated in SQLite                            |
+| PRAGMA shrink_memory             | No         |                                                 |
+| PRAGMA soft_heap_limit           | No         |                                                 |
+| PRAGMA stats                     | No         | Used for testing in SQLite                      |
+| PRAGMA synchronous               | No         |                                                 |
+| PRAGMA table_info                | No         |                                                 |
+| PRAGMA table_list                | No         |                                                 |
+| PRAGMA table_xinfo               | No         |                                                 |
+| PRAGMA temp_store                | No         |                                                 |
+| PRAGMA temp_store_directory      | Not Needed | deprecated in SQLite                            |
+| PRAGMA threads                   | No         |                                                 |
+| PRAGMA trusted_schema            | No         |                                                 |
+| PRAGMA user_version              | No         |                                                 |
+| PRAGMA vdbe_addoptrace           | No         |                                                 |
+| PRAGMA vdbe_debug                | No         |                                                 |
+| PRAGMA vdbe_listing              | No         |                                                 |
+| PRAGMA vdbe_trace                | No         |                                                 |
+| PRAGMA wal_autocheckpoint        | No         |                                                 |
+| PRAGMA wal_checkpoint            | Partial    | Not supported calling with param (pragma-value) |
+| PRAGMA writable_schema           | No         |                                                 |
 
 ### Expressions
 
