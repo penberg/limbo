@@ -35,7 +35,6 @@ mod tests {
 
     fn run_cli() -> process::Command {
         let bin_path = cargo_bin("limbo");
-        let cmd = process::Command::new(bin_path);
-        cmd
+        process::Command::new(bin_path)
     }
 }

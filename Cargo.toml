@@ -15,7 +15,8 @@ members = [
     "macros",
     "simulator",
     "sqlite3",
-    "test", "extensions/percentile",
+    "tests",
+    "extensions/percentile",
 ]
 exclude = ["perf/latency/limbo"]
 
