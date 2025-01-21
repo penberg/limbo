@@ -75,27 +75,18 @@ impl Database {
     }
 
     pub fn register_builtins(&self) -> Result<(), String> {
+        let ext_api = self.build_limbo_ext();
         #[cfg(feature = "uuid")]
-        self.register_uuid()?;
-        #[cfg(feature = "percentile")]
-        self.register_percentile()?;
-        Ok(())
-    }
-
-    #[cfg(feature = "uuid")]
-    pub fn register_uuid(&self) -> Result<(), String> {
-        let ext_api = Box::new(self.build_limbo_ext());
         if unsafe { !limbo_uuid::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register uuid extension".to_string());
         }
-        Ok(())
-    }
-
-    #[cfg(feature = "percentile")]
-    pub fn register_percentile(&self) -> Result<(), String> {
-        let ext_api = self.build_limbo_ext();
+        #[cfg(feature = "percentile")]
         if unsafe { !limbo_percentile::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register percentile extension".to_string());
+        }
+        #[cfg(feature = "regexp")]
+        if unsafe { !limbo_regexp::register_extension_static(&ext_api).is_ok() } {
+            return Err("Failed to register regexp extension".to_string());
         }
         Ok(())
     }

@@ -1271,6 +1271,7 @@ dependencies = [
  "limbo_ext",
  "limbo_macros",
  "limbo_percentile",
+ "limbo_regexp",
  "limbo_uuid",
  "log",
  "miette",

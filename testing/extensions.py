@@ -133,7 +133,6 @@ def assert_specific_time(result):
 
 def test_uuid(pipe):
     specific_time = "01945ca0-3189-76c0-9a8f-caf310fc8b8e"
-
     # these are built into the binary, so we just test they work
     run_test(
         pipe,
@@ -210,7 +209,20 @@ def validate_percentile_disc(res):
 
 
 def test_aggregates(pipe):
-    # also built-in
+    extension_path = "./target/debug/liblimbo_percentile.so"
+    # assert no function before extension loads
+    run_test(
+        pipe,
+        "SELECT median(1);",
+        returns_error,
+        "median agg function returns null when ext not loaded",
+    )
+    run_test(
+        pipe,
+        f".load {extension_path}",
+        returns_null,
+        "load extension command works properly",
+    )
     run_test(
         pipe,
         "select median(value) from numbers;",
@@ -260,4 +272,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
