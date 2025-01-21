@@ -13,6 +13,7 @@ public class LimboStepResult {
     private static final int STEP_RESULT_ID_IO = 20;
     private static final int STEP_RESULT_ID_DONE = 30;
     private static final int STEP_RESULT_ID_INTERRUPT = 40;
+    // Indicates that the database file could not be written because of concurrent activity by some other connection
     private static final int STEP_RESULT_ID_BUSY = 50;
     private static final int STEP_RESULT_ID_ERROR = 60;
 
@@ -39,6 +40,14 @@ public class LimboStepResult {
 
     public boolean isDone() {
         return stepResultId == STEP_RESULT_ID_DONE;
+    }
+
+    public boolean isInInvalidState() {
+        // current implementation doesn't allow STEP_RESULT_ID_IO to be returned
+        return stepResultId == STEP_RESULT_ID_IO ||
+               stepResultId == STEP_RESULT_ID_INTERRUPT ||
+               stepResultId == STEP_RESULT_ID_BUSY ||
+               stepResultId == STEP_RESULT_ID_ERROR;
     }
 
     @Override
