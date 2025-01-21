@@ -7,6 +7,7 @@ use jni::JNIEnv;
 use limbo_core::{Statement, StepResult};
 
 pub const STEP_RESULT_ID_ROW: i32 = 10;
+#[allow(dead_code)]
 pub const STEP_RESULT_ID_IO: i32 = 20;
 pub const STEP_RESULT_ID_DONE: i32 = 30;
 pub const STEP_RESULT_ID_INTERRUPT: i32 = 40;
@@ -61,13 +62,19 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
                 Ok(row) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
                 Err(e) => {
                     set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-                    return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
+                    return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None);
                 }
             },
-            Ok(StepResult::IO) => {},
-            Ok(StepResult::Done) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None),
-            Ok(StepResult::Interrupt) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None),
-            Ok(StepResult::Busy) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
+            Ok(StepResult::IO) => {}
+            Ok(StepResult::Done) => {
+                return to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None)
+            }
+            Ok(StepResult::Interrupt) => {
+                return to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None)
+            }
+            Ok(StepResult::Busy) => {
+                return to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None)
+            }
             _ => return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
         }
     }
