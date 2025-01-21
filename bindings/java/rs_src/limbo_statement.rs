@@ -1,5 +1,6 @@
 use crate::errors::Result;
 use crate::errors::{LimboError, LIMBO_ETC};
+use crate::limbo_connection::LimboConnection;
 use crate::utils::set_err_msg_and_throw_exception;
 use jni::objects::{JObject, JValue};
 use jni::sys::jlong;
@@ -16,11 +17,12 @@ pub const STEP_RESULT_ID_ERROR: i32 = 60;
 
 pub struct LimboStatement {
     pub(crate) stmt: Statement,
+    pub(crate) connection: LimboConnection,
 }
 
 impl LimboStatement {
-    pub fn new(stmt: Statement) -> Self {
-        LimboStatement { stmt }
+    pub fn new(stmt: Statement, connection: LimboConnection) -> Self {
+        LimboStatement { stmt, connection }
     }
 
     pub fn to_ptr(self) -> jlong {
@@ -65,7 +67,9 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
                     return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None);
                 }
             },
-            Ok(StepResult::IO) => {}
+            Ok(StepResult::IO) => {
+                stmt.connection.io.run_once().unwrap();
+            }
             Ok(StepResult::Done) => {
                 return to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None)
             }

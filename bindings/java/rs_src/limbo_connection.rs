@@ -69,7 +69,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepar
     };
 
     match connection.conn.prepare(sql) {
-        Ok(stmt) => LimboStatement::new(stmt).to_ptr(),
+        Ok(stmt) => LimboStatement::new(stmt, connection.clone()).to_ptr(),
         Err(e) => {
             set_err_msg_and_throw_exception(
                 &mut env,
