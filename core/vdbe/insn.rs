@@ -895,13 +895,63 @@ pub fn exec_boolean_not(mut reg: &OwnedValue) -> OwnedValue {
 }
 
 pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
-    let lhs_value = OwnedValue::value_to_string(lhs);
-    let rhs_value = OwnedValue::value_to_string(rhs);
+    match (lhs, rhs) {
+        (OwnedValue::Text(lhs_text), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_text.value.as_ref().clone() + &rhs_text.value))
+        }
+        (OwnedValue::Text(lhs_text), OwnedValue::Integer(rhs_int)) => OwnedValue::build_text(
+            Rc::new(lhs_text.value.as_ref().clone() + &rhs_int.to_string()),
+        ),
+        (OwnedValue::Text(lhs_text), OwnedValue::Float(rhs_float)) => OwnedValue::build_text(
+            Rc::new(lhs_text.value.as_ref().clone() + &rhs_float.to_string()),
+        ),
+        (OwnedValue::Text(lhs_text), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(Rc::new(
+            lhs_text.value.as_ref().clone() + &rhs_agg.final_value().to_string(),
+        )),
 
-    if lhs_value.is_empty() || rhs_value.is_empty() {
-        OwnedValue::Null
-    } else {
-    let result = lhs_value + &rhs_value;
-        OwnedValue::build_text(Rc::new(result))
+        (OwnedValue::Integer(lhs_int), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_text.value))
+        }
+        (OwnedValue::Integer(lhs_int), OwnedValue::Integer(rhs_int)) => {
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_int.to_string()))
+        }
+        (OwnedValue::Integer(lhs_int), OwnedValue::Float(rhs_float)) => {
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_float.to_string()))
+        }
+        (OwnedValue::Integer(lhs_int), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(
+            Rc::new(lhs_int.to_string() + &rhs_agg.final_value().to_string()),
+        ),
+
+        (OwnedValue::Float(lhs_float), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_text.value))
+        }
+        (OwnedValue::Float(lhs_float), OwnedValue::Integer(rhs_int)) => {
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_int.to_string()))
+        }
+        (OwnedValue::Float(lhs_float), OwnedValue::Float(rhs_float)) => {
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_float.to_string()))
+        }
+        (OwnedValue::Float(lhs_float), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(
+            Rc::new(lhs_float.to_string() + &rhs_agg.final_value().to_string()),
+        ),
+
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Text(rhs_text)) => {
+            OwnedValue::build_text(Rc::new(lhs_agg.final_value().to_string() + &rhs_text.value))
+        }
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Integer(rhs_int)) => OwnedValue::build_text(
+            Rc::new(lhs_agg.final_value().to_string() + &rhs_int.to_string()),
+        ),
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Float(rhs_float)) => OwnedValue::build_text(
+            Rc::new(lhs_agg.final_value().to_string() + &rhs_float.to_string()),
+        ),
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(Rc::new(
+            lhs_agg.final_value().to_string() + &rhs_agg.final_value().to_string(),
+        )),
+
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Blob(_), _) | (_, OwnedValue::Blob(_)) => {
+            todo!("TODO: Handle Blob conversion to String")
+        }
+        (OwnedValue::Record(_), _) | (_, OwnedValue::Record(_)) => unreachable!(),
     }
 }

@@ -1118,7 +1118,7 @@ pub fn insn_to_str(
                 *dest as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("r[{}]=r[{}] << r[{}]", dest, lhs, rhs)
+                format!("r[{}]=r[{}] + r[{}]", dest, lhs, rhs),
             ),
         };
     format!(
