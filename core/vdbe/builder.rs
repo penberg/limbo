@@ -30,6 +30,7 @@ pub struct ProgramBuilder {
     // map of instruction index to manual comment (used in EXPLAIN)
     comments: HashMap<InsnReference, &'static str>,
     pub parameters: Parameters,
+    pub columns: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,6 +61,7 @@ impl ProgramBuilder {
             seekrowid_emitted_bitmask: 0,
             comments: HashMap::new(),
             parameters: Parameters::new(),
+            columns: Vec::new(),
         }
     }
 
@@ -352,6 +354,7 @@ impl ProgramBuilder {
             parameters: self.parameters,
             n_change: Cell::new(0),
             change_cnt_on,
+            columns: self.columns,
         }
     }
 }
