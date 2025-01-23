@@ -187,7 +187,7 @@ pub enum CheckpointStatus {
 // min_frame and max_frame is the range of frames that can be safely transferred from WAL to db
 // file.
 // current_page is a helper to iterate through all the pages that might have a frame in the safe
-// range. This is inneficient for now.
+// range. This is inefficient for now.
 struct OngoingCheckpoint {
     page: PageRef,
     state: CheckpointState,
@@ -228,13 +228,13 @@ pub struct WalFileShared {
     max_frame: u64,
     nbackfills: u64,
     // Frame cache maps a Page to all the frames it has stored in WAL in ascending order.
-    // This is do to easily find the frame it must checkpoint each connection if a checkpoint is
+    // This is to easily find the frame it must checkpoint each connection if a checkpoint is
     // necessary.
     // One difference between SQLite and limbo is that we will never support multi process, meaning
     // we don't need WAL's index file. So we can do stuff like this without shared memory.
-    // TODO: this will need refactoring because this is incredible memory inneficient.
+    // TODO: this will need refactoring because this is incredible memory inefficient.
     frame_cache: HashMap<u64, Vec<u64>>,
-    // Another memory inneficient array made to just keep track of pages that are in frame_cache.
+    // Another memory inefficient array made to just keep track of pages that are in frame_cache.
     pages_in_frames: Vec<u64>,
     last_checksum: (u32, u32), // Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
     file: Rc<dyn File>,
