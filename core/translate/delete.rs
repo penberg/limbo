@@ -44,8 +44,8 @@ pub fn prepare_delete_plan(
     // Parse the WHERE clause
     let resolved_where_clauses = parse_where(where_clause, &referenced_tables)?;
 
-    // Parse the LIMIT clause
-    let resolved_limit = limit.and_then(|l| parse_limit(*l));
+    // Parse the LIMIT/OFFSET clause
+    let (resolved_limit, resolved_offset) = limit.map_or(Ok((None, None)), |l| parse_limit(*l))?;
 
     let plan = DeletePlan {
         source: SourceOperator::Scan {
@@ -58,6 +58,7 @@ pub fn prepare_delete_plan(
         where_clause: resolved_where_clauses,
         order_by: None,
         limit: resolved_limit,
+        offset: resolved_offset,
         referenced_tables,
         available_indexes: vec![],
         contains_constant_false_condition: false,

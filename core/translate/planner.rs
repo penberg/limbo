@@ -566,19 +566,30 @@ fn parse_join(
     })
 }
 
-pub fn parse_limit(limit: Limit) -> Option<usize> {
+pub fn parse_limit(limit: Limit) -> Result<(Option<usize>, Option<usize>)> {
+    let offset = match limit.offset {
+        Some(offset_expr) => {
+            if let Expr::Literal(ast::Literal::Numeric(n)) = offset_expr {
+                n.parse().ok()
+            } else {
+                crate::bail_parse_error!("Invalid OFFSET clause");
+            }
+        }
+        None => Some(0),
+    };
+
     if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
-        n.parse().ok()
+        Ok((n.parse().ok(), offset))
     } else if let Expr::Id(id) = limit.expr {
         if id.0.eq_ignore_ascii_case("true") {
-            Some(1)
+            Ok((Some(1), offset))
         } else if id.0.eq_ignore_ascii_case("false") {
-            Some(0)
+            Ok((Some(0), offset))
         } else {
-            None
+            crate::bail_parse_error!("Invalid LIMIT clause");
         }
     } else {
-        None
+        crate::bail_parse_error!("Invalid LIMIT clause");
     }
 }
 

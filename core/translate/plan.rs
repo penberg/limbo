@@ -65,6 +65,8 @@ pub struct SelectPlan {
     pub aggregates: Vec<Aggregate>,
     /// limit clause
     pub limit: Option<usize>,
+    /// offset clause
+    pub offset: Option<usize>,
     /// all the tables referenced in the query
     pub referenced_tables: Vec<TableReference>,
     /// all the indexes available
@@ -88,6 +90,8 @@ pub struct DeletePlan {
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// limit clause
     pub limit: Option<usize>,
+    /// offset clause
+    pub offset: Option<usize>,
     /// all the tables referenced in the query
     pub referenced_tables: Vec<TableReference>,
     /// all the indexes available
