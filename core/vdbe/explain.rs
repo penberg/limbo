@@ -957,6 +957,22 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::OffsetLimit {
+                limit_reg,
+                combined_reg,
+                offset_reg,
+            } => (
+                "OffsetLimit",
+                *limit_reg as i32,
+                *combined_reg as i32,
+                *offset_reg as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "if r[{}]>0 then r[{}]=r[{}]+max(0,r[{}]) else r[{}]=(-1)",
+                    limit_reg, combined_reg, limit_reg, offset_reg, combined_reg
+                ),
+            ),
             Insn::OpenWriteAsync {
                 cursor_id,
                 root_page,
