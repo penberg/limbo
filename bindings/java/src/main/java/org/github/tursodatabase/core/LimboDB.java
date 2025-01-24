@@ -1,5 +1,9 @@
 package org.github.tursodatabase.core;
 
+import static org.github.tursodatabase.utils.ByteArrayUtils.stringToUtf8ByteArray;
+
+import java.sql.SQLException;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.github.tursodatabase.LimboErrorCode;
 import org.github.tursodatabase.annotations.NativeInvocation;
@@ -7,12 +11,6 @@ import org.github.tursodatabase.annotations.VisibleForTesting;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.sql.SQLException;
-import java.sql.SQLFeatureNotSupportedException;
-import java.util.concurrent.locks.ReentrantLock;
-
-import static org.github.tursodatabase.utils.ByteArrayUtils.stringToUtf8ByteArray;
 
 /**
  * This class provides a thin JNI layer over the SQLite3 C API.
@@ -39,7 +37,7 @@ public final class LimboDB extends AbstractDB {
      * Loads the SQLite interface backend.
      */
     public static void load() {
-        if (isLoaded) return;
+        if (isLoaded) {return;}
 
         try {
             System.loadLibrary("_limbo_java");
@@ -49,7 +47,7 @@ public final class LimboDB extends AbstractDB {
     }
 
     /**
-     * @param url      e.g. "jdbc:sqlite:fileName
+     * @param url e.g. "jdbc:sqlite:fileName
      * @param filePath e.g. path to file
      */
     public static LimboDB create(String url, String filePath) throws SQLException {
@@ -86,7 +84,9 @@ public final class LimboDB extends AbstractDB {
 
         byte[] filePathBytes = stringToUtf8ByteArray(filePath);
         if (filePathBytes == null) {
-            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "File path cannot be converted to byteArray. File name: " + filePath);
+            throw LimboExceptionUtils.buildLimboException(
+                    LimboErrorCode.LIMBO_ETC.code,
+                    "File path cannot be converted to byteArray. File name: " + filePath);
         }
 
         dbPointer = openUtf8(filePathBytes, openFlags);
@@ -95,14 +95,10 @@ public final class LimboDB extends AbstractDB {
 
     @Override
     public long connect() throws SQLException {
-        byte[] filePathBytes = stringToUtf8ByteArray(filePath);
-        if (filePathBytes == null) {
-            throw LimboExceptionUtils.buildLimboException(LimboErrorCode.LIMBO_ETC.code, "File path cannot be converted to byteArray. File name: " + filePath);
-        }
-        return connect0(filePathBytes, dbPointer);
+        return connect0(dbPointer);
     }
 
-    private native long connect0(byte[] path, long databasePtr) throws SQLException;
+    private native long connect0(long databasePtr) throws SQLException;
 
     @VisibleForTesting
     native void throwJavaException(int errorCode) throws SQLException;
@@ -110,7 +106,7 @@ public final class LimboDB extends AbstractDB {
     /**
      * Throws formatted SQLException with error code and message.
      *
-     * @param errorCode         Error code.
+     * @param errorCode Error code.
      * @param errorMessageBytes Error message.
      */
     @NativeInvocation(invokedFrom = "limbo_db.rs")

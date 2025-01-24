@@ -5,16 +5,16 @@ use jni::objects::{JByteArray, JObject};
 use jni::sys::{jint, jlong};
 use jni::JNIEnv;
 use limbo_core::Database;
-use std::rc::Rc;
 use std::sync::Arc;
 
 struct LimboDB {
     db: Arc<Database>,
+    io: Arc<dyn limbo_core::IO>,
 }
 
 impl LimboDB {
-    pub fn new(db: Arc<Database>) -> Self {
-        LimboDB { db }
+    pub fn new(db: Arc<Database>, io: Arc<dyn limbo_core::IO>) -> Self {
+        LimboDB { db, io }
     }
 
     pub fn to_ptr(self) -> jlong {
@@ -76,14 +76,13 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
         }
     };
 
-    LimboDB::new(db).to_ptr()
+    LimboDB::new(db, io).to_ptr()
 }
 
 #[no_mangle]
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
-    file_path_byte_arr: JByteArray<'local>,
     db_pointer: jlong,
 ) -> jlong {
     let db = match to_limbo_db(db_pointer) {
@@ -94,41 +93,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
         }
     };
 
-    let path = match env
-        .convert_byte_array(file_path_byte_arr)
-        .map_err(|e| e.to_string())
-    {
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(s) => s,
-            Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-                return 0;
-            }
-        },
-        Err(e) => {
-            set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-            return 0;
-        }
-    };
-
-    let io: Rc<dyn limbo_core::IO> = match path.as_str() {
-        ":memory:" => match limbo_core::MemoryIO::new() {
-            Ok(io) => Rc::new(io),
-            Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-                return 0;
-            }
-        },
-        _ => match limbo_core::PlatformIO::new() {
-            Ok(io) => Rc::new(io),
-            Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-                return 0;
-            }
-        },
-    };
-    let conn = LimboConnection::new(db.db.connect(), io);
-
+    let conn = LimboConnection::new(db.db.connect(), db.io.clone());
     conn.to_ptr()
 }
 
