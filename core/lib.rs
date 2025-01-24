@@ -61,6 +61,8 @@ pub use storage::pager::Page;
 pub use storage::pager::Pager;
 pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
+use crate::storage::wal::CheckpointResult;
+
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
 #[derive(Clone)]
@@ -393,7 +395,7 @@ impl Connection {
         Ok(())
     }
 
-    pub fn checkpoint(&self) -> Result<()> {
+    pub fn checkpoint(&self) -> Result<(CheckpointResult)> {
         self.pager.clear_page_cache();
         Ok(())
     }

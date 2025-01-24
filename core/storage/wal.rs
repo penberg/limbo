@@ -26,6 +26,12 @@ pub const SHARED_LOCK: u32 = 1;
 pub const WRITE_LOCK: u32 = 2;
 
 #[derive(Debug)]
+pub struct CheckpointResult {
+    /// number of pages moved successfully from WAL to db file after checkpoint
+    nbackfills: u64,
+}
+
+#[derive(Debug)]
 pub enum CheckpointMode {
     Passive,
     Full,
