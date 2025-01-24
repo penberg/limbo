@@ -59,27 +59,32 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
     };
 
     loop {
-        match stmt.stmt.step() {
-            Ok(StepResult::Row(row)) => match row_to_obj_array(&mut env, &row) {
-                Ok(row) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
-                Err(e) => {
+        match stmt
+            .stmt
+            .step()
+            .map_err(|_e| to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None))
+            .unwrap()
+        {
+            StepResult::Row(row) => {
+                return match row_to_obj_array(&mut env, &row) {
+                    Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
+                    Err(e) => {
+                        set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
+                        to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
+                    }
+                }
+            }
+            StepResult::IO => {
+                if let Err(e) = stmt.connection.io.run_once() {
                     set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
                     return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None);
                 }
-            },
-            Ok(StepResult::IO) => {
-                stmt.connection.io.run_once().unwrap();
             }
-            Ok(StepResult::Done) => {
-                return to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None)
-            }
-            Ok(StepResult::Interrupt) => {
+            StepResult::Done => return to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None),
+            StepResult::Interrupt => {
                 return to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None)
             }
-            Ok(StepResult::Busy) => {
-                return to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None)
-            }
-            _ => return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
+            StepResult::Busy => return to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
         }
     }
 }
