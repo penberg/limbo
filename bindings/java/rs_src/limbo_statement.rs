@@ -53,18 +53,17 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
         Ok(stmt) => stmt,
         Err(e) => {
             set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-
-            return JObject::null();
+            return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None);
         }
     };
 
     loop {
-        match stmt
-            .stmt
-            .step()
-            .map_err(|_e| to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None))
-            .unwrap()
-        {
+        let step_result = match stmt.stmt.step() {
+            Ok(result) => result,
+            Err(_) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
+        };
+
+        match step_result {
             StepResult::Row(row) => {
                 return match row_to_obj_array(&mut env, &row) {
                     Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
