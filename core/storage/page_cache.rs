@@ -6,7 +6,7 @@ use super::pager::PageRef;
 
 // In limbo, page cache is shared by default, meaning that multiple frames from WAL can reside in
 // the cache, meaning, we need a way to differentiate between pages cached in different
-// connections. For this we include the max_frame that will read a connection from so that if two
+// connections. For this we include the max_frame that a connection will read from so that if two
 // connections have different max_frames, they might or not have different frame read from WAL.
 //
 // WAL was introduced after Shared cache in SQLite, so this is why these two features don't work
