@@ -1,0 +1,42 @@
+name: Benchmarks+Nyrkiö
+
+# Pull request support isn't integrated to the github-action-benchmark so run only post-merge
+on:
+  push:
+    branches: [ "main", "master", "notmain", "add-nyrkio" ]
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    environment: test
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      #     cache: 'npm'
+      # - name: Install dependencies
+      #   run: npm install && npm run build
+
+      - name: Bench
+        run: cargo bench  2>&1 | tee output.txt
+
+      - name: Analyze benchmark result with Nyrkiö
+        uses: nyrkio/github-action-benchmark@HEAD
+        with:
+          name: turso
+          tool: criterion
+          output-file-path: output.txt
+          fail-on-alert: true
+          # Nyrkiö configuration
+          nyrkio-enable: true
+          # Get yours from https://nyrkio.com/docs/getting-started
+          nyrkio-token: ${{ secrets.NYRKIO_JWT_TOKEN }}
+
+          # Old way...
+          # Explicitly set this to null. We don't want threshold based alerts today.
+          external-data-json-path: null
+          gh-repository: null
