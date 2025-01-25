@@ -551,6 +551,18 @@ pub enum Insn {
         rhs: usize,
         dest: usize,
     },
+    /// Take the logical AND of the values in registers P1 and P2 and write the result into register P3.
+    And {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
+    /// Take the logical OR of the values in register P1 and P2 and store the answer in register P3.
+    Or {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {
@@ -953,5 +965,169 @@ pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
             todo!("TODO: Handle Blob conversion to String")
         }
         (OwnedValue::Record(_), _) | (_, OwnedValue::Record(_)) => unreachable!(),
+    }
+}
+
+pub fn exec_and(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+
+    match (lhs, rhs) {
+        (_, OwnedValue::Integer(0))
+        | (OwnedValue::Integer(0), _)
+        | (_, OwnedValue::Float(0.0))
+        | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_and(
+            &cast_text_to_numerical(&lhs.value),
+            &cast_text_to_numerical(&rhs.value),
+        ),
+        (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
+            exec_and(&cast_text_to_numerical(&text.value), other)
+        }
+        _ => OwnedValue::Integer(1),
+    }
+}
+
+pub fn exec_or(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+
+    match (lhs, rhs) {
+        (OwnedValue::Null, OwnedValue::Null)
+        | (OwnedValue::Null, OwnedValue::Float(0.0))
+        | (OwnedValue::Float(0.0), OwnedValue::Null)
+        | (OwnedValue::Null, OwnedValue::Integer(0))
+        | (OwnedValue::Integer(0), OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Float(0.0), OwnedValue::Integer(0))
+        | (OwnedValue::Integer(0), OwnedValue::Float(0.0))
+        | (OwnedValue::Float(0.0), OwnedValue::Float(0.0))
+        | (OwnedValue::Integer(0), OwnedValue::Integer(0)) => OwnedValue::Integer(0),
+        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_or(
+            &cast_text_to_numerical(&lhs.value),
+            &cast_text_to_numerical(&rhs.value),
+        ),
+        (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
+            exec_or(&cast_text_to_numerical(&text.value), other)
+        }
+        _ => OwnedValue::Integer(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::{
+        types::{LimboText, OwnedValue},
+        vdbe::insn::exec_or,
+    };
+
+    use super::exec_and;
+
+    #[test]
+    fn test_exec_and() {
+        let inputs = vec![
+            (OwnedValue::Integer(0), OwnedValue::Null),
+            (OwnedValue::Null, OwnedValue::Integer(1)),
+            (OwnedValue::Null, OwnedValue::Null),
+            (OwnedValue::Float(0.0), OwnedValue::Null),
+            (OwnedValue::Integer(1), OwnedValue::Float(2.2)),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("string".to_string()))),
+            ),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+            ),
+            (
+                OwnedValue::Integer(1),
+                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+            ),
+        ];
+        let outpus = [
+            OwnedValue::Integer(0),
+            OwnedValue::Null,
+            OwnedValue::Null,
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(1),
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(1),
+        ];
+
+        assert_eq!(
+            inputs.len(),
+            outpus.len(),
+            "Inputs and Outputs should have same size"
+        );
+        for (i, (lhs, rhs)) in inputs.iter().enumerate() {
+            assert_eq!(
+                exec_and(lhs, rhs),
+                outpus[i],
+                "Wrong AND for lhs: {}, rhs: {}",
+                lhs,
+                rhs
+            );
+        }
+    }
+
+    #[test]
+    fn test_exec_or() {
+        let inputs = vec![
+            (OwnedValue::Integer(0), OwnedValue::Null),
+            (OwnedValue::Null, OwnedValue::Integer(1)),
+            (OwnedValue::Null, OwnedValue::Null),
+            (OwnedValue::Float(0.0), OwnedValue::Null),
+            (OwnedValue::Integer(1), OwnedValue::Float(2.2)),
+            (OwnedValue::Float(0.0), OwnedValue::Integer(0)),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("string".to_string()))),
+            ),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+            ),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("".to_string()))),
+            ),
+        ];
+        let outpus = [
+            OwnedValue::Null,
+            OwnedValue::Integer(1),
+            OwnedValue::Null,
+            OwnedValue::Null,
+            OwnedValue::Integer(1),
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(1),
+            OwnedValue::Integer(0),
+        ];
+
+        assert_eq!(
+            inputs.len(),
+            outpus.len(),
+            "Inputs and Outputs should have same size"
+        );
+        for (i, (lhs, rhs)) in inputs.iter().enumerate() {
+            assert_eq!(
+                exec_or(lhs, rhs),
+                outpus[i],
+                "Wrong OR for lhs: {}, rhs: {}",
+                lhs,
+                rhs
+            );
+        }
     }
 }

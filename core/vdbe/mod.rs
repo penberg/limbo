@@ -48,8 +48,9 @@ use datetime::{
     exec_date, exec_datetime_full, exec_julianday, exec_strftime, exec_time, exec_unixepoch,
 };
 use insn::{
-    exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_concat, exec_divide,
-    exec_multiply, exec_remainder, exec_shift_left, exec_shift_right, exec_subtract,
+    exec_add, exec_and, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_concat,
+    exec_divide, exec_multiply, exec_or, exec_remainder, exec_shift_left, exec_shift_right,
+    exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
@@ -286,6 +287,7 @@ pub struct Program {
     pub auto_commit: bool,
     pub n_change: Cell<i64>,
     pub change_cnt_on: bool,
+    pub columns: Vec<String>,
 }
 
 impl Program {
@@ -2352,6 +2354,16 @@ impl Program {
                 Insn::Concat { lhs, rhs, dest } => {
                     state.registers[*dest] =
                         exec_concat(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::And { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_and(&state.registers[*lhs], &state.registers[*rhs]);
+                    state.pc += 1;
+                }
+                Insn::Or { lhs, rhs, dest } => {
+                    state.registers[*dest] =
+                        exec_or(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
             }

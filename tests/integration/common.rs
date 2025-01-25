@@ -67,3 +67,45 @@ pub(crate) fn compare_string(a: &String, b: &String) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TempDatabase;
+
+    #[test]
+    fn test_statement_columns() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
+        let tmp_db =
+            TempDatabase::new("create table test (foo integer, bar integer, baz integer);");
+        let conn = tmp_db.connect_limbo();
+
+        let stmt = conn.prepare("select * from test;")?;
+
+        let columns = stmt.columns();
+        assert_eq!(columns.len(), 3);
+        assert_eq!(&columns[0], "foo");
+        assert_eq!(&columns[1], "bar");
+        assert_eq!(&columns[2], "baz");
+
+        let stmt = conn.prepare("select foo, bar from test;")?;
+
+        let columns = stmt.columns();
+        assert_eq!(columns.len(), 2);
+        assert_eq!(&columns[0], "foo");
+        assert_eq!(&columns[1], "bar");
+
+        let stmt = conn.prepare("delete from test;")?;
+        let columns = stmt.columns();
+        assert_eq!(columns.len(), 0);
+
+        let stmt = conn.prepare("insert into test (foo, bar, baz) values (1, 2, 3);")?;
+        let columns = stmt.columns();
+        assert_eq!(columns.len(), 0);
+
+        let stmt = conn.prepare("delete from test where foo = 1")?;
+        let columns = stmt.columns();
+        assert_eq!(columns.len(), 0);
+
+        Ok(())
+    }
+}
