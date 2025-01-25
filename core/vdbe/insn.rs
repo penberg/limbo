@@ -551,6 +551,12 @@ pub enum Insn {
         rhs: usize,
         dest: usize,
     },
+    /// Take the logical AND of the values in registers P1 and P2 and write the result into register P3.
+    And {
+        lhs: usize,
+        rhs: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {
@@ -953,5 +959,57 @@ pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
             todo!("TODO: Handle Blob conversion to String")
         }
         (OwnedValue::Record(_), _) | (_, OwnedValue::Record(_)) => unreachable!(),
+    }
+}
+
+pub fn exec_and(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
+    if let OwnedValue::Agg(agg) = lhs {
+        lhs = agg.final_value();
+    }
+    if let OwnedValue::Agg(agg) = rhs {
+        rhs = agg.final_value();
+    }
+
+    match (lhs, rhs) {
+        (_, OwnedValue::Integer(0))
+        | (OwnedValue::Integer(0), _)
+        | (_, OwnedValue::Float(0.0))
+        | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
+        (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        _ => OwnedValue::Integer(1),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::types::OwnedValue;
+
+    use super::exec_and;
+
+    #[test]
+    fn test_exec_and() {
+        let inputs = vec![
+            (OwnedValue::Integer(0), OwnedValue::Null),
+            (OwnedValue::Null, OwnedValue::Integer(1)),
+            (OwnedValue::Null, OwnedValue::Null),
+            (OwnedValue::Float(0.0), OwnedValue::Null),
+            (OwnedValue::Integer(1), OwnedValue::Float(2.2)),
+        ];
+        let outpus = vec![
+            OwnedValue::Integer(0),
+            OwnedValue::Null,
+            OwnedValue::Null,
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(1),
+        ];
+
+        assert_eq!(
+            inputs.len(),
+            outpus.len(),
+            "Inputs and Outputs should have same size"
+        );
+        for (i, (lhs, rhs)) in inputs.iter().enumerate() {
+            assert_eq!(exec_and(lhs, rhs), outpus[i]);
+        }
     }
 }
