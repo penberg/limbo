@@ -982,6 +982,13 @@ pub fn exec_and(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         | (_, OwnedValue::Float(0.0))
         | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
         (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
+        (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_and(
+            &cast_text_to_numerical(&lhs.value),
+            &cast_text_to_numerical(&rhs.value),
+        ),
+        (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
+            exec_and(&cast_text_to_numerical(&text.value), other)
+        }
         _ => OwnedValue::Integer(1),
     }
 }
@@ -1034,11 +1041,26 @@ mod tests {
             (OwnedValue::Null, OwnedValue::Null),
             (OwnedValue::Float(0.0), OwnedValue::Null),
             (OwnedValue::Integer(1), OwnedValue::Float(2.2)),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("string".to_string()))),
+            ),
+            (
+                OwnedValue::Integer(0),
+                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+            ),
+            (
+                OwnedValue::Integer(1),
+                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+            ),
         ];
-        let outpus = vec![
+        let outpus = [
             OwnedValue::Integer(0),
             OwnedValue::Null,
             OwnedValue::Null,
+            OwnedValue::Integer(0),
+            OwnedValue::Integer(1),
+            OwnedValue::Integer(0),
             OwnedValue::Integer(0),
             OwnedValue::Integer(1),
         ];
@@ -1049,7 +1071,13 @@ mod tests {
             "Inputs and Outputs should have same size"
         );
         for (i, (lhs, rhs)) in inputs.iter().enumerate() {
-            assert_eq!(exec_and(lhs, rhs), outpus[i]);
+            assert_eq!(
+                exec_and(lhs, rhs),
+                outpus[i],
+                "Wrong AND for lhs: {}, rhs: {}",
+                lhs,
+                rhs
+            );
         }
     }
 
@@ -1075,7 +1103,7 @@ mod tests {
                 OwnedValue::Text(LimboText::new(Rc::new("".to_string()))),
             ),
         ];
-        let outpus = vec![
+        let outpus = [
             OwnedValue::Null,
             OwnedValue::Integer(1),
             OwnedValue::Null,
