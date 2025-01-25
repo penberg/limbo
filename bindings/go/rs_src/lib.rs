@@ -1,6 +1,8 @@
+mod rows;
+#[allow(dead_code)]
 mod statement;
 mod types;
-use limbo_core::{Connection, Database, LimboError, Value};
+use limbo_core::{Connection, Database, LimboError};
 use std::{
     ffi::{c_char, c_void},
     rc::Rc,
@@ -8,6 +10,9 @@ use std::{
     sync::Arc,
 };
 
+/// # Safety
+/// Safe to be called from Go with null terminated DSN string.
+/// performs null check on the path.
 #[no_mangle]
 pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
     if path.is_null() {
@@ -34,27 +39,22 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
     std::ptr::null_mut()
 }
 
-struct TursoConn<'a> {
+#[allow(dead_code)]
+struct TursoConn {
     conn: Rc<Connection>,
     io: Arc<dyn limbo_core::IO>,
-    cursor_idx: usize,
-    cursor: Option<Vec<Value<'a>>>,
 }
 
-impl<'a> TursoConn<'_> {
+impl TursoConn {
     fn new(conn: Rc<Connection>, io: Arc<dyn limbo_core::IO>) -> Self {
-        TursoConn {
-            conn,
-            io,
-            cursor_idx: 0,
-            cursor: None,
-        }
+        TursoConn { conn, io }
     }
+    #[allow(clippy::wrong_self_convention)]
     fn to_ptr(self) -> *mut c_void {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    fn from_ptr(ptr: *mut c_void) -> &'static mut TursoConn<'a> {
+    fn from_ptr(ptr: *mut c_void) -> &'static mut TursoConn {
         if ptr.is_null() {
             panic!("Null pointer");
         }
@@ -68,7 +68,7 @@ impl<'a> TursoConn<'_> {
 #[no_mangle]
 pub unsafe extern "C" fn db_close(db: *mut c_void) {
     if !db.is_null() {
-        let _ = unsafe { Box::from_raw(db) };
+        let _ = unsafe { Box::from_raw(db as *mut TursoConn) };
     }
 }
 
@@ -77,19 +77,12 @@ fn get_io(db_location: &DbType) -> Result<Arc<dyn limbo_core::IO>, LimboError> {
     Ok(match db_location {
         DbType::Memory => Arc::new(limbo_core::MemoryIO::new()?),
         _ => {
-            #[cfg(target_family = "unix")]
-            if cfg!(all(target_os = "linux", feature = "io_uring")) {
-                Arc::new(limbo_core::UringIO::new()?)
-            } else {
-                Arc::new(limbo_core::UnixIO::new()?)
-            }
-
-            #[cfg(target_family = "windows")]
-            Arc::new(limbo_core::WindowsIO::new()?);
+            return Ok(Arc::new(limbo_core::PlatformIO::new()?));
         }
     })
 }
 
+#[allow(dead_code)]
 struct DbOptions {
     path: DbType,
     params: Parameters,

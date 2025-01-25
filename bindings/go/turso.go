@@ -4,43 +4,61 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"sync"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"golang.org/x/sys/windows"
 )
 
-const (
-	turso = "../../target/debug/lib_turso_go.so"
-)
+const turso = "../../target/debug/lib_turso_go"
+const driverName = "turso"
 
-func toGoStr(ptr uintptr, length int) string {
-	if ptr == 0 {
-		return ""
+var tursoLib uintptr
+
+func getSystemLibrary() error {
+	switch runtime.GOOS {
+	case "darwin":
+		slib, err := purego.Dlopen(fmt.Sprintf("%s.dylib", turso), purego.RTLD_LAZY)
+		if err != nil {
+			return err
+		}
+		tursoLib = slib
+	case "linux":
+		slib, err := purego.Dlopen(fmt.Sprintf("%s.so", turso), purego.RTLD_LAZY)
+		if err != nil {
+			return err
+		}
+		tursoLib = slib
+	case "windows":
+		slib, err := windows.LoadLibrary(fmt.Sprintf("%s.dll", turso))
+		if err != nil {
+			return err
+		}
+		tursoLib = slib
+	default:
+		panic(fmt.Errorf("GOOS=%s is not supported", runtime.GOOS))
 	}
-	uptr := unsafe.Pointer(ptr)
-	s := (*string)(uptr)
-	if s == nil {
-		// redundant
-		return ""
-	}
-	return *s
+	return nil
 }
 
 func init() {
-	slib, err := purego.Dlopen(turso, purego.RTLD_LAZY)
+	err := getSystemLibrary()
 	if err != nil {
 		slog.Error("Error opening turso library: ", err)
 		os.Exit(1)
 	}
-	lib = slib
-	sql.Register("turso", &tursoDriver{})
+	sql.Register(driverName, &tursoDriver{})
 }
 
-type tursoDriver struct {
-	tursoCtx
+type tursoDriver struct{}
+
+func (d tursoDriver) Open(name string) (driver.Conn, error) {
+	return openConn(name)
 }
 
 func toCString(s string) uintptr {
@@ -48,80 +66,76 @@ func toCString(s string) uintptr {
 	return uintptr(unsafe.Pointer(&b[0]))
 }
 
-func getExtFunc(ptr interface{}, name string) {
-	purego.RegisterLibFunc(ptr, lib, name)
+// helper to register an FFI function in the lib_turso_go library
+func getFfiFunc(ptr interface{}, name string) {
+	purego.RegisterLibFunc(&ptr, tursoLib, name)
 }
 
-type conn struct {
+type tursoConn struct {
 	ctx uintptr
 	sync.Mutex
-	writeTimeFmt string
-	lastInsertID int64
-	lastAffected int64
+	prepare func(uintptr, uintptr) uintptr
 }
 
-func newConn() *conn {
-	return &conn{
-		0,
+func newConn(ctx uintptr) *tursoConn {
+	var prepare func(uintptr, uintptr) uintptr
+	getFfiFunc(&prepare, FfiDbPrepare)
+	return &tursoConn{
+		ctx,
 		sync.Mutex{},
-		"2006-01-02 15:04:05",
-		0,
-		0,
+		prepare,
 	}
 }
 
-func open(dsn string) (*conn, error) {
-	var open func(uintptr) uintptr
-	getExtFunc(&open, ExtDBOpen)
-	c := newConn()
-	path := toCString(dsn)
-	ctx := open(path)
-	c.ctx = ctx
-	return c, nil
-}
+func openConn(dsn string) (*tursoConn, error) {
+	var dbOpen func(uintptr) uintptr
+	getFfiFunc(&dbOpen, FfiDbOpen)
 
-type tursoCtx struct {
-	conn *conn
-	tx   *sql.Tx
-	err  error
-	rows *sql.Rows
-	stmt *sql.Stmt
-}
+	cStr := toCString(dsn)
+	defer freeCString(cStr)
 
-func (lc tursoCtx) Open(dsn string) (driver.Conn, error) {
-	conn, err := open(dsn)
-	if err != nil {
-		return nil, err
+	ctx := dbOpen(cStr)
+	if ctx == 0 {
+		return nil, fmt.Errorf("failed to open database for dsn=%q", dsn)
 	}
-	nc := tursoCtx{conn: conn}
-	return nc, nil
+	return &tursoConn{ctx: ctx}, nil
 }
 
-func (lc tursoCtx) Close() error {
-	var closedb func(uintptr) uintptr
-	getExtFunc(&closedb, ExtDBClose)
-	closedb(lc.conn.ctx)
+func (c *tursoConn) Close() error {
+	if c.ctx == 0 {
+		return nil
+	}
+	var dbClose func(uintptr) uintptr
+	getFfiFunc(&dbClose, FfiDbClose)
+
+	dbClose(c.ctx)
+	c.ctx = 0
 	return nil
 }
 
-// TODO: Begin not implemented
-func (lc tursoCtx) Begin() (driver.Tx, error) {
-	return nil, nil
+func (c *tursoConn) Prepare(query string) (driver.Stmt, error) {
+	if c.ctx == 0 {
+		return nil, errors.New("connection closed")
+	}
+	if c.prepare == nil {
+		var dbPrepare func(uintptr, uintptr) uintptr
+		getFfiFunc(&dbPrepare, FfiDbPrepare)
+		c.prepare = dbPrepare
+	}
+	qPtr := toCString(query)
+	stmtPtr := c.prepare(c.ctx, qPtr)
+	freeCString(qPtr)
+
+	if stmtPtr == 0 {
+		return nil, fmt.Errorf("prepare failed: %q", query)
+	}
+	return &tursoStmt{
+		ctx: stmtPtr,
+		sql: query,
+	}, nil
 }
 
-func (ls tursoCtx) Prepare(sql string) (driver.Stmt, error) {
-	var prepare func(uintptr, uintptr) uintptr
-	getExtFunc(&prepare, ExtDBPrepare)
-	s := toCString(sql)
-	statement := prepare(ls.conn.ctx, s)
-	if statement == 0 {
-		return nil, errors.New("no rows")
-	}
-	ls.stmt = stmt{
-		ctx: statement,
-
-	}
-
-	}
-	return nil, nil
+// begin is needed to implement driver.Conn.. for now not implemented
+func (c *tursoConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions not implemented")
 }

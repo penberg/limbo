@@ -1,77 +1,192 @@
 package turso
 
 import (
+	"context"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
+	"unsafe"
 )
 
-type stmt struct {
-	ctx uintptr
-	sql string
+// only construct tursoStmt with initStmt function to ensure proper initialization
+type tursoStmt struct {
+	ctx           uintptr
+	sql           string
+	query         stmtQueryFn
+	execute       stmtExecuteFn
+	getParamCount func(uintptr) int32
 }
 
-type rows struct {
-	ctx     uintptr
-	rowsPtr uintptr
-	columns []string
-	err     error
+// Initialize/register the FFI function pointers for the statement methods
+func initStmt(ctx uintptr, sql string) *tursoStmt {
+	var query stmtQueryFn
+	var execute stmtExecuteFn
+	var getParamCount func(uintptr) int32
+	methods := []ExtFunc{{query, FfiStmtQuery}, {execute, FfiStmtExec}, {getParamCount, FfiStmtParameterCount}}
+	for i := range methods {
+		methods[i].initFunc()
+	}
+	return &tursoStmt{
+		ctx: uintptr(ctx),
+		sql: sql,
+	}
 }
 
-func (ls *stmt) Query(args []driver.Value) (driver.Rows, error) {
-	var dbPrepare func(uintptr, uintptr) uintptr
-	getExtFunc(&dbPrepare, "db_prepare")
+func (st *tursoStmt) NumInput() int {
+	return int(st.getParamCount(st.ctx))
+}
 
-	queryPtr := toCString(ls.sql)
-	defer freeCString(queryPtr)
+func (st *tursoStmt) Exec(args []driver.Value) (driver.Result, error) {
+	argArray, err := buildArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	argPtr := uintptr(0)
+	argCount := uint64(len(argArray))
+	if argCount > 0 {
+		argPtr = uintptr(unsafe.Pointer(&argArray[0]))
+	}
+	var changes uint64
+	rc := st.execute(st.ctx, argPtr, argCount, uintptr(unsafe.Pointer(&changes)))
+	switch ResultCode(rc) {
+	case Ok:
+		return driver.RowsAffected(changes), nil
+	case Error:
+		return nil, errors.New("error executing statement")
+	case Busy:
+		return nil, errors.New("busy")
+	case Interrupt:
+		return nil, errors.New("interrupted")
+	case Invalid:
+		return nil, errors.New("invalid statement")
+	default:
+		return nil, fmt.Errorf("unexpected status: %d", rc)
+	}
+}
 
-	rowsPtr := dbPrepare(ls.ctx, queryPtr)
+func (st *tursoStmt) Query(args []driver.Value) (driver.Rows, error) {
+	queryArgs, err := buildArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	rowsPtr := st.query(st.ctx, uintptr(unsafe.Pointer(&queryArgs[0])), uint64(len(queryArgs)))
 	if rowsPtr == 0 {
-		return nil, fmt.Errorf("failed to prepare query")
+		return nil, fmt.Errorf("query failed for: %q", st.sql)
 	}
-	var colFunc func(uintptr, uintptr) uintptr
-
-	getExtFunc(&colFunc, "columns")
-
-	rows := &rows{
-		ctx:     ls.ctx,
-		rowsPtr: rowsPtr,
-	}
-	return rows, nil
+	return initRows(rowsPtr), nil
 }
 
-func (lr *rows) Columns() []string {
-	return lr.columns
+func (ts *tursoStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	stripped := namedValueToValue(args)
+	argArray, err := getArgsPtr(stripped)
+	if err != nil {
+		return nil, err
+	}
+	var changes uintptr
+	res := ts.execute(ts.ctx, argArray, uint64(len(args)), changes)
+	switch ResultCode(res) {
+	case Ok:
+		return driver.RowsAffected(changes), nil
+	case Error:
+		return nil, errors.New("error executing statement")
+	case Busy:
+		return nil, errors.New("busy")
+	case Interrupt:
+		return nil, errors.New("interrupted")
+	default:
+		return nil, fmt.Errorf("unexpected status: %d", res)
+	}
 }
 
-func (lr *rows) Close() error {
-	var rowsClose func(uintptr)
-	getExtFunc(&rowsClose, "rows_close")
-	rowsClose(lr.rowsPtr)
+func (st *tursoStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	queryArgs, err := buildNamedArgs(args)
+	if err != nil {
+		return nil, err
+	}
+	rowsPtr := st.query(st.ctx, uintptr(unsafe.Pointer(&queryArgs[0])), uint64(len(queryArgs)))
+	if rowsPtr == 0 {
+		return nil, fmt.Errorf("query failed for: %q", st.sql)
+	}
+	return initRows(rowsPtr), nil
+}
+
+// only construct tursoRows with initRows function to ensure proper initialization
+type tursoRows struct {
+	ctx       uintptr
+	columns   []string
+	closed    bool
+	getCols   func(uintptr, *uint) uintptr
+	next      func(uintptr) uintptr
+	getValue  func(uintptr, int32) uintptr
+	closeRows func(uintptr) uintptr
+	freeCols  func(uintptr) uintptr
+}
+
+// Initialize/register the FFI function pointers for the rows methods
+// DO NOT construct 'tursoRows' without this function
+func initRows(ctx uintptr) *tursoRows {
+	var getCols func(uintptr, *uint) uintptr
+	var getValue func(uintptr, int32) uintptr
+	var closeRows func(uintptr) uintptr
+	var freeCols func(uintptr) uintptr
+	var next func(uintptr) uintptr
+	methods := []ExtFunc{
+		{getCols, FfiRowsGetColumns},
+		{getValue, FfiRowsGetValue},
+		{closeRows, FfiRowsClose},
+		{freeCols, FfiFreeColumns},
+		{next, FfiRowsNext}}
+	for i := range methods {
+		methods[i].initFunc()
+	}
+
+	return &tursoRows{
+		ctx:       ctx,
+		getCols:   getCols,
+		getValue:  getValue,
+		closeRows: closeRows,
+		freeCols:  freeCols,
+		next:      next,
+	}
+}
+
+func (r *tursoRows) Columns() []string {
+	if r.columns == nil {
+		var columnCount uint
+		colArrayPtr := r.getCols(r.ctx, &columnCount)
+		if colArrayPtr != 0 && columnCount > 0 {
+			r.columns = cArrayToGoStrings(colArrayPtr, columnCount)
+			if r.freeCols == nil {
+				getFfiFunc(&r.freeCols, FfiFreeColumns)
+			}
+			defer r.freeCols(colArrayPtr)
+		}
+	}
+	return r.columns
+}
+
+func (r *tursoRows) Close() error {
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	r.closeRows(r.ctx)
+	r.ctx = 0
 	return nil
 }
 
-func (lr *rows) Next(dest []driver.Value) error {
-	var rowsNext func(uintptr, uintptr) int32
-	getExtFunc(&rowsNext, "rows_next")
-
-	status := rowsNext(lr.ctx, lr.rowsPtr)
+func (r *tursoRows) Next(dest []driver.Value) error {
+	status := r.next(r.ctx)
 	switch ResultCode(status) {
 	case Row:
 		for i := range dest {
-			getExtFunc(&rowsGetValue, "rows_get_value")
-
-			valPtr := rowsGetValue(lr.ctx, int32(i))
-			if valPtr != 0 {
-				val := cStringToGoString(valPtr)
-				dest[i] = val
-				freeCString(valPtr)
-			} else {
-				dest[i] = nil
-			}
+			valPtr := r.getValue(r.ctx, int32(i))
+			val := toGoValue(valPtr)
+			dest[i] = val
 		}
 		return nil
-	case 0: // No more rows
+	case Done:
 		return io.EOF
 	default:
 		return fmt.Errorf("unexpected status: %d", status)

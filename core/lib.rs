@@ -427,6 +427,10 @@ impl Connection {
         let prev_total_changes = self.total_changes.get();
         self.total_changes.set(prev_total_changes + nchange);
     }
+
+    pub fn total_changes(&self) -> i64 {
+        self.total_changes.get()
+    }
 }
 
 pub struct Statement {
@@ -471,6 +475,10 @@ impl Statement {
 
     pub fn parameters(&self) -> &parameters::Parameters {
         &self.program.parameters
+    }
+
+    pub fn parameters_count(&self) -> usize {
+        self.program.parameters.count()
     }
 
     pub fn bind_at(&mut self, index: NonZero<usize>, value: Value) {
