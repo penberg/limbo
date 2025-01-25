@@ -23,6 +23,11 @@ This product depends on logback, distributed by the logback authors:
 * License: licenses/bindings/java/logback-license.md (Apache License v2.0)
 * Homepage: https://github.com/qos-ch/logback?tab=License-1-ov-file 
 
+This product depends on spotless, distributed by the diffplug authors:
+
+* License: licenses/bindings/java/spotless-license.md (Apache License v2.0)
+* Homepage: https://github.com/diffplug/spotless
+
 This product depends on serde, distributed by the serde-rs project: 
 
 * License: licenses/core/serde-apache-license.md (Apache License v2.0)

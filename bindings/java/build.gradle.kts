@@ -7,6 +7,9 @@ plugins {
     java
     application
     id("net.ltgt.errorprone") version "3.1.0"
+
+    // If you're stuck on JRE 8, use id 'com.diffplug.spotless' version '6.13.0' or older.
+    id("com.diffplug.spotless") version "6.13.0"
 }
 
 group = "org.github.tursodatabase"
@@ -109,5 +112,14 @@ tasks.withType<JavaCompile> {
         options.errorprone {
             disable("NullAway")
         }
+    }
+}
+
+spotless {
+    java {
+        target("**/*.java")
+        targetExclude(layout.buildDirectory.dir("**/*.java").get().asFile)
+        removeUnusedImports()
+        googleJavaFormat("1.7") // or use eclipse().configFile("path/to/eclipse-format.xml")
     }
 }
