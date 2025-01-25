@@ -64,6 +64,11 @@ public class LimboResultSet {
             row++;
         }
 
+        if (lastStepResult.isInInvalidState()) {
+            open = false;
+            throw new SQLException("step() returned invalid result: " + lastStepResult);
+        }
+
         pastLastRow = lastStepResult.isDone();
         if (pastLastRow) {
             open = false;
