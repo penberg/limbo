@@ -284,6 +284,7 @@ pub struct Program {
     pub auto_commit: bool,
     pub n_change: Cell<i64>,
     pub change_cnt_on: bool,
+    pub columns: Vec<String>,
 }
 
 impl Program {

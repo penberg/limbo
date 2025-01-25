@@ -295,7 +295,6 @@ impl Connection {
     pub(crate) fn run_cmd(self: &Rc<Connection>, cmd: Cmd) -> Result<Option<Rows>> {
         let db = self.db.clone();
         let syms: &SymbolTable = &db.syms.borrow();
-
         match cmd {
             Cmd::Stmt(stmt) => {
                 let program = Rc::new(translate::translate(
@@ -466,6 +465,10 @@ impl Statement {
         Ok(Rows::new(stmt))
     }
 
+    pub fn columns(&self) -> &[String] {
+        &self.program.columns
+    }
+
     pub fn parameters(&self) -> &parameters::Parameters {
         &self.program.parameters
     }
@@ -512,6 +515,10 @@ impl Rows {
 
     pub fn next_row(&mut self) -> Result<StepResult<'_>> {
         self.stmt.step()
+    }
+
+    pub fn columns(&self) -> &[String] {
+        self.stmt.columns()
     }
 }
 
