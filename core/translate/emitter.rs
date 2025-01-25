@@ -68,6 +68,10 @@ pub struct TranslateCtx<'a> {
     pub reg_result_cols_start: Option<usize>,
     // The register holding the limit value, if any.
     pub reg_limit: Option<usize>,
+    // The register holding the offset value, if any.
+    pub reg_offset: Option<usize>,
+    // The register holding the limit+offset value, if any.
+    pub reg_limit_offset_sum: Option<usize>,
     // metadata for the group by operator
     pub meta_group_by: Option<GroupByMetadata>,
     // metadata for the order by operator
@@ -111,6 +115,8 @@ fn prologue<'a>(
         label_main_loop_end: None,
         reg_agg_start: None,
         reg_limit: None,
+        reg_offset: None,
+        reg_limit_offset_sum: None,
         reg_result_cols_start: None,
         meta_group_by: None,
         meta_left_joins: HashMap::new(),
@@ -198,6 +204,14 @@ pub fn emit_query<'a>(
 
     if t_ctx.reg_limit.is_none() {
         t_ctx.reg_limit = plan.limit.map(|_| program.alloc_register());
+    }
+
+    if t_ctx.reg_offset.is_none() {
+        t_ctx.reg_offset = plan.offset.map(|_| program.alloc_register());
+    }
+
+    if t_ctx.reg_limit_offset_sum.is_none() {
+        t_ctx.reg_limit_offset_sum = plan.offset.map(|_| program.alloc_register());
     }
 
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0

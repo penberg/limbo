@@ -97,6 +97,8 @@ pub fn emit_subquery<'a>(
         result_column_indexes_in_orderby_sorter: HashMap::new(),
         result_columns_to_skip_in_orderby_sorter: None,
         reg_limit: plan.limit.map(|_| program.alloc_register()),
+        reg_offset: plan.offset.map(|_| program.alloc_register()),
+        reg_limit_offset_sum: plan.offset.map(|_| program.alloc_register()),
         resolver: Resolver::new(t_ctx.resolver.symbol_table),
     };
     let subquery_body_end_label = program.allocate_label();
