@@ -44,7 +44,9 @@ use crate::{
     json::json_extract, json::json_object, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
-use datetime::{exec_date, exec_datetime_full, exec_julianday, exec_time, exec_unixepoch};
+use datetime::{
+    exec_date, exec_datetime_full, exec_julianday, exec_strftime, exec_time, exec_unixepoch,
+};
 use insn::{
     exec_add, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_concat, exec_divide,
     exec_multiply, exec_remainder, exec_shift_left, exec_shift_right, exec_subtract,
@@ -2004,6 +2006,12 @@ impl Program {
                                 if let Some(conn) = self.connection.upgrade() {
                                     conn.load_extension(ext)?;
                                 }
+                            }
+                            ScalarFunc::StrfTime => {
+                                let result = exec_strftime(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                );
+                                state.registers[*dest] = result;
                             }
                         },
                         crate::function::Func::External(f) => match f.func {

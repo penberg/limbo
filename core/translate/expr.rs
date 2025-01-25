@@ -1517,6 +1517,26 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::StrfTime => {
+                            if let Some(args) = args {
+                                for arg in args.iter() {
+                                    // register containing result of each argument expression
+                                    let _ = translate_and_mark(
+                                        program,
+                                        referenced_tables,
+                                        arg,
+                                        resolver,
+                                    )?;
+                                }
+                            }
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: target_register + 1,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
                     }
                 }
                 Func::Math(math_func) => match math_func.arity() {

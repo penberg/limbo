@@ -4,16 +4,24 @@ This document describes the compatibility of Limbo with SQLite.
 
 ## Table of contents:
 
-- [Features](#features)
-- [SQLite query language](#sqlite-query-language)
+- [Compatibility with SQLite](#compatibility-with-sqlite)
+  - [Table of contents:](#table-of-contents)
+  - [Features](#features)
+  - [SQLite query language](#sqlite-query-language)
     - [Statements](#statements)
-      - [PRAGMA Statements](#pragma)
+      - [PRAGMA](#pragma)
     - [Expressions](#expressions)
-    - [Functions](#functions)
-- [SQLite C API](#sqlite-c-api)
-- [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
-- [Extensions](#extensions)
+    - [SQL functions](#sql-functions)
+      - [Scalar functions](#scalar-functions)
+      - [Mathematical functions](#mathematical-functions)
+      - [Aggregate functions](#aggregate-functions)
+      - [Date and time functions](#date-and-time-functions)
+      - [JSON functions](#json-functions)
+  - [SQLite C API](#sqlite-c-api)
+  - [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+  - [Extensions](#extensions)
     - [UUID](#uuid)
+    - [regexp](#regexp)
 
 ## Features
 
@@ -308,7 +316,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | datetime()  | Yes     | partially supports modifiers |
 | julianday() | Partial | does not support modifiers   |
 | unixepoch() | Partial | does not support modifiers   |
-| strftime()  | No      |                              |
+| strftime()  | Yes     | partially supports modifiers |
 | timediff()  | No      |                              |
 
 Modifiers:
