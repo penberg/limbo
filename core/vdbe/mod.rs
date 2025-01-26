@@ -60,7 +60,7 @@ use regex::{Regex, RegexBuilder};
 use sorter::Sorter;
 use std::borrow::BorrowMut;
 use std::cell::{Cell, RefCell, RefMut};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::num::NonZero;
 use std::rc::{Rc, Weak};
 
@@ -195,44 +195,52 @@ impl RegexCache {
 }
 
 fn get_cursor_as_table_mut<'long, 'short>(
-    cursors: &'short mut RefMut<'long, BTreeMap<CursorID, Cursor>>,
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
     cursor_id: CursorID,
 ) -> &'short mut BTreeCursor {
     let cursor = cursors
-        .get_mut(&cursor_id)
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
         .expect("cursor not allocated")
         .as_table_mut();
     cursor
 }
 
 fn get_cursor_as_index_mut<'long, 'short>(
-    cursors: &'short mut RefMut<'long, BTreeMap<CursorID, Cursor>>,
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
     cursor_id: CursorID,
 ) -> &'short mut BTreeCursor {
     let cursor = cursors
-        .get_mut(&cursor_id)
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
         .expect("cursor not allocated")
         .as_index_mut();
     cursor
 }
 
 fn get_cursor_as_pseudo_mut<'long, 'short>(
-    cursors: &'short mut RefMut<'long, BTreeMap<CursorID, Cursor>>,
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
     cursor_id: CursorID,
 ) -> &'short mut PseudoCursor {
     let cursor = cursors
-        .get_mut(&cursor_id)
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
         .expect("cursor not allocated")
         .as_pseudo_mut();
     cursor
 }
 
 fn get_cursor_as_sorter_mut<'long, 'short>(
-    cursors: &'short mut RefMut<'long, BTreeMap<CursorID, Cursor>>,
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
     cursor_id: CursorID,
 ) -> &'short mut Sorter {
     let cursor = cursors
-        .get_mut(&cursor_id)
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
         .expect("cursor not allocated")
         .as_sorter_mut();
     cursor
@@ -264,7 +272,7 @@ impl<const N: usize> Bitfield<N> {
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: InsnReference,
-    cursors: RefCell<BTreeMap<CursorID, Cursor>>,
+    cursors: RefCell<Vec<Option<Cursor>>>,
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
     deferred_seek: Option<(CursorID, CursorID)>,
@@ -275,8 +283,9 @@ pub struct ProgramState {
 }
 
 impl ProgramState {
-    pub fn new(max_registers: usize) -> Self {
-        let cursors: RefCell<BTreeMap<CursorID, Cursor>> = RefCell::new(BTreeMap::new());
+    pub fn new(max_registers: usize, max_cursors: usize) -> Self {
+        let cursors: RefCell<Vec<Option<Cursor>>> =
+            RefCell::new((0..max_cursors).map(|_| None).collect());
         let registers = vec![OwnedValue::Null; max_registers];
         Self {
             pc: 0,
@@ -317,8 +326,10 @@ impl ProgramState {
 
     pub fn reset(&mut self) {
         self.pc = 0;
-        self.cursors.borrow_mut().clear();
-        self.registers.iter_mut().for_each(|r| *r = OwnedValue::Null);
+        self.cursors.borrow_mut().iter_mut().for_each(|c| *c = None);
+        self.registers
+            .iter_mut()
+            .for_each(|r| *r = OwnedValue::Null);
         self.last_compare = None;
         self.deferred_seek = None;
         self.ended_coroutine.0 = [0; 4];
@@ -765,10 +776,16 @@ impl Program {
                         BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
                     match cursor_type {
                         CursorType::BTreeTable(_) => {
-                            cursors.insert(*cursor_id, Cursor::new_table(cursor));
+                            cursors
+                                .get_mut(*cursor_id)
+                                .unwrap()
+                                .replace(Cursor::new_table(cursor));
                         }
                         CursorType::BTreeIndex(_) => {
-                            cursors.insert(*cursor_id, Cursor::new_index(cursor));
+                            cursors
+                                .get_mut(*cursor_id)
+                                .unwrap()
+                                .replace(Cursor::new_index(cursor));
                         }
                         CursorType::Pseudo(_) => {
                             panic!("OpenReadAsync on pseudo cursor");
@@ -788,7 +805,10 @@ impl Program {
                     num_fields: _,
                 } => {
                     let cursor = PseudoCursor::new();
-                    cursors.insert(*cursor_id, Cursor::new_pseudo(cursor));
+                    cursors
+                        .get_mut(*cursor_id)
+                        .unwrap()
+                        .replace(Cursor::new_pseudo(cursor));
                     state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
@@ -1569,7 +1589,10 @@ impl Program {
                         })
                         .collect();
                     let cursor = Sorter::new(order);
-                    cursors.insert(*cursor_id, Cursor::new_sorter(cursor));
+                    cursors
+                        .get_mut(*cursor_id)
+                        .unwrap()
+                        .replace(Cursor::new_sorter(cursor));
                     state.pc += 1;
                 }
                 Insn::SorterData {
@@ -2254,9 +2277,15 @@ impl Program {
                     let cursor =
                         BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
                     if is_index {
-                        cursors.insert(*cursor_id, Cursor::new_index(cursor));
+                        cursors
+                            .get_mut(*cursor_id)
+                            .unwrap()
+                            .replace(Cursor::new_index(cursor));
                     } else {
-                        cursors.insert(*cursor_id, Cursor::new_table(cursor));
+                        cursors
+                            .get_mut(*cursor_id)
+                            .unwrap()
+                            .replace(Cursor::new_table(cursor));
                     }
                     state.pc += 1;
                 }
@@ -2289,7 +2318,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Close { cursor_id } => {
-                    let _ = cursors.remove(&*cursor_id);
+                    cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
                 Insn::IsNull { src, target_pc } => {

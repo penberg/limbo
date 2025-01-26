@@ -372,7 +372,8 @@ impl Connection {
                         syms,
                     )?;
 
-                    let mut state = vdbe::ProgramState::new(program.max_registers);
+                    let mut state =
+                        vdbe::ProgramState::new(program.max_registers, program.cursor_ref.len());
                     program.step(&mut state, self.pager.clone())?;
                 }
             }
@@ -441,7 +442,7 @@ pub struct Statement {
 
 impl Statement {
     pub fn new(program: Rc<vdbe::Program>, pager: Rc<Pager>) -> Self {
-        let state = vdbe::ProgramState::new(program.max_registers);
+        let state = vdbe::ProgramState::new(program.max_registers, program.cursor_ref.len());
         Self {
             program,
             state,
