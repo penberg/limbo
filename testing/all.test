@@ -22,3 +22,4 @@ source $testdir/where.test
 source $testdir/compare.test
 source $testdir/changes.test
 source $testdir/total-changes.test
+source $testdir/offset.test
