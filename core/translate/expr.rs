@@ -929,6 +929,14 @@ pub fn translate_expr(
                             func_ctx,
                         )
                     }
+                    JsonFunc::JsonValid => translate_function(
+                        program,
+                        args.as_deref().unwrap_or_default(),
+                        referenced_tables,
+                        resolver,
+                        target_register,
+                        func_ctx,
+                    ),
                 },
                 Func::Scalar(srf) => {
                     match srf {

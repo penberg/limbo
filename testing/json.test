@@ -544,3 +544,35 @@ do_execsql_test json_from_json_object {
 #do_execsql_test json_object_duplicated_keys {
 #    SELECT json_object('key', 'value', 'key', 'value2');
 #} {{{"key":"value2"}}}
+#
+
+do_execsql_test json_valid_1 {
+   SELECT json_valid('{"a":55,"b":72}');
+} {1}
+do_execsql_test json_valid_2 {
+   SELECT json_valid('["a",55,"b",72]');
+} {1}
+do_execsql_test json_valid_3 {
+   SELECT json_valid( CAST('{"a":1}' AS BLOB) );
+} {1}
+do_execsql_test json_valid_4 {
+  SELECT json_valid(123);
+} {1}
+do_execsql_test json_valid_5 {
+  SELECT json_valid(12.3);
+} {1}
+do_execsql_test json_valid_6 {
+  SELECT json_valid('not a valid json');
+} {0}
+do_execsql_test json_valid_7 {
+   SELECT json_valid('{"a":"55,"b":72}');
+} {0}
+do_execsql_test json_valid_8 {
+   SELECT json_valid('{"a":55 "b":72}');
+} {0}
+do_execsql_test json_valid_3 {
+   SELECT json_valid( CAST('{"a":"1}' AS BLOB) );
+} {0}
+do_execsql_test json_valid_9 {
+    SELECT json_valid(NULL);
+} {}

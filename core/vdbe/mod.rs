@@ -40,9 +40,9 @@ use crate::vdbe::builder::CursorType;
 use crate::vdbe::insn::Insn;
 #[cfg(feature = "json")]
 use crate::{
-    function::JsonFunc, json::get_json, json::json_array, json::json_array_length,
-    json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
-    json::json_extract, json::json_object, json::json_type,
+    function::JsonFunc, json::get_json, json::is_json_valid, json::json_array,
+    json::json_array_length, json::json_arrow_extract, json::json_arrow_shift_extract,
+    json::json_error_position, json::json_extract, json::json_object, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VERSION};
 use datetime::{
@@ -1741,6 +1741,10 @@ impl Program {
                                     Ok(pos) => state.registers[*dest] = pos,
                                     Err(e) => return Err(e),
                                 }
+                            }
+                            JsonFunc::JsonValid => {
+                                let json_value = &state.registers[*start_reg];
+                                state.registers[*dest] = is_json_valid(json_value)?;
                             }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
