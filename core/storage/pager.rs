@@ -3,7 +3,7 @@ use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::{CheckpointResult, Wal};
-use crate::{Buffer, Result};
+use crate::{Buffer, LimboError, Result};
 use log::trace;
 use parking_lot::RwLock;
 use std::cell::{RefCell, UnsafeCell};
@@ -449,6 +449,71 @@ impl Pager {
         // TODO: only clear cache of things that are really invalidated
         self.page_cache.write().clear();
         checkpoint_result
+    }
+
+    // Providing a page is optional, if provided it will be used to avoid reading the page from disk.
+    // This is implemented in accordance with sqlite freepage2() function.
+    pub fn free_page(&self, page: Option<PageRef>, page_id: usize) -> Result<()> {
+        if page_id < 2 || page_id > self.db_header.borrow().database_size as usize {
+            return Err(LimboError::Corrupt(format!(
+                "Invalid page number {} for free operation",
+                page_id
+            )));
+        }
+
+        let page = match page {
+            Some(page) => {
+                assert_eq!(page.get().id, page_id, "Page id mismatch");
+                page
+            }
+            None => self.read_page(page_id)?,
+        };
+
+        let page_1 = self.read_page(1)?;
+        page_1.set_dirty();
+        self.add_dirty(1);
+
+        self.db_header.borrow_mut().freelist_pages += 1;
+
+        let trunk_page_id = self.db_header.borrow().freelist_trunk_page;
+
+        if trunk_page_id != 0 {
+            // Add as leaf to current trunk
+            let trunk_page = self.read_page(trunk_page_id as usize)?;
+            let trunk_page_contents = trunk_page.get().contents.as_ref().unwrap();
+            let number_of_leaf_pages = trunk_page_contents.read_u32(4);
+
+            let max_free_list_entries = (self.usable_size() / 4) - 8;
+
+            if number_of_leaf_pages < max_free_list_entries as u32 {
+                trunk_page.set_dirty();
+                self.add_dirty(trunk_page_id as usize);
+
+                trunk_page_contents.write_u32(4, number_of_leaf_pages + 1);
+                trunk_page_contents
+                    .write_u32((8 + (number_of_leaf_pages * 4)) as usize, page_id as u32);
+                page.clear_uptodate();
+                page.clear_loaded();
+
+                return Ok(());
+            }
+        }
+
+        // If we get here, need to make this page a new trunk
+        page.set_dirty();
+        self.add_dirty(page_id);
+
+        let contents = page.get().contents.as_mut().unwrap();
+        // Point to previous trunk
+        contents.write_u32(0, trunk_page_id);
+        // Zero leaf count
+        contents.write_u32(4, 0);
+        // Update page 1 to point to new trunk
+        self.db_header.borrow_mut().freelist_trunk_page = page_id as u32;
+        // Clear flags
+        page.clear_uptodate();
+        page.clear_loaded();
+        Ok(())
     }
 
     /*
