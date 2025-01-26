@@ -28,7 +28,7 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
             Ok(db) => {
                 println!("Opened database: {}", path);
                 let conn = db.connect();
-                return TursoConn::new(conn, io).to_ptr();
+                return LimboConn::new(conn, io).to_ptr();
             }
             Err(e) => {
                 println!("Error opening database: {}", e);
@@ -40,25 +40,25 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
 }
 
 #[allow(dead_code)]
-struct TursoConn {
+struct LimboConn {
     conn: Rc<Connection>,
     io: Arc<dyn limbo_core::IO>,
 }
 
-impl TursoConn {
+impl LimboConn {
     fn new(conn: Rc<Connection>, io: Arc<dyn limbo_core::IO>) -> Self {
-        TursoConn { conn, io }
+        LimboConn { conn, io }
     }
     #[allow(clippy::wrong_self_convention)]
     fn to_ptr(self) -> *mut c_void {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    fn from_ptr(ptr: *mut c_void) -> &'static mut TursoConn {
+    fn from_ptr(ptr: *mut c_void) -> &'static mut LimboConn {
         if ptr.is_null() {
             panic!("Null pointer");
         }
-        unsafe { &mut *(ptr as *mut TursoConn) }
+        unsafe { &mut *(ptr as *mut LimboConn) }
     }
 }
 
@@ -68,7 +68,7 @@ impl TursoConn {
 #[no_mangle]
 pub unsafe extern "C" fn db_close(db: *mut c_void) {
     if !db.is_null() {
-        let _ = unsafe { Box::from_raw(db as *mut TursoConn) };
+        let _ = unsafe { Box::from_raw(db as *mut LimboConn) };
     }
 }
 

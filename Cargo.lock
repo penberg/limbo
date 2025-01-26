@@ -1302,6 +1302,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo-go"
+version = "0.0.13"
+dependencies = [
+ "limbo_core",
+]
+
+[[package]]
 name = "limbo-wasm"
 version = "0.0.13"
 dependencies = [
@@ -2662,13 +2669,6 @@ name = "tracing-core"
 version = "0.1.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
-
-[[package]]
-name = "turso-go"
-version = "0.0.13"
-dependencies = [
- "limbo_core",
-]
 
 [[package]]
 name = "typenum"

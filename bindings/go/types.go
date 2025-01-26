@@ -1,4 +1,4 @@
-package turso
+package limbo
 
 import (
 	"database/sql/driver"
@@ -47,7 +47,7 @@ func namedValueToValue(named []driver.NamedValue) []driver.Value {
 	return out
 }
 
-func buildNamedArgs(named []driver.NamedValue) ([]tursoValue, error) {
+func buildNamedArgs(named []driver.NamedValue) ([]limboValue, error) {
 	args := make([]driver.Value, len(named))
 	for i, nv := range named {
 		args[i] = nv.Value
@@ -75,7 +75,7 @@ const (
 )
 
 // struct to pass Go values over FFI
-type tursoValue struct {
+type limboValue struct {
 	Type  valueType
 	Value [8]byte
 }
@@ -86,9 +86,9 @@ type Blob struct {
 	Len  uint
 }
 
-// convert a tursoValue to a native Go value
+// convert a limboValue to a native Go value
 func toGoValue(valPtr uintptr) interface{} {
-	val := (*tursoValue)(unsafe.Pointer(valPtr))
+	val := (*limboValue)(unsafe.Pointer(valPtr))
 	switch val.Type {
 	case intVal:
 		return *(*int64)(unsafe.Pointer(&val.Value))
@@ -169,9 +169,9 @@ func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
 	return out
 }
 
-// convert a Go slice of driver.Value to a slice of tursoValue that can be sent over FFI
-func buildArgs(args []driver.Value) ([]tursoValue, error) {
-	argSlice := make([]tursoValue, len(args))
+// convert a Go slice of driver.Value to a slice of limboValue that can be sent over FFI
+func buildArgs(args []driver.Value) ([]limboValue, error) {
+	argSlice := make([]limboValue, len(args))
 
 	for i, v := range args {
 		switch val := v.(type) {
