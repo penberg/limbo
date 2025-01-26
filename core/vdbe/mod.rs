@@ -772,8 +772,7 @@ impl Program {
                     root_page,
                 } => {
                     let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
-                    let cursor =
-                        BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
+                    let cursor = BTreeCursor::new(pager.clone(), *root_page);
                     match cursor_type {
                         CursorType::BTreeTable(_) => {
                             cursors
@@ -2274,8 +2273,7 @@ impl Program {
                 } => {
                     let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
                     let is_index = cursor_type.is_index();
-                    let cursor =
-                        BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
+                    let cursor = BTreeCursor::new(pager.clone(), *root_page);
                     if is_index {
                         cursors
                             .get_mut(*cursor_id)
@@ -2307,11 +2305,7 @@ impl Program {
                         // TODO: implement temp datbases
                         todo!("temp databases not implemented yet");
                     }
-                    let mut cursor = Box::new(BTreeCursor::new(
-                        pager.clone(),
-                        0,
-                        self.database_header.clone(),
-                    ));
+                    let mut cursor = Box::new(BTreeCursor::new(pager.clone(), 0));
 
                     let root_page = cursor.btree_create(*flags);
                     state.registers[*root] = OwnedValue::Integer(root_page as i64);

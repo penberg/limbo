@@ -105,7 +105,6 @@ pub struct BTreeCursor {
     rowid: RefCell<Option<u64>>,
     record: RefCell<Option<OwnedRecord>>,
     null_flag: bool,
-    database_header: Rc<RefCell<DatabaseHeader>>,
     /// Index internal pages are consumed on the way up, so we store going upwards flag in case
     /// we just moved to a parent page and the parent page is an internal index page which requires
     /// to be consumed.
@@ -137,18 +136,13 @@ struct PageStack {
 }
 
 impl BTreeCursor {
-    pub fn new(
-        pager: Rc<Pager>,
-        root_page: usize,
-        database_header: Rc<RefCell<DatabaseHeader>>,
-    ) -> Self {
+    pub fn new(pager: Rc<Pager>, root_page: usize) -> Self {
         Self {
             pager,
             root_page,
             rowid: RefCell::new(None),
             record: RefCell::new(None),
             null_flag: false,
-            database_header,
             going_upwards: false,
             write_info: WriteInfo {
                 state: WriteState::Start,
@@ -750,7 +744,7 @@ impl BTreeCursor {
     /// and the overflow cell count is used to determine if the page overflows,
     /// i.e. whether we need to balance the btree after the insert.
     fn insert_into_cell(&self, page: &mut PageContent, payload: &[u8], cell_idx: usize) {
-        let free = self.compute_free_space(page, RefCell::borrow(&self.database_header));
+        let free = self.compute_free_space(page, RefCell::borrow(&self.pager.db_header));
         const CELL_POINTER_SIZE_BYTES: usize = 2;
         let enough_space = payload.len() + CELL_POINTER_SIZE_BYTES <= free as usize;
         if !enough_space {
@@ -832,7 +826,7 @@ impl BTreeCursor {
         // then we need to do some more calculation to figure out where to insert the freeblock
         // in the freeblock linked list.
         let maxpc = {
-            let db_header = self.database_header.borrow();
+            let db_header = self.pager.db_header.borrow();
             let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
             usable_space as u16
         };
@@ -1063,7 +1057,7 @@ impl BTreeCursor {
                     contents.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
                     contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
 
-                    let db_header = RefCell::borrow(&self.database_header);
+                    let db_header = RefCell::borrow(&self.pager.db_header);
                     let cell_content_area_start =
                         db_header.page_size - db_header.reserved_space as u16;
                     contents.write_u16(
@@ -1294,7 +1288,7 @@ impl BTreeCursor {
     /// This marks the page as dirty and writes the page header.
     fn allocate_page(&self, page_type: PageType, offset: usize) -> PageRef {
         let page = self.pager.allocate_page().unwrap();
-        btree_init_page(&page, page_type, &self.database_header.borrow(), offset);
+        btree_init_page(&page, page_type, &self.pager.db_header.borrow(), offset);
         page
     }
 
@@ -1322,7 +1316,7 @@ impl BTreeCursor {
         // there are free blocks and enough space
         if page_ref.first_freeblock() != 0 && gap + 2 <= top {
             // find slot
-            let db_header = RefCell::borrow(&self.database_header);
+            let db_header = RefCell::borrow(&self.pager.db_header);
             let pc = find_free_cell(page_ref, db_header, amount);
             if pc != 0 {
                 return pc as u16;
@@ -1332,11 +1326,11 @@ impl BTreeCursor {
 
         if gap + 2 + amount > top {
             // defragment
-            self.defragment_page(page_ref, RefCell::borrow(&self.database_header));
+            self.defragment_page(page_ref, RefCell::borrow(&self.pager.db_header));
             top = page_ref.read_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA) as usize;
         }
 
-        let db_header = RefCell::borrow(&self.database_header);
+        let db_header = RefCell::borrow(&self.pager.db_header);
         top -= amount;
 
         page_ref.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, top as u16);
@@ -1656,7 +1650,7 @@ impl BTreeCursor {
     /// The usable size of a page might be an odd number. However, the usable size is not allowed to be less than 480.
     /// In other words, if the page size is 512, then the reserved space size cannot exceed 32.
     fn usable_space(&self) -> usize {
-        let db_header = RefCell::borrow(&self.database_header);
+        let db_header = self.pager.db_header.borrow();
         (db_header.page_size - db_header.reserved_space as u16) as usize
     }
 
