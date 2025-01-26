@@ -277,8 +277,7 @@ pub struct ProgramState {
 impl ProgramState {
     pub fn new(max_registers: usize) -> Self {
         let cursors: RefCell<BTreeMap<CursorID, Cursor>> = RefCell::new(BTreeMap::new());
-        let mut registers = Vec::with_capacity(max_registers);
-        registers.resize(max_registers, OwnedValue::Null);
+        let registers = vec![OwnedValue::Null; max_registers];
         Self {
             pc: 0,
             cursors,
@@ -319,9 +318,7 @@ impl ProgramState {
     pub fn reset(&mut self) {
         self.pc = 0;
         self.cursors.borrow_mut().clear();
-        let max_registers = self.registers.len();
-        self.registers.clear();
-        self.registers.resize(max_registers, OwnedValue::Null);
+        self.registers.iter_mut().for_each(|r| *r = OwnedValue::Null);
         self.last_compare = None;
         self.deferred_seek = None;
         self.ended_coroutine.0 = [0; 4];
