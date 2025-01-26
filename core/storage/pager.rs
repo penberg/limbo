@@ -454,6 +454,14 @@ impl Pager {
     // Providing a page is optional, if provided it will be used to avoid reading the page from disk.
     // This is implemented in accordance with sqlite freepage2() function.
     pub fn free_page(&self, page: Option<PageRef>, page_id: usize) -> Result<()> {
+        const TRUNK_PAGE_HEADER_SIZE: usize = 8;
+        const LEAF_ENTRY_SIZE: usize = 4;
+        const RESERVED_SLOTS: usize = 2;
+
+
+        const TRUNK_PAGE_NEXT_PAGE_OFFSET: usize = 0;  // Offset to next trunk page pointer
+        const TRUNK_PAGE_LEAF_COUNT_OFFSET: usize = 4;  // Offset to leaf count
+
         if page_id < 2 || page_id > self.db_header.borrow().database_size as usize {
             return Err(LimboError::Corrupt(format!(
                 "Invalid page number {} for free operation",
@@ -469,10 +477,6 @@ impl Pager {
             None => self.read_page(page_id)?,
         };
 
-        let page_1 = self.read_page(1)?;
-        page_1.set_dirty();
-        self.add_dirty(1);
-
         self.db_header.borrow_mut().freelist_pages += 1;
 
         let trunk_page_id = self.db_header.borrow().freelist_trunk_page;
@@ -481,17 +485,18 @@ impl Pager {
             // Add as leaf to current trunk
             let trunk_page = self.read_page(trunk_page_id as usize)?;
             let trunk_page_contents = trunk_page.get().contents.as_ref().unwrap();
-            let number_of_leaf_pages = trunk_page_contents.read_u32(4);
-
-            let max_free_list_entries = (self.usable_size() / 4) - 8;
+            let number_of_leaf_pages = trunk_page_contents.read_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET);
+            
+            // Reserve 2 slots for the trunk page header which is 8 bytes or 2*LEAF_ENTRY_SIZE
+            let max_free_list_entries = (self.usable_size() / LEAF_ENTRY_SIZE) - RESERVED_SLOTS;
 
             if number_of_leaf_pages < max_free_list_entries as u32 {
                 trunk_page.set_dirty();
                 self.add_dirty(trunk_page_id as usize);
 
-                trunk_page_contents.write_u32(4, number_of_leaf_pages + 1);
+                trunk_page_contents.write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, number_of_leaf_pages + 1);
                 trunk_page_contents
-                    .write_u32((8 + (number_of_leaf_pages * 4)) as usize, page_id as u32);
+                    .write_u32(TRUNK_PAGE_HEADER_SIZE + (number_of_leaf_pages as usize * LEAF_ENTRY_SIZE), page_id as u32);
                 page.clear_uptodate();
                 page.clear_loaded();
 
@@ -505,9 +510,9 @@ impl Pager {
 
         let contents = page.get().contents.as_mut().unwrap();
         // Point to previous trunk
-        contents.write_u32(0, trunk_page_id);
+        contents.write_u32(TRUNK_PAGE_NEXT_PAGE_OFFSET, trunk_page_id);
         // Zero leaf count
-        contents.write_u32(4, 0);
+        contents.write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, 0);
         // Update page 1 to point to new trunk
         self.db_header.borrow_mut().freelist_trunk_page = page_id as u32;
         // Clear flags
