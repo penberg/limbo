@@ -458,9 +458,8 @@ impl Pager {
         const LEAF_ENTRY_SIZE: usize = 4;
         const RESERVED_SLOTS: usize = 2;
 
-
-        const TRUNK_PAGE_NEXT_PAGE_OFFSET: usize = 0;  // Offset to next trunk page pointer
-        const TRUNK_PAGE_LEAF_COUNT_OFFSET: usize = 4;  // Offset to leaf count
+        const TRUNK_PAGE_NEXT_PAGE_OFFSET: usize = 0; // Offset to next trunk page pointer
+        const TRUNK_PAGE_LEAF_COUNT_OFFSET: usize = 4; // Offset to leaf count
 
         if page_id < 2 || page_id > self.db_header.borrow().database_size as usize {
             return Err(LimboError::Corrupt(format!(
@@ -486,7 +485,7 @@ impl Pager {
             let trunk_page = self.read_page(trunk_page_id as usize)?;
             let trunk_page_contents = trunk_page.get().contents.as_ref().unwrap();
             let number_of_leaf_pages = trunk_page_contents.read_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET);
-            
+
             // Reserve 2 slots for the trunk page header which is 8 bytes or 2*LEAF_ENTRY_SIZE
             let max_free_list_entries = (self.usable_size() / LEAF_ENTRY_SIZE) - RESERVED_SLOTS;
 
@@ -494,9 +493,12 @@ impl Pager {
                 trunk_page.set_dirty();
                 self.add_dirty(trunk_page_id as usize);
 
-                trunk_page_contents.write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, number_of_leaf_pages + 1);
                 trunk_page_contents
-                    .write_u32(TRUNK_PAGE_HEADER_SIZE + (number_of_leaf_pages as usize * LEAF_ENTRY_SIZE), page_id as u32);
+                    .write_u32(TRUNK_PAGE_LEAF_COUNT_OFFSET, number_of_leaf_pages + 1);
+                trunk_page_contents.write_u32(
+                    TRUNK_PAGE_HEADER_SIZE + (number_of_leaf_pages as usize * LEAF_ENTRY_SIZE),
+                    page_id as u32,
+                );
                 page.clear_uptodate();
                 page.clear_loaded();
 
