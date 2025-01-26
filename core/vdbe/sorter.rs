@@ -16,8 +16,13 @@ impl Sorter {
         }
     }
     pub fn is_empty(&self) -> bool {
-        self.current.is_none()
+        self.records.is_empty()
     }
+
+    pub fn has_more(&self) -> bool {
+        self.current.is_some()
+    }
+
     // We do the sorting here since this is what is called by the SorterSort instruction
     pub fn sort(&mut self) {
         self.records.sort_by(|a, b| {
