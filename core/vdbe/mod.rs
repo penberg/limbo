@@ -258,6 +258,19 @@ impl ProgramState {
     }
 
     pub fn reset(&mut self) {
+        self.pc = 0;
+        self.btree_table_cursors.borrow_mut().clear();
+        self.btree_index_cursors.borrow_mut().clear();
+        self.pseudo_cursors.borrow_mut().clear();
+        self.sorter_cursors.borrow_mut().clear();
+        let max_registers = self.registers.len();
+        self.registers.clear();
+        self.registers.resize(max_registers, OwnedValue::Null);
+        self.last_compare = None;
+        self.deferred_seek = None;
+        self.ended_coroutine.clear();
+        self.regex_cache.like.clear();
+        self.interrupted = false;
         self.parameters.clear();
     }
 }

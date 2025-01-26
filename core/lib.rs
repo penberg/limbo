@@ -486,8 +486,7 @@ impl Statement {
     }
 
     pub fn reset(&mut self) {
-        let state = vdbe::ProgramState::new(self.program.max_registers);
-        self.state = state
+        self.state.reset();
     }
 }
 
