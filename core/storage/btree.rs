@@ -789,7 +789,7 @@ impl BTreeCursor {
         const CELL_POINTER_SIZE_BYTES: usize = 2;
         let enough_space = payload.len() + CELL_POINTER_SIZE_BYTES <= free as usize;
         if !enough_space {
-            // add to overflow cell
+            // add to overflow cells
             page.overflow_cells.push(OverflowCell {
                 index: cell_idx,
                 payload: Pin::new(Vec::from(payload)),
@@ -798,35 +798,33 @@ impl BTreeCursor {
         }
 
         // TODO: insert into cell payload in internal page
-        // TODO: handle the unwrap
         let new_cell_data_pointer = self
             .allocate_cell_space(page, payload.len() as u16)
-            .expect("Failed to allocate cell space");
+            .unwrap();
         let buf = page.as_ptr();
 
-        // copy data
+        // Copy cell data
         buf[new_cell_data_pointer as usize..new_cell_data_pointer as usize + payload.len()]
             .copy_from_slice(payload);
         //  memmove(pIns+2, pIns, 2*(pPage->nCell - i));
         let (cell_pointer_array_start, _) = page.cell_pointer_array_offset_and_size();
         let cell_pointer_cur_idx = cell_pointer_array_start + (CELL_POINTER_SIZE_BYTES * cell_idx);
 
-        // move existing pointers forward by CELL_POINTER_SIZE_BYTES...
-        let n_cells_forward = page.cell_count() - cell_idx;
-        let n_bytes_forward = CELL_POINTER_SIZE_BYTES * n_cells_forward;
+        let cell_count = page.cell_count();
+
+        // Move existing pointers if needed
+        let n_bytes_forward = CELL_POINTER_SIZE_BYTES * (cell_count - cell_idx);
         if n_bytes_forward > 0 {
             buf.copy_within(
                 cell_pointer_cur_idx..cell_pointer_cur_idx + n_bytes_forward,
                 cell_pointer_cur_idx + CELL_POINTER_SIZE_BYTES,
             );
         }
-        // ...and insert new cell pointer at the current index
+
+        // Insert new cell pointer at the current cell index
         page.write_u16(cell_pointer_cur_idx - page.offset, new_cell_data_pointer);
 
-        // update first byte of content area (cell data always appended to the left, so cell content area pointer moves to point to the new cell data)
-        page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, new_cell_data_pointer);
-
-        // update cell count
+        // Update cell count
         let new_n_cells = (page.cell_count() + 1) as u16;
         page.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, new_n_cells);
     }
