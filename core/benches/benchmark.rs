@@ -46,7 +46,7 @@ fn limbo_bench(criterion: &mut Criterion) {
         let io = io.clone();
         b.iter(|| {
             let mut rows = stmt.query().unwrap();
-            match rows.next_row().unwrap() {
+            match rows.step().unwrap() {
                 limbo_core::StepResult::Row(row) => {
                     assert_eq!(row.get::<i64>(0).unwrap(), 1);
                 }
@@ -74,7 +74,7 @@ fn limbo_bench(criterion: &mut Criterion) {
             let io = io.clone();
             b.iter(|| {
                 let mut rows = stmt.query().unwrap();
-                match rows.next_row().unwrap() {
+                match rows.step().unwrap() {
                     limbo_core::StepResult::Row(row) => {
                         assert_eq!(row.get::<i64>(0).unwrap(), 1);
                     }
@@ -103,7 +103,7 @@ fn limbo_bench(criterion: &mut Criterion) {
             let io = io.clone();
             b.iter(|| {
                 let mut rows = stmt.query().unwrap();
-                match rows.next_row().unwrap() {
+                match rows.step().unwrap() {
                     limbo_core::StepResult::Row(row) => {
                         assert_eq!(row.get::<i64>(0).unwrap(), 1);
                     }

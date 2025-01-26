@@ -20,7 +20,7 @@ fn test_simple_overflow_page() -> anyhow::Result<()> {
 
     match conn.query(insert_query) {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::IO => {
                     tmp_db.io.run_once()?;
                 }
@@ -39,7 +39,7 @@ fn test_simple_overflow_page() -> anyhow::Result<()> {
 
     match conn.query(list_query) {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     let first_value = &row.values[0];
                     let text = &row.values[1];
@@ -93,7 +93,7 @@ fn test_sequential_overflow_page() -> anyhow::Result<()> {
         let insert_query = format!("INSERT INTO test VALUES ({}, '{}')", i, huge_text.as_str());
         match conn.query(insert_query) {
             Ok(Some(ref mut rows)) => loop {
-                match rows.next_row()? {
+                match rows.step()? {
                     StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
@@ -112,7 +112,7 @@ fn test_sequential_overflow_page() -> anyhow::Result<()> {
     let mut current_index = 0;
     match conn.query(list_query) {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     let first_value = &row.values[0];
                     let text = &row.values[1];
@@ -166,7 +166,7 @@ fn test_sequential_write() -> anyhow::Result<()> {
         let insert_query = format!("INSERT INTO test VALUES ({})", i);
         match conn.query(insert_query) {
             Ok(Some(ref mut rows)) => loop {
-                match rows.next_row()? {
+                match rows.step()? {
                     StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
@@ -183,7 +183,7 @@ fn test_sequential_write() -> anyhow::Result<()> {
         let mut current_read_index = 0;
         match conn.query(list_query) {
             Ok(Some(ref mut rows)) => loop {
-                match rows.next_row()? {
+                match rows.step()? {
                     StepResult::Row(row) => {
                         let first_value = row.values.first().expect("missing id");
                         let id = match first_value {
@@ -227,7 +227,7 @@ fn test_regression_multi_row_insert() -> anyhow::Result<()> {
 
     match conn.query(insert_query) {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::IO => {
                     tmp_db.io.run_once()?;
                 }
@@ -248,7 +248,7 @@ fn test_regression_multi_row_insert() -> anyhow::Result<()> {
     let mut actual_ids = Vec::new();
     match conn.query(list_query) {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     let first_value = row.values.first().expect("missing id");
                     let id = match first_value {
@@ -334,7 +334,7 @@ fn test_wal_checkpoint() -> anyhow::Result<()> {
         conn.checkpoint()?;
         match conn.query(insert_query) {
             Ok(Some(ref mut rows)) => loop {
-                match rows.next_row()? {
+                match rows.step()? {
                     StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
@@ -355,7 +355,7 @@ fn test_wal_checkpoint() -> anyhow::Result<()> {
     let mut current_index = 0;
     match conn.query(list_query) {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     let first_value = &row.values[0];
                     let id = match first_value {
@@ -394,7 +394,7 @@ fn test_wal_restart() -> anyhow::Result<()> {
         let insert_query = format!("INSERT INTO test VALUES ({})", i);
         match conn.query(insert_query) {
             Ok(Some(ref mut rows)) => loop {
-                match rows.next_row()? {
+                match rows.step()? {
                     StepResult::IO => {
                         tmp_db.io.run_once()?;
                     }
@@ -418,7 +418,7 @@ fn test_wal_restart() -> anyhow::Result<()> {
         loop {
             if let Some(ref mut rows) = conn.query(list_query)? {
                 loop {
-                    match rows.next_row()? {
+                    match rows.step()? {
                         StepResult::Row(row) => {
                             let first_value = &row.values[0];
                             let count = match first_value {

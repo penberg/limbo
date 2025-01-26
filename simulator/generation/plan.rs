@@ -414,7 +414,7 @@ impl Interaction {
             assert!(rows.is_some());
             let mut rows = rows.unwrap();
             let mut out = Vec::new();
-            while let Ok(row) = rows.next_row() {
+            while let Ok(row) = rows.step() {
                 match row {
                     StepResult::Row(row) => {
                         let mut r = Vec::new();

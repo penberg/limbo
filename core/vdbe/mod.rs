@@ -44,7 +44,7 @@ use crate::{
     json::json_arrow_extract, json::json_arrow_shift_extract, json::json_error_position,
     json::json_extract, json::json_object, json::json_type,
 };
-use crate::{resolve_ext_path, Connection, Result, Rows, TransactionState, DATABASE_VERSION};
+use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VERSION};
 use datetime::{
     exec_date, exec_datetime_full, exec_julianday, exec_strftime, exec_time, exec_unixepoch,
 };
@@ -2338,10 +2338,9 @@ impl Program {
                         "SELECT * FROM  sqlite_schema WHERE {}",
                         where_clause
                     ))?;
-                    let rows = Rows { stmt };
                     let mut schema = RefCell::borrow_mut(&conn.schema);
                     // TODO: This function below is synchronous, make it not async
-                    parse_schema_rows(Some(rows), &mut schema, conn.pager.io.clone())?;
+                    parse_schema_rows(Some(stmt), &mut schema, conn.pager.io.clone())?;
                     state.pc += 1;
                 }
                 Insn::ShiftRight { lhs, rhs, dest } => {

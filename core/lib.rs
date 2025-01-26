@@ -281,7 +281,7 @@ impl Connection {
         }
     }
 
-    pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Rows>> {
+    pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Statement>> {
         let sql = sql.into();
         trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
@@ -292,7 +292,7 @@ impl Connection {
         }
     }
 
-    pub(crate) fn run_cmd(self: &Rc<Connection>, cmd: Cmd) -> Result<Option<Rows>> {
+    pub(crate) fn run_cmd(self: &Rc<Connection>, cmd: Cmd) -> Result<Option<Statement>> {
         let db = self.db.clone();
         let syms: &SymbolTable = &db.syms.borrow();
         match cmd {
@@ -306,7 +306,7 @@ impl Connection {
                     syms,
                 )?);
                 let stmt = Statement::new(program, self.pager.clone());
-                Ok(Some(Rows { stmt }))
+                Ok(Some(stmt))
             }
             Cmd::Explain(stmt) => {
                 let program = translate::translate(
@@ -465,9 +465,9 @@ impl Statement {
         }
     }
 
-    pub fn query(&mut self) -> Result<Rows> {
+    pub fn query(&mut self) -> Result<Statement> {
         let stmt = Statement::new(self.program.clone(), self.pager.clone());
-        Ok(Rows::new(stmt))
+        Ok(stmt)
     }
 
     pub fn columns(&self) -> &[String] {
@@ -509,24 +509,6 @@ impl<'a> Row<'a> {
     pub fn get<T: types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
-    }
-}
-
-pub struct Rows {
-    stmt: Statement,
-}
-
-impl Rows {
-    pub fn new(stmt: Statement) -> Self {
-        Self { stmt }
-    }
-
-    pub fn next_row(&mut self) -> Result<StepResult<'_>> {
-        self.stmt.step()
-    }
-
-    pub fn columns(&self) -> &[String] {
-        self.stmt.columns()
     }
 }
 
@@ -605,7 +587,7 @@ impl<'a> QueryRunner<'a> {
 }
 
 impl Iterator for QueryRunner<'_> {
-    type Item = Result<Option<Rows>>;
+    type Item = Result<Option<Statement>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.parser.next() {

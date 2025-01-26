@@ -110,7 +110,7 @@ pub enum Params {
 pub struct Transaction {}
 
 pub struct Rows {
-    _inner: Rc<limbo_core::Rows>,
+    _inner: Rc<limbo_core::Statement>,
 }
 
 impl Rows {
