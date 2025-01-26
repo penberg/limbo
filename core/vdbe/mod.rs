@@ -32,7 +32,8 @@ use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{
-    AggContext, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey, SeekOp,
+    AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey,
+    SeekOp,
 };
 use crate::util::parse_schema_rows;
 use crate::vdbe::builder::CursorType;
@@ -58,8 +59,8 @@ use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
 use sorter::Sorter;
 use std::borrow::BorrowMut;
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::cell::{Cell, RefCell, RefMut};
+use std::collections::HashMap;
 use std::num::NonZero;
 use std::rc::{Rc, Weak};
 
@@ -193,40 +194,106 @@ impl RegexCache {
     }
 }
 
+fn get_cursor_as_table_mut<'long, 'short>(
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
+    cursor_id: CursorID,
+) -> &'short mut BTreeCursor {
+    let cursor = cursors
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
+        .expect("cursor not allocated")
+        .as_table_mut();
+    cursor
+}
+
+fn get_cursor_as_index_mut<'long, 'short>(
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
+    cursor_id: CursorID,
+) -> &'short mut BTreeCursor {
+    let cursor = cursors
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
+        .expect("cursor not allocated")
+        .as_index_mut();
+    cursor
+}
+
+fn get_cursor_as_pseudo_mut<'long, 'short>(
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
+    cursor_id: CursorID,
+) -> &'short mut PseudoCursor {
+    let cursor = cursors
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
+        .expect("cursor not allocated")
+        .as_pseudo_mut();
+    cursor
+}
+
+fn get_cursor_as_sorter_mut<'long, 'short>(
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
+    cursor_id: CursorID,
+) -> &'short mut Sorter {
+    let cursor = cursors
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
+        .expect("cursor not allocated")
+        .as_sorter_mut();
+    cursor
+}
+
+struct Bitfield<const N: usize>([u64; N]);
+
+impl<const N: usize> Bitfield<N> {
+    fn new() -> Self {
+        Self([0; N])
+    }
+
+    fn set(&mut self, bit: usize) {
+        assert!(bit < N * 64, "bit out of bounds");
+        self.0[bit / 64] |= 1 << (bit % 64);
+    }
+
+    fn unset(&mut self, bit: usize) {
+        assert!(bit < N * 64, "bit out of bounds");
+        self.0[bit / 64] &= !(1 << (bit % 64));
+    }
+
+    fn get(&self, bit: usize) -> bool {
+        assert!(bit < N * 64, "bit out of bounds");
+        (self.0[bit / 64] & (1 << (bit % 64))) != 0
+    }
+}
+
 /// The program state describes the environment in which the program executes.
 pub struct ProgramState {
     pub pc: InsnReference,
-    btree_table_cursors: RefCell<BTreeMap<CursorID, BTreeCursor>>,
-    btree_index_cursors: RefCell<BTreeMap<CursorID, BTreeCursor>>,
-    pseudo_cursors: RefCell<BTreeMap<CursorID, PseudoCursor>>,
-    sorter_cursors: RefCell<BTreeMap<CursorID, Sorter>>,
+    cursors: RefCell<Vec<Option<Cursor>>>,
     registers: Vec<OwnedValue>,
     last_compare: Option<std::cmp::Ordering>,
     deferred_seek: Option<(CursorID, CursorID)>,
-    ended_coroutine: HashMap<usize, bool>, // flag to indicate that a coroutine has ended (key is the yield register)
+    ended_coroutine: Bitfield<4>, // flag to indicate that a coroutine has ended (key is the yield register. currently we assume that the yield register is always between 0-255, YOLO)
     regex_cache: RegexCache,
     interrupted: bool,
     parameters: HashMap<NonZero<usize>, OwnedValue>,
 }
 
 impl ProgramState {
-    pub fn new(max_registers: usize) -> Self {
-        let btree_table_cursors = RefCell::new(BTreeMap::new());
-        let btree_index_cursors = RefCell::new(BTreeMap::new());
-        let pseudo_cursors = RefCell::new(BTreeMap::new());
-        let sorter_cursors = RefCell::new(BTreeMap::new());
-        let mut registers = Vec::with_capacity(max_registers);
-        registers.resize(max_registers, OwnedValue::Null);
+    pub fn new(max_registers: usize, max_cursors: usize) -> Self {
+        let cursors: RefCell<Vec<Option<Cursor>>> =
+            RefCell::new((0..max_cursors).map(|_| None).collect());
+        let registers = vec![OwnedValue::Null; max_registers];
         Self {
             pc: 0,
-            btree_table_cursors,
-            btree_index_cursors,
-            pseudo_cursors,
-            sorter_cursors,
+            cursors,
             registers,
             last_compare: None,
             deferred_seek: None,
-            ended_coroutine: HashMap::new(),
+            ended_coroutine: Bitfield::new(),
             regex_cache: RegexCache::new(),
             interrupted: false,
             parameters: HashMap::new(),
@@ -259,16 +326,13 @@ impl ProgramState {
 
     pub fn reset(&mut self) {
         self.pc = 0;
-        self.btree_table_cursors.borrow_mut().clear();
-        self.btree_index_cursors.borrow_mut().clear();
-        self.pseudo_cursors.borrow_mut().clear();
-        self.sorter_cursors.borrow_mut().clear();
-        let max_registers = self.registers.len();
-        self.registers.clear();
-        self.registers.resize(max_registers, OwnedValue::Null);
+        self.cursors.borrow_mut().iter_mut().for_each(|c| *c = None);
+        self.registers
+            .iter_mut()
+            .for_each(|r| *r = OwnedValue::Null);
         self.last_compare = None;
         self.deferred_seek = None;
-        self.ended_coroutine.clear();
+        self.ended_coroutine.0 = [0; 4];
         self.regex_cache.like.clear();
         self.interrupted = false;
         self.parameters.clear();
@@ -276,11 +340,11 @@ impl ProgramState {
 }
 
 macro_rules! must_be_btree_cursor {
-    ($cursor_id:expr, $cursor_ref:expr, $btree_table_cursors:expr, $btree_index_cursors:expr, $insn_name:expr) => {{
+    ($cursor_id:expr, $cursor_ref:expr, $cursors:expr, $insn_name:expr) => {{
         let (_, cursor_type) = $cursor_ref.get($cursor_id).unwrap();
         let cursor = match cursor_type {
-            CursorType::BTreeTable(_) => $btree_table_cursors.get_mut(&$cursor_id).unwrap(),
-            CursorType::BTreeIndex(_) => $btree_index_cursors.get_mut(&$cursor_id).unwrap(),
+            CursorType::BTreeTable(_) => get_cursor_as_table_mut(&mut $cursors, $cursor_id),
+            CursorType::BTreeIndex(_) => get_cursor_as_index_mut(&mut $cursors, $cursor_id),
             CursorType::Pseudo(_) => panic!("{} on pseudo cursor", $insn_name),
             CursorType::Sorter => panic!("{} on sorter cursor", $insn_name),
         };
@@ -333,10 +397,7 @@ impl Program {
             }
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
-            let mut btree_table_cursors = state.btree_table_cursors.borrow_mut();
-            let mut btree_index_cursors = state.btree_index_cursors.borrow_mut();
-            let mut pseudo_cursors = state.pseudo_cursors.borrow_mut();
-            let mut sorter_cursors = state.sorter_cursors.borrow_mut();
+            let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
                     assert!(target_pc.is_offset());
@@ -414,13 +475,8 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::NullRow { cursor_id } => {
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "NullRow"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NullRow");
                     cursor.set_null_flag(true);
                     state.pc += 1;
                 }
@@ -720,10 +776,16 @@ impl Program {
                         BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
                     match cursor_type {
                         CursorType::BTreeTable(_) => {
-                            btree_table_cursors.insert(*cursor_id, cursor);
+                            cursors
+                                .get_mut(*cursor_id)
+                                .unwrap()
+                                .replace(Cursor::new_table(cursor));
                         }
                         CursorType::BTreeIndex(_) => {
-                            btree_index_cursors.insert(*cursor_id, cursor);
+                            cursors
+                                .get_mut(*cursor_id)
+                                .unwrap()
+                                .replace(Cursor::new_index(cursor));
                         }
                         CursorType::Pseudo(_) => {
                             panic!("OpenReadAsync on pseudo cursor");
@@ -743,28 +805,21 @@ impl Program {
                     num_fields: _,
                 } => {
                     let cursor = PseudoCursor::new();
-                    pseudo_cursors.insert(*cursor_id, cursor);
+                    cursors
+                        .get_mut(*cursor_id)
+                        .unwrap()
+                        .replace(Cursor::new_pseudo(cursor));
                     state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "RewindAsync"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "RewindAsync");
                     return_if_io!(cursor.rewind());
                     state.pc += 1;
                 }
                 Insn::LastAsync { cursor_id } => {
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "LastAsync"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "LastAsync");
                     return_if_io!(cursor.last());
                     state.pc += 1;
                 }
@@ -773,13 +828,8 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "LastAwait"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "LastAwait");
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
                         state.pc = pc_if_empty.to_offset_int();
@@ -792,13 +842,8 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "RewindAwait"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "RewindAwait");
                     cursor.wait_for_completion()?;
                     if cursor.is_empty() {
                         state.pc = pc_if_empty.to_offset_int();
@@ -812,9 +857,9 @@ impl Program {
                     dest,
                 } => {
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
-                        let index_cursor = btree_index_cursors.get_mut(&index_cursor_id).unwrap();
+                        let index_cursor = get_cursor_as_index_mut(&mut cursors, index_cursor_id);
                         let rowid = index_cursor.rowid()?;
-                        let table_cursor = btree_table_cursors.get_mut(&table_cursor_id).unwrap();
+                        let table_cursor = get_cursor_as_table_mut(&mut cursors, table_cursor_id);
                         match table_cursor.seek(SeekKey::TableRowId(rowid.unwrap()), SeekOp::EQ)? {
                             CursorResult::Ok(_) => {}
                             CursorResult::IO => {
@@ -829,8 +874,7 @@ impl Program {
                             let cursor = must_be_btree_cursor!(
                                 *cursor_id,
                                 self.cursor_ref,
-                                btree_table_cursors,
-                                btree_index_cursors,
+                                cursors,
                                 "Column"
                             );
                             let record = cursor.record()?;
@@ -845,7 +889,7 @@ impl Program {
                             }
                         }
                         CursorType::Sorter => {
-                            let cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                            let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                             if let Some(record) = cursor.record() {
                                 state.registers[*dest] = record.values[*column].clone();
                             } else {
@@ -853,7 +897,7 @@ impl Program {
                             }
                         }
                         CursorType::Pseudo(_) => {
-                            let cursor = pseudo_cursors.get_mut(cursor_id).unwrap();
+                            let cursor = get_cursor_as_pseudo_mut(&mut cursors, *cursor_id);
                             if let Some(record) = cursor.record() {
                                 state.registers[*dest] = record.values[*column].clone();
                             } else {
@@ -879,25 +923,15 @@ impl Program {
                     return Ok(StepResult::Row(record));
                 }
                 Insn::NextAsync { cursor_id } => {
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "NextAsync"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NextAsync");
                     cursor.set_null_flag(false);
                     return_if_io!(cursor.next());
                     state.pc += 1;
                 }
                 Insn::PrevAsync { cursor_id } => {
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "PrevAsync"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "PrevAsync");
                     cursor.set_null_flag(false);
                     return_if_io!(cursor.prev());
                     state.pc += 1;
@@ -907,13 +941,8 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "PrevAwait"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "PrevAwait");
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
                         state.pc = pc_if_next.to_offset_int();
@@ -926,13 +955,8 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
-                    let cursor = must_be_btree_cursor!(
-                        *cursor_id,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "NextAwait"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NextAwait");
                     cursor.wait_for_completion()?;
                     if !cursor.is_empty() {
                         state.pc = pc_if_next.to_offset_int();
@@ -1062,9 +1086,9 @@ impl Program {
                 }
                 Insn::RowId { cursor_id, dest } => {
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
-                        let index_cursor = btree_index_cursors.get_mut(&index_cursor_id).unwrap();
+                        let index_cursor = get_cursor_as_index_mut(&mut cursors, index_cursor_id);
                         let rowid = index_cursor.rowid()?;
-                        let table_cursor = btree_table_cursors.get_mut(&table_cursor_id).unwrap();
+                        let table_cursor = get_cursor_as_table_mut(&mut cursors, table_cursor_id);
                         match table_cursor.seek(SeekKey::TableRowId(rowid.unwrap()), SeekOp::EQ)? {
                             CursorResult::Ok(_) => {}
                             CursorResult::IO => {
@@ -1074,7 +1098,7 @@ impl Program {
                         }
                     }
 
-                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     if let Some(ref rowid) = cursor.rowid()? {
                         state.registers[*dest] = OwnedValue::Integer(*rowid as i64);
                     } else {
@@ -1088,7 +1112,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
-                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     let rowid = match &state.registers[*src_reg] {
                         OwnedValue::Integer(rowid) => *rowid as u64,
                         OwnedValue::Null => {
@@ -1124,7 +1148,7 @@ impl Program {
                 } => {
                     assert!(target_pc.is_offset());
                     if *is_index {
-                        let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
+                        let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let found = return_if_io!(
@@ -1136,7 +1160,7 @@ impl Program {
                             state.pc += 1;
                         }
                     } else {
-                        let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                        let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
@@ -1169,7 +1193,7 @@ impl Program {
                 } => {
                     assert!(target_pc.is_offset());
                     if *is_index {
-                        let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
+                        let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                         let record_from_regs: OwnedRecord =
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let found = return_if_io!(
@@ -1181,7 +1205,7 @@ impl Program {
                             state.pc += 1;
                         }
                     } else {
-                        let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                        let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                         let rowid = match &state.registers[*start_reg] {
                             OwnedValue::Null => {
                                 // All integer values are greater than null so we just rewind the cursor
@@ -1212,7 +1236,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
-                    let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
@@ -1235,7 +1259,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
-                    let cursor = btree_index_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
@@ -1565,7 +1589,10 @@ impl Program {
                         })
                         .collect();
                     let cursor = Sorter::new(order);
-                    sorter_cursors.insert(*cursor_id, cursor);
+                    cursors
+                        .get_mut(*cursor_id)
+                        .unwrap()
+                        .replace(Cursor::new_sorter(cursor));
                     state.pc += 1;
                 }
                 Insn::SorterData {
@@ -1573,7 +1600,7 @@ impl Program {
                     dest_reg,
                     pseudo_cursor,
                 } => {
-                    let sorter_cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                    let sorter_cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     let record = match sorter_cursor.record() {
                         Some(record) => record.clone(),
                         None => {
@@ -1582,7 +1609,7 @@ impl Program {
                         }
                     };
                     state.registers[*dest_reg] = OwnedValue::Record(record.clone());
-                    let pseudo_cursor = pseudo_cursors.get_mut(pseudo_cursor).unwrap();
+                    let pseudo_cursor = get_cursor_as_pseudo_mut(&mut cursors, *pseudo_cursor);
                     pseudo_cursor.insert(record);
                     state.pc += 1;
                 }
@@ -1590,7 +1617,7 @@ impl Program {
                     cursor_id,
                     record_reg,
                 } => {
-                    let cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(record) => record,
                         _ => unreachable!("SorterInsert on non-record register"),
@@ -1602,11 +1629,12 @@ impl Program {
                     cursor_id,
                     pc_if_empty,
                 } => {
-                    if let Some(cursor) = sorter_cursors.get_mut(cursor_id) {
+                    let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
+                    if cursor.is_empty() {
+                        state.pc = pc_if_empty.to_offset_int();
+                    } else {
                         cursor.sort();
                         state.pc += 1;
-                    } else {
-                        state.pc = pc_if_empty.to_offset_int();
                     }
                 }
                 Insn::SorterNext {
@@ -1614,9 +1642,9 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
-                    let cursor = sorter_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     cursor.next();
-                    if !cursor.is_empty() {
+                    if cursor.has_more() {
                         state.pc = pc_if_next.to_offset_int();
                     } else {
                         state.pc += 1;
@@ -2101,7 +2129,7 @@ impl Program {
                     assert!(jump_on_definition.is_offset());
                     let start_offset = start_offset.to_offset_int();
                     state.registers[*yield_reg] = OwnedValue::Integer(start_offset as i64);
-                    state.ended_coroutine.insert(*yield_reg, false);
+                    state.ended_coroutine.unset(*yield_reg);
                     let jump_on_definition = jump_on_definition.to_offset_int();
                     state.pc = if jump_on_definition == 0 {
                         state.pc + 1
@@ -2111,7 +2139,7 @@ impl Program {
                 }
                 Insn::EndCoroutine { yield_reg } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
-                        state.ended_coroutine.insert(*yield_reg, true);
+                        state.ended_coroutine.set(*yield_reg);
                         let pc: u32 = pc
                             .try_into()
                             .unwrap_or_else(|_| panic!("EndCoroutine: pc overflow: {}", pc));
@@ -2125,11 +2153,7 @@ impl Program {
                     end_offset,
                 } => {
                     if let OwnedValue::Integer(pc) = state.registers[*yield_reg] {
-                        if *state
-                            .ended_coroutine
-                            .get(yield_reg)
-                            .expect("coroutine not initialized")
-                        {
+                        if state.ended_coroutine.get(*yield_reg) {
                             state.pc = end_offset.to_offset_int();
                         } else {
                             let pc: u32 = pc
@@ -2153,7 +2177,7 @@ impl Program {
                     record_reg,
                     flag: _,
                 } => {
-                    let cursor = btree_table_cursors.get_mut(cursor).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(r) => r,
                         _ => unreachable!("Not a record! Cannot insert a non record value."),
@@ -2163,7 +2187,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
-                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     cursor.wait_for_completion()?;
                     // Only update last_insert_rowid for regular table inserts, not schema modifications
                     if cursor.root_page() != 1 {
@@ -2178,12 +2202,12 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::DeleteAsync { cursor_id } => {
-                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     return_if_io!(cursor.delete());
                     state.pc += 1;
                 }
                 Insn::DeleteAwait { cursor_id } => {
-                    let cursor = btree_table_cursors.get_mut(cursor_id).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     cursor.wait_for_completion()?;
                     let prev_changes = self.n_change.get();
                     self.n_change.set(prev_changes + 1);
@@ -2192,7 +2216,7 @@ impl Program {
                 Insn::NewRowid {
                     cursor, rowid_reg, ..
                 } => {
-                    let cursor = btree_table_cursors.get_mut(cursor).unwrap();
+                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
                     // TODO: make io handle rng
                     let rowid = return_if_io!(get_new_rowid(cursor, thread_rng()));
                     state.registers[*rowid_reg] = OwnedValue::Integer(rowid);
@@ -2232,13 +2256,8 @@ impl Program {
                     rowid_reg,
                     target_pc,
                 } => {
-                    let cursor = must_be_btree_cursor!(
-                        *cursor,
-                        self.cursor_ref,
-                        btree_table_cursors,
-                        btree_index_cursors,
-                        "NotExists"
-                    );
+                    let cursor =
+                        must_be_btree_cursor!(*cursor, self.cursor_ref, cursors, "NotExists");
                     let exists = return_if_io!(cursor.exists(&state.registers[*rowid_reg]));
                     if exists {
                         state.pc += 1;
@@ -2258,9 +2277,15 @@ impl Program {
                     let cursor =
                         BTreeCursor::new(pager.clone(), *root_page, self.database_header.clone());
                     if is_index {
-                        btree_index_cursors.insert(*cursor_id, cursor);
+                        cursors
+                            .get_mut(*cursor_id)
+                            .unwrap()
+                            .replace(Cursor::new_index(cursor));
                     } else {
-                        btree_table_cursors.insert(*cursor_id, cursor);
+                        cursors
+                            .get_mut(*cursor_id)
+                            .unwrap()
+                            .replace(Cursor::new_table(cursor));
                     }
                     state.pc += 1;
                 }
@@ -2293,21 +2318,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Close { cursor_id } => {
-                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
-                    match cursor_type {
-                        CursorType::BTreeTable(_) => {
-                            let _ = btree_table_cursors.remove(cursor_id);
-                        }
-                        CursorType::BTreeIndex(_) => {
-                            let _ = btree_index_cursors.remove(cursor_id);
-                        }
-                        CursorType::Pseudo(_) => {
-                            let _ = pseudo_cursors.remove(cursor_id);
-                        }
-                        CursorType::Sorter => {
-                            let _ = sorter_cursors.remove(cursor_id);
-                        }
-                    }
+                    cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
                 Insn::IsNull { src, target_pc } => {
@@ -3437,7 +3448,7 @@ mod tests {
         exec_ltrim, exec_max, exec_min, exec_nullif, exec_quote, exec_random, exec_randomblob,
         exec_round, exec_rtrim, exec_sign, exec_soundex, exec_substring, exec_trim, exec_typeof,
         exec_unhex, exec_unicode, exec_upper, exec_zeroblob, execute_sqlite_version, AggContext,
-        OwnedValue,
+        Bitfield, OwnedValue,
     };
     use std::{collections::HashMap, rc::Rc};
 
@@ -4325,5 +4336,24 @@ mod tests {
             exec_replace(&input_str, &pattern_str, &replace_str),
             expected_str
         );
+    }
+
+    #[test]
+    fn test_bitfield() {
+        let mut bitfield = Bitfield::<4>::new();
+        for i in 0..256 {
+            bitfield.set(i);
+            assert!(bitfield.get(i));
+            for j in 0..i {
+                assert!(bitfield.get(j));
+            }
+            for j in i + 1..256 {
+                assert!(!bitfield.get(j));
+            }
+        }
+        for i in 0..256 {
+            bitfield.unset(i);
+            assert!(!bitfield.get(i));
+        }
     }
 }
