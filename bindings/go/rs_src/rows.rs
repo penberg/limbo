@@ -2,17 +2,17 @@ use crate::{
     statement::TursoStatement,
     types::{ResultCode, TursoValue},
 };
-use limbo_core::{Rows, StepResult, Value};
+use limbo_core::{Statement, StepResult, Value};
 use std::ffi::{c_char, c_void};
 
 pub struct TursoRows<'a> {
-    rows: Rows,
+    rows: Statement,
     cursor: Option<Vec<Value<'a>>>,
     stmt: Box<TursoStatement<'a>>,
 }
 
 impl<'a> TursoRows<'a> {
-    pub fn new(rows: Rows, stmt: Box<TursoStatement<'a>>) -> Self {
+    pub fn new(rows: Statement, stmt: Box<TursoStatement<'a>>) -> Self {
         TursoRows {
             rows,
             stmt,
@@ -40,7 +40,7 @@ pub extern "C" fn rows_next(ctx: *mut c_void) -> ResultCode {
     }
     let ctx = TursoRows::from_ptr(ctx);
 
-    match ctx.rows.next_row() {
+    match ctx.rows.step() {
         Ok(StepResult::Row(row)) => {
             ctx.cursor = Some(row.values);
             ResultCode::Row
@@ -133,6 +133,6 @@ pub extern "C" fn free_rows(rows: *mut c_void) {
         return;
     }
     unsafe {
-        let _ = Box::from_raw(rows as *mut Rows);
+        let _ = Box::from_raw(rows as *mut Statement);
     }
 }

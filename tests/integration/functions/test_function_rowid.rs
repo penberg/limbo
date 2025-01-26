@@ -11,7 +11,7 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     let mut insert_query = conn.query("INSERT INTO test_rowid (id, val) VALUES (NULL, 'test1')")?;
     if let Some(ref mut rows) = insert_query {
         loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::IO => {
                     tmp_db.io.run_once()?;
                 }
@@ -25,7 +25,7 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     let mut select_query = conn.query("SELECT last_insert_rowid()")?;
     if let Some(ref mut rows) = select_query {
         loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     if let Value::Integer(id) = row.values[0] {
                         assert_eq!(id, 1, "First insert should have rowid 1");
@@ -44,7 +44,7 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     // Test explicit rowid
     match conn.query("INSERT INTO test_rowid (id, val) VALUES (5, 'test2')") {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::IO => {
                     tmp_db.io.run_once()?;
                 }
@@ -60,7 +60,7 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     let mut last_id = 0;
     match conn.query("SELECT last_insert_rowid()") {
         Ok(Some(ref mut rows)) => loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     if let Value::Integer(id) = row.values[0] {
                         last_id = id;

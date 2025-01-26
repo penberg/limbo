@@ -95,7 +95,7 @@ impl<'a> ImportFile<'a> {
                 match self.conn.query(insert_string) {
                     Ok(rows) => {
                         if let Some(mut rows) = rows {
-                            while let Ok(x) = rows.next_row() {
+                            while let Ok(x) = rows.step() {
                                 match x {
                                     limbo_core::StepResult::IO => {
                                         self.io.run_once().unwrap();

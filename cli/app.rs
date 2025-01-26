@@ -3,7 +3,7 @@ use crate::{
     opcodes_dictionary::OPCODE_DESCRIPTIONS,
 };
 use cli_table::{Cell, Table};
-use limbo_core::{Database, LimboError, Rows, StepResult, Value};
+use limbo_core::{Database, LimboError, Statement, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
 use std::{
@@ -614,7 +614,7 @@ impl Limbo {
     fn print_query_result(
         &mut self,
         sql: &str,
-        mut output: Result<Option<Rows>, LimboError>,
+        mut output: Result<Option<Statement>, LimboError>,
     ) -> anyhow::Result<()> {
         match output {
             Ok(Some(ref mut rows)) => match self.opts.output_mode {
@@ -624,7 +624,7 @@ impl Limbo {
                         return Ok(());
                     }
 
-                    match rows.next_row() {
+                    match rows.step() {
                         Ok(StepResult::Row(row)) => {
                             for (i, value) in row.values.iter().enumerate() {
                                 if i > 0 {
@@ -669,7 +669,7 @@ impl Limbo {
                     }
                     let mut table_rows: Vec<Vec<_>> = vec![];
                     loop {
-                        match rows.next_row() {
+                        match rows.step() {
                             Ok(StepResult::Row(row)) => {
                                 table_rows.push(
                                     row.values
@@ -739,7 +739,7 @@ impl Limbo {
             Ok(Some(ref mut rows)) => {
                 let mut found = false;
                 loop {
-                    match rows.next_row()? {
+                    match rows.step()? {
                         StepResult::Row(row) => {
                             if let Some(Value::Text(schema)) = row.values.first() {
                                 let _ = self.write_fmt(format_args!("{};", schema));
@@ -796,7 +796,7 @@ impl Limbo {
             Ok(Some(ref mut rows)) => {
                 let mut tables = String::new();
                 loop {
-                    match rows.next_row()? {
+                    match rows.step()? {
                         StepResult::Row(row) => {
                             if let Some(Value::Text(table)) = row.values.first() {
                                 tables.push_str(table);
