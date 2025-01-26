@@ -2387,6 +2387,11 @@ impl Program {
                         exec_or(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
+                Insn::Noop => {
+                    // Do nothing
+                    // Advance the program counter for the next opcode
+                    state.pc += 1
+                }
             }
         }
     }
