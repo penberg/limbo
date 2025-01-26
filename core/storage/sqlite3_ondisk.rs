@@ -333,7 +333,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     Ok(())
 }
 
-fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
+pub fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
     buf[0..16].copy_from_slice(&header.magic);
     buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
     buf[18] = header.write_version;
