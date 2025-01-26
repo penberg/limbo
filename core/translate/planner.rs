@@ -10,7 +10,7 @@ use crate::{
     vdbe::BranchOffset,
     Result,
 };
-use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit};
+use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit, UnaryOperator};
 
 pub const ROWID: &str = "rowid";
 
@@ -566,25 +566,34 @@ fn parse_join(
     })
 }
 
-pub fn parse_limit(limit: Limit) -> Result<(Option<usize>, Option<usize>)> {
-    let offset = match limit.offset {
-        Some(offset_expr) => {
-            if let Expr::Literal(ast::Literal::Numeric(n)) = offset_expr {
-                n.parse().ok()
-            } else {
-                crate::bail_parse_error!("Invalid OFFSET clause");
-            }
-        }
+pub fn parse_limit(limit: Limit) -> Result<(Option<isize>, Option<isize>)> {
+    let offset_val = match limit.offset {
+        Some(offset_expr) => match offset_expr {
+            Expr::Literal(ast::Literal::Numeric(n)) => n.parse().ok(),
+            // If OFFSET is negative, the result is as if OFFSET is zero
+            Expr::Unary(UnaryOperator::Negative, expr) => match *expr {
+                Expr::Literal(ast::Literal::Numeric(n)) => n.parse::<isize>().ok().map(|num| -num),
+                _ => crate::bail_parse_error!("Invalid OFFSET clause"),
+            },
+            _ => crate::bail_parse_error!("Invalid OFFSET clause"),
+        },
         None => Some(0),
     };
 
     if let Expr::Literal(ast::Literal::Numeric(n)) = limit.expr {
-        Ok((n.parse().ok(), offset))
+        Ok((n.parse().ok(), offset_val))
+    } else if let Expr::Unary(UnaryOperator::Negative, expr) = limit.expr {
+        if let Expr::Literal(ast::Literal::Numeric(n)) = *expr {
+            let limit_val = n.parse::<isize>().ok().map(|num| -num);
+            Ok((limit_val, offset_val))
+        } else {
+            crate::bail_parse_error!("Invalid LIMIT clause");
+        }
     } else if let Expr::Id(id) = limit.expr {
         if id.0.eq_ignore_ascii_case("true") {
-            Ok((Some(1), offset))
+            Ok((Some(1), offset_val))
         } else if id.0.eq_ignore_ascii_case("false") {
-            Ok((Some(0), offset))
+            Ok((Some(0), offset_val))
         } else {
             crate::bail_parse_error!("Invalid LIMIT clause");
         }

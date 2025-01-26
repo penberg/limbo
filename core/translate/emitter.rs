@@ -316,7 +316,7 @@ fn emit_delete_insns(
     program: &mut ProgramBuilder,
     t_ctx: &mut TranslateCtx,
     source: &SourceOperator,
-    limit: &Option<usize>,
+    limit: &Option<isize>,
 ) -> Result<()> {
     let cursor_id = match source {
         SourceOperator::Scan {
