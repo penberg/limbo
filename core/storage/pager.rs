@@ -157,7 +157,7 @@ pub struct Pager {
     /// I/O interface for input/output operations.
     pub io: Arc<dyn crate::io::IO>,
     dirty_pages: Rc<RefCell<HashSet<usize>>>,
-    db_header: Rc<RefCell<DatabaseHeader>>,
+    pub db_header: Rc<RefCell<DatabaseHeader>>,
 
     flush_info: RefCell<FlushInfo>,
     checkpoint_state: RefCell<CheckpointState>,
