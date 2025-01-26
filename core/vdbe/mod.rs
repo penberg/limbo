@@ -19,6 +19,7 @@
 
 pub mod builder;
 mod datetime;
+mod strftime;
 pub mod explain;
 pub mod insn;
 pub mod likeop;
