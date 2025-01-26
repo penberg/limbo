@@ -1,4 +1,4 @@
-package turso
+package limbo
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"unsafe"
 )
 
-// only construct tursoStmt with initStmt function to ensure proper initialization
-type tursoStmt struct {
+// only construct limboStmt with initStmt function to ensure proper initialization
+type limboStmt struct {
 	ctx           uintptr
 	sql           string
 	query         stmtQueryFn
@@ -19,7 +19,7 @@ type tursoStmt struct {
 }
 
 // Initialize/register the FFI function pointers for the statement methods
-func initStmt(ctx uintptr, sql string) *tursoStmt {
+func initStmt(ctx uintptr, sql string) *limboStmt {
 	var query stmtQueryFn
 	var execute stmtExecuteFn
 	var getParamCount func(uintptr) int32
@@ -27,17 +27,17 @@ func initStmt(ctx uintptr, sql string) *tursoStmt {
 	for i := range methods {
 		methods[i].initFunc()
 	}
-	return &tursoStmt{
+	return &limboStmt{
 		ctx: uintptr(ctx),
 		sql: sql,
 	}
 }
 
-func (st *tursoStmt) NumInput() int {
+func (st *limboStmt) NumInput() int {
 	return int(st.getParamCount(st.ctx))
 }
 
-func (st *tursoStmt) Exec(args []driver.Value) (driver.Result, error) {
+func (st *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
 	argArray, err := buildArgs(args)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (st *tursoStmt) Exec(args []driver.Value) (driver.Result, error) {
 	}
 }
 
-func (st *tursoStmt) Query(args []driver.Value) (driver.Rows, error) {
+func (st *limboStmt) Query(args []driver.Value) (driver.Rows, error) {
 	queryArgs, err := buildArgs(args)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (st *tursoStmt) Query(args []driver.Value) (driver.Rows, error) {
 	return initRows(rowsPtr), nil
 }
 
-func (ts *tursoStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+func (ts *limboStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	stripped := namedValueToValue(args)
 	argArray, err := getArgsPtr(stripped)
 	if err != nil {
@@ -99,7 +99,7 @@ func (ts *tursoStmt) ExecContext(ctx context.Context, query string, args []drive
 	}
 }
 
-func (st *tursoStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+func (st *limboStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	queryArgs, err := buildNamedArgs(args)
 	if err != nil {
 		return nil, err
@@ -111,8 +111,8 @@ func (st *tursoStmt) QueryContext(ctx context.Context, args []driver.NamedValue)
 	return initRows(rowsPtr), nil
 }
 
-// only construct tursoRows with initRows function to ensure proper initialization
-type tursoRows struct {
+// only construct limboRows with initRows function to ensure proper initialization
+type limboRows struct {
 	ctx       uintptr
 	columns   []string
 	closed    bool
@@ -124,8 +124,8 @@ type tursoRows struct {
 }
 
 // Initialize/register the FFI function pointers for the rows methods
-// DO NOT construct 'tursoRows' without this function
-func initRows(ctx uintptr) *tursoRows {
+// DO NOT construct 'limboRows' without this function
+func initRows(ctx uintptr) *limboRows {
 	var getCols func(uintptr, *uint) uintptr
 	var getValue func(uintptr, int32) uintptr
 	var closeRows func(uintptr) uintptr
@@ -141,7 +141,7 @@ func initRows(ctx uintptr) *tursoRows {
 		methods[i].initFunc()
 	}
 
-	return &tursoRows{
+	return &limboRows{
 		ctx:       ctx,
 		getCols:   getCols,
 		getValue:  getValue,
@@ -151,7 +151,7 @@ func initRows(ctx uintptr) *tursoRows {
 	}
 }
 
-func (r *tursoRows) Columns() []string {
+func (r *limboRows) Columns() []string {
 	if r.columns == nil {
 		var columnCount uint
 		colArrayPtr := r.getCols(r.ctx, &columnCount)
@@ -166,7 +166,7 @@ func (r *tursoRows) Columns() []string {
 	return r.columns
 }
 
-func (r *tursoRows) Close() error {
+func (r *limboRows) Close() error {
 	if r.closed {
 		return nil
 	}
@@ -176,7 +176,7 @@ func (r *tursoRows) Close() error {
 	return nil
 }
 
-func (r *tursoRows) Next(dest []driver.Value) error {
+func (r *limboRows) Next(dest []driver.Value) error {
 	status := r.next(r.ctx)
 	switch ResultCode(status) {
 	case Row:

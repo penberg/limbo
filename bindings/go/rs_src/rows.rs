@@ -1,19 +1,19 @@
 use crate::{
-    statement::TursoStatement,
-    types::{ResultCode, TursoValue},
+    statement::LimboStatement,
+    types::{LimboValue, ResultCode},
 };
 use limbo_core::{Statement, StepResult, Value};
 use std::ffi::{c_char, c_void};
 
-pub struct TursoRows<'a> {
+pub struct LimboRows<'a> {
     rows: Statement,
     cursor: Option<Vec<Value<'a>>>,
-    stmt: Box<TursoStatement<'a>>,
+    stmt: Box<LimboStatement<'a>>,
 }
 
-impl<'a> TursoRows<'a> {
-    pub fn new(rows: Statement, stmt: Box<TursoStatement<'a>>) -> Self {
-        TursoRows {
+impl<'a> LimboRows<'a> {
+    pub fn new(rows: Statement, stmt: Box<LimboStatement<'a>>) -> Self {
+        LimboRows {
             rows,
             stmt,
             cursor: None,
@@ -25,11 +25,11 @@ impl<'a> TursoRows<'a> {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    pub fn from_ptr(ptr: *mut c_void) -> &'static mut TursoRows<'a> {
+    pub fn from_ptr(ptr: *mut c_void) -> &'static mut LimboRows<'a> {
         if ptr.is_null() {
             panic!("Null pointer");
         }
-        unsafe { &mut *(ptr as *mut TursoRows) }
+        unsafe { &mut *(ptr as *mut LimboRows) }
     }
 }
 
@@ -38,7 +38,7 @@ pub extern "C" fn rows_next(ctx: *mut c_void) -> ResultCode {
     if ctx.is_null() {
         return ResultCode::Error;
     }
-    let ctx = TursoRows::from_ptr(ctx);
+    let ctx = LimboRows::from_ptr(ctx);
 
     match ctx.rows.step() {
         Ok(StepResult::Row(row)) => {
@@ -61,11 +61,11 @@ pub extern "C" fn rows_get_value(ctx: *mut c_void, col_idx: usize) -> *const c_v
     if ctx.is_null() {
         return std::ptr::null();
     }
-    let ctx = TursoRows::from_ptr(ctx);
+    let ctx = LimboRows::from_ptr(ctx);
 
     if let Some(ref cursor) = ctx.cursor {
         if let Some(value) = cursor.get(col_idx) {
-            let val = TursoValue::from_value(value);
+            let val = LimboValue::from_value(value);
             return val.to_ptr();
         }
     }
@@ -87,7 +87,7 @@ pub extern "C" fn rows_get_columns(
     if rows_ptr.is_null() || out_length.is_null() {
         return std::ptr::null_mut();
     }
-    let rows = TursoRows::from_ptr(rows_ptr);
+    let rows = LimboRows::from_ptr(rows_ptr);
     let c_strings: Vec<std::ffi::CString> = rows
         .rows
         .columns()
@@ -108,7 +108,7 @@ pub extern "C" fn rows_get_columns(
 #[no_mangle]
 pub extern "C" fn rows_close(rows_ptr: *mut c_void) {
     if !rows_ptr.is_null() {
-        let _ = unsafe { Box::from_raw(rows_ptr as *mut TursoRows) };
+        let _ = unsafe { Box::from_raw(rows_ptr as *mut LimboRows) };
     }
 }
 

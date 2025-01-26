@@ -26,7 +26,7 @@ pub enum ValueType {
 }
 
 #[repr(C)]
-pub struct TursoValue {
+pub struct LimboValue {
     pub value_type: ValueType,
     pub value: ValueUnion,
 }
@@ -131,9 +131,9 @@ impl ValueUnion {
     }
 }
 
-impl TursoValue {
+impl LimboValue {
     pub fn new(value_type: ValueType, value: ValueUnion) -> Self {
-        TursoValue { value_type, value }
+        LimboValue { value_type, value }
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -144,16 +144,16 @@ impl TursoValue {
     pub fn from_value(value: &limbo_core::Value<'_>) -> Self {
         match value {
             limbo_core::Value::Integer(i) => {
-                TursoValue::new(ValueType::Integer, ValueUnion::from_int(*i))
+                LimboValue::new(ValueType::Integer, ValueUnion::from_int(*i))
             }
             limbo_core::Value::Float(r) => {
-                TursoValue::new(ValueType::Real, ValueUnion::from_real(*r))
+                LimboValue::new(ValueType::Real, ValueUnion::from_real(*r))
             }
-            limbo_core::Value::Text(s) => TursoValue::new(ValueType::Text, ValueUnion::from_str(s)),
+            limbo_core::Value::Text(s) => LimboValue::new(ValueType::Text, ValueUnion::from_str(s)),
             limbo_core::Value::Blob(b) => {
-                TursoValue::new(ValueType::Blob, ValueUnion::from_bytes(b))
+                LimboValue::new(ValueType::Blob, ValueUnion::from_bytes(b))
             }
-            limbo_core::Value::Null => TursoValue::new(ValueType::Null, ValueUnion::from_null()),
+            limbo_core::Value::Null => LimboValue::new(ValueType::Null, ValueUnion::from_null()),
         }
     }
 

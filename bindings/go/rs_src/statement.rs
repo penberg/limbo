@@ -1,6 +1,6 @@
-use crate::rows::TursoRows;
-use crate::types::{AllocPool, ResultCode, TursoValue};
-use crate::TursoConn;
+use crate::rows::LimboRows;
+use crate::types::{AllocPool, LimboValue, ResultCode};
+use crate::LimboConn;
 use limbo_core::{Statement, StepResult};
 use std::ffi::{c_char, c_void};
 use std::num::NonZero;
@@ -12,11 +12,11 @@ pub extern "C" fn db_prepare(ctx: *mut c_void, query: *const c_char) -> *mut c_v
     }
     let query_str = unsafe { std::ffi::CStr::from_ptr(query) }.to_str().unwrap();
 
-    let db = TursoConn::from_ptr(ctx);
+    let db = LimboConn::from_ptr(ctx);
 
     let stmt = db.conn.prepare(query_str.to_string());
     match stmt {
-        Ok(stmt) => TursoStatement::new(stmt, db).to_ptr(),
+        Ok(stmt) => LimboStatement::new(stmt, db).to_ptr(),
         Err(_) => std::ptr::null_mut(),
     }
 }
@@ -24,14 +24,14 @@ pub extern "C" fn db_prepare(ctx: *mut c_void, query: *const c_char) -> *mut c_v
 #[no_mangle]
 pub extern "C" fn stmt_execute(
     ctx: *mut c_void,
-    args_ptr: *mut TursoValue,
+    args_ptr: *mut LimboValue,
     arg_count: usize,
     changes: *mut i64,
 ) -> ResultCode {
     if ctx.is_null() {
         return ResultCode::Error;
     }
-    let stmt = TursoStatement::from_ptr(ctx);
+    let stmt = LimboStatement::from_ptr(ctx);
 
     let args = if !args_ptr.is_null() && arg_count > 0 {
         unsafe { std::slice::from_raw_parts(args_ptr, arg_count) }
@@ -78,20 +78,20 @@ pub extern "C" fn stmt_parameter_count(ctx: *mut c_void) -> i32 {
     if ctx.is_null() {
         return -1;
     }
-    let stmt = TursoStatement::from_ptr(ctx);
+    let stmt = LimboStatement::from_ptr(ctx);
     stmt.statement.parameters_count() as i32
 }
 
 #[no_mangle]
 pub extern "C" fn stmt_query(
     ctx: *mut c_void,
-    args_ptr: *mut TursoValue,
+    args_ptr: *mut LimboValue,
     args_count: usize,
 ) -> *mut c_void {
     if ctx.is_null() {
         return std::ptr::null_mut();
     }
-    let stmt = TursoStatement::from_ptr(ctx);
+    let stmt = LimboStatement::from_ptr(ctx);
     let args = if !args_ptr.is_null() && args_count > 0 {
         unsafe { std::slice::from_raw_parts(args_ptr, args_count) }
     } else {
@@ -104,21 +104,21 @@ pub extern "C" fn stmt_query(
     match stmt.statement.query() {
         Ok(rows) => {
             let stmt = unsafe { Box::from_raw(stmt) };
-            TursoRows::new(rows, stmt).to_ptr()
+            LimboRows::new(rows, stmt).to_ptr()
         }
         Err(_) => std::ptr::null_mut(),
     }
 }
 
-pub struct TursoStatement<'conn> {
+pub struct LimboStatement<'conn> {
     pub statement: Statement,
-    pub conn: &'conn mut TursoConn,
+    pub conn: &'conn mut LimboConn,
     pub pool: AllocPool,
 }
 
-impl<'conn> TursoStatement<'conn> {
-    pub fn new(statement: Statement, conn: &'conn mut TursoConn) -> Self {
-        TursoStatement {
+impl<'conn> LimboStatement<'conn> {
+    pub fn new(statement: Statement, conn: &'conn mut LimboConn) -> Self {
+        LimboStatement {
             statement,
             conn,
             pool: AllocPool::new(),
@@ -130,10 +130,10 @@ impl<'conn> TursoStatement<'conn> {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    fn from_ptr(ptr: *mut c_void) -> &'static mut TursoStatement<'conn> {
+    fn from_ptr(ptr: *mut c_void) -> &'static mut LimboStatement<'conn> {
         if ptr.is_null() {
             panic!("Null pointer");
         }
-        unsafe { &mut *(ptr as *mut TursoStatement) }
+        unsafe { &mut *(ptr as *mut LimboStatement) }
     }
 }
