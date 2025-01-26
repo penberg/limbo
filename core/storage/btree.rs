@@ -1839,7 +1839,125 @@ impl BTreeCursor {
     }
 
     pub fn delete(&mut self) -> Result<CursorResult<()>> {
-        println!("rowid: {:?}", self.rowid.borrow());
+        let page = self.stack.top();
+        return_if_locked!(page);
+
+        if !page.is_loaded() {
+            self.pager.load_page(page.clone())?;
+            return Ok(CursorResult::IO);
+        }
+
+        let target_rowid = match self.rowid.borrow().as_ref() {
+            Some(rowid) => *rowid,
+            None => return Ok(CursorResult::Ok(())),
+        };
+
+        let contents = page.get().contents.as_ref().unwrap();
+
+        // TODO(Krishna): We are doing this linear search here because seek() is returning the index of previous cell.
+        // And the fix is currently not very clear to me.
+        // This finds the cell with matching rowid with in a page.
+        let mut cell_idx = None;
+        for idx in 0..contents.cell_count() {
+            let cell = contents.cell_get(
+                idx,
+                self.pager.clone(),
+                self.payload_overflow_threshold_max(contents.page_type()),
+                self.payload_overflow_threshold_min(contents.page_type()),
+                self.usable_space(),
+            )?;
+
+            if let BTreeCell::TableLeafCell(leaf_cell) = cell {
+                if leaf_cell._rowid == target_rowid {
+                    cell_idx = Some(idx);
+                    break;
+                }
+            }
+        }
+
+        let cell_idx = match cell_idx {
+            Some(idx) => idx,
+            None => return Ok(CursorResult::Ok(())),
+        };
+
+        let contents = page.get().contents.as_ref().unwrap();
+        let cell = contents.cell_get(
+            cell_idx,
+            self.pager.clone(),
+            self.payload_overflow_threshold_max(contents.page_type()),
+            self.payload_overflow_threshold_min(contents.page_type()),
+            self.usable_space(),
+        )?;
+
+        if cell_idx >= contents.cell_count() {
+            return Err(LimboError::Corrupt(format!(
+                "Corrupted page: cell index {} is out of bounds for page with {} cells",
+                cell_idx,
+                contents.cell_count()
+            )));
+        }
+
+        let original_child_pointer = match &cell {
+            BTreeCell::TableInteriorCell(interior) => Some(interior._left_child_page),
+            _ => None,
+        };
+
+        return_if_io!(self.clear_overflow_pages(&cell));
+
+        let page = self.stack.top();
+        return_if_locked!(page);
+        if !page.is_loaded() {
+            self.pager.load_page(page.clone())?;
+            return Ok(CursorResult::IO);
+        }
+
+        page.set_dirty();
+        self.pager.add_dirty(page.get().id);
+
+        let contents = page.get().contents.as_mut().unwrap();
+
+        // If this is an interior node, we need to handle deletion differently
+        // For interior nodes:
+        // 1. Move cursor to largest entry in left subtree
+        // 2. Copy that entry to replace the one being deleted
+        // 3. Delete the leaf entry
+        if !contents.is_leaf() {
+            // 1. Move cursor to largest entry in left subtree
+            return_if_io!(self.prev());
+
+            let leaf_page = self.stack.top();
+
+            // 2. Copy that entry to replace the one being deleted
+            let leaf_contents = leaf_page.get().contents.as_ref().unwrap();
+            let leaf_cell_idx = self.stack.current_cell_index() as usize - 1;
+            let predecessor_cell = leaf_contents.cell_get(
+                leaf_cell_idx,
+                self.pager.clone(),
+                self.payload_overflow_threshold_max(leaf_contents.page_type()),
+                self.payload_overflow_threshold_min(leaf_contents.page_type()),
+                self.usable_space(),
+            )?;
+
+            // 3. Create an interior cell from the leaf cell
+            let mut cell_payload: Vec<u8> = Vec::new();
+            match predecessor_cell {
+                BTreeCell::TableLeafCell(leaf_cell) => {
+                    // Format: [left child page (4 bytes)][rowid varint]
+                    if let Some(child_pointer) = original_child_pointer {
+                        cell_payload.extend_from_slice(&child_pointer.to_be_bytes());
+                        write_varint_to_vec(leaf_cell._rowid, &mut cell_payload);
+                    }
+                }
+                _ => unreachable!("Expected table leaf cell"),
+            }
+            self.insert_into_cell(contents, &cell_payload, cell_idx);
+            self.drop_cell(contents, cell_idx);
+        } else {
+            // For leaf nodes, simply remove the cell
+            self.drop_cell(contents, cell_idx);
+        }
+
+        // TODO(Krishna): Implement balance after delete. I will implement after balance_nonroot is extended.
         Ok(CursorResult::Ok(()))
     }
 
