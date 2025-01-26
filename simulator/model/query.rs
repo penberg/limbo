@@ -140,6 +140,7 @@ impl Create {
 pub(crate) struct Select {
     pub(crate) table: String,
     pub(crate) predicate: Predicate,
+    pub(crate) limit: Option<usize>,
 }
 
 impl Select {
@@ -190,7 +191,14 @@ impl Display for Query {
             Self::Select(Select {
                 table,
                 predicate: guard,
-            }) => write!(f, "SELECT * FROM {} WHERE {}", table, guard),
+                limit,
+            }) => write!(
+                f,
+                "SELECT * FROM {} WHERE {}{}",
+                table,
+                guard,
+                limit.map_or("".to_string(), |l| format!(" LIMIT {}", l))
+            ),
             Self::Insert(Insert { table, values }) => {
                 write!(f, "INSERT INTO {} VALUES ", table)?;
                 for (i, row) in values.iter().enumerate() {

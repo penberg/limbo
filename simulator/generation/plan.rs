@@ -282,6 +282,9 @@ impl Interactions {
                             query.shadow(env);
                         }
                     }
+                    Property::SelectLimit { select } => {
+                        select.shadow(env);
+                    },
                 }
                 for interaction in property.interactions() {
                     match interaction {

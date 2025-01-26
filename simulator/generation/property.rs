@@ -62,6 +62,17 @@ pub(crate) enum Property {
         /// Additional interactions in the middle of the property
         queries: Vec<Query>,
     },
+    /// Select Limit is a property in which the select query
+    /// has a limit clause that is respected by the query.
+    /// The execution of the property is as follows
+    ///    SELECT * FROM <t> WHERE <predicate> LIMIT <n>
+    /// This property is a single-interaction property.
+    /// The interaction has the following constraints;
+    /// - The select query will respect the limit clause.
+    SelectLimit {
+        /// The select query
+        select: Select,
+    },
 }
 
 impl Property {
@@ -69,6 +80,7 @@ impl Property {
         match self {
             Property::InsertSelect { .. } => "Insert-Select".to_string(),
             Property::DoubleCreateFailure { .. } => "Double-Create-Failure".to_string(),
+            Property::SelectLimit { .. } => "Select-Limit".to_string(),
         }
     }
     /// interactions construct a list of interactions, which is an executable representation of the property.
@@ -164,6 +176,38 @@ impl Property {
 
                 interactions
             }
+            Property::SelectLimit { select } => {
+                let table_name = select.table.clone();
+
+                let assumption = Interaction::Assumption(Assertion {
+                    message: format!("table {} exists", table_name),
+                    func: Box::new({
+                        let table_name = table_name.clone();
+                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
+                            Ok(env.tables.iter().any(|t| t.name == table_name))
+                        }
+                    }),
+                });
+
+                let limit = select.limit.clone().unwrap_or(0);
+
+                let assertion = Interaction::Assertion(Assertion {
+                    message: "select query should respect the limit clause".to_string(),
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                        let last = stack.last().unwrap();
+                        match last {
+                            Ok(rows) => Ok(limit >= rows.len()),
+                            Err(_) => Ok(true),
+                        }
+                    }),
+                });
+
+                vec![
+                    assumption,
+                    Interaction::Query(Query::Select(select.clone())),
+                    assertion,
+                ]
+            }
         }
     }
 }
@@ -248,6 +292,7 @@ fn property_insert_select<R: rand::Rng>(
     let select_query = Select {
         table: table.name.clone(),
         predicate: Predicate::arbitrary_from(rng, (table, &row)),
+        limit: None,
     };
 
     Property::InsertSelect {
@@ -256,6 +301,21 @@ fn property_insert_select<R: rand::Rng>(
         queries,
         select: select_query,
     }
+}
+
+fn property_select_limit<R: rand::Rng>(
+    rng: &mut R,
+    env: &SimulatorEnv,
+) -> Property {
+    // Get a random table
+    let table = pick(&env.tables, rng);
+    // Select the table
+    let select = Select {
+        table: table.name.clone(),
+        predicate: Predicate::arbitrary_from(rng, table),
+        limit: Some(rng.gen_range(1..=5)),
+    };
+    Property::SelectLimit { select }
 }
 
 fn property_double_create_failure<R: rand::Rng>(
@@ -311,6 +371,10 @@ impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
                 (
                     remaining_.create / 2.0,
                     Box::new(|rng: &mut R| property_double_create_failure(rng, env, &remaining_)),
+                ),
+                (
+                    remaining_.read,
+                    Box::new(|rng: &mut R| property_select_limit(rng, env)),
                 ),
             ],
             rng,

@@ -23,6 +23,7 @@ impl ArbitraryFrom<&Vec<Table>> for Select {
         Self {
             table: table.name.clone(),
             predicate: Predicate::arbitrary_from(rng, table),
+            limit: Some(rng.gen_range(0..=1000)),
         }
     }
 }
@@ -33,6 +34,7 @@ impl ArbitraryFrom<&Vec<&Table>> for Select {
         Self {
             table: table.name.clone(),
             predicate: Predicate::arbitrary_from(rng, *table),
+            limit: Some(rng.gen_range(0..=1000)),
         }
     }
 }
