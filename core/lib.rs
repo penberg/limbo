@@ -47,6 +47,7 @@ pub use error::LimboError;
 use translate::select::prepare_select_plan;
 pub type Result<T, E = LimboError> = std::result::Result<T, E>;
 
+use crate::storage::wal::CheckpointResult;
 use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
 pub use io::PlatformIO;
@@ -61,7 +62,6 @@ pub use storage::pager::Page;
 pub use storage::pager::Pager;
 pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
-use crate::storage::wal::CheckpointResult;
 
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
@@ -395,9 +395,9 @@ impl Connection {
         Ok(())
     }
 
-    pub fn checkpoint(&self) -> Result<(CheckpointResult)> {
-        self.pager.clear_page_cache();
-        Ok(())
+    pub fn checkpoint(&self) -> Result<CheckpointResult> {
+        let checkpoint_result = self.pager.clear_page_cache();
+        Ok(checkpoint_result)
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -410,7 +410,7 @@ impl Connection {
         loop {
             // TODO: make this async?
             match self.pager.checkpoint()? {
-                CheckpointStatus::Done => {
+                CheckpointStatus::Done(_) => {
                     return Ok(());
                 }
                 CheckpointStatus::IO => {

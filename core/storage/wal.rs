@@ -1,9 +1,9 @@
+use log::{debug, trace};
 use std::collections::HashMap;
+use std::fmt::Formatter;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
-use std::{cell::RefCell, rc::Rc, sync::Arc};
-
-use log::{debug, trace};
+use std::{cell::RefCell, fmt, rc::Rc, sync::Arc};
 
 use crate::io::{File, SyncCompletion, IO};
 use crate::result::LimboResult;
@@ -27,8 +27,19 @@ pub const WRITE_LOCK: u32 = 2;
 
 #[derive(Debug)]
 pub struct CheckpointResult {
-    /// number of pages moved successfully from WAL to db file after checkpoint
-    nbackfills: u64,
+    /// number of frames in WAL
+    pub num_wal_frames: u64,
+    /// number of frames moved successfully from WAL to db file after checkpoint
+    pub num_checkpointed_frames: u64,
+}
+
+impl CheckpointResult {
+    pub fn new() -> Self {
+        Self {
+            num_wal_frames: 0,
+            num_checkpointed_frames: 0,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -165,7 +176,7 @@ pub trait Wal {
 
 // Syncing requires a state machine because we need to schedule a sync and then wait until it is
 // finished. If we don't wait there will be undefined behaviour that no one wants to debug.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 enum SyncState {
     NotSyncing,
     Syncing,
@@ -182,7 +193,7 @@ pub enum CheckpointState {
 }
 
 pub enum CheckpointStatus {
-    Done,
+    Done(CheckpointResult),
     IO,
 }
 
@@ -200,6 +211,17 @@ struct OngoingCheckpoint {
     min_frame: u64,
     max_frame: u64,
     current_page: u64,
+}
+
+impl fmt::Debug for OngoingCheckpoint {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OngoingCheckpoint")
+            .field("state", &self.state)
+            .field("min_frame", &self.min_frame)
+            .field("max_frame", &self.max_frame)
+            .field("current_page", &self.current_page)
+            .finish()
+    }
 }
 
 #[allow(dead_code)]
@@ -222,6 +244,23 @@ pub struct WalFile {
     max_frame: u64,
     /// Start of range to look for frames range=(minframe..max_frame)
     min_frame: u64,
+}
+
+impl fmt::Debug for WalFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WalFile")
+            .field("sync_state", &self.sync_state)
+            .field("syncing", &self.syncing)
+            .field("page_size", &self.page_size)
+            .field("shared", &self.shared)
+            .field("ongoing_checkpoint", &self.ongoing_checkpoint)
+            .field("checkpoint_threshold", &self.checkpoint_threshold)
+            .field("max_frame_read_lock_index", &self.max_frame_read_lock_index)
+            .field("max_frame", &self.max_frame)
+            .field("min_frame", &self.min_frame)
+            // Excluding other fields
+            .finish()
+    }
 }
 
 // TODO(pere): lock only important parts + pin WalFileShared
@@ -252,6 +291,21 @@ pub struct WalFileShared {
     /// There is only one write allowed in WAL mode. This lock takes care of ensuring there is only
     /// one used.
     write_lock: LimboRwLock,
+}
+
+impl fmt::Debug for WalFileShared {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WalFileShared")
+            .field("wal_header", &self.wal_header)
+            .field("min_frame", &self.min_frame)
+            .field("max_frame", &self.max_frame)
+            .field("nbackfills", &self.nbackfills)
+            .field("frame_cache", &self.frame_cache)
+            .field("pages_in_frames", &self.pages_in_frames)
+            .field("last_checksum", &self.last_checksum)
+            // Excluding `file`, `read_locks`, and `write_lock`
+            .finish()
+    }
 }
 
 impl Wal for WalFile {
@@ -534,6 +588,13 @@ impl Wal for WalFile {
                         return Ok(CheckpointStatus::IO);
                     }
                     let mut shared = self.shared.write().unwrap();
+
+                    // Record two num pages fields to return as checkpoint result to caller.
+                    // Ref: pnLog, pnCkpt on https://www.sqlite.org/c3ref/wal_checkpoint_v2.html
+                    let checkpoint_result = CheckpointResult {
+                        num_wal_frames: shared.max_frame,
+                        num_checkpointed_frames: self.ongoing_checkpoint.max_frame,
+                    };
                     let everything_backfilled =
                         shared.max_frame == self.ongoing_checkpoint.max_frame;
                     if everything_backfilled {
@@ -547,7 +608,7 @@ impl Wal for WalFile {
                         shared.nbackfills = self.ongoing_checkpoint.max_frame;
                     }
                     self.ongoing_checkpoint.state = CheckpointState::Start;
-                    return Ok(CheckpointStatus::Done);
+                    return Ok(CheckpointStatus::Done(checkpoint_result));
                 }
             }
         }
@@ -578,7 +639,11 @@ impl Wal for WalFile {
                     Ok(CheckpointStatus::IO)
                 } else {
                     self.sync_state.replace(SyncState::NotSyncing);
-                    Ok(CheckpointStatus::Done)
+                    let checkpoint_result = CheckpointResult {
+                        num_wal_frames: self.max_frame,
+                        num_checkpointed_frames: self.ongoing_checkpoint.max_frame,
+                    };
+                    Ok(CheckpointStatus::Done(checkpoint_result))
                 }
             }
         }

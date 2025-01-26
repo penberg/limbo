@@ -2,7 +2,7 @@ use crate::result::LimboResult;
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
-use crate::storage::wal::Wal;
+use crate::storage::wal::{CheckpointResult, Wal};
 use crate::{Buffer, Result};
 use log::trace;
 use std::cell::{RefCell, UnsafeCell};
@@ -207,12 +207,14 @@ impl Pager {
     }
 
     pub fn end_tx(&self) -> Result<CheckpointStatus> {
-        match self.cacheflush()? {
-            CheckpointStatus::Done => {}
-            CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
-        };
-        self.wal.borrow().end_read_tx()?;
-        Ok(CheckpointStatus::Done)
+        let checkpoint_status = self.cacheflush()?;
+        match checkpoint_status {
+            CheckpointStatus::IO => Ok(checkpoint_status),
+            CheckpointStatus::Done(_) => {
+                self.wal.borrow().end_read_tx()?;
+                Ok(checkpoint_status)
+            }
+        }
     }
 
     /// Reads a page from the database.
@@ -301,6 +303,7 @@ impl Pager {
     }
 
     pub fn cacheflush(&self) -> Result<CheckpointStatus> {
+        let mut checkpoint_result = CheckpointResult::new();
         loop {
             let state = self.flush_info.borrow().state.clone();
             match state {
@@ -334,7 +337,7 @@ impl Pager {
                 FlushState::SyncWal => {
                     match self.wal.borrow_mut().sync() {
                         Ok(CheckpointStatus::IO) => return Ok(CheckpointStatus::IO),
-                        Ok(CheckpointStatus::Done) => {}
+                        Ok(CheckpointStatus::Done(res)) => checkpoint_result = res,
                         Err(e) => return Err(e),
                     }
 
@@ -348,7 +351,8 @@ impl Pager {
                 }
                 FlushState::Checkpoint => {
                     match self.checkpoint()? {
-                        CheckpointStatus::Done => {
+                        CheckpointStatus::Done(res) => {
+                            checkpoint_result = res;
                             self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
                         }
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
@@ -368,10 +372,11 @@ impl Pager {
                 }
             }
         }
-        Ok(CheckpointStatus::Done)
+        Ok(CheckpointStatus::Done(checkpoint_result))
     }
 
     pub fn checkpoint(&self) -> Result<CheckpointStatus> {
+        let mut checkpoint_result = CheckpointResult::new();
         loop {
             let state = self.checkpoint_state.borrow().clone();
             trace!("pager_checkpoint(state={:?})", state);
@@ -384,7 +389,8 @@ impl Pager {
                         CheckpointMode::Passive,
                     )? {
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
-                        CheckpointStatus::Done => {
+                        CheckpointStatus::Done(res) => {
+                            checkpoint_result = res;
                             self.checkpoint_state.replace(CheckpointState::SyncDbFile);
                         }
                     };
@@ -408,7 +414,7 @@ impl Pager {
                         Ok(CheckpointStatus::IO)
                     } else {
                         self.checkpoint_state.replace(CheckpointState::Checkpoint);
-                        Ok(CheckpointStatus::Done)
+                        Ok(CheckpointStatus::Done(checkpoint_result))
                     };
                 }
             }
@@ -416,7 +422,8 @@ impl Pager {
     }
 
     // WARN: used for testing purposes
-    pub fn clear_page_cache(&self) {
+    pub fn clear_page_cache(&self) -> CheckpointResult {
+        let checkpoint_result: CheckpointResult;
         loop {
             match self.wal.borrow_mut().checkpoint(
                 self,
@@ -426,7 +433,8 @@ impl Pager {
                 Ok(CheckpointStatus::IO) => {
                     let _ = self.io.run_once();
                 }
-                Ok(CheckpointStatus::Done) => {
+                Ok(CheckpointStatus::Done(res)) => {
+                    checkpoint_result = res;
                     break;
                 }
                 Err(err) => panic!("error while clearing cache {}", err),
@@ -434,6 +442,7 @@ impl Pager {
         }
         // TODO: only clear cache of things that are really invalidated
         self.page_cache.write().unwrap().clear();
+        checkpoint_result
     }
 
     /*
