@@ -705,7 +705,17 @@ fn emit_loop_source(
                 plan.aggregates.is_empty(),
                 "We should not get here with aggregates"
             );
-            emit_select_result(program, t_ctx, plan, t_ctx.label_main_loop_end)?;
+            let loop_labels = *t_ctx
+                .labels_main_loop
+                .get(&plan.source.id())
+                .expect("source has no loop labels");
+            emit_select_result(
+                program,
+                t_ctx,
+                plan,
+                t_ctx.label_main_loop_end,
+                Some(loop_labels.next),
+            )?;
 
             Ok(())
         }

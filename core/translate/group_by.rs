@@ -394,7 +394,13 @@ pub fn emit_group_by<'a>(
 
     match &plan.order_by {
         None => {
-            emit_select_result(program, t_ctx, plan, Some(label_group_by_end))?;
+            emit_select_result(
+                program,
+                t_ctx,
+                plan,
+                Some(label_group_by_end),
+                Some(group_by_end_without_emitting_row_label),
+            )?;
         }
         Some(_) => {
             order_by_sorter_insert(program, t_ctx, plan)?;

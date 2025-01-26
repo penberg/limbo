@@ -17,7 +17,7 @@ use super::{
     emitter::TranslateCtx,
     expr::translate_expr,
     plan::{Direction, ResultSetColumn, SelectPlan},
-    result_row::emit_result_row_and_limit,
+    result_row::{emit_offset, emit_result_row_and_limit},
 };
 
 // Metadata for handling ORDER BY operations
@@ -63,6 +63,7 @@ pub fn emit_order_by(
     let order_by = plan.order_by.as_ref().unwrap();
     let result_columns = &plan.result_columns;
     let sort_loop_start_label = program.allocate_label();
+    let sort_loop_next_label = program.allocate_label();
     let sort_loop_end_label = program.allocate_label();
     let mut pseudo_columns = vec![];
     for (i, _) in order_by.iter().enumerate() {
@@ -117,6 +118,8 @@ pub fn emit_order_by(
     });
 
     program.resolve_label(sort_loop_start_label, program.offset());
+    emit_offset(program, t_ctx, plan, sort_loop_next_label)?;
+
     program.emit_insn(Insn::SorterData {
         cursor_id: sort_cursor,
         dest_reg: reg_sorter_data,
@@ -138,6 +141,7 @@ pub fn emit_order_by(
 
     emit_result_row_and_limit(program, t_ctx, plan, start_reg, Some(sort_loop_end_label))?;
 
+    program.resolve_label(sort_loop_next_label, program.offset());
     program.emit_insn(Insn::SorterNext {
         cursor_id: sort_cursor,
         pc_if_next: sort_loop_start_label,
