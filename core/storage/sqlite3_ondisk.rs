@@ -439,7 +439,7 @@ impl PageContent {
         u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
     }
 
-    fn read_u32(&self, pos: usize) -> u32 {
+    pub fn read_u32(&self, pos: usize) -> u32 {
         let buf = self.as_ptr();
         u32::from_be_bytes([
             buf[self.offset + pos],
