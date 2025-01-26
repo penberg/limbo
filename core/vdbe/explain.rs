@@ -1145,7 +1145,7 @@ pub fn insn_to_str(
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!(""),
+                String::new(),
             ),
         };
     format!(
