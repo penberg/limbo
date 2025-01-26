@@ -947,14 +947,36 @@ impl BTreeCursor {
     /// Drop a cell from a page.
     /// This is done by freeing the range of bytes that the cell occupies.
     fn drop_cell(&self, page: &mut PageContent, cell_idx: usize) {
+        let cell_count = page.cell_count();
         let (cell_start, cell_len) = page.cell_get_raw_region(
             cell_idx,
             self.payload_overflow_threshold_max(page.page_type()),
             self.payload_overflow_threshold_min(page.page_type()),
             self.usable_space(),
         );
-        self.free_cell_range(page, cell_start as u16, cell_len as u16);
-        page.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, page.cell_count() as u16 - 1);
+
+        self.free_cell_range(page, cell_start as u16, cell_len as u16)
+            .expect("Failed to free cell range");
+
+        let new_cell_count = cell_count - 1;
+        page.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, new_cell_count as u16);
+
+        if new_cell_count == 0 {
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
+            page.write_u8(PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT, 0);
+            page.write_u16(
+                PAGE_HEADER_OFFSET_CELL_CONTENT_AREA,
+                self.usable_space() as u16,
+            );
+        } else {
+            let (pointer_array_start, _) = page.cell_pointer_array_offset_and_size();
+            let buf = page.as_ptr();
+            buf.copy_within(
+                pointer_array_start + (2 * (cell_idx + 1))  // src
+                    ..pointer_array_start + (2 * cell_count),
+                pointer_array_start + (2 * cell_idx), // dst
+            );
+        }
     }
 
     /// Balance a leaf page.
