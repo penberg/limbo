@@ -429,7 +429,7 @@ impl PageContent {
         }
     }
 
-    fn read_u8(&self, pos: usize) -> u8 {
+    pub fn read_u8(&self, pos: usize) -> u8 {
         let buf = self.as_ptr();
         buf[self.offset + pos]
     }

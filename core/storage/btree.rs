@@ -832,71 +832,116 @@ impl BTreeCursor {
     /// This function also updates the freeblock list in the page.
     /// Freeblocks are used to keep track of free space in the page,
     /// and are organized as a linked list.
-    fn free_cell_range(&self, page: &mut PageContent, offset: u16, len: u16) {
-        // if the freeblock list is empty, we set this block as the first freeblock in the page header.
-        if page.first_freeblock() == 0 {
-            page.write_u16(offset as usize, 0); // next freeblock = null
-            page.write_u16(offset as usize + 2, len); // size of this freeblock
-            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, offset); // first freeblock in page = this block
-            return;
-        }
-        let first_block = page.first_freeblock();
+    fn free_cell_range(&self, page: &mut PageContent, offset: u16, len: u16) -> Result<()> {
+        let mut cell_block_end = offset as u32 + len as u32;
+        let mut fragments_reduced = 0;
+        let mut cell_length = len;
+        let mut cell_block_start = offset;
+        let mut next_free_block_ptr = PAGE_HEADER_OFFSET_FIRST_FREEBLOCK as u16;
 
-        // if the freeblock list is not empty, and the offset is less than the first freeblock,
-        // we insert this block at the head of the list
-        if offset < first_block {
-            page.write_u16(offset as usize, first_block); // next freeblock = previous first freeblock
-            page.write_u16(offset as usize + 2, len); // size of this freeblock
-            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, offset); // first freeblock in page = this block
-            return;
-        }
-
-        // if we clear space that is at the start of the cell content area,
-        // we need to update the cell content area pointer forward to account for the removed space
-        // FIXME: is offset ever < cell_content_area? cell content area grows leftwards and the pointer
-        // is to the start of the last allocated cell. should we assert!(offset >= page.cell_content_area())
-        // and change this to if offset == page.cell_content_area()?
-        if offset <= page.cell_content_area() {
-            // FIXME: remove the line directly below this, it does not change anything.
-            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, page.first_freeblock());
-            page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, offset + len);
-            return;
-        }
-
-        // if the freeblock list is not empty, and the offset is greater than the first freeblock,
-        // then we need to do some more calculation to figure out where to insert the freeblock
-        // in the freeblock linked list.
-        let maxpc = {
-            let db_header = self.pager.db_header.borrow();
-            let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
-            usable_space as u16
+        let usable_size = {
+            let db_header = self.database_header.borrow();
+            (db_header.page_size - db_header.reserved_space as u16) as u32
         };
 
-        let mut pc = first_block;
-        let mut prev = first_block;
+        assert!(
+            cell_block_end <= usable_size,
+            "cell block end is out of bounds"
+        );
+        assert!(cell_block_start >= 4, "minimum cell size is 4");
+        assert!(
+            cell_block_start <= self.usable_space() as u16 - 4,
+            "offset is out of page bounds"
+        );
 
-        while pc <= maxpc && pc < offset {
-            let next = page.read_u16(pc as usize);
-            prev = pc;
-            pc = next;
-        }
-
-        if pc >= maxpc {
-            // insert into tail
-            let offset = offset as usize;
-            let prev = prev as usize;
-            page.write_u16(prev, offset as u16);
-            page.write_u16(offset, 0);
-            page.write_u16(offset + 2, len);
+        // Check for empty freelist fast path
+        let mut next_free_block = if page.read_u8(next_free_block_ptr as usize + 1) == 0
+            && page.read_u8(next_free_block_ptr as usize) == 0
+        {
+            0 // Fast path for empty freelist
         } else {
-            // insert in between
-            let next = page.read_u16(pc as usize);
-            let offset = offset as usize;
-            let prev = prev as usize;
-            page.write_u16(prev, offset as u16);
-            page.write_u16(offset, next);
-            page.write_u16(offset + 2, len);
+            // Find position in free list
+            let mut block = page.read_u16(next_free_block_ptr as usize);
+            while block != 0 && block < cell_block_start {
+                if block <= next_free_block_ptr {
+                    if block == 0 {
+                        break; // Handle corruption test case
+                    }
+                    return Err(LimboError::Corrupt("Free block list not ascending".into()));
+                }
+                next_free_block_ptr = block;
+                block = page.read_u16(block as usize);
+            }
+            block
+        };
+
+        if next_free_block as u32 > usable_size - 4 {
+            return Err(LimboError::Corrupt("Free block beyond usable space".into()));
         }
+
+        // Coalesce with next block if adjacent
+        if next_free_block != 0 && cell_block_end + 3 >= next_free_block as u32 {
+            fragments_reduced = (next_free_block as u32 - cell_block_end) as u8;
+            if cell_block_end > next_free_block as u32 {
+                return Err(LimboError::Corrupt("Invalid block overlap".into()));
+            }
+
+            let next_block_size = page.read_u16(next_free_block as usize + 2) as u32;
+            cell_block_end = next_free_block as u32 + next_block_size;
+            if cell_block_end > usable_size {
+                return Err(LimboError::Corrupt(
+                    "Coalesced block extends beyond page".into(),
+                ));
+            }
+
+            cell_length = cell_block_end as u16 - cell_block_start;
+            next_free_block = page.read_u16(next_free_block as usize);
+        }
+
+        // Coalesce with previous block if adjacent
+        if next_free_block_ptr > PAGE_HEADER_OFFSET_FIRST_FREEBLOCK as u16 {
+            let prev_block_end =
+                next_free_block_ptr as u32 + page.read_u16(next_free_block_ptr as usize + 2) as u32;
+
+            if prev_block_end + 3 >= cell_block_start as u32 {
+                if prev_block_end > cell_block_start as u32 {
+                    return Err(LimboError::Corrupt("Invalid previous block overlap".into()));
+                }
+                fragments_reduced += (cell_block_start as u32 - prev_block_end) as u8;
+                cell_length = (cell_block_end - next_free_block_ptr as u32) as u16;
+                cell_block_start = next_free_block_ptr;
+            }
+        }
+
+        // Update frag count
+        let current_frags = page.read_u8(PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT);
+        if fragments_reduced > current_frags {
+            return Err(LimboError::Corrupt("Invalid fragmentation count".into()));
+        }
+        page.write_u8(
+            PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT,
+            current_frags - fragments_reduced,
+        );
+
+        let content_area_start = page.cell_content_area();
+        if cell_block_start <= content_area_start {
+            if cell_block_start < content_area_start {
+                return Err(LimboError::Corrupt("Free block before content area".into()));
+            }
+            if next_free_block_ptr != PAGE_HEADER_OFFSET_FIRST_FREEBLOCK as u16 {
+                return Err(LimboError::Corrupt("Invalid content area merge".into()));
+            }
+            // Extend content area
+            page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, next_free_block);
+            page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, cell_block_end as u16);
+        } else {
+            // Insert in free list
+            page.write_u16(next_free_block_ptr as usize, cell_block_start);
+            page.write_u16(cell_block_start as usize, next_free_block);
+            page.write_u16(cell_block_start as usize + 2, cell_length);
+        }
+
+        Ok(())
     }
 
     /// Drop a cell from a page.
