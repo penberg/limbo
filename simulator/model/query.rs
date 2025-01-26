@@ -1,8 +1,13 @@
 use std::fmt::Display;
 
-use crate::model::table::{Table, Value};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq)]
+use crate::{
+    model::table::{Table, Value},
+    runner::env::SimulatorEnv,
+};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum Predicate {
     And(Vec<Predicate>), // p1 AND p2 AND p3... AND pn
     Or(Vec<Predicate>),  // p1 OR p2 OR p3... OR pn
@@ -83,7 +88,7 @@ impl Display for Predicate {
 }
 
 // This type represents the potential queries on the database.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Query {
     Create(Create),
     Select(Select),
@@ -108,28 +113,63 @@ impl Query {
             | Query::Delete(Delete { table, .. }) => vec![table.clone()],
         }
     }
+
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+        match self {
+            Query::Create(create) => create.shadow(env),
+            Query::Insert(insert) => insert.shadow(env),
+            Query::Delete(delete) => delete.shadow(env),
+            Query::Select(select) => select.shadow(env),
+        }
+    }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Create {
     pub(crate) table: Table,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl Create {
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+        if !env.tables.iter().any(|t| t.name == self.table.name) {
+            env.tables.push(self.table.clone());
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Select {
     pub(crate) table: String,
     pub(crate) predicate: Predicate,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl Select {
+    pub(crate) fn shadow(&self, _env: &mut SimulatorEnv) {}
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Insert {
     pub(crate) table: String,
     pub(crate) values: Vec<Vec<Value>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl Insert {
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+        if let Some(t) = env.tables.iter_mut().find(|t| t.name == self.table) {
+            t.rows.extend(self.values.clone());
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Delete {
     pub(crate) table: String,
     pub(crate) predicate: Predicate,
+}
+
+impl Delete {
+    pub(crate) fn shadow(&self, _env: &mut SimulatorEnv) {
+        todo!()
+    }
 }
 
 impl Display for Query {

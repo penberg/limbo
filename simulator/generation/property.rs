@@ -1,4 +1,5 @@
 use limbo_core::LimboError;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
@@ -16,7 +17,7 @@ use super::{
 
 /// Properties are representations of executable specifications
 /// about the database behavior.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Property {
     /// Insert-Select is a property in which the inserted row
     /// must be in the resulting rows of a select query that has a
@@ -103,7 +104,6 @@ impl Property {
 
                 let assertion = Interaction::Assertion(Assertion {
                     message: format!(
-                        // todo: add the part inserting ({} = {})",
                         "row [{:?}] not found in table {}",
                         row.iter().map(|v| v.to_string()).collect::<Vec<String>>(),
                         insert.table,
