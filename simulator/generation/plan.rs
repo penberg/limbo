@@ -1,13 +1,15 @@
-use std::{fmt::Display, rc::Rc, vec};
+use std::{fmt::Display, path::Path, rc::Rc, vec};
 
 use limbo_core::{Connection, Result, StepResult};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
         query::{Create, Insert, Query, Select},
         table::Value,
     },
-    SimConnection, SimulatorEnv,
+    runner::env::SimConnection,
+    SimulatorEnv,
 };
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
@@ -19,9 +21,72 @@ use super::{
 
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct InteractionPlan {
     pub(crate) plan: Vec<Interactions>,
+}
+
+impl InteractionPlan {
+    /// Compute via diff computes a a plan from a given `.plan` file without the need to parse
+    /// sql. This is possible because there are two versions of the plan file, one that is human
+    /// readable and one that is serialized as JSON. Under watch mode, the users will be able to
+    /// delete interactions from the human readable file, and this function uses the JSON file as
+    /// a baseline to detect with interactions were deleted and constructs the plan from the
+    /// remaining interactions.
+    pub(crate) fn compute_via_diff(plan_path: &Path) -> Vec<Vec<Interaction>> {
+        let interactions = std::fs::read_to_string(plan_path).unwrap();
+        let interactions = interactions.lines().collect::<Vec<_>>();
+
+        let plan: InteractionPlan = serde_json::from_str(
+            std::fs::read_to_string(plan_path.with_extension("plan.json"))
+                .unwrap()
+                .as_str(),
+        )
+        .unwrap();
+
+        let mut plan = plan
+            .plan
+            .into_iter()
+            .map(|i| i.interactions())
+            .collect::<Vec<_>>();
+
+        let (mut i, mut j1, mut j2) = (0, 0, 0);
+
+        while i < interactions.len() && j1 < plan.len() {
+            if interactions[i].starts_with("-- begin")
+                || interactions[i].starts_with("-- end")
+                || interactions[i].is_empty()
+            {
+                i += 1;
+                continue;
+            }
+
+            if interactions[i].contains(plan[j1][j2].to_string().as_str()) {
+                i += 1;
+                if j2 + 1 < plan[j1].len() {
+                    j2 += 1;
+                } else {
+                    j1 += 1;
+                    j2 = 0;
+                }
+            } else {
+                plan[j1].remove(j2);
+
+                if plan[j1].is_empty() {
+                    plan.remove(j1);
+                    j2 = 0;
+                }
+            }
+        }
+        if j1 < plan.len() {
+            if j2 < plan[j1].len() {
+                let _ = plan[j1].split_off(j2);
+            }
+            let _ = plan.split_off(j1);
+        }
+
+        plan
+    }
 }
 
 pub(crate) struct InteractionPlanState {
@@ -30,7 +95,7 @@ pub(crate) struct InteractionPlanState {
     pub(crate) secondary_pointer: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Interactions {
     Property(Property),
     Query(Query),
@@ -108,12 +173,12 @@ impl Display for InteractionPlan {
                         match interaction {
                             Interaction::Query(query) => writeln!(f, "{};", query)?,
                             Interaction::Assumption(assumption) => {
-                                writeln!(f, "-- ASSUME: {};", assumption.message)?
+                                writeln!(f, "-- ASSUME {};", assumption.message)?
                             }
                             Interaction::Assertion(assertion) => {
-                                writeln!(f, "-- ASSERT: {};", assertion.message)?
+                                writeln!(f, "-- ASSERT {};", assertion.message)?
                             }
-                            Interaction::Fault(fault) => writeln!(f, "-- FAULT: {};", fault)?,
+                            Interaction::Fault(fault) => writeln!(f, "-- FAULT '{}';", fault)?,
                         }
                     }
                     writeln!(f, "-- end testing '{}'", name)?;
@@ -160,9 +225,9 @@ impl Display for Interaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Query(query) => write!(f, "{}", query),
-            Self::Assumption(assumption) => write!(f, "ASSUME: {}", assumption.message),
-            Self::Assertion(assertion) => write!(f, "ASSERT: {}", assertion.message),
-            Self::Fault(fault) => write!(f, "FAULT: {}", fault),
+            Self::Assumption(assumption) => write!(f, "ASSUME {}", assumption.message),
+            Self::Assertion(assertion) => write!(f, "ASSERT {}", assertion.message),
+            Self::Fault(fault) => write!(f, "FAULT '{}'", fault),
         }
     }
 }
@@ -178,7 +243,7 @@ pub(crate) struct Assertion {
     pub(crate) message: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Fault {
     Disconnect,
 }
@@ -195,6 +260,29 @@ impl Interactions {
     pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
         match self {
             Interactions::Property(property) => {
+                match property {
+                    Property::InsertSelect {
+                        insert,
+                        row_index: _,
+                        queries,
+                        select,
+                    } => {
+                        insert.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
+                        select.shadow(env);
+                    }
+                    Property::DoubleCreateFailure { create, queries } => {
+                        if env.tables.iter().any(|t| t.name == create.table.name) {
+                            return;
+                        }
+                        create.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
+                    }
+                }
                 for interaction in property.interactions() {
                     match interaction {
                         Interaction::Query(query) => match query {
@@ -220,23 +308,7 @@ impl Interactions {
                     }
                 }
             }
-            Interactions::Query(query) => match query {
-                Query::Create(create) => {
-                    if !env.tables.iter().any(|t| t.name == create.table.name) {
-                        env.tables.push(create.table.clone());
-                    }
-                }
-                Query::Insert(insert) => {
-                    let table = env
-                        .tables
-                        .iter_mut()
-                        .find(|t| t.name == insert.table)
-                        .unwrap();
-                    table.rows.extend(insert.values.clone());
-                }
-                Query::Delete(_) => todo!(),
-                Query::Select(_) => {}
-            },
+            Interactions::Query(query) => query.shadow(env),
             Interactions::Fault(_) => {}
         }
     }
@@ -317,6 +389,14 @@ impl ArbitraryFrom<&mut SimulatorEnv> for InteractionPlan {
 }
 
 impl Interaction {
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+        match self {
+            Self::Query(query) => query.shadow(env),
+            Self::Assumption(_) => {}
+            Self::Assertion(_) => {}
+            Self::Fault(_) => {}
+        }
+    }
     pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> ResultSet {
         if let Self::Query(query) = self {
             let query_str = query.to_string();
@@ -334,7 +414,7 @@ impl Interaction {
             assert!(rows.is_some());
             let mut rows = rows.unwrap();
             let mut out = Vec::new();
-            while let Ok(row) = rows.next_row() {
+            while let Ok(row) = rows.step() {
                 match row {
                     StepResult::Row(row) => {
                         let mut r = Vec::new();

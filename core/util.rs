@@ -4,7 +4,7 @@ use sqlite3_parser::ast::{Expr, FunctionTail, Literal};
 
 use crate::{
     schema::{self, Schema},
-    Result, Rows, StepResult, IO,
+    Result, Statement, StepResult, IO,
 };
 
 // https://sqlite.org/lang_keywords.html
@@ -25,11 +25,15 @@ pub fn normalize_ident(identifier: &str) -> String {
 
 pub const PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX: &str = "sqlite_autoindex_";
 
-pub fn parse_schema_rows(rows: Option<Rows>, schema: &mut Schema, io: Arc<dyn IO>) -> Result<()> {
+pub fn parse_schema_rows(
+    rows: Option<Statement>,
+    schema: &mut Schema,
+    io: Arc<dyn IO>,
+) -> Result<()> {
     if let Some(mut rows) = rows {
         let mut automatic_indexes = Vec::new();
         loop {
-            match rows.next_row()? {
+            match rows.step()? {
                 StepResult::Row(row) => {
                     let ty = row.get::<&str>(0)?;
                     if ty != "table" && ty != "index" {

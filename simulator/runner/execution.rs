@@ -36,7 +36,7 @@ pub(crate) struct ExecutionHistory {
 }
 
 impl ExecutionHistory {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             history: Vec::new(),
         }
@@ -49,19 +49,20 @@ pub(crate) struct ExecutionResult {
 }
 
 impl ExecutionResult {
-    fn new(history: ExecutionHistory, error: Option<LimboError>) -> Self {
+    pub(crate) fn new(history: ExecutionHistory, error: Option<LimboError>) -> Self {
         Self { history, error }
     }
 }
 
 pub(crate) fn execute_plans(
-    env: &mut SimulatorEnv,
+    env: Arc<Mutex<SimulatorEnv>>,
     plans: &mut [InteractionPlan],
     states: &mut [InteractionPlanState],
     last_execution: Arc<Mutex<Execution>>,
 ) -> ExecutionResult {
     let mut history = ExecutionHistory::new();
     let now = std::time::Instant::now();
+    let mut env = env.lock().unwrap();
     for _tick in 0..env.opts.ticks {
         // Pick the connection to interact with
         let connection_index = pick_index(env.connections.len(), &mut env.rng);
@@ -77,7 +78,7 @@ pub(crate) fn execute_plans(
         last_execution.interaction_index = state.interaction_pointer;
         last_execution.secondary_index = state.secondary_pointer;
         // Execute the interaction for the selected connection
-        match execute_plan(env, connection_index, plans, states) {
+        match execute_plan(&mut env, connection_index, plans, states) {
             Ok(_) => {}
             Err(err) => {
                 return ExecutionResult::new(history, Some(err));
@@ -155,14 +156,14 @@ fn execute_plan(
 /// `execute_interaction` uses this type in conjunction with a result, where
 /// the `Err` case indicates a full-stop due to a bug, and the `Ok` case
 /// indicates the next step in the plan.
-enum ExecutionContinuation {
+pub(crate) enum ExecutionContinuation {
     /// Default continuation, execute the next interaction.
     NextInteraction,
     /// Typically used in the case of preconditions failures, skip to the next property.
     NextProperty,
 }
 
-fn execute_interaction(
+pub(crate) fn execute_interaction(
     env: &mut SimulatorEnv,
     connection_index: usize,
     interaction: &Interaction,

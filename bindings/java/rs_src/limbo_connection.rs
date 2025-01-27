@@ -9,16 +9,19 @@ use jni::sys::jlong;
 use jni::JNIEnv;
 use limbo_core::Connection;
 use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct LimboConnection {
+    // Because java's LimboConnection is 1:1 mapped to limbo connection, we can use Rc
     pub(crate) conn: Rc<Connection>,
-    pub(crate) io: Rc<dyn limbo_core::IO>,
+    // Because io is shared across multiple `LimboConnection`s, wrap it with Arc
+    pub(crate) io: Arc<dyn limbo_core::IO>,
 }
 
 impl LimboConnection {
-    pub fn new(conn: Rc<Connection>, io: Rc<dyn limbo_core::IO>) -> Self {
+    pub fn new(conn: Rc<Connection>, io: Arc<dyn limbo_core::IO>) -> Self {
         LimboConnection { conn, io }
     }
 
@@ -69,7 +72,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepar
     };
 
     match connection.conn.prepare(sql) {
-        Ok(stmt) => LimboStatement::new(stmt).to_ptr(),
+        Ok(stmt) => LimboStatement::new(stmt, connection.clone()).to_ptr(),
         Err(e) => {
             set_err_msg_and_throw_exception(
                 &mut env,

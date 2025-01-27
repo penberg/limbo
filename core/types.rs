@@ -2,7 +2,10 @@ use limbo_ext::{AggCtx, FinalizeFunction, StepFunction};
 
 use crate::error::LimboError;
 use crate::ext::{ExtValue, ExtValueType};
+use crate::pseudo::PseudoCursor;
+use crate::storage::btree::BTreeCursor;
 use crate::storage::sqlite3_ondisk::write_varint;
+use crate::vdbe::sorter::Sorter;
 use crate::Result;
 use std::fmt::Display;
 use std::rc::Rc;
@@ -604,7 +607,59 @@ impl OwnedRecord {
     }
 }
 
-#[derive(PartialEq, Debug)]
+pub enum Cursor {
+    Table(BTreeCursor),
+    Index(BTreeCursor),
+    Pseudo(PseudoCursor),
+    Sorter(Sorter),
+}
+
+impl Cursor {
+    pub fn new_table(cursor: BTreeCursor) -> Self {
+        Self::Table(cursor)
+    }
+
+    pub fn new_index(cursor: BTreeCursor) -> Self {
+        Self::Index(cursor)
+    }
+
+    pub fn new_pseudo(cursor: PseudoCursor) -> Self {
+        Self::Pseudo(cursor)
+    }
+
+    pub fn new_sorter(cursor: Sorter) -> Self {
+        Self::Sorter(cursor)
+    }
+
+    pub fn as_table_mut(&mut self) -> &mut BTreeCursor {
+        match self {
+            Self::Table(cursor) => cursor,
+            _ => panic!("Cursor is not a table"),
+        }
+    }
+
+    pub fn as_index_mut(&mut self) -> &mut BTreeCursor {
+        match self {
+            Self::Index(cursor) => cursor,
+            _ => panic!("Cursor is not an index"),
+        }
+    }
+
+    pub fn as_pseudo_mut(&mut self) -> &mut PseudoCursor {
+        match self {
+            Self::Pseudo(cursor) => cursor,
+            _ => panic!("Cursor is not a pseudo cursor"),
+        }
+    }
+
+    pub fn as_sorter_mut(&mut self) -> &mut Sorter {
+        match self {
+            Self::Sorter(cursor) => cursor,
+            _ => panic!("Cursor is not a sorter cursor"),
+        }
+    }
+}
+
 pub enum CursorResult<T> {
     Ok(T),
     IO,

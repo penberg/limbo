@@ -1,5 +1,6 @@
 use crate::errors::Result;
 use crate::errors::{LimboError, LIMBO_ETC};
+use crate::limbo_connection::LimboConnection;
 use crate::utils::set_err_msg_and_throw_exception;
 use jni::objects::{JObject, JValue};
 use jni::sys::jlong;
@@ -7,6 +8,7 @@ use jni::JNIEnv;
 use limbo_core::{Statement, StepResult};
 
 pub const STEP_RESULT_ID_ROW: i32 = 10;
+#[allow(dead_code)]
 pub const STEP_RESULT_ID_IO: i32 = 20;
 pub const STEP_RESULT_ID_DONE: i32 = 30;
 pub const STEP_RESULT_ID_INTERRUPT: i32 = 40;
@@ -15,11 +17,12 @@ pub const STEP_RESULT_ID_ERROR: i32 = 60;
 
 pub struct LimboStatement {
     pub(crate) stmt: Statement,
+    pub(crate) connection: LimboConnection,
 }
 
 impl LimboStatement {
-    pub fn new(stmt: Statement) -> Self {
-        LimboStatement { stmt }
+    pub fn new(stmt: Statement, connection: LimboConnection) -> Self {
+        LimboStatement { stmt, connection }
     }
 
     pub fn to_ptr(self) -> jlong {
@@ -50,30 +53,38 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
         Ok(stmt) => stmt,
         Err(e) => {
             set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-
-            return JObject::null();
+            return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None);
         }
     };
 
-    match stmt.stmt.step() {
-        Ok(StepResult::Row(row)) => match row_to_obj_array(&mut env, &row) {
-            Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
-            Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-                to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
+    loop {
+        let step_result = match stmt.stmt.step() {
+            Ok(result) => result,
+            Err(_) => return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
+        };
+
+        match step_result {
+            StepResult::Row(row) => {
+                return match row_to_obj_array(&mut env, &row) {
+                    Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
+                    Err(e) => {
+                        set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
+                        to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
+                    }
+                }
             }
-        },
-        Ok(StepResult::IO) => match env.new_object_array(0, "java/lang/Object", JObject::null()) {
-            Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_IO, Some(row.into())),
-            Err(e) => {
-                set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
-                to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
+            StepResult::IO => {
+                if let Err(e) = stmt.connection.io.run_once() {
+                    set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
+                    return to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None);
+                }
             }
-        },
-        Ok(StepResult::Done) => to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None),
-        Ok(StepResult::Interrupt) => to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None),
-        Ok(StepResult::Busy) => to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
-        _ => to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None),
+            StepResult::Done => return to_limbo_step_result(&mut env, STEP_RESULT_ID_DONE, None),
+            StepResult::Interrupt => {
+                return to_limbo_step_result(&mut env, STEP_RESULT_ID_INTERRUPT, None)
+            }
+            StepResult::Busy => return to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
+        }
     }
 }
 

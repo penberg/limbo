@@ -605,6 +605,20 @@ pub fn translate_expr(
                         dest: target_register,
                     });
                 }
+                ast::Operator::And => {
+                    program.emit_insn(Insn::And {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
+                ast::Operator::Or => {
+                    program.emit_insn(Insn::Or {
+                        lhs: e1_reg,
+                        rhs: e2_reg,
+                        dest: target_register,
+                    });
+                }
                 ast::Operator::BitwiseAnd => {
                     program.emit_insn(Insn::BitAnd {
                         lhs: e1_reg,
@@ -915,6 +929,14 @@ pub fn translate_expr(
                             func_ctx,
                         )
                     }
+                    JsonFunc::JsonValid => translate_function(
+                        program,
+                        args.as_deref().unwrap_or_default(),
+                        referenced_tables,
+                        resolver,
+                        target_register,
+                        func_ctx,
+                    ),
                 },
                 Func::Scalar(srf) => {
                     match srf {
@@ -1512,6 +1534,26 @@ pub fn translate_expr(
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
                                 start_reg: str_reg,
+                                dest: target_register,
+                                func: func_ctx,
+                            });
+                            Ok(target_register)
+                        }
+                        ScalarFunc::StrfTime => {
+                            if let Some(args) = args {
+                                for arg in args.iter() {
+                                    // register containing result of each argument expression
+                                    let _ = translate_and_mark(
+                                        program,
+                                        referenced_tables,
+                                        arg,
+                                        resolver,
+                                    )?;
+                                }
+                            }
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: target_register + 1,
                                 dest: target_register,
                                 func: func_ctx,
                             });

@@ -22,24 +22,44 @@ pub fn exec_datetime_full(values: &[OwnedValue]) -> OwnedValue {
     exec_datetime(values, DateTimeOutput::DateTime)
 }
 
+#[inline(always)]
+pub fn exec_strftime(values: &[OwnedValue]) -> OwnedValue {
+    if values.is_empty() {
+        return OwnedValue::Null;
+    }
+
+    let format_str = match &values[0] {
+        OwnedValue::Text(text) => text.value.to_string(),
+        OwnedValue::Integer(num) => num.to_string(),
+        OwnedValue::Float(num) => format!("{:.14}", num),
+        _ => return OwnedValue::Null,
+    };
+
+    exec_datetime(&values[1..], DateTimeOutput::StrfTime(format_str))
+}
+
 enum DateTimeOutput {
     Date,
     Time,
     DateTime,
+    // Holds the format string
+    StrfTime(String),
 }
 
 fn exec_datetime(values: &[OwnedValue], output_type: DateTimeOutput) -> OwnedValue {
     if values.is_empty() {
-        return OwnedValue::build_text(Rc::new(
-            parse_naive_date_time(&OwnedValue::build_text(Rc::new("now".to_string())))
-                .unwrap()
-                .format(match output_type {
-                    DateTimeOutput::DateTime => "%Y-%m-%d %H:%M:%S",
-                    DateTimeOutput::Time => "%H:%M:%S",
-                    DateTimeOutput::Date => "%Y-%m-%d",
-                })
-                .to_string(),
-        ));
+        let now =
+            parse_naive_date_time(&OwnedValue::build_text(Rc::new("now".to_string()))).unwrap();
+
+        let formatted_str = match output_type {
+            DateTimeOutput::DateTime => now.format("%Y-%m-%d %H:%M:%S").to_string(),
+            DateTimeOutput::Time => now.format("%H:%M:%S").to_string(),
+            DateTimeOutput::Date => now.format("%Y-%m-%d").to_string(),
+            DateTimeOutput::StrfTime(ref format_str) => strftime_format(&now, format_str),
+        };
+
+        // Parse here
+        return OwnedValue::build_text(Rc::new(formatted_str));
     }
     if let Some(mut dt) = parse_naive_date_time(&values[0]) {
         // if successful, treat subsequent entries as modifiers
@@ -95,6 +115,31 @@ fn format_dt(dt: NaiveDateTime, output_type: DateTimeOutput, subsec: bool) -> St
                 dt.format("%Y-%m-%d %H:%M:%S").to_string()
             }
         }
+        DateTimeOutput::StrfTime(format_str) => strftime_format(&dt, &format_str),
+    }
+}
+
+// Not as fast as if the formatting was native to chrono, but a good enough
+// for now, just to have the feature implemented
+fn strftime_format(dt: &NaiveDateTime, format_str: &str) -> String {
+    use std::fmt::Write;
+    // Necessary to remove %f and %J that are exclusive formatters to sqlite
+    // Chrono does not support them, so it is necessary to replace the modifiers manually
+
+    // Sqlite uses 9 decimal places for julianday in strftime
+    let copy_format = format_str
+        .to_string()
+        .replace("%J", &format!("{:.9}", to_julian_day_exact(dt)));
+    // Just change the formatting here to have fractional seconds using chrono builtin modifier
+    let copy_format = copy_format.replace("%f", "%S.%3f");
+
+    // The write! macro is used here as chrono's format can panic if the formatting string contains
+    // unknown specifiers. By using a writer, we can catch the panic and handle the error
+    let mut formatted = String::new();
+    match write!(formatted, "{}", dt.format(&copy_format)) {
+        Ok(_) => formatted,
+        // On sqlite when the formatting fails nothing is printed
+        Err(_) => "".to_string(),
     }
 }
 
@@ -1729,4 +1774,7 @@ mod tests {
             .naive_utc();
         assert!(is_leap_second(&dt));
     }
+
+    #[test]
+    fn test_strftime() {}
 }

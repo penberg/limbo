@@ -1,20 +1,20 @@
 #![allow(clippy::arc_with_non_send_sync, dead_code)]
 use clap::Parser;
-use core::panic;
-use generation::plan::{InteractionPlan, InteractionPlanState};
+use generation::plan::{Interaction, InteractionPlan, InteractionPlanState};
 use generation::ArbitraryFrom;
 use limbo_core::Database;
+use notify::event::{DataChange, ModifyKind};
+use notify::{EventKind, RecursiveMode, Watcher};
 use rand::prelude::*;
-use rand_chacha::ChaCha8Rng;
 use runner::cli::SimulatorCLI;
-use runner::env::{SimConnection, SimulatorEnv, SimulatorOpts};
+use runner::env::SimulatorEnv;
 use runner::execution::{execute_plans, Execution, ExecutionHistory, ExecutionResult};
-use runner::io::SimulatorIO;
+use runner::watch;
 use std::any::Any;
 use std::backtrace::Backtrace;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use tempfile::TempDir;
 
 mod generation;
@@ -49,6 +49,10 @@ impl Paths {
             log::info!("shrunk database path: {:?}", paths.shrunk_db);
         }
         log::info!("simulator plan path: {:?}", paths.plan);
+        log::info!(
+            "simulator plan serialized path: {:?}",
+            paths.plan.with_extension("plan.json")
+        );
         if shrink {
             log::info!("shrunk plan path: {:?}", paths.shrunk_plan);
         }
@@ -77,7 +81,85 @@ fn main() -> Result<(), String> {
     log::info!("seed: {}", seed);
 
     let last_execution = Arc::new(Mutex::new(Execution::new(0, 0, 0)));
+    let (env, plans) = setup_simulation(seed, &cli_opts, &paths.db, &paths.plan);
 
+    if cli_opts.watch {
+        watch_mode(seed, &cli_opts, &paths, last_execution.clone()).unwrap();
+    } else {
+        run_simulator(seed, &cli_opts, &paths, env, plans, last_execution.clone());
+    }
+
+    Ok(())
+}
+
+fn watch_mode(
+    seed: u64,
+    cli_opts: &SimulatorCLI,
+    paths: &Paths,
+    last_execution: Arc<Mutex<Execution>>,
+) -> notify::Result<()> {
+    let (tx, rx) = mpsc::channel::<notify::Result<notify::Event>>();
+    println!("watching {:?}", paths.plan);
+    // Use recommended_watcher() to automatically select the best implementation
+    // for your platform. The `EventHandler` passed to this constructor can be a
+    // closure, a `std::sync::mpsc::Sender`, a `crossbeam_channel::Sender`, or
+    // another type the trait is implemented for.
+    let mut watcher = notify::recommended_watcher(tx)?;
+
+    // Add a path to be watched. All files and directories at that path and
+    // below will be monitored for changes.
+    watcher.watch(&paths.plan, RecursiveMode::NonRecursive)?;
+    // Block forever, printing out events as they come in
+    for res in rx {
+        match res {
+            Ok(event) => {
+                if let EventKind::Modify(ModifyKind::Data(DataChange::Content)) = event.kind {
+                    log::info!("plan file modified, rerunning simulation");
+
+                    let result = SandboxedResult::from(
+                        std::panic::catch_unwind(|| {
+                            let plan: Vec<Vec<Interaction>> =
+                                InteractionPlan::compute_via_diff(&paths.plan);
+
+                            let mut env = SimulatorEnv::new(seed, cli_opts, &paths.db);
+                            plan.iter().for_each(|is| {
+                                is.iter().for_each(|i| {
+                                    i.shadow(&mut env);
+                                });
+                            });
+                            let env = Arc::new(Mutex::new(env.clone()));
+                            watch::run_simulation(env, &mut [plan], last_execution.clone())
+                        }),
+                        last_execution.clone(),
+                    );
+                    match result {
+                        SandboxedResult::Correct => {
+                            log::info!("simulation succeeded");
+                            println!("simulation succeeded");
+                        }
+                        SandboxedResult::Panicked { error, .. }
+                        | SandboxedResult::FoundBug { error, .. } => {
+                            log::error!("simulation failed: '{}'", error);
+                            println!("simulation failed: '{}'", error);
+                        }
+                    }
+                }
+            }
+            Err(e) => println!("watch error: {:?}", e),
+        }
+    }
+
+    Ok(())
+}
+
+fn run_simulator(
+    seed: u64,
+    cli_opts: &SimulatorCLI,
+    paths: &Paths,
+    env: SimulatorEnv,
+    plans: Vec<InteractionPlan>,
+    last_execution: Arc<Mutex<Execution>>,
+) {
     std::panic::set_hook(Box::new(move |info| {
         log::error!("panic occurred");
 
@@ -94,81 +176,22 @@ fn main() -> Result<(), String> {
         log::error!("captured backtrace:\n{}", bt);
     }));
 
+    let env = Arc::new(Mutex::new(env));
     let result = SandboxedResult::from(
         std::panic::catch_unwind(|| {
-            run_simulation(
-                seed,
-                &cli_opts,
-                &paths.db,
-                &paths.plan,
-                last_execution.clone(),
-                None,
-            )
+            run_simulation(env.clone(), &mut plans.clone(), last_execution.clone())
         }),
         last_execution.clone(),
     );
 
     if cli_opts.doublecheck {
-        // Run the simulation again
-        let result2 = SandboxedResult::from(
-            std::panic::catch_unwind(|| {
-                run_simulation(
-                    seed,
-                    &cli_opts,
-                    &paths.doublecheck_db,
-                    &paths.plan,
-                    last_execution.clone(),
-                    None,
-                )
-            }),
-            last_execution.clone(),
-        );
-
-        match (result, result2) {
-            (SandboxedResult::Correct, SandboxedResult::Panicked { .. }) => {
-                log::error!("doublecheck failed! first run succeeded, but second run panicked.");
-            }
-            (SandboxedResult::FoundBug { .. }, SandboxedResult::Panicked { .. }) => {
-                log::error!(
-                    "doublecheck failed! first run failed an assertion, but second run panicked."
-                );
-            }
-            (SandboxedResult::Panicked { .. }, SandboxedResult::Correct) => {
-                log::error!("doublecheck failed! first run panicked, but second run succeeded.");
-            }
-            (SandboxedResult::Panicked { .. }, SandboxedResult::FoundBug { .. }) => {
-                log::error!(
-                    "doublecheck failed! first run panicked, but second run failed an assertion."
-                );
-            }
-            (SandboxedResult::Correct, SandboxedResult::FoundBug { .. }) => {
-                log::error!(
-                    "doublecheck failed! first run succeeded, but second run failed an assertion."
-                );
-            }
-            (SandboxedResult::FoundBug { .. }, SandboxedResult::Correct) => {
-                log::error!(
-                    "doublecheck failed! first run failed an assertion, but second run succeeded."
-                );
-            }
-            (SandboxedResult::Correct, SandboxedResult::Correct)
-            | (SandboxedResult::FoundBug { .. }, SandboxedResult::FoundBug { .. })
-            | (SandboxedResult::Panicked { .. }, SandboxedResult::Panicked { .. }) => {
-                // Compare the two database files byte by byte
-                let db_bytes = std::fs::read(&paths.db).unwrap();
-                let doublecheck_db_bytes = std::fs::read(&paths.doublecheck_db).unwrap();
-                if db_bytes != doublecheck_db_bytes {
-                    log::error!("doublecheck failed! database files are different.");
-                } else {
-                    log::info!("doublecheck succeeded! database files are the same.");
-                }
-            }
-        }
+        doublecheck(env.clone(), paths, &plans, last_execution.clone(), result);
     } else {
         // No doublecheck, run shrinking if panicking or found a bug.
         match &result {
             SandboxedResult::Correct => {
                 log::info!("simulation succeeded");
+                println!("simulation succeeded");
             }
             SandboxedResult::Panicked {
                 error,
@@ -196,21 +219,28 @@ fn main() -> Result<(), String> {
                 }
 
                 log::error!("simulation failed: '{}'", error);
+                println!("simulation failed: '{}'", error);
 
                 if cli_opts.shrink {
                     log::info!("Starting to shrink");
-                    let shrink = Some(last_execution);
+
+                    let shrunk_plans = plans
+                        .iter()
+                        .map(|plan| {
+                            let shrunk = plan.shrink_interaction_plan(last_execution);
+                            log::info!("{}", shrunk.stats());
+                            shrunk
+                        })
+                        .collect::<Vec<_>>();
+
                     let last_execution = Arc::new(Mutex::new(*last_execution));
 
                     let shrunk = SandboxedResult::from(
                         std::panic::catch_unwind(|| {
                             run_simulation(
-                                seed,
-                                &cli_opts,
-                                &paths.shrunk_db,
-                                &paths.shrunk_plan,
+                                env.clone(),
+                                &mut shrunk_plans.clone(),
                                 last_execution.clone(),
-                                shrink,
                             )
                         }),
                         last_execution,
@@ -258,35 +288,78 @@ fn main() -> Result<(), String> {
         println!("shrunk database path: {:?}", paths.shrunk_db);
     }
     println!("simulator plan path: {:?}", paths.plan);
+    println!(
+        "simulator plan serialized path: {:?}",
+        paths.plan.with_extension("plan.json")
+    );
     if cli_opts.shrink {
         println!("shrunk plan path: {:?}", paths.shrunk_plan);
     }
     println!("simulator history path: {:?}", paths.history);
     println!("seed: {}", seed);
-
-    Ok(())
 }
 
-fn move_db_and_plan_files(output_dir: &Path) {
-    let old_db_path = output_dir.join("simulator.db");
-    let old_plan_path = output_dir.join("simulator.plan");
+fn doublecheck(
+    env: Arc<Mutex<SimulatorEnv>>,
+    paths: &Paths,
+    plans: &[InteractionPlan],
+    last_execution: Arc<Mutex<Execution>>,
+    result: SandboxedResult,
+) {
+    {
+        let mut env_ = env.lock().unwrap();
+        env_.db =
+            Database::open_file(env_.io.clone(), paths.doublecheck_db.to_str().unwrap()).unwrap();
+    }
 
-    let new_db_path = output_dir.join("simulator_double.db");
-    let new_plan_path = output_dir.join("simulator_double.plan");
+    // Run the simulation again
+    let result2 = SandboxedResult::from(
+        std::panic::catch_unwind(|| {
+            run_simulation(env.clone(), &mut plans.to_owned(), last_execution.clone())
+        }),
+        last_execution.clone(),
+    );
 
-    std::fs::rename(&old_db_path, &new_db_path).unwrap();
-    std::fs::rename(&old_plan_path, &new_plan_path).unwrap();
-}
-
-fn revert_db_and_plan_files(output_dir: &Path) {
-    let old_db_path = output_dir.join("simulator.db");
-    let old_plan_path = output_dir.join("simulator.plan");
-
-    let new_db_path = output_dir.join("simulator_double.db");
-    let new_plan_path = output_dir.join("simulator_double.plan");
-
-    std::fs::rename(&new_db_path, &old_db_path).unwrap();
-    std::fs::rename(&new_plan_path, &old_plan_path).unwrap();
+    match (result, result2) {
+        (SandboxedResult::Correct, SandboxedResult::Panicked { .. }) => {
+            log::error!("doublecheck failed! first run succeeded, but second run panicked.");
+        }
+        (SandboxedResult::FoundBug { .. }, SandboxedResult::Panicked { .. }) => {
+            log::error!(
+                "doublecheck failed! first run failed an assertion, but second run panicked."
+            );
+        }
+        (SandboxedResult::Panicked { .. }, SandboxedResult::Correct) => {
+            log::error!("doublecheck failed! first run panicked, but second run succeeded.");
+        }
+        (SandboxedResult::Panicked { .. }, SandboxedResult::FoundBug { .. }) => {
+            log::error!(
+                "doublecheck failed! first run panicked, but second run failed an assertion."
+            );
+        }
+        (SandboxedResult::Correct, SandboxedResult::FoundBug { .. }) => {
+            log::error!(
+                "doublecheck failed! first run succeeded, but second run failed an assertion."
+            );
+        }
+        (SandboxedResult::FoundBug { .. }, SandboxedResult::Correct) => {
+            log::error!(
+                "doublecheck failed! first run failed an assertion, but second run succeeded."
+            );
+        }
+        (SandboxedResult::Correct, SandboxedResult::Correct)
+        | (SandboxedResult::FoundBug { .. }, SandboxedResult::FoundBug { .. })
+        | (SandboxedResult::Panicked { .. }, SandboxedResult::Panicked { .. }) => {
+            // Compare the two database files byte by byte
+            let db_bytes = std::fs::read(&paths.db).unwrap();
+            let doublecheck_db_bytes = std::fs::read(&paths.doublecheck_db).unwrap();
+            if db_bytes != doublecheck_db_bytes {
+                log::error!("doublecheck failed! database files are different.");
+            } else {
+                log::info!("doublecheck succeeded! database files are the same.");
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -342,67 +415,64 @@ impl SandboxedResult {
     }
 }
 
-fn run_simulation(
-    seed: u64,
+fn setup_simulation(
+    mut seed: u64,
     cli_opts: &SimulatorCLI,
     db_path: &Path,
     plan_path: &Path,
+) -> (SimulatorEnv, Vec<InteractionPlan>) {
+    if let Some(load) = &cli_opts.load {
+        let seed_path = PathBuf::from(load).with_extension("seed");
+        let seed_str = std::fs::read_to_string(&seed_path).unwrap();
+        seed = seed_str.parse().unwrap();
+    }
+
+    let mut env = SimulatorEnv::new(seed, cli_opts, db_path);
+
+    // todo: the loading works correctly because of a hacky decision
+    // Rigth now, the plan generation is the only point we use the rng, so the environment doesn't
+    // even need it. In the future, especially with multi-connections and multi-threading, we might
+    // use the RNG for more things such as scheduling, so this assumption will fail.  When that happens,
+    // we'll need to reachitect this logic by saving and loading RNG state.
+    let plans = if let Some(load) = &cli_opts.load {
+        log::info!("Loading database interaction plan...");
+        let plan = std::fs::read_to_string(load).unwrap();
+        let plan: InteractionPlan = serde_json::from_str(&plan).unwrap();
+        vec![plan]
+    } else {
+        log::info!("Generating database interaction plan...");
+        (1..=env.opts.max_connections)
+            .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
+            .collect::<Vec<_>>()
+    };
+
+    // todo: for now, we only use 1 connection, so it's safe to use the first plan.
+    let plan = plans[0].clone();
+
+    let mut f = std::fs::File::create(plan_path).unwrap();
+    // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
+    f.write_all(plan.to_string().as_bytes()).unwrap();
+
+    let serialized_plan_path = plan_path.with_extension("plan.json");
+    let mut f = std::fs::File::create(&serialized_plan_path).unwrap();
+    f.write_all(serde_json::to_string(&plan).unwrap().as_bytes())
+        .unwrap();
+
+    let seed_path = plan_path.with_extension("seed");
+    let mut f = std::fs::File::create(&seed_path).unwrap();
+    f.write_all(seed.to_string().as_bytes()).unwrap();
+
+    log::info!("{}", plan.stats());
+    (env, plans)
+}
+
+fn run_simulation(
+    env: Arc<Mutex<SimulatorEnv>>,
+    plans: &mut [InteractionPlan],
     last_execution: Arc<Mutex<Execution>>,
-    shrink: Option<&Execution>,
 ) -> ExecutionResult {
-    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    log::info!("Executing database interaction plan...");
 
-    let (create_percent, read_percent, write_percent, delete_percent) = {
-        let mut remaining = 100.0;
-        let read_percent = rng.gen_range(0.0..=remaining);
-        remaining -= read_percent;
-        let write_percent = rng.gen_range(0.0..=remaining);
-        remaining -= write_percent;
-        let delete_percent = remaining;
-
-        let create_percent = write_percent / 10.0;
-        let write_percent = write_percent - create_percent;
-
-        (create_percent, read_percent, write_percent, delete_percent)
-    };
-
-    let opts = SimulatorOpts {
-        ticks: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
-        max_connections: 1, // TODO: for now let's use one connection as we didn't implement
-        // correct transactions procesing
-        max_tables: rng.gen_range(0..128),
-        create_percent,
-        read_percent,
-        write_percent,
-        delete_percent,
-        page_size: 4096, // TODO: randomize this too
-        max_interactions: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
-        max_time_simulation: cli_opts.maximum_time,
-    };
-    let io = Arc::new(SimulatorIO::new(seed, opts.page_size).unwrap());
-
-    let db = match Database::open_file(io.clone(), db_path.to_str().unwrap()) {
-        Ok(db) => db,
-        Err(e) => {
-            panic!("error opening simulator test file {:?}: {:?}", db_path, e);
-        }
-    };
-
-    let connections = vec![SimConnection::Disconnected; opts.max_connections];
-
-    let mut env = SimulatorEnv {
-        opts,
-        tables: Vec::new(),
-        connections,
-        rng,
-        io,
-        db,
-    };
-
-    log::info!("Generating database interaction plan...");
-    let mut plans = (1..=env.opts.max_connections)
-        .map(|_| InteractionPlan::arbitrary_from(&mut env.rng.clone(), &mut env))
-        .collect::<Vec<_>>();
     let mut states = plans
         .iter()
         .map(|_| InteractionPlanState {
@@ -411,27 +481,9 @@ fn run_simulation(
             secondary_pointer: 0,
         })
         .collect::<Vec<_>>();
+    let result = execute_plans(env.clone(), plans, &mut states, last_execution);
 
-    let plan = if let Some(failing_execution) = shrink {
-        // todo: for now, we only use 1 connection, so it's safe to use the first plan.
-        println!("Interactions Before: {}", plans[0].plan.len());
-        let shrunk = plans[0].shrink_interaction_plan(failing_execution);
-        println!("Interactions After: {}", shrunk.plan.len());
-        shrunk
-    } else {
-        plans[0].clone()
-    };
-
-    let mut f = std::fs::File::create(plan_path).unwrap();
-    // todo: create a detailed plan file with all the plans. for now, we only use 1 connection, so it's safe to use the first plan.
-    f.write_all(plan.to_string().as_bytes()).unwrap();
-
-    log::info!("{}", plan.stats());
-
-    log::info!("Executing database interaction plan...");
-
-    let result = execute_plans(&mut env, &mut plans, &mut states, last_execution);
-
+    let env = env.lock().unwrap();
     env.io.print_stats();
 
     log::info!("Simulation completed");

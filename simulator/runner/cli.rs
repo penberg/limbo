@@ -41,6 +41,14 @@ pub struct SimulatorCLI {
         help = "minimize(shrink) the failing counterexample"
     )]
     pub shrink: bool,
+    #[clap(short = 'l', long, help = "load plan from a file")]
+    pub load: Option<String>,
+    #[clap(
+        short = 'w',
+        long,
+        help = "enable watch mode that reruns the simulation on file changes"
+    )]
+    pub watch: bool,
 }
 
 impl SimulatorCLI {
@@ -51,9 +59,21 @@ impl SimulatorCLI {
         if self.maximum_size < 1 {
             return Err("maximum size must be at least 1".to_string());
         }
+        // todo: fix an issue here where if minimum size is not defined, it prevents setting low maximum sizes.
         if self.minimum_size > self.maximum_size {
             return Err("Minimum size cannot be greater than maximum size".to_string());
         }
+
+        // Make sure uncompatible options are not set
+        if self.shrink && self.doublecheck {
+            return Err("Cannot use shrink and doublecheck at the same time".to_string());
+        }
+
+        if let Some(plan_path) = &self.load {
+            std::fs::File::open(plan_path)
+                .map_err(|_| format!("Plan file '{}' could not be opened", plan_path))?;
+        }
+
         Ok(())
     }
 }

@@ -7,6 +7,7 @@ members = [
     "bindings/python",
     "bindings/rust",
     "bindings/wasm",
+	"bindings/go",
     "cli",
     "core",
     "extensions/core",
@@ -57,7 +58,7 @@ github-attestations = true
 debug = "line-tables-only"
 codegen-units = 1
 panic = "abort"
-lto = "off"
+lto = true
 
 [profile.bench-profile]
 inherits = "release"
@@ -65,3 +66,4 @@ debug = true
 
 [profile.dist]
 inherits = "release"
+lto = "thin"

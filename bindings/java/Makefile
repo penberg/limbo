@@ -1,6 +1,12 @@
-.PHONY: test build_test
+.PHONY: java_lint test build_test
 
-test: build_test
+lint:
+	./gradlew spotlessCheck
+
+lint_apply:
+	./gradlew spotlessApply
+
+test: lint build_test
 	./gradlew test --info
 
 build_test:

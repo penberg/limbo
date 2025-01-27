@@ -443,3 +443,140 @@ do_execsql_test julianday-time-only {
 #    SELECT julianday('2023-05-18');
 #} {2460082.5}
 
+
+
+
+# Strftime tests
+
+
+set FMT {%d,%e,%f,%F,%G,%g,%H,%I,%j,%J,%k,%l,%i,%m,%M,%p,%P,%R,%s,%S,%T,%U,%u,%V,%w,%W,%Y,%%}
+
+do_execsql_test strftime-day {
+    SELECT strftime('%d', '2025-01-23T13:10:30.567');
+} {23}
+
+do_execsql_test strftime-day-without-leading-zero-1 {
+    SELECT strftime('%e', '2025-01-23T13:10:30.567');
+} {23}
+
+do_execsql_test strftime-day-without-leading-zero-2 {
+    SELECT strftime('%e', '2025-01-02T13:10:30.567');
+} {" 2"} 
+# TODO not a typo in sqlite there is also a space 
+
+do_execsql_test strftime-fractional-seconds {
+    SELECT strftime('%f', '2025-01-02T13:10:30.567');
+} {30.567}
+
+do_execsql_test strftime-iso-8601-date {
+    SELECT strftime('%F', '2025-01-23T13:10:30.567');
+} {2025-01-23}
+
+do_execsql_test strftime-iso-8601-year {
+    SELECT strftime('%G', '2025-01-23T13:10:30.567');
+} {2025}
+
+do_execsql_test strftime-iso-8601-year-2_digit {
+    SELECT strftime('%g', '2025-01-23T13:10:30.567');
+} {25}
+
+do_execsql_test strftime-hour {
+    SELECT strftime('%H', '2025-01-23T13:10:30.567');
+} {13}
+
+do_execsql_test strftime-hour-12-hour-clock {
+    SELECT strftime('%I', '2025-01-23T13:10:30.567');
+} {01}
+
+do_execsql_test strftime-day-of-year {
+    SELECT strftime('%j', '2025-01-23T13:10:30.567');
+} {023}
+
+do_execsql_test strftime-julianday {
+    SELECT strftime('%J', '2025-01-23T13:10:30.567');
+} {2460699.048964896}
+
+do_execsql_test strftime-hour-without-leading-zero-1 {
+    SELECT strftime('%k', '2025-01-23T13:10:30.567');
+} {13}
+
+do_execsql_test strftime-hour-without-leading-zero-2 {
+    SELECT strftime('%k', '2025-01-23T02:10:30.567');
+} {" 2"}
+
+do_execsql_test strftime-hour-12-hour-clock-without-leading-zero-2 {
+    SELECT strftime('%l', '2025-01-23T13:10:30.567');
+} {" 1"}
+
+do_execsql_test strftime-month {
+    SELECT strftime('%m', '2025-01-23T13:10:30.567');
+} {01}
+
+do_execsql_test strftime-minute {
+    SELECT strftime('%M', '2025-01-23T13:14:30.567');
+} {14}
+
+do_execsql_test strftime-am-pm=1 {
+    SELECT strftime('%p', '2025-01-23T11:14:30.567');
+} {AM}
+
+do_execsql_test strftime-am-pm-2 {
+    SELECT strftime('%p', '2025-01-23T13:14:30.567');
+} {PM}
+
+do_execsql_test strftime-am-pm-lower-1 {
+    SELECT strftime('%P', '2025-01-23T11:14:30.567');
+} {am}
+
+do_execsql_test strftime-am-pm-lower-2 {
+    SELECT strftime('%P', '2025-01-23T13:14:30.567');
+} {pm}
+
+do_execsql_test strftime-iso8601-time {
+    SELECT strftime('%R', '2025-01-23T13:14:30.567');
+} {13:14}
+
+do_execsql_test strftime-seconds-since-epoch {
+    SELECT strftime('%s', '2025-01-23T13:14:30.567');
+} {1737638070}
+
+do_execsql_test strftime-seconds {
+    SELECT strftime('%S', '2025-01-23T13:14:30.567');
+} {30}
+
+do_execsql_test strftime-iso8601-with-seconds {
+    SELECT strftime('%T', '2025-01-23T13:14:30.567');
+} {13:14:30}
+
+do_execsql_test strftime-week-year-start-sunday {
+    SELECT strftime('%U', '2025-01-23T13:14:30.567');
+} {03}
+
+do_execsql_test strftime-day-week-start-monday {
+    SELECT strftime('%u', '2025-01-23T13:14:30.567');
+} {4}
+
+do_execsql_test strftime-iso8601-week-year {
+    SELECT strftime('%V', '2025-01-23T13:14:30.567');
+} {04}
+
+do_execsql_test strftime-day-week-start-sunday {
+    SELECT strftime('%w', '2025-01-23T13:14:30.567');
+} {4}
+
+do_execsql_test strftime-day-week-start-sunday {
+    SELECT strftime('%w', '2025-01-23T13:14:30.567');
+} {4}
+
+do_execsql_test strftime-week-year-start-sunday {
+    SELECT strftime('%W', '2025-01-23T13:14:30.567');
+} {03}
+
+do_execsql_test strftime-year {
+    SELECT strftime('%Y', '2025-01-23T13:14:30.567');
+} {2025}
+
+do_execsql_test strftime-percent {
+    SELECT strftime('%%', '2025-01-23T13:14:30.567');
+} {%}
+

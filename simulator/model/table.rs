@@ -1,5 +1,7 @@
 use std::{fmt::Display, ops::Deref};
 
+use serde::{Deserialize, Serialize};
+
 pub(crate) struct Name(pub(crate) String);
 
 impl Deref for Name {
@@ -10,14 +12,14 @@ impl Deref for Name {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Table {
     pub(crate) rows: Vec<Vec<Value>>,
     pub(crate) name: String,
     pub(crate) columns: Vec<Column>,
 }
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Column {
     pub(crate) name: String,
     pub(crate) column_type: ColumnType,
@@ -25,7 +27,7 @@ pub(crate) struct Column {
     pub(crate) unique: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum ColumnType {
     Integer,
     Float,
@@ -44,10 +46,30 @@ impl Display for ColumnType {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+fn float_to_string<S>(float: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&format!("{}", float))
+}
+
+fn string_to_float<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    s.parse().map_err(serde::de::Error::custom)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum Value {
     Null,
     Integer(i64),
+    // we use custom serialization to preserve float precision
+    #[serde(
+        serialize_with = "float_to_string",
+        deserialize_with = "string_to_float"
+    )]
     Float(f64),
     Text(String),
     Blob(Vec<u8>),
