@@ -12,7 +12,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Clone)]
-#[allow(dead_code)]
 pub struct LimboConnection {
     // Because java's LimboConnection is 1:1 mapped to limbo connection, we can use Rc
     pub(crate) conn: Rc<Connection>,
@@ -29,7 +28,6 @@ impl LimboConnection {
         Box::into_raw(Box::new(self)) as jlong
     }
 
-    #[allow(dead_code)]
     pub fn drop(ptr: jlong) {
         let _boxed = unsafe { Box::from_raw(ptr as *mut LimboConnection) };
     }
@@ -41,6 +39,15 @@ pub fn to_limbo_connection(ptr: jlong) -> Result<&'static mut LimboConnection> {
     } else {
         unsafe { Ok(&mut *(ptr as *mut LimboConnection)) }
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection__1close<'local>(
+    _env: JNIEnv<'local>,
+    _obj: JObject<'local>,
+    connection_ptr: jlong,
+) {
+    LimboConnection::drop(connection_ptr);
 }
 
 #[no_mangle]
