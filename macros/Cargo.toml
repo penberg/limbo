@@ -12,6 +12,8 @@ description = "The Limbo database library"
 [lib]
 proc-macro = true
 
+[features]
+
 [dependencies]
 quote = "1.0.38"
 proc-macro2 = "1.0.93"

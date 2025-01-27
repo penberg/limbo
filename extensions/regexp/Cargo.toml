@@ -6,11 +6,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+static = ["limbo_ext/static"]
+
 [lib]
 crate-type = ["cdylib", "lib"]
 
 
 [dependencies]
-limbo_ext = { path = "../core"}
+limbo_ext = { path = "../core", features = ["static"] }
 regex = "1.11.1"
 log = "0.4.20"

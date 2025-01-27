@@ -1,7 +1,7 @@
 use limbo_ext::{register_extension, scalar, Value, ValueType};
 
 register_extension! {
-    scalars: { uuid4_str, uuid4_blob, uuid7_str, uuid7, uuid7_ts, uuid_str, uuid_blob }
+    scalars: {uuid4_str, uuid4_blob, uuid7_str, uuid7, uuid7_ts, uuid_str, uuid_blob },
 }
 
 #[scalar(name = "uuid4_str", alias = "gen_random_uuid")]

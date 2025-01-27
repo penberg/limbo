@@ -359,7 +359,6 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn register_extension(input: TokenStream) -> TokenStream {
     let input_ast = parse_macro_input!(input as RegisterExtensionInput);
-
     let RegisterExtensionInput {
         aggregates,
         scalars,
@@ -389,17 +388,30 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
             }
         }
     });
+    let static_aggregates = aggregate_calls.clone();
+    let static_scalars = scalar_calls.clone();
 
     let expanded = quote! {
-        #[no_mangle]
-        pub extern "C" fn register_extension(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
+        #[cfg(feature = "static")]
+        pub unsafe extern "C" fn register_extension_static(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
             let api = unsafe { &*api };
-            #(#scalar_calls)*
+            #(#static_scalars)*
 
-            #(#aggregate_calls)*
+            #(#static_aggregates)*
 
             ::limbo_ext::ResultCode::OK
-        }
+          }
+
+        #[cfg(not(feature = "static"))]
+            #[no_mangle]
+            pub unsafe extern "C" fn register_extension(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
+                let api = unsafe { &*api };
+                #(#scalar_calls)*
+
+                #(#aggregate_calls)*
+
+                ::limbo_ext::ResultCode::OK
+            }
     };
 
     TokenStream::from(expanded)

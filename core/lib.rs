@@ -21,7 +21,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use fallible_iterator::FallibleIterator;
 #[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
-#[cfg(not(target_family = "wasm"))]
 use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use log::trace;
 use schema::Schema;
@@ -138,6 +137,9 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
+        if let Err(e) = db.register_builtins() {
+            return Err(LimboError::ExtensionError(e));
+        }
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),
@@ -557,7 +559,6 @@ impl SymbolTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
-            // TODO: wasm libs will be very different
             #[cfg(not(target_family = "wasm"))]
             extensions: Vec::new(),
         }
