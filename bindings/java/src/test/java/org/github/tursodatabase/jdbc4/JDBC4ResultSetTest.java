@@ -61,7 +61,7 @@ class JDBC4ResultSetTest {
   }
 
   @Test
-  void resultSet_close_test() throws Exception {
+  void close_resultSet_test() throws Exception {
     stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
     stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
     stmt.executeQuery("SELECT * FROM users");

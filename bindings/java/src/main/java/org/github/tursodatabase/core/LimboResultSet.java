@@ -1,5 +1,6 @@
 package org.github.tursodatabase.core;
 
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import org.github.tursodatabase.annotations.Nullable;
 import org.slf4j.Logger;
@@ -40,7 +41,8 @@ public class LimboResultSet {
   }
 
   /**
-   * Consumes all the rows in this result set until the {@link #next()} method returns `false`.
+   * Consumes all the rows in this {@link ResultSet} until the {@link #next()} method returns
+   * `false`.
    *
    * @throws SQLException if the result set is not open or if an error occurs while iterating.
    */

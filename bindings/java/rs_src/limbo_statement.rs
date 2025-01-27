@@ -29,7 +29,6 @@ impl LimboStatement {
         Box::into_raw(Box::new(self)) as jlong
     }
 
-    #[allow(dead_code)]
     pub fn drop(ptr: jlong) {
         let _boxed = unsafe { Box::from_raw(ptr as *mut LimboStatement) };
     }
