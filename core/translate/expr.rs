@@ -1626,7 +1626,12 @@ pub fn translate_expr(
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
-        ast::Expr::Id(_) => unreachable!("Id should be resolved to a Column before translation"),
+        ast::Expr::Id(id) => {
+            crate::bail_parse_error!(
+                "no such column: {} - should this be a string literal in single-quotes?",
+                id.0
+            )
+        }
         ast::Expr::Column {
             database: _,
             table,
