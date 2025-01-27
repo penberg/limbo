@@ -27,7 +27,7 @@ where
 
 struct Serializer<W, F = CompactFormatter> {
     writer: W,
-    formatter: F, // TODO settings for formatting (single vs double quotes, whitespace etc)
+    formatter: F,
 }
 
 impl<W> Serializer<W>
@@ -77,56 +77,48 @@ where
         self.formatter
             .write_i8(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_i16(self, v: i16) -> Result<()> {
         self.formatter
             .write_i16(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_i32(self, v: i32) -> Result<()> {
         self.formatter
             .write_i32(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_i64(self, v: i64) -> Result<()> {
         self.formatter
             .write_i64(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_u8(self, v: u8) -> Result<()> {
         self.formatter
             .write_u8(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_u16(self, v: u16) -> Result<()> {
         self.formatter
             .write_u16(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_u32(self, v: u32) -> Result<()> {
         self.formatter
             .write_u32(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_u64(self, v: u64) -> Result<()> {
         self.formatter
             .write_u64(&mut self.writer, v)
             .map_err(Error::from)
-        // self.call_to_string(&v)
     }
 
     fn serialize_f32(self, v: f32) -> Result<()> {
@@ -148,9 +140,6 @@ where
     }
 
     fn serialize_str(self, v: &str) -> Result<()> {
-        // self.output += "\"";
-        // self.output += &escape(v);
-        // self.output += "\"";
         format_escaped_str(&mut self.writer, &mut self.formatter, v).map_err(Error::from)
     }
 
@@ -502,7 +491,6 @@ where
     where
         T: ?Sized + Serialize,
     {
-        // TODO see here later
         ser::SerializeMap::serialize_key(self, key)?;
         ser::SerializeMap::serialize_value(self, value)
     }
@@ -761,7 +749,7 @@ pub trait Formatter {
                 // let mut buffer = ryu::Buffer::new();
                 // let s = buffer.format_finite(value);
 
-                // TODO this the previous implementation present in the package
+                // This the previous implementation present in the package
                 // However, serde_json does it differently above.
                 // Not sure if there if its done like this because of the precision
                 let s = &format!("{:.1}", value);
