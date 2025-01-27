@@ -31,7 +31,6 @@ public abstract class LimboConnection implements Connection {
   public LimboConnection(String url, String filePath, Properties properties) throws SQLException {
     this.database = open(url, filePath, properties);
     this.connectionPtr = this.database.connect();
-    this.closed = true;
   }
 
   private static AbstractDB open(String url, String filePath, Properties properties)

@@ -68,13 +68,16 @@ class JDBC4ConnectionTest {
 
   @Test
   void calling_close_multiple_times_throws_no_exception() throws Exception {
+    assertFalse(connection.isClosed());
     connection.close();
+    assertTrue(connection.isClosed());
     connection.close();
   }
 
   @Test
   void calling_methods_on_closed_connection_should_throw_exception() throws Exception {
     connection.close();
+    assertTrue(connection.isClosed());
     assertThrows(
         SQLException.class,
         () ->
