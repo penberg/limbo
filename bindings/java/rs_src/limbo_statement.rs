@@ -91,7 +91,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
 pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement__1close<'local>(
     _env: JNIEnv<'local>,
     _obj: JObject<'local>,
-    stmt_ptr: jlong
+    stmt_ptr: jlong,
 ) {
     LimboStatement::drop(stmt_ptr);
 }
