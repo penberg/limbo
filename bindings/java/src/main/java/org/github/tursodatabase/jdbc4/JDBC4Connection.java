@@ -83,7 +83,7 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public void close() throws SQLException {
-    // TODO
+    super.close();
   }
 
   @Override
