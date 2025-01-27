@@ -88,6 +88,15 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
     }
 }
 
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement__1close<'local>(
+    _env: JNIEnv<'local>,
+    _obj: JObject<'local>,
+    stmt_ptr: jlong
+) {
+    LimboStatement::drop(stmt_ptr);
+}
+
 fn row_to_obj_array<'local>(
     env: &mut JNIEnv<'local>,
     row: &limbo_core::Row,

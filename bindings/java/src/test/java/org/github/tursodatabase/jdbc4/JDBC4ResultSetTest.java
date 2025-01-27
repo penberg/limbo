@@ -57,4 +57,28 @@ class JDBC4ResultSetTest {
     // as well
     assertFalse(resultSet.next());
   }
+
+  @Test
+  void resultSet_close_test() throws Exception {
+    stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
+    stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
+    stmt.executeQuery("SELECT * FROM users");
+    ResultSet resultSet = stmt.getResultSet();
+
+    assertFalse(resultSet.isClosed());
+    resultSet.close();
+    assertTrue(resultSet.isClosed());
+  }
+
+  @Test
+  void calling_methods_on_closed_resultSet_should_throw_exception() throws Exception {
+    stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
+    stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
+    stmt.executeQuery("SELECT * FROM users");
+    ResultSet resultSet = stmt.getResultSet();
+    resultSet.close();
+    assertTrue(resultSet.isClosed());
+
+    resultSet.next();
+  }
 }

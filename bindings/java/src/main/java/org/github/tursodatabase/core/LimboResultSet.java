@@ -50,7 +50,11 @@ public class LimboResultSet {
    * cursor can only move forward.
    */
   public boolean next() throws SQLException {
-    if (!open || isEmptyResultSet || pastLastRow) {
+    if (!open) {
+      throw new SQLException("The resultSet is not open");
+    }
+
+    if (isEmptyResultSet || pastLastRow) {
       return false; // completed ResultSet
     }
 
@@ -95,6 +99,11 @@ public class LimboResultSet {
     if (!open) {
       throw new SQLException("ResultSet closed");
     }
+  }
+
+  public void close() throws SQLException {
+    this.statement.close();
+    this.open = false;
   }
 
   @Override

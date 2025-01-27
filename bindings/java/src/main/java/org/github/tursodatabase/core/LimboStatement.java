@@ -67,6 +67,16 @@ public class LimboStatement {
     LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
   }
 
+  /**
+   * Closes the current statement and releases any resources associated with it. This method calls
+   * the native `_close` method to perform the actual closing operation.
+   */
+  public void close() {
+    _close(statementPointer);
+  }
+
+  private native void _close(long statementPointer);
+
   @Override
   public String toString() {
     return "LimboStatement{"

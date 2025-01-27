@@ -25,7 +25,7 @@ public class JDBC4ResultSet implements ResultSet {
 
   @Override
   public void close() throws SQLException {
-    // TODO
+    resultSet.close();
   }
 
   @Override
@@ -866,8 +866,7 @@ public class JDBC4ResultSet implements ResultSet {
 
   @Override
   public boolean isClosed() throws SQLException {
-    // TODO
-    return false;
+    return !resultSet.isOpen();
   }
 
   @Override
