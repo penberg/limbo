@@ -49,6 +49,7 @@ public abstract class LimboConnection implements Connection {
       return;
     }
     this._close(this.connectionPtr);
+    this.closed = true;
   }
 
   private native void _close(long connectionPtr);
