@@ -323,7 +323,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeSeq for Map<'a, W, F>
+impl<W, F> ser::SerializeSeq for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -360,7 +360,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeTuple for Map<'a, W, F>
+impl<W, F> ser::SerializeTuple for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -380,7 +380,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeTupleStruct for Map<'a, W, F>
+impl<W, F> ser::SerializeTupleStruct for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -400,7 +400,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeTupleVariant for Map<'a, W, F>
+impl<W, F> ser::SerializeTupleVariant for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -435,7 +435,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeMap for Map<'a, W, F>
+impl<W, F> ser::SerializeMap for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -490,7 +490,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeStruct for Map<'a, W, F>
+impl<W, F> ser::SerializeStruct for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -512,7 +512,7 @@ where
     }
 }
 
-impl<'a, W, F> ser::SerializeStructVariant for Map<'a, W, F>
+impl<W, F> ser::SerializeStructVariant for Map<'_, W, F>
 where
     W: io::Write,
     F: Formatter,
@@ -677,7 +677,6 @@ pub trait Formatter {
     }
 
     /// Writes an integer value like `123` to the specified writer.
-
     fn write_u8<W>(&mut self, writer: &mut W, value: u8) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -686,7 +685,6 @@ pub trait Formatter {
     }
 
     /// Writes an integer value like `123` to the specified writer.
-
     fn write_u16<W>(&mut self, writer: &mut W, value: u16) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -695,7 +693,6 @@ pub trait Formatter {
     }
 
     /// Writes an integer value like `123` to the specified writer.
-
     fn write_u32<W>(&mut self, writer: &mut W, value: u32) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -704,7 +701,6 @@ pub trait Formatter {
     }
 
     /// Writes an integer value like `123` to the specified writer.
-
     fn write_u64<W>(&mut self, writer: &mut W, value: u64) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -713,7 +709,6 @@ pub trait Formatter {
     }
 
     /// Writes an integer value like `123` to the specified writer.
-
     fn write_u128<W>(&mut self, writer: &mut W, value: u128) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -722,7 +717,6 @@ pub trait Formatter {
     }
 
     /// Writes a floating point value like `-31.26e+12` to the specified writer.
-
     fn write_f32<W>(&mut self, writer: &mut W, value: f32) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -747,7 +741,6 @@ pub trait Formatter {
     }
 
     /// Writes a floating point value like `-31.26e+12` to the specified writer.
-
     fn write_f64<W>(&mut self, writer: &mut W, value: f64) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -779,7 +772,6 @@ pub trait Formatter {
     }
 
     /// Writes a number that has already been rendered to a string.
-
     fn write_number_str<W>(&mut self, writer: &mut W, value: &str) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -789,7 +781,6 @@ pub trait Formatter {
 
     /// Called before each series of `write_string_fragment` and
     /// `write_char_escape`.  Writes a `"` to the specified writer.
-
     fn begin_string<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -808,7 +799,6 @@ pub trait Formatter {
 
     /// Writes a string fragment that doesn't need any escaping to the
     /// specified writer.
-
     fn write_string_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -869,7 +859,6 @@ pub trait Formatter {
 
     /// Called before every array.  Writes a `[` to the specified
     /// writer.
-
     fn begin_array<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -879,7 +868,6 @@ pub trait Formatter {
 
     /// Called after every array.  Writes a `]` to the specified
     /// writer.
-
     fn end_array<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -889,7 +877,6 @@ pub trait Formatter {
 
     /// Called before every array value.  Writes a `,` if needed to
     /// the specified writer.
-
     fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -902,7 +889,6 @@ pub trait Formatter {
     }
 
     /// Called after every array value.
-
     fn end_array_value<W>(&mut self, _writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -912,7 +898,6 @@ pub trait Formatter {
 
     /// Called before every object.  Writes a `{` to the specified
     /// writer.
-
     fn begin_object<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -922,7 +907,6 @@ pub trait Formatter {
 
     /// Called after every object.  Writes a `}` to the specified
     /// writer.
-
     fn end_object<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -931,7 +915,6 @@ pub trait Formatter {
     }
 
     /// Called before every object key.
-
     fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -946,7 +929,6 @@ pub trait Formatter {
     /// Called after every object key.  A `:` should be written to the
     /// specified writer by either this method or
     /// `begin_object_value`.
-
     fn end_object_key<W>(&mut self, _writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -957,7 +939,6 @@ pub trait Formatter {
     /// Called before every object value.  A `:` should be written to
     /// the specified writer by either this method or
     /// `end_object_key`.
-
     fn begin_object_value<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -966,7 +947,6 @@ pub trait Formatter {
     }
 
     /// Called after every object value.
-
     fn end_object_value<W>(&mut self, _writer: &mut W) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -976,7 +956,6 @@ pub trait Formatter {
 
     /// Writes a raw JSON fragment that doesn't need any escaping to the
     /// specified writer.
-
     fn write_raw_fragment<W>(&mut self, writer: &mut W, fragment: &str) -> io::Result<()>
     where
         W: ?Sized + io::Write,
@@ -1083,13 +1062,13 @@ impl<'a> PrettyFormatter<'a> {
     }
 }
 
-impl<'a> Default for PrettyFormatter<'a> {
+impl Default for PrettyFormatter<'_> {
     fn default() -> Self {
         PrettyFormatter::new()
     }
 }
 
-impl<'a> Formatter for PrettyFormatter<'a> {
+impl Formatter for PrettyFormatter<'_> {
     #[inline]
     fn begin_array<W>(&mut self, writer: &mut W) -> io::Result<()>
     where
