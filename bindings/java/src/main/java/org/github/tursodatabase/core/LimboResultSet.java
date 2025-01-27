@@ -40,6 +40,19 @@ public class LimboResultSet {
   }
 
   /**
+   * Consumes all the rows in this result set until the {@link #next()} method returns `false`.
+   *
+   * @throws SQLException if the result set is not open or if an error occurs while iterating.
+   */
+  public void consumeAll() throws SQLException {
+    if (!open) {
+      throw new SQLException("The result set is not open");
+    }
+
+    while (next()) {}
+  }
+
+  /**
    * Moves the cursor forward one row from its current position. A {@link LimboResultSet} cursor is
    * initially positioned before the first fow; the first call to the method <code>next</code> makes
    * the first row the current row; the second call makes the second row the current row, and so on.
@@ -74,9 +87,6 @@ public class LimboResultSet {
     }
 
     pastLastRow = lastStepResult.isDone();
-    if (pastLastRow) {
-      open = false;
-    }
     return !pastLastRow;
   }
 

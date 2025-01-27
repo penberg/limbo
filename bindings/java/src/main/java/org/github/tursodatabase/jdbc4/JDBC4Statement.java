@@ -65,9 +65,7 @@ public class JDBC4Statement implements Statement {
 
     requireNonNull(statement, "statement should not be null after running execute method");
     final LimboResultSet resultSet = statement.getResultSet();
-    while (resultSet.isOpen()) {
-      resultSet.next();
-    }
+    resultSet.consumeAll();
 
     // TODO: return update count;
     return 0;

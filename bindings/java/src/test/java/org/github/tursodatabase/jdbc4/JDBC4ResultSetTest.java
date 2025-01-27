@@ -1,9 +1,11 @@
 package org.github.tursodatabase.jdbc4;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 import org.github.tursodatabase.TestUtils;
@@ -79,6 +81,6 @@ class JDBC4ResultSetTest {
     resultSet.close();
     assertTrue(resultSet.isClosed());
 
-    resultSet.next();
+    assertThrows(SQLException.class, resultSet::next);
   }
 }
