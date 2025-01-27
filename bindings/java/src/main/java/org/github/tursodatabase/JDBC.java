@@ -3,20 +3,23 @@ package org.github.tursodatabase;
 import java.sql.*;
 import java.util.Locale;
 import java.util.Properties;
-import java.util.logging.Logger;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.jdbc4.JDBC4Connection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class JDBC implements Driver {
+  private static final Logger logger = LoggerFactory.getLogger(JDBC.class);
+
   private static final String VALID_URL_PREFIX = "jdbc:sqlite:";
 
   static {
     try {
       DriverManager.registerDriver(new JDBC());
     } catch (Exception e) {
-      // TODO: log
+      logger.error("Failed to register driver", e);
     }
   }
 
@@ -72,7 +75,7 @@ public class JDBC implements Driver {
 
   @Override
   @SkipNullableCheck
-  public Logger getParentLogger() throws SQLFeatureNotSupportedException {
+  public java.util.logging.Logger getParentLogger() throws SQLFeatureNotSupportedException {
     // TODO
     return null;
   }
