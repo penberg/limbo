@@ -1,0 +1,16 @@
+[package]
+name = "limbo_vector"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+static= [ "limbo_ext/static" ]
+
+[dependencies]
+limbo_ext = { path = "../core", features = ["static"] }

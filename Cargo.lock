@@ -1442,6 +1442,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "limbo_vector"
+version = "0.0.13"
+dependencies = [
+ "limbo_ext",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
