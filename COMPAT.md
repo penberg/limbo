@@ -19,6 +19,7 @@ This document describes the compatibility of Limbo with SQLite.
       - [JSON functions](#json-functions)
   - [SQLite C API](#sqlite-c-api)
   - [SQLite VDBE opcodes](#sqlite-vdbe-opcodes)
+  - [SQLite journaling modes](#sqlite-journaling-modes)
   - [Extensions](#extensions)
     - [UUID](#uuid)
     - [regexp](#regexp)
@@ -38,229 +39,229 @@ The current status of Limbo is:
 
 ### Statements
 
-| Statement                 | Status  | Comment |
-| ------------------------- | ------- | ------- |
-| ALTER TABLE               | No      |         |
-| ANALYZE                   | No      |         |
-| ATTACH DATABASE           | No      |         |
-| BEGIN TRANSACTION         | No      |         |
-| COMMIT TRANSACTION        | No      |         |
-| CREATE INDEX              | No      |         |
-| CREATE TABLE              | Partial |         |
-| CREATE TRIGGER            | No      |         |
-| CREATE VIEW               | No      |         |
-| CREATE VIRTUAL TABLE      | No      |         |
-| DELETE                    | No      |         |
-| DETACH DATABASE           | No      |         |
-| DROP INDEX                | No      |         |
-| DROP TABLE                | No      |         |
-| DROP TRIGGER              | No      |         |
-| DROP VIEW                 | No      |         |
-| END TRANSACTION           | No      |         |
-| EXPLAIN                   | Yes     |         |
-| INDEXED BY                | No      |         |
-| INSERT                    | Partial |         |
-| ON CONFLICT clause        | No      |         |
-| REINDEX                   | No      |         |
-| RELEASE SAVEPOINT         | No      |         |
-| REPLACE                   | No      |         |
-| RETURNING clause          | No      |         |
-| ROLLBACK TRANSACTION      | No      |         |
-| SAVEPOINT                 | No      |         |
-| SELECT                    | Yes     |         |
-| SELECT ... WHERE          | Yes     |         |
-| SELECT ... WHERE ... LIKE | Yes     |         |
-| SELECT ... LIMIT          | Yes     |         |
-| SELECT ... ORDER BY       | Yes     |         |
-| SELECT ... GROUP BY       | Yes     |         |
-| SELECT ... HAVING         | Yes     |         |
-| SELECT ... JOIN           | Yes     |         |
+| Statement                 | Status  | Comment                                                                           |
+|---------------------------|---------|-----------------------------------------------------------------------------------|
+| ALTER TABLE               | No      |                                                                                   |
+| ANALYZE                   | No      |                                                                                   |
+| ATTACH DATABASE           | No      |                                                                                   |
+| BEGIN TRANSACTION         | No      |                                                                                   |
+| COMMIT TRANSACTION        | No      |                                                                                   |
+| CREATE INDEX              | No      |                                                                                   |
+| CREATE TABLE              | Partial |                                                                                   |
+| CREATE TRIGGER            | No      |                                                                                   |
+| CREATE VIEW               | No      |                                                                                   |
+| CREATE VIRTUAL TABLE      | No      |                                                                                   |
+| DELETE                    | No      |                                                                                   |
+| DETACH DATABASE           | No      |                                                                                   |
+| DROP INDEX                | No      |                                                                                   |
+| DROP TABLE                | No      |                                                                                   |
+| DROP TRIGGER              | No      |                                                                                   |
+| DROP VIEW                 | No      |                                                                                   |
+| END TRANSACTION           | No      |                                                                                   |
+| EXPLAIN                   | Yes     |                                                                                   |
+| INDEXED BY                | No      |                                                                                   |
+| INSERT                    | Partial |                                                                                   |
+| ON CONFLICT clause        | No      |                                                                                   |
+| REINDEX                   | No      |                                                                                   |
+| RELEASE SAVEPOINT         | No      |                                                                                   |
+| REPLACE                   | No      |                                                                                   |
+| RETURNING clause          | No      |                                                                                   |
+| ROLLBACK TRANSACTION      | No      |                                                                                   |
+| SAVEPOINT                 | No      |                                                                                   |
+| SELECT                    | Yes     |                                                                                   |
+| SELECT ... WHERE          | Yes     |                                                                                   |
+| SELECT ... WHERE ... LIKE | Yes     |                                                                                   |
+| SELECT ... LIMIT          | Yes     |                                                                                   |
+| SELECT ... ORDER BY       | Yes     |                                                                                   |
+| SELECT ... GROUP BY       | Yes     |                                                                                   |
+| SELECT ... HAVING         | Yes     |                                                                                   |
+| SELECT ... JOIN           | Yes     |                                                                                   |
 | SELECT ... CROSS JOIN     | Yes     | SQLite CROSS JOIN means "do not reorder joins". We don't support that yet anyway. |
-| SELECT ... INNER JOIN     | Yes     |         |
-| SELECT ... OUTER JOIN     | Partial | no RIGHT JOIN |
-| SELECT ... JOIN USING     | Yes     |         |
-| SELECT ... NATURAL JOIN   | Yes     |         |
-| UPDATE                    | No      |         |
-| UPSERT                    | No      |         |
-| VACUUM                    | No      |         |
-| WITH clause               | No      |         |
+| SELECT ... INNER JOIN     | Yes     |                                                                                   |
+| SELECT ... OUTER JOIN     | Partial | no RIGHT JOIN                                                                     |
+| SELECT ... JOIN USING     | Yes     |                                                                                   |
+| SELECT ... NATURAL JOIN   | Yes     |                                                                                   |
+| UPDATE                    | No      |                                                                                   |
+| UPSERT                    | No      |                                                                                   |
+| VACUUM                    | No      |                                                                                   |
+| WITH clause               | No      |                                                                                   |
 
 #### [PRAGMA](https://www.sqlite.org/pragma.html)
 
 
-| Statement                        | Status     | Comment                                         |
-|----------------------------------|------------|-------------------------------------------------|
-| PRAGMA analysis_limit            | No         |                                                 |
-| PRAGMA application_id            | No         |                                                 |
-| PRAGMA auto_vacuum               | No         |                                                 |
-| PRAGMA automatic_index           | No         |                                                 |
-| PRAGMA busy_timeout              | No         |                                                 |
-| PRAGMA busy_timeout              | No         |                                                 |
-| PRAGMA cache_size                | Yes        |                                                 |
-| PRAGMA cache_spill               | No         |                                                 |
-| PRAGMA case_sensitive_like       | Not Needed | deprecated in SQLite                            |
-| PRAGMA cell_size_check           | No         |                                                 |
-| PRAGMA checkpoint_fullsync       | No         |                                                 |
-| PRAGMA collation_list            | No         |                                                 |
-| PRAGMA compile_options           | No         |                                                 |
-| PRAGMA count_changes             | Not Needed | deprecated in SQLite                            |
-| PRAGMA data_store_directory      | Not Needed | deprecated in SQLite                            |
-| PRAGMA data_version              | No         |                                                 |
-| PRAGMA database_list             | No         |                                                 |
-| PRAGMA default_cache_size        | Not Needed | deprecated in SQLite                            |
-| PRAGMA defer_foreign_keys        | No         |                                                 |
-| PRAGMA empty_result_callbacks    | Not Needed | deprecated in SQLite                            |
-| PRAGMA encoding                  | No         |                                                 |
-| PRAGMA foreign_key_check         | No         |                                                 |
-| PRAGMA foreign_key_list          | No         |                                                 |
-| PRAGMA foreign_keys              | No         |                                                 |
-| PRAGMA freelist_count            | No         |                                                 |
-| PRAGMA full_column_names         | Not Needed | deprecated in SQLite                            |
-| PRAGMA fullsync                  | No         |                                                 |
-| PRAGMA function_list             | No         |                                                 |
-| PRAGMA hard_heap_limit           | No         |                                                 |
-| PRAGMA ignore_check_constraints  | No         |                                                 |
-| PRAGMA incremental_vacuum        | No         |                                                 |
-| PRAGMA index_info                | No         |                                                 |
-| PRAGMA index_list                | No         |                                                 |
-| PRAGMA index_xinfo               | No         |                                                 |
-| PRAGMA integrity_check           | No         |                                                 |
-| PRAGMA journal_mode              | No         |                                                 |
-| PRAGMA journal_size_limit        | No         |                                                 |
-| PRAGMA legacy_alter_table        | No         |                                                 |
-| PRAGMA legacy_file_format        | No         |                                                 |
-| PRAGMA locking_mode              | No         |                                                 |
-| PRAGMA max_page_count            | No         |                                                 |
-| PRAGMA mmap_size                 | No         |                                                 |
-| PRAGMA module_list               | No         |                                                 |
-| PRAGMA optimize                  | No         |                                                 |
-| PRAGMA page_count                | No         |                                                 |
-| PRAGMA page_size                 | No         |                                                 |
-| PRAGMA parser_trace              | No         |                                                 |
-| PRAGMA pragma_list               | No         |                                                 |
-| PRAGMA query_only                | No         |                                                 |
-| PRAGMA quick_check               | No         |                                                 |
-| PRAGMA read_uncommitted          | No         |                                                 |
-| PRAGMA recursive_triggers        | No         |                                                 |
-| PRAGMA reverse_unordered_selects | No         |                                                 |
-| PRAGMA schema_version            | No         |                                                 |
-| PRAGMA secure_delete             | No         |                                                 |
-| PRAGMA short_column_names        | Not Needed | deprecated in SQLite                            |
-| PRAGMA shrink_memory             | No         |                                                 |
-| PRAGMA soft_heap_limit           | No         |                                                 |
-| PRAGMA stats                     | No         | Used for testing in SQLite                      |
-| PRAGMA synchronous               | No         |                                                 |
-| PRAGMA table_info                | No         |                                                 |
-| PRAGMA table_list                | No         |                                                 |
-| PRAGMA table_xinfo               | No         |                                                 |
-| PRAGMA temp_store                | No         |                                                 |
-| PRAGMA temp_store_directory      | Not Needed | deprecated in SQLite                            |
-| PRAGMA threads                   | No         |                                                 |
-| PRAGMA trusted_schema            | No         |                                                 |
-| PRAGMA user_version              | No         |                                                 |
-| PRAGMA vdbe_addoptrace           | No         |                                                 |
-| PRAGMA vdbe_debug                | No         |                                                 |
-| PRAGMA vdbe_listing              | No         |                                                 |
-| PRAGMA vdbe_trace                | No         |                                                 |
-| PRAGMA wal_autocheckpoint        | No         |                                                 |
-| PRAGMA wal_checkpoint            | Partial    | Not supported calling with param (pragma-value) |
-| PRAGMA writable_schema           | No         |                                                 |
+| Statement                        | Status     | Comment                                      |
+|----------------------------------|------------|----------------------------------------------|
+| PRAGMA analysis_limit            | No         |                                              |
+| PRAGMA application_id            | No         |                                              |
+| PRAGMA auto_vacuum               | No         |                                              |
+| PRAGMA automatic_index           | No         |                                              |
+| PRAGMA busy_timeout              | No         |                                              |
+| PRAGMA busy_timeout              | No         |                                              |
+| PRAGMA cache_size                | Yes        |                                              |
+| PRAGMA cache_spill               | No         |                                              |
+| PRAGMA case_sensitive_like       | Not Needed | deprecated in SQLite                         |
+| PRAGMA cell_size_check           | No         |                                              |
+| PRAGMA checkpoint_fullsync       | No         |                                              |
+| PRAGMA collation_list            | No         |                                              |
+| PRAGMA compile_options           | No         |                                              |
+| PRAGMA count_changes             | Not Needed | deprecated in SQLite                         |
+| PRAGMA data_store_directory      | Not Needed | deprecated in SQLite                         |
+| PRAGMA data_version              | No         |                                              |
+| PRAGMA database_list             | No         |                                              |
+| PRAGMA default_cache_size        | Not Needed | deprecated in SQLite                         |
+| PRAGMA defer_foreign_keys        | No         |                                              |
+| PRAGMA empty_result_callbacks    | Not Needed | deprecated in SQLite                         |
+| PRAGMA encoding                  | No         |                                              |
+| PRAGMA foreign_key_check         | No         |                                              |
+| PRAGMA foreign_key_list          | No         |                                              |
+| PRAGMA foreign_keys              | No         |                                              |
+| PRAGMA freelist_count            | No         |                                              |
+| PRAGMA full_column_names         | Not Needed | deprecated in SQLite                         |
+| PRAGMA fullsync                  | No         |                                              |
+| PRAGMA function_list             | No         |                                              |
+| PRAGMA hard_heap_limit           | No         |                                              |
+| PRAGMA ignore_check_constraints  | No         |                                              |
+| PRAGMA incremental_vacuum        | No         |                                              |
+| PRAGMA index_info                | No         |                                              |
+| PRAGMA index_list                | No         |                                              |
+| PRAGMA index_xinfo               | No         |                                              |
+| PRAGMA integrity_check           | No         |                                              |
+| PRAGMA journal_mode              | No         |                                              |
+| PRAGMA journal_size_limit        | No         |                                              |
+| PRAGMA legacy_alter_table        | No         |                                              |
+| PRAGMA legacy_file_format        | No         |                                              |
+| PRAGMA locking_mode              | No         |                                              |
+| PRAGMA max_page_count            | No         |                                              |
+| PRAGMA mmap_size                 | No         |                                              |
+| PRAGMA module_list               | No         |                                              |
+| PRAGMA optimize                  | No         |                                              |
+| PRAGMA page_count                | No         |                                              |
+| PRAGMA page_size                 | No         |                                              |
+| PRAGMA parser_trace              | No         |                                              |
+| PRAGMA pragma_list               | No         |                                              |
+| PRAGMA query_only                | No         |                                              |
+| PRAGMA quick_check               | No         |                                              |
+| PRAGMA read_uncommitted          | No         |                                              |
+| PRAGMA recursive_triggers        | No         |                                              |
+| PRAGMA reverse_unordered_selects | No         |                                              |
+| PRAGMA schema_version            | No         |                                              |
+| PRAGMA secure_delete             | No         |                                              |
+| PRAGMA short_column_names        | Not Needed | deprecated in SQLite                         |
+| PRAGMA shrink_memory             | No         |                                              |
+| PRAGMA soft_heap_limit           | No         |                                              |
+| PRAGMA stats                     | No         | Used for testing in SQLite                   |
+| PRAGMA synchronous               | No         |                                              |
+| PRAGMA table_info                | No         |                                              |
+| PRAGMA table_list                | No         |                                              |
+| PRAGMA table_xinfo               | No         |                                              |
+| PRAGMA temp_store                | No         |                                              |
+| PRAGMA temp_store_directory      | Not Needed | deprecated in SQLite                         |
+| PRAGMA threads                   | No         |                                              |
+| PRAGMA trusted_schema            | No         |                                              |
+| PRAGMA user_version              | No         |                                              |
+| PRAGMA vdbe_addoptrace           | No         |                                              |
+| PRAGMA vdbe_debug                | No         |                                              |
+| PRAGMA vdbe_listing              | No         |                                              |
+| PRAGMA vdbe_trace                | No         |                                              |
+| PRAGMA wal_autocheckpoint        | No         |                                              |
+| PRAGMA wal_checkpoint            | Partial    | Not Needed calling with param (pragma-value) |
+| PRAGMA writable_schema           | No         |                                              |
 
 ### Expressions
 
 Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 
-| Syntax                       | Status  | Comment |
-|------------------------------|---------|---------|
-| literals                     | Yes     |         |
-| schema.table.column          | Partial | Schemas aren't supported |
-| unary operator               | Yes     | |
-| binary operator              | Partial | Only `%`, `!<`, and `!>` are unsupported |
-| agg() FILTER (WHERE ...)     | No      | Is incorrectly ignored |
-| ... OVER (...)               | No      | Is incorrectly ignored |
-| (expr)                       | Yes     |         |
-| CAST (expr AS type)          | Yes     |         |
-| COLLATE                      | No      |         |
-| (NOT) LIKE                   | No      |         |
-| (NOT) GLOB                   | No      |         |
-| (NOT) REGEXP                 | No      |         |
-| (NOT) MATCH                  | No      |         |
-| IS (NOT)                     | No      |         |
-| IS (NOT) DISTINCT FROM       | No      |         |
-| (NOT) BETWEEN ... AND ...    | No      |         |
-| (NOT) IN (subquery)          | No      |         |
-| (NOT) EXISTS (subquery)      | No      |         |
-| CASE WHEN THEN ELSE END      | Yes     |         |
-| RAISE                        | No      |         |
+| Syntax                    | Status  | Comment                                  |
+|---------------------------|---------|------------------------------------------|
+| literals                  | Yes     |                                          |
+| schema.table.column       | Partial | Schemas aren't supported                 |
+| unary operator            | Yes     |                                          |
+| binary operator           | Partial | Only `%`, `!<`, and `!>` are unsupported |
+| agg() FILTER (WHERE ...)  | No      | Is incorrectly ignored                   |
+| ... OVER (...)            | No      | Is incorrectly ignored                   |
+| (expr)                    | Yes     |                                          |
+| CAST (expr AS type)       | Yes     |                                          |
+| COLLATE                   | No      |                                          |
+| (NOT) LIKE                | No      |                                          |
+| (NOT) GLOB                | No      |                                          |
+| (NOT) REGEXP              | No      |                                          |
+| (NOT) MATCH               | No      |                                          |
+| IS (NOT)                  | No      |                                          |
+| IS (NOT) DISTINCT FROM    | No      |                                          |
+| (NOT) BETWEEN ... AND ... | No      |                                          |
+| (NOT) IN (subquery)       | No      |                                          |
+| (NOT) EXISTS (subquery)   | No      |                                          |
+| CASE WHEN THEN ELSE END   | Yes     |                                          |
+| RAISE                     | No      |                                          |
 
 ### SQL functions
 
 #### Scalar functions
 
-| Function                     | Status | Comment |
-|------------------------------|--------|---------|
-| abs(X)                       | Yes    |         |
-| changes()                    | Partial| Still need to support update statements and triggers |
-| char(X1,X2,...,XN)           | Yes    |         |
-| coalesce(X,Y,...)            | Yes    |         |
-| concat(X,...)                | Yes    |         |
-| concat_ws(SEP,X,...)         | Yes    |         |
-| format(FORMAT,...)           | No     |         |
-| glob(X,Y)                    | Yes    |         |
-| hex(X)                       | Yes    |         |
-| ifnull(X,Y)                  | Yes    |         |
-| iif(X,Y,Z)                   | Yes    |         |
-| instr(X,Y)                   | Yes    |         |
-| last_insert_rowid()          | Yes    |         |
-| length(X)                    | Yes    |         |
-| like(X,Y)                    | Yes    |         |
-| like(X,Y,Z)                  | Yes    |         |
-| likelihood(X,Y)              | No     |         |
-| likely(X)                    | No     |         |
-| load_extension(X)            | Yes    | sqlite3 extensions not yet supported |
-| load_extension(X,Y)          | No     |         |
-| lower(X)                     | Yes    |         |
-| ltrim(X)                     | Yes    |         |
-| ltrim(X,Y)                   | Yes    |         |
-| max(X,Y,...)                 | Yes    |         |
-| min(X,Y,...)                 | Yes    |         |
-| nullif(X,Y)                  | Yes    |         |
-| octet_length(X)              | Yes    |         |
-| printf(FORMAT,...)           | No     |         |
-| quote(X)                     | Yes    |         |
-| random()                     | Yes    |         |
-| randomblob(N)                | Yes    |         |
-| replace(X,Y,Z)               | Yes    |         |
-| round(X)                     | Yes    |         |
-| round(X,Y)                   | Yes    |         |
-| rtrim(X)                     | Yes    |         |
-| rtrim(X,Y)                   | Yes    |         |
-| sign(X)                      | Yes    |         |
-| soundex(X)                   | Yes    |         |
-| sqlite_compileoption_get(N)  | No     |         |
-| sqlite_compileoption_used(X) | No     |         |
-| sqlite_offset(X)             | No     |         |
-| sqlite_source_id()           | No     |         |
-| sqlite_version()             | Yes    |         |
-| substr(X,Y,Z)                | Yes    |         |
-| substr(X,Y)                  | Yes    |         |
-| substring(X,Y,Z)             | Yes    |         |
-| substring(X,Y)               | Yes    |         |
-| total_changes()              | Partial| Still need to support update statements and triggers |
-| trim(X)                      | Yes    |         |
-| trim(X,Y)                    | Yes    |         |
-| typeof(X)                    | Yes    |         |
-| unhex(X)                     | Yes    |         |
-| unhex(X,Y)                   | Yes    |         |
-| unicode(X)                   | Yes    |         |
-| unlikely(X)                  | No     |         |
-| upper(X)                     | Yes    |         |
-| zeroblob(N)                  | Yes    |         |
+| Function                     | Status  | Comment                                              |
+|------------------------------|---------|------------------------------------------------------|
+| abs(X)                       | Yes     |                                                      |
+| changes()                    | Partial | Still need to support update statements and triggers |
+| char(X1,X2,...,XN)           | Yes     |                                                      |
+| coalesce(X,Y,...)            | Yes     |                                                      |
+| concat(X,...)                | Yes     |                                                      |
+| concat_ws(SEP,X,...)         | Yes     |                                                      |
+| format(FORMAT,...)           | No      |                                                      |
+| glob(X,Y)                    | Yes     |                                                      |
+| hex(X)                       | Yes     |                                                      |
+| ifnull(X,Y)                  | Yes     |                                                      |
+| iif(X,Y,Z)                   | Yes     |                                                      |
+| instr(X,Y)                   | Yes     |                                                      |
+| last_insert_rowid()          | Yes     |                                                      |
+| length(X)                    | Yes     |                                                      |
+| like(X,Y)                    | Yes     |                                                      |
+| like(X,Y,Z)                  | Yes     |                                                      |
+| likelihood(X,Y)              | No      |                                                      |
+| likely(X)                    | No      |                                                      |
+| load_extension(X)            | Yes     | sqlite3 extensions not yet supported                 |
+| load_extension(X,Y)          | No      |                                                      |
+| lower(X)                     | Yes     |                                                      |
+| ltrim(X)                     | Yes     |                                                      |
+| ltrim(X,Y)                   | Yes     |                                                      |
+| max(X,Y,...)                 | Yes     |                                                      |
+| min(X,Y,...)                 | Yes     |                                                      |
+| nullif(X,Y)                  | Yes     |                                                      |
+| octet_length(X)              | Yes     |                                                      |
+| printf(FORMAT,...)           | No      |                                                      |
+| quote(X)                     | Yes     |                                                      |
+| random()                     | Yes     |                                                      |
+| randomblob(N)                | Yes     |                                                      |
+| replace(X,Y,Z)               | Yes     |                                                      |
+| round(X)                     | Yes     |                                                      |
+| round(X,Y)                   | Yes     |                                                      |
+| rtrim(X)                     | Yes     |                                                      |
+| rtrim(X,Y)                   | Yes     |                                                      |
+| sign(X)                      | Yes     |                                                      |
+| soundex(X)                   | Yes     |                                                      |
+| sqlite_compileoption_get(N)  | No      |                                                      |
+| sqlite_compileoption_used(X) | No      |                                                      |
+| sqlite_offset(X)             | No      |                                                      |
+| sqlite_source_id()           | No      |                                                      |
+| sqlite_version()             | Yes     |                                                      |
+| substr(X,Y,Z)                | Yes     |                                                      |
+| substr(X,Y)                  | Yes     |                                                      |
+| substring(X,Y,Z)             | Yes     |                                                      |
+| substring(X,Y)               | Yes     |                                                      |
+| total_changes()              | Partial | Still need to support update statements and triggers |
+| trim(X)                      | Yes     |                                                      |
+| trim(X,Y)                    | Yes     |                                                      |
+| typeof(X)                    | Yes     |                                                      |
+| unhex(X)                     | Yes     |                                                      |
+| unhex(X,Y)                   | Yes     |                                                      |
+| unicode(X)                   | Yes     |                                                      |
+| unlikely(X)                  | No      |                                                      |
+| upper(X)                     | Yes     |                                                      |
+| zeroblob(N)                  | Yes     |                                                      |
 
 #### Mathematical functions
 
 | Function   | Status | Comment |
-| ---------- | ------ | ------- |
+|------------|--------|---------|
 | acos(X)    | Yes    |         |
 | acosh(X)   | Yes    |         |
 | asin(X)    | Yes    |         |
@@ -572,6 +573,20 @@ Modifiers:
 | VerifyCookie   | No     |
 | Yield          | Yes    |
 | ZeroOrNull     | Yes    |
+
+##  [SQLite journaling modes](https://www.sqlite.org/pragma.html#pragma_journal_mode)
+
+We currently don't have plan to support the rollback journal mode as it locks the database file during writes.
+Therefore, all rollback-type modes (delete, truncate, persist, memory) are marked are `Not Needed` below.
+
+| Journal mode | Status     | Comment                        |
+|--------------|------------|--------------------------------|
+| wal          | Yes        |                                |
+| wal2         | No         | experimental feature in sqlite |
+| delete       | Not Needed |                                |
+| truncate     | Not Needed |                                |
+| persist      | Not Needed |                                |
+| memory       | Not Needed |                                |
 
 ##  Extensions
 
