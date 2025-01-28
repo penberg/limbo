@@ -68,8 +68,8 @@ fn merge_patch(target: &mut Val, patch: Val) {
         }
 
         match (current, patch) {
-            (curr, Val::Null) => {
-                *curr = Val::Null;
+            (current_val, Val::Null) => {
+                *current_val = Val::Null;
             }
             (Val::Object(target_map), Val::Object(patch_map)) => {
                 for (key, patch_val) in patch_map {
@@ -95,9 +95,106 @@ fn merge_patch(target: &mut Val, patch: Val) {
                     };
                 }
             }
-            (curr, patch_val) => {
-                *curr = patch_val;
+            (current_val, patch_val) => {
+                *current_val = patch_val;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use crate::types::LimboText;
+
+    use super::*;
+
+    fn create_text(s: &str) -> OwnedValue {
+        OwnedValue::Text(LimboText::new(Rc::new(s.to_string())))
+    }
+
+    fn create_json(s: &str) -> OwnedValue {
+        OwnedValue::Text(LimboText::json(Rc::new(s.to_string())))
+    }
+
+    #[test]
+    fn test_basic_text_replacement() {
+        let target = create_text(r#"{"name":"John","age":"30"}"#);
+        let patch = create_text(r#"{"age":"31"}"#);
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(result, create_json(r#"{"name":"John","age":"31"}"#));
+    }
+
+    #[test]
+    fn test_null_field_removal() {
+        let target = create_text(r#"{"name":"John","email":"john@example.com"}"#);
+        let patch = create_text(r#"{"email":null}"#);
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(result, create_json(r#"{"name":"John"}"#));
+    }
+
+    #[test]
+    fn test_nested_object_merge() {
+        let target =
+            create_text(r#"{"user":{"name":"John","details":{"age":"30","score":"95.5"}}}"#);
+
+        let patch = create_text(r#"{"user":{"details":{"score":"97.5"}}}"#);
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(
+            result,
+            create_json(r#"{"user":{"name":"John","details":{"age":"30","score":"97.5"}}}"#)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "blob is not supported!")]
+    fn test_blob_not_supported() {
+        let target = OwnedValue::Blob(Rc::new(vec![1, 2, 3]));
+        let patch = create_text("{}");
+        json_patch(&target, &patch).unwrap();
+    }
+
+    #[test]
+    fn test_deep_null_replacement() {
+        let target = create_text(r#"{"level1":{"level2":{"keep":"value","remove":"value"}}}"#);
+
+        let patch = create_text(r#"{"level1":{"level2":{"remove":null}}}"#);
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(
+            result,
+            create_json(r#"{"level1":{"level2":{"keep":"value"}}}"#)
+        );
+    }
+
+    #[test]
+    fn test_empty_patch() {
+        let target = create_json(r#"{"name":"John","age":"30"}"#);
+        let patch = create_text("{}");
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(result, target);
+    }
+
+    #[test]
+    fn test_add_new_field() {
+        let target = create_text(r#"{"existing":"value"}"#);
+        let patch = create_text(r#"{"new":"field"}"#);
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(result, create_json(r#"{"existing":"value","new":"field"}"#));
+    }
+
+    #[test]
+    fn test_complete_object_replacement() {
+        let target = create_text(r#"{"old":{"nested":"value"}}"#);
+        let patch = create_text(r#"{"old":"new_value"}"#);
+
+        let result = json_patch(&target, &patch).unwrap();
+        assert_eq!(result, create_json(r#"{"old":"new_value"}"#));
     }
 }
