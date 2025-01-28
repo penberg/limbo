@@ -504,3 +504,56 @@ impl<'de> de::VariantAccess<'de> for Variant<'de> {
         }
     }
 }
+
+pub mod ordered_object {
+
+    use crate::json::Val;
+    use serde::de::{MapAccess, Visitor};
+    use serde::{Deserializer, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S>(pairs: &Vec<(String, Val)>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(pairs.len()))?;
+        for (k, v) in pairs {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<(String, Val)>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct OrderedMapVisitor;
+
+        impl<'de> Visitor<'de> for OrderedMapVisitor {
+            type Value = Vec<(String, Val)>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a map")
+            }
+
+            fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut pairs = match access.size_hint() {
+                    Some(size) => Vec::with_capacity(size),
+                    None => Vec::new(),
+                };
+
+                while let Some((key, value)) = access.next_entry()? {
+                    pairs.push((key, value));
+                }
+
+                Ok(pairs)
+            }
+        }
+
+        deserializer.deserialize_map(OrderedMapVisitor)
+    }
+}

@@ -6,6 +6,7 @@ mod ser;
 use std::rc::Rc;
 
 pub use crate::json::de::from_str;
+use crate::json::de::ordered_object;
 use crate::json::error::Error as JsonError;
 use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
@@ -23,7 +24,8 @@ pub enum Val {
     Float(f64),
     String(String),
     Array(Vec<Val>),
-    Object(IndexMap<String, Val>),
+    #[serde(with = "ordered_object")]
+    Object(Vec<(String, Val)>),
 }
 
 pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -367,7 +369,7 @@ fn json_extract_single<'a>(
 
                 match current_element {
                     Val::Object(map) => {
-                        if let Some(value) = map.get(key) {
+                        if let Some((_, value)) = map.iter().find(|(k, _)| k == key) {
                             current_element = value;
                         } else {
                             return Ok(None);
