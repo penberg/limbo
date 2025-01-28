@@ -576,3 +576,45 @@ do_execsql_test json_valid_3 {
 do_execsql_test json_valid_9 {
     SELECT json_valid(NULL);
 } {}
+do_execsql_test json-patch-basic-1 {
+    select json_patch('{"a":1}', '{"b":2}');
+} {{{"a":1,"b":2}}}
+do_execsql_test json-patch-basic-2 {
+    select json_patch('{"x":100,"y":200}', '{"z":300}');
+} {{{"x":100,"y":200,"z":300}}}
+do_execsql_test json-patch-override-1 {
+    select json_patch('{"a":1,"b":2}', '{"b":3}');
+} {{{"a":1,"b":3}}}
+do_execsql_test json-patch-override-2 {
+    select json_patch('{"name":"john","age":25}', '{"age":26,"city":"NYC"}');
+} {{{"name":"john","age":26,"city":"NYC"}}}
+do_execsql_test json-patch-nested-1 {
+    select json_patch('{"user":{"name":"john"}}', '{"user":{"age":30}}');
+} {{{"user":{"name":"john","age":30}}}}
+do_execsql_test json-patch-nested-2 {
+    select json_patch('{"settings":{"theme":"dark"}}', '{"settings":{"theme":"light","font":"arial"}}');
+} {{{"settings":{"theme":"light","font":"arial"}}}}
+do_execsql_test json-patch-array-1 {
+    select json_patch('{"arr":[1,2,3]}', '{"arr":[4,5,6]}');
+} {{{"arr":[4,5,6]}}}
+do_execsql_test json-patch-array-2 {
+    select json_patch('{"list":["a","b"]}', '{"list":["c"]}');
+} {{{"list":["c"]}}}
+do_execsql_test json-patch-empty-1 {
+    select json_patch('{}', '{"a":1}');
+} {{{"a":1}}}
+do_execsql_test json-patch-empty-2 {
+    select json_patch('{"a":1}', '{}');
+} {{{"a":1}}}
+do_execsql_test json-patch-deep-nested-1 {
+    select json_patch(
+        '{"level1":{"level2":{"value":100}}}',
+        '{"level1":{"level2":{"newValue":200}}}'
+    );
+} {{{"level1":{"level2":{"value":100,"newValue":200}}}}}
+do_execsql_test json-patch-mixed-types-1 {
+    select json_patch(
+        '{"str":"hello","num":42,"bool":true}',
+        '{"arr":[1,2,3],"obj":{"x":1}}'
+    );
+} {{{"str":"hello","num":42,"bool":true,"arr":[1,2,3],"obj":{"x":1}}}}
