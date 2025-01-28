@@ -540,4 +540,62 @@ mod tests {
         assert_eq!(vector.dims, 3);
         assert_eq!(vector.vector_type, VectorType::Float32);
     }
+
+    #[quickcheck]
+    fn prop_vector_text_roundtrip_2d(v: ArbitraryVector<2>) -> bool {
+        test_vector_text_roundtrip(v.into())
+    }
+
+    #[quickcheck]
+    fn prop_vector_text_roundtrip_3d(v: ArbitraryVector<3>) -> bool {
+        test_vector_text_roundtrip(v.into())
+    }
+
+    #[quickcheck]
+    fn prop_vector_text_roundtrip_4d(v: ArbitraryVector<4>) -> bool {
+        test_vector_text_roundtrip(v.into())
+    }
+
+    #[quickcheck]
+    fn prop_vector_text_roundtrip_100d(v: ArbitraryVector<100>) -> bool {
+        test_vector_text_roundtrip(v.into())
+    }
+
+    #[quickcheck]
+    fn prop_vector_text_roundtrip_1536d(v: ArbitraryVector<1536>) -> bool {
+        test_vector_text_roundtrip(v.into())
+    }
+
+    /// Test that a vector can be converted to text and back without loss of precision
+    fn test_vector_text_roundtrip(v: Vector) -> bool {
+        // Convert to text
+        let text = vector_to_text(&v);
+
+        // Parse back from text
+        let value = Value::from_text(text);
+        let parsed = parse_string_vector(v.vector_type.clone(), &value);
+
+        match parsed {
+            Ok(parsed_vector) => {
+                // Check dimensions match
+                if v.dims != parsed_vector.dims {
+                    return false;
+                }
+
+                match v.vector_type {
+                    VectorType::Float32 => {
+                        let original = v.as_f32_slice();
+                        let parsed = parsed_vector.as_f32_slice();
+                        original.iter().zip(parsed.iter()).all(|(a, b)| a == b)
+                    }
+                    VectorType::Float64 => {
+                        let original = v.as_f64_slice();
+                        let parsed = parsed_vector.as_f64_slice();
+                        original.iter().zip(parsed.iter()).all(|(a, b)| a == b)
+                    }
+                }
+            }
+            Err(_) => false,
+        }
+    }
 }
