@@ -114,7 +114,6 @@ public class LimboResultSet {
   }
 
   public void close() throws SQLException {
-    this.statement.close();
     this.open = false;
   }
 
