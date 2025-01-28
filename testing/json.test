@@ -8,6 +8,10 @@ do_execsql_test json5-ecma-script-1 {
 } {{{"a":5,"b":6}}}
 
 do_execsql_test json5-ecma-script-2 {
+    select json('{a:5,a:3}') ;
+} {{{"a":5,"a":3}}}
+
+do_execsql_test json5-ecma-script-3 {
    SELECT json('{ MNO_123$xyz : 789 }');
 } {{{"MNO_123$xyz":789}}}
 
@@ -582,6 +586,12 @@ do_execsql_test json-patch-basic-1 {
 do_execsql_test json-patch-basic-2 {
     select json_patch('{"x":100,"y":200}', '{"z":300}');
 } {{{"x":100,"y":200,"z":300}}}
+do_execsql_test json-patch-preserve-duplicates-1 {
+    select json_patch('{"x":100,"x":200}', '{"z":300}');
+} {{{"x":100,"x":200,"z":300}}}
+do_execsql_test json-patch-preserve-duplicates-2 {
+    select json_patch('{"x":100,"x":200}', '{"x":900}');
+} {{{"x":900,"x":200}}}
 do_execsql_test json-patch-override-1 {
     select json_patch('{"a":1,"b":2}', '{"b":3}');
 } {{{"a":1,"b":3}}}
