@@ -65,6 +65,10 @@ limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["st
 limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
 miette = "7.4.0"
 
+[build-dependencies]
+chrono = "0.4.38"
+built = { version = "0.7.5", features = ["git2", "chrono"] }
+
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }
 
