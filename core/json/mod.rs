@@ -1,5 +1,6 @@
 mod de;
 mod error;
+mod json_operations;
 mod json_path;
 mod ser;
 
@@ -8,6 +9,7 @@ use std::rc::Rc;
 pub use crate::json::de::from_str;
 use crate::json::de::ordered_object;
 use crate::json::error::Error as JsonError;
+pub use crate::json::json_operations::json_patch;
 use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
