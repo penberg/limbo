@@ -26,14 +26,14 @@ This document describes the compatibility of Limbo with SQLite.
 
 ## Features
 
-Limbo aims to be fully compatible with SQLite, with opt-in features Not Needed by SQLite.
+Limbo aims to be fully compatible with SQLite, with opt-in features not supported by SQLite.
 
 The current status of Limbo is:
 
 * ✅ SQLite file format is fully supported.
 * 🚧 SQLite query language [[status](#sqlite-query-language)]
 * 🚧 SQLite C API [[status](#sqlite-c-api)].
-* ⛔️ Concurrent access from multiple processes is Not Needed.
+* ⛔️ Concurrent access from multiple processes is not supported.
 
 ## SQLite query language
 
