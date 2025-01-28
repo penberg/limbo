@@ -10,34 +10,55 @@ import (
 )
 
 // only construct limboStmt with initStmt function to ensure proper initialization
+// inUse tracks whether or not `query` has been called. if inUse > 0, stmt no longer
+// owns the underlying data and `rows` is responsible for cleaning it up on close.
 type limboStmt struct {
 	ctx           uintptr
 	sql           string
-	query         stmtQueryFn
-	execute       stmtExecuteFn
+	inUse         int
+	query         func(stmtPtr uintptr, argsPtr uintptr, argCount uint64) uintptr
+	execute       func(stmtPtr uintptr, argsPtr uintptr, argCount uint64, changes uintptr) int32
 	getParamCount func(uintptr) int32
+	closeStmt     func(uintptr) int32
 }
 
 // Initialize/register the FFI function pointers for the statement methods
 func initStmt(ctx uintptr, sql string) *limboStmt {
-	var query stmtQueryFn
-	var execute stmtExecuteFn
+	var query func(stmtPtr uintptr, argsPtr uintptr, argCount uint64) uintptr
+	getFfiFunc(&query, FfiStmtQuery)
+	var execute func(stmtPtr uintptr, argsPtr uintptr, argCount uint64, changes uintptr) int32
+	getFfiFunc(&execute, FfiStmtExec)
 	var getParamCount func(uintptr) int32
-	methods := []ExtFunc{{query, FfiStmtQuery}, {execute, FfiStmtExec}, {getParamCount, FfiStmtParameterCount}}
-	for i := range methods {
-		methods[i].initFunc()
-	}
+	getFfiFunc(&getParamCount, FfiStmtParameterCount)
+	var closeStmt func(uintptr) int32
+	getFfiFunc(&closeStmt, FfiStmtClose)
 	return &limboStmt{
-		ctx: uintptr(ctx),
-		sql: sql,
+		ctx:           uintptr(ctx),
+		sql:           sql,
+		inUse:         0,
+		execute:       execute,
+		query:         query,
+		getParamCount: getParamCount,
+		closeStmt:     closeStmt,
 	}
 }
 
-func (st *limboStmt) NumInput() int {
-	return int(st.getParamCount(st.ctx))
+func (ls *limboStmt) NumInput() int {
+	return int(ls.getParamCount(ls.ctx))
 }
 
-func (st *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
+func (ls *limboStmt) Close() error {
+	if ls.inUse == 0 {
+		res := ls.closeStmt(ls.ctx)
+		if ResultCode(res) != Ok {
+			return fmt.Errorf("error closing statement: %s", ResultCode(res).String())
+		}
+	}
+	ls.ctx = 0
+	return nil
+}
+
+func (ls *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
 	argArray, err := buildArgs(args)
 	if err != nil {
 		return nil, err
@@ -48,9 +69,9 @@ func (st *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
 		argPtr = uintptr(unsafe.Pointer(&argArray[0]))
 	}
 	var changes uint64
-	rc := st.execute(st.ctx, argPtr, argCount, uintptr(unsafe.Pointer(&changes)))
+	rc := ls.execute(ls.ctx, argPtr, argCount, uintptr(unsafe.Pointer(&changes)))
 	switch ResultCode(rc) {
-	case Ok:
+	case Ok, Done:
 		return driver.RowsAffected(changes), nil
 	case Error:
 		return nil, errors.New("error executing statement")
@@ -70,23 +91,34 @@ func (st *limboStmt) Query(args []driver.Value) (driver.Rows, error) {
 	if err != nil {
 		return nil, err
 	}
-	rowsPtr := st.query(st.ctx, uintptr(unsafe.Pointer(&queryArgs[0])), uint64(len(queryArgs)))
+	argPtr := uintptr(0)
+	if len(args) > 0 {
+		argPtr = uintptr(unsafe.Pointer(&queryArgs[0]))
+	}
+	rowsPtr := st.query(st.ctx, argPtr, uint64(len(queryArgs)))
 	if rowsPtr == 0 {
 		return nil, fmt.Errorf("query failed for: %q", st.sql)
 	}
+	st.inUse++
 	return initRows(rowsPtr), nil
 }
 
-func (ts *limboStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+func (ls *limboStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	stripped := namedValueToValue(args)
 	argArray, err := getArgsPtr(stripped)
 	if err != nil {
 		return nil, err
 	}
-	var changes uintptr
-	res := ts.execute(ts.ctx, argArray, uint64(len(args)), changes)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	var changes uint64
+	res := ls.execute(ls.ctx, argArray, uint64(len(args)), uintptr(unsafe.Pointer(&changes)))
 	switch ResultCode(res) {
-	case Ok:
+	case Ok, Done:
+		changes := uint64(changes)
 		return driver.RowsAffected(changes), nil
 	case Error:
 		return nil, errors.New("error executing statement")
@@ -99,15 +131,25 @@ func (ts *limboStmt) ExecContext(ctx context.Context, query string, args []drive
 	}
 }
 
-func (st *limboStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+func (ls *limboStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	queryArgs, err := buildNamedArgs(args)
 	if err != nil {
 		return nil, err
 	}
-	rowsPtr := st.query(st.ctx, uintptr(unsafe.Pointer(&queryArgs[0])), uint64(len(queryArgs)))
-	if rowsPtr == 0 {
-		return nil, fmt.Errorf("query failed for: %q", st.sql)
+	argsPtr := uintptr(0)
+	if len(queryArgs) > 0 {
+		argsPtr = uintptr(unsafe.Pointer(&queryArgs[0]))
 	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	rowsPtr := ls.query(ls.ctx, argsPtr, uint64(len(queryArgs)))
+	if rowsPtr == 0 {
+		return nil, fmt.Errorf("query failed for: %q", ls.sql)
+	}
+	ls.inUse++
 	return initRows(rowsPtr), nil
 }
 
@@ -127,19 +169,15 @@ type limboRows struct {
 // DO NOT construct 'limboRows' without this function
 func initRows(ctx uintptr) *limboRows {
 	var getCols func(uintptr, *uint) uintptr
+	getFfiFunc(&getCols, FfiRowsGetColumns)
 	var getValue func(uintptr, int32) uintptr
+	getFfiFunc(&getValue, FfiRowsGetValue)
 	var closeRows func(uintptr) uintptr
+	getFfiFunc(&closeRows, FfiRowsClose)
 	var freeCols func(uintptr) uintptr
+	getFfiFunc(&freeCols, FfiFreeColumns)
 	var next func(uintptr) uintptr
-	methods := []ExtFunc{
-		{getCols, FfiRowsGetColumns},
-		{getValue, FfiRowsGetValue},
-		{closeRows, FfiRowsClose},
-		{freeCols, FfiFreeColumns},
-		{next, FfiRowsNext}}
-	for i := range methods {
-		methods[i].initFunc()
-	}
+	getFfiFunc(&next, FfiRowsNext)
 
 	return &limboRows{
 		ctx:       ctx,
@@ -157,9 +195,6 @@ func (r *limboRows) Columns() []string {
 		colArrayPtr := r.getCols(r.ctx, &columnCount)
 		if colArrayPtr != 0 && columnCount > 0 {
 			r.columns = cArrayToGoStrings(colArrayPtr, columnCount)
-			if r.freeCols == nil {
-				getFfiFunc(&r.freeCols, FfiFreeColumns)
-			}
 			defer r.freeCols(colArrayPtr)
 		}
 	}
@@ -177,18 +212,22 @@ func (r *limboRows) Close() error {
 }
 
 func (r *limboRows) Next(dest []driver.Value) error {
-	status := r.next(r.ctx)
-	switch ResultCode(status) {
-	case Row:
-		for i := range dest {
-			valPtr := r.getValue(r.ctx, int32(i))
-			val := toGoValue(valPtr)
-			dest[i] = val
+	for {
+		status := r.next(r.ctx)
+		switch ResultCode(status) {
+		case Row:
+			for i := range dest {
+				valPtr := r.getValue(r.ctx, int32(i))
+				val := toGoValue(valPtr)
+				dest[i] = val
+			}
+			return nil
+		case Io:
+			continue
+		case Done:
+			return io.EOF
+		default:
+			return fmt.Errorf("unexpected status: %d", status)
 		}
-		return nil
-	case Done:
-		return io.EOF
-	default:
-		return fmt.Errorf("unexpected status: %d", status)
 	}
 }
