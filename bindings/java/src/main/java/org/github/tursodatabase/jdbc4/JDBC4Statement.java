@@ -19,6 +19,8 @@ public class JDBC4Statement implements Statement {
   private final LimboConnection connection;
   @Nullable private LimboStatement statement = null;
 
+  // Because JDBC4Statement has different life cycle in compared to LimboStatement, let's use this
+  // field to manage JDBC4Statement lifecycle
   private boolean closed;
   private boolean closeOnCompletion;
 
@@ -65,9 +67,7 @@ public class JDBC4Statement implements Statement {
 
     requireNonNull(statement, "statement should not be null after running execute method");
     final LimboResultSet resultSet = statement.getResultSet();
-    while (resultSet.isOpen()) {
-      resultSet.next();
-    }
+    resultSet.consumeAll();
 
     // TODO: return update count;
     return 0;
@@ -75,8 +75,14 @@ public class JDBC4Statement implements Statement {
 
   @Override
   public void close() throws SQLException {
-    clearGeneratedKeys();
-    internalClose();
+    if (closed) {
+      return;
+    }
+
+    if (this.statement != null) {
+      this.statement.close();
+    }
+
     closed = true;
   }
 
@@ -150,8 +156,7 @@ public class JDBC4Statement implements Statement {
    */
   @Override
   public boolean execute(String sql) throws SQLException {
-    internalClose();
-
+    ensureOpen();
     return this.withConnectionTimeout(
         () -> {
           try {
@@ -298,8 +303,7 @@ public class JDBC4Statement implements Statement {
 
   @Override
   public boolean isClosed() throws SQLException {
-    // TODO
-    return false;
+    return this.closed;
   }
 
   @Override
@@ -346,14 +350,6 @@ public class JDBC4Statement implements Statement {
     return false;
   }
 
-  protected void internalClose() throws SQLException {
-    // TODO
-  }
-
-  protected void clearGeneratedKeys() throws SQLException {
-    // TODO
-  }
-
   protected void updateGeneratedKeys() throws SQLException {
     // TODO
   }
@@ -377,5 +373,11 @@ public class JDBC4Statement implements Statement {
   @FunctionalInterface
   protected interface SQLCallable<T> {
     T call() throws SQLException;
+  }
+
+  private void ensureOpen() throws SQLException {
+    if (closed) {
+      throw new SQLException("Statement is closed");
+    }
   }
 }

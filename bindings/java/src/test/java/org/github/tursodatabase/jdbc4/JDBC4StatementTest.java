@@ -3,6 +3,7 @@ package org.github.tursodatabase.jdbc4;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 import org.github.tursodatabase.TestUtils;
@@ -50,5 +51,23 @@ class JDBC4StatementTest {
     stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
     stmt.execute("INSERT INTO users VALUES (1, 'limbo');");
     assertTrue(stmt.execute("SELECT * FROM users;"));
+  }
+
+  @Test
+  void close_statement_test() throws Exception {
+    stmt.close();
+    assertTrue(stmt.isClosed());
+  }
+
+  @Test
+  void double_close_is_no_op() throws SQLException {
+    stmt.close();
+    assertDoesNotThrow(() -> stmt.close());
+  }
+
+  @Test
+  void operations_on_closed_statement_should_throw_exception() throws Exception {
+    stmt.close();
+    assertThrows(SQLException.class, () -> stmt.execute("SELECT 1;"));
   }
 }

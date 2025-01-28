@@ -1,9 +1,11 @@
 package org.github.tursodatabase.jdbc4;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Properties;
 import org.github.tursodatabase.TestUtils;
@@ -56,5 +58,25 @@ class JDBC4ResultSetTest {
     // if the previous call to next() returned false, consecutive call to next() should return false
     // as well
     assertFalse(resultSet.next());
+  }
+
+  @Test
+  void close_resultSet_test() throws Exception {
+    stmt.executeQuery("SELECT 1;");
+    ResultSet resultSet = stmt.getResultSet();
+
+    assertFalse(resultSet.isClosed());
+    resultSet.close();
+    assertTrue(resultSet.isClosed());
+  }
+
+  @Test
+  void calling_methods_on_closed_resultSet_should_throw_exception() throws Exception {
+    stmt.executeQuery("SELECT 1;");
+    ResultSet resultSet = stmt.getResultSet();
+    resultSet.close();
+    assertTrue(resultSet.isClosed());
+
+    assertThrows(SQLException.class, resultSet::next);
   }
 }
