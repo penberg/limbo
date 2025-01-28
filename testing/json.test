@@ -592,6 +592,9 @@ do_execsql_test json-patch-preserve-duplicates-1 {
 do_execsql_test json-patch-preserve-duplicates-2 {
     select json_patch('{"x":100,"x":200}', '{"x":900}');
 } {{{"x":900,"x":200}}}
+do_execsql_test json-patch-first-update-wins {
+    select json_patch('{"x":100,"c":200}', '{"x":900, "x":null}');
+} {{{"x":900,"c":200}}}
 do_execsql_test json-patch-override-1 {
     select json_patch('{"a":1,"b":2}', '{"b":3}');
 } {{{"a":1,"b":3}}}

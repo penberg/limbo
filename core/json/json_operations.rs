@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use crate::types::OwnedValue;
 
@@ -48,7 +48,7 @@ pub fn json_patch(target: &OwnedValue, patch: &OwnedValue) -> crate::Result<Owne
 /// * Non-object values replace the target completely
 fn merge_patch(target: &mut Val, patch: Val) {
     let mut queue = VecDeque::with_capacity(8);
-
+    let mut applied_keys = HashSet::<String>::new();
     queue.push_back(PatchOperation {
         path: Vec::new(),
         patch,
@@ -72,7 +72,11 @@ fn merge_patch(target: &mut Val, patch: Val) {
                 *current_val = Val::Null;
             }
             (Val::Object(target_map), Val::Object(patch_map)) => {
+                applied_keys.clear();
                 for (key, patch_val) in patch_map {
+                    if applied_keys.insert(key.clone()) == false {
+                        continue;
+                    }
                     if let Some(pos) = target_map
                         .iter()
                         .position(|(target_key, _)| target_key == &key)
