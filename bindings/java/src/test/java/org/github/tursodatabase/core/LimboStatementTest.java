@@ -21,7 +21,7 @@ class LimboStatementTest {
 
   @Test
   void closing_statement_closes_related_resources() throws Exception {
-    LimboStatement stmt = connection.prepare("SELECT 1");
+    LimboStatement stmt = connection.prepare("SELECT 1;");
     stmt.execute();
 
     stmt.close();

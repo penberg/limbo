@@ -68,6 +68,6 @@ class JDBC4StatementTest {
   @Test
   void operations_on_closed_statement_should_throw_exception() throws Exception {
     stmt.close();
-    assertThrows(SQLException.class, () -> stmt.execute("SELECT 1"));
+    assertThrows(SQLException.class, () -> stmt.execute("SELECT 1;"));
   }
 }

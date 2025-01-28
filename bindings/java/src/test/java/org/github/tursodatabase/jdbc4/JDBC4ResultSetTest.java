@@ -62,9 +62,7 @@ class JDBC4ResultSetTest {
 
   @Test
   void close_resultSet_test() throws Exception {
-    stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
-    stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
-    stmt.executeQuery("SELECT * FROM users");
+    stmt.executeQuery("SELECT 1;");
     ResultSet resultSet = stmt.getResultSet();
 
     assertFalse(resultSet.isClosed());
@@ -74,9 +72,7 @@ class JDBC4ResultSetTest {
 
   @Test
   void calling_methods_on_closed_resultSet_should_throw_exception() throws Exception {
-    stmt.executeUpdate("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
-    stmt.executeUpdate("INSERT INTO users VALUES (2, 'seonwoo');");
-    stmt.executeQuery("SELECT * FROM users");
+    stmt.executeQuery("SELECT 1;");
     ResultSet resultSet = stmt.getResultSet();
     resultSet.close();
     assertTrue(resultSet.isClosed());
