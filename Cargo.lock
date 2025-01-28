@@ -1342,6 +1342,7 @@ dependencies = [
  "limbo_percentile",
  "limbo_regexp",
  "limbo_uuid",
+ "limbo_vector",
  "log",
  "miette",
  "mimalloc",

@@ -239,7 +239,6 @@ pub fn vector_type(blob: &[u8]) -> Result<VectorType> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,7 +14,7 @@ name = "limbo_core"
 path = "lib.rs"
 
 [features]
-default = ["fs", "json", "uuid", "io_uring"]
+default = ["fs", "json", "uuid", "vector", "io_uring"]
 fs = []
 json = [
     "dep:jsonb",
@@ -22,6 +22,7 @@ json = [
     "dep:pest_derive",
 ]
 uuid = ["limbo_uuid/static"]
+vector = ["limbo_vector/static"]
 io_uring = ["dep:io-uring", "rustix/io_uring"]
 percentile = ["limbo_percentile/static"]
 regexp = ["limbo_regexp/static"]
@@ -61,6 +62,7 @@ rand = "0.8.5"
 bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
 limbo_macros = { path = "../macros" }
 limbo_uuid = { path = "../extensions/uuid", optional = true, features = ["static"] }
+limbo_vector = { path = "../extensions/vector", optional = true, features = ["static"] }
 limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["static"] }
 limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
 miette = "7.4.0"
