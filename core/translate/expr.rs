@@ -937,6 +937,17 @@ pub fn translate_expr(
                         target_register,
                         func_ctx,
                     ),
+                    JsonFunc::JsonPatch => {
+                        let args = expect_arguments_exact!(args, 2, j);
+                        translate_function(
+                            program,
+                            args,
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        )
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
