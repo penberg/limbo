@@ -19,11 +19,11 @@ fn regex(pattern: &Value, haystack: &Value) -> Value {
             let Some(haystack) = haystack.to_text() else {
                 return Value::null();
             };
-            let re = match Regex::new(&pattern) {
+            let re = match Regex::new(pattern) {
                 Ok(re) => re,
                 Err(_) => return Value::null(),
             };
-            Value::from_integer(re.is_match(&haystack) as i64)
+            Value::from_integer(re.is_match(haystack) as i64)
         }
         _ => Value::null(),
     }

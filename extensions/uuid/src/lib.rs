@@ -1,4 +1,4 @@
-use limbo_ext::{register_extension, scalar, Value, ValueType};
+use limbo_ext::{register_extension, scalar, ResultCode, Value, ValueType};
 
 register_extension! {
     scalars: {uuid4_str, uuid4_blob, uuid7_str, uuid7, uuid7_ts, uuid_str, uuid_blob },
@@ -27,25 +27,25 @@ fn uuid7_str(args: &[Value]) -> Value {
             ValueType::Integer => {
                 let ctx = uuid::ContextV7::new();
                 let Some(int) = args[0].to_integer() else {
-                    return Value::null();
+                    return Value::error(ResultCode::InvalidArgs);
                 };
                 uuid::Timestamp::from_unix(ctx, int as u64, 0)
             }
             ValueType::Text => {
                 let Some(text) = args[0].to_text() else {
-                    return Value::null();
+                    return Value::error(ResultCode::InvalidArgs);
                 };
                 match text.parse::<i64>() {
                     Ok(unix) => {
                         if unix <= 0 {
-                            return Value::null();
+                            return Value::error_with_message("Invalid timestamp".to_string());
                         }
                         uuid::Timestamp::from_unix(uuid::ContextV7::new(), unix as u64, 0)
                     }
-                    Err(_) => return Value::null(),
+                    Err(_) => return Value::error(ResultCode::InvalidArgs),
                 }
             }
-            _ => return Value::null(),
+            _ => return Value::error(ResultCode::InvalidArgs),
         }
     };
     let uuid = uuid::Uuid::new_v7(timestamp);

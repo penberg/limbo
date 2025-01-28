@@ -1394,6 +1394,7 @@ name = "limbo_percentile"
 version = "0.0.13"
 dependencies = [
  "limbo_ext",
+ "mimalloc",
 ]
 
 [[package]]
@@ -1402,6 +1403,7 @@ version = "0.0.13"
 dependencies = [
  "limbo_ext",
  "log",
+ "mimalloc",
  "regex",
 ]
 
@@ -1437,7 +1439,7 @@ name = "limbo_uuid"
 version = "0.0.13"
 dependencies = [
  "limbo_ext",
- "log",
+ "mimalloc",
  "uuid",
 ]
 

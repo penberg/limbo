@@ -163,8 +163,16 @@ macro_rules! call_external_function {
     ) => {{
         if $arg_count == 0 {
             let result_c_value: ExtValue = unsafe { ($func_ptr)(0, std::ptr::null()) };
-            let result_ov = OwnedValue::from_ffi(&result_c_value);
-            $state.registers[$dest_register] = result_ov;
+            match OwnedValue::from_ffi(&result_c_value) {
+                Ok(result_ov) => {
+                    $state.registers[$dest_register] = result_ov;
+                    unsafe { result_c_value.free() };
+                }
+                Err(e) => {
+                    unsafe { result_c_value.free() };
+                    return Err(e);
+                }
+            }
         } else {
             let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
             let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
@@ -174,8 +182,16 @@ macro_rules! call_external_function {
             }
             let argv_ptr = ext_values.as_ptr();
             let result_c_value: ExtValue = unsafe { ($func_ptr)($arg_count as i32, argv_ptr) };
-            let result_ov = OwnedValue::from_ffi(&result_c_value);
-            $state.registers[$dest_register] = result_ov;
+            match OwnedValue::from_ffi(&result_c_value) {
+                Ok(result_ov) => {
+                    $state.registers[$dest_register] = result_ov;
+                    unsafe { result_c_value.free() };
+                }
+                Err(e) => {
+                    unsafe { result_c_value.free() };
+                    return Err(e);
+                }
+            }
         }
     }};
 }
@@ -1553,7 +1569,7 @@ impl Program {
                             AggFunc::Min => {}
                             AggFunc::GroupConcat | AggFunc::StringAgg => {}
                             AggFunc::External(_) => {
-                                agg.compute_external();
+                                agg.compute_external()?;
                             }
                         },
                         OwnedValue::Null => {
