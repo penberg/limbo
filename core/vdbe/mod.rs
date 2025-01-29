@@ -2708,15 +2708,11 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
 fn exec_abs(reg: &OwnedValue) -> Result<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
-            if *x == i64::MIN {
+            match i64::checked_abs(*x) {
+                Some(y) => Ok(OwnedValue::Integer(y)),
                 // Special case: if we do the abs of "-9223372036854775808", it causes overflow.
-                // return RuntimeError
-                return Err(LimboError::RuntimeError("integer overflow".to_string()));
-            }
-            if x < &0 {
-                Ok(OwnedValue::Integer(-x))
-            } else {
-                Ok(OwnedValue::Integer(*x))
+                // return IntegerOverflow error
+                None => Err(LimboError::IntegerOverflow),
             }
         }
         OwnedValue::Float(x) => {
