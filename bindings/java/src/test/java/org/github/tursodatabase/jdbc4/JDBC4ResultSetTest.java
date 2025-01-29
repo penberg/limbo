@@ -178,7 +178,7 @@ class JDBC4ResultSetTest {
 
   @Test
   void test_getShort() throws Exception {
-    stmt.executeUpdate("CREATE TABLE test_short (short_col SMALLINT);");
+    stmt.executeUpdate("CREATE TABLE test_short (short_col INTEGER);");
     stmt.executeUpdate("INSERT INTO test_short (short_col) VALUES (123);");
     stmt.executeUpdate("INSERT INTO test_short (short_col) VALUES (32767);"); // Max short value
     stmt.executeUpdate("INSERT INTO test_short (short_col) VALUES (-32768);"); // Min short value
@@ -243,8 +243,6 @@ class JDBC4ResultSetTest {
   @Test
   @Disabled("limbo has a bug which sees -9223372036854775808 as double")
   void test_getLong() throws Exception {
-    Long l1 = Long.MIN_VALUE;
-    Long l2 = Long.MAX_VALUE;
     stmt.executeUpdate("CREATE TABLE test_long (long_col BIGINT);");
     stmt.executeUpdate("INSERT INTO test_long (long_col) VALUES (1234567890);");
     stmt.executeUpdate(
@@ -318,7 +316,7 @@ class JDBC4ResultSetTest {
 
   @Test
   void test_getDouble() throws Exception {
-    stmt.executeUpdate("CREATE TABLE test_double (double_col DOUBLE);");
+    stmt.executeUpdate("CREATE TABLE test_double (double_col REAL);");
     stmt.executeUpdate("INSERT INTO test_double (double_col) VALUES (1.234567);");
     stmt.executeUpdate(
         "INSERT INTO test_double (double_col) VALUES (1.7976931348623157E308);"); // Max double
