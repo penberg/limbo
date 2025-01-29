@@ -4,12 +4,12 @@ mod json_operations;
 mod json_path;
 mod ser;
 
-use std::rc::Rc;
+use std::{ops::Mul, rc::Rc};
 
 pub use crate::json::de::from_str;
 use crate::json::de::ordered_object;
 use crate::json::error::Error as JsonError;
-pub use crate::json::json_operations::json_patch;
+pub use crate::json::json_operations::{json_patch, json_remove};
 use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
@@ -402,6 +402,53 @@ fn json_extract_single<'a>(
     }
 
     Ok(Some(current_element))
+}
+
+fn operate_on_json_by_path<F>(json: &mut Val, path: JsonPath, mut closure: F)
+where
+    F: FnMut(&mut Val) -> (),
+{
+    if let Some(target) = find_target(json, &path) {
+        closure(target);
+    }
+}
+
+fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<&'a mut Val> {
+    let mut current = json;
+    for key in path.elements {
+        match &key {
+            PathElement::Root() => continue,
+            PathElement::ArrayLocator(index) => match current {
+                Val::Array(arr) => {
+                    if let Some(index) = match index {
+                        i if *i < 0 => arr.len().checked_sub(i.abs() as usize),
+                        i => ((*i as usize) < arr.len()).then_some(*i as usize),
+                    } {
+                        current = &mut arr[index];
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            },
+            PathElement::Key(key) => match current {
+                Val::Object(obj) => {
+                    if let Some(pos) = &obj.iter().position(|(obj_key, _)| &key == obj_key) {
+                        let val = &mut obj[*pos].1;
+                        current = val;
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            },
+        }
+    }
+    return Some(current);
 }
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
