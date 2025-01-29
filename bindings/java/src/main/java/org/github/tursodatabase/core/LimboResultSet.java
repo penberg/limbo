@@ -117,6 +117,25 @@ public class LimboResultSet {
     this.open = false;
   }
 
+  // Note that columnIndex starts from 1
+  @Nullable
+  public Object get(int columnIndex) throws SQLException {
+    if (!this.isOpen()) {
+      throw new SQLException("ResultSet is not open");
+    }
+
+    if (this.lastStepResult == null || this.lastStepResult.getResult() == null) {
+      throw new SQLException("ResultSet is null");
+    }
+
+    final Object[] resultSet = this.lastStepResult.getResult();
+    if (columnIndex > resultSet.length) {
+      throw new SQLException("columnIndex out of bound");
+    }
+
+    return resultSet[columnIndex - 1];
+  }
+
   @Override
   public String toString() {
     return "LimboResultSet{"

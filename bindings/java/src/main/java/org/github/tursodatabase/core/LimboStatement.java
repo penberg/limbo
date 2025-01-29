@@ -55,6 +55,11 @@ public class LimboStatement {
     return result;
   }
 
+  /**
+   * Because Limbo supports async I/O, it is possible to return a {@link LimboStepResult} with
+   * {@link LimboStepResult#STEP_RESULT_ID_ROW}. However, this is handled by the native side, so you
+   * can expect that this method will not return a {@link LimboStepResult#STEP_RESULT_ID_ROW}.
+   */
   @Nullable
   private native LimboStepResult step(long stmtPointer) throws SQLException;
 
