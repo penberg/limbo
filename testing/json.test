@@ -592,9 +592,9 @@ do_execsql_test json-patch-preserve-duplicates-1 {
 do_execsql_test json-patch-preserve-duplicates-2 {
     select json_patch('{"x":100,"x":200}', '{"x":900}');
 } {{{"x":900,"x":200}}}
-do_execsql_test json-patch-first-update-wins {
+do_execsql_test json-patch-last-update-wins {
     select json_patch('{"x":100,"c":200}', '{"x":900, "x":null}');
-} {{{"x":900,"c":200}}}
+} {{{"c":200}}}
 do_execsql_test json-patch-override-1 {
     select json_patch('{"a":1,"b":2}', '{"b":3}');
 } {{{"a":1,"b":3}}}
@@ -636,10 +636,43 @@ do_execsql_test json-patch-add-all-dup-keys-from-patch {
         '{"x":100,"x":200}',
         '{"z":{}, "z":5, "z":100}'
     );
-} {{{"x":100,"x":200,"z":{},"z":5,"z":100}}}
+} {{{"x":100,"x":200,"z":100}}}
 do_execsql_test json-patch-first-occurance-patch {
+    select json_patch('{"x":100,"x":200}','{"x":{}, "x":5, "x":100}');
+} {{{"x":100,"x":200}}}
+do_execsql_test json-patch-complex-nested-dup-keys {
     select json_patch(
-        '{"x":100,"x":200}',
-        '{"x":{}, "x":5, "x":100}'
+        '{"a":{"x":1,"x":2},"a":{"y":3},"b":[{"z":4,"z":5}]}',
+        '{"a":{"w":6},"b":[{"z":7,"z":8}],"b":{"z":9}}'
     );
-} {{{"x":{},"x":200}}}
+} {{{"a":{"x":1,"x":2,"w":6},"a":{"y":3},"b":{"z":9}}}}
+do_execsql_test json-patch-unicode-dup-keys {
+    select json_patch(
+        '{"🔑":1,"🔑":2}',
+        '{"🗝️":3,"🗝️":4}'
+    );
+} {{{"🔑":1,"🔑":2,"🗝️":4}}}
+do_execsql_test json-patch-empty-string-dup-keys {
+    select json_patch(
+        '{"":1,"":2}',
+        '{"":3,"":4}'
+    );
+} {{{"":4,"":2}}}
+do_execsql_test json-patch-multiple-types-dup-keys {
+    select json_patch(
+        '{"x":100,"x":"str","x":true,"x":null}',
+        '{"y":1,"y":{},"y":[],"y":false}'
+    );
+} {{{"x":100,"x":"str","x":true,"x":null,"y":false}}}
+do_execsql_test json-patch-deep-nested-dup-keys {
+    select json_patch(
+        '{"a":{"b":{"c":1}},"a":{"b":{"c":2}},"a":{"b":{"d":3}}}',
+        '{"x":{"y":{"z":4}},"x":{"y":{"z":5}}}'
+    );
+} {{{"a":{"b":{"c":1}},"a":{"b":{"c":2}},"a":{"b":{"d":3}},"x":{"y":{"z":5}}}}}
+do_execsql_test json-patch-abomination {
+    select json_patch(
+        '{"a":{"b":{"x":1,"x":2,"y":{"z":3,"z":{"w":4}}},"b":[{"c":5,"c":6},{"d":{"e":7,"e":null}}],"f":{"g":[1,2,3],"g":{"h":8,"h":[4,5,6]}},"i":{"j":true,"j":{"k":false,"k":{"l":null,"l":"string"}}},"m":{"n":{"o":{"p":9,"p":{"q":10}},"o":{"r":11}}},"m":[{"s":{"t":12}},{"s":{"t":13,"t":{"u":14}}}]},"a":{"v":{"w":{"x":{"y":{"z":15}}}},"v":{"w":{"x":16,"x":{"y":17}}},"aa":[{"bb":{"cc":18,"cc":{"dd":19}}},{"bb":{"cc":{"dd":20},"cc":21}}]}}',
+        '{"a":{"b":{"x":{"new":"value"},"y":null},"b":{"c":{"updated":true},"d":{"e":{"replaced":100}}},"f":{"g":{"h":{"nested":"deep"}}},"i":{"j":{"k":{"l":{"modified":false}}}},"m":{"n":{"o":{"p":{"q":{"extra":"level"}}}},"s":null},"aa":[{"bb":{"cc":{"dd":{"ee":"new"}}}},{"bb":{"cc":{"dd":{"ff":"value"}}}}],"v":{"w":{"x":{"y":{"z":{"final":"update"}}}}}},"newTop":{"level":{"key":{"with":{"deep":{"nesting":true}}},"key":[{"array":{"in":{"deep":{"structure":null}}}}]}}}'
+    );
+} {{{"a":{"b":{"x":{"new":"value"},"x":2,"c":{"updated":true},"d":{"e":{"replaced":100}}},"b":[{"c":5,"c":6},{"d":{"e":7,"e":null}}],"f":{"g":{"h":{"nested":"deep"}},"g":{"h":8,"h":[4,5,6]}},"i":{"j":{"k":{"l":{"modified":false}}},"j":{"k":false,"k":{"l":null,"l":"string"}}},"m":{"n":{"o":{"p":{"q":{"extra":"level"}},"p":{"q":10}},"o":{"r":11}}},"m":[{"s":{"t":12}},{"s":{"t":13,"t":{"u":14}}}],"aa":[{"bb":{"cc":{"dd":{"ee":"new"}}}},{"bb":{"cc":{"dd":{"ff":"value"}}}}],"v":{"w":{"x":{"y":{"z":{"final":"update"}}}}}},"a":{"v":{"w":{"x":{"y":{"z":15}}}},"v":{"w":{"x":16,"x":{"y":17}}},"aa":[{"bb":{"cc":18,"cc":{"dd":19}}},{"bb":{"cc":{"dd":20},"cc":21}}]},"newTop":{"level":{"key":[{"array":{"in":{"deep":{"structure":null}}}}]}}}}}
