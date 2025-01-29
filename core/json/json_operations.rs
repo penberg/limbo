@@ -29,80 +29,117 @@ pub fn json_patch(target: &OwnedValue, patch: &OwnedValue) -> crate::Result<Owne
 
     let mut parsed_target = get_json_value(target)?;
     let parsed_patch = get_json_value(patch)?;
-
-    merge_patch(&mut parsed_target, parsed_patch);
+    let mut patcher = Patcher::new(16);
+    patcher.apply_patch(&mut parsed_target, parsed_patch);
 
     convert_json_to_db_type(&parsed_target, false)
 }
 
-/// # Implementation Notes
-///
-/// * Processes patches in breadth-first order
-/// * Maintains path information for nested updates
-/// * Handles object merging with proper null value semantics
-/// * Preserves existing values not mentioned in the patch
-///
-/// Following RFC 7386 rules:
-/// * null values remove properties
-/// * Objects are merged recursively
-/// * Non-object values replace the target completely
-fn merge_patch(target: &mut Val, patch: Val) {
-    let mut queue = VecDeque::with_capacity(8);
-    let mut applied_keys = HashSet::<String>::new();
-    queue.push_back(PatchOperation {
-        path: Vec::new(),
-        patch,
-    });
-    while let Some(PatchOperation { path, patch }) = queue.pop_front() {
-        let mut current: &mut Val = target;
+struct Patcher {
+    queue: VecDeque<PatchOperation>,
+    applied_keys: HashSet<String>,
+}
 
-        for (depth, key) in path.iter().enumerate() {
+impl Patcher {
+    fn new(queue_capacity: usize) -> Self {
+        Self {
+            queue: VecDeque::with_capacity(queue_capacity),
+            applied_keys: HashSet::new(),
+        }
+    }
+
+    fn apply_patch(&mut self, target: &mut Val, patch: Val) {
+        self.queue.push_back(PatchOperation {
+            path: Vec::new(),
+            patch,
+        });
+
+        while let Some(op) = self.queue.pop_front() {
+            let current = self.navigate_to_target(target, &op.path);
+            self.apply_operation(current, op.patch, &op.path);
+        }
+    }
+
+    fn navigate_to_target<'a>(&self, target: &'a mut Val, path: &Vec<usize>) -> &'a mut Val {
+        let mut current = target;
+        for (depth, &key) in path.iter().enumerate() {
             if let Val::Object(ref mut obj) = current {
                 current = &mut obj
-                    .get_mut(*key)
+                    .get_mut(key)
                     .unwrap_or_else(|| {
                         panic!("Invalid path at depth {}: key '{}' not found", depth, key)
                     })
                     .1;
             }
         }
+        current
+    }
 
+    fn apply_operation(&mut self, current: &mut Val, patch: Val, path: &Vec<usize>) {
         match (current, patch) {
-            (current_val, Val::Null) => {
-                *current_val = Val::Null;
-            }
+            (current_val, Val::Null) => *current_val = Val::Null,
             (Val::Object(target_map), Val::Object(patch_map)) => {
-                applied_keys.clear();
-                for (key, patch_val) in patch_map {
-                    if applied_keys.insert(key.clone()) == false {
-                        continue;
-                    }
-                    if let Some(pos) = target_map
-                        .iter()
-                        .position(|(target_key, _)| target_key == &key)
-                    {
-                        match patch_val {
-                            Val::Null => {
-                                target_map.remove(pos);
-                            }
-                            val => {
-                                let mut new_path = path.clone();
-                                new_path.push(pos);
-                                queue.push_back(PatchOperation {
-                                    path: new_path,
-                                    patch: val,
-                                });
-                            }
-                        };
-                    } else {
-                        target_map.push((key, patch_val));
-                    };
+                self.merge_objects(target_map, patch_map, path);
+            }
+            (current_val, patch_val) => *current_val = patch_val,
+        }
+    }
+
+    fn merge_objects(
+        &mut self,
+        target_map: &mut Vec<(String, Val)>,
+        patch_map: Vec<(String, Val)>,
+        path: &Vec<usize>,
+    ) {
+        self.applied_keys.clear();
+        let original_keys: Vec<String> = target_map.iter().map(|(key, _)| key.clone()).collect();
+
+        for (key, patch_val) in patch_map {
+            self.process_key_value(target_map, &original_keys, key, patch_val, path);
+        }
+    }
+
+    fn process_key_value(
+        &mut self,
+        target_map: &mut Vec<(String, Val)>,
+        original_keys: &[String],
+        key: String,
+        patch_val: Val,
+        path: &Vec<usize>,
+    ) {
+        if !original_keys.contains(&key) {
+            target_map.push((key, patch_val));
+            return;
+        }
+
+        if let Some(pos) = target_map
+            .iter()
+            .position(|(target_key, _)| target_key == &key)
+        {
+            if !self.applied_keys.insert(key) {
+                return;
+            }
+
+            match patch_val {
+                Val::Null => {
+                    target_map.remove(pos);
+                }
+                val => {
+                    self.queue_nested_patch(pos, val, path);
                 }
             }
-            (current_val, patch_val) => {
-                *current_val = patch_val;
-            }
+        } else {
+            target_map.push((key, patch_val));
         }
+    }
+
+    fn queue_nested_patch(&mut self, pos: usize, val: Val, path: &Vec<usize>) {
+        let mut new_path = path.clone();
+        new_path.push(pos);
+        self.queue.push_back(PatchOperation {
+            path: new_path,
+            patch: val,
+        });
     }
 }
 
