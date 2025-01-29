@@ -129,7 +129,7 @@ public class LimboResultSet {
     }
 
     final Object[] resultSet = this.lastStepResult.getResult();
-    if (columnIndex > resultSet.length) {
+    if (columnIndex > resultSet.length || columnIndex < 0) {
       throw new SQLException("columnIndex out of bound");
     }
 

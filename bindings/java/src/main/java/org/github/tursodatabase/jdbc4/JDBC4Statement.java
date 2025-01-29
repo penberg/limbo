@@ -57,7 +57,8 @@ public class JDBC4Statement implements Statement {
   @Override
   public ResultSet executeQuery(String sql) throws SQLException {
     ensureOpen();
-    statement = this.withConnectionTimeout(
+    statement =
+        this.withConnectionTimeout(
             () -> {
               try {
                 // TODO: if sql is a readOnly query, do we still need the locks?

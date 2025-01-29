@@ -443,4 +443,74 @@ class JDBC4ResultSetTest {
     assertTrue(resultSet.next());
     assertNull(resultSet.getBytes(1));
   }
+
+  @Test
+  void test_getXXX_methods_on_multiple_columns() throws Exception {
+    stmt.executeUpdate(
+        "CREATE TABLE test_integration ("
+            + "string_col TEXT, "
+            + "boolean_col INTEGER, "
+            + "byte_col INTEGER, "
+            + "short_col INTEGER, "
+            + "int_col INTEGER, "
+            + "long_col BIGINT, "
+            + "float_col REAL, "
+            + "double_col REAL, "
+            + "bigdecimal_col REAL, "
+            + "bytes_col BLOB);");
+
+    stmt.executeUpdate(
+        "INSERT INTO test_integration VALUES ("
+            + "'test', "
+            + "1, "
+            + "1, "
+            + "123, "
+            + "12345, "
+            + "1234567890, "
+            + "1.23, "
+            + "1.234567, "
+            + "12345.67, "
+            + "X'48656C6C6F');");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_integration");
+    assertTrue(resultSet.next());
+
+    // Verify each column
+    assertEquals("test", resultSet.getString(1));
+    assertTrue(resultSet.getBoolean(2));
+    assertEquals(1, resultSet.getByte(3));
+    assertEquals(123, resultSet.getShort(4));
+    assertEquals(12345, resultSet.getInt(5));
+    assertEquals(1234567890L, resultSet.getLong(6));
+    assertEquals(1.23f, resultSet.getFloat(7), 0.0001);
+    assertEquals(1.234567, resultSet.getDouble(8), 0.0001);
+    assertEquals(
+        new BigDecimal("12345.67").setScale(2, RoundingMode.HALF_UP),
+        resultSet.getBigDecimal(9, 2));
+    assertArrayEquals("Hello".getBytes(), resultSet.getBytes(10));
+  }
+
+  @Test
+  void test_invalidColumnIndex_outOfBounds() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_invalid (col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_invalid (col) VALUES (1);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_invalid");
+    assertTrue(resultSet.next());
+
+    // Test out-of-bounds column index
+    assertThrows(SQLException.class, () -> resultSet.getInt(2));
+  }
+
+  @Test
+  void test_invalidColumnIndex_negative() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_invalid (col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_invalid (col) VALUES (1);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_invalid");
+    assertTrue(resultSet.next());
+
+    // Test negative column index
+    assertThrows(SQLException.class, () -> resultSet.getInt(-1));
+  }
 }
