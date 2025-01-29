@@ -1,17 +1,23 @@
 bindings/java:
-  - 'bindings/java/**'
+  - changed-files:
+      - any-glob-to-any-file: 'bindings/java/**'
 
 bindings/go:
-  - 'bindings/go/**'
+  - changed-files:
+      - any-glob-to-any-file: 'bindings/go/**'
 
 bindings/python:
-  - 'bindings/python/**'
+  - changed-files:
+      - any-glob-to-any-file: 'bindings/python/**'
 
 bindings/rust:
-  - 'bindings/rust/**'
+  - changed-files:
+      - any-glob-to-any-file: 'bindings/rust/**'
 
 bindings/wasm:
-  - 'bindings/wasm/**'
+  - changed-files:
+      - any-glob-to-any-file: 'bindings/wasm/**'
 
 core:
-  - 'core/**'
+  - changed-files:
+      - any-glob-to-any-file: 'core/**'
