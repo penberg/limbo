@@ -27,6 +27,7 @@ pub mod sorter;
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
 use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::info;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -2037,6 +2038,14 @@ impl Program {
                                     DATABASE_VERSION.get().unwrap().parse()?;
                                 let version = execute_sqlite_version(version_integer);
                                 state.registers[*dest] = OwnedValue::build_text(Rc::new(version));
+                            }
+                            ScalarFunc::SqliteSourceId => {
+                                let src_id = format!(
+                                    "{} {}",
+                                    info::build::BUILT_TIME_SQLITE,
+                                    info::build::GIT_COMMIT_HASH.unwrap_or("unknown")
+                                );
+                                state.registers[*dest] = OwnedValue::build_text(Rc::new(src_id));
                             }
                             ScalarFunc::Replace => {
                                 assert_eq!(arg_count, 3);

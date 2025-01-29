@@ -241,7 +241,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | sqlite_compileoption_get(N)  | No      |                                                      |
 | sqlite_compileoption_used(X) | No      |                                                      |
 | sqlite_offset(X)             | No      |                                                      |
-| sqlite_source_id()           | No      |                                                      |
+| sqlite_source_id()           | Yes     |                                                      |
 | sqlite_version()             | Yes     |                                                      |
 | substr(X,Y,Z)                | Yes     |                                                      |
 | substr(X,Y)                  | Yes     |                                                      |
