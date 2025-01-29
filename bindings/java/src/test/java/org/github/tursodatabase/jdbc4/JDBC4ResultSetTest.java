@@ -3,6 +3,7 @@ package org.github.tursodatabase.jdbc4;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -94,7 +95,18 @@ class JDBC4ResultSetTest {
     stmt.executeUpdate("INSERT INTO test_string (string_col) VALUES ('test');");
 
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_string");
+    assertTrue(resultSet.next());
     assertEquals("test", resultSet.getString(1));
+  }
+
+  @Test
+  void test_getString_returnsNull() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (string_col TEXT);");
+    stmt.executeUpdate("INSERT INTO test_null (string_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertNull(resultSet.getString(1));
   }
 
   @Test
@@ -105,6 +117,7 @@ class JDBC4ResultSetTest {
 
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_boolean");
 
+    assertTrue(resultSet.next());
     assertTrue(resultSet.getBoolean(1));
 
     resultSet.next();
@@ -117,6 +130,7 @@ class JDBC4ResultSetTest {
     stmt.executeUpdate("INSERT INTO test_boolean (boolean_col) VALUES (0);");
 
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_boolean");
+    assertTrue(resultSet.next());
     assertFalse(resultSet.getBoolean(1));
   }
 
@@ -130,6 +144,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_byte");
 
     // Test value that fits within byte size
+    assertTrue(resultSet.next());
     assertEquals(1, resultSet.getByte(1));
 
     // Test value that exceeds byte size (positive overflow)
@@ -151,6 +166,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_short");
 
     // Test typical short value
+    assertTrue(resultSet.next());
     assertEquals(123, resultSet.getShort(1));
 
     // Test maximum short value
@@ -172,6 +188,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_int");
 
     // Test typical int value
+    assertTrue(resultSet.next());
     assertEquals(12345, resultSet.getInt(1));
 
     // Test maximum int value
@@ -223,6 +240,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_float");
 
     // Test typical float value
+    assertTrue(resultSet.next());
     assertEquals(1.23f, resultSet.getFloat(1), 0.0001);
 
     // Test maximum float value
@@ -254,6 +272,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_double");
 
     // Test typical double value
+    assertTrue(resultSet.next());
     assertEquals(1.234567, resultSet.getDouble(1), 0.0001);
 
     // Test maximum double value
@@ -286,6 +305,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_bigdecimal");
 
     // Test typical BigDecimal value
+    assertTrue(resultSet.next());
     assertEquals(
         new BigDecimal("12345.67").setScale(2, RoundingMode.HALF_UP),
         resultSet.getBigDecimal(1, 2));
@@ -332,6 +352,7 @@ class JDBC4ResultSetTest {
 
     // Assert the inserted data
     ResultSet resultSet = stmt.executeQuery("SELECT bytes_col FROM test_bytes");
+    assertTrue(resultSet.next());
     assertArrayEquals(data, resultSet.getBytes(1));
   }
 }
