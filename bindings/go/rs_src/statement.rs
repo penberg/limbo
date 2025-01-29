@@ -14,7 +14,7 @@ pub extern "C" fn db_prepare(ctx: *mut c_void, query: *const c_char) -> *mut c_v
 
     let db = LimboConn::from_ptr(ctx);
 
-    let stmt = db.conn.prepare(query_str.to_string());
+    let stmt = db.conn.prepare(query_str);
     match stmt {
         Ok(stmt) => LimboStatement::new(stmt, db).to_ptr(),
         Err(_) => std::ptr::null_mut(),

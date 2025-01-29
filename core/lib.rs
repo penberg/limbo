@@ -255,10 +255,10 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn prepare(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Statement> {
-        let sql = sql.into();
+    pub fn prepare(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Statement> {
+        let sql = sql.as_ref();
         trace!("Preparing: {}", sql);
-        let db = self.db.clone();
+        let db = &self.db;
         let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -283,8 +283,8 @@ impl Connection {
         }
     }
 
-    pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Statement>> {
-        let sql = sql.into();
+    pub fn query(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Option<Statement>> {
+        let sql = sql.as_ref();
         trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -344,9 +344,9 @@ impl Connection {
         QueryRunner::new(self, sql)
     }
 
-    pub fn execute(self: &Rc<Connection>, sql: impl Into<String>) -> Result<()> {
-        let sql = sql.into();
-        let db = self.db.clone();
+    pub fn execute(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<()> {
+        let sql = sql.as_ref();
+        let db = &self.db;
         let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
