@@ -14,6 +14,9 @@ pub enum ResultCode {
     ReadOnly = 8,
     NoData = 9,
     Done = 10,
+    SyntaxErr = 11,
+    ConstraintViolation = 12,
+    NoSuchEntity = 13,
 }
 
 #[repr(C)]
@@ -55,6 +58,7 @@ pub struct AllocPool {
     strings: Vec<String>,
     blobs: Vec<Vec<u8>>,
 }
+
 impl AllocPool {
     pub fn new() -> Self {
         AllocPool {
@@ -82,11 +86,13 @@ pub extern "C" fn free_blob(blob_ptr: *mut c_void) {
         let _ = Box::from_raw(blob_ptr as *mut Blob);
     }
 }
+
 #[allow(dead_code)]
 impl ValueUnion {
     fn from_str(s: &str) -> Self {
+        let cstr = std::ffi::CString::new(s).expect("Failed to create CString");
         ValueUnion {
-            text_ptr: s.as_ptr() as *const c_char,
+            text_ptr: cstr.into_raw(),
         }
     }
 
@@ -121,7 +127,14 @@ impl ValueUnion {
     }
 
     pub fn to_str(&self) -> &str {
-        unsafe { std::ffi::CStr::from_ptr(self.text_ptr).to_str().unwrap() }
+        unsafe {
+            if self.text_ptr.is_null() {
+                return "";
+            }
+            std::ffi::CStr::from_ptr(self.text_ptr)
+                .to_str()
+                .unwrap_or("")
+        }
     }
 
     pub fn to_bytes(&self) -> &[u8] {
@@ -157,16 +170,30 @@ impl LimboValue {
         }
     }
 
+    // The values we get from Go need to be temporarily owned by the statement until they are bound
+    // then they can be cleaned up immediately afterwards
     pub fn to_value<'pool>(&self, pool: &'pool mut AllocPool) -> limbo_core::Value<'pool> {
         match self.value_type {
-            ValueType::Integer => limbo_core::Value::Integer(unsafe { self.value.int_val }),
-            ValueType::Real => limbo_core::Value::Float(unsafe { self.value.real_val }),
+            ValueType::Integer => {
+                if unsafe { self.value.int_val == 0 } {
+                    return limbo_core::Value::Null;
+                }
+                limbo_core::Value::Integer(unsafe { self.value.int_val })
+            }
+            ValueType::Real => {
+                if unsafe { self.value.real_val == 0.0 } {
+                    return limbo_core::Value::Null;
+                }
+                limbo_core::Value::Float(unsafe { self.value.real_val })
+            }
             ValueType::Text => {
+                if unsafe { self.value.text_ptr.is_null() } {
+                    return limbo_core::Value::Null;
+                }
                 let cstr = unsafe { std::ffi::CStr::from_ptr(self.value.text_ptr) };
                 match cstr.to_str() {
                     Ok(utf8_str) => {
                         let owned = utf8_str.to_owned();
-                        // statement needs to own these strings, will free when closed
                         let borrowed = pool.add_string(owned);
                         limbo_core::Value::Text(borrowed)
                     }
@@ -174,6 +201,9 @@ impl LimboValue {
                 }
             }
             ValueType::Blob => {
+                if unsafe { self.value.blob_ptr.is_null() } {
+                    return limbo_core::Value::Null;
+                }
                 let blob_ptr = unsafe { self.value.blob_ptr as *const Blob };
                 if blob_ptr.is_null() {
                     limbo_core::Value::Null

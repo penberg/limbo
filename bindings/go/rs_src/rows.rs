@@ -1,22 +1,22 @@
 use crate::{
-    statement::LimboStatement,
     types::{LimboValue, ResultCode},
+    LimboConn,
 };
-use limbo_core::{Statement, StepResult, Value};
+use limbo_core::{Row, Statement, StepResult};
 use std::ffi::{c_char, c_void};
 
 pub struct LimboRows<'a> {
-    rows: Statement,
-    cursor: Option<Vec<Value<'a>>>,
-    stmt: Box<LimboStatement<'a>>,
+    stmt: Box<Statement>,
+    conn: &'a LimboConn,
+    cursor: Option<Row<'a>>,
 }
 
 impl<'a> LimboRows<'a> {
-    pub fn new(rows: Statement, stmt: Box<LimboStatement<'a>>) -> Self {
+    pub fn new(stmt: Statement, conn: &'a LimboConn) -> Self {
         LimboRows {
-            rows,
-            stmt,
+            stmt: Box::new(stmt),
             cursor: None,
+            conn,
         }
     }
 
@@ -40,14 +40,14 @@ pub extern "C" fn rows_next(ctx: *mut c_void) -> ResultCode {
     }
     let ctx = LimboRows::from_ptr(ctx);
 
-    match ctx.rows.step() {
+    match ctx.stmt.step() {
         Ok(StepResult::Row(row)) => {
-            ctx.cursor = Some(row.values);
+            ctx.cursor = Some(row);
             ResultCode::Row
         }
         Ok(StepResult::Done) => ResultCode::Done,
         Ok(StepResult::IO) => {
-            let _ = ctx.stmt.conn.io.run_once();
+            let _ = ctx.conn.io.run_once();
             ResultCode::Io
         }
         Ok(StepResult::Busy) => ResultCode::Busy,
@@ -64,7 +64,7 @@ pub extern "C" fn rows_get_value(ctx: *mut c_void, col_idx: usize) -> *const c_v
     let ctx = LimboRows::from_ptr(ctx);
 
     if let Some(ref cursor) = ctx.cursor {
-        if let Some(value) = cursor.get(col_idx) {
+        if let Some(value) = cursor.values.get(col_idx) {
             let val = LimboValue::from_value(value);
             return val.to_ptr();
         }
@@ -89,7 +89,7 @@ pub extern "C" fn rows_get_columns(
     }
     let rows = LimboRows::from_ptr(rows_ptr);
     let c_strings: Vec<std::ffi::CString> = rows
-        .rows
+        .stmt
         .columns()
         .iter()
         .map(|name| std::ffi::CString::new(name.as_str()).unwrap())

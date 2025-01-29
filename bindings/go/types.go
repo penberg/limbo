@@ -6,22 +6,62 @@ import (
 	"unsafe"
 )
 
-type ResultCode int
+type ResultCode int32
 
 const (
-	Error     ResultCode = -1
-	Ok        ResultCode = 0
-	Row       ResultCode = 1
-	Busy      ResultCode = 2
-	Io        ResultCode = 3
-	Interrupt ResultCode = 4
-	Invalid   ResultCode = 5
-	Null      ResultCode = 6
-	NoMem     ResultCode = 7
-	ReadOnly  ResultCode = 8
-	NoData    ResultCode = 9
-	Done      ResultCode = 10
+	Error               ResultCode = -1
+	Ok                  ResultCode = 0
+	Row                 ResultCode = 1
+	Busy                ResultCode = 2
+	Io                  ResultCode = 3
+	Interrupt           ResultCode = 4
+	Invalid             ResultCode = 5
+	Null                ResultCode = 6
+	NoMem               ResultCode = 7
+	ReadOnly            ResultCode = 8
+	NoData              ResultCode = 9
+	Done                ResultCode = 10
+	SyntaxErr           ResultCode = 11
+	ConstraintViolation ResultCode = 12
+	NoSuchEntity        ResultCode = 13
 )
+
+func (rc ResultCode) String() string {
+	switch rc {
+	case Error:
+		return "Error"
+	case Ok:
+		return "Ok"
+	case Row:
+		return "Row"
+	case Busy:
+		return "Busy"
+	case Io:
+		return "Io"
+	case Interrupt:
+		return "Query was interrupted"
+	case Invalid:
+		return "Invalid"
+	case Null:
+		return "Null"
+	case NoMem:
+		return "Out of memory"
+	case ReadOnly:
+		return "Read Only"
+	case NoData:
+		return "No Data"
+	case Done:
+		return "Done"
+	case SyntaxErr:
+		return "Syntax Error"
+	case ConstraintViolation:
+		return "Constraint Violation"
+	case NoSuchEntity:
+		return "No such entity"
+	default:
+		return "Unknown response code"
+	}
+}
 
 const (
 	FfiDbOpen             string = "db_open"
@@ -30,6 +70,7 @@ const (
 	FfiStmtExec           string = "stmt_execute"
 	FfiStmtQuery          string = "stmt_query"
 	FfiStmtParameterCount string = "stmt_parameter_count"
+	FfiStmtClose          string = "stmt_close"
 	FfiRowsClose          string = "rows_close"
 	FfiRowsGetColumns     string = "rows_get_columns"
 	FfiRowsNext           string = "rows_next"
@@ -48,35 +89,41 @@ func namedValueToValue(named []driver.NamedValue) []driver.Value {
 }
 
 func buildNamedArgs(named []driver.NamedValue) ([]limboValue, error) {
-	args := make([]driver.Value, len(named))
-	for i, nv := range named {
-		args[i] = nv.Value
-	}
+	args := namedValueToValue(named)
 	return buildArgs(args)
 }
 
-type ExtFunc struct {
-	funcPtr  interface{}
-	funcName string
-}
-
-func (ef *ExtFunc) initFunc() {
-	getFfiFunc(&ef.funcPtr, ef.funcName)
-}
-
-type valueType int
+type valueType int32
 
 const (
-	intVal valueType = iota
-	textVal
-	blobVal
-	realVal
-	nullVal
+	intVal  valueType = 0
+	textVal valueType = 1
+	blobVal valueType = 2
+	realVal valueType = 3
+	nullVal valueType = 4
 )
+
+func (vt valueType) String() string {
+	switch vt {
+	case intVal:
+		return "int"
+	case textVal:
+		return "text"
+	case blobVal:
+		return "blob"
+	case realVal:
+		return "real"
+	case nullVal:
+		return "null"
+	default:
+		return "unknown"
+	}
+}
 
 // struct to pass Go values over FFI
 type limboValue struct {
 	Type  valueType
+	_     [4]byte // padding to align Value to 8 bytes
 	Value [8]byte
 }
 
@@ -88,6 +135,9 @@ type Blob struct {
 
 // convert a limboValue to a native Go value
 func toGoValue(valPtr uintptr) interface{} {
+	if valPtr == 0 {
+		return nil
+	}
 	val := (*limboValue)(unsafe.Pointer(valPtr))
 	switch val.Type {
 	case intVal:
@@ -139,19 +189,6 @@ func toGoBlob(blobPtr uintptr) []byte {
 	return unsafe.Slice((*byte)(unsafe.Pointer(blob.Data)), blob.Len)
 }
 
-var freeString func(*byte)
-
-// free a C style string allocated via FFI
-func freeCString(cstr uintptr) {
-	if cstr == 0 {
-		return
-	}
-	if freeString == nil {
-		getFfiFunc(&freeString, FfiFreeCString)
-	}
-	freeString((*byte)(unsafe.Pointer(cstr)))
-}
-
 func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
 	if arrayPtr == 0 || length == 0 {
 		return nil
@@ -172,30 +209,29 @@ func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
 // convert a Go slice of driver.Value to a slice of limboValue that can be sent over FFI
 func buildArgs(args []driver.Value) ([]limboValue, error) {
 	argSlice := make([]limboValue, len(args))
-
 	for i, v := range args {
+		limboVal := limboValue{}
 		switch val := v.(type) {
 		case nil:
-			argSlice[i].Type = nullVal
-
+			limboVal.Type = nullVal
 		case int64:
-			argSlice[i].Type = intVal
-			storeInt64(&argSlice[i].Value, val)
-
+			limboVal.Type = intVal
+			limboVal.Value = *(*[8]byte)(unsafe.Pointer(&val))
 		case float64:
-			argSlice[i].Type = realVal
-			storeFloat64(&argSlice[i].Value, val)
+			limboVal.Type = realVal
+			limboVal.Value = *(*[8]byte)(unsafe.Pointer(&val))
 		case string:
-			argSlice[i].Type = textVal
+			limboVal.Type = textVal
 			cstr := CString(val)
-			storePointer(&argSlice[i].Value, cstr)
+			*(*uintptr)(unsafe.Pointer(&limboVal.Value)) = uintptr(unsafe.Pointer(cstr))
 		case []byte:
 			argSlice[i].Type = blobVal
 			blob := makeBlob(val)
-			*(*uintptr)(unsafe.Pointer(&argSlice[i].Value)) = uintptr(unsafe.Pointer(blob))
+			*(*uintptr)(unsafe.Pointer(&limboVal.Value)) = uintptr(unsafe.Pointer(blob))
 		default:
 			return nil, fmt.Errorf("unsupported type: %T", v)
 		}
+		argSlice[i] = limboVal
 	}
 	return argSlice, nil
 }
@@ -211,9 +247,6 @@ func storeFloat64(data *[8]byte, val float64) {
 func storePointer(data *[8]byte, ptr *byte) {
 	*(*uintptr)(unsafe.Pointer(data)) = uintptr(unsafe.Pointer(ptr))
 }
-
-type stmtExecuteFn func(stmtPtr uintptr, argsPtr uintptr, argCount uint64, changes uintptr) int32
-type stmtQueryFn func(stmtPtr uintptr, argsPtr uintptr, argCount uint64) uintptr
 
 /* Credit below (Apache2 License) to:
 https://github.com/ebitengine/purego/blob/main/internal/strings/strings.go
