@@ -631,3 +631,15 @@ do_execsql_test json-patch-mixed-types-1 {
         '{"arr":[1,2,3],"obj":{"x":1}}'
     );
 } {{{"str":"hello","num":42,"bool":true,"arr":[1,2,3],"obj":{"x":1}}}}
+do_execsql_test json-patch-add-all-dup-keys-from-patch {
+    select json_patch(
+        '{"x":100,"x":200}',
+        '{"z":{}, "z":5, "z":100}'
+    );
+} {{{"x":100,"x":200,"z":{},"z":5,"z":100}}}
+do_execsql_test json-patch-first-occurance-patch {
+    select json_patch(
+        '{"x":100,"x":200}',
+        '{"x":{}, "x":5, "x":100}'
+    );
+} {{{"x":{},"x":200}}}
