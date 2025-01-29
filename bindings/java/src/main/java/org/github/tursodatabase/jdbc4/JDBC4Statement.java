@@ -53,9 +53,21 @@ public class JDBC4Statement implements Statement {
     this.resultSetHoldability = resultSetHoldability;
   }
 
+  // TODO: should executeQuery run execute right after preparing the statement?
   @Override
   public ResultSet executeQuery(String sql) throws SQLException {
-    execute(sql);
+    ensureOpen();
+    statement =
+        this.withConnectionTimeout(
+            () -> {
+              try {
+                // TODO: if sql is a readOnly query, do we still need the locks?
+                connectionLock.lock();
+                return connection.prepare(sql);
+              } finally {
+                connectionLock.unlock();
+              }
+            });
 
     requireNonNull(statement, "statement should not be null after running execute method");
     return new JDBC4ResultSet(statement.getResultSet());
