@@ -24,6 +24,7 @@ pub enum Val {
     Float(f64),
     String(String),
     Array(Vec<Val>),
+    Removed,
     #[serde(with = "ordered_object")]
     Object(Vec<(String, Val)>),
 }
@@ -313,6 +314,7 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
         Val::String(_) => "text",
         Val::Array(_) => "array",
         Val::Object(_) => "object",
+        Val::Removed => unreachable!(),
     };
 
     Ok(OwnedValue::Text(LimboText::json(Rc::new(val.to_string()))))

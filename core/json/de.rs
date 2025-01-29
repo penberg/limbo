@@ -519,6 +519,9 @@ pub mod ordered_object {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(pairs.len()))?;
         for (k, v) in pairs {
+            if let Val::Removed = v {
+                continue;
+            }
             map.serialize_entry(k, v)?;
         }
         map.end()
