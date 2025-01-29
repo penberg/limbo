@@ -28,6 +28,7 @@ use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
 use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
 use crate::info;
+use crate::json::json_remove;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
@@ -1754,6 +1755,11 @@ impl Program {
                                 let target = &state.registers[*start_reg];
                                 let patch = &state.registers[*start_reg + 1];
                                 state.registers[*dest] = json_patch(target, patch)?;
+                            }
+                            JsonFunc::JsonRemove => {
+                                state.registers[*dest] = json_remove(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
                             }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {

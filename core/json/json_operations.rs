@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::types::OwnedValue;
 
-use super::{convert_json_to_db_type, get_json_value, Val};
+use super::{convert_json_to_db_type, get_json_value, json_path::json_path, Val};
 
 /// Represents a single patch operation in the merge queue.
 ///
@@ -145,6 +145,31 @@ impl JsonPatcher {
             patch: val,
         });
     }
+}
+
+pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
+    if args.len() == 0 {
+        return Ok(OwnedValue::Null);
+    }
+    if args.len() == 1 {
+        return Ok(args[0].clone());
+    }
+    let mut parsed_target = get_json_value(&args[0])?;
+
+    let paths: Result<Vec<_>, _> = args[1..]
+        .iter()
+        .map(|path| {
+            if let OwnedValue::Text(path) = path {
+                json_path(&path.value)
+            } else {
+                crate::bail_constraint_error!("bad JSON path: {:?}", path.to_string())
+            }
+        })
+        .collect();
+    let paths = paths?;
+    println!("{:?}", paths);
+
+    Ok(OwnedValue::Null)
 }
 
 #[cfg(test)]
