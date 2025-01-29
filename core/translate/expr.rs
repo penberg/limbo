@@ -1773,7 +1773,7 @@ pub fn translate_expr(
                 } else {
                     1
                 };
-                
+
                 // Special case: if we're negating "9223372036854775808", this is exactly MIN_INT64
                 // If we don't do this -1 * 9223372036854775808 will overflow and parse will fail and trigger conversion to Real.
                 if multiplier == -1 && numeric_value == "9223372036854775808" {
