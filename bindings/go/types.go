@@ -3,6 +3,7 @@ package limbo
 import (
 	"database/sql/driver"
 	"fmt"
+	"runtime"
 	"unsafe"
 )
 
@@ -88,7 +89,7 @@ func namedValueToValue(named []driver.NamedValue) []driver.Value {
 	return out
 }
 
-func buildNamedArgs(named []driver.NamedValue) ([]limboValue, error) {
+func buildNamedArgs(named []driver.NamedValue) ([]limboValue, func(), error) {
 	args := namedValueToValue(named)
 	return buildArgs(args)
 }
@@ -123,14 +124,14 @@ func (vt valueType) String() string {
 // struct to pass Go values over FFI
 type limboValue struct {
 	Type  valueType
-	_     [4]byte // padding to align Value to 8 bytes
+	_     [4]byte
 	Value [8]byte
 }
 
 // struct to pass byte slices over FFI
 type Blob struct {
 	Data uintptr
-	Len  uint
+	Len  int64
 }
 
 // convert a limboValue to a native Go value
@@ -157,15 +158,15 @@ func toGoValue(valPtr uintptr) interface{} {
 	}
 }
 
-func getArgsPtr(args []driver.Value) (uintptr, error) {
+func getArgsPtr(args []driver.Value) (uintptr, func(), error) {
 	if len(args) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
-	argSlice, err := buildArgs(args)
+	argSlice, allocs, err := buildArgs(args)
 	if err != nil {
-		return 0, err
+		return 0, allocs, err
 	}
-	return uintptr(unsafe.Pointer(&argSlice[0])), nil
+	return uintptr(unsafe.Pointer(&argSlice[0])), allocs, nil
 }
 
 // convert a byte slice to a Blob type that can be sent over FFI
@@ -173,11 +174,10 @@ func makeBlob(b []byte) *Blob {
 	if len(b) == 0 {
 		return nil
 	}
-	blob := &Blob{
+	return &Blob{
 		Data: uintptr(unsafe.Pointer(&b[0])),
-		Len:  uint(len(b)),
+		Len:  int64(len(b)),
 	}
-	return blob
 }
 
 // converts a blob received via FFI to a native Go byte slice
@@ -186,6 +186,9 @@ func toGoBlob(blobPtr uintptr) []byte {
 		return nil
 	}
 	blob := (*Blob)(unsafe.Pointer(blobPtr))
+	if blob.Data == 0 || blob.Len == 0 {
+		return nil
+	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(blob.Data)), blob.Len)
 }
 
@@ -207,7 +210,8 @@ func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
 }
 
 // convert a Go slice of driver.Value to a slice of limboValue that can be sent over FFI
-func buildArgs(args []driver.Value) ([]limboValue, error) {
+func buildArgs(args []driver.Value) ([]limboValue, func(), error) {
+	pinner := new(runtime.Pinner)
 	argSlice := make([]limboValue, len(args))
 	for i, v := range args {
 		limboVal := limboValue{}
@@ -225,27 +229,16 @@ func buildArgs(args []driver.Value) ([]limboValue, error) {
 			cstr := CString(val)
 			*(*uintptr)(unsafe.Pointer(&limboVal.Value)) = uintptr(unsafe.Pointer(cstr))
 		case []byte:
-			argSlice[i].Type = blobVal
+			limboVal.Type = blobVal
 			blob := makeBlob(val)
+			pinner.Pin(blob)
 			*(*uintptr)(unsafe.Pointer(&limboVal.Value)) = uintptr(unsafe.Pointer(blob))
 		default:
-			return nil, fmt.Errorf("unsupported type: %T", v)
+			return nil, pinner.Unpin, fmt.Errorf("unsupported type: %T", v)
 		}
 		argSlice[i] = limboVal
 	}
-	return argSlice, nil
-}
-
-func storeInt64(data *[8]byte, val int64) {
-	*(*int64)(unsafe.Pointer(data)) = val
-}
-
-func storeFloat64(data *[8]byte, val float64) {
-	*(*float64)(unsafe.Pointer(data)) = val
-}
-
-func storePointer(data *[8]byte, ptr *byte) {
-	*(*uintptr)(unsafe.Pointer(data)) = uintptr(unsafe.Pointer(ptr))
+	return argSlice, pinner.Unpin, nil
 }
 
 /* Credit below (Apache2 License) to:
