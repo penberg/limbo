@@ -78,6 +78,7 @@ const (
 	FfiRowsGetValue       string = "rows_get_value"
 	FfiFreeColumns        string = "free_columns"
 	FfiFreeCString        string = "free_string"
+	FfiFreeBlob           string = "free_blob"
 )
 
 // convert a namedValue slice into normal values until named parameters are supported
@@ -147,9 +148,11 @@ func toGoValue(valPtr uintptr) interface{} {
 		return *(*float64)(unsafe.Pointer(&val.Value))
 	case textVal:
 		textPtr := *(*uintptr)(unsafe.Pointer(&val.Value))
+		defer freeCString(textPtr)
 		return GoString(textPtr)
 	case blobVal:
 		blobPtr := *(*uintptr)(unsafe.Pointer(&val.Value))
+		defer freeBlob(blobPtr)
 		return toGoBlob(blobPtr)
 	case nullVal:
 		return nil
@@ -189,7 +192,34 @@ func toGoBlob(blobPtr uintptr) []byte {
 	if blob.Data == 0 || blob.Len == 0 {
 		return nil
 	}
-	return unsafe.Slice((*byte)(unsafe.Pointer(blob.Data)), blob.Len)
+	data := unsafe.Slice((*byte)(unsafe.Pointer(blob.Data)), blob.Len)
+	copied := make([]byte, len(data))
+	copy(copied, data)
+	return copied
+}
+
+var freeBlobFunc func(uintptr)
+
+func freeBlob(blobPtr uintptr) {
+	if blobPtr == 0 {
+		return
+	}
+	if freeBlobFunc == nil {
+		getFfiFunc(&freeBlobFunc, FfiFreeBlob)
+	}
+	freeBlobFunc(blobPtr)
+}
+
+var freeStringFunc func(uintptr)
+
+func freeCString(cstrPtr uintptr) {
+	if cstrPtr == 0 {
+		return
+	}
+	if freeStringFunc == nil {
+		getFfiFunc(&freeStringFunc, FfiFreeCString)
+	}
+	freeStringFunc(cstrPtr)
 }
 
 func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
@@ -210,6 +240,8 @@ func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
 }
 
 // convert a Go slice of driver.Value to a slice of limboValue that can be sent over FFI
+// for Blob types, we have to pin them so they are not garbage collected before they can be copied
+// into a buffer on the Rust side, so we return a function to unpin them that can be deferred after this call
 func buildArgs(args []driver.Value) ([]limboValue, func(), error) {
 	pinner := new(runtime.Pinner)
 	argSlice := make([]limboValue, len(args))

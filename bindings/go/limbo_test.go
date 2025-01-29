@@ -100,7 +100,7 @@ func TestQuery(t *testing.T) {
 			t.Fatalf("Error scanning row: %v", err)
 		}
 		if a != i || b != rowsMap[i] || string(c) != rowsMap[i] {
-			t.Fatalf("Expected %d, %s, got %d, %s, %b", i, rowsMap[i], a, b, c)
+			t.Fatalf("Expected %d, %s, %s, got %d, %s, %b", i, rowsMap[i], rowsMap[i], a, b, c)
 		}
 		fmt.Println("RESULTS: ", a, b, string(c))
 		i++
