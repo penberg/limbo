@@ -1342,6 +1342,7 @@ dependencies = [
  "limbo_percentile",
  "limbo_regexp",
  "limbo_uuid",
+ "limbo_vector",
  "log",
  "miette",
  "mimalloc",
@@ -1439,6 +1440,13 @@ dependencies = [
  "limbo_ext",
  "log",
  "uuid",
+]
+
+[[package]]
+name = "limbo_vector"
+version = "0.0.13"
+dependencies = [
+ "limbo_ext",
 ]
 
 [[package]]

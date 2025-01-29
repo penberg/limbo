@@ -616,3 +616,15 @@ The `regexp` extension is compatible with [sqlean-regexp](https://github.com/nal
 | regexp_substr(source, pattern)                 | Yes    |         |
 | regexp_capture(source, pattern[, n])           | No     |         |
 | regexp_replace(source, pattern, replacement)   | No     |         |
+
+### Vector
+
+The `vector` extension is compatible with libSQL native vector search.
+
+| Function                                       | Status | Comment | 
+|------------------------------------------------|--------|---------|
+| vector(x)                                      | Yes    |         |
+| vector32(x)                                    | Yes    |         |
+| vector64(x)                                    | Yes    |         |
+| vector_extract(x)                              | Yes    |         |
+| vector_distance_cos(x, y)                      | Yes    |         |
