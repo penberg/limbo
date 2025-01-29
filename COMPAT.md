@@ -126,7 +126,7 @@ The current status of Limbo is:
 | PRAGMA index_list                | No         |                                              |
 | PRAGMA index_xinfo               | No         |                                              |
 | PRAGMA integrity_check           | No         |                                              |
-| PRAGMA journal_mode              | No         |                                              |
+| PRAGMA journal_mode              | Yes        |                                              |
 | PRAGMA journal_size_limit        | No         |                                              |
 | PRAGMA legacy_alter_table        | No         |                                              |
 | PRAGMA legacy_file_format        | No         |                                              |
