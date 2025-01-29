@@ -30,18 +30,19 @@ pub fn json_patch(target: &OwnedValue, patch: &OwnedValue) -> crate::Result<Owne
 
     let mut parsed_target = get_json_value(target)?;
     let parsed_patch = get_json_value(patch)?;
-    let mut patcher = Patcher::new(16);
+    let mut patcher = JsonPatcher::new(16);
     patcher.apply_patch(&mut parsed_target, parsed_patch);
 
     convert_json_to_db_type(&parsed_target, false)
 }
 
-struct Patcher {
+#[derive(Debug)]
+struct JsonPatcher {
     queue: VecDeque<PatchOperation>,
     path_storage: Vec<usize>,
 }
 
-impl Patcher {
+impl JsonPatcher {
     fn new(queue_capacity: usize) -> Self {
         Self {
             queue: VecDeque::with_capacity(queue_capacity),
@@ -160,6 +161,228 @@ mod tests {
 
     fn create_json(s: &str) -> OwnedValue {
         OwnedValue::Text(LimboText::json(Rc::new(s.to_string())))
+    }
+
+    #[test]
+    fn test_new_patcher() {
+        let patcher = JsonPatcher::new(10);
+        assert_eq!(patcher.queue.capacity(), 10);
+        assert_eq!(patcher.path_storage.capacity(), 256);
+        assert!(patcher.queue.is_empty());
+        assert!(patcher.path_storage.is_empty());
+    }
+
+    #[test]
+    fn test_simple_value_replacement() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![("key1".to_string(), Val::String("old".to_string()))]);
+        let patch = Val::Object(vec![("key1".to_string(), Val::String("new".to_string()))]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            assert_eq!(map[0].1, Val::String("new".to_string()));
+        } else {
+            panic!("Expected object");
+        }
+    }
+
+    #[test]
+    fn test_nested_object_patch() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![(
+            "a".to_string(),
+            Val::Object(vec![("b".to_string(), Val::String("old".to_string()))]),
+        )]);
+        let patch = Val::Object(vec![(
+            "a".to_string(),
+            Val::Object(vec![("b".to_string(), Val::String("new".to_string()))]),
+        )]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            if let Val::Object(nested) = &map[0].1 {
+                assert_eq!(nested[0].1, Val::String("new".to_string()));
+            } else {
+                panic!("Expected nested object");
+            }
+        }
+    }
+
+    #[test]
+    fn test_null_removal() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![
+            ("keep".to_string(), Val::String("value".to_string())),
+            ("remove".to_string(), Val::String("value".to_string())),
+        ]);
+        let patch = Val::Object(vec![("remove".to_string(), Val::Null)]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            assert_eq!(map[0].1, Val::String("value".to_string()));
+            assert_eq!(map[1].1, Val::Removed);
+        }
+    }
+
+    #[test]
+    fn test_duplicate_keys_first_occurrence() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![
+            ("key".to_string(), Val::String("first".to_string())),
+            ("key".to_string(), Val::String("second".to_string())),
+            ("key".to_string(), Val::String("third".to_string())),
+        ]);
+        let patch = Val::Object(vec![(
+            "key".to_string(),
+            Val::String("modified".to_string()),
+        )]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            assert_eq!(map[0].1, Val::String("modified".to_string()));
+            assert_eq!(map[1].1, Val::String("second".to_string()));
+            assert_eq!(map[2].1, Val::String("third".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_add_new_key() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![(
+            "existing".to_string(),
+            Val::String("value".to_string()),
+        )]);
+        let patch = Val::Object(vec![("new".to_string(), Val::String("value".to_string()))]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            assert_eq!(map.len(), 2);
+            assert_eq!(map[1].0, "new");
+            assert_eq!(map[1].1, Val::String("value".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_deep_nested_patch() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![(
+            "level1".to_string(),
+            Val::Object(vec![(
+                "level2".to_string(),
+                Val::Object(vec![("level3".to_string(), Val::String("old".to_string()))]),
+            )]),
+        )]);
+        let patch = Val::Object(vec![(
+            "level1".to_string(),
+            Val::Object(vec![(
+                "level2".to_string(),
+                Val::Object(vec![("level3".to_string(), Val::String("new".to_string()))]),
+            )]),
+        )]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(l1) = target {
+            if let Val::Object(l2) = &l1[0].1 {
+                if let Val::Object(l3) = &l2[0].1 {
+                    assert_eq!(l3[0].1, Val::String("new".to_string()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_null_patch_on_nonexistent_key() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![(
+            "existing".to_string(),
+            Val::String("value".to_string()),
+        )]);
+        let patch = Val::Object(vec![("nonexistent".to_string(), Val::Null)]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            assert_eq!(map.len(), 1); // Should not add new key for null patch
+            assert_eq!(map[0].0, "existing");
+        }
+    }
+
+    #[test]
+    fn test_nested_duplicate_keys() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![(
+            "outer".to_string(),
+            Val::Object(vec![
+                ("inner".to_string(), Val::String("first".to_string())),
+                ("inner".to_string(), Val::String("second".to_string())),
+            ]),
+        )]);
+        let patch = Val::Object(vec![(
+            "outer".to_string(),
+            Val::Object(vec![(
+                "inner".to_string(),
+                Val::String("modified".to_string()),
+            )]),
+        )]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(outer) = target {
+            if let Val::Object(inner) = &outer[0].1 {
+                assert_eq!(inner[0].1, Val::String("modified".to_string()));
+                assert_eq!(inner[1].1, Val::String("second".to_string()));
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid path")]
+    fn test_invalid_path_navigation() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![("a".to_string(), Val::Object(vec![]))]);
+        patcher.path_storage.push(0);
+        patcher.path_storage.push(999); // Invalid index
+
+        patcher.navigate_to_target(&mut target, 0, 2);
+    }
+
+    #[test]
+    fn test_merge_empty_objects() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![]);
+        let patch = Val::Object(vec![]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        if let Val::Object(map) = target {
+            assert!(map.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_path_storage_growth() {
+        let mut patcher = JsonPatcher::new(10);
+        let mut target = Val::Object(vec![(
+            "a".to_string(),
+            Val::Object(vec![("b".to_string(), Val::Object(vec![]))]),
+        )]);
+        let patch = Val::Object(vec![(
+            "a".to_string(),
+            Val::Object(vec![("b".to_string(), Val::String("value".to_string()))]),
+        )]);
+
+        patcher.apply_patch(&mut target, patch);
+
+        // Path storage should contain [0, 0] for accessing a.b
+        assert_eq!(patcher.path_storage.len(), 3);
+        assert_eq!(patcher.path_storage[0], 0);
+        assert_eq!(patcher.path_storage[1], 0);
     }
 
     #[test]
