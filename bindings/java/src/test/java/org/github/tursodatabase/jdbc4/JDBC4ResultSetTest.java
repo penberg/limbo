@@ -100,7 +100,7 @@ class JDBC4ResultSetTest {
   }
 
   @Test
-  void test_getString_returnsNull() throws Exception {
+  void test_getString_returns_null_on_null() throws Exception {
     stmt.executeUpdate("CREATE TABLE test_null (string_col TEXT);");
     stmt.executeUpdate("INSERT INTO test_null (string_col) VALUES (NULL);");
 
@@ -135,6 +135,16 @@ class JDBC4ResultSetTest {
   }
 
   @Test
+  void test_getBoolean_returns_false_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (boolean_col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_null (boolean_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertFalse(resultSet.getBoolean(1));
+  }
+
+  @Test
   void test_getByte() throws Exception {
     stmt.executeUpdate("CREATE TABLE test_byte (byte_col INTEGER);");
     stmt.executeUpdate("INSERT INTO test_byte (byte_col) VALUES (1);");
@@ -154,6 +164,16 @@ class JDBC4ResultSetTest {
     // Test value that exceeds byte size (negative overflow)
     assertTrue(resultSet.next());
     assertEquals(127, resultSet.getByte(1)); // -129 overflows to 127
+  }
+
+  @Test
+  void test_getByte_returns_zero_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (byte_col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_null (byte_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertEquals(0, resultSet.getByte(1));
   }
 
   @Test
@@ -179,6 +199,16 @@ class JDBC4ResultSetTest {
   }
 
   @Test
+  void test_getShort_returns_zero_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (short_col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_null (short_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertEquals(0, resultSet.getShort(1));
+  }
+
+  @Test
   void test_getInt() throws Exception {
     stmt.executeUpdate("CREATE TABLE test_int (int_col INT);");
     stmt.executeUpdate("INSERT INTO test_int (int_col) VALUES (12345);");
@@ -198,6 +228,16 @@ class JDBC4ResultSetTest {
     // Test minimum int value
     assertTrue(resultSet.next());
     assertEquals(-2147483648, resultSet.getInt(1));
+  }
+
+  @Test
+  void test_getInt_returns_zero_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (int_col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_null (int_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertEquals(0, resultSet.getInt(1));
   }
 
   @Test
@@ -224,6 +264,16 @@ class JDBC4ResultSetTest {
     // Test minimum long value
     assertTrue(resultSet.next());
     assertEquals(-9223372036854775808L, resultSet.getLong(1));
+  }
+
+  @Test
+  void test_getLong_returns_zero_no_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (long_col INTEGER);");
+    stmt.executeUpdate("INSERT INTO test_null (long_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertEquals(0L, resultSet.getLong(1));
   }
 
   @Test
@@ -257,6 +307,16 @@ class JDBC4ResultSetTest {
   }
 
   @Test
+  void test_getFloat_returns_zero_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (float_col REAL);");
+    stmt.executeUpdate("INSERT INTO test_null (float_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertEquals(0.0f, resultSet.getFloat(1), 0.0001);
+  }
+
+  @Test
   void test_getDouble() throws Exception {
     stmt.executeUpdate("CREATE TABLE test_double (double_col DOUBLE);");
     stmt.executeUpdate("INSERT INTO test_double (double_col) VALUES (1.234567);");
@@ -286,6 +346,16 @@ class JDBC4ResultSetTest {
     // Test minimum negative double value
     assertTrue(resultSet.next());
     assertEquals(-1.7976931348623157E308, resultSet.getDouble(1), 0.0001);
+  }
+
+  @Test
+  void test_getDouble_returns_zero_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (double_col REAL);");
+    stmt.executeUpdate("INSERT INTO test_null (double_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertEquals(0.0, resultSet.getDouble(1), 0.0001);
   }
 
   @Test
@@ -329,6 +399,16 @@ class JDBC4ResultSetTest {
         resultSet.getBigDecimal(1, 2));
   }
 
+  @Test
+  void test_getBigDecimal_returns_null_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (bigdecimal_col REAL);");
+    stmt.executeUpdate("INSERT INTO test_null (bigdecimal_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertNull(resultSet.getBigDecimal(1, 2));
+  }
+
   @ParameterizedTest
   @MethodSource("byteArrayProvider")
   void test_getBytes(byte[] data) throws Exception {
@@ -354,5 +434,15 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT bytes_col FROM test_bytes");
     assertTrue(resultSet.next());
     assertArrayEquals(data, resultSet.getBytes(1));
+  }
+
+  @Test
+  void test_getBytes_returns_null_on_null() throws Exception {
+    stmt.executeUpdate("CREATE TABLE test_null (bytes_col BLOB);");
+    stmt.executeUpdate("INSERT INTO test_null (bytes_col) VALUES (NULL);");
+
+    ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_null");
+    assertTrue(resultSet.next());
+    assertNull(resultSet.getBytes(1));
   }
 }
