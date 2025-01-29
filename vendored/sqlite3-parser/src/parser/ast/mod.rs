@@ -1594,6 +1594,8 @@ pub enum PragmaName {
     CacheSize,
     /// `journal_mode` pragma
     JournalMode,
+    /// Return the total number of pages in the database file.
+    PageCount,
     /// returns information about the columns of a table
     TableInfo,
     /// trigger a checkpoint to run on database(s) if WAL is enabled

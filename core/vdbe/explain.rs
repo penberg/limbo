@@ -1163,6 +1163,15 @@ pub fn insn_to_str(
                 0,
                 String::new(),
             ),
+            Insn::PageCount { db, dest } => (
+                "Pagecount",
+                *db as i32,
+                *dest as i32,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

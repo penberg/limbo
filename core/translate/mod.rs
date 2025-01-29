@@ -640,6 +640,10 @@ fn update_pragma(
             query_pragma(PragmaName::WalCheckpoint, schema, None, header, program)?;
             Ok(())
         }
+        PragmaName::PageCount => {
+            query_pragma(PragmaName::PageCount, schema, None, header, program)?;
+            Ok(())
+        }
         PragmaName::TableInfo => {
             // because we need control over the write parameter for the transaction,
             // this should be unreachable. We have to force-call query_pragma before
@@ -680,6 +684,13 @@ fn query_pragma(
                 dest: register,
             });
             program.emit_result_row(register, 3);
+        }
+        PragmaName::PageCount => {
+            program.emit_insn(Insn::PageCount {
+                db: 0,
+                dest: register,
+            });
+            program.emit_result_row(register, 1);
         }
         PragmaName::TableInfo => {
             let table = match value {
