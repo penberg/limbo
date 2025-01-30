@@ -368,7 +368,7 @@ Modifiers:
 | json_patch(json1,json2)            | Yes     |                                                                                                                                              |
 | jsonb_patch(json1,json2)           |         |                                                                                                                                              |
 | json_pretty(json)                  |         |                                                                                                                                              |
-| json_remove(json,path,...)         | Yes     |                                                                                                                                              |
+| json_remove(json,path,...)         | Partial | Uses same json path parser as json_extract so shares same limitations.                                                                       |
 | jsonb_remove(json,path,...)        |         |                                                                                                                                              |
 | json_replace(json,path,value,...)  |         |                                                                                                                                              |
 | jsonb_replace(json,path,value,...) |         |                                                                                                                                              |
