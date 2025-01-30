@@ -401,178 +401,179 @@ Modifiers:
 
 ## SQLite VDBE opcodes
 
-| Opcode         | Status |
-|----------------|--------|
-| Add            | Yes    |
-| AddImm         | No     |
-| Affinity       | No     |
-| AggFinal       | Yes    |
-| AggStep        | Yes    |
-| AggStep        | Yes    |
-| And            | Yes    |
-| AutoCommit     | No     |
-| BitAnd         | Yes    |
-| BitNot         | Yes    |
-| BitOr          | Yes    |
-| Blob           | Yes    |
-| Checkpoint     | No     |
-| Clear          | No     |
-| Close          | No     |
-| CollSeq        | No     |
-| Column         | Yes    |
-| Compare        | Yes    |
-| Concat         | Yes    |
-| Copy           | Yes    |
-| Count          | No     |
-| CreateIndex    | No     |
-| CreateTable    | No     |
-| DecrJumpZero   | Yes    |
-| Delete         | No     |
-| Destroy        | No     |
-| Divide         | Yes    |
-| DropIndex      | No     |
-| DropTable      | No     |
-| DropTrigger    | No     |
-| EndCoroutine   | Yes    |
-| Eq             | Yes    |
-| Expire         | No     |
-| Explain        | No     |
-| FkCounter      | No     |
-| FkIfZero       | No     |
-| Found          | No     |
-| Function       | Yes    |
-| Ge             | Yes    |
-| Gosub          | Yes    |
-| Goto           | Yes    |
-| Gt             | Yes    |
-| Halt           | Yes    |
-| HaltIfNull     | No     |
-| IdxDelete      | No     |
-| IdxGE          | Yes    |
-| IdxInsert      | No     |
-| IdxLT          | No     |
-| IdxRowid       | No     |
-| If             | Yes    |
-| IfNeg          | No     |
-| IfNot          | Yes    |
-| IfPos          | Yes    |
-| IfZero         | No     |
-| IncrVacuum     | No     |
-| Init           | Yes    |
-| InitCoroutine  | Yes    |
-| Insert         | No     |
-| InsertAsync    | Yes    |
-| InsertAwait    | Yes    |
-| InsertInt      | No     |
-| Int64          | No     |
-| Integer        | Yes    |
-| IntegrityCk    | No     |
-| IsNull         | Yes    |
-| IsUnique       | No     |
-| JournalMode    | No     |
-| Jump           | Yes    |
-| Last           | No     |
-| Le             | Yes    |
-| LoadAnalysis   | No     |
-| Lt             | Yes    |
-| MakeRecord     | Yes    |
-| MaxPgcnt       | No     |
-| MemMax         | No     |
-| Move           | No     |
-| Multiply       | Yes    |
-| MustBeInt      | Yes    |
-| Ne             | Yes    |
-| NewRowid       | Yes    |
-| Next           | No     |
-| NextAsync      | Yes    |
-| NextAwait      | Yes    |
-| Noop           | No     |
-| Not            | Yes    |
-| NotExists      | Yes    |
-| NotFound       | No     |
-| NotNull        | Yes    |
-| Null           | Yes    |
-| NullRow        | Yes    |
-| Once           | No     |
-| OpenAutoindex  | No     |
-| OpenEphemeral  | No     |
-| OpenPseudo     | Yes    |
-| OpenRead       | Yes    |
-| OpenReadAsync  | Yes    |
-| OpenWrite      | No     |
-| OpenWriteAsync | Yes    |
-| OpenWriteAwait | Yes    |
-| Or             | Yes    |
-| Pagecount      | No     |
-| Param          | No     |
-| ParseSchema    | No     |
-| Permutation    | No     |
-| Prev           | No     |
-| PrevAsync      | Yes    |
-| PrevAwait      | Yes    |
-| Program        | No     |
-| ReadCookie     | No     |
-| Real           | Yes    |
-| RealAffinity   | Yes    |
-| Remainder      | Yes    |
-| ResetCount     | No     |
-| ResultRow      | Yes    |
-| Return         | Yes    |
-| Rewind         | Yes    |
-| RewindAsync    | Yes    |
-| RewindAwait    | Yes    |
-| RowData        | No     |
-| RowId          | Yes    |
-| RowKey         | No     |
-| RowSetAdd      | No     |
-| RowSetRead     | No     |
-| RowSetTest     | No     |
-| Rowid          | Yes    |
-| SCopy          | No     |
-| Savepoint      | No     |
-| Seek           | No     |
-| SeekGe         | Yes    |
-| SeekGt         | Yes    |
-| SeekLe         | No     |
-| SeekLt         | No     |
-| SeekRowid      | Yes    |
-| Sequence       | No     |
-| SetCookie      | No     |
-| ShiftLeft      | Yes    |
-| ShiftRight     | Yes    |
-| SoftNull       | Yes    |
-| Sort           | No     |
-| SorterCompare  | No     |
-| SorterData     | Yes    |
-| SorterInsert   | Yes    |
-| SorterNext     | Yes    |
-| SorterOpen     | Yes    |
-| SorterSort     | Yes    |
-| String         | No     |
-| String8        | Yes    |
-| Subtract       | Yes    |
-| TableLock      | No     |
-| ToBlob         | No     |
-| ToInt          | No     |
-| ToNumeric      | No     |
-| ToReal         | No     |
-| ToText         | No     |
-| Trace          | No     |
-| Transaction    | Yes    |
-| VBegin         | No     |
-| VColumn        | No     |
-| VCreate        | No     |
-| VDestroy       | No     |
-| VFilter        | No     |
-| VNext          | No     |
-| VOpen          | No     |
-| VRename        | No     |
-| VUpdate        | No     |
-| Vacuum         | No     |
-| Variable       | No     |
-| VerifyCookie   | No     |
-| Yield          | Yes    |
-| ZeroOrNull     | Yes    |
+| Opcode         | Status | Comment |
+|----------------|--------|---------|
+| Add            | Yes    |         |
+| AddImm         | No     |         |
+| Affinity       | No     |         |
+| AggFinal       | Yes    |         |
+| AggStep        | Yes    |         |
+| AggStep        | Yes    |         |
+| And            | Yes    |         |
+| AutoCommit     | No     |         |
+| BitAnd         | Yes    |         |
+| BitNot         | Yes    |         |
+| BitOr          | Yes    |         |
+| Blob           | Yes    |         |
+| Checkpoint     | No     |         |
+| Clear          | No     |         |
+| Close          | No     |         |
+| CollSeq        | No     |         |
+| Column         | Yes    |         |
+| Compare        | Yes    |         |
+| Concat         | Yes    |         |
+| Copy           | Yes    |         |
+| Count          | No     |         |
+| CreateBTree    | Partial| no temp databases |
+| CreateTable    | No     |         |
+| CreateTable    | No     |         |
+| DecrJumpZero   | Yes    |         |
+| Delete         | No     |         |
+| Destroy        | No     |         |
+| Divide         | Yes    |         |
+| DropIndex      | No     |         |
+| DropTable      | No     |         |
+| DropTrigger    | No     |         |
+| EndCoroutine   | Yes    |         |
+| Eq             | Yes    |         |
+| Expire         | No     |         |
+| Explain        | No     |         |
+| FkCounter      | No     |         |
+| FkIfZero       | No     |         |
+| Found          | No     |         |
+| Function       | Yes    |         |
+| Ge             | Yes    |         |
+| Gosub          | Yes    |         |
+| Goto           | Yes    |         |
+| Gt             | Yes    |         |
+| Halt           | Yes    |         |
+| HaltIfNull     | No     |         |
+| IdxDelete      | No     |         |
+| IdxGE          | Yes    |         |
+| IdxInsert      | No     |         |
+| IdxLT          | No     |         |
+| IdxRowid       | No     |         |
+| If             | Yes    |         |
+| IfNeg          | No     |         |
+| IfNot          | Yes    |         |
+| IfPos          | Yes    |         |
+| IfZero         | No     |         |
+| IncrVacuum     | No     |         |
+| Init           | Yes    |         |
+| InitCoroutine  | Yes    |         |
+| Insert         | No     |         |
+| InsertAsync    | Yes    |         |
+| InsertAwait    | Yes    |         |
+| InsertInt      | No     |         |
+| Int64          | No     |         |
+| Integer        | Yes    |         |
+| IntegrityCk    | No     |         |
+| IsNull         | Yes    |         |
+| IsUnique       | No     |         |
+| JournalMode    | No     |         |
+| Jump           | Yes    |         |
+| Last           | No     |         |
+| Le             | Yes    |         |
+| LoadAnalysis   | No     |         |
+| Lt             | Yes    |         |
+| MakeRecord     | Yes    |         |
+| MaxPgcnt       | No     |         |
+| MemMax         | No     |         |
+| Move           | No     |         |
+| Multiply       | Yes    |         |
+| MustBeInt      | Yes    |         |
+| Ne             | Yes    |         |
+| NewRowid       | Yes    |         |
+| Next           | No     |         |
+| NextAsync      | Yes    |         |
+| NextAwait      | Yes    |         |
+| Noop           | No     |         |
+| Not            | Yes    |         |
+| NotExists      | Yes    |         |
+| NotFound       | No     |         |
+| NotNull        | Yes    |         |
+| Null           | Yes    |         |
+| NullRow        | Yes    |         |
+| Once           | No     |         |
+| OpenAutoindex  | No     |         |
+| OpenEphemeral  | No     |         |
+| OpenPseudo     | Yes    |         |
+| OpenRead       | Yes    |         |
+| OpenReadAsync  | Yes    |         |
+| OpenWrite      | No     |         |
+| OpenWriteAsync | Yes    |         |
+| OpenWriteAwait | Yes    |         |
+| Or             | Yes    |         |
+| Pagecount      | No     |         |
+| Param          | No     |         |
+| ParseSchema    | No     |         |
+| Permutation    | No     |         |
+| Prev           | No     |         |
+| PrevAsync      | Yes    |         |
+| PrevAwait      | Yes    |         |
+| Program        | No     |         |
+| ReadCookie     | No     |         |
+| Real           | Yes    |         |
+| RealAffinity   | Yes    |         |
+| Remainder      | Yes    |         |
+| ResetCount     | No     |         |
+| ResultRow      | Yes    |         |
+| Return         | Yes    |         |
+| Rewind         | Yes    |         |
+| RewindAsync    | Yes    |         |
+| RewindAwait    | Yes    |         |
+| RowData        | No     |         |
+| RowId          | Yes    |         |
+| RowKey         | No     |         |
+| RowSetAdd      | No     |         |
+| RowSetRead     | No     |         |
+| RowSetTest     | No     |         |
+| Rowid          | Yes    |         |
+| SCopy          | No     |         |
+| Savepoint      | No     |         |
+| Seek           | No     |         |
+| SeekGe         | Yes    |         |
+| SeekGt         | Yes    |         |
+| SeekLe         | No     |         |
+| SeekLt         | No     |         |
+| SeekRowid      | Yes    |         |
+| Sequence       | No     |         |
+| SetCookie      | No     |         |
+| ShiftLeft      | Yes    |         |
+| ShiftRight     | Yes    |         |
+| SoftNull       | Yes    |         |
+| Sort           | No     |         |
+| SorterCompare  | No     |         |
+| SorterData     | Yes    |         |
+| SorterInsert   | Yes    |         |
+| SorterNext     | Yes    |         |
+| SorterOpen     | Yes    |         |
+| SorterSort     | Yes    |         |
+| String         | No     |         |
+| String8        | Yes    |         |
+| Subtract       | Yes    |         |
+| TableLock      | No     |         |
+| ToBlob         | No     |         |
+| ToInt          | No     |         |
+| ToNumeric      | No     |         |
+| ToReal         | No     |         |
+| ToText         | No     |         |
+| Trace          | No     |         |
+| Transaction    | Yes    |         |
+| VBegin         | No     |         |
+| VColumn        | No     |         |
+| VCreate        | No     |         |
+| VDestroy       | No     |         |
+| VFilter        | No     |         |
+| VNext          | No     |         |
+| VOpen          | No     |         |
+| VRename        | No     |         |
+| VUpdate        | No     |         |
+| Vacuum         | No     |         |
+| Variable       | No     |         |
+| VerifyCookie   | No     |         |
+| Yield          | Yes    |         |
+| ZeroOrNull     | Yes    |         |
 
 ##  [SQLite journaling modes](https://www.sqlite.org/pragma.html#pragma_journal_mode)
 
