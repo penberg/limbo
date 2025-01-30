@@ -15,8 +15,8 @@ pub enum Value<'a> {
     Null,
     Integer(i64),
     Float(f64),
-    Text(&'a String),
-    Blob(&'a Vec<u8>),
+    Text(&'a str),
+    Blob(&'a [u8]),
 }
 
 impl Display for Value<'_> {
