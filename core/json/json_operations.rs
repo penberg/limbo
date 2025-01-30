@@ -154,10 +154,11 @@ pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
     if args.is_empty() {
         return Ok(OwnedValue::Null);
     }
+
+    let mut parsed_target = get_json_value(&args[0])?;
     if args.len() == 1 {
         return Ok(args[0].clone());
     }
-    let mut parsed_target = get_json_value(&args[0])?;
 
     let paths: Result<Vec<_>, _> = args[1..]
         .iter()
