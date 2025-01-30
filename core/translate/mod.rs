@@ -258,7 +258,7 @@ fn emit_schema_entry(
 ///
 /// An automatic PRIMARY KEY index is not required if:
 /// - The table has no PRIMARY KEY
-/// - The table has a single-column PRIMARY KEY whose typename is _exactly_ "integer" e.g. not "INT".
+/// - The table has a single-column PRIMARY KEY whose typename is _exactly_ "INTEGER" e.g. not "INT".
 ///   In this case, the PRIMARY KEY column becomes an alias for the rowid.
 ///
 /// Otherwise, an automatic PRIMARY KEY index is required.
@@ -348,7 +348,8 @@ fn check_automatic_pk_index_required(
             let needs_auto_index = if let Some(primary_key_definition) = &primary_key_definition {
                 match primary_key_definition {
                     PrimaryKeyDefinitionType::Simple { typename } => {
-                        let is_integer = typename.is_some() && typename.unwrap() == "integer";
+                        let is_integer =
+                            typename.is_some() && typename.unwrap().to_uppercase() == "INTEGER";
                         !is_integer
                     }
                     PrimaryKeyDefinitionType::Composite => true,
