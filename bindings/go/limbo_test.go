@@ -3,63 +3,68 @@ package limbo_test
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"testing"
 
 	_ "limbo"
 )
 
-func TestConnection(t *testing.T) {
-	conn, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("Error opening database: %v", err)
+var conn *sql.DB
+var connErr error
+
+func TestMain(m *testing.M) {
+	conn, connErr = sql.Open("sqlite3", ":memory:")
+	if connErr != nil {
+		panic(connErr)
 	}
 	defer conn.Close()
-}
-
-func TestCreateTable(t *testing.T) {
-	conn, err := sql.Open("sqlite3", ":memory:")
+	err := createTable()
 	if err != nil {
-		t.Fatalf("Error opening database: %v", err)
+		log.Fatalf("Error creating table: %v", err)
 	}
-	defer conn.Close()
-
-	err = createTable(conn)
-	if err != nil {
-		t.Fatalf("Error creating table: %v", err)
-	}
+	m.Run()
 }
 
 func TestInsertData(t *testing.T) {
-	conn, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("Error opening database: %v", err)
-	}
-	defer conn.Close()
-
-	err = createTable(conn)
-	if err != nil {
-		t.Fatalf("Error creating table: %v", err)
-	}
-
-	err = insertData(conn)
+	err := insertData()
 	if err != nil {
 		t.Fatalf("Error inserting data: %v", err)
 	}
 }
 
+func TestFunction(t *testing.T) {
+	insert := "INSERT INTO test (foo, bar, baz) VALUES (?, ?, zeroblob(?));"
+	stmt, err := conn.Prepare(insert)
+	if err != nil {
+		t.Fatalf("Error preparing statement: %v", err)
+	}
+	_, err = stmt.Exec(1, "hello", 100)
+	if err != nil {
+		t.Fatalf("Error executing statment with arguments: %v", err)
+	}
+	stmt.Close()
+	stmt, err = conn.Prepare("SELECT baz FROM test where foo = ?")
+	if err != nil {
+		t.Fatalf("Error preparing select stmt: %v", err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(1)
+	if err != nil {
+		t.Fatalf("Error executing select stmt: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var b []byte
+		err = rows.Scan(&b)
+		if err != nil {
+			t.Fatalf("Error scanning row: %v", err)
+		}
+		fmt.Println("RESULTS: ", string(b))
+	}
+}
+
 func TestQuery(t *testing.T) {
-	conn, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("Error opening database: %v", err)
-	}
-	defer conn.Close()
-
-	err = createTable(conn)
-	if err != nil {
-		t.Fatalf("Error creating table: %v", err)
-	}
-
-	err = insertData(conn)
+	err := insertData()
 	if err != nil {
 		t.Fatalf("Error inserting data: %v", err)
 	}
@@ -99,8 +104,8 @@ func TestQuery(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error scanning row: %v", err)
 		}
-		if a != i || b != rowsMap[i] || string(c) != rowsMap[i] {
-			t.Fatalf("Expected %d, %s, %s, got %d, %s, %b", i, rowsMap[i], rowsMap[i], a, b, c)
+		if a != i || b != rowsMap[i] || !slicesAreEq(c, []byte(rowsMap[i])) {
+			t.Fatalf("Expected %d, %s, %s, got %d, %s, %s", i, rowsMap[i], rowsMap[i], a, b, string(c))
 		}
 		fmt.Println("RESULTS: ", a, b, string(c))
 		i++
@@ -109,11 +114,26 @@ func TestQuery(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatalf("Row iteration error: %v", err)
 	}
+
+}
+
+func slicesAreEq(a, b []byte) bool {
+	if len(a) != len(b) {
+		fmt.Printf("LENGTHS NOT EQUAL: %d != %d\n", len(a), len(b))
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			fmt.Printf("SLICES NOT EQUAL: %v != %v\n", a, b)
+			return false
+		}
+	}
+	return true
 }
 
 var rowsMap = map[int]string{1: "hello", 2: "world", 3: "foo", 4: "bar", 5: "baz"}
 
-func createTable(conn *sql.DB) error {
+func createTable() error {
 	insert := "CREATE TABLE test (foo INT, bar TEXT, baz BLOB);"
 	stmt, err := conn.Prepare(insert)
 	if err != nil {
@@ -124,7 +144,7 @@ func createTable(conn *sql.DB) error {
 	return err
 }
 
-func insertData(conn *sql.DB) error {
+func insertData() error {
 	for i := 1; i <= 5; i++ {
 		insert := "INSERT INTO test (foo, bar, baz) VALUES (?, ?, ?);"
 		stmt, err := conn.Prepare(insert)

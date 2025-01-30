@@ -198,26 +198,16 @@ func toGoBlob(blobPtr uintptr) []byte {
 	return copied
 }
 
-var freeBlobFunc func(uintptr)
-
 func freeBlob(blobPtr uintptr) {
 	if blobPtr == 0 {
 		return
 	}
-	if freeBlobFunc == nil {
-		getFfiFunc(&freeBlobFunc, FfiFreeBlob)
-	}
 	freeBlobFunc(blobPtr)
 }
-
-var freeStringFunc func(uintptr)
 
 func freeCString(cstrPtr uintptr) {
 	if cstrPtr == 0 {
 		return
-	}
-	if freeStringFunc == nil {
-		getFfiFunc(&freeStringFunc, FfiFreeCString)
 	}
 	freeStringFunc(cstrPtr)
 }
@@ -226,7 +216,6 @@ func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
 	if arrayPtr == 0 || length == 0 {
 		return nil
 	}
-
 	ptrSlice := unsafe.Slice(
 		(**byte)(unsafe.Pointer(arrayPtr)),
 		length,
@@ -259,6 +248,7 @@ func buildArgs(args []driver.Value) ([]limboValue, func(), error) {
 		case string:
 			limboVal.Type = textVal
 			cstr := CString(val)
+			pinner.Pin(cstr)
 			*(*uintptr)(unsafe.Pointer(&limboVal.Value)) = uintptr(unsafe.Pointer(cstr))
 		case []byte:
 			limboVal.Type = blobVal

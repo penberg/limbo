@@ -7,7 +7,7 @@ use std::{
     ffi::{c_char, c_void},
     rc::Rc,
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 /// # Safety
@@ -26,7 +26,6 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
         let db = Database::open_file(io.clone(), &db_options.path.to_string());
         match db {
             Ok(db) => {
-                println!("Opened database: {}", path);
                 let conn = db.connect();
                 return LimboConn::new(conn, io).to_ptr();
             }
@@ -41,20 +40,24 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
 
 #[allow(dead_code)]
 struct LimboConn {
-    conn: Rc<Connection>,
+    conn: RwLock<Rc<Connection>>,
     io: Arc<dyn limbo_core::IO>,
 }
 
-impl LimboConn {
+impl<'conn> LimboConn {
     fn new(conn: Rc<Connection>, io: Arc<dyn limbo_core::IO>) -> Self {
-        LimboConn { conn, io }
-    }
-    #[allow(clippy::wrong_self_convention)]
-    fn to_ptr(self) -> *mut c_void {
-        Box::into_raw(Box::new(self)) as *mut c_void
+        LimboConn {
+            conn: conn.into(),
+            io,
+        }
     }
 
-    fn from_ptr(ptr: *mut c_void) -> &'static mut LimboConn {
+    #[allow(clippy::wrong_self_convention)]
+    fn to_ptr(self) -> *mut c_void {
+        Arc::into_raw(Arc::new(self)) as *mut c_void
+    }
+
+    fn from_ptr(ptr: *mut c_void) -> &'conn mut LimboConn {
         if ptr.is_null() {
             panic!("Null pointer");
         }

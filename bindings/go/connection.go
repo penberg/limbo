@@ -4,7 +4,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"unsafe"
+	"sync"
 
 	"github.com/ebitengine/purego"
 )
@@ -14,57 +14,91 @@ const (
 	libName    = "lib_limbo_go"
 )
 
-var limboLib uintptr
-
-type limboDriver struct{}
-
-func (d limboDriver) Open(name string) (driver.Conn, error) {
-	return openConn(name)
+type limboDriver struct {
+	sync.Mutex
 }
 
-func toCString(s string) uintptr {
-	b := append([]byte(s), 0)
-	return uintptr(unsafe.Pointer(&b[0]))
+var library = sync.OnceValue(func() uintptr {
+	lib, err := loadLibrary()
+	if err != nil {
+		panic(err)
+	}
+	return lib
+})
+
+var (
+	libOnce        sync.Once
+	loadErr        error
+	dbOpen         func(string) uintptr
+	dbClose        func(uintptr) uintptr
+	connPrepare    func(uintptr, string) uintptr
+	freeBlobFunc   func(uintptr)
+	freeStringFunc func(uintptr)
+	rowsGetColumns func(uintptr, *uint) uintptr
+	rowsGetValue   func(uintptr, int32) uintptr
+	closeRows      func(uintptr) uintptr
+	freeCols       func(uintptr) uintptr
+	rowsNext       func(uintptr) uintptr
+	stmtQuery      func(stmtPtr uintptr, argsPtr uintptr, argCount uint64) uintptr
+	stmtExec       func(stmtPtr uintptr, argsPtr uintptr, argCount uint64, changes uintptr) int32
+	stmtParamCount func(uintptr) int32
+	closeStmt      func(uintptr) int32
+)
+
+func ensureLibLoaded() error {
+	libOnce.Do(func() {
+		purego.RegisterLibFunc(&dbOpen, library(), FfiDbOpen)
+		purego.RegisterLibFunc(&dbClose, library(), FfiDbClose)
+		purego.RegisterLibFunc(&connPrepare, library(), FfiDbPrepare)
+		purego.RegisterLibFunc(&freeBlobFunc, library(), FfiFreeBlob)
+		purego.RegisterLibFunc(&freeStringFunc, library(), FfiFreeCString)
+		purego.RegisterLibFunc(&rowsGetColumns, library(), FfiRowsGetColumns)
+		purego.RegisterLibFunc(&rowsGetValue, library(), FfiRowsGetValue)
+		purego.RegisterLibFunc(&closeRows, library(), FfiRowsClose)
+		purego.RegisterLibFunc(&freeCols, library(), FfiFreeColumns)
+		purego.RegisterLibFunc(&rowsNext, library(), FfiRowsNext)
+		purego.RegisterLibFunc(&stmtQuery, library(), FfiStmtQuery)
+		purego.RegisterLibFunc(&stmtExec, library(), FfiStmtExec)
+		purego.RegisterLibFunc(&stmtParamCount, library(), FfiStmtParameterCount)
+		purego.RegisterLibFunc(&closeStmt, library(), FfiStmtClose)
+	})
+	return loadErr
 }
 
-// helper to register an FFI function in the lib_limbo_go library
-func getFfiFunc(ptr interface{}, name string) {
-	purego.RegisterLibFunc(ptr, limboLib, name)
+func (d *limboDriver) Open(name string) (driver.Conn, error) {
+	d.Lock()
+	defer d.Unlock()
+	conn, err := openConn(name)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
-// TODO: sync primitives
 type limboConn struct {
-	ctx     uintptr
-	prepare func(uintptr, string) uintptr
+	sync.Mutex
+	ctx uintptr
 }
 
 func newConn(ctx uintptr) *limboConn {
-	var prepare func(uintptr, string) uintptr
-	getFfiFunc(&prepare, FfiDbPrepare)
 	return &limboConn{
+		sync.Mutex{},
 		ctx,
-		prepare,
 	}
 }
 
 func openConn(dsn string) (*limboConn, error) {
-	var dbOpen func(string) uintptr
-	getFfiFunc(&dbOpen, FfiDbOpen)
-
 	ctx := dbOpen(dsn)
 	if ctx == 0 {
 		return nil, fmt.Errorf("failed to open database for dsn=%q", dsn)
 	}
-	return newConn(ctx), nil
+	return newConn(ctx), loadErr
 }
 
 func (c *limboConn) Close() error {
 	if c.ctx == 0 {
 		return nil
 	}
-	var dbClose func(uintptr) uintptr
-	getFfiFunc(&dbClose, FfiDbClose)
-
 	dbClose(c.ctx)
 	c.ctx = 0
 	return nil
@@ -74,10 +108,9 @@ func (c *limboConn) Prepare(query string) (driver.Stmt, error) {
 	if c.ctx == 0 {
 		return nil, errors.New("connection closed")
 	}
-	if c.prepare == nil {
-		panic("prepare function not set")
-	}
-	stmtPtr := c.prepare(c.ctx, query)
+	c.Lock()
+	defer c.Unlock()
+	stmtPtr := connPrepare(c.ctx, query)
 	if stmtPtr == 0 {
 		return nil, fmt.Errorf("failed to prepare query=%q", query)
 	}
