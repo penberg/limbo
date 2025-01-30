@@ -1,0 +1,20 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+name = "limbo_time"
+repository.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+static = ["limbo_ext/static"]
+
+[dependencies]
+chrono = "0.4.39"
+limbo_ext = { path = "../core", features = ["static"] }
+strum = "0.26.3"
+strum_macros = "0.26.3"
+thiserror = "2.0.11"
