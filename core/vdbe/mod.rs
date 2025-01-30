@@ -1893,7 +1893,7 @@ impl Program {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
                                     ScalarFunc::Sign => exec_sign(reg_value),
-                                    ScalarFunc::Abs => exec_abs(reg_value),
+                                    ScalarFunc::Abs => Some(exec_abs(reg_value)?),
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
                                     ScalarFunc::Length => Some(exec_length(reg_value)),
@@ -2718,24 +2718,25 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
     OwnedValue::build_text(Rc::new(result.to_uppercase()))
 }
 
-fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
+fn exec_abs(reg: &OwnedValue) -> Result<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
-            if x < &0 {
-                Some(OwnedValue::Integer(-x))
-            } else {
-                Some(OwnedValue::Integer(*x))
+            match i64::checked_abs(*x) {
+                Some(y) => Ok(OwnedValue::Integer(y)),
+                // Special case: if we do the abs of "-9223372036854775808", it causes overflow.
+                // return IntegerOverflow error
+                None => Err(LimboError::IntegerOverflow),
             }
         }
         OwnedValue::Float(x) => {
             if x < &0.0 {
-                Some(OwnedValue::Float(-x))
+                Ok(OwnedValue::Float(-x))
             } else {
-                Some(OwnedValue::Float(*x))
+                Ok(OwnedValue::Float(*x))
             }
         }
-        OwnedValue::Null => Some(OwnedValue::Null),
-        _ => Some(OwnedValue::Float(0.0)),
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Float(0.0)),
     }
 }
 
@@ -3768,6 +3769,9 @@ mod tests {
             OwnedValue::Float(0.0)
         );
         assert_eq!(exec_abs(&OwnedValue::Null).unwrap(), OwnedValue::Null);
+
+        // ABS(i64::MIN) should return RuntimeError
+        assert!(exec_abs(&OwnedValue::Integer(i64::MIN)).is_err());
     }
 
     #[test]
