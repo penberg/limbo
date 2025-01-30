@@ -23,6 +23,7 @@ pub mod explain;
 pub mod insn;
 pub mod likeop;
 pub mod sorter;
+mod strftime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;

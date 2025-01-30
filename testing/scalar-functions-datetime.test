@@ -580,3 +580,12 @@ do_execsql_test strftime-percent {
     SELECT strftime('%%', '2025-01-23T13:14:30.567');
 } {%}
 
+# Tests that should return null or empty string
+# Will test formatter strings that exist in chrono
+# But should not exist in sqlite
+
+set FMT [list %S.%3f %C %y %b %B %h %a %A %D %x %v %.f %.3f %.6f %.9f %3f %6f %9f %X %r %Z %z %:z %::z %:::z %#z %c %+ %t %n %-? %_? %0?]
+
+foreach i $FMT {
+  do_execsql_test strftime-invalid-$i "SELECT strftime('$i','2025-01-23T13:14:30.567');" {}
+}
