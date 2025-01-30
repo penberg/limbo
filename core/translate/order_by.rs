@@ -73,6 +73,7 @@ pub fn emit_order_by(
             primary_key: false,
             ty: crate::schema::Type::Null,
             is_rowid_alias: false,
+            notnull: false,
             default: None,
         });
     }
@@ -88,6 +89,7 @@ pub fn emit_order_by(
             primary_key: false,
             ty: crate::schema::Type::Null,
             is_rowid_alias: false,
+            notnull: false,
             default: None,
         });
     }

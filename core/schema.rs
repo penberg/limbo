@@ -178,6 +178,7 @@ impl PseudoTable {
             ty,
             primary_key,
             is_rowid_alias: false,
+            notnull: false,
             default: None,
         });
     }
@@ -272,10 +273,14 @@ fn create_table(
 
                 let mut default = None;
                 let mut primary_key = false;
+                let mut notnull = false;
                 for c_def in &col_def.constraints {
                     match &c_def.constraint {
                         sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. } => {
                             primary_key = true;
+                        }
+                        sqlite3_parser::ast::ColumnConstraint::NotNull { .. } => {
+                            notnull = true;
                         }
                         sqlite3_parser::ast::ColumnConstraint::Default(expr) => {
                             default = Some(expr.clone())
@@ -295,6 +300,7 @@ fn create_table(
                     ty,
                     primary_key,
                     is_rowid_alias: typename_exactly_integer && primary_key,
+                    notnull,
                     default,
                 });
             }
@@ -344,6 +350,7 @@ pub struct Column {
     pub ty: Type,
     pub primary_key: bool,
     pub is_rowid_alias: bool,
+    pub notnull: bool,
     pub default: Option<Expr>,
 }
 
@@ -383,6 +390,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                notnull: false,
                 default: None,
             },
             Column {
@@ -390,6 +398,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                notnull: false,
                 default: None,
             },
             Column {
@@ -397,6 +406,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                notnull: false,
                 default: None,
             },
             Column {
@@ -404,6 +414,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 ty: Type::Integer,
                 primary_key: false,
                 is_rowid_alias: false,
+                notnull: false,
                 default: None,
             },
             Column {
@@ -411,6 +422,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                notnull: false,
                 default: None,
             },
         ],
@@ -740,6 +752,24 @@ mod tests {
     }
 
     #[test]
+    pub fn test_col_notnull() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER NOT NULL);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.notnull, true);
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_col_notnull_negative() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.notnull, false);
+        Ok(())
+    }
+
+    #[test]
     pub fn test_sqlite_schema() {
         let expected = r#"CREATE TABLE sqlite_schema (
   type TEXT,
@@ -813,6 +843,7 @@ mod tests {
                 ty: Type::Integer,
                 primary_key: false,
                 is_rowid_alias: false,
+                notnull: false,
                 default: None,
             }],
         };
