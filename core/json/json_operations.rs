@@ -500,4 +500,94 @@ mod tests {
         let result = json_patch(&target, &patch).unwrap();
         assert_eq!(result, create_json(r#"{"old":"new_value"}"#));
     }
+
+    #[test]
+    fn test_json_remove_empty_args() {
+        let args = vec![];
+        assert_eq!(json_remove(&args).unwrap(), OwnedValue::Null);
+    }
+
+    #[test]
+    fn test_json_remove_array_element() {
+        let args = vec![create_json(r#"[1,2,3,4,5]"#), create_text("$[2]")];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), "[1,2,4,5]"),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_multiple_paths() {
+        let args = vec![
+            create_json(r#"{"a": 1, "b": 2, "c": 3}"#),
+            create_text("$.a"),
+            create_text("$.c"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"b":2}"#),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_nested_paths() {
+        let args = vec![
+            create_json(r#"{"a": {"b": {"c": 1, "d": 2}}}"#),
+            create_text("$.a.b.c"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"a":{"b":{"d":2}}}"#),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_duplicate_keys() {
+        let args = vec![
+            create_json(r#"{"a": 1, "a": 2, "a": 3}"#),
+            create_text("$.a"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"a":2,"a":3}"#),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_invalid_path() {
+        let args = vec![
+            create_json(r#"{"a": 1}"#),
+            OwnedValue::Integer(42), // Invalid path type
+        ];
+
+        assert!(json_remove(&args).is_err());
+    }
+
+    #[test]
+    fn test_json_remove_complex_case() {
+        let args = vec![
+            create_json(r#"{"a":[1,2,3],"b":{"x":1,"x":2},"c":[{"y":1},{"y":2}]}"#),
+            create_text("$.a[1]"),
+            create_text("$.b.x"),
+            create_text("$.c[0].y"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => {
+                let value = t.value.as_str();
+                assert!(value.contains(r#"[1,3]"#));
+                assert!(value.contains(r#"{"x":2}"#));
+            }
+            _ => panic!("Expected Text value"),
+        }
+    }
 }

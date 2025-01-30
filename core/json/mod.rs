@@ -241,6 +241,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 /// *all_as_db* - if true, objects and arrays will be returned as pure TEXT without the JSON subtype
 fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<OwnedValue> {
     match extracted {
+        Val::Removed => Ok(OwnedValue::Null),
         Val::Null => Ok(OwnedValue::Null),
         Val::Float(f) => Ok(OwnedValue::Float(*f)),
         Val::Integer(i) => Ok(OwnedValue::Integer(*i)),
@@ -1061,5 +1062,99 @@ mod tests {
                 .to_string()
                 .contains("json_object requires an even number of values")),
         }
+    }
+
+    #[test]
+    fn test_find_target_array() {
+        let mut val = Val::Array(vec![
+            Val::String("first".to_string()),
+            Val::String("second".to_string()),
+        ]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(0)],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Array(_, idx)) => assert_eq!(idx, 0),
+            _ => panic!("Expected Array target"),
+        }
+    }
+
+    #[test]
+    fn test_find_target_negative_index() {
+        let mut val = Val::Array(vec![
+            Val::String("first".to_string()),
+            Val::String("second".to_string()),
+        ]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(-1)],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Array(_, idx)) => assert_eq!(idx, 1),
+            _ => panic!("Expected Array target"),
+        }
+    }
+
+    #[test]
+    fn test_find_target_object() {
+        let mut val = Val::Object(vec![("key".to_string(), Val::String("value".to_string()))]);
+        let path = JsonPath {
+            elements: vec![PathElement::Key("key".to_string())],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Value(_)) => {}
+            _ => panic!("Expected Value target"),
+        }
+    }
+
+    #[test]
+    fn test_find_target_removed() {
+        let mut val = Val::Object(vec![
+            ("key".to_string(), Val::Removed),
+            ("key".to_string(), Val::String("value".to_string())),
+        ]);
+        let path = JsonPath {
+            elements: vec![PathElement::Key("key".to_string())],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Value(val)) => assert!(matches!(val, Val::String(_))),
+            _ => panic!("Expected second value, not removed"),
+        }
+    }
+
+    #[test]
+    fn test_mutate_json() {
+        let mut val = Val::Array(vec![Val::String("test".to_string())]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(0)],
+        };
+
+        let result = mutate_json_by_path(&mut val, path, |target| match target {
+            Target::Array(arr, idx) => {
+                arr.remove(idx);
+                "removed"
+            }
+            _ => panic!("Expected Array target"),
+        });
+
+        assert_eq!(result, Some("removed"));
+        assert!(matches!(val, Val::Array(arr) if arr.is_empty()));
+    }
+
+    #[test]
+    fn test_mutate_json_none() {
+        let mut val = Val::Array(vec![]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(0)],
+        };
+
+        let result: Option<()> = mutate_json_by_path(&mut val, path, |_| {
+            panic!("Should not be called");
+        });
+
+        assert_eq!(result, None);
     }
 }
