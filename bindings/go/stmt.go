@@ -59,7 +59,8 @@ func (ls *limboStmt) Close() error {
 }
 
 func (ls *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
-	argArray, err := buildArgs(args)
+	argArray, cleanup, err := buildArgs(args)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +88,8 @@ func (ls *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
 }
 
 func (st *limboStmt) Query(args []driver.Value) (driver.Rows, error) {
-	queryArgs, err := buildArgs(args)
+	queryArgs, cleanup, err := buildArgs(args)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +107,8 @@ func (st *limboStmt) Query(args []driver.Value) (driver.Rows, error) {
 
 func (ls *limboStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	stripped := namedValueToValue(args)
-	argArray, err := getArgsPtr(stripped)
+	argArray, cleanup, err := getArgsPtr(stripped)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +135,8 @@ func (ls *limboStmt) ExecContext(ctx context.Context, query string, args []drive
 }
 
 func (ls *limboStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	queryArgs, err := buildNamedArgs(args)
+	queryArgs, allocs, err := buildNamedArgs(args)
+	defer allocs()
 	if err != nil {
 		return nil, err
 	}

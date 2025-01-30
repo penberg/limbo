@@ -65,8 +65,7 @@ pub extern "C" fn rows_get_value(ctx: *mut c_void, col_idx: usize) -> *const c_v
 
     if let Some(ref cursor) = ctx.cursor {
         if let Some(value) = cursor.values.get(col_idx) {
-            let val = LimboValue::from_value(value);
-            return val.to_ptr();
+            return LimboValue::from_value(value).to_ptr();
         }
     }
     std::ptr::null()

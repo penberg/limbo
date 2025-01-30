@@ -30,28 +30,22 @@ pub enum ValueType {
 
 #[repr(C)]
 pub struct LimboValue {
-    pub value_type: ValueType,
-    pub value: ValueUnion,
+    value_type: ValueType,
+    value: ValueUnion,
 }
 
 #[repr(C)]
-pub union ValueUnion {
-    pub int_val: i64,
-    pub real_val: f64,
-    pub text_ptr: *const c_char,
-    pub blob_ptr: *const c_void,
+union ValueUnion {
+    int_val: i64,
+    real_val: f64,
+    text_ptr: *const c_char,
+    blob_ptr: *const c_void,
 }
 
 #[repr(C)]
-pub struct Blob {
-    pub data: *const u8,
-    pub len: usize,
-}
-
-impl Blob {
-    pub fn to_ptr(&self) -> *const c_void {
-        self as *const Blob as *const c_void
-    }
+struct Blob {
+    data: *const u8,
+    len: i64,
 }
 
 pub struct AllocPool {
@@ -97,12 +91,12 @@ impl ValueUnion {
     }
 
     fn from_bytes(b: &[u8]) -> Self {
+        let blob = Box::new(Blob {
+            data: b.as_ptr(),
+            len: b.len() as i64,
+        });
         ValueUnion {
-            blob_ptr: Blob {
-                data: b.as_ptr(),
-                len: b.len(),
-            }
-            .to_ptr(),
+            blob_ptr: Box::into_raw(blob) as *const c_void,
         }
     }
 
@@ -140,12 +134,12 @@ impl ValueUnion {
     pub fn to_bytes(&self) -> &[u8] {
         let blob = unsafe { self.blob_ptr as *const Blob };
         let blob = unsafe { &*blob };
-        unsafe { std::slice::from_raw_parts(blob.data, blob.len) }
+        unsafe { std::slice::from_raw_parts(blob.data, blob.len as usize) }
     }
 }
 
 impl LimboValue {
-    pub fn new(value_type: ValueType, value: ValueUnion) -> Self {
+    fn new(value_type: ValueType, value: ValueUnion) -> Self {
         LimboValue { value_type, value }
     }
 
@@ -204,15 +198,9 @@ impl LimboValue {
                 if unsafe { self.value.blob_ptr.is_null() } {
                     return limbo_core::Value::Null;
                 }
-                let blob_ptr = unsafe { self.value.blob_ptr as *const Blob };
-                if blob_ptr.is_null() {
-                    limbo_core::Value::Null
-                } else {
-                    let blob = unsafe { &*blob_ptr };
-                    let data = unsafe { std::slice::from_raw_parts(blob.data, blob.len) };
-                    let borrowed = pool.add_blob(data.to_vec());
-                    limbo_core::Value::Blob(borrowed)
-                }
+                let bytes = self.value.to_bytes();
+                let borrowed = pool.add_blob(bytes.to_vec());
+                limbo_core::Value::Blob(borrowed)
             }
             ValueType::Null => limbo_core::Value::Null,
         }
