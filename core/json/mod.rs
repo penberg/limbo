@@ -512,6 +512,21 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
 }
 
+pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
+    match json_value {
+        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
+            Ok(_) => Ok(OwnedValue::Integer(1)),
+            Err(_) => Ok(OwnedValue::Integer(0)),
+        },
+        OwnedValue::Blob(b) => match jsonb::from_slice(b) {
+            Ok(_) => Ok(OwnedValue::Integer(1)),
+            Err(_) => Ok(OwnedValue::Integer(0)),
+        },
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Integer(1)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1046,19 +1061,5 @@ mod tests {
                 .to_string()
                 .contains("json_object requires an even number of values")),
         }
-    }
-}
-pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
-    match json_value {
-        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
-            Ok(_) => Ok(OwnedValue::Integer(1)),
-            Err(_) => Ok(OwnedValue::Integer(0)),
-        },
-        OwnedValue::Blob(b) => match jsonb::from_slice(b) {
-            Ok(_) => Ok(OwnedValue::Integer(1)),
-            Err(_) => Ok(OwnedValue::Integer(0)),
-        },
-        OwnedValue::Null => Ok(OwnedValue::Null),
-        _ => Ok(OwnedValue::Integer(1)),
     }
 }
