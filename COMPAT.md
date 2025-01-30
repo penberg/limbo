@@ -151,7 +151,7 @@ The current status of Limbo is:
 | PRAGMA soft_heap_limit           | No         |                                              |
 | PRAGMA stats                     | No         | Used for testing in SQLite                   |
 | PRAGMA synchronous               | No         |                                              |
-| PRAGMA table_info                | No         |                                              |
+| PRAGMA table_info                | Yes        |                                              |
 | PRAGMA table_list                | No         |                                              |
 | PRAGMA table_xinfo               | No         |                                              |
 | PRAGMA temp_store                | No         |                                              |
