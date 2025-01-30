@@ -11,6 +11,14 @@ do_execsql_test where-clause-eq-string {
     select count(1) from users where last_name = 'Rodriguez';
 } {61}
 
+do_execsql_test where-clause-isnull {
+    select count(1) from users where last_name isnull;
+} {0}
+
+do_execsql_test where-clause-notnull {
+    select count(1) from users where last_name not null;
+} {10000}
+
 do_execsql_test where-clause-ne {
     select count(1) from users where id != 2000;
 } {9999}
