@@ -537,14 +537,19 @@ fn translate_pragma(
     });
     let start_offset = program.offset();
     let mut write = false;
+
+    let pragma = match PragmaName::from_str(&name.name.0) {
+        Ok(pragma) => pragma,
+        Err(()) => bail_parse_error!("Not a valid pragma name"),
+    };
+
     match body {
         None => {
-            let pragma_name = &name.name.0;
-            query_pragma(pragma_name, database_header.clone(), program)?;
+            query_pragma(pragma, database_header.clone(), program)?;
         }
         Some(ast::PragmaBody::Equals(value)) => {
             write = true;
-            update_pragma(&name.name.0, value, database_header.clone(), pager, program)?;
+            update_pragma(pragma, value, database_header.clone(), pager, program)?;
         }
         Some(ast::PragmaBody::Call(_)) => {
             todo!()
@@ -565,16 +570,12 @@ fn translate_pragma(
 }
 
 fn update_pragma(
-    name: &str,
+    pragma: PragmaName,
     value: ast::Expr,
     header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
     program: &mut ProgramBuilder,
 ) -> Result<()> {
-    let pragma = match PragmaName::from_str(name) {
-        Ok(pragma) => pragma,
-        Err(()) => bail_parse_error!("Not a valid pragma name"),
-    };
     match pragma {
         PragmaName::CacheSize => {
             let cache_size = match value {
@@ -593,25 +594,21 @@ fn update_pragma(
             Ok(())
         }
         PragmaName::JournalMode => {
-            query_pragma("journal_mode", header, program)?;
+            query_pragma(PragmaName::JournalMode, header, program)?;
             Ok(())
         }
         PragmaName::WalCheckpoint => {
-            query_pragma("wal_checkpoint", header, program)?;
+            query_pragma(PragmaName::WalCheckpoint, header, program)?;
             Ok(())
         }
     }
 }
 
 fn query_pragma(
-    name: &str,
+    pragma: PragmaName,
     database_header: Rc<RefCell<DatabaseHeader>>,
     program: &mut ProgramBuilder,
 ) -> Result<()> {
-    let pragma = match PragmaName::from_str(name) {
-        Ok(pragma) => pragma,
-        Err(()) => bail_parse_error!("Not a valid pragma name"),
-    };
     let register = program.alloc_register();
     match pragma {
         PragmaName::CacheSize => {
