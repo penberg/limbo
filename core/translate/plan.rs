@@ -64,7 +64,9 @@ pub struct SelectPlan {
     /// all the aggregates collected from the result columns, order by, and (TODO) having clauses
     pub aggregates: Vec<Aggregate>,
     /// limit clause
-    pub limit: Option<usize>,
+    pub limit: Option<isize>,
+    /// offset clause
+    pub offset: Option<isize>,
     /// all the tables referenced in the query
     pub referenced_tables: Vec<TableReference>,
     /// all the indexes available
@@ -87,7 +89,9 @@ pub struct DeletePlan {
     /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// limit clause
-    pub limit: Option<usize>,
+    pub limit: Option<isize>,
+    /// offset clause
+    pub offset: Option<isize>,
     /// all the tables referenced in the query
     pub referenced_tables: Vec<TableReference>,
     /// all the indexes available

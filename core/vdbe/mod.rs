@@ -2290,6 +2290,37 @@ impl Program {
                         state.pc = target_pc.to_offset_int();
                     }
                 }
+                Insn::OffsetLimit {
+                    limit_reg,
+                    combined_reg,
+                    offset_reg,
+                } => {
+                    let limit_val = match state.registers[*limit_reg] {
+                        OwnedValue::Integer(val) => val,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "OffsetLimit: the value in limit_reg is not an integer".into(),
+                            ));
+                        }
+                    };
+                    let offset_val = match state.registers[*offset_reg] {
+                        OwnedValue::Integer(val) if val < 0 => 0,
+                        OwnedValue::Integer(val) if val >= 0 => val,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "OffsetLimit: the value in offset_reg is not an integer".into(),
+                            ));
+                        }
+                    };
+
+                    let offset_limit_sum = limit_val.overflowing_add(offset_val);
+                    if limit_val <= 0 || offset_limit_sum.1 {
+                        state.registers[*combined_reg] = OwnedValue::Integer(-1);
+                    } else {
+                        state.registers[*combined_reg] = OwnedValue::Integer(offset_limit_sum.0);
+                    }
+                    state.pc += 1;
+                }
                 // this cursor may be reused for next insert
                 // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
                 // If not there might be some optimizations obviously.

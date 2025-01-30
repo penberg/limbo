@@ -473,6 +473,12 @@ pub enum Insn {
         target_pc: BranchOffset,
     },
 
+    OffsetLimit {
+        limit_reg: usize,
+        combined_reg: usize,
+        offset_reg: usize,
+    },
+
     OpenWriteAsync {
         cursor_id: CursorID,
         root_page: PageIdx,
