@@ -73,6 +73,7 @@ pub fn emit_order_by(
             primary_key: false,
             ty: crate::schema::Type::Null,
             is_rowid_alias: false,
+            default: None,
         });
     }
     for (i, rc) in result_columns.iter().enumerate() {
@@ -87,6 +88,7 @@ pub fn emit_order_by(
             primary_key: false,
             ty: crate::schema::Type::Null,
             is_rowid_alias: false,
+            default: None,
         });
     }
 

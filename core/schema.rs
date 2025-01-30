@@ -178,6 +178,7 @@ impl PseudoTable {
             ty,
             primary_key,
             is_rowid_alias: false,
+            default: None,
         });
     }
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
@@ -268,22 +269,33 @@ fn create_table(
                     }
                     None => Type::Null,
                 };
-                let mut primary_key = col_def.constraints.iter().any(|c| {
-                    matches!(
-                        c.constraint,
-                        sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
-                    )
-                });
+
+                let mut default = None;
+                let mut primary_key = false;
+                for c_def in &col_def.constraints {
+                    match &c_def.constraint {
+                        sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. } => {
+                            primary_key = true;
+                        }
+                        sqlite3_parser::ast::ColumnConstraint::Default(expr) => {
+                            default = Some(expr.clone())
+                        }
+                        _ => {}
+                    }
+                }
+
                 if primary_key {
                     primary_key_column_names.push(name.clone());
                 } else if primary_key_column_names.contains(&name) {
                     primary_key = true;
                 }
+
                 cols.push(Column {
                     name: normalize_ident(&name),
                     ty,
                     primary_key,
                     is_rowid_alias: typename_exactly_integer && primary_key,
+                    default,
                 });
             }
             if options.contains(TableOptions::WITHOUT_ROWID) {
@@ -332,6 +344,7 @@ pub struct Column {
     pub ty: Type,
     pub primary_key: bool,
     pub is_rowid_alias: bool,
+    pub default: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -370,30 +383,35 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                default: None,
             },
             Column {
                 name: "name".to_string(),
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                default: None,
             },
             Column {
                 name: "tbl_name".to_string(),
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                default: None,
             },
             Column {
                 name: "rootpage".to_string(),
                 ty: Type::Integer,
                 primary_key: false,
                 is_rowid_alias: false,
+                default: None,
             },
             Column {
                 name: "sql".to_string(),
                 ty: Type::Text,
                 primary_key: false,
                 is_rowid_alias: false,
+                default: None,
             },
         ],
     }
@@ -712,6 +730,16 @@ mod tests {
     }
 
     #[test]
+    pub fn test_default_value() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a INTEGER DEFAULT 23);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        let default = column.default.clone().unwrap();
+        assert_eq!(default.to_string(), "23");
+        Ok(())
+    }
+
+    #[test]
     pub fn test_sqlite_schema() {
         let expected = r#"CREATE TABLE sqlite_schema (
   type TEXT,
@@ -785,6 +813,7 @@ mod tests {
                 ty: Type::Integer,
                 primary_key: false,
                 is_rowid_alias: false,
+                default: None,
             }],
         };
 

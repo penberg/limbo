@@ -171,6 +171,7 @@ pub fn emit_group_by<'a>(
             primary_key: false,
             ty: crate::schema::Type::Null,
             is_rowid_alias: false,
+            default: None,
         })
         .collect::<Vec<_>>();
 

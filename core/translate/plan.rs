@@ -275,6 +275,7 @@ impl TableReference {
                         ty: Type::Text, // FIXME: infer proper type
                         is_rowid_alias: false,
                         primary_key: false,
+                        default: None,
                     })
                     .collect(),
             ))),
