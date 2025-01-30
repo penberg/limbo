@@ -4,7 +4,7 @@ mod json_operations;
 mod json_path;
 mod ser;
 
-use std::{ops::Mul, rc::Rc};
+use std::rc::Rc;
 
 pub use crate::json::de::from_str;
 use crate::json::de::ordered_object;
@@ -404,19 +404,23 @@ fn json_extract_single<'a>(
     Ok(Some(current_element))
 }
 
-fn operate_on_json_by_path<F>(json: &mut Val, path: JsonPath, mut closure: F)
-where
-    F: FnMut(&mut Val) -> (),
-{
-    if let Some(target) = find_target(json, &path) {
-        closure(target);
-    }
+enum Target<'a> {
+    Array(&'a mut Vec<Val>, usize),
+    Value(&'a mut Val),
 }
 
-fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<&'a mut Val> {
+fn mutate_json_by_path<F, R>(json: &mut Val, path: JsonPath, mut closure: F) -> Option<R>
+where
+    F: FnMut(Target) -> R,
+{
+    find_target(json, &path).map(|target| closure(target))
+}
+
+fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
     let mut current = json;
-    for key in path.elements {
-        match &key {
+    for (i, key) in path.elements.iter().enumerate() {
+        let is_last = i == path.elements.len() - 1;
+        match key {
             PathElement::Root() => continue,
             PathElement::ArrayLocator(index) => match current {
                 Val::Array(arr) => {
@@ -424,7 +428,11 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<&'a mut Val> {
                         i if *i < 0 => arr.len().checked_sub(i.abs() as usize),
                         i => ((*i as usize) < arr.len()).then_some(*i as usize),
                     } {
-                        current = &mut arr[index];
+                        if is_last {
+                            return Some(Target::Array(arr, index));
+                        } else {
+                            current = &mut arr[index];
+                        }
                     } else {
                         return None;
                     }
@@ -435,7 +443,10 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<&'a mut Val> {
             },
             PathElement::Key(key) => match current {
                 Val::Object(obj) => {
-                    if let Some(pos) = &obj.iter().position(|(obj_key, _)| &key == obj_key) {
+                    if let Some(pos) = &obj
+                        .iter()
+                        .position(|(k, v)| k == key && !matches!(v, Val::Removed))
+                    {
                         let val = &mut obj[*pos].1;
                         current = val;
                     } else {
@@ -448,7 +459,7 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<&'a mut Val> {
             },
         }
     }
-    return Some(current);
+    return Some(Target::Value(current));
 }
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {

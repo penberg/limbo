@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use crate::types::OwnedValue;
+use crate::{
+    json::{mutate_json_by_path, Target},
+    types::OwnedValue,
+};
 
 use super::{convert_json_to_db_type, get_json_value, json_path::json_path, Val};
 
@@ -167,9 +170,17 @@ pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
         })
         .collect();
     let paths = paths?;
-    println!("{:?}", paths);
 
-    Ok(OwnedValue::Null)
+    for path in paths {
+        mutate_json_by_path(&mut parsed_target, path, |val| match val {
+            Target::Array(arr, index) => {
+                arr.remove(index);
+            }
+            Target::Value(val) => *val = Val::Removed,
+        });
+    }
+
+    convert_json_to_db_type(&parsed_target, false)
 }
 
 #[cfg(test)]
