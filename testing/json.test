@@ -676,3 +676,31 @@ do_execsql_test json-patch-abomination {
         '{"a":{"b":{"x":{"new":"value"},"y":null},"b":{"c":{"updated":true},"d":{"e":{"replaced":100}}},"f":{"g":{"h":{"nested":"deep"}}},"i":{"j":{"k":{"l":{"modified":false}}}},"m":{"n":{"o":{"p":{"q":{"extra":"level"}}}},"s":null},"aa":[{"bb":{"cc":{"dd":{"ee":"new"}}}},{"bb":{"cc":{"dd":{"ff":"value"}}}}],"v":{"w":{"x":{"y":{"z":{"final":"update"}}}}}},"newTop":{"level":{"key":{"with":{"deep":{"nesting":true}}},"key":[{"array":{"in":{"deep":{"structure":null}}}}]}}}'
     );
 } {{{"a":{"b":{"x":{"new":"value"},"x":2,"c":{"updated":true},"d":{"e":{"replaced":100}}},"b":[{"c":5,"c":6},{"d":{"e":7,"e":null}}],"f":{"g":{"h":{"nested":"deep"}},"g":{"h":8,"h":[4,5,6]}},"i":{"j":{"k":{"l":{"modified":false}}},"j":{"k":false,"k":{"l":null,"l":"string"}}},"m":{"n":{"o":{"p":{"q":{"extra":"level"}},"p":{"q":10}},"o":{"r":11}}},"m":[{"s":{"t":12}},{"s":{"t":13,"t":{"u":14}}}],"aa":[{"bb":{"cc":{"dd":{"ee":"new"}}}},{"bb":{"cc":{"dd":{"ff":"value"}}}}],"v":{"w":{"x":{"y":{"z":{"final":"update"}}}}}},"a":{"v":{"w":{"x":{"y":{"z":15}}}},"v":{"w":{"x":16,"x":{"y":17}}},"aa":[{"bb":{"cc":18,"cc":{"dd":19}}},{"bb":{"cc":{"dd":20},"cc":21}}]},"newTop":{"level":{"key":[{"array":{"in":{"deep":{"structure":null}}}}]}}}}}
+
+do_execsql_test json-remove-1 {
+    select json_remove('{"a": 5, "a": [5,4,3,2,1]}','$.a', '$.a[4]', '$.a[5]', '$.a');
+} {{{}}}
+
+do_execsql_test json-remove-2 {
+    SELECT json_remove('{"a": {"b": {"c": 1, "c": 2}, "b": [1,2,3]}}', '$.a.b.c', '$.a.b[1]');
+} {{{"a":{"b":{"c":2},"b":[1,2,3]}}}}
+
+do_execsql_test json-remove-3 {
+    SELECT json_remove('[1,2,3,4,5]', '$[0]', '$[4]', '$[5]');
+} {{[2,3,4,5]}}
+
+do_execsql_test json-remove-4 {
+    SELECT json_remove('{"arr": [1,2,3,4,5]}', '$.arr[#-1]', '$.arr[#-3]', '$.arr[#-1]');
+} {{{"arr":[1,3]}}}
+
+do_execsql_test json-remove-5 {
+    SELECT json_remove('{}', '$.a');
+} {{{}}}
+
+do_execsql_test json-remove-6 {
+    SELECT json_remove('{"a": [[1,2], [3,4]]}', '$.a[0][1]', '$.a[1]');
+} {{{"a":[[1]]}}}
+
+do_execsql_test json-remove-7 {
+    SELECT json_remove('{"a": 1, "b": [1,2], "c": {"d": 3}}', '$.a', '$.b[0]', '$.c.d');
+} {{{"b":[2],"c":{}}}}

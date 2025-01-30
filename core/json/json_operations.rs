@@ -1,8 +1,11 @@
 use std::collections::VecDeque;
 
-use crate::types::OwnedValue;
+use crate::{
+    json::{mutate_json_by_path, Target},
+    types::OwnedValue,
+};
 
-use super::{convert_json_to_db_type, get_json_value, Val};
+use super::{convert_json_to_db_type, get_json_value, json_path::json_path, Val};
 
 /// Represents a single patch operation in the merge queue.
 ///
@@ -145,6 +148,40 @@ impl JsonPatcher {
             patch: val,
         });
     }
+}
+
+pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
+    if args.is_empty() {
+        return Ok(OwnedValue::Null);
+    }
+
+    let mut parsed_target = get_json_value(&args[0])?;
+    if args.len() == 1 {
+        return Ok(args[0].clone());
+    }
+
+    let paths: Result<Vec<_>, _> = args[1..]
+        .iter()
+        .map(|path| {
+            if let OwnedValue::Text(path) = path {
+                json_path(&path.value)
+            } else {
+                crate::bail_constraint_error!("bad JSON path: {:?}", path.to_string())
+            }
+        })
+        .collect();
+    let paths = paths?;
+
+    for path in paths {
+        mutate_json_by_path(&mut parsed_target, path, |val| match val {
+            Target::Array(arr, index) => {
+                arr.remove(index);
+            }
+            Target::Value(val) => *val = Val::Removed,
+        });
+    }
+
+    convert_json_to_db_type(&parsed_target, false)
 }
 
 #[cfg(test)]
@@ -463,5 +500,95 @@ mod tests {
 
         let result = json_patch(&target, &patch).unwrap();
         assert_eq!(result, create_json(r#"{"old":"new_value"}"#));
+    }
+
+    #[test]
+    fn test_json_remove_empty_args() {
+        let args = vec![];
+        assert_eq!(json_remove(&args).unwrap(), OwnedValue::Null);
+    }
+
+    #[test]
+    fn test_json_remove_array_element() {
+        let args = vec![create_json(r#"[1,2,3,4,5]"#), create_text("$[2]")];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), "[1,2,4,5]"),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_multiple_paths() {
+        let args = vec![
+            create_json(r#"{"a": 1, "b": 2, "c": 3}"#),
+            create_text("$.a"),
+            create_text("$.c"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"b":2}"#),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_nested_paths() {
+        let args = vec![
+            create_json(r#"{"a": {"b": {"c": 1, "d": 2}}}"#),
+            create_text("$.a.b.c"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"a":{"b":{"d":2}}}"#),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_duplicate_keys() {
+        let args = vec![
+            create_json(r#"{"a": 1, "a": 2, "a": 3}"#),
+            create_text("$.a"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"a":2,"a":3}"#),
+            _ => panic!("Expected Text value"),
+        }
+    }
+
+    #[test]
+    fn test_json_remove_invalid_path() {
+        let args = vec![
+            create_json(r#"{"a": 1}"#),
+            OwnedValue::Integer(42), // Invalid path type
+        ];
+
+        assert!(json_remove(&args).is_err());
+    }
+
+    #[test]
+    fn test_json_remove_complex_case() {
+        let args = vec![
+            create_json(r#"{"a":[1,2,3],"b":{"x":1,"x":2},"c":[{"y":1},{"y":2}]}"#),
+            create_text("$.a[1]"),
+            create_text("$.b.x"),
+            create_text("$.c[0].y"),
+        ];
+
+        let result = json_remove(&args).unwrap();
+        match result {
+            OwnedValue::Text(t) => {
+                let value = t.value.as_str();
+                assert!(value.contains(r#"[1,3]"#));
+                assert!(value.contains(r#"{"x":2}"#));
+            }
+            _ => panic!("Expected Text value"),
+        }
     }
 }

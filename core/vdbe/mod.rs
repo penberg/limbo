@@ -44,7 +44,7 @@ use crate::{
     function::JsonFunc, json::get_json, json::is_json_valid, json::json_array,
     json::json_array_length, json::json_arrow_extract, json::json_arrow_shift_extract,
     json::json_error_position, json::json_extract, json::json_object, json::json_patch,
-    json::json_type,
+    json::json_remove, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VERSION};
 use datetime::{
@@ -1754,6 +1754,11 @@ impl Program {
                                 let target = &state.registers[*start_reg];
                                 let patch = &state.registers[*start_reg + 1];
                                 state.registers[*dest] = json_patch(target, patch)?;
+                            }
+                            JsonFunc::JsonRemove => {
+                                state.registers[*dest] = json_remove(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
                             }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {

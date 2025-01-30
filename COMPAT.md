@@ -368,7 +368,7 @@ Modifiers:
 | json_patch(json1,json2)            | Yes     |                                                                                                                                              |
 | jsonb_patch(json1,json2)           |         |                                                                                                                                              |
 | json_pretty(json)                  |         |                                                                                                                                              |
-| json_remove(json,path,...)         |         |                                                                                                                                              |
+| json_remove(json,path,...)         | Partial | Uses same json path parser as json_extract so shares same limitations.                                                                       |
 | jsonb_remove(json,path,...)        |         |                                                                                                                                              |
 | json_replace(json,path,value,...)  |         |                                                                                                                                              |
 | jsonb_replace(json,path,value,...) |         |                                                                                                                                              |
@@ -596,7 +596,7 @@ Limbo has in-tree extensions.
 
 UUID's in Limbo are `blobs` by default.
 
-| Function              | Status | Comment                                                       | 
+| Function              | Status | Comment                                                       |
 |-----------------------|--------|---------------------------------------------------------------|
 | uuid4()               | Yes    | UUID version 4                                                |
 | uuid4_str()           | Yes    | UUID v4 string alias `gen_random_uuid()` for PG compatibility |
@@ -609,7 +609,7 @@ UUID's in Limbo are `blobs` by default.
 
 The `regexp` extension is compatible with [sqlean-regexp](https://github.com/nalgeon/sqlean/blob/main/docs/regexp.md).
 
-| Function                                       | Status | Comment | 
+| Function                                       | Status | Comment |
 |------------------------------------------------|--------|---------|
 | regexp(pattern, source)                        | Yes    |         |
 | regexp_like(source, pattern)                   | Yes    |         |
@@ -621,7 +621,7 @@ The `regexp` extension is compatible with [sqlean-regexp](https://github.com/nal
 
 The `vector` extension is compatible with libSQL native vector search.
 
-| Function                                       | Status | Comment | 
+| Function                                       | Status | Comment |
 |------------------------------------------------|--------|---------|
 | vector(x)                                      | Yes    |         |
 | vector32(x)                                    | Yes    |         |

@@ -81,6 +81,7 @@ pub enum JsonFunc {
     JsonErrorPosition,
     JsonValid,
     JsonPatch,
+    JsonRemove,
 }
 
 #[cfg(feature = "json")]
@@ -101,6 +102,7 @@ impl Display for JsonFunc {
                 Self::JsonErrorPosition => "json_error_position".to_string(),
                 Self::JsonValid => "json_valid".to_string(),
                 Self::JsonPatch => "json_patch".to_string(),
+                Self::JsonRemove => "json_remove".to_string(),
             }
         )
     }
@@ -530,6 +532,8 @@ impl Func {
             "json_valid" => Ok(Self::Json(JsonFunc::JsonValid)),
             #[cfg(feature = "json")]
             "json_patch" => Ok(Self::Json(JsonFunc::JsonPatch)),
+            #[cfg(feature = "json")]
+            "json_remove" => Ok(Self::Json(JsonFunc::JsonRemove)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),

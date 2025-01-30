@@ -948,6 +948,22 @@ pub fn translate_expr(
                             func_ctx,
                         )
                     }
+                    JsonFunc::JsonRemove => {
+                        if let Some(args) = args {
+                            for arg in args.iter() {
+                                // register containing result of each argument expression
+                                let _ =
+                                    translate_and_mark(program, referenced_tables, arg, resolver)?;
+                            }
+                        }
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: target_register + 1,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
