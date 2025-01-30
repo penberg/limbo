@@ -151,7 +151,7 @@ impl JsonPatcher {
 }
 
 pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
-    if args.len() == 0 {
+    if args.is_empty() {
         return Ok(OwnedValue::Null);
     }
     if args.len() == 1 {

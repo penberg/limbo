@@ -409,11 +409,11 @@ enum Target<'a> {
     Value(&'a mut Val),
 }
 
-fn mutate_json_by_path<F, R>(json: &mut Val, path: JsonPath, mut closure: F) -> Option<R>
+fn mutate_json_by_path<F, R>(json: &mut Val, path: JsonPath, closure: F) -> Option<R>
 where
     F: FnMut(Target) -> R,
 {
-    find_target(json, &path).map(|target| closure(target))
+    find_target(json, &path).map(closure)
 }
 
 fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
@@ -425,7 +425,7 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
             PathElement::ArrayLocator(index) => match current {
                 Val::Array(arr) => {
                     if let Some(index) = match index {
-                        i if *i < 0 => arr.len().checked_sub(i.abs() as usize),
+                        i if *i < 0 => arr.len().checked_sub(i.unsigned_abs() as usize),
                         i => ((*i as usize) < arr.len()).then_some(*i as usize),
                     } {
                         if is_last {
@@ -459,7 +459,7 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
             },
         }
     }
-    return Some(Target::Value(current));
+    Some(Target::Value(current))
 }
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
