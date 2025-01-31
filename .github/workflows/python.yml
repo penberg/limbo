@@ -15,19 +15,28 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "true"
 
 jobs:
+  configure-strategy:
+    runs-on: ubuntu-latest
+    outputs:
+      python-versions: ${{ steps.gen-matrix.outputs.python-versions }}
+    steps:
+      - id: gen-matrix
+        run: |
+          if [ ${{ github.event_name }} == "pull_request" ]; then
+            echo "python-versions=[\"3.13\"]" >> $GITHUB_OUTPUT
+          else
+            echo "python-versions=[\"3.9\",\"3.10\",\"3.11\",\"3.12\",\"3.13\"]" >> $GITHUB_OUTPUT
+          fi
+
   test:
+    needs: configure-strategy
     strategy:
       matrix:
         os:
           - ubuntu-latest
           - macos-latest
           - windows-latest
-        python-version:
-          - "3.9"
-          - "3.10"
-          - "3.11"
-          - "3.12"
-          - "3.13"
+        python-version: ${{ fromJson(needs.configure-strategy.outputs.python-versions) }}
     runs-on: ${{ matrix.os }}
 
     defaults:
