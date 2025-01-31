@@ -138,7 +138,7 @@ The current status of Limbo is:
 | PRAGMA page_count                | No         |                                              |
 | PRAGMA page_size                 | No         |                                              |
 | PRAGMA parser_trace              | No         |                                              |
-| PRAGMA pragma_list               | No         |                                              |
+| PRAGMA pragma_list               | Yes        |                                              |
 | PRAGMA query_only                | No         |                                              |
 | PRAGMA quick_check               | No         |                                              |
 | PRAGMA read_uncommitted          | No         |                                              |

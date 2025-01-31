@@ -29,6 +29,7 @@ use crate::storage::wal::CheckpointMode;
 use crate::translate::delete::translate_delete;
 use crate::util::{normalize_ident, PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX};
 use crate::vdbe::builder::CursorType;
+use crate::vdbe::BranchOffset;
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
@@ -38,6 +39,7 @@ use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
 use std::str::FromStr;
+use strum::IntoEnumIterator;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -531,6 +533,36 @@ enum PrimaryKeyDefinitionType<'a> {
     Composite,
 }
 
+fn list_pragmas(
+    program: &mut ProgramBuilder,
+    init_label: BranchOffset,
+    start_offset: BranchOffset,
+) {
+    let mut pragma_strings: Vec<String> = PragmaName::iter().map(|x| x.to_string()).collect();
+    pragma_strings.sort();
+
+    let register = program.alloc_register();
+    for pragma in &pragma_strings {
+        program.emit_insn(Insn::String8 {
+            value: pragma.to_string(),
+            dest: register,
+        });
+        program.emit_insn(Insn::ResultRow {
+            start_reg: register,
+            count: 1,
+        });
+    }
+    program.emit_insn(Insn::Halt {
+        err_code: 0,
+        description: String::new(),
+    });
+    program.resolve_label(init_label, program.offset());
+    program.emit_constant_insns();
+    program.emit_insn(Insn::Goto {
+        target_pc: start_offset,
+    });
+}
+
 fn translate_pragma(
     program: &mut ProgramBuilder,
     schema: &Schema,
@@ -545,6 +577,11 @@ fn translate_pragma(
     });
     let start_offset = program.offset();
     let mut write = false;
+
+    if name.name.0.to_lowercase() == "pragma_list" {
+        list_pragmas(program, init_label, start_offset);
+        return Ok(());
+    }
 
     let pragma = match PragmaName::from_str(&name.name.0) {
         Ok(pragma) => pragma,
