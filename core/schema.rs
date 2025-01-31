@@ -367,7 +367,7 @@ pub enum Type {
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Self::Null => "NULL",
+            Self::Null => "",
             Self::Text => "TEXT",
             Self::Numeric => "NUMERIC",
             Self::Integer => "INTEGER",
