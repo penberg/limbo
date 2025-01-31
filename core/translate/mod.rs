@@ -560,13 +560,10 @@ fn list_pragmas(
     init_label: BranchOffset,
     start_offset: BranchOffset,
 ) {
-    let mut pragma_strings: Vec<String> = PragmaName::iter().map(|x| x.to_string()).collect();
-    pragma_strings.sort();
-
-    let register = program.alloc_register();
-    for pragma in &pragma_strings {
+    for x in PragmaName::iter() {
+        let register = program.alloc_register();
         program.emit_insn(Insn::String8 {
-            value: pragma.to_string(),
+            value: x.to_string(),
             dest: register,
         });
         program.emit_insn(Insn::ResultRow {

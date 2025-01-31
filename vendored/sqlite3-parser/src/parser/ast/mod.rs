@@ -1594,10 +1594,10 @@ pub enum PragmaName {
     CacheSize,
     /// `journal_mode` pragma
     JournalMode,
-    /// trigger a checkpoint to run on database(s) if WAL is enabled
-    WalCheckpoint,
     /// returns information about the columns of a table
     TableInfo,
+    /// trigger a checkpoint to run on database(s) if WAL is enabled
+    WalCheckpoint,
 }
 
 /// `CREATE TRIGGER` time
@@ -1894,7 +1894,8 @@ pub enum FrameExclude {
 
 #[cfg(test)]
 mod test {
-    use super::Name;
+    use super::{Name, PragmaName};
+    use strum::IntoEnumIterator;
 
     #[test]
     fn test_dequote() {
@@ -1904,6 +1905,16 @@ mod test {
         assert_eq!(name(r#""x""#), "x");
         assert_eq!(name(r#""x""y""#), "x\"y");
         assert_eq!(name("[x]"), "x");
+    }
+
+    #[test]
+    // pragma pragma_list expects this to be sorted. We can avoid allocations there if we keep
+    // the list sorted.
+    fn pragma_list_sorted() {
+        let pragma_strings: Vec<String> = PragmaName::iter().map(|x| x.to_string()).collect();
+        let mut pragma_strings_sorted = pragma_strings.clone();
+        pragma_strings_sorted.sort();
+        assert_eq!(pragma_strings, pragma_strings_sorted);
     }
 
     fn name(s: &'static str) -> Name {
