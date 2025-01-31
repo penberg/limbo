@@ -67,12 +67,16 @@ pub fn emit_order_by(
     let sort_loop_end_label = program.allocate_label();
     let mut pseudo_columns = vec![];
     for (i, _) in order_by.iter().enumerate() {
+        let ty = crate::schema::Type::Null;
         pseudo_columns.push(Column {
             // Names don't matter. We are tracking which result column is in which position in the ORDER BY clause in m.result_column_indexes_in_orderby_sorter.
             name: format!("sort_key_{}", i),
             primary_key: false,
-            ty: crate::schema::Type::Null,
+            ty,
+            ty_str: ty.to_string(),
             is_rowid_alias: false,
+            notnull: false,
+            default: None,
         });
     }
     for (i, rc) in result_columns.iter().enumerate() {
@@ -82,11 +86,15 @@ pub fn emit_order_by(
                 continue;
             }
         }
+        let ty = crate::schema::Type::Null;
         pseudo_columns.push(Column {
             name: rc.expr.to_string(),
             primary_key: false,
-            ty: crate::schema::Type::Null,
+            ty,
+            ty_str: ty.to_string(),
             is_rowid_alias: false,
+            notnull: false,
+            default: None,
         });
     }
 

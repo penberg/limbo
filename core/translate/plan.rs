@@ -273,8 +273,11 @@ impl TableReference {
                     .map(|rc| Column {
                         name: rc.name.clone(),
                         ty: Type::Text, // FIXME: infer proper type
+                        ty_str: "TEXT".to_string(),
                         is_rowid_alias: false,
                         primary_key: false,
+                        notnull: false,
+                        default: None,
                     })
                     .collect(),
             ))),
