@@ -90,6 +90,9 @@ pub extern "C" fn rows_get_columns(rows_ptr: *mut c_void) -> i32 {
     rows.stmt.columns().len() as i32
 }
 
+/// Returns a pointer to a string with the name of the column at the given index.
+/// The caller is responsible for freeing the memory, it should be copied on the Go side
+/// immediately and 'free_string' called
 #[no_mangle]
 pub extern "C" fn rows_get_column_name(rows_ptr: *mut c_void, idx: i32) -> *const c_char {
     if rows_ptr.is_null() {

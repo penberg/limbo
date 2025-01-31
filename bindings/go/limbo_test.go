@@ -6,7 +6,7 @@ import (
 	"log"
 	"testing"
 
-	_ "limbo"
+	_ "github.com/tursodatabase/limbo"
 )
 
 var conn *sql.DB

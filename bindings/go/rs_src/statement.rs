@@ -13,10 +13,7 @@ pub extern "C" fn db_prepare(ctx: *mut c_void, query: *const c_char) -> *mut c_v
     let query_str = unsafe { std::ffi::CStr::from_ptr(query) }.to_str().unwrap();
 
     let db = LimboConn::from_ptr(ctx);
-    let Ok(conn) = db.conn.read() else {
-        return std::ptr::null_mut();
-    };
-    let stmt = conn.prepare(query_str);
+    let stmt = db.conn.prepare(query_str);
     match stmt {
         Ok(stmt) => LimboStatement::new(Some(stmt), LimboConn::from_ptr(ctx)).to_ptr(),
         Err(_) => std::ptr::null_mut(),
@@ -55,10 +52,7 @@ pub extern "C" fn stmt_execute(
                 return ResultCode::Error;
             }
             Ok(StepResult::Done) => {
-                let Ok(conn) = stmt.conn.conn.read() else {
-                    return ResultCode::Done;
-                };
-                let total_changes = conn.total_changes();
+                let total_changes = stmt.conn.conn.total_changes();
                 if !changes.is_null() {
                     unsafe {
                         *changes = total_changes;

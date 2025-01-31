@@ -7,7 +7,7 @@ use std::{
     ffi::{c_char, c_void},
     rc::Rc,
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 /// # Safety
@@ -40,21 +40,18 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
 
 #[allow(dead_code)]
 struct LimboConn {
-    conn: RwLock<Rc<Connection>>,
+    conn: Rc<Connection>,
     io: Arc<dyn limbo_core::IO>,
 }
 
 impl<'conn> LimboConn {
     fn new(conn: Rc<Connection>, io: Arc<dyn limbo_core::IO>) -> Self {
-        LimboConn {
-            conn: conn.into(),
-            io,
-        }
+        LimboConn { conn, io }
     }
 
     #[allow(clippy::wrong_self_convention)]
     fn to_ptr(self) -> *mut c_void {
-        Arc::into_raw(Arc::new(self)) as *mut c_void
+        Box::into_raw(Box::new(self)) as *mut c_void
     }
 
     fn from_ptr(ptr: *mut c_void) -> &'conn mut LimboConn {
