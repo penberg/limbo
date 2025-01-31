@@ -253,6 +253,11 @@ fn emit_schema_entry(
     });
 }
 
+struct PrimaryKeyColumnInfo<'a> {
+    name: &'a String,
+    is_descending: bool,
+}
+
 /// Check if an automatic PRIMARY KEY index is required for the table.
 /// If so, create a register for the index root page and return it.
 ///
@@ -282,10 +287,13 @@ fn check_automatic_pk_index_required(
                         columns: pk_cols, ..
                     } = &constraint.constraint
                     {
-                        let primary_key_column_results: Vec<Result<&String>> = pk_cols
+                        let primary_key_column_results: Vec<Result<PrimaryKeyColumnInfo>> = pk_cols
                             .iter()
                             .map(|col| match &col.expr {
-                                ast::Expr::Id(name) => Ok(&name.0),
+                                ast::Expr::Id(name) => Ok(PrimaryKeyColumnInfo {
+                                    name: &name.0,
+                                    is_descending: matches!(col.order, Some(ast::SortOrder::Desc)),
+                                }),
                                 _ => Err(LimboError::ParseError(
                                     "expressions prohibited in PRIMARY KEY and UNIQUE constraints"
                                         .to_string(),
@@ -297,7 +305,9 @@ fn check_automatic_pk_index_required(
                             if let Err(e) = result {
                                 bail_parse_error!("{}", e);
                             }
-                            let column_name = result?;
+                            let pk_info = result?;
+
+                            let column_name = pk_info.name;
                             let column_def = columns.get(&ast::Name(column_name.clone()));
                             if column_def.is_none() {
                                 bail_parse_error!("No such column: {}", column_name);
@@ -314,8 +324,11 @@ fn check_automatic_pk_index_required(
                                 let column_def = column_def.unwrap();
                                 let typename =
                                     column_def.col_type.as_ref().map(|t| t.name.as_str());
-                                primary_key_definition =
-                                    Some(PrimaryKeyDefinitionType::Simple { typename });
+                                let is_descending = pk_info.is_descending;
+                                primary_key_definition = Some(PrimaryKeyDefinitionType::Simple {
+                                    typename,
+                                    is_descending,
+                                });
                             }
                         }
                     }
@@ -333,8 +346,10 @@ fn check_automatic_pk_index_required(
                             bail_parse_error!("table {} has more than one primary key", tbl_name);
                         }
                         let typename = col_def.col_type.as_ref().map(|t| t.name.as_str());
-                        primary_key_definition =
-                            Some(PrimaryKeyDefinitionType::Simple { typename });
+                        primary_key_definition = Some(PrimaryKeyDefinitionType::Simple {
+                            typename,
+                            is_descending: false,
+                        });
                     }
                 }
             }
@@ -347,10 +362,13 @@ fn check_automatic_pk_index_required(
             // Check if we need an automatic index
             let needs_auto_index = if let Some(primary_key_definition) = &primary_key_definition {
                 match primary_key_definition {
-                    PrimaryKeyDefinitionType::Simple { typename } => {
+                    PrimaryKeyDefinitionType::Simple {
+                        typename,
+                        is_descending,
+                    } => {
                         let is_integer =
                             typename.is_some() && typename.unwrap().to_uppercase() == "INTEGER";
-                        !is_integer
+                        !is_integer || *is_descending
                     }
                     PrimaryKeyDefinitionType::Composite => true,
                 }
@@ -521,7 +539,10 @@ fn translate_create_table(
 }
 
 enum PrimaryKeyDefinitionType<'a> {
-    Simple { typename: Option<&'a str> },
+    Simple {
+        typename: Option<&'a str>,
+        is_descending: bool,
+    },
     Composite,
 }
 
