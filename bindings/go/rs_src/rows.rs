@@ -78,51 +78,36 @@ pub extern "C" fn free_string(s: *mut c_char) {
     }
 }
 
+/// Function to get the number of expected ResultColumns in the prepared statement.
+/// to avoid the needless complexity of returning an array of strings, this instead
+/// works like rows_next/rows_get_value
 #[no_mangle]
-pub extern "C" fn rows_get_columns(
-    rows_ptr: *mut c_void,
-    out_length: *mut usize,
-) -> *mut *const c_char {
-    if rows_ptr.is_null() || out_length.is_null() {
+pub extern "C" fn rows_get_columns(rows_ptr: *mut c_void) -> i32 {
+    if rows_ptr.is_null() {
+        return -1;
+    }
+    let rows = LimboRows::from_ptr(rows_ptr);
+    rows.stmt.columns().len() as i32
+}
+
+#[no_mangle]
+pub extern "C" fn rows_get_column_name(rows_ptr: *mut c_void, idx: i32) -> *const c_char {
+    if rows_ptr.is_null() {
         return std::ptr::null_mut();
     }
     let rows = LimboRows::from_ptr(rows_ptr);
-    let c_strings: Vec<std::ffi::CString> = rows
-        .stmt
-        .columns()
-        .iter()
-        .map(|name| std::ffi::CString::new(name.as_str()).unwrap())
-        .collect();
-
-    let c_ptrs: Vec<*const c_char> = c_strings.iter().map(|s| s.as_ptr()).collect();
-    unsafe {
-        *out_length = c_ptrs.len();
+    if idx < 0 || idx as usize >= rows.stmt.columns().len() {
+        return std::ptr::null_mut();
     }
-    let ptr = c_ptrs.as_ptr();
-    std::mem::forget(c_strings);
-    std::mem::forget(c_ptrs);
-    ptr as *mut *const c_char
+    let name = &rows.stmt.columns()[idx as usize];
+    let cstr = std::ffi::CString::new(name.as_bytes()).expect("Failed to create CString");
+    cstr.into_raw() as *const c_char
 }
 
 #[no_mangle]
 pub extern "C" fn rows_close(rows_ptr: *mut c_void) {
     if !rows_ptr.is_null() {
         let _ = unsafe { Box::from_raw(rows_ptr as *mut LimboRows) };
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn free_columns(columns: *mut *const c_char) {
-    if columns.is_null() {
-        return;
-    }
-    unsafe {
-        let mut idx = 0;
-        while !(*columns.add(idx)).is_null() {
-            let _ = std::ffi::CString::from_raw(*columns.add(idx) as *mut c_char);
-            idx += 1;
-        }
-        let _ = Box::from_raw(columns);
     }
 }
 

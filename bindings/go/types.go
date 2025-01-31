@@ -65,20 +65,23 @@ func (rc ResultCode) String() string {
 }
 
 const (
-	FfiDbOpen             string = "db_open"
-	FfiDbClose            string = "db_close"
-	FfiDbPrepare          string = "db_prepare"
-	FfiStmtExec           string = "stmt_execute"
-	FfiStmtQuery          string = "stmt_query"
-	FfiStmtParameterCount string = "stmt_parameter_count"
-	FfiStmtClose          string = "stmt_close"
-	FfiRowsClose          string = "rows_close"
-	FfiRowsGetColumns     string = "rows_get_columns"
-	FfiRowsNext           string = "rows_next"
-	FfiRowsGetValue       string = "rows_get_value"
-	FfiFreeColumns        string = "free_columns"
-	FfiFreeCString        string = "free_string"
-	FfiFreeBlob           string = "free_blob"
+	driverName            = "sqlite3"
+	libName               = "lib_limbo_go"
+	FfiDbOpen             = "db_open"
+	FfiDbClose            = "db_close"
+	FfiDbPrepare          = "db_prepare"
+	FfiStmtExec           = "stmt_execute"
+	FfiStmtQuery          = "stmt_query"
+	FfiStmtParameterCount = "stmt_parameter_count"
+	FfiStmtClose          = "stmt_close"
+	FfiRowsClose          = "rows_close"
+	FfiRowsGetColumns     = "rows_get_columns"
+	FfiRowsGetColumnName  = "rows_get_column_name"
+	FfiRowsNext           = "rows_next"
+	FfiRowsGetValue       = "rows_get_value"
+	FfiFreeColumns        = "free_columns"
+	FfiFreeCString        = "free_string"
+	FfiFreeBlob           = "free_blob"
 )
 
 // convert a namedValue slice into normal values until named parameters are supported
@@ -210,22 +213,6 @@ func freeCString(cstrPtr uintptr) {
 		return
 	}
 	freeStringFunc(cstrPtr)
-}
-
-func cArrayToGoStrings(arrayPtr uintptr, length uint) []string {
-	if arrayPtr == 0 || length == 0 {
-		return nil
-	}
-	ptrSlice := unsafe.Slice(
-		(**byte)(unsafe.Pointer(arrayPtr)),
-		length,
-	)
-
-	out := make([]string, 0, length)
-	for _, cstr := range ptrSlice {
-		out = append(out, GoString(uintptr(unsafe.Pointer(cstr))))
-	}
-	return out
 }
 
 // convert a Go slice of driver.Value to a slice of limboValue that can be sent over FFI

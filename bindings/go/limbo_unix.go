@@ -3,7 +3,6 @@
 package limbo
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,12 +42,4 @@ func loadLibrary() (uintptr, error) {
 		}
 	}
 	return 0, fmt.Errorf("%s library not found in LD_LIBRARY_PATH or CWD", libName)
-}
-
-func init() {
-	err := ensureLibLoaded()
-	if err != nil {
-		panic(err)
-	}
-	sql.Register("sqlite3", &limboDriver{})
 }

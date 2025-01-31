@@ -1,6 +1,7 @@
 package limbo
 
 import (
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"fmt"
@@ -9,66 +10,67 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-const (
-	driverName = "sqlite3"
-	libName    = "lib_limbo_go"
-)
+func init() {
+	err := ensureLibLoaded()
+	if err != nil {
+		panic(err)
+	}
+	sql.Register(driverName, &limboDriver{})
+}
 
 type limboDriver struct {
 	sync.Mutex
 }
 
-var library = sync.OnceValue(func() uintptr {
-	lib, err := loadLibrary()
-	if err != nil {
-		panic(err)
-	}
-	return lib
-})
-
 var (
-	libOnce        sync.Once
-	loadErr        error
-	dbOpen         func(string) uintptr
-	dbClose        func(uintptr) uintptr
-	connPrepare    func(uintptr, string) uintptr
-	freeBlobFunc   func(uintptr)
-	freeStringFunc func(uintptr)
-	rowsGetColumns func(uintptr, *uint) uintptr
-	rowsGetValue   func(uintptr, int32) uintptr
-	closeRows      func(uintptr) uintptr
-	freeCols       func(uintptr) uintptr
-	rowsNext       func(uintptr) uintptr
-	stmtQuery      func(stmtPtr uintptr, argsPtr uintptr, argCount uint64) uintptr
-	stmtExec       func(stmtPtr uintptr, argsPtr uintptr, argCount uint64, changes uintptr) int32
-	stmtParamCount func(uintptr) int32
-	closeStmt      func(uintptr) int32
+	libOnce           sync.Once
+	limboLib          uintptr
+	loadErr           error
+	dbOpen            func(string) uintptr
+	dbClose           func(uintptr) uintptr
+	connPrepare       func(uintptr, string) uintptr
+	freeBlobFunc      func(uintptr)
+	freeStringFunc    func(uintptr)
+	rowsGetColumns    func(uintptr) int32
+	rowsGetColumnName func(uintptr, int32) uintptr
+	rowsGetValue      func(uintptr, int32) uintptr
+	closeRows         func(uintptr) uintptr
+	rowsNext          func(uintptr) uintptr
+	stmtQuery         func(stmtPtr uintptr, argsPtr uintptr, argCount uint64) uintptr
+	stmtExec          func(stmtPtr uintptr, argsPtr uintptr, argCount uint64, changes uintptr) int32
+	stmtParamCount    func(uintptr) int32
+	closeStmt         func(uintptr) int32
 )
 
+// Register all the symbols on library load
 func ensureLibLoaded() error {
 	libOnce.Do(func() {
-		purego.RegisterLibFunc(&dbOpen, library(), FfiDbOpen)
-		purego.RegisterLibFunc(&dbClose, library(), FfiDbClose)
-		purego.RegisterLibFunc(&connPrepare, library(), FfiDbPrepare)
-		purego.RegisterLibFunc(&freeBlobFunc, library(), FfiFreeBlob)
-		purego.RegisterLibFunc(&freeStringFunc, library(), FfiFreeCString)
-		purego.RegisterLibFunc(&rowsGetColumns, library(), FfiRowsGetColumns)
-		purego.RegisterLibFunc(&rowsGetValue, library(), FfiRowsGetValue)
-		purego.RegisterLibFunc(&closeRows, library(), FfiRowsClose)
-		purego.RegisterLibFunc(&freeCols, library(), FfiFreeColumns)
-		purego.RegisterLibFunc(&rowsNext, library(), FfiRowsNext)
-		purego.RegisterLibFunc(&stmtQuery, library(), FfiStmtQuery)
-		purego.RegisterLibFunc(&stmtExec, library(), FfiStmtExec)
-		purego.RegisterLibFunc(&stmtParamCount, library(), FfiStmtParameterCount)
-		purego.RegisterLibFunc(&closeStmt, library(), FfiStmtClose)
+		limboLib, loadErr = loadLibrary()
+		if loadErr != nil {
+			return
+		}
+		purego.RegisterLibFunc(&dbOpen, limboLib, FfiDbOpen)
+		purego.RegisterLibFunc(&dbClose, limboLib, FfiDbClose)
+		purego.RegisterLibFunc(&connPrepare, limboLib, FfiDbPrepare)
+		purego.RegisterLibFunc(&freeBlobFunc, limboLib, FfiFreeBlob)
+		purego.RegisterLibFunc(&freeStringFunc, limboLib, FfiFreeCString)
+		purego.RegisterLibFunc(&rowsGetColumns, limboLib, FfiRowsGetColumns)
+		purego.RegisterLibFunc(&rowsGetColumnName, limboLib, FfiRowsGetColumnName)
+		purego.RegisterLibFunc(&rowsGetValue, limboLib, FfiRowsGetValue)
+		purego.RegisterLibFunc(&closeRows, limboLib, FfiRowsClose)
+		purego.RegisterLibFunc(&rowsNext, limboLib, FfiRowsNext)
+		purego.RegisterLibFunc(&stmtQuery, limboLib, FfiStmtQuery)
+		purego.RegisterLibFunc(&stmtExec, limboLib, FfiStmtExec)
+		purego.RegisterLibFunc(&stmtParamCount, limboLib, FfiStmtParameterCount)
+		purego.RegisterLibFunc(&closeStmt, limboLib, FfiStmtClose)
 	})
 	return loadErr
 }
 
 func (d *limboDriver) Open(name string) (driver.Conn, error) {
 	d.Lock()
-	defer d.Unlock()
 	conn, err := openConn(name)
+	d.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -80,26 +82,24 @@ type limboConn struct {
 	ctx uintptr
 }
 
-func newConn(ctx uintptr) *limboConn {
-	return &limboConn{
-		sync.Mutex{},
-		ctx,
-	}
-}
-
 func openConn(dsn string) (*limboConn, error) {
 	ctx := dbOpen(dsn)
 	if ctx == 0 {
 		return nil, fmt.Errorf("failed to open database for dsn=%q", dsn)
 	}
-	return newConn(ctx), loadErr
+	return &limboConn{
+		sync.Mutex{},
+		ctx,
+	}, loadErr
 }
 
 func (c *limboConn) Close() error {
 	if c.ctx == 0 {
 		return nil
 	}
+	c.Lock()
 	dbClose(c.ctx)
+	c.Unlock()
 	c.ctx = 0
 	return nil
 }
@@ -114,7 +114,7 @@ func (c *limboConn) Prepare(query string) (driver.Stmt, error) {
 	if stmtPtr == 0 {
 		return nil, fmt.Errorf("failed to prepare query=%q", query)
 	}
-	return initStmt(stmtPtr, query), nil
+	return newStmt(stmtPtr, query), nil
 }
 
 // begin is needed to implement driver.Conn.. for now not implemented

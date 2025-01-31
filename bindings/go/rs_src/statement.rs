@@ -132,13 +132,9 @@ pub struct LimboStatement<'conn> {
 #[no_mangle]
 pub extern "C" fn stmt_close(ctx: *mut c_void) -> ResultCode {
     if !ctx.is_null() {
-        let stmt = LimboStatement::from_ptr(ctx);
-        if stmt.statement.is_none() {
-            return ResultCode::Error;
-        } else {
-            let _ = unsafe { Box::from_raw(ctx as *mut LimboStatement) };
-            return ResultCode::Ok;
-        }
+        let stmt = unsafe { Box::from_raw(ctx as *mut LimboStatement) };
+        drop(stmt);
+        return ResultCode::Ok;
     }
     ResultCode::Invalid
 }

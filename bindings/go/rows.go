@@ -7,7 +7,6 @@ import (
 	"sync"
 )
 
-// only construct limboRows with initRows function to ensure proper initialization
 type limboRows struct {
 	mu      sync.Mutex
 	ctx     uintptr
@@ -15,12 +14,12 @@ type limboRows struct {
 	closed  bool
 }
 
-// Initialize/register the FFI function pointers for the rows methods
-// DO NOT construct 'limboRows' without this function
-func initRows(ctx uintptr) *limboRows {
+func newRows(ctx uintptr) *limboRows {
 	return &limboRows{
-		mu:  sync.Mutex{},
-		ctx: ctx,
+		mu:      sync.Mutex{},
+		ctx:     ctx,
+		closed:  false,
+		columns: nil,
 	}
 }
 
@@ -29,15 +28,17 @@ func (r *limboRows) Columns() []string {
 		return nil
 	}
 	if r.columns == nil {
-		var columnCount uint
 		r.mu.Lock()
-		defer r.mu.Unlock()
-		colArrayPtr := rowsGetColumns(r.ctx, &columnCount)
-		if colArrayPtr != 0 && columnCount > 0 {
-			r.columns = cArrayToGoStrings(colArrayPtr, columnCount)
-			if freeCols != nil {
-				defer freeCols(colArrayPtr)
+		count := rowsGetColumns(r.ctx)
+		if count > 0 {
+			columns := make([]string, 0, count)
+			for i := 0; i < int(count); i++ {
+				cstr := rowsGetColumnName(r.ctx, int32(i))
+				columns = append(columns, fmt.Sprintf("%s", GoString(cstr)))
+				freeCString(cstr)
 			}
+			r.mu.Unlock()
+			r.columns = columns
 		}
 	}
 	return r.columns
@@ -59,14 +60,14 @@ func (r *limboRows) Next(dest []driver.Value) error {
 	if r.ctx == 0 || r.closed {
 		return io.EOF
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for {
 		status := rowsNext(r.ctx)
 		switch ResultCode(status) {
 		case Row:
 			for i := range dest {
-				r.mu.Lock()
 				valPtr := rowsGetValue(r.ctx, int32(i))
-				r.mu.Unlock()
 				val := toGoValue(valPtr)
 				dest[i] = val
 			}

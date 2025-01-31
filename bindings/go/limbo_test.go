@@ -18,7 +18,7 @@ func TestMain(m *testing.M) {
 		panic(connErr)
 	}
 	defer conn.Close()
-	err := createTable()
+	err := createTable(conn)
 	if err != nil {
 		log.Fatalf("Error creating table: %v", err)
 	}
@@ -26,49 +26,13 @@ func TestMain(m *testing.M) {
 }
 
 func TestInsertData(t *testing.T) {
-	err := insertData()
+	err := insertData(conn)
 	if err != nil {
 		t.Fatalf("Error inserting data: %v", err)
-	}
-}
-
-func TestFunction(t *testing.T) {
-	insert := "INSERT INTO test (foo, bar, baz) VALUES (?, ?, zeroblob(?));"
-	stmt, err := conn.Prepare(insert)
-	if err != nil {
-		t.Fatalf("Error preparing statement: %v", err)
-	}
-	_, err = stmt.Exec(1, "hello", 100)
-	if err != nil {
-		t.Fatalf("Error executing statment with arguments: %v", err)
-	}
-	stmt.Close()
-	stmt, err = conn.Prepare("SELECT baz FROM test where foo = ?")
-	if err != nil {
-		t.Fatalf("Error preparing select stmt: %v", err)
-	}
-	defer stmt.Close()
-	rows, err := stmt.Query(1)
-	if err != nil {
-		t.Fatalf("Error executing select stmt: %v", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var b []byte
-		err = rows.Scan(&b)
-		if err != nil {
-			t.Fatalf("Error scanning row: %v", err)
-		}
-		fmt.Println("RESULTS: ", string(b))
 	}
 }
 
 func TestQuery(t *testing.T) {
-	err := insertData()
-	if err != nil {
-		t.Fatalf("Error inserting data: %v", err)
-	}
-
 	query := "SELECT * FROM test;"
 	stmt, err := conn.Prepare(query)
 	if err != nil {
@@ -117,6 +81,130 @@ func TestQuery(t *testing.T) {
 
 }
 
+func TestFunctions(t *testing.T) {
+	insert := "INSERT INTO test (foo, bar, baz) VALUES (?, ?, zeroblob(?));"
+	stmt, err := conn.Prepare(insert)
+	if err != nil {
+		t.Fatalf("Error preparing statement: %v", err)
+	}
+	_, err = stmt.Exec(60, "TestFunction", 400)
+	if err != nil {
+		t.Fatalf("Error executing statment with arguments: %v", err)
+	}
+	stmt.Close()
+	stmt, err = conn.Prepare("SELECT baz FROM test where foo = ?")
+	if err != nil {
+		t.Fatalf("Error preparing select stmt: %v", err)
+	}
+	defer stmt.Close()
+	rows, err := stmt.Query(60)
+	if err != nil {
+		t.Fatalf("Error executing select stmt: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var b []byte
+		err = rows.Scan(&b)
+		if err != nil {
+			t.Fatalf("Error scanning row: %v", err)
+		}
+		if len(b) != 400 {
+			t.Fatalf("Expected 100 bytes, got %d", len(b))
+		}
+	}
+	sql := "SELECT uuid4_str();"
+	stmt, err = conn.Prepare(sql)
+	if err != nil {
+		t.Fatalf("Error preparing statement: %v", err)
+	}
+	defer stmt.Close()
+	rows, err = stmt.Query()
+	if err != nil {
+		t.Fatalf("Error executing query: %v", err)
+	}
+	defer rows.Close()
+	var i int
+	for rows.Next() {
+		var b string
+		err = rows.Scan(&b)
+		if err != nil {
+			t.Fatalf("Error scanning row: %v", err)
+		}
+		if len(b) != 36 {
+			t.Fatalf("Expected 36 bytes, got %d", len(b))
+		}
+		i++
+		fmt.Printf("uuid: %s\n", b)
+	}
+	if i != 1 {
+		t.Fatalf("Expected 1 row, got %d", i)
+	}
+	fmt.Println("zeroblob + uuid functions passed")
+}
+
+func TestDuplicateConnection(t *testing.T) {
+	newConn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("Error opening new connection: %v", err)
+	}
+	err = createTable(newConn)
+	if err != nil {
+		t.Fatalf("Error creating table: %v", err)
+	}
+	err = insertData(newConn)
+	if err != nil {
+		t.Fatalf("Error inserting data: %v", err)
+	}
+	query := "SELECT * FROM test;"
+	rows, err := newConn.Query(query)
+	if err != nil {
+		t.Fatalf("Error executing query: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a int
+		var b string
+		var c []byte
+		err = rows.Scan(&a, &b, &c)
+		if err != nil {
+			t.Fatalf("Error scanning row: %v", err)
+		}
+		fmt.Println("RESULTS: ", a, b, string(c))
+	}
+}
+
+func TestDuplicateConnection2(t *testing.T) {
+	newConn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("Error opening new connection: %v", err)
+	}
+	sql := "CREATE TABLE test (foo INTEGER, bar INTEGER, baz BLOB);"
+	newConn.Exec(sql)
+	sql = "INSERT INTO test (foo, bar, baz) VALUES (?, ?, uuid4());"
+	stmt, err := newConn.Prepare(sql)
+	stmt.Exec(242345, 2342434)
+	defer stmt.Close()
+	query := "SELECT * FROM test;"
+	rows, err := newConn.Query(query)
+	if err != nil {
+		t.Fatalf("Error executing query: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a int
+		var b int
+		var c []byte
+		err = rows.Scan(&a, &b, &c)
+		if err != nil {
+			t.Fatalf("Error scanning row: %v", err)
+		}
+		fmt.Println("RESULTS: ", a, b, string(c))
+		if len(c) != 16 {
+			t.Fatalf("Expected 16 bytes, got %d", len(c))
+		}
+	}
+}
+
 func slicesAreEq(a, b []byte) bool {
 	if len(a) != len(b) {
 		fmt.Printf("LENGTHS NOT EQUAL: %d != %d\n", len(a), len(b))
@@ -133,7 +221,7 @@ func slicesAreEq(a, b []byte) bool {
 
 var rowsMap = map[int]string{1: "hello", 2: "world", 3: "foo", 4: "bar", 5: "baz"}
 
-func createTable() error {
+func createTable(conn *sql.DB) error {
 	insert := "CREATE TABLE test (foo INT, bar TEXT, baz BLOB);"
 	stmt, err := conn.Prepare(insert)
 	if err != nil {
@@ -144,7 +232,7 @@ func createTable() error {
 	return err
 }
 
-func insertData() error {
+func insertData(conn *sql.DB) error {
 	for i := 1; i <= 5; i++ {
 		insert := "INSERT INTO test (foo, bar, baz) VALUES (?, ?, ?);"
 		stmt, err := conn.Prepare(insert)
