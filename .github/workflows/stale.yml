@@ -14,7 +14,7 @@ jobs:
       - name: Close stale pull requests
         uses: actions/stale@v6
         with:
-          repo-token: ${{ secrets.STALE_GH_TOKEN }}
+          repo-token: ${{ secrets.GH_TOKEN }}
           operations-per-run: 1000
           ascending: true
           stale-pr-message: 'This pull request has been marked as stale due to inactivity. It will be closed in 7 days if no further activity occurs.'

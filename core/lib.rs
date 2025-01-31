@@ -1,6 +1,7 @@
 mod error;
 mod ext;
 mod function;
+mod info;
 mod io;
 #[cfg(feature = "json")]
 mod json;
@@ -21,7 +22,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use fallible_iterator::FallibleIterator;
 #[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
-#[cfg(not(target_family = "wasm"))]
 use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use log::trace;
 use schema::Schema;
@@ -138,6 +138,9 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
+        if let Err(e) = db.register_builtins() {
+            return Err(LimboError::ExtensionError(e));
+        }
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),
@@ -253,10 +256,10 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn prepare(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Statement> {
-        let sql = sql.into();
+    pub fn prepare(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Statement> {
+        let sql = sql.as_ref();
         trace!("Preparing: {}", sql);
-        let db = self.db.clone();
+        let db = &self.db;
         let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -281,8 +284,8 @@ impl Connection {
         }
     }
 
-    pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Statement>> {
-        let sql = sql.into();
+    pub fn query(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Option<Statement>> {
+        let sql = sql.as_ref();
         trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -342,9 +345,9 @@ impl Connection {
         QueryRunner::new(self, sql)
     }
 
-    pub fn execute(self: &Rc<Connection>, sql: impl Into<String>) -> Result<()> {
-        let sql = sql.into();
-        let db = self.db.clone();
+    pub fn execute(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<()> {
+        let sql = sql.as_ref();
+        let db = &self.db;
         let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -557,7 +560,6 @@ impl SymbolTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
-            // TODO: wasm libs will be very different
             #[cfg(not(target_family = "wasm"))]
             extensions: Vec::new(),
         }

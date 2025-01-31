@@ -7,6 +7,8 @@ use std::num::ParseIntError;
 use std::ops::Deref;
 use std::str::{self, Bytes, FromStr};
 
+use strum_macros::{EnumIter, EnumString};
+
 use fmt::{ToTokens, TokenStream};
 use indexmap::{IndexMap, IndexSet};
 
@@ -1585,7 +1587,8 @@ pub type PragmaValue = Expr; // TODO
 
 /// `PRAGMA` value
 // https://sqlite.org/pragma.html
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, EnumString, strum::Display)]
+#[strum(serialize_all = "snake_case")]
 pub enum PragmaName {
     /// `cache_size` pragma
     CacheSize,
@@ -1593,19 +1596,8 @@ pub enum PragmaName {
     JournalMode,
     /// trigger a checkpoint to run on database(s) if WAL is enabled
     WalCheckpoint,
-}
-
-impl FromStr for PragmaName {
-    type Err = ();
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            "cache_size" => Ok(PragmaName::CacheSize),
-            "wal_checkpoint" => Ok(PragmaName::WalCheckpoint),
-            "journal_mode" => Ok(PragmaName::JournalMode),
-            _ => Err(()),
-        }
-    }
+    /// returns information about the columns of a table
+    TableInfo,
 }
 
 /// `CREATE TRIGGER` time

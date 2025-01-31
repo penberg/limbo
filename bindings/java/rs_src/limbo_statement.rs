@@ -29,7 +29,6 @@ impl LimboStatement {
         Box::into_raw(Box::new(self)) as jlong
     }
 
-    #[allow(dead_code)]
     pub fn drop(ptr: jlong) {
         let _boxed = unsafe { Box::from_raw(ptr as *mut LimboStatement) };
     }
@@ -86,6 +85,15 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
             StepResult::Busy => return to_limbo_step_result(&mut env, STEP_RESULT_ID_BUSY, None),
         }
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement__1close<'local>(
+    _env: JNIEnv<'local>,
+    _obj: JObject<'local>,
+    stmt_ptr: jlong,
+) {
+    LimboStatement::drop(stmt_ptr);
 }
 
 fn row_to_obj_array<'local>(

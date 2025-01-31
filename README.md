@@ -28,7 +28,7 @@ Limbo is an in-process OLTP database engine library that has:
 
 * **Asynchronous I/O** support on Linux with `io_uring`
 * **SQLite compatibility** [[doc](COMPAT.md)] for SQL dialect, file formats, and the C API
-* **Language bindings** for JavaScript/WebAssembly, Rust, Python, and Java
+* **Language bindings** for JavaScript/WebAssembly, Rust, Go, Python, and [Java](bindings/java)
 * **OS support** for Linux, macOS, and Windows
 
 ## Getting Started

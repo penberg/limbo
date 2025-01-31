@@ -83,13 +83,12 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public void close() throws SQLException {
-    // TODO
+    super.close();
   }
 
   @Override
   public boolean isClosed() throws SQLException {
-    // TODO
-    return false;
+    return super.isClosed();
   }
 
   @Override

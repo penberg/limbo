@@ -133,22 +133,7 @@ def assert_specific_time(result):
 
 def test_uuid(pipe):
     specific_time = "01945ca0-3189-76c0-9a8f-caf310fc8b8e"
-    extension_path = "./target/debug/liblimbo_uuid.so"
-
-    # before extension loads, assert no function
-    run_test(
-        pipe,
-        "SELECT uuid4();",
-        returns_error,
-        "uuid functions return null when ext not loaded",
-    )
-    run_test(pipe, "SELECT uuid4_str();", returns_error)
-    run_test(
-        pipe,
-        f".load {extension_path}",
-        returns_null,
-        "load extension command works properly",
-    )
+    # these are built into the binary, so we just test they work
     run_test(
         pipe,
         "SELECT hex(uuid4());",

@@ -14,6 +14,9 @@ pub enum ResultCode {
     ReadOnly = 8,
     NoData = 9,
     Done = 10,
+    SyntaxErr = 11,
+    ConstraintViolation = 12,
+    NoSuchEntity = 13,
 }
 
 #[repr(C)]
@@ -27,34 +30,29 @@ pub enum ValueType {
 
 #[repr(C)]
 pub struct LimboValue {
-    pub value_type: ValueType,
-    pub value: ValueUnion,
+    value_type: ValueType,
+    value: ValueUnion,
 }
 
 #[repr(C)]
-pub union ValueUnion {
-    pub int_val: i64,
-    pub real_val: f64,
-    pub text_ptr: *const c_char,
-    pub blob_ptr: *const c_void,
+union ValueUnion {
+    int_val: i64,
+    real_val: f64,
+    text_ptr: *const c_char,
+    blob_ptr: *const c_void,
 }
 
 #[repr(C)]
-pub struct Blob {
-    pub data: *const u8,
-    pub len: usize,
-}
-
-impl Blob {
-    pub fn to_ptr(&self) -> *const c_void {
-        self as *const Blob as *const c_void
-    }
+struct Blob {
+    data: *const u8,
+    len: i64,
 }
 
 pub struct AllocPool {
     strings: Vec<String>,
     blobs: Vec<Vec<u8>>,
 }
+
 impl AllocPool {
     pub fn new() -> Self {
         AllocPool {
@@ -82,21 +80,23 @@ pub extern "C" fn free_blob(blob_ptr: *mut c_void) {
         let _ = Box::from_raw(blob_ptr as *mut Blob);
     }
 }
+
 #[allow(dead_code)]
 impl ValueUnion {
     fn from_str(s: &str) -> Self {
+        let cstr = std::ffi::CString::new(s).expect("Failed to create CString");
         ValueUnion {
-            text_ptr: s.as_ptr() as *const c_char,
+            text_ptr: cstr.into_raw(),
         }
     }
 
     fn from_bytes(b: &[u8]) -> Self {
+        let blob = Box::new(Blob {
+            data: b.as_ptr(),
+            len: b.len() as i64,
+        });
         ValueUnion {
-            blob_ptr: Blob {
-                data: b.as_ptr(),
-                len: b.len(),
-            }
-            .to_ptr(),
+            blob_ptr: Box::into_raw(blob) as *const c_void,
         }
     }
 
@@ -121,18 +121,25 @@ impl ValueUnion {
     }
 
     pub fn to_str(&self) -> &str {
-        unsafe { std::ffi::CStr::from_ptr(self.text_ptr).to_str().unwrap() }
+        unsafe {
+            if self.text_ptr.is_null() {
+                return "";
+            }
+            std::ffi::CStr::from_ptr(self.text_ptr)
+                .to_str()
+                .unwrap_or("")
+        }
     }
 
     pub fn to_bytes(&self) -> &[u8] {
         let blob = unsafe { self.blob_ptr as *const Blob };
         let blob = unsafe { &*blob };
-        unsafe { std::slice::from_raw_parts(blob.data, blob.len) }
+        unsafe { std::slice::from_raw_parts(blob.data, blob.len as usize) }
     }
 }
 
 impl LimboValue {
-    pub fn new(value_type: ValueType, value: ValueUnion) -> Self {
+    fn new(value_type: ValueType, value: ValueUnion) -> Self {
         LimboValue { value_type, value }
     }
 
@@ -157,16 +164,30 @@ impl LimboValue {
         }
     }
 
+    // The values we get from Go need to be temporarily owned by the statement until they are bound
+    // then they can be cleaned up immediately afterwards
     pub fn to_value<'pool>(&self, pool: &'pool mut AllocPool) -> limbo_core::Value<'pool> {
         match self.value_type {
-            ValueType::Integer => limbo_core::Value::Integer(unsafe { self.value.int_val }),
-            ValueType::Real => limbo_core::Value::Float(unsafe { self.value.real_val }),
+            ValueType::Integer => {
+                if unsafe { self.value.int_val == 0 } {
+                    return limbo_core::Value::Null;
+                }
+                limbo_core::Value::Integer(unsafe { self.value.int_val })
+            }
+            ValueType::Real => {
+                if unsafe { self.value.real_val == 0.0 } {
+                    return limbo_core::Value::Null;
+                }
+                limbo_core::Value::Float(unsafe { self.value.real_val })
+            }
             ValueType::Text => {
+                if unsafe { self.value.text_ptr.is_null() } {
+                    return limbo_core::Value::Null;
+                }
                 let cstr = unsafe { std::ffi::CStr::from_ptr(self.value.text_ptr) };
                 match cstr.to_str() {
                     Ok(utf8_str) => {
                         let owned = utf8_str.to_owned();
-                        // statement needs to own these strings, will free when closed
                         let borrowed = pool.add_string(owned);
                         limbo_core::Value::Text(borrowed)
                     }
@@ -174,15 +195,12 @@ impl LimboValue {
                 }
             }
             ValueType::Blob => {
-                let blob_ptr = unsafe { self.value.blob_ptr as *const Blob };
-                if blob_ptr.is_null() {
-                    limbo_core::Value::Null
-                } else {
-                    let blob = unsafe { &*blob_ptr };
-                    let data = unsafe { std::slice::from_raw_parts(blob.data, blob.len) };
-                    let borrowed = pool.add_blob(data.to_vec());
-                    limbo_core::Value::Blob(borrowed)
+                if unsafe { self.value.blob_ptr.is_null() } {
+                    return limbo_core::Value::Null;
                 }
+                let bytes = self.value.to_bytes();
+                let borrowed = pool.add_blob(bytes.to_vec());
+                limbo_core::Value::Blob(borrowed)
             }
             ValueType::Null => limbo_core::Value::Null,
         }

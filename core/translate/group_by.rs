@@ -165,12 +165,16 @@ pub fn emit_group_by<'a>(
             .map(|agg| agg.args.len())
             .sum::<usize>();
     // sorter column names do not matter
+    let ty = crate::schema::Type::Null;
     let pseudo_columns = (0..sorter_column_count)
         .map(|i| Column {
             name: i.to_string(),
             primary_key: false,
-            ty: crate::schema::Type::Null,
+            ty,
+            ty_str: ty.to_string(),
             is_rowid_alias: false,
+            notnull: false,
+            default: None,
         })
         .collect::<Vec<_>>();
 
@@ -394,7 +398,13 @@ pub fn emit_group_by<'a>(
 
     match &plan.order_by {
         None => {
-            emit_select_result(program, t_ctx, plan, Some(label_group_by_end))?;
+            emit_select_result(
+                program,
+                t_ctx,
+                plan,
+                Some(label_group_by_end),
+                Some(group_by_end_without_emitting_row_label),
+            )?;
         }
         Some(_) => {
             order_by_sorter_insert(program, t_ctx, plan)?;

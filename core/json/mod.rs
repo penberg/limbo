@@ -1,12 +1,15 @@
 mod de;
 mod error;
+mod json_operations;
 mod json_path;
 mod ser;
 
 use std::rc::Rc;
 
 pub use crate::json::de::from_str;
+use crate::json::de::ordered_object;
 use crate::json::error::Error as JsonError;
+pub use crate::json::json_operations::{json_patch, json_remove};
 use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
@@ -23,7 +26,9 @@ pub enum Val {
     Float(f64),
     String(String),
     Array(Vec<Val>),
-    Object(IndexMap<String, Val>),
+    Removed,
+    #[serde(with = "ordered_object")]
+    Object(Vec<(String, Val)>),
 }
 
 pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -236,6 +241,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
 /// *all_as_db* - if true, objects and arrays will be returned as pure TEXT without the JSON subtype
 fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<OwnedValue> {
     match extracted {
+        Val::Removed => Ok(OwnedValue::Null),
         Val::Null => Ok(OwnedValue::Null),
         Val::Float(f) => Ok(OwnedValue::Float(*f)),
         Val::Integer(i) => Ok(OwnedValue::Integer(*i)),
@@ -311,6 +317,7 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
         Val::String(_) => "text",
         Val::Array(_) => "array",
         Val::Object(_) => "object",
+        Val::Removed => unreachable!(),
     };
 
     Ok(OwnedValue::Text(LimboText::json(Rc::new(val.to_string()))))
@@ -367,7 +374,7 @@ fn json_extract_single<'a>(
 
                 match current_element {
                     Val::Object(map) => {
-                        if let Some(value) = map.get(key) {
+                        if let Some((_, value)) = map.iter().find(|(k, _)| k == key) {
                             current_element = value;
                         } else {
                             return Ok(None);
@@ -396,6 +403,64 @@ fn json_extract_single<'a>(
     }
 
     Ok(Some(current_element))
+}
+
+enum Target<'a> {
+    Array(&'a mut Vec<Val>, usize),
+    Value(&'a mut Val),
+}
+
+fn mutate_json_by_path<F, R>(json: &mut Val, path: JsonPath, closure: F) -> Option<R>
+where
+    F: FnMut(Target) -> R,
+{
+    find_target(json, &path).map(closure)
+}
+
+fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
+    let mut current = json;
+    for (i, key) in path.elements.iter().enumerate() {
+        let is_last = i == path.elements.len() - 1;
+        match key {
+            PathElement::Root() => continue,
+            PathElement::ArrayLocator(index) => match current {
+                Val::Array(arr) => {
+                    if let Some(index) = match index {
+                        i if *i < 0 => arr.len().checked_sub(i.unsigned_abs() as usize),
+                        i => ((*i as usize) < arr.len()).then_some(*i as usize),
+                    } {
+                        if is_last {
+                            return Some(Target::Array(arr, index));
+                        } else {
+                            current = &mut arr[index];
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            },
+            PathElement::Key(key) => match current {
+                Val::Object(obj) => {
+                    if let Some(pos) = &obj
+                        .iter()
+                        .position(|(k, v)| k == key && !matches!(v, Val::Removed))
+                    {
+                        let val = &mut obj[*pos].1;
+                        current = val;
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            },
+        }
+    }
+    Some(Target::Value(current))
 }
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -446,6 +511,21 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
 
     let result = crate::json::to_string(&value_map).unwrap();
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+}
+
+pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
+    match json_value {
+        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
+            Ok(_) => Ok(OwnedValue::Integer(1)),
+            Err(_) => Ok(OwnedValue::Integer(0)),
+        },
+        OwnedValue::Blob(b) => match jsonb::from_slice(b) {
+            Ok(_) => Ok(OwnedValue::Integer(1)),
+            Err(_) => Ok(OwnedValue::Integer(0)),
+        },
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Integer(1)),
+    }
 }
 
 #[cfg(test)]
@@ -983,18 +1063,98 @@ mod tests {
                 .contains("json_object requires an even number of values")),
         }
     }
-}
-pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
-    match json_value {
-        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
-            Ok(_) => Ok(OwnedValue::Integer(1)),
-            Err(_) => Ok(OwnedValue::Integer(0)),
-        },
-        OwnedValue::Blob(b) => match jsonb::from_slice(b) {
-            Ok(_) => Ok(OwnedValue::Integer(1)),
-            Err(_) => Ok(OwnedValue::Integer(0)),
-        },
-        OwnedValue::Null => Ok(OwnedValue::Null),
-        _ => Ok(OwnedValue::Integer(1)),
+
+    #[test]
+    fn test_find_target_array() {
+        let mut val = Val::Array(vec![
+            Val::String("first".to_string()),
+            Val::String("second".to_string()),
+        ]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(0)],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Array(_, idx)) => assert_eq!(idx, 0),
+            _ => panic!("Expected Array target"),
+        }
+    }
+
+    #[test]
+    fn test_find_target_negative_index() {
+        let mut val = Val::Array(vec![
+            Val::String("first".to_string()),
+            Val::String("second".to_string()),
+        ]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(-1)],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Array(_, idx)) => assert_eq!(idx, 1),
+            _ => panic!("Expected Array target"),
+        }
+    }
+
+    #[test]
+    fn test_find_target_object() {
+        let mut val = Val::Object(vec![("key".to_string(), Val::String("value".to_string()))]);
+        let path = JsonPath {
+            elements: vec![PathElement::Key("key".to_string())],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Value(_)) => {}
+            _ => panic!("Expected Value target"),
+        }
+    }
+
+    #[test]
+    fn test_find_target_removed() {
+        let mut val = Val::Object(vec![
+            ("key".to_string(), Val::Removed),
+            ("key".to_string(), Val::String("value".to_string())),
+        ]);
+        let path = JsonPath {
+            elements: vec![PathElement::Key("key".to_string())],
+        };
+
+        match find_target(&mut val, &path) {
+            Some(Target::Value(val)) => assert!(matches!(val, Val::String(_))),
+            _ => panic!("Expected second value, not removed"),
+        }
+    }
+
+    #[test]
+    fn test_mutate_json() {
+        let mut val = Val::Array(vec![Val::String("test".to_string())]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(0)],
+        };
+
+        let result = mutate_json_by_path(&mut val, path, |target| match target {
+            Target::Array(arr, idx) => {
+                arr.remove(idx);
+                "removed"
+            }
+            _ => panic!("Expected Array target"),
+        });
+
+        assert_eq!(result, Some("removed"));
+        assert!(matches!(val, Val::Array(arr) if arr.is_empty()));
+    }
+
+    #[test]
+    fn test_mutate_json_none() {
+        let mut val = Val::Array(vec![]);
+        let path = JsonPath {
+            elements: vec![PathElement::ArrayLocator(0)],
+        };
+
+        let result: Option<()> = mutate_json_by_path(&mut val, path, |_| {
+            panic!("Should not be called");
+        });
+
+        assert_eq!(result, None);
     }
 }

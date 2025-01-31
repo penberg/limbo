@@ -27,8 +27,9 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::storage::wal::CheckpointMode;
 use crate::translate::delete::translate_delete;
-use crate::util::PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX;
+use crate::util::{normalize_ident, PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX};
 use crate::vdbe::builder::CursorType;
+use crate::vdbe::BranchOffset;
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
@@ -38,6 +39,7 @@ use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
 use std::str::FromStr;
+use strum::IntoEnumIterator;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -90,7 +92,14 @@ pub fn translate(
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
         ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
         ast::Stmt::Pragma(name, body) => {
-            translate_pragma(&mut program, &name, body, database_header.clone(), pager)?;
+            translate_pragma(
+                &mut program,
+                &schema,
+                &name,
+                body,
+                database_header.clone(),
+                pager,
+            )?;
         }
         ast::Stmt::Reindex { .. } => bail_parse_error!("REINDEX not supported yet"),
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
@@ -253,6 +262,11 @@ fn emit_schema_entry(
     });
 }
 
+struct PrimaryKeyColumnInfo<'a> {
+    name: &'a String,
+    is_descending: bool,
+}
+
 /// Check if an automatic PRIMARY KEY index is required for the table.
 /// If so, create a register for the index root page and return it.
 ///
@@ -282,10 +296,13 @@ fn check_automatic_pk_index_required(
                         columns: pk_cols, ..
                     } = &constraint.constraint
                     {
-                        let primary_key_column_results: Vec<Result<&String>> = pk_cols
+                        let primary_key_column_results: Vec<Result<PrimaryKeyColumnInfo>> = pk_cols
                             .iter()
                             .map(|col| match &col.expr {
-                                ast::Expr::Id(name) => Ok(&name.0),
+                                ast::Expr::Id(name) => Ok(PrimaryKeyColumnInfo {
+                                    name: &name.0,
+                                    is_descending: matches!(col.order, Some(ast::SortOrder::Desc)),
+                                }),
                                 _ => Err(LimboError::ParseError(
                                     "expressions prohibited in PRIMARY KEY and UNIQUE constraints"
                                         .to_string(),
@@ -297,7 +314,9 @@ fn check_automatic_pk_index_required(
                             if let Err(e) = result {
                                 bail_parse_error!("{}", e);
                             }
-                            let column_name = result?;
+                            let pk_info = result?;
+
+                            let column_name = pk_info.name;
                             let column_def = columns.get(&ast::Name(column_name.clone()));
                             if column_def.is_none() {
                                 bail_parse_error!("No such column: {}", column_name);
@@ -314,8 +333,11 @@ fn check_automatic_pk_index_required(
                                 let column_def = column_def.unwrap();
                                 let typename =
                                     column_def.col_type.as_ref().map(|t| t.name.as_str());
-                                primary_key_definition =
-                                    Some(PrimaryKeyDefinitionType::Simple { typename });
+                                let is_descending = pk_info.is_descending;
+                                primary_key_definition = Some(PrimaryKeyDefinitionType::Simple {
+                                    typename,
+                                    is_descending,
+                                });
                             }
                         }
                     }
@@ -333,8 +355,10 @@ fn check_automatic_pk_index_required(
                             bail_parse_error!("table {} has more than one primary key", tbl_name);
                         }
                         let typename = col_def.col_type.as_ref().map(|t| t.name.as_str());
-                        primary_key_definition =
-                            Some(PrimaryKeyDefinitionType::Simple { typename });
+                        primary_key_definition = Some(PrimaryKeyDefinitionType::Simple {
+                            typename,
+                            is_descending: false,
+                        });
                     }
                 }
             }
@@ -347,9 +371,13 @@ fn check_automatic_pk_index_required(
             // Check if we need an automatic index
             let needs_auto_index = if let Some(primary_key_definition) = &primary_key_definition {
                 match primary_key_definition {
-                    PrimaryKeyDefinitionType::Simple { typename } => {
-                        let is_integer = typename.is_some() && typename.unwrap() == "INTEGER";
-                        !is_integer
+                    PrimaryKeyDefinitionType::Simple {
+                        typename,
+                        is_descending,
+                    } => {
+                        let is_integer =
+                            typename.is_some() && typename.unwrap().to_uppercase() == "INTEGER";
+                        !is_integer || *is_descending
                     }
                     PrimaryKeyDefinitionType::Composite => true,
                 }
@@ -520,12 +548,46 @@ fn translate_create_table(
 }
 
 enum PrimaryKeyDefinitionType<'a> {
-    Simple { typename: Option<&'a str> },
+    Simple {
+        typename: Option<&'a str>,
+        is_descending: bool,
+    },
     Composite,
+}
+
+fn list_pragmas(
+    program: &mut ProgramBuilder,
+    init_label: BranchOffset,
+    start_offset: BranchOffset,
+) {
+    let mut pragma_strings: Vec<String> = PragmaName::iter().map(|x| x.to_string()).collect();
+    pragma_strings.sort();
+
+    let register = program.alloc_register();
+    for pragma in &pragma_strings {
+        program.emit_insn(Insn::String8 {
+            value: pragma.to_string(),
+            dest: register,
+        });
+        program.emit_insn(Insn::ResultRow {
+            start_reg: register,
+            count: 1,
+        });
+    }
+    program.emit_insn(Insn::Halt {
+        err_code: 0,
+        description: String::new(),
+    });
+    program.resolve_label(init_label, program.offset());
+    program.emit_constant_insns();
+    program.emit_insn(Insn::Goto {
+        target_pc: start_offset,
+    });
 }
 
 fn translate_pragma(
     program: &mut ProgramBuilder,
+    schema: &Schema,
     name: &ast::QualifiedName,
     body: Option<ast::PragmaBody>,
     database_header: Rc<RefCell<DatabaseHeader>>,
@@ -537,18 +599,57 @@ fn translate_pragma(
     });
     let start_offset = program.offset();
     let mut write = false;
+
+    if name.name.0.to_lowercase() == "pragma_list" {
+        list_pragmas(program, init_label, start_offset);
+        return Ok(());
+    }
+
+    let pragma = match PragmaName::from_str(&name.name.0) {
+        Ok(pragma) => pragma,
+        Err(_) => bail_parse_error!("Not a valid pragma name"),
+    };
+
     match body {
         None => {
-            let pragma_name = &name.name.0;
-            query_pragma(pragma_name, database_header.clone(), program)?;
+            query_pragma(pragma, schema, None, database_header.clone(), program)?;
         }
-        Some(ast::PragmaBody::Equals(value)) => {
-            write = true;
-            update_pragma(&name.name.0, value, database_header.clone(), pager, program)?;
-        }
-        Some(ast::PragmaBody::Call(_)) => {
-            todo!()
-        }
+        Some(ast::PragmaBody::Equals(value)) => match pragma {
+            PragmaName::TableInfo => {
+                query_pragma(
+                    pragma,
+                    schema,
+                    Some(value),
+                    database_header.clone(),
+                    program,
+                )?;
+            }
+            _ => {
+                write = true;
+                update_pragma(
+                    pragma,
+                    schema,
+                    value,
+                    database_header.clone(),
+                    pager,
+                    program,
+                )?;
+            }
+        },
+        Some(ast::PragmaBody::Call(value)) => match pragma {
+            PragmaName::TableInfo => {
+                query_pragma(
+                    pragma,
+                    schema,
+                    Some(value),
+                    database_header.clone(),
+                    program,
+                )?;
+            }
+            _ => {
+                todo!()
+            }
+        },
     };
     program.emit_insn(Insn::Halt {
         err_code: 0,
@@ -565,16 +666,13 @@ fn translate_pragma(
 }
 
 fn update_pragma(
-    name: &str,
+    pragma: PragmaName,
+    schema: &Schema,
     value: ast::Expr,
     header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
     program: &mut ProgramBuilder,
 ) -> Result<()> {
-    let pragma = match PragmaName::from_str(name) {
-        Ok(pragma) => pragma,
-        Err(()) => bail_parse_error!("Not a valid pragma name"),
-    };
     match pragma {
         PragmaName::CacheSize => {
             let cache_size = match value {
@@ -593,25 +691,29 @@ fn update_pragma(
             Ok(())
         }
         PragmaName::JournalMode => {
-            query_pragma("journal_mode", header, program)?;
+            query_pragma(PragmaName::JournalMode, schema, None, header, program)?;
             Ok(())
         }
         PragmaName::WalCheckpoint => {
-            query_pragma("wal_checkpoint", header, program)?;
+            query_pragma(PragmaName::WalCheckpoint, schema, None, header, program)?;
             Ok(())
+        }
+        PragmaName::TableInfo => {
+            // because we need control over the write parameter for the transaction,
+            // this should be unreachable. We have to force-call query_pragma before
+            // getting here
+            unreachable!();
         }
     }
 }
 
 fn query_pragma(
-    name: &str,
+    pragma: PragmaName,
+    schema: &Schema,
+    value: Option<ast::Expr>,
     database_header: Rc<RefCell<DatabaseHeader>>,
     program: &mut ProgramBuilder,
 ) -> Result<()> {
-    let pragma = match PragmaName::from_str(name) {
-        Ok(pragma) => pragma,
-        Err(()) => bail_parse_error!("Not a valid pragma name"),
-    };
     let register = program.alloc_register();
     match pragma {
         PragmaName::CacheSize => {
@@ -648,6 +750,76 @@ fn query_pragma(
                 start_reg: register,
                 count: 3,
             });
+        }
+        PragmaName::TableInfo => {
+            let table = match value {
+                Some(ast::Expr::Name(name)) => {
+                    let tbl = normalize_ident(&name.0);
+                    schema.get_table(&tbl)
+                }
+                _ => None,
+            };
+
+            let base_reg = register;
+            program.alloc_register();
+            program.alloc_register();
+            program.alloc_register();
+            program.alloc_register();
+            program.alloc_register();
+            if let Some(table) = table {
+                for (i, column) in table.columns.iter().enumerate() {
+                    // cid
+                    program.emit_insn(Insn::Integer {
+                        value: i as i64,
+                        dest: base_reg,
+                    });
+
+                    // name
+                    program.emit_insn(Insn::String8 {
+                        value: column.name.clone(),
+                        dest: base_reg + 1,
+                    });
+
+                    // type
+                    program.emit_insn(Insn::String8 {
+                        value: column.ty_str.clone(),
+                        dest: base_reg + 2,
+                    });
+
+                    // notnull
+                    program.emit_insn(Insn::Integer {
+                        value: if column.notnull { 1 } else { 0 },
+                        dest: base_reg + 3,
+                    });
+
+                    // dflt_value
+                    match &column.default {
+                        None => {
+                            program.emit_insn(Insn::Null {
+                                dest: base_reg + 4,
+                                dest_end: Some(base_reg + 5),
+                            });
+                        }
+                        Some(expr) => {
+                            program.emit_insn(Insn::String8 {
+                                value: expr.to_string(),
+                                dest: base_reg + 4,
+                            });
+                        }
+                    }
+
+                    // pk
+                    program.emit_insn(Insn::Integer {
+                        value: if column.primary_key { 1 } else { 0 },
+                        dest: base_reg + 5,
+                    });
+
+                    program.emit_insn(Insn::ResultRow {
+                        start_reg: base_reg,
+                        count: 6,
+                    });
+                }
+            }
         }
     }
 

@@ -45,6 +45,8 @@ pub enum LimboError {
     ExtensionError(String),
     #[error("Unbound parameter at index {0}")]
     Unbound(NonZero<usize>),
+    #[error("Runtime error: integer overflow")]
+    IntegerOverflow,
 }
 
 #[macro_export]

@@ -1,4 +1,4 @@
-use limbo_ext::{register_extension, AggFunc, AggregateDerive, ResultCode, Value};
+use limbo_ext::{register_extension, AggFunc, AggregateDerive, Value};
 
 register_extension! {
     aggregates: { Median, Percentile, PercentileCont, PercentileDisc }
@@ -41,7 +41,7 @@ impl AggFunc for Median {
 struct Percentile;
 
 impl AggFunc for Percentile {
-    type State = (Vec<f64>, Option<f64>, Option<()>);
+    type State = (Vec<f64>, Option<f64>, Option<&'static str>);
 
     const NAME: &'static str = "percentile";
     const ARGS: i32 = 2;
@@ -53,13 +53,13 @@ impl AggFunc for Percentile {
             args.get(1).and_then(Value::to_float),
         ) {
             if !(0.0..=100.0).contains(&p) {
-                err_value.get_or_insert(());
+                err_value.get_or_insert("Invalid percentile value");
                 return;
             }
 
             if let Some(existing_p) = *p_value {
                 if (existing_p - p).abs() >= 0.001 {
-                    err_value.get_or_insert(());
+                    err_value.get_or_insert("Inconsistent percentile values across rows");
                     return;
                 }
             } else {
@@ -74,8 +74,8 @@ impl AggFunc for Percentile {
         if values.is_empty() {
             return Value::null();
         }
-        if err_value.is_some() {
-            return Value::error(ResultCode::Error);
+        if let Some(err) = err_value {
+            return Value::error_with_message(err.into());
         }
         if values.len() == 1 {
             return Value::from_float(values[0]);
@@ -101,7 +101,7 @@ impl AggFunc for Percentile {
 struct PercentileCont;
 
 impl AggFunc for PercentileCont {
-    type State = (Vec<f64>, Option<f64>, Option<()>);
+    type State = (Vec<f64>, Option<f64>, Option<&'static str>);
 
     const NAME: &'static str = "percentile_cont";
     const ARGS: i32 = 2;
@@ -113,13 +113,13 @@ impl AggFunc for PercentileCont {
             args.get(1).and_then(Value::to_float),
         ) {
             if !(0.0..=1.0).contains(&p) {
-                err_state.get_or_insert(());
+                err_state.get_or_insert("Percentile value must be between 0.0 and 1.0 inclusive");
                 return;
             }
 
             if let Some(existing_p) = *p_value {
                 if (existing_p - p).abs() >= 0.001 {
-                    err_state.get_or_insert(());
+                    err_state.get_or_insert("Inconsistent percentile values across rows");
                     return;
                 }
             } else {
@@ -134,8 +134,8 @@ impl AggFunc for PercentileCont {
         if values.is_empty() {
             return Value::null();
         }
-        if err_state.is_some() {
-            return Value::error(ResultCode::Error);
+        if let Some(err) = err_state {
+            return Value::error_with_message(err.into());
         }
         if values.len() == 1 {
             return Value::from_float(values[0]);
@@ -161,7 +161,7 @@ impl AggFunc for PercentileCont {
 struct PercentileDisc;
 
 impl AggFunc for PercentileDisc {
-    type State = (Vec<f64>, Option<f64>, Option<()>);
+    type State = (Vec<f64>, Option<f64>, Option<&'static str>);
 
     const NAME: &'static str = "percentile_disc";
     const ARGS: i32 = 2;
@@ -175,8 +175,8 @@ impl AggFunc for PercentileDisc {
         if values.is_empty() {
             return Value::null();
         }
-        if err_value.is_some() {
-            return Value::error(ResultCode::Error);
+        if let Some(err) = err_value {
+            return Value::error_with_message(err.into());
         }
 
         let p = p_value.unwrap();

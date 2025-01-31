@@ -444,6 +444,22 @@ pub fn translate_condition_expr(
                 );
             }
         }
+        ast::Expr::NotNull(expr) => {
+            let cur_reg = program.alloc_register();
+            translate_expr(program, Some(referenced_tables), expr, cur_reg, resolver)?;
+            program.emit_insn(Insn::IsNull {
+                src: cur_reg,
+                target_pc: condition_metadata.jump_target_when_false,
+            });
+        }
+        ast::Expr::IsNull(expr) => {
+            let cur_reg = program.alloc_register();
+            translate_expr(program, Some(referenced_tables), expr, cur_reg, resolver)?;
+            program.emit_insn(Insn::NotNull {
+                reg: cur_reg,
+                target_pc: condition_metadata.jump_target_when_false,
+            });
+        }
         _ => todo!("op {:?} not implemented", expr),
     }
     Ok(())
@@ -937,6 +953,33 @@ pub fn translate_expr(
                         target_register,
                         func_ctx,
                     ),
+                    JsonFunc::JsonPatch => {
+                        let args = expect_arguments_exact!(args, 2, j);
+                        translate_function(
+                            program,
+                            args,
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        )
+                    }
+                    JsonFunc::JsonRemove => {
+                        if let Some(args) = args {
+                            for arg in args.iter() {
+                                // register containing result of each argument expression
+                                let _ =
+                                    translate_and_mark(program, referenced_tables, arg, resolver)?;
+                            }
+                        }
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: target_register + 1,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
                 },
                 Func::Scalar(srf) => {
                     match srf {
@@ -1492,6 +1535,28 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::SqliteSourceId => {
+                            if args.is_some() {
+                                crate::bail_parse_error!(
+                                    "sqlite_source_id function with arguments"
+                                );
+                            }
+
+                            let output_register = program.alloc_register();
+                            program.emit_insn(Insn::Function {
+                                constant_mask: 0,
+                                start_reg: output_register,
+                                dest: output_register,
+                                func: func_ctx,
+                            });
+
+                            program.emit_insn(Insn::Copy {
+                                src_reg: output_register,
+                                dst_reg: target_register,
+                                amount: 0,
+                            });
+                            Ok(target_register)
+                        }
                         ScalarFunc::Replace => {
                             let args = if let Some(args) = args {
                                 if !args.len() == 3 {
@@ -1626,7 +1691,12 @@ pub fn translate_expr(
             }
         }
         ast::Expr::FunctionCallStar { .. } => todo!(),
-        ast::Expr::Id(_) => unreachable!("Id should be resolved to a Column before translation"),
+        ast::Expr::Id(id) => {
+            crate::bail_parse_error!(
+                "no such column: {} - should this be a string literal in single-quotes?",
+                id.0
+            )
+        }
         ast::Expr::Column {
             database: _,
             table,
@@ -1768,22 +1838,33 @@ pub fn translate_expr(
                 UnaryOperator::Negative | UnaryOperator::Positive,
                 ast::Expr::Literal(ast::Literal::Numeric(numeric_value)),
             ) => {
-                let maybe_int = numeric_value.parse::<i64>();
                 let multiplier = if let UnaryOperator::Negative = op {
                     -1
                 } else {
                     1
                 };
-                if let Ok(value) = maybe_int {
+
+                // Special case: if we're negating "9223372036854775808", this is exactly MIN_INT64
+                // If we don't do this -1 * 9223372036854775808 will overflow and parse will fail and trigger conversion to Real.
+                if multiplier == -1 && numeric_value == "9223372036854775808" {
                     program.emit_insn(Insn::Integer {
-                        value: value * multiplier,
+                        value: i64::MIN,
                         dest: target_register,
                     });
                 } else {
-                    program.emit_insn(Insn::Real {
-                        value: multiplier as f64 * numeric_value.parse::<f64>()?,
-                        dest: target_register,
-                    });
+                    let maybe_int = numeric_value.parse::<i64>();
+                    if let Ok(value) = maybe_int {
+                        program.emit_insn(Insn::Integer {
+                            value: value * multiplier,
+                            dest: target_register,
+                        });
+                    } else {
+                        let value = numeric_value.parse::<f64>()?;
+                        program.emit_insn(Insn::Real {
+                            value: value * multiplier as f64,
+                            dest: target_register,
+                        });
+                    }
                 }
                 Ok(target_register)
             }
