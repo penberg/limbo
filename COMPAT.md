@@ -487,7 +487,7 @@ Modifiers:
 | Next           | No     |         |
 | NextAsync      | Yes    |         |
 | NextAwait      | Yes    |         |
-| Noop           | No     |         |
+| Noop           | Yes     |         |
 | Not            | Yes    |         |
 | NotExists      | Yes    |         |
 | NotFound       | No     |         |

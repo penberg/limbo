@@ -569,6 +569,7 @@ pub enum Insn {
         rhs: usize,
         dest: usize,
     },
+    Noop,
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {

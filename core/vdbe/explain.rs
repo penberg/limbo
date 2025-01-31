@@ -1154,6 +1154,15 @@ pub fn insn_to_str(
                 0,
                 format!("r[{}]=(r[{}] || r[{}])", dest, lhs, rhs),
             ),
+            Insn::Noop => (
+                "Noop",
+                0,
+                0,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                String::new(),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",
