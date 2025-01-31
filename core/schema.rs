@@ -176,6 +176,7 @@ impl PseudoTable {
         self.columns.push(Column {
             name: normalize_ident(name),
             ty,
+            ty_str: ty.to_string(),
             primary_key,
             is_rowid_alias: false,
             notnull: false,
@@ -245,30 +246,42 @@ fn create_table(
                 // and the value of this column are the same.
                 // https://www.sqlite.org/lang_createtable.html#rowids_and_the_integer_primary_key
                 let mut typename_exactly_integer = false;
-                let ty = match col_def.col_type {
+                let (ty, ty_str) = match col_def.col_type {
                     Some(data_type) => {
+                        let s = data_type.name.as_str();
+                        let ty_str = if matches!(
+                            s.to_uppercase().as_str(),
+                            "TEXT" | "INT" | "INTEGER" | "BLOB" | "REAL"
+                        ) {
+                            s.to_uppercase().to_string()
+                        } else {
+                            s.to_string()
+                        };
+
                         // https://www.sqlite.org/datatype3.html
-                        let type_name = data_type.name.as_str().to_uppercase();
+                        let type_name = ty_str.to_uppercase();
                         if type_name.contains("INT") {
                             typename_exactly_integer = type_name == "INTEGER";
-                            Type::Integer
+                            (Type::Integer, ty_str)
                         } else if type_name.contains("CHAR")
                             || type_name.contains("CLOB")
                             || type_name.contains("TEXT")
                         {
-                            Type::Text
-                        } else if type_name.contains("BLOB") || type_name.is_empty() {
-                            Type::Blob
+                            (Type::Text, ty_str)
+                        } else if type_name.contains("BLOB") {
+                            (Type::Blob, ty_str)
+                        } else if type_name.is_empty() {
+                            (Type::Blob, "".to_string())
                         } else if type_name.contains("REAL")
                             || type_name.contains("FLOA")
                             || type_name.contains("DOUB")
                         {
-                            Type::Real
+                            (Type::Real, ty_str)
                         } else {
-                            Type::Numeric
+                            (Type::Numeric, ty_str)
                         }
                     }
-                    None => Type::Null,
+                    None => (Type::Null, "".to_string()),
                 };
 
                 let mut default = None;
@@ -298,6 +311,7 @@ fn create_table(
                 cols.push(Column {
                     name: normalize_ident(&name),
                     ty,
+                    ty_str,
                     primary_key,
                     is_rowid_alias: typename_exactly_integer && primary_key,
                     notnull,
@@ -348,6 +362,8 @@ pub fn _build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
 pub struct Column {
     pub name: String,
     pub ty: Type,
+    // many sqlite operations like table_info retain the original string
+    pub ty_str: String,
     pub primary_key: bool,
     pub is_rowid_alias: bool,
     pub notnull: bool,
@@ -388,6 +404,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
             Column {
                 name: "type".to_string(),
                 ty: Type::Text,
+                ty_str: "TEXT".to_string(),
                 primary_key: false,
                 is_rowid_alias: false,
                 notnull: false,
@@ -396,6 +413,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
             Column {
                 name: "name".to_string(),
                 ty: Type::Text,
+                ty_str: "TEXT".to_string(),
                 primary_key: false,
                 is_rowid_alias: false,
                 notnull: false,
@@ -404,6 +422,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
             Column {
                 name: "tbl_name".to_string(),
                 ty: Type::Text,
+                ty_str: "TEXT".to_string(),
                 primary_key: false,
                 is_rowid_alias: false,
                 notnull: false,
@@ -412,6 +431,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
             Column {
                 name: "rootpage".to_string(),
                 ty: Type::Integer,
+                ty_str: "INT".to_string(),
                 primary_key: false,
                 is_rowid_alias: false,
                 notnull: false,
@@ -420,6 +440,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
             Column {
                 name: "sql".to_string(),
                 ty: Type::Text,
+                ty_str: "TEXT".to_string(),
                 primary_key: false,
                 is_rowid_alias: false,
                 notnull: false,
@@ -770,6 +791,51 @@ mod tests {
     }
 
     #[test]
+    pub fn test_col_type_string_integer() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a InTeGeR);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.ty_str, "INTEGER");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_col_type_string_int() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a InT);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.ty_str, "INT");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_col_type_string_blob() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a bLoB);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.ty_str, "BLOB");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_col_type_string_empty() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.ty_str, "");
+        Ok(())
+    }
+
+    #[test]
+    pub fn test_col_type_string_some_nonsense() -> Result<()> {
+        let sql = r#"CREATE TABLE t1 (a someNonsenseName);"#;
+        let table = BTreeTable::from_sql(sql, 0)?;
+        let column = table.get_column("a").unwrap().1;
+        assert_eq!(column.ty_str, "someNonsenseName");
+        Ok(())
+    }
+
+    #[test]
     pub fn test_sqlite_schema() {
         let expected = r#"CREATE TABLE sqlite_schema (
   type TEXT,
@@ -841,6 +907,7 @@ mod tests {
             columns: vec![Column {
                 name: "a".to_string(),
                 ty: Type::Integer,
+                ty_str: "INT".to_string(),
                 primary_key: false,
                 is_rowid_alias: false,
                 notnull: false,
