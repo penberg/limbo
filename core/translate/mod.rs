@@ -548,7 +548,7 @@ fn translate_pragma(
 
     let pragma = match PragmaName::from_str(&name.name.0) {
         Ok(pragma) => pragma,
-        Err(()) => bail_parse_error!("Not a valid pragma name"),
+        Err(_) => bail_parse_error!("Not a valid pragma name"),
     };
 
     match body {

@@ -32,6 +32,8 @@ bitflags = "2.0"
 uncased = "0.9.10"
 indexmap = "2.0"
 miette = "7.4.0"
+strum = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"
 
 [dev-dependencies]
 env_logger = { version = "0.11", default-features = false }
