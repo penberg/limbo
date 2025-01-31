@@ -206,23 +206,9 @@ fn emit_schema_entry(
         prev_largest_reg: 0,
     });
 
-    let type_reg = program.alloc_register();
-    program.emit_insn(Insn::String8 {
-        value: entry_type.as_str().to_string(),
-        dest: type_reg,
-    });
-
-    let name_reg = program.alloc_register();
-    program.emit_insn(Insn::String8 {
-        value: name.to_string(),
-        dest: name_reg,
-    });
-
-    let tbl_name_reg = program.alloc_register();
-    program.emit_insn(Insn::String8 {
-        value: tbl_name.to_string(),
-        dest: tbl_name_reg,
-    });
+    let type_reg = program.emit_string8_new_reg(entry_type.as_str().to_string());
+    program.emit_string8_new_reg(name.to_string());
+    program.emit_string8_new_reg(tbl_name.to_string());
 
     let rootpage_reg = program.alloc_register();
     program.emit_insn(Insn::Copy {
@@ -233,15 +219,9 @@ fn emit_schema_entry(
 
     let sql_reg = program.alloc_register();
     if let Some(sql) = sql {
-        program.emit_insn(Insn::String8 {
-            value: sql,
-            dest: sql_reg,
-        });
+        program.emit_string8(sql, sql_reg);
     } else {
-        program.emit_insn(Insn::Null {
-            dest: sql_reg,
-            dest_end: None,
-        });
+        program.emit_null(sql_reg);
     }
 
     let record_reg = program.alloc_register();
@@ -407,21 +387,13 @@ fn translate_create_table(
 ) -> Result<()> {
     if schema.get_table(tbl_name.name.0.as_str()).is_some() {
         if if_not_exists {
-            let init_label = program.allocate_label();
-            program.emit_insn(Insn::Init {
-                target_pc: init_label,
-            });
+            let init_label = program.emit_init();
             let start_offset = program.offset();
-            program.emit_insn(Insn::Halt {
-                err_code: 0,
-                description: String::new(),
-            });
+            program.emit_halt();
             program.resolve_label(init_label, program.offset());
-            program.emit_insn(Insn::Transaction { write: true });
+            program.emit_transaction(true);
             program.emit_constant_insns();
-            program.emit_insn(Insn::Goto {
-                target_pc: start_offset,
-            });
+            program.emit_goto(start_offset);
 
             return Ok(());
         }
@@ -431,10 +403,7 @@ fn translate_create_table(
     let sql = create_table_body_to_str(&tbl_name, &body);
 
     let parse_schema_label = program.allocate_label();
-    let init_label = program.allocate_label();
-    program.emit_insn(Insn::Init {
-        target_pc: init_label,
-    });
+    let init_label = program.emit_init();
     let start_offset = program.offset();
     // TODO: ReadCookie
     // TODO: If
@@ -533,16 +502,11 @@ fn translate_create_table(
     });
 
     // TODO: SqlExec
-    program.emit_insn(Insn::Halt {
-        err_code: 0,
-        description: String::new(),
-    });
+    program.emit_halt();
     program.resolve_label(init_label, program.offset());
-    program.emit_insn(Insn::Transaction { write: true });
+    program.emit_transaction(true);
     program.emit_constant_insns();
-    program.emit_insn(Insn::Goto {
-        target_pc: start_offset,
-    });
+    program.emit_goto(start_offset);
 
     Ok(())
 }
@@ -561,25 +525,14 @@ fn list_pragmas(
     start_offset: BranchOffset,
 ) {
     for x in PragmaName::iter() {
-        let register = program.alloc_register();
-        program.emit_insn(Insn::String8 {
-            value: x.to_string(),
-            dest: register,
-        });
-        program.emit_insn(Insn::ResultRow {
-            start_reg: register,
-            count: 1,
-        });
+        let register = program.emit_string8_new_reg(x.to_string());
+        program.emit_result_row(register, 1);
     }
-    program.emit_insn(Insn::Halt {
-        err_code: 0,
-        description: String::new(),
-    });
+
+    program.emit_halt();
     program.resolve_label(init_label, program.offset());
     program.emit_constant_insns();
-    program.emit_insn(Insn::Goto {
-        target_pc: start_offset,
-    });
+    program.emit_goto(start_offset);
 }
 
 fn translate_pragma(
@@ -590,10 +543,7 @@ fn translate_pragma(
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
 ) -> Result<()> {
-    let init_label = program.allocate_label();
-    program.emit_insn(Insn::Init {
-        target_pc: init_label,
-    });
+    let init_label = program.emit_init();
     let start_offset = program.offset();
     let mut write = false;
 
@@ -648,16 +598,11 @@ fn translate_pragma(
             }
         },
     };
-    program.emit_insn(Insn::Halt {
-        err_code: 0,
-        description: String::new(),
-    });
+    program.emit_halt();
     program.resolve_label(init_label, program.offset());
-    program.emit_insn(Insn::Transaction { write });
+    program.emit_transaction(write);
     program.emit_constant_insns();
-    program.emit_insn(Insn::Goto {
-        target_pc: start_offset,
-    });
+    program.emit_goto(start_offset);
 
     Ok(())
 }
@@ -714,24 +659,15 @@ fn query_pragma(
     let register = program.alloc_register();
     match pragma {
         PragmaName::CacheSize => {
-            program.emit_insn(Insn::Integer {
-                value: database_header.borrow().default_page_cache_size.into(),
-                dest: register,
-            });
-            program.emit_insn(Insn::ResultRow {
-                start_reg: register,
-                count: 1,
-            });
+            program.emit_int(
+                database_header.borrow().default_page_cache_size.into(),
+                register,
+            );
+            program.emit_result_row(register, 1);
         }
         PragmaName::JournalMode => {
-            program.emit_insn(Insn::String8 {
-                value: "wal".into(),
-                dest: register,
-            });
-            program.emit_insn(Insn::ResultRow {
-                start_reg: register,
-                count: 1,
-            });
+            program.emit_string8("wal".into(), register);
+            program.emit_result_row(register, 1);
         }
         PragmaName::WalCheckpoint => {
             // Checkpoint uses 3 registers: P1, P2, P3. Ref Insn::Checkpoint for more info.
@@ -743,10 +679,7 @@ fn query_pragma(
                 checkpoint_mode: CheckpointMode::Passive,
                 dest: register,
             });
-            program.emit_insn(Insn::ResultRow {
-                start_reg: register,
-                count: 3,
-            });
+            program.emit_result_row(register, 3);
         }
         PragmaName::TableInfo => {
             let table = match value {
@@ -766,55 +699,30 @@ fn query_pragma(
             if let Some(table) = table {
                 for (i, column) in table.columns.iter().enumerate() {
                     // cid
-                    program.emit_insn(Insn::Integer {
-                        value: i as i64,
-                        dest: base_reg,
-                    });
-
+                    program.emit_int(i as i64, base_reg);
                     // name
-                    program.emit_insn(Insn::String8 {
-                        value: column.name.clone(),
-                        dest: base_reg + 1,
-                    });
+                    program.emit_string8(column.name.clone(), base_reg + 1);
 
                     // type
-                    program.emit_insn(Insn::String8 {
-                        value: column.ty_str.clone(),
-                        dest: base_reg + 2,
-                    });
+                    program.emit_string8(column.ty_str.clone(), base_reg + 2);
 
                     // notnull
-                    program.emit_insn(Insn::Integer {
-                        value: if column.notnull { 1 } else { 0 },
-                        dest: base_reg + 3,
-                    });
+                    program.emit_bool(column.notnull, base_reg + 3);
 
                     // dflt_value
                     match &column.default {
                         None => {
-                            program.emit_insn(Insn::Null {
-                                dest: base_reg + 4,
-                                dest_end: Some(base_reg + 5),
-                            });
+                            program.emit_null(base_reg + 4);
                         }
                         Some(expr) => {
-                            program.emit_insn(Insn::String8 {
-                                value: expr.to_string(),
-                                dest: base_reg + 4,
-                            });
+                            program.emit_string8(expr.to_string(), base_reg + 4);
                         }
                     }
 
                     // pk
-                    program.emit_insn(Insn::Integer {
-                        value: if column.primary_key { 1 } else { 0 },
-                        dest: base_reg + 5,
-                    });
+                    program.emit_bool(column.primary_key, base_reg + 5);
 
-                    program.emit_insn(Insn::ResultRow {
-                        start_reg: base_reg,
-                        count: 6,
-                    });
+                    program.emit_result_row(base_reg, 6);
                 }
             }
         }
