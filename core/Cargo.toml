@@ -66,6 +66,7 @@ limbo_vector = { path = "../extensions/vector", optional = true, features = ["st
 limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["static"] }
 limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
 miette = "7.4.0"
+strum = "0.26"
 
 [build-dependencies]
 chrono = "0.4.38"
