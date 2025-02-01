@@ -8,7 +8,8 @@ use rand::seq::SliceRandom as _;
 use rand::Rng;
 
 use super::property::Remaining;
-use super::{backtrack, frequency, pick};
+use super::table::LikeValue;
+use super::{backtrack, frequency, pick, ArbitraryFromMaybe};
 
 impl Arbitrary for Create {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
@@ -287,24 +288,48 @@ fn produce_true_predicate<R: Rng>(rng: &mut R, (t, row): (&Table, &Vec<Value>)) 
     let column_index = rng.gen_range(0..t.columns.len());
     let column = &t.columns[column_index];
     let value = &row[column_index];
-    one_of(
+    backtrack(
         vec![
-            Box::new(|_| Predicate::Eq(column.name.clone(), value.clone())),
-            Box::new(|rng| {
-                let v = loop {
+            (
+                1,
+                Box::new(|_| Some(Predicate::Eq(column.name.clone(), value.clone()))),
+            ),
+            (
+                1,
+                Box::new(|rng| {
                     let v = Value::arbitrary_from(rng, &column.column_type);
-                    if &v != value {
-                        break v;
+                    if &v == value {
+                        None
+                    } else {
+                        Some(Predicate::Neq(column.name.clone(), v))
                     }
-                };
-                Predicate::Neq(column.name.clone(), v)
-            }),
-            Box::new(|rng| {
-                Predicate::Gt(column.name.clone(), LTValue::arbitrary_from(rng, value).0)
-            }),
-            Box::new(|rng| {
-                Predicate::Lt(column.name.clone(), GTValue::arbitrary_from(rng, value).0)
-            }),
+                }),
+            ),
+            (
+                1,
+                Box::new(|rng| {
+                    Some(Predicate::Gt(
+                        column.name.clone(),
+                        LTValue::arbitrary_from(rng, value).0,
+                    ))
+                }),
+            ),
+            (
+                1,
+                Box::new(|rng| {
+                    Some(Predicate::Lt(
+                        column.name.clone(),
+                        GTValue::arbitrary_from(rng, value).0,
+                    ))
+                }),
+            ),
+            (
+                1,
+                Box::new(|rng| {
+                    LikeValue::arbitrary_from_maybe(rng, value)
+                        .map(|like| Predicate::Like(column.name.clone(), like.0))
+                }),
+            ),
         ],
         rng,
     )

@@ -1415,6 +1415,8 @@ dependencies = [
  "notify",
  "rand",
  "rand_chacha",
+ "regex",
+ "regex-syntax",
  "serde",
  "serde_json",
  "tempfile",

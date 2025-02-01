@@ -1,7 +1,4 @@
-use std::{
-    iter::Sum,
-    ops::SubAssign,
-};
+use std::{iter::Sum, ops::SubAssign};
 
 use anarchist_readable_name_generator_lib::readable_name_custom;
 use rand::{distributions::uniform::SampleUniform, Rng};
@@ -26,6 +23,13 @@ pub trait Arbitrary {
 /// or a predicate satisfying a given table row.
 pub trait ArbitraryFrom<T> {
     fn arbitrary_from<R: Rng>(rng: &mut R, t: T) -> Self;
+}
+
+/// ArbitraryFromMaybe trait for fallibally generating random values from a given value
+pub trait ArbitraryFromMaybe<T> {
+    fn arbitrary_from_maybe<R: Rng>(rng: &mut R, t: T) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 /// Frequency is a helper function for composing different generators with different frequency
