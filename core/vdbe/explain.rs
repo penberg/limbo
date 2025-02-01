@@ -1034,14 +1034,14 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
-            Insn::IsNull { src, target_pc } => (
+            Insn::IsNull { reg, target_pc } => (
                 "IsNull",
-                *src as i32,
+                *reg as i32,
                 target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if (r[{}]==NULL) goto {}", src, target_pc.to_debug_int()),
+                format!("if (r[{}]==NULL) goto {}", reg, target_pc.to_debug_int()),
             ),
             Insn::ParseSchema { db, where_clause } => (
                 "ParseSchema",

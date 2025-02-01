@@ -448,7 +448,7 @@ pub fn translate_condition_expr(
             let cur_reg = program.alloc_register();
             translate_expr(program, Some(referenced_tables), expr, cur_reg, resolver)?;
             program.emit_insn(Insn::IsNull {
-                src: cur_reg,
+                reg: cur_reg,
                 target_pc: condition_metadata.jump_target_when_false,
             });
         }

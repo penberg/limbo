@@ -510,7 +510,7 @@ pub enum Insn {
     /// Check if the register is null.
     IsNull {
         /// Source register (P1).
-        src: usize,
+        reg: usize,
 
         /// Jump to this PC if the register is null (P2).
         target_pc: BranchOffset,

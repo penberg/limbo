@@ -2389,8 +2389,8 @@ impl Program {
                     cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
-                Insn::IsNull { src, target_pc } => {
-                    if matches!(state.registers[*src], OwnedValue::Null) {
+                Insn::IsNull { reg, target_pc } => {
+                    if matches!(state.registers[*reg], OwnedValue::Null) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
