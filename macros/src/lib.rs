@@ -343,6 +343,9 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
             unsafe extern "C" fn #connect_fn_name(
                 db: *const ::std::ffi::c_void,
             ) -> ::limbo_ext::ResultCode {
+                if db.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
                 let api = unsafe { &*(db as *const ExtensionApi) };
                 <#struct_name as ::limbo_ext::VTabModule>::connect(api)
             }
@@ -360,6 +363,9 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
                 argc: i32,
                 argv: *const ::limbo_ext::Value,
             ) -> ::limbo_ext::ResultCode {
+                if cursor.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
                 let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
                 let args = std::slice::from_raw_parts(argv, argc as usize);
                 <#struct_name as ::limbo_ext::VTabModule>::filter(cursor, argc, args)
@@ -370,6 +376,9 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
                 cursor: *mut ::std::ffi::c_void,
                 idx: u32,
             ) -> ::limbo_ext::Value {
+                if cursor.is_null() {
+                    return ::limbo_ext::Value::error(ResultCode::Error);
+                }
                 let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
                 <#struct_name as ::limbo_ext::VTabModule>::column(cursor, idx)
             }
@@ -378,6 +387,9 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
             unsafe extern "C" fn #next_fn_name(
                 cursor: *mut ::std::ffi::c_void,
             ) -> ::limbo_ext::ResultCode {
+                if cursor.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
                 let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
                 <#struct_name as ::limbo_ext::VTabModule>::next(cursor)
             }
@@ -386,6 +398,9 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
             unsafe extern "C" fn #eof_fn_name(
                 cursor: *mut ::std::ffi::c_void,
             ) -> bool {
+                if cursor.is_null() {
+                    return true;
+                }
                 let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
                 <#struct_name as ::limbo_ext::VTabModule>::eof(cursor)
             }
@@ -399,7 +414,7 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
                 }
 
                 let api = &*api;
-                let name = <#struct_name as ::limbo_ext::VTabModule>::name();
+                let name = <#struct_name as ::limbo_ext::VTabModule>::NAME;
                 // name needs to be a c str FFI compatible, NOT CString
                 let name_c = std::ffi::CString::new(name).unwrap();
 
@@ -493,9 +508,9 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
                 let result = unsafe{ #vtab_ident::#register_fn(api)};
                 if result == ::limbo_ext::ResultCode::OK {
                     let result = <#vtab_ident as ::limbo_ext::VTabModule>::connect(api);
-                    return result;
-                } else {
-                    return result;
+                    if !result.is_ok() {
+                        return result;
+                     }
                 }
             }
         }
@@ -535,5 +550,6 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
                 ::limbo_ext::ResultCode::OK
             }
         };
+
     TokenStream::from(expanded)
 }

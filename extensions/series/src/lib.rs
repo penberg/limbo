@@ -1,10 +1,18 @@
 use limbo_ext::{
     register_extension, ExtensionApi, ResultCode, VTabCursor, VTabModule, VTabModuleDerive, Value,
-    ValueType,
 };
 
 register_extension! {
     vtabs: { GenerateSeriesVTab }
+}
+
+macro_rules! try_option {
+    ($expr:expr, $err:expr) => {
+        match $expr {
+            Some(val) => val,
+            None => return $err,
+        }
+    };
 }
 
 /// A virtual table that generates a sequence of integers
@@ -13,9 +21,7 @@ struct GenerateSeriesVTab;
 
 impl VTabModule for GenerateSeriesVTab {
     type VCursor = GenerateSeriesCursor;
-    fn name() -> &'static str {
-        "generate_series"
-    }
+    const NAME: &'static str = "generate_series";
 
     fn connect(api: &ExtensionApi) -> ResultCode {
         // Create table schema
@@ -25,8 +31,7 @@ impl VTabModule for GenerateSeriesVTab {
             stop INTEGER HIDDEN,
             step INTEGER HIDDEN
         )";
-        let name = Self::name();
-        api.declare_virtual_table(name, sql)
+        api.declare_virtual_table(Self::NAME, sql)
     }
 
     fn open() -> Self::VCursor {
@@ -43,35 +48,19 @@ impl VTabModule for GenerateSeriesVTab {
         if arg_count == 0 || arg_count > 3 {
             return ResultCode::InvalidArgs;
         }
-        let start = {
-            if args[0].value_type() == ValueType::Integer {
-                args[0].to_integer().unwrap()
-            } else {
-                return ResultCode::InvalidArgs;
-            }
-        };
-        let stop = if args.len() == 1 {
-            i64::MAX
-        } else {
-            if args[1].value_type() == ValueType::Integer {
-                args[1].to_integer().unwrap()
-            } else {
-                return ResultCode::InvalidArgs;
-            }
-        };
-        let step = if args.len() <= 2 {
-            1
-        } else {
-            if args[2].value_type() == ValueType::Integer {
-                args[2].to_integer().unwrap()
-            } else {
-                return ResultCode::InvalidArgs;
-            }
-        };
+        let start = try_option!(args[0].to_integer(), ResultCode::InvalidArgs);
+        let stop = try_option!(
+            args.get(1).map(|v| v.to_integer().unwrap_or(i64::MAX)),
+            ResultCode::InvalidArgs
+        );
+        let step = try_option!(
+            args.get(2).map(|v| v.to_integer().unwrap_or(1)),
+            ResultCode::InvalidArgs
+        );
         cursor.start = start;
         cursor.current = start;
-        cursor.stop = stop;
         cursor.step = step;
+        cursor.stop = stop;
         ResultCode::OK
     }
 

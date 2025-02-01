@@ -131,6 +131,7 @@ impl Database {
             return ResultCode::Error;
         };
         let vtab_module = self.vtab_modules.get(name).unwrap().clone();
+
         let vtab = VirtualTable {
             name: name.to_string(),
             implementation: vtab_module,
@@ -171,6 +172,10 @@ impl Database {
         #[cfg(feature = "crypto")]
         if unsafe { !limbo_crypto::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register crypto extension".to_string());
+        }
+        #[cfg(feature = "series")]
+        if unsafe { !limbo_series::register_extension_static(&ext_api).is_ok() } {
+            return Err("Failed to register series extension".to_string());
         }
         Ok(())
     }

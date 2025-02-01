@@ -280,6 +280,7 @@ fn get_cursor_as_virtual_mut<'long, 'short>(
         .as_virtual_mut();
     cursor
 }
+
 struct Bitfield<const N: usize>([u64; N]);
 
 impl<const N: usize> Bitfield<N> {

@@ -1,6 +1,5 @@
+use sqlite3_parser::ast::{self, CreateTableBody, Expr, FunctionTail, Literal};
 use std::{rc::Rc, sync::Arc};
-
-use sqlite3_parser::ast::{CreateTableBody, Expr, FunctionTail, Literal};
 
 use crate::{
     schema::{self, Column, Schema, Type},
@@ -308,7 +307,7 @@ pub fn exprs_are_equivalent(expr1: &Expr, expr2: &Expr) -> bool {
     }
 }
 
-pub fn columns_from_create_table_body(body: CreateTableBody) -> Result<Vec<Column>, ()> {
+pub fn columns_from_create_table_body(body: ast::CreateTableBody) -> Result<Vec<Column>, ()> {
     let CreateTableBody::ColumnsAndConstraints { columns, .. } = body else {
         return Err(());
     };

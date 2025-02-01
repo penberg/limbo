@@ -99,8 +99,8 @@ pub type VtabFnEof = unsafe extern "C" fn(cursor: *mut c_void) -> bool;
 
 pub trait VTabModule: 'static {
     type VCursor: VTabCursor;
+    const NAME: &'static str;
 
-    fn name() -> &'static str;
     fn connect(api: &ExtensionApi) -> ResultCode;
     fn open() -> Self::VCursor;
     fn filter(cursor: &mut Self::VCursor, arg_count: i32, args: &[Value]) -> ResultCode;
