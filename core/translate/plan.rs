@@ -9,7 +9,6 @@ use crate::{
     function::AggFunc,
     schema::{BTreeTable, Column, Index, Table},
     vdbe::BranchOffset,
-    Result,
 };
 use crate::{
     schema::{PseudoTable, Type},
@@ -31,6 +30,28 @@ pub struct GroupBy {
     pub having: Option<Vec<ast::Expr>>,
 }
 
+/// In a query plan, WHERE clause conditions and JOIN conditions are all folded into a vector of JoinAwareConditionExpr.
+/// This is done so that we can evaluate the conditions at the correct loop depth.
+/// We also need to keep track of whether the condition came from an OUTER JOIN. Take this example:
+/// SELECT * FROM users u LEFT JOIN products p ON u.id = 5.
+/// Even though the condition only refers to 'u', we CANNOT evaluate it at the users loop, because we need to emit NULL
+/// values for the columns of 'p', for EVERY row in 'u', instead of completely skipping any rows in 'u' where the condition is false.
+#[derive(Debug, Clone)]
+pub struct JoinAwareConditionExpr {
+    /// The original condition expression.
+    pub expr: ast::Expr,
+    /// Is this condition originally from an OUTER JOIN?
+    /// If so, we need to evaluate it at the loop of the right table in that JOIN,
+    /// regardless of which tables it references.
+    /// We also cannot e.g. short circuit the entire query in the optimizer if the condition is statically false.
+    pub from_outer_join: bool,
+    /// The loop index where to evaluate the condition.
+    /// For example, in `SELECT * FROM u JOIN p WHERE u.id = 5`, the condition can already be evaluated at the first loop (idx 0),
+    /// because that is the rightmost table that it references.
+    pub eval_at_loop: usize,
+}
+
+/// A query plan is either a SELECT or a DELETE (for now)
 #[derive(Debug, Clone)]
 pub enum Plan {
     Select(SelectPlan),
@@ -51,12 +72,13 @@ pub enum SelectQueryType {
 
 #[derive(Debug, Clone)]
 pub struct SelectPlan {
-    /// A tree of sources (tables).
-    pub source: SourceOperator,
+    /// List of table references in loop order, outermost first.
+    pub table_references: Vec<TableReference>,
     /// the columns inside SELECT ... FROM
     pub result_columns: Vec<ResultSetColumn>,
-    /// where clause split into a vec at 'AND' boundaries.
-    pub where_clause: Option<Vec<ast::Expr>>,
+    /// where clause split into a vec at 'AND' boundaries. all join conditions also get shoved in here,
+    /// and we keep track of which join they came from (mainly for OUTER JOIN processing)
+    pub where_clause: Vec<JoinAwareConditionExpr>,
     /// group by clause
     pub group_by: Option<GroupBy>,
     /// order by clause
@@ -67,8 +89,6 @@ pub struct SelectPlan {
     pub limit: Option<isize>,
     /// offset clause
     pub offset: Option<isize>,
-    /// all the tables referenced in the query
-    pub referenced_tables: Vec<TableReference>,
     /// all the indexes available
     pub available_indexes: Vec<Rc<Index>>,
     /// query contains a constant condition that is always false
@@ -80,33 +100,22 @@ pub struct SelectPlan {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DeletePlan {
-    /// A tree of sources (tables).
-    pub source: SourceOperator,
+    /// List of table references. Delete is always a single table.
+    pub table_references: Vec<TableReference>,
     /// the columns inside SELECT ... FROM
     pub result_columns: Vec<ResultSetColumn>,
     /// where clause split into a vec at 'AND' boundaries.
-    pub where_clause: Option<Vec<ast::Expr>>,
+    pub where_clause: Vec<JoinAwareConditionExpr>,
     /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// limit clause
     pub limit: Option<isize>,
     /// offset clause
     pub offset: Option<isize>,
-    /// all the tables referenced in the query
-    pub referenced_tables: Vec<TableReference>,
     /// all the indexes available
     pub available_indexes: Vec<Rc<Index>>,
     /// query contains a constant condition that is always false
     pub contains_constant_false_condition: bool,
-}
-
-impl Display for Plan {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Select(select_plan) => write!(f, "{}", select_plan.source),
-            Delete(delete_plan) => write!(f, "{}", delete_plan.source),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,177 +124,126 @@ pub enum IterationDirection {
     Backwards,
 }
 
-impl SourceOperator {
-    pub fn select_star(&self, out_columns: &mut Vec<ResultSetColumn>) {
-        for (table_index, col, idx) in self.select_star_helper() {
-            out_columns.push(ResultSetColumn {
-                name: col.name.clone(),
-                expr: ast::Expr::Column {
-                    database: None,
-                    table: table_index,
-                    column: idx,
-                    is_rowid_alias: col.is_rowid_alias,
-                },
-                contains_aggregates: false,
-            });
-        }
-    }
-
-    /// All this ceremony is required to deduplicate columns when joining with USING
-    fn select_star_helper(&self) -> Vec<(usize, &Column, usize)> {
-        match self {
-            SourceOperator::Join {
-                left, right, using, ..
-            } => {
-                let mut columns = left.select_star_helper();
-
-                // Join columns are filtered out from the right side
-                // in the case of a USING join.
-                if let Some(using_cols) = using {
-                    let right_columns = right.select_star_helper();
-
-                    for (table_index, col, idx) in right_columns {
-                        if !using_cols
-                            .iter()
-                            .any(|using_col| col.name.eq_ignore_ascii_case(&using_col.0))
-                        {
-                            columns.push((table_index, col, idx));
-                        }
-                    }
-                } else {
-                    columns.extend(right.select_star_helper());
-                }
-                columns
-            }
-            SourceOperator::Scan {
-                table_reference, ..
-            }
-            | SourceOperator::Search {
-                table_reference, ..
-            }
-            | SourceOperator::Subquery {
-                table_reference, ..
-            } => table_reference
+pub fn select_star(tables: &[TableReference], out_columns: &mut Vec<ResultSetColumn>) {
+    for (current_table_index, table) in tables.iter().enumerate() {
+        let maybe_using_cols = table
+            .join_info
+            .as_ref()
+            .and_then(|join_info| join_info.using.as_ref());
+        out_columns.extend(
+            table
                 .columns()
                 .iter()
                 .enumerate()
-                .map(|(i, col)| (table_reference.table_index, col, i))
-                .collect(),
-            SourceOperator::Nothing { .. } => Vec::new(),
-        }
+                .filter(|(_, col)| {
+                    // If we are joining with USING, we need to deduplicate the columns from the right table
+                    // that are also present in the USING clause.
+                    if let Some(using_cols) = maybe_using_cols {
+                        !using_cols
+                            .iter()
+                            .any(|using_col| col.name.eq_ignore_ascii_case(&using_col.0))
+                    } else {
+                        true
+                    }
+                })
+                .map(|(i, col)| ResultSetColumn {
+                    name: col.name.clone(),
+                    expr: ast::Expr::Column {
+                        database: None,
+                        table: current_table_index,
+                        column: i,
+                        is_rowid_alias: col.is_rowid_alias,
+                    },
+                    contains_aggregates: false,
+                }),
+        );
     }
 }
 
+/// Join information for a table reference.
+#[derive(Debug, Clone)]
+pub struct JoinInfo {
+    /// Whether this is an OUTER JOIN.
+    pub outer: bool,
+    /// The USING clause for the join, if any. NATURAL JOIN is transformed into USING (col1, col2, ...).
+    pub using: Option<ast::DistinctNames>,
+}
+
+/// A table reference in the query plan.
+/// For example, SELECT * FROM users u JOIN products p JOIN (SELECT * FROM users) sub
+/// has three table references:
+/// 1. operation=Scan, table=users, table_identifier=u, reference_type=BTreeTable, join_info=None
+/// 2. operation=Scan, table=products, table_identifier=p, reference_type=BTreeTable, join_info=Some(JoinInfo { outer: false, using: None }),
+/// 3. operation=Subquery, table=users, table_identifier=sub, reference_type=Subquery, join_info=None
+#[derive(Debug, Clone)]
+pub struct TableReference {
+    /// The operation that this table reference performs.
+    pub op: Operation,
+    /// Table object, which contains metadata about the table, e.g. columns.
+    pub table: Table,
+    /// The name of the table as referred to in the query, either the literal name or an alias e.g. "users" or "u"
+    pub identifier: String,
+    /// The join info for this table reference, if it is the right side of a join (which all except the first table reference have)
+    pub join_info: Option<JoinInfo>,
+}
+
 /**
-  A SourceOperator is a Node in the query plan that reads data from a table.
+  A SourceOperator is a reference in the query plan that reads data from a table.
 */
 #[derive(Clone, Debug)]
-pub enum SourceOperator {
-    // Join operator
-    // This operator is used to join two source operators.
-    // It takes a left and right source operator, a list of predicates to evaluate,
-    // and a boolean indicating whether it is an outer join.
-    Join {
-        id: usize,
-        left: Box<SourceOperator>,
-        right: Box<SourceOperator>,
-        predicates: Option<Vec<ast::Expr>>,
-        outer: bool,
-        using: Option<ast::DistinctNames>,
-    },
-    // Scan operator
-    // This operator is used to scan a table.
-    // It takes a table to scan and an optional list of predicates to evaluate.
-    // The predicates are used to filter rows from the table.
-    // e.g. SELECT * FROM t1 WHERE t1.foo = 5
+pub enum Operation {
+    // Scan operation
+    // This operation is used to scan a table.
     // The iter_dir are uset to indicate the direction of the iterator.
     // The use of Option for iter_dir is aimed at implementing a conservative optimization strategy: it only pushes
     // iter_dir down to Scan when iter_dir is None, to prevent potential result set errors caused by multiple
-    // assignments. for more detailed discussions, please refer to https://github.com/penberg/limbo/pull/376
+    // assignments. for more detailed discussions, please refer to https://github.com/tursodatabase/limbo/pull/376
     Scan {
-        id: usize,
-        table_reference: TableReference,
-        predicates: Option<Vec<ast::Expr>>,
         iter_dir: Option<IterationDirection>,
     },
-    // Search operator
-    // This operator is used to search for a row in a table using an index
+    // Search operation
+    // This operation is used to search for a row in a table using an index
     // (i.e. a primary key or a secondary index)
-    Search {
-        id: usize,
-        table_reference: TableReference,
-        search: Search,
-        predicates: Option<Vec<ast::Expr>>,
-    },
+    Search(Search),
+    /// Subquery operation
+    /// This operation is used to represent a subquery in the query plan.
+    /// The subquery itself (recursively) contains an arbitrary SelectPlan.
     Subquery {
-        id: usize,
-        table_reference: TableReference,
         plan: Box<SelectPlan>,
-        predicates: Option<Vec<ast::Expr>>,
-    },
-    // Nothing operator
-    // This operator is used to represent an empty query.
-    // e.g. SELECT * from foo WHERE 0 will eventually be optimized to Nothing.
-    Nothing {
-        id: usize,
-    },
-}
-
-/// The type of the table reference, either BTreeTable or Subquery
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TableReferenceType {
-    /// A BTreeTable is a table that is stored on disk in a B-tree index.
-    BTreeTable,
-    /// A subquery.
-    Subquery {
-        /// The index of the first register in the query plan that contains the result columns of the subquery.
         result_columns_start_reg: usize,
     },
 }
 
-/// A query plan has a list of TableReference objects, each of which represents a table or subquery.
-#[derive(Clone, Debug)]
-pub struct TableReference {
-    /// Table object, which contains metadata about the table, e.g. columns.
-    pub table: Table,
-    /// The name of the table as referred to in the query, either the literal name or an alias e.g. "users" or "u"
-    pub table_identifier: String,
-    /// The index of this reference in the list of TableReference objects in the query plan
-    /// The reference at index 0 is the first table in the FROM clause, the reference at index 1 is the second table in the FROM clause, etc.
-    /// So, the index is relevant for determining when predicates (WHERE, ON filters etc.) should be evaluated.
-    pub table_index: usize,
-    /// The type of the table reference, either BTreeTable or Subquery
-    pub reference_type: TableReferenceType,
-}
-
 impl TableReference {
+    /// Returns the btree table for this table reference, if it is a BTreeTable.
     pub fn btree(&self) -> Option<Rc<BTreeTable>> {
-        match self.reference_type {
-            TableReferenceType::BTreeTable => self.table.btree(),
-            TableReferenceType::Subquery { .. } => None,
-        }
+        self.table.btree()
     }
-    pub fn new_subquery(identifier: String, table_index: usize, plan: &SelectPlan) -> Self {
+
+    /// Creates a new TableReference for a subquery.
+    pub fn new_subquery(identifier: String, plan: SelectPlan, join_info: Option<JoinInfo>) -> Self {
+        let table = Table::Pseudo(Rc::new(PseudoTable::new_with_columns(
+            plan.result_columns
+                .iter()
+                .map(|rc| Column {
+                    name: rc.name.clone(),
+                    ty: Type::Text, // FIXME: infer proper type
+                    ty_str: "TEXT".to_string(),
+                    is_rowid_alias: false,
+                    primary_key: false,
+                    notnull: false,
+                    default: None,
+                })
+                .collect(),
+        )));
         Self {
-            table: Table::Pseudo(Rc::new(PseudoTable::new_with_columns(
-                plan.result_columns
-                    .iter()
-                    .map(|rc| Column {
-                        name: rc.name.clone(),
-                        ty: Type::Text, // FIXME: infer proper type
-                        ty_str: "TEXT".to_string(),
-                        is_rowid_alias: false,
-                        primary_key: false,
-                        notnull: false,
-                        default: None,
-                    })
-                    .collect(),
-            ))),
-            table_identifier: identifier.clone(),
-            table_index,
-            reference_type: TableReferenceType::Subquery {
+            op: Operation::Subquery {
+                plan: Box::new(plan),
                 result_columns_start_reg: 0, // Will be set in the bytecode emission phase
             },
+            table,
+            identifier: identifier.clone(),
+            join_info,
         }
     }
 
@@ -300,30 +258,18 @@ impl TableReference {
 #[derive(Clone, Debug)]
 pub enum Search {
     /// A rowid equality point lookup. This is a special case that uses the SeekRowid bytecode instruction and does not loop.
-    RowidEq { cmp_expr: ast::Expr },
+    RowidEq { cmp_expr: JoinAwareConditionExpr },
     /// A rowid search. Uses bytecode instructions like SeekGT, SeekGE etc.
     RowidSearch {
         cmp_op: ast::Operator,
-        cmp_expr: ast::Expr,
+        cmp_expr: JoinAwareConditionExpr,
     },
     /// A secondary index search. Uses bytecode instructions like SeekGE, SeekGT etc.
     IndexSearch {
         index: Rc<Index>,
         cmp_op: ast::Operator,
-        cmp_expr: ast::Expr,
+        cmp_expr: JoinAwareConditionExpr,
     },
-}
-
-impl SourceOperator {
-    pub fn id(&self) -> usize {
-        match self {
-            SourceOperator::Join { id, .. } => *id,
-            SourceOperator::Scan { id, .. } => *id,
-            SourceOperator::Search { id, .. } => *id,
-            SourceOperator::Subquery { id, .. } => *id,
-            SourceOperator::Nothing { id } => *id,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
