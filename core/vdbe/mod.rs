@@ -604,15 +604,18 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let cond = state.registers[lhs] == state.registers[rhs];
+                    let nulleq = flags.has_nulleq();
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if (nulleq && cond) || (!nulleq && jump_if_null) {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -631,15 +634,18 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let cond = state.registers[lhs] != state.registers[rhs];
+                    let nulleq = flags.has_nulleq();
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if (nulleq && cond) || (!nulleq && jump_if_null) {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -658,15 +664,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -685,15 +692,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -712,15 +720,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -739,15 +748,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -2389,8 +2399,8 @@ impl Program {
                     cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
-                Insn::IsNull { src, target_pc } => {
-                    if matches!(state.registers[*src], OwnedValue::Null) {
+                Insn::IsNull { reg, target_pc } => {
+                    if matches!(state.registers[*reg], OwnedValue::Null) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;

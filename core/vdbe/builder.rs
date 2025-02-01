@@ -374,7 +374,7 @@ impl ProgramBuilder {
                 Insn::IdxGT { target_pc, .. } => {
                     resolve(target_pc, "IdxGT");
                 }
-                Insn::IsNull { src: _, target_pc } => {
+                Insn::IsNull { reg: _, target_pc } => {
                     resolve(target_pc, "IsNull");
                 }
                 _ => continue,

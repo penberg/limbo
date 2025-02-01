@@ -186,8 +186,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | (NOT) GLOB                | Yes     |                                          |
 | (NOT) REGEXP              | No      |                                          |
 | (NOT) MATCH               | No      |                                          |
-| IS (NOT)                  | No      |                                          |
-| IS (NOT) DISTINCT FROM    | No      |                                          |
+| IS (NOT)                  | Yes     |                                          |
+| IS (NOT) DISTINCT FROM    | Yes     |                                          |
 | (NOT) BETWEEN ... AND ... | No      |                                          |
 | (NOT) IN (subquery)       | No      |                                          |
 | (NOT) EXISTS (subquery)   | No      |                                          |
