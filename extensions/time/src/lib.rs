@@ -14,7 +14,6 @@ use time::*;
 register_extension! {
     scalars: {
         time_now,
-        time_fmt_iso,
         time_date,
         make_date,
         make_timestamp,
@@ -43,6 +42,7 @@ register_extension! {
         time_before,
         time_compare,
         time_equal,
+        dur_ns,
         dur_us,
         dur_ms,
         dur_s,
@@ -53,7 +53,13 @@ register_extension! {
         time_sub,
         time_since,
         time_until,
-        time_trunc
+        time_trunc,
+        time_round,
+        time_fmt_iso,
+        time_fmt_datetime,
+        time_fmt_date,
+        time_fmt_time,
+        time_parse,
     },
 }
 
@@ -119,29 +125,6 @@ fn time_now(args: &[Value]) -> Value {
     let t = Time::new();
 
     t.into_blob()
-}
-
-#[scalar(name = "time_fmt_iso")]
-fn time_fmt_iso(args: &[Value]) -> Value {
-    if args.len() != 1 && args.len() != 2 {
-        return Value::error(ResultCode::InvalidArgs);
-    }
-    let blob = ok_tri!(args[0].to_blob());
-
-    let t = tri!(Time::try_from(blob));
-
-    let offset_sec = {
-        if args.len() == 2 {
-            value_tri!(args[1].value_type(), ValueType::Integer);
-            ok_tri!(args[1].to_integer()) as i32
-        } else {
-            0
-        }
-    };
-
-    let fmt_str = tri!(t.fmt_iso(offset_sec));
-
-    Value::from_text(fmt_str)
 }
 
 /// ```text
@@ -614,6 +597,16 @@ fn time_equal(args: &[Value]) -> Value {
 
 // Duration Constants
 
+/// 1 nanosecond
+#[scalar(name = "dur_ns")]
+fn dur_ns(args: &[Value]) -> Value {
+    if args.len() != 0 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+
+    Value::from_integer(ok_tri!(chrono::Duration::nanoseconds(1).num_nanoseconds()))
+}
+
 /// 1 microsecond
 #[scalar(name = "dur_us")]
 fn dur_us(args: &[Value]) -> Value {
@@ -809,4 +802,153 @@ fn time_trunc(args: &[Value]) -> Value {
         }
         _ => Value::error(ResultCode::Error),
     }
+}
+
+#[scalar(name = "time_round")]
+fn time_round(args: &[Value]) -> Value {
+    if args.len() != 2 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+
+    let blob = ok_tri!(args[0].to_blob());
+
+    let t = tri!(Time::try_from(blob));
+
+    value_tri!(args[1].value_type(), ValueType::Integer);
+
+    let duration = ok_tri!(args[1].to_integer());
+    let duration = Duration::from(duration);
+
+    tri!(t.round_duration(duration)).into_blob()
+}
+
+// Formatting
+
+#[scalar(name = "time_fmt_iso")]
+fn time_fmt_iso(args: &[Value]) -> Value {
+    if args.len() != 1 && args.len() != 2 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+    let blob = ok_tri!(args[0].to_blob());
+
+    let t = tri!(Time::try_from(blob));
+
+    let offset_sec = {
+        if args.len() == 2 {
+            value_tri!(args[1].value_type(), ValueType::Integer);
+            ok_tri!(args[1].to_integer()) as i32
+        } else {
+            0
+        }
+    };
+
+    let fmt_str = tri!(t.fmt_iso(offset_sec));
+
+    Value::from_text(fmt_str)
+}
+
+#[scalar(name = "time_fmt_datetime")]
+fn time_fmt_datetime(args: &[Value]) -> Value {
+    if args.len() != 1 && args.len() != 2 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+    let blob = ok_tri!(args[0].to_blob());
+
+    let t = tri!(Time::try_from(blob));
+
+    let offset_sec = {
+        if args.len() == 2 {
+            value_tri!(args[1].value_type(), ValueType::Integer);
+            ok_tri!(args[1].to_integer()) as i32
+        } else {
+            0
+        }
+    };
+
+    let fmt_str = tri!(t.fmt_datetime(offset_sec));
+
+    Value::from_text(fmt_str)
+}
+
+#[scalar(name = "time_fmt_date")]
+fn time_fmt_date(args: &[Value]) -> Value {
+    if args.len() != 1 && args.len() != 2 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+    let blob = ok_tri!(args[0].to_blob());
+
+    let t = tri!(Time::try_from(blob));
+
+    let offset_sec = {
+        if args.len() == 2 {
+            value_tri!(args[1].value_type(), ValueType::Integer);
+            ok_tri!(args[1].to_integer()) as i32
+        } else {
+            0
+        }
+    };
+
+    let fmt_str = tri!(t.fmt_date(offset_sec));
+
+    Value::from_text(fmt_str)
+}
+
+#[scalar(name = "time_fmt_time")]
+fn time_fmt_time(args: &[Value]) -> Value {
+    if args.len() != 1 && args.len() != 2 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+    let blob = ok_tri!(args[0].to_blob());
+
+    let t = tri!(Time::try_from(blob));
+
+    let offset_sec = {
+        if args.len() == 2 {
+            value_tri!(args[1].value_type(), ValueType::Integer);
+            ok_tri!(args[1].to_integer()) as i32
+        } else {
+            0
+        }
+    };
+
+    let fmt_str = tri!(t.fmt_time(offset_sec));
+
+    Value::from_text(fmt_str)
+}
+
+#[scalar(name = "time_parse")]
+fn time_parse(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::error(ResultCode::InvalidArgs);
+    }
+
+    let dt_str = ok_tri!(args[0].to_text());
+
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&dt_str) {
+        return Time::from_datetime(dt.to_utc()).into_blob();
+    }
+
+    if let Ok(mut dt) = chrono::NaiveDateTime::parse_from_str(&dt_str, "%Y-%m-%d %H:%M:%S") {
+        // Unwrap is safe here
+        dt = dt.with_nanosecond(0).unwrap();
+        return Time::from_datetime(dt.and_utc()).into_blob();
+    }
+
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(&dt_str, "%Y-%m-%d") {
+        // Unwrap is safe here
+
+        let dt = date
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+            .with_nanosecond(0)
+            .unwrap();
+        return Time::from_datetime(dt.and_utc()).into_blob();
+    }
+
+    let time = tri!(chrono::NaiveTime::parse_from_str(&dt_str, "%H:%M:%S"));
+    let dt = NaiveDateTime::new(NaiveDate::from_ymd_opt(1, 1, 1).unwrap(), time)
+        .with_nanosecond(0)
+        .unwrap();
+
+    Time::from_datetime(dt.and_utc()).into_blob()
 }

@@ -134,6 +134,48 @@ impl Time {
         }
     }
 
+    pub fn fmt_datetime(&self, offset_sec: i32) -> Result<String> {
+        let fmt = "%F %T";
+
+        if offset_sec == 0 {
+            return Ok(self.inner.format(fmt).to_string());
+        }
+        // I do not see how this can error
+        let offset = &FixedOffset::east_opt(offset_sec).ok_or(TimeError::InvalidFormat)?;
+
+        let timezone_date = self.inner.with_timezone(offset);
+
+        return Ok(timezone_date.format(fmt).to_string());
+    }
+
+    pub fn fmt_date(&self, offset_sec: i32) -> Result<String> {
+        let fmt = "%F";
+
+        if offset_sec == 0 {
+            return Ok(self.inner.format(fmt).to_string());
+        }
+        // I do not see how this can error
+        let offset = &FixedOffset::east_opt(offset_sec).ok_or(TimeError::InvalidFormat)?;
+
+        let timezone_date = self.inner.with_timezone(offset);
+
+        return Ok(timezone_date.format(fmt).to_string());
+    }
+
+    pub fn fmt_time(&self, offset_sec: i32) -> Result<String> {
+        let fmt = "%T";
+
+        if offset_sec == 0 {
+            return Ok(self.inner.format(fmt).to_string());
+        }
+        // I do not see how this can error
+        let offset = &FixedOffset::east_opt(offset_sec).ok_or(TimeError::InvalidFormat)?;
+
+        let timezone_date = self.inner.with_timezone(offset);
+
+        return Ok(timezone_date.format(fmt).to_string());
+    }
+
     /// Adjust the datetime to the offset
     pub fn from_datetime(dt: DateTime<Utc>) -> Self {
         Self { inner: dt }
@@ -359,6 +401,12 @@ impl Time {
         }
 
         Ok(ret)
+    }
+
+    pub fn round_duration(&self, d: Duration) -> Result<Self> {
+        Ok(Self {
+            inner: self.inner.duration_round(d.inner)?,
+        })
     }
 
     pub fn time_get(&self, field: TimeField) -> Value {
