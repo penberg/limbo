@@ -33,7 +33,7 @@ Limbo is an in-process OLTP database engine library that has:
 
 ## Getting Started
 
-### CLI
+### 💻 Command Line
 
 You can install the latest `limbo` release with:
 
@@ -63,7 +63,7 @@ You can also build and run the latest development version with:
 cargo run
 ```
 
-### JavaScript (wip)
+### ✨ JavaScript (wip)
 
 Installation:
 
@@ -82,7 +82,7 @@ const users = stmt.all();
 console.log(users);
 ```
 
-### Python (wip)
+### 🐍 Python (wip)
 
 ```console
 pip install pylimbo
@@ -98,6 +98,10 @@ cur = con.cursor()
 res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
 ```
+
+## Contributing
+
+We'd love to have you contribute to Limbo! Please check out the [contribution guide] to get started.
 
 ## FAQ
 
@@ -115,8 +119,6 @@ Limbo is a research project to build a SQLite compatible in-process database in 
 This project is licensed under the [MIT license].
 
 ### Contribution
-
-We'd love to have you contribute to Limbo! Please check out the [contribution guide] to get started.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in Limbo by you, shall be licensed as MIT, without any additional
