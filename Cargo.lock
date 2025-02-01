@@ -1671,6 +1671,7 @@ version = "0.0.13"
 dependencies = [
  "chrono",
  "limbo_ext",
+ "mimalloc",
  "strum",
  "strum_macros",
  "thiserror 2.0.11",
