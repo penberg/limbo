@@ -85,7 +85,7 @@ macro_rules! emit_cmp_null_insn {
                 lhs: $lhs,
                 rhs: $rhs,
                 target_pc: $cond.jump_target_when_false,
-                flags: CmpInsFlags::default().jump_if_null().null_eq(),
+                flags: CmpInsFlags::default().null_eq(),
             });
         }
     }};
