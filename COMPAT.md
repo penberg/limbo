@@ -182,8 +182,8 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | (expr)                    | Yes     |                                          |
 | CAST (expr AS type)       | Yes     |                                          |
 | COLLATE                   | No      |                                          |
-| (NOT) LIKE                | No      |                                          |
-| (NOT) GLOB                | No      |                                          |
+| (NOT) LIKE                | Yes     |                                          |
+| (NOT) GLOB                | Yes     |                                          |
 | (NOT) REGEXP              | No      |                                          |
 | (NOT) MATCH               | No      |                                          |
 | IS (NOT)                  | No      |                                          |
