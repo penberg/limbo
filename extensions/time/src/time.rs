@@ -441,8 +441,7 @@ impl Time {
             YearDay => Value::from_integer(self.inner.ordinal() as i64),
             WeekDay => Value::from_integer(self.inner.weekday().num_days_from_sunday() as i64),
             Epoch => Value::from_float(
-                self.inner.timestamp() as f64
-                    + (self.inner.nanosecond() as f64) / (1_000_000_000 as f64),
+                self.inner.timestamp() as f64 + self.inner.nanosecond() as f64 / 1_000_000_000 as f64,
             ),
         }
     }

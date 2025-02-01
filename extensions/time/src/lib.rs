@@ -324,7 +324,7 @@ fn time_get_second(args: &[Value]) -> Value {
     Value::from_integer(t.get_second())
 }
 
-#[scalar(name = "time_get_nan")]
+#[scalar(name = "time_get_nano")]
 fn time_get_nano(args: &[Value]) -> Value {
     if args.len() != 1 {
         return Value::error(ResultCode::InvalidArgs);
