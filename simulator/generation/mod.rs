@@ -1,4 +1,7 @@
-use std::{iter::Sum, ops::SubAssign};
+use std::{
+    iter::Sum,
+    ops::SubAssign,
+};
 
 use anarchist_readable_name_generator_lib::readable_name_custom;
 use rand::{distributions::uniform::SampleUniform, Rng};
@@ -58,6 +61,36 @@ pub(crate) fn frequency<
 pub(crate) fn one_of<'a, T, R: Rng>(choices: Vec<Box<dyn Fn(&mut R) -> T + 'a>>, rng: &mut R) -> T {
     let index = rng.gen_range(0..choices.len());
     choices[index](rng)
+}
+
+/// backtrack is a helper function for composing different "failable" generators.
+/// The function takes a list of functions that return an Option<T>, along with number of retries
+/// to make before giving up.
+pub(crate) fn backtrack<'a, T, R: Rng>(
+    mut choices: Vec<(u32, Box<dyn Fn(&mut R) -> Option<T> + 'a>)>,
+    rng: &mut R,
+) -> T {
+    loop {
+        // If there are no more choices left, we give up
+        let choices_ = choices
+            .iter()
+            .enumerate()
+            .filter(|(_, (retries, _))| *retries > 0)
+            .collect::<Vec<_>>();
+        if choices_.is_empty() {
+            panic!("backtrack: no more choices left");
+        }
+        // Run a one_of on the remaining choices
+        let (choice_index, choice) = pick(&choices_, rng);
+        let choice_index = *choice_index;
+        // If the choice returns None, we decrement the number of retries and try again
+        let result = choice.1(rng);
+        if let Some(result) = result {
+            return result;
+        } else {
+            choices[choice_index].0 -= 1;
+        }
+    }
 }
 
 /// pick is a helper function for uniformly picking a random element from a slice

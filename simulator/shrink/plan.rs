@@ -30,7 +30,7 @@ impl InteractionPlan {
         for interaction in plan.plan.iter_mut() {
             if let Interactions::Property(p) = interaction {
                 match p {
-                    Property::InsertSelect { queries, .. }
+                    Property::InsertValuesSelect { queries, .. }
                     | Property::DoubleCreateFailure { queries, .. } => {
                         queries.clear();
                     }

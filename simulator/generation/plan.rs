@@ -14,10 +14,7 @@ use crate::{
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
 
-use super::{
-    pick,
-    property::{remaining, Property},
-};
+use super::property::{remaining, Property};
 
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
@@ -261,7 +258,7 @@ impl Interactions {
         match self {
             Interactions::Property(property) => {
                 match property {
-                    Property::InsertSelect {
+                    Property::InsertValuesSelect {
                         insert,
                         row_index: _,
                         queries,
@@ -284,7 +281,7 @@ impl Interactions {
                     }
                     Property::SelectLimit { select } => {
                         select.shadow(env);
-                    },
+                    }
                 }
                 for interaction in property.interactions() {
                     match interaction {
@@ -295,12 +292,16 @@ impl Interactions {
                                 }
                             }
                             Query::Insert(insert) => {
+                                let values = match &insert {
+                                    Insert::Values { values, .. } => values.clone(),
+                                    Insert::Select { select, .. } => select.shadow(env),
+                                };
                                 let table = env
                                     .tables
                                     .iter_mut()
-                                    .find(|t| t.name == insert.table)
+                                    .find(|t| t.name == insert.table())
                                     .unwrap();
-                                table.rows.extend(insert.values.clone());
+                                table.rows.extend(values);
                             }
                             Query::Delete(_) => todo!(),
                             Query::Select(_) => {}
@@ -311,7 +312,9 @@ impl Interactions {
                     }
                 }
             }
-            Interactions::Query(query) => query.shadow(env),
+            Interactions::Query(query) => {
+                query.shadow(env);
+            }
             Interactions::Fault(_) => {}
         }
     }
@@ -392,12 +395,10 @@ impl ArbitraryFrom<&mut SimulatorEnv> for InteractionPlan {
 }
 
 impl Interaction {
-    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
         match self {
             Self::Query(query) => query.shadow(env),
-            Self::Assumption(_) => {}
-            Self::Assertion(_) => {}
-            Self::Fault(_) => {}
+            Self::Assumption(_) | Self::Assertion(_) | Self::Fault(_) => vec![],
         }
     }
     pub(crate) fn execute_query(&self, conn: &mut Rc<Connection>) -> ResultSet {
@@ -548,12 +549,11 @@ fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions 
 }
 
 fn random_read<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
-    Interactions::Query(Query::Select(Select::arbitrary_from(rng, &env.tables)))
+    Interactions::Query(Query::Select(Select::arbitrary_from(rng, env)))
 }
 
 fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
-    let table = pick(&env.tables, rng);
-    let insert_query = Query::Insert(Insert::arbitrary_from(rng, table));
+    let insert_query = Query::Insert(Insert::arbitrary_from(rng, env));
     Interactions::Query(insert_query)
 }
 

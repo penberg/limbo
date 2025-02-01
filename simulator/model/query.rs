@@ -101,7 +101,8 @@ impl Query {
         match self {
             Query::Create(_) => vec![],
             Query::Select(Select { table, .. })
-            | Query::Insert(Insert { table, .. })
+            | Query::Insert(Insert::Select { table, .. })
+            | Query::Insert(Insert::Values { table, .. })
             | Query::Delete(Delete { table, .. }) => vec![table.clone()],
         }
     }
@@ -109,12 +110,13 @@ impl Query {
         match self {
             Query::Create(Create { table }) => vec![table.name.clone()],
             Query::Select(Select { table, .. })
-            | Query::Insert(Insert { table, .. })
+            | Query::Insert(Insert::Select { table, .. })
+            | Query::Insert(Insert::Values { table, .. })
             | Query::Delete(Delete { table, .. }) => vec![table.clone()],
         }
     }
 
-    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
         match self {
             Query::Create(create) => create.shadow(env),
             Query::Insert(insert) => insert.shadow(env),
@@ -129,34 +131,110 @@ pub(crate) struct Create {
 }
 
 impl Create {
-    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
         if !env.tables.iter().any(|t| t.name == self.table.name) {
             env.tables.push(self.table.clone());
         }
+
+        vec![]
     }
+}
+
+impl Display for Create {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CREATE TABLE {} (", self.table.name)?;
+
+        for (i, column) in self.table.columns.iter().enumerate() {
+            if i != 0 {
+                write!(f, ",")?;
+            }
+            write!(f, "{} {}", column.name, column.column_type)?;
+        }
+
+        write!(f, ")")
+    }
+}
+
+/// `SELECT` distinctness
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Distinctness {
+    /// `DISTINCT`
+    Distinct,
+    /// `ALL`
+    All,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Select {
     pub(crate) table: String,
     pub(crate) predicate: Predicate,
+    pub(crate) distinct: Distinctness,
     pub(crate) limit: Option<usize>,
 }
 
 impl Select {
-    pub(crate) fn shadow(&self, _env: &mut SimulatorEnv) {}
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
+        let table = env.tables.iter().find(|t| t.name == self.table.as_str());
+        if let Some(table) = table {
+            table
+                .rows
+                .iter()
+                .filter(|row| self.predicate.test(row, table))
+                .cloned()
+                .collect()
+        } else {
+            vec![]
+        }
+    }
+}
+
+impl Display for Select {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "SELECT * FROM {} WHERE {}{}",
+            self.table,
+            self.predicate,
+            self.limit
+                .map_or("".to_string(), |l| format!(" LIMIT {}", l))
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct Insert {
-    pub(crate) table: String,
-    pub(crate) values: Vec<Vec<Value>>,
+pub(crate) enum Insert {
+    Values {
+        table: String,
+        values: Vec<Vec<Value>>,
+    },
+    Select {
+        table: String,
+        select: Box<Select>,
+    },
 }
 
 impl Insert {
-    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) {
-        if let Some(t) = env.tables.iter_mut().find(|t| t.name == self.table) {
-            t.rows.extend(self.values.clone());
+    pub(crate) fn shadow(&self, env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
+        match self {
+            Insert::Values { table, values } => {
+                if let Some(t) = env.tables.iter_mut().find(|t| &t.name == table) {
+                    t.rows.extend(values.clone());
+                }
+            }
+            Insert::Select { table, select } => {
+                let rows = select.shadow(env);
+                if let Some(t) = env.tables.iter_mut().find(|t| &t.name == table) {
+                    t.rows.extend(rows);
+                }
+            }
+        }
+
+        vec![]
+    }
+
+    pub(crate) fn table(&self) -> &str {
+        match self {
+            Insert::Values { table, .. } | Insert::Select { table, .. } => table,
         }
     }
 }
@@ -168,7 +246,7 @@ pub(crate) struct Delete {
 }
 
 impl Delete {
-    pub(crate) fn shadow(&self, _env: &mut SimulatorEnv) {
+    pub(crate) fn shadow(&self, _env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
         todo!()
     }
 }
@@ -176,30 +254,9 @@ impl Delete {
 impl Display for Query {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Create(Create { table }) => {
-                write!(f, "CREATE TABLE {} (", table.name)?;
-
-                for (i, column) in table.columns.iter().enumerate() {
-                    if i != 0 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, "{} {}", column.name, column.column_type)?;
-                }
-
-                write!(f, ")")
-            }
-            Self::Select(Select {
-                table,
-                predicate: guard,
-                limit,
-            }) => write!(
-                f,
-                "SELECT * FROM {} WHERE {}{}",
-                table,
-                guard,
-                limit.map_or("".to_string(), |l| format!(" LIMIT {}", l))
-            ),
-            Self::Insert(Insert { table, values }) => {
+            Self::Create(create) => write!(f, "{}", create),
+            Self::Select(select) => write!(f, "{}", select),
+            Self::Insert(Insert::Values { table, values }) => {
                 write!(f, "INSERT INTO {} VALUES ", table)?;
                 for (i, row) in values.iter().enumerate() {
                     if i != 0 {
@@ -215,6 +272,10 @@ impl Display for Query {
                     write!(f, ")")?;
                 }
                 Ok(())
+            }
+            Self::Insert(Insert::Select { table, select }) => {
+                write!(f, "INSERT INTO {} ", table)?;
+                write!(f, "{}", select)
             }
             Self::Delete(Delete {
                 table,
