@@ -1,48 +1,73 @@
 {
   inputs = {
-    nixpkgs = {
-      url = "github:nixos/nixpkgs";
-    };
-    fenix = {
-      url = "github:nix-community/fenix";
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = {
-    nixpkgs,
-    fenix,
-    ...
-  }: let
-    systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
-    forAllSystems = nixpkgs.lib.genAttrs systems;
-  in {
-    devShells = forAllSystems (
-      system: let
-        pkgs = nixpkgs.legacyPackages.${system};
-        rustStable = fenix.packages.${system}.stable.toolchain;
-        wasmTarget = fenix.packages.${system}.targets.wasm32-wasi.latest.rust-std;
-        extraDarwinInputs =
-          if pkgs.stdenv.isDarwin
-          then [pkgs.darwin.apple_sdk.frameworks.CoreFoundation]
-          else [];
-      in {
-        default = with pkgs;
-          mkShell {
-            buildInputs =
-              [
-                clang
-                libiconv
-                sqlite
-                gnumake
-                rustup # not used to install the toolchain, but the makefile uses it
-                rustStable
-                wasmTarget
-                tcl
-              ]
-              ++ extraDarwinInputs;
-          };
+  outputs = { nixpkgs, flake-utils, rust-overlay, crane, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
+
+        toolchain = break ((pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+          extensions = [ "rust-analyzer" "rust-src" ];
+          targets = [ "wasm32-unknown-unknown" ];
+        });
+
+        lib = pkgs.lib;
+
+        cargoArtifacts = craneLib.buildDepsOnly {
+          src = ./.;
+          pname = "limbo";
+          stritcDeps = true;
+          nativeBuildInputs = with pkgs; [ python3 ];
+        };
+
+        commonArgs = {
+          inherit cargoArtifacts;
+          pname = "limbo";
+          src = ./.;
+          nativeBuildInputs = with pkgs; [ python3 ];
+          strictDeps = true;
+        };
+
+        craneLib = ((crane.mkLib pkgs).overrideToolchain toolchain);
+      in
+      rec {
+        formatter = pkgs.nixpkgs-fmt;
+        checks = {
+          doc = craneLib.cargoDoc commonArgs;
+          fmt = craneLib.cargoFmt commonArgs;
+          clippy = craneLib.cargoClippy (commonArgs // {
+            # TODO: maybe add `-- --deny warnings`
+            cargoClippyExtraArgs = "--all-targets";
+          });
+        };
+        packages.limbo = craneLib.buildPackage (commonArgs // {
+          cargoExtraArgs = "--bin limbo";
+        });
+        packages.default = packages.limbo;
+        devShells.default = with pkgs; mkShell {
+          nativeBuildInputs = [
+            clang
+            sqlite
+            gnumake
+            tcl
+            python3
+            nodejs
+            toolchain
+          ] ++ lib.optionals pkgs.stdenv.isDarwin [
+            apple-sdk
+          ];
+        };
       }
     );
-  };
 }
