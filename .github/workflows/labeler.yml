@@ -6,6 +6,7 @@ on:
 jobs:
   label:
     runs-on: ubuntu-latest
+    environment: test
     permissions:
       contents: read
       pull-requests: write
