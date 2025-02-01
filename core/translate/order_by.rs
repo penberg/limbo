@@ -184,7 +184,7 @@ pub fn order_by_sorter_insert(
         let key_reg = start_reg + i;
         translate_expr(
             program,
-            Some(&plan.referenced_tables),
+            Some(&plan.table_references),
             expr,
             key_reg,
             &t_ctx.resolver,
@@ -205,7 +205,7 @@ pub fn order_by_sorter_insert(
         }
         translate_expr(
             program,
-            Some(&plan.referenced_tables),
+            Some(&plan.table_references),
             &rc.expr,
             cur_reg,
             &t_ctx.resolver,

@@ -16,8 +16,8 @@ use super::aggregation::emit_ungrouped_aggregation;
 use super::group_by::{emit_group_by, init_group_by, GroupByMetadata};
 use super::main_loop::{close_loop, emit_loop, init_loop, open_loop, LeftJoinMetadata, LoopLabels};
 use super::order_by::{emit_order_by, init_order_by, SortMetadata};
-use super::plan::SelectPlan;
-use super::plan::SourceOperator;
+use super::plan::Operation;
+use super::plan::{SelectPlan, TableReference};
 use super::subquery::emit_subqueries;
 
 #[derive(Debug)]
@@ -58,7 +58,7 @@ impl<'a> Resolver<'a> {
 #[derive(Debug)]
 pub struct TranslateCtx<'a> {
     // A typical query plan is a nested loop. Each loop has its own LoopLabels (see the definition of LoopLabels for more details)
-    pub labels_main_loop: HashMap<usize, LoopLabels>,
+    pub labels_main_loop: Vec<LoopLabels>,
     // label for the instruction that jumps to the next phase of the query after the main loop
     // we don't know ahead of time what that is (GROUP BY, ORDER BY, etc.)
     pub label_main_loop_end: Option<BranchOffset>,
@@ -111,7 +111,7 @@ fn prologue<'a>(
     let start_offset = program.offset();
 
     let t_ctx = TranslateCtx {
-        labels_main_loop: HashMap::new(),
+        labels_main_loop: Vec::new(),
         label_main_loop_end: None,
         reg_agg_start: None,
         reg_limit: None,
@@ -195,12 +195,7 @@ pub fn emit_query<'a>(
     t_ctx: &'a mut TranslateCtx<'a>,
 ) -> Result<usize> {
     // Emit subqueries first so the results can be read in the main query loop.
-    emit_subqueries(
-        program,
-        t_ctx,
-        &mut plan.referenced_tables,
-        &mut plan.source,
-    )?;
+    emit_subqueries(program, t_ctx, &mut plan.table_references)?;
 
     if t_ctx.reg_limit.is_none() {
         t_ctx.reg_limit = plan.limit.map(|_| program.alloc_register());
@@ -236,16 +231,21 @@ pub fn emit_query<'a>(
     if let Some(ref mut group_by) = plan.group_by {
         init_group_by(program, t_ctx, group_by, &plan.aggregates)?;
     }
-    init_loop(program, t_ctx, &plan.source, &OperationMode::SELECT)?;
+    init_loop(
+        program,
+        t_ctx,
+        &plan.table_references,
+        &OperationMode::SELECT,
+    )?;
 
     // Set up main query execution loop
-    open_loop(program, t_ctx, &mut plan.source, &plan.referenced_tables)?;
+    open_loop(program, t_ctx, &plan.table_references, &plan.where_clause)?;
 
     // Process result columns and expressions in the inner loop
     emit_loop(program, t_ctx, plan)?;
 
     // Clean up and close the main execution loop
-    close_loop(program, t_ctx, &plan.source)?;
+    close_loop(program, t_ctx, &plan.table_references)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
@@ -285,20 +285,25 @@ fn emit_program_for_delete(
     }
 
     // Initialize cursors and other resources needed for query execution
-    init_loop(program, &mut t_ctx, &plan.source, &OperationMode::DELETE)?;
+    init_loop(
+        program,
+        &mut t_ctx,
+        &plan.table_references,
+        &OperationMode::DELETE,
+    )?;
 
     // Set up main query execution loop
     open_loop(
         program,
         &mut t_ctx,
-        &mut plan.source,
-        &plan.referenced_tables,
+        &mut plan.table_references,
+        &plan.where_clause,
     )?;
 
-    emit_delete_insns(program, &mut t_ctx, &plan.source, &plan.limit)?;
+    emit_delete_insns(program, &mut t_ctx, &plan.table_references, &plan.limit)?;
 
     // Clean up and close the main execution loop
-    close_loop(program, &mut t_ctx, &plan.source)?;
+    close_loop(program, &mut t_ctx, &plan.table_references)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
@@ -315,20 +320,15 @@ fn emit_program_for_delete(
 fn emit_delete_insns(
     program: &mut ProgramBuilder,
     t_ctx: &mut TranslateCtx,
-    source: &SourceOperator,
+    table_references: &[TableReference],
     limit: &Option<isize>,
 ) -> Result<()> {
-    let cursor_id = match source {
-        SourceOperator::Scan {
-            table_reference, ..
-        } => program.resolve_cursor_id(&table_reference.table_identifier),
-        SourceOperator::Search {
-            table_reference,
-            search,
-            ..
-        } => match search {
+    let table_reference = table_references.first().unwrap();
+    let cursor_id = match &table_reference.op {
+        Operation::Scan { .. } => program.resolve_cursor_id(&table_reference.identifier),
+        Operation::Search(search) => match search {
             Search::RowidEq { .. } | Search::RowidSearch { .. } => {
-                program.resolve_cursor_id(&table_reference.table_identifier)
+                program.resolve_cursor_id(&table_reference.identifier)
             }
             Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
         },
