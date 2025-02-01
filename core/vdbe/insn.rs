@@ -6,6 +6,36 @@ use crate::storage::wal::CheckpointMode;
 use crate::types::{OwnedRecord, OwnedValue};
 use limbo_macros::Description;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Flags(usize);
+
+impl Flags {
+    const NULL_EQ: usize = 0x80;
+    const JUMP_IF_NULL: usize = 0x10;
+
+    fn has(&self, flag: usize) -> bool {
+        (self.0 & flag) != 0
+    }
+
+    pub fn null_eq(mut self) -> Self {
+        self.0 |= Flags::NULL_EQ;
+        self
+    }
+
+    pub fn jump_if_null(mut self) -> Self {
+        self.0 |= Flags::JUMP_IF_NULL;
+        self
+    }
+
+    pub fn has_jump_if_null(&self) -> bool {
+        self.has(Flags::JUMP_IF_NULL)
+    }
+
+    pub fn has_nulleq(&self) -> bool {
+        self.has(Flags::NULL_EQ)
+    }
+}
+
 #[derive(Description, Debug)]
 pub enum Insn {
     // Initialize the program state and jump to the given PC.
@@ -108,52 +138,56 @@ pub enum Insn {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        /// Flags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
         /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
         /// <JUMP TO NEXT ROW IF id != NULL>
         /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
         /// This flag indicates that if either is null we should still jump.
-        jump_if_null: bool,
+        flags: Flags,
     },
     // Compare two registers and jump to the given PC if they are not equal.
     Ne {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// Flags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
+        flags: Flags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
     Lt {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: Flags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
     Le {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: Flags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
     Gt {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: Flags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
     Ge {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: Flags,
     },
     /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
     If {

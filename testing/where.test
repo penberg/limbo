@@ -3,6 +3,38 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+do_execsql_test_small where-is-null {
+    select count(*) from demo where value is null;
+} {2}
+
+do_execsql_test_small where-equals-null {
+    select count(*) from demo where value = null;
+} {0}
+
+do_execsql_test_small where-is-not-null {
+    select count(*) from demo where value is not null;
+} {3}
+
+do_execsql_test_small where-not-equal-null {
+    select count(*) from demo where value != null;
+} {0}
+
+do_execsql_test_small where-is-a-with-nulls {
+    select count(*) from demo where value is 'A';
+} {1}
+
+do_execsql_test_small where-equals-a-with-nulls {
+    select count(*) from demo where value == 'A';
+} {1}
+
+do_execsql_test_small where-is-not-a-with-nulls {
+    select count(*) from demo where value is not 'A';
+} {4}
+
+do_execsql_test_small where-not-equals-a-with-nulls {
+    select count(*) from demo where value != 'A';
+} {2}
+
 do_execsql_test where-clause-eq {
     select last_name from users where id = 2000;
 } {Rodriguez}
