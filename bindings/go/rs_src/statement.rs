@@ -1,7 +1,7 @@
 use crate::rows::LimboRows;
 use crate::types::{AllocPool, LimboValue, ResultCode};
 use crate::LimboConn;
-use limbo_core::{Statement, StepResult};
+use limbo_core::{LimboError, Statement, StepResult};
 use std::ffi::{c_char, c_void};
 use std::num::NonZero;
 
@@ -15,8 +15,11 @@ pub extern "C" fn db_prepare(ctx: *mut c_void, query: *const c_char) -> *mut c_v
     let db = LimboConn::from_ptr(ctx);
     let stmt = db.conn.prepare(query_str);
     match stmt {
-        Ok(stmt) => LimboStatement::new(Some(stmt), LimboConn::from_ptr(ctx)).to_ptr(),
-        Err(_) => std::ptr::null_mut(),
+        Ok(stmt) => LimboStatement::new(Some(stmt), db).to_ptr(),
+        Err(err) => {
+            db.err = Some(err);
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -69,7 +72,8 @@ pub extern "C" fn stmt_execute(
             Ok(StepResult::Interrupt) => {
                 return ResultCode::Interrupt;
             }
-            Err(_) => {
+            Err(err) => {
+                stmt.conn.err = Some(err);
                 return ResultCode::Error;
             }
         }
@@ -83,6 +87,7 @@ pub extern "C" fn stmt_parameter_count(ctx: *mut c_void) -> i32 {
     }
     let stmt = LimboStatement::from_ptr(ctx);
     let Some(statement) = stmt.statement.as_ref() else {
+        stmt.err = Some(LimboError::InternalError("Statement is closed".to_string()));
         return -1;
     };
     statement.parameters_count() as i32
@@ -116,11 +121,10 @@ pub extern "C" fn stmt_query(
 }
 
 pub struct LimboStatement<'conn> {
-    /// If 'query' is ran on the statement, ownership is transfered to the LimboRows object,
-    /// and this is set to true. `stmt_close` should never be called on a statement that has
-    /// been used to create a LimboRows object.
+    /// If 'query' is ran on the statement, ownership is transfered to the LimboRows object
     pub statement: Option<Statement>,
     pub conn: &'conn mut LimboConn,
+    pub err: Option<LimboError>,
 }
 
 #[no_mangle]
@@ -133,9 +137,22 @@ pub extern "C" fn stmt_close(ctx: *mut c_void) -> ResultCode {
     ResultCode::Invalid
 }
 
+#[no_mangle]
+pub extern "C" fn stmt_get_error(ctx: *mut c_void) -> *const c_char {
+    if ctx.is_null() {
+        return std::ptr::null();
+    }
+    let stmt = LimboStatement::from_ptr(ctx);
+    stmt.get_error()
+}
+
 impl<'conn> LimboStatement<'conn> {
     pub fn new(statement: Option<Statement>, conn: &'conn mut LimboConn) -> Self {
-        LimboStatement { statement, conn }
+        LimboStatement {
+            statement,
+            conn,
+            err: None,
+        }
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -148,5 +165,16 @@ impl<'conn> LimboStatement<'conn> {
             panic!("Null pointer");
         }
         unsafe { &mut *(ptr as *mut LimboStatement) }
+    }
+
+    fn get_error(&mut self) -> *const c_char {
+        if let Some(err) = &self.err {
+            let err = format!("{}", err);
+            let c_str = std::ffi::CString::new(err).unwrap();
+            self.err = None;
+            c_str.into_raw() as *const c_char
+        } else {
+            std::ptr::null()
+        }
     }
 }

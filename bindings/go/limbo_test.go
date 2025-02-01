@@ -205,6 +205,81 @@ func TestDuplicateConnection2(t *testing.T) {
 	}
 }
 
+func TestConnectionError(t *testing.T) {
+	newConn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("Error opening new connection: %v", err)
+	}
+	sql := "CREATE TABLE test (foo INTEGER, bar INTEGER, baz BLOB);"
+	newConn.Exec(sql)
+	sql = "INSERT INTO test (foo, bar, baz) VALUES (?, ?, notafunction(?));"
+	_, err = newConn.Prepare(sql)
+	if err == nil {
+		t.Fatalf("Expected error, got nil")
+	}
+	expectedErr := "Parse error: unknown function notafunction"
+	if err.Error() != expectedErr {
+		t.Fatalf("Error test failed, expected: %s, found: %v", expectedErr, err)
+	}
+	fmt.Println("Connection error test passed")
+}
+
+func TestStatementError(t *testing.T) {
+	newConn, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("Error opening new connection: %v", err)
+	}
+	sql := "CREATE TABLE test (foo INTEGER, bar INTEGER, baz BLOB);"
+	newConn.Exec(sql)
+	sql = "INSERT INTO test (foo, bar, baz) VALUES (?, ?, ?);"
+	stmt, err := newConn.Prepare(sql)
+	if err != nil {
+		t.Fatalf("Error preparing statement: %v", err)
+	}
+	_, err = stmt.Exec(1, 2)
+	if err == nil {
+		t.Fatalf("Expected error, got nil")
+	}
+	if err.Error() != "sql: expected 3 arguments, got 2" {
+		t.Fatalf("Unexpected : %v\n", err)
+	}
+	fmt.Println("Statement error test passed")
+}
+
+func TestDriverRowsErrorMessages(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("CREATE TABLE test (id INTEGER, name TEXT)")
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	_, err = db.Exec("INSERT INTO test (id, name) VALUES (?, ?)", 1, "Alice")
+	if err != nil {
+		t.Fatalf("failed to insert row: %v", err)
+	}
+
+	rows, err := db.Query("SELECT id, name FROM test")
+	if err != nil {
+		t.Fatalf("failed to query table: %v", err)
+	}
+
+	if !rows.Next() {
+		t.Fatalf("expected at least one row")
+	}
+	var id int
+	var name string
+	err = rows.Scan(&name, &id)
+	if err == nil {
+		t.Fatalf("expected error scanning wrong type: %v", err)
+	}
+	t.Log("Rows error behavior test passed")
+}
+
 func slicesAreEq(a, b []byte) bool {
 	if len(a) != len(b) {
 		fmt.Printf("LENGTHS NOT EQUAL: %d != %d\n", len(a), len(b))
