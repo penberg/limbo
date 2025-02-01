@@ -7,7 +7,7 @@ use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::vdbe::{
     builder::ProgramBuilder,
-    insn::{Flags, Insn},
+    insn::{CmpInsFlags, Insn},
     BranchOffset,
 };
 use crate::Result;
@@ -55,14 +55,14 @@ macro_rules! emit_cmp_insn {
                 lhs: lhs_reg,
                 rhs: rhs_reg,
                 target_pc: $cond.jump_target_when_true,
-                flags: Flags::default(),
+                flags: CmpInsFlags::default(),
             });
         } else {
             $program.emit_insn(Insn::$op_false {
                 lhs: lhs_reg,
                 rhs: rhs_reg,
                 target_pc: $cond.jump_target_when_false,
-                flags: Flags::default().jump_if_null(),
+                flags: CmpInsFlags::default().jump_if_null(),
             });
         }
     }};
@@ -100,14 +100,14 @@ macro_rules! emit_cmp_null_insn {
                     lhs: lhs_reg,
                     rhs: rhs_reg,
                     target_pc: $cond.jump_target_when_true,
-                    flags: Flags::default().null_eq(),
+                    flags: CmpInsFlags::default().null_eq(),
                 });
             } else {
                 $program.emit_insn(Insn::$op_false {
                     lhs: lhs_reg,
                     rhs: rhs_reg,
                     target_pc: $cond.jump_target_when_false,
-                    flags: Flags::default().jump_if_null().null_eq(),
+                    flags: CmpInsFlags::default().jump_if_null().null_eq(),
                 });
             }
         }
@@ -454,7 +454,7 @@ pub fn translate_condition_expr(
                             lhs: lhs_reg,
                             rhs: rhs_reg,
                             target_pc: jump_target_when_true,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         });
                     } else {
                         // If this is the last condition, we need to jump to the 'jump_target_when_false' label if there is no match.
@@ -462,7 +462,7 @@ pub fn translate_condition_expr(
                             lhs: lhs_reg,
                             rhs: rhs_reg,
                             target_pc: condition_metadata.jump_target_when_false,
-                            flags: Flags::default().jump_if_null(),
+                            flags: CmpInsFlags::default().jump_if_null(),
                         });
                     }
                 }
@@ -483,7 +483,7 @@ pub fn translate_condition_expr(
                         lhs: lhs_reg,
                         rhs: rhs_reg,
                         target_pc: condition_metadata.jump_target_when_false,
-                        flags: Flags::default().jump_if_null(),
+                        flags: CmpInsFlags::default().jump_if_null(),
                     });
                 }
                 // If we got here, then none of the conditions were a match, so we jump to the 'jump_target_when_true' label if 'jump_if_condition_is_true'.
@@ -626,7 +626,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -642,7 +642,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -658,7 +658,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -674,7 +674,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -690,7 +690,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -706,7 +706,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -799,7 +799,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -813,7 +813,7 @@ pub fn translate_expr(
                             lhs: e1_reg,
                             rhs: e2_reg,
                             target_pc: if_true_label,
-                            flags: Flags::default(),
+                            flags: CmpInsFlags::default(),
                         },
                         target_register,
                         if_true_label,
@@ -884,7 +884,7 @@ pub fn translate_expr(
                         lhs: base_reg,
                         rhs: expr_reg,
                         target_pc: next_case_label,
-                        flags: Flags::default(),
+                        flags: CmpInsFlags::default(),
                     }),
                     // CASE WHEN 0 THEN 0 ELSE 1 becomes ifnot 0 branch to next clause
                     None => program.emit_insn(Insn::IfNot {

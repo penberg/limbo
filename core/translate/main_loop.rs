@@ -4,7 +4,7 @@ use crate::{
     translate::result_row::emit_select_result,
     vdbe::{
         builder::{CursorType, ProgramBuilder},
-        insn::{Flags, Insn},
+        insn::{CmpInsFlags, Insn},
         BranchOffset,
     },
     Result,
@@ -477,7 +477,7 @@ pub fn open_loop(
                                 lhs: rowid_reg,
                                 rhs: cmp_reg,
                                 target_pc: loop_end,
-                                flags: Flags::default(),
+                                flags: CmpInsFlags::default(),
                             });
                         }
                     }
@@ -499,7 +499,7 @@ pub fn open_loop(
                                 lhs: rowid_reg,
                                 rhs: cmp_reg,
                                 target_pc: loop_end,
-                                flags: Flags::default(),
+                                flags: CmpInsFlags::default(),
                             });
                         }
                     }
