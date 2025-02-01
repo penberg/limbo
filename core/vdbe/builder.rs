@@ -98,6 +98,70 @@ impl ProgramBuilder {
         self.insns.push(insn);
     }
 
+    pub fn emit_string8(&mut self, value: String, dest: usize) {
+        self.emit_insn(Insn::String8 { value, dest });
+    }
+
+    pub fn emit_string8_new_reg(&mut self, value: String) -> usize {
+        let dest = self.alloc_register();
+        self.emit_insn(Insn::String8 { value, dest });
+        dest
+    }
+
+    pub fn emit_int(&mut self, value: i64, dest: usize) {
+        self.emit_insn(Insn::Integer { value, dest });
+    }
+
+    pub fn emit_bool(&mut self, value: bool, dest: usize) {
+        self.emit_insn(Insn::Integer {
+            value: if value { 1 } else { 0 },
+            dest,
+        });
+    }
+
+    pub fn emit_null(&mut self, dest: usize) {
+        self.emit_insn(Insn::Null {
+            dest,
+            dest_end: None,
+        });
+    }
+
+    pub fn emit_result_row(&mut self, start_reg: usize, count: usize) {
+        self.emit_insn(Insn::ResultRow { start_reg, count });
+    }
+
+    pub fn emit_halt(&mut self) {
+        self.emit_insn(Insn::Halt {
+            err_code: 0,
+            description: String::new(),
+        });
+    }
+
+    // no users yet, but I want to avoid someone else in the future
+    // just adding parameters to emit_halt! If you use this, remove the
+    // clippy warning please.
+    #[allow(dead_code)]
+    pub fn emit_halt_err(&mut self, err_code: usize, description: String) {
+        self.emit_insn(Insn::Halt {
+            err_code,
+            description,
+        });
+    }
+
+    pub fn emit_init(&mut self) -> BranchOffset {
+        let target_pc = self.allocate_label();
+        self.emit_insn(Insn::Init { target_pc });
+        target_pc
+    }
+
+    pub fn emit_transaction(&mut self, write: bool) {
+        self.emit_insn(Insn::Transaction { write });
+    }
+
+    pub fn emit_goto(&mut self, target_pc: BranchOffset) {
+        self.emit_insn(Insn::Goto { target_pc });
+    }
+
     pub fn add_comment(&mut self, insn_index: BranchOffset, comment: &'static str) {
         self.comments.insert(insn_index.to_offset_int(), comment);
     }
