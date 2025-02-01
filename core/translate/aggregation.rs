@@ -41,7 +41,7 @@ pub fn emit_ungrouped_aggregation<'a>(
 
     // This always emits a ResultRow because currently it can only be used for a single row result
     // Limit is None because we early exit on limit 0 and the max rows here is 1
-    emit_select_result(program, t_ctx, plan, None)?;
+    emit_select_result(program, t_ctx, plan, None, None)?;
 
     Ok(())
 }

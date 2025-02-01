@@ -68,6 +68,7 @@ limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["st
 limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
 limbo_time = { path = "../extensions/time", optional = true, features = ["static"] }
 miette = "7.4.0"
+strum = "0.26"
 
 [build-dependencies]
 chrono = "0.4.38"

@@ -2,6 +2,7 @@ package limbo_test
 
 import (
 	"database/sql"
+	"fmt"
 	"testing"
 
 	_ "limbo"
@@ -76,7 +77,7 @@ func TestQuery(t *testing.T) {
 	}
 	defer rows.Close()
 
-	expectedCols := []string{"foo", "bar"}
+	expectedCols := []string{"foo", "bar", "baz"}
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatalf("Error getting columns: %v", err)
@@ -93,13 +94,15 @@ func TestQuery(t *testing.T) {
 	for rows.Next() {
 		var a int
 		var b string
-		err = rows.Scan(&a, &b)
+		var c []byte
+		err = rows.Scan(&a, &b, &c)
 		if err != nil {
 			t.Fatalf("Error scanning row: %v", err)
 		}
-		if a != i || b != rowsMap[i] {
-			t.Fatalf("Expected %d, %s, got %d, %s", i, rowsMap[i], a, b)
+		if a != i || b != rowsMap[i] || string(c) != rowsMap[i] {
+			t.Fatalf("Expected %d, %s, %s, got %d, %s, %b", i, rowsMap[i], rowsMap[i], a, b, c)
 		}
+		fmt.Println("RESULTS: ", a, b, string(c))
 		i++
 	}
 
@@ -111,7 +114,7 @@ func TestQuery(t *testing.T) {
 var rowsMap = map[int]string{1: "hello", 2: "world", 3: "foo", 4: "bar", 5: "baz"}
 
 func createTable(conn *sql.DB) error {
-	insert := "CREATE TABLE test (foo INT, bar TEXT);"
+	insert := "CREATE TABLE test (foo INT, bar TEXT, baz BLOB);"
 	stmt, err := conn.Prepare(insert)
 	if err != nil {
 		return err
@@ -123,13 +126,13 @@ func createTable(conn *sql.DB) error {
 
 func insertData(conn *sql.DB) error {
 	for i := 1; i <= 5; i++ {
-		insert := "INSERT INTO test (foo, bar) VALUES (?, ?);"
+		insert := "INSERT INTO test (foo, bar, baz) VALUES (?, ?, ?);"
 		stmt, err := conn.Prepare(insert)
 		if err != nil {
 			return err
 		}
 		defer stmt.Close()
-		if _, err = stmt.Exec(i, rowsMap[i]); err != nil {
+		if _, err = stmt.Exec(i, rowsMap[i], []byte(rowsMap[i])); err != nil {
 			return err
 		}
 	}

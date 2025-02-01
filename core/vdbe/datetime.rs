@@ -122,6 +122,7 @@ fn format_dt(dt: NaiveDateTime, output_type: DateTimeOutput, subsec: bool) -> St
 // Not as fast as if the formatting was native to chrono, but a good enough
 // for now, just to have the feature implemented
 fn strftime_format(dt: &NaiveDateTime, format_str: &str) -> String {
+    use super::strftime::CustomStrftimeItems;
     use std::fmt::Write;
     // Necessary to remove %f and %J that are exclusive formatters to sqlite
     // Chrono does not support them, so it is necessary to replace the modifiers manually
@@ -130,13 +131,13 @@ fn strftime_format(dt: &NaiveDateTime, format_str: &str) -> String {
     let copy_format = format_str
         .to_string()
         .replace("%J", &format!("{:.9}", to_julian_day_exact(dt)));
-    // Just change the formatting here to have fractional seconds using chrono builtin modifier
-    let copy_format = copy_format.replace("%f", "%S.%3f");
+
+    let items = CustomStrftimeItems::new(&copy_format);
 
     // The write! macro is used here as chrono's format can panic if the formatting string contains
     // unknown specifiers. By using a writer, we can catch the panic and handle the error
     let mut formatted = String::new();
-    match write!(formatted, "{}", dt.format(&copy_format)) {
+    match write!(formatted, "{}", dt.format_with_items(items)) {
         Ok(_) => formatted,
         // On sqlite when the formatting fails nothing is printed
         Err(_) => "".to_string(),

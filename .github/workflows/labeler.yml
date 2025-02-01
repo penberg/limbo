@@ -11,7 +11,11 @@ jobs:
       pull-requests: write
 
     steps:
-      - uses: actions/labeler@v4
+      - uses: actions/checkout@v4
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          configuration-path: .github/labeler.yml
+          sparse-checkout: |
+            .github
+      - uses: actions/labeler@v5
+        with:
+          repo-token: "${{ secrets.GH_TOKEN }}"
+          configuration-path: '.github/labeler.yml'

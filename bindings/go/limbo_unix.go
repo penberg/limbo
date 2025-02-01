@@ -35,7 +35,7 @@ func loadLibrary() error {
 	for _, path := range paths {
 		libPath := filepath.Join(path, libraryName)
 		if _, err := os.Stat(libPath); err == nil {
-			slib, dlerr := purego.Dlopen(libPath, purego.RTLD_LAZY)
+			slib, dlerr := purego.Dlopen(libPath, purego.RTLD_NOW|purego.RTLD_GLOBAL)
 			if dlerr != nil {
 				return fmt.Errorf("failed to load library at %s: %w", libPath, dlerr)
 			}

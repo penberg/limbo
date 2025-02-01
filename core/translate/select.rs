@@ -57,6 +57,7 @@ pub fn prepare_select_plan(
                 order_by: None,
                 aggregates: vec![],
                 limit: None,
+                offset: None,
                 referenced_tables,
                 available_indexes: schema.indexes.clone().into_values().flatten().collect(),
                 contains_constant_false_condition: false,
@@ -326,8 +327,9 @@ pub fn prepare_select_plan(
                 plan.order_by = Some(key);
             }
 
-            // Parse the LIMIT clause
-            plan.limit = select.limit.and_then(|l| parse_limit(*l));
+            // Parse the LIMIT/OFFSET clause
+            (plan.limit, plan.offset) =
+                select.limit.map_or(Ok((None, None)), |l| parse_limit(*l))?;
 
             // Return the unoptimized query plan
             Ok(Plan::Select(plan))

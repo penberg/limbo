@@ -23,6 +23,7 @@ pub mod explain;
 pub mod insn;
 pub mod likeop;
 pub mod sorter;
+mod strftime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
@@ -43,7 +44,8 @@ use crate::vdbe::insn::Insn;
 use crate::{
     function::JsonFunc, json::get_json, json::is_json_valid, json::json_array,
     json::json_array_length, json::json_arrow_extract, json::json_arrow_shift_extract,
-    json::json_error_position, json::json_extract, json::json_object, json::json_type,
+    json::json_error_position, json::json_extract, json::json_object, json::json_patch,
+    json::json_remove, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VERSION};
 use datetime::{
@@ -164,8 +166,16 @@ macro_rules! call_external_function {
     ) => {{
         if $arg_count == 0 {
             let result_c_value: ExtValue = unsafe { ($func_ptr)(0, std::ptr::null()) };
-            let result_ov = OwnedValue::from_ffi(&result_c_value);
-            $state.registers[$dest_register] = result_ov;
+            match OwnedValue::from_ffi(&result_c_value) {
+                Ok(result_ov) => {
+                    $state.registers[$dest_register] = result_ov;
+                    unsafe { result_c_value.free() };
+                }
+                Err(e) => {
+                    unsafe { result_c_value.free() };
+                    return Err(e);
+                }
+            }
         } else {
             let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
             let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
@@ -175,8 +185,16 @@ macro_rules! call_external_function {
             }
             let argv_ptr = ext_values.as_ptr();
             let result_c_value: ExtValue = unsafe { ($func_ptr)($arg_count as i32, argv_ptr) };
-            let result_ov = OwnedValue::from_ffi(&result_c_value);
-            $state.registers[$dest_register] = result_ov;
+            match OwnedValue::from_ffi(&result_c_value) {
+                Ok(result_ov) => {
+                    $state.registers[$dest_register] = result_ov;
+                    unsafe { result_c_value.free() };
+                }
+                Err(e) => {
+                    unsafe { result_c_value.free() };
+                    return Err(e);
+                }
+            }
         }
     }};
 }
@@ -1554,7 +1572,7 @@ impl Program {
                             AggFunc::Min => {}
                             AggFunc::GroupConcat | AggFunc::StringAgg => {}
                             AggFunc::External(_) => {
-                                agg.compute_external();
+                                agg.compute_external()?;
                             }
                         },
                         OwnedValue::Null => {
@@ -1747,6 +1765,18 @@ impl Program {
                                 let json_value = &state.registers[*start_reg];
                                 state.registers[*dest] = is_json_valid(json_value)?;
                             }
+                            JsonFunc::JsonPatch => {
+                                assert_eq!(arg_count, 2);
+                                assert!(*start_reg + 1 < state.registers.len());
+                                let target = &state.registers[*start_reg];
+                                let patch = &state.registers[*start_reg + 1];
+                                state.registers[*dest] = json_patch(target, patch)?;
+                            }
+                            JsonFunc::JsonRemove => {
+                                state.registers[*dest] = json_remove(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
+                            }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
                             ScalarFunc::Cast => {
@@ -1880,7 +1910,7 @@ impl Program {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
                                     ScalarFunc::Sign => exec_sign(reg_value),
-                                    ScalarFunc::Abs => exec_abs(reg_value),
+                                    ScalarFunc::Abs => Some(exec_abs(reg_value)?),
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
                                     ScalarFunc::Length => Some(exec_length(reg_value)),
@@ -2277,6 +2307,37 @@ impl Program {
                         state.pc = target_pc.to_offset_int();
                     }
                 }
+                Insn::OffsetLimit {
+                    limit_reg,
+                    combined_reg,
+                    offset_reg,
+                } => {
+                    let limit_val = match state.registers[*limit_reg] {
+                        OwnedValue::Integer(val) => val,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "OffsetLimit: the value in limit_reg is not an integer".into(),
+                            ));
+                        }
+                    };
+                    let offset_val = match state.registers[*offset_reg] {
+                        OwnedValue::Integer(val) if val < 0 => 0,
+                        OwnedValue::Integer(val) if val >= 0 => val,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "OffsetLimit: the value in offset_reg is not an integer".into(),
+                            ));
+                        }
+                    };
+
+                    let offset_limit_sum = limit_val.overflowing_add(offset_val);
+                    if limit_val <= 0 || offset_limit_sum.1 {
+                        state.registers[*combined_reg] = OwnedValue::Integer(-1);
+                    } else {
+                        state.registers[*combined_reg] = OwnedValue::Integer(offset_limit_sum.0);
+                    }
+                    state.pc += 1;
+                }
                 // this cursor may be reused for next insert
                 // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
                 // If not there might be some optimizations obviously.
@@ -2395,6 +2456,11 @@ impl Program {
                     state.registers[*dest] =
                         exec_or(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
+                }
+                Insn::Noop => {
+                    // Do nothing
+                    // Advance the program counter for the next opcode
+                    state.pc += 1
                 }
             }
         }
@@ -2705,24 +2771,25 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
     OwnedValue::build_text(Rc::new(result.to_uppercase()))
 }
 
-fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
+fn exec_abs(reg: &OwnedValue) -> Result<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
-            if x < &0 {
-                Some(OwnedValue::Integer(-x))
-            } else {
-                Some(OwnedValue::Integer(*x))
+            match i64::checked_abs(*x) {
+                Some(y) => Ok(OwnedValue::Integer(y)),
+                // Special case: if we do the abs of "-9223372036854775808", it causes overflow.
+                // return IntegerOverflow error
+                None => Err(LimboError::IntegerOverflow),
             }
         }
         OwnedValue::Float(x) => {
             if x < &0.0 {
-                Some(OwnedValue::Float(-x))
+                Ok(OwnedValue::Float(-x))
             } else {
-                Some(OwnedValue::Float(*x))
+                Ok(OwnedValue::Float(*x))
             }
         }
-        OwnedValue::Null => Some(OwnedValue::Null),
-        _ => Some(OwnedValue::Float(0.0)),
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Float(0.0)),
     }
 }
 
@@ -3755,6 +3822,9 @@ mod tests {
             OwnedValue::Float(0.0)
         );
         assert_eq!(exec_abs(&OwnedValue::Null).unwrap(), OwnedValue::Null);
+
+        // ABS(i64::MIN) should return RuntimeError
+        assert!(exec_abs(&OwnedValue::Integer(i64::MIN)).is_err());
     }
 
     #[test]
