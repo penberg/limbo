@@ -111,3 +111,15 @@ do_execsql_test select_base_case_else {
 do_execsql_test select_base_case_noelse_null {
   select case 'null else' when 0 then 0 when 1 then 1 end;
 } {}
+
+do_execsql_test select-is-null {
+    select null is null, (1 / 0) is null, null is (1 / 0), (1 / 0) is (1 / 0);
+    select 4 is null, '4' is null, 0 is null, (1 / 2) is null;
+} {1|1|1|1
+0|0|0|0}
+
+do_execsql_test select-is-not-null {
+    select null is not null, (1 / 0) is not null, null is not (1 / 0), (1 / 0) is not (1 / 0);
+    select 4 is not null, '4' is not null, 0 is not null, (1 / 2) is not null;
+} {0|0|0|0
+1|1|1|1}
