@@ -70,19 +70,28 @@ macro_rules! ok_tri {
             None => return Value::error(ResultCode::Error),
         }
     };
+    ($e:expr, $msg:expr) => {
+        match $e {
+            Some(val) => val,
+            None => return Value::error_with_message($msg.to_string()),
+        }
+    };
 }
 
 macro_rules! tri {
     ($e:expr) => {
         match $e {
             Ok(val) => val,
-            Err(_) => return Value::error(ResultCode::Error),
+            Err(err) => return Value::error_with_message(err.to_string()),
+        }
+    };
+    ($e:expr, $msg:expr) => {
+        match $e {
+            Ok(val) => val,
+            Err(_) => return Value::error_with_message($msg.to_string()),
         }
     };
 }
-
-pub(crate) use ok_tri;
-pub(crate) use tri;
 
 /// Checks to see if e's enum is of type val
 macro_rules! value_tri {
@@ -90,6 +99,12 @@ macro_rules! value_tri {
         match $e {
             $val => (),
             _ => return Value::error(ResultCode::InvalidArgs),
+        }
+    };
+    ($e:expr, $val:pat, $msg:expr) => {
+        match $e {
+            $val => (),
+            _ => return Value::error_with_message($msg.to_string()),
         }
     };
 }
@@ -102,16 +117,16 @@ pub enum TimeError {
     #[error("invalid datetime format")]
     InvalidFormat,
     /// Blob is not size of `TIME_BLOB_SIZE`
-    #[error("blob is not correct size")]
+    #[error("invalid time blob size")]
     InvalidSize,
     /// Blob time version not matching
-    #[error("time blob version mismatch")]
+    #[error("mismatch time blob version")]
     MismatchVersion,
     #[error("unknown field")]
     UnknownField(#[from] <TimeField as ::core::str::FromStr>::Err),
     #[error("rounding error")]
     RoundingError(#[from] chrono::RoundingError),
-    #[error("datetime creation error")]
+    #[error("time creation error")]
     CreationError,
 }
 
@@ -141,6 +156,14 @@ fn time_date_internal(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
+    for arg in args {
+        value_tri!(
+            arg.value_type(),
+            ValueType::Integer,
+            "all parameters should be integers"
+        );
+    }
+
     let year = ok_tri!(args[0].to_integer());
     let month = ok_tri!(args[1].to_integer());
     let day = ok_tri!(args[2].to_integer());
@@ -150,35 +173,21 @@ fn time_date_internal(args: &[Value]) -> Value {
     let mut nano_secs = 0;
     let mut offset = FixedOffset::east_opt(0).unwrap();
 
-    value_tri!(args[0].value_type(), ValueType::Integer);
-    value_tri!(args[1].value_type(), ValueType::Integer);
-    value_tri!(args[2].value_type(), ValueType::Integer);
-
-    // As you have to create a date starting in year 1 month 1 day 1
-    // You need to offset the variables by 1
-
     if args.len() >= 6 {
-        value_tri!(args[3].value_type(), ValueType::Integer);
-        value_tri!(args[4].value_type(), ValueType::Integer);
-        value_tri!(args[5].value_type(), ValueType::Integer);
-
         hour = ok_tri!(args[3].to_integer());
         minutes = ok_tri!(args[4].to_integer());
         seconds = ok_tri!(args[5].to_integer());
     }
 
     if args.len() >= 7 {
-        value_tri!(args[6].value_type(), ValueType::Integer);
-
         nano_secs = ok_tri!(args[6].to_integer());
     }
 
     if args.len() == 8 {
-        value_tri!(args[7].value_type(), ValueType::Integer);
-
         let offset_sec = ok_tri!(args[7].to_integer()) as i32;
+        // TODO offset is not normalized. Maybe could just increase/decrease the number of seconds
+        // instead of relying in this offset
         offset = ok_tri!(FixedOffset::east_opt(offset_sec));
-        // I believe this is not a double conversion here
     }
 
     let t = Time::time_date(
@@ -226,11 +235,11 @@ fn time_get(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
-    let field = ok_tri!(args[1].to_text());
+    let field = ok_tri!(args[1].to_text(), "2nd parameter: should be a field name");
 
     let field = tri!(TimeField::from_str(&field));
 
@@ -243,7 +252,7 @@ fn time_get_year(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -256,7 +265,7 @@ fn time_get_month(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -269,7 +278,7 @@ fn time_get_day(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -282,7 +291,7 @@ fn time_get_hour(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -295,7 +304,7 @@ fn time_get_minute(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -308,7 +317,7 @@ fn time_get_second(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -321,7 +330,7 @@ fn time_get_nano(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -334,7 +343,7 @@ fn time_get_weekday(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -347,7 +356,7 @@ fn time_get_yearday(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -360,7 +369,7 @@ fn time_get_isoyear(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -373,7 +382,7 @@ fn time_get_isoweek(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -385,15 +394,19 @@ fn time_unix_internal(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    value_tri!(&args[0].value_type(), ValueType::Integer);
+    for arg in args {
+        value_tri!(
+            arg.value_type(),
+            ValueType::Integer,
+            "all parameters should be integers"
+        );
+    }
 
     let seconds = ok_tri!(args[0].to_integer());
 
     let mut nano_sec = 0;
 
     if args.len() == 2 {
-        value_tri!(args[1].value_type(), ValueType::Integer);
-
         nano_sec = ok_tri!(args[1].to_integer());
     }
 
@@ -424,7 +437,11 @@ fn time_milli(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    value_tri!(&args[0].value_type(), ValueType::Integer);
+    value_tri!(
+        &args[0].value_type(),
+        ValueType::Integer,
+        "parameter should be an integer"
+    );
 
     let millis = ok_tri!(args[0].to_integer());
 
@@ -441,7 +458,11 @@ fn time_micro(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    value_tri!(&args[0].value_type(), ValueType::Integer);
+    value_tri!(
+        &args[0].value_type(),
+        ValueType::Integer,
+        "parameter should be an integer"
+    );
 
     let micros = ok_tri!(args[0].to_integer());
 
@@ -458,7 +479,11 @@ fn time_nano(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    value_tri!(&args[0].value_type(), ValueType::Integer);
+    value_tri!(
+        &args[0].value_type(),
+        ValueType::Integer,
+        "parameter should be an integer"
+    );
 
     let nanos = ok_tri!(args[0].to_integer());
 
@@ -475,7 +500,7 @@ fn time_to_unix(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -488,7 +513,7 @@ fn time_to_milli(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -501,7 +526,7 @@ fn time_to_micro(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -514,12 +539,14 @@ fn time_to_nano(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
     Value::from_integer(ok_tri!(t.to_unix_nano()))
 }
+
+// Comparisons
 
 #[scalar(name = "time_after")]
 fn time_after(args: &[Value]) -> Value {
@@ -527,11 +554,11 @@ fn time_after(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
-    let blob = ok_tri!(args[1].to_blob());
+    let blob = ok_tri!(args[1].to_blob(), "2nd parameter: should be a time blob");
 
     let u = tri!(Time::try_from(blob));
 
@@ -544,11 +571,11 @@ fn time_before(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
-    let blob = ok_tri!(args[1].to_blob());
+    let blob = ok_tri!(args[1].to_blob(), "2nd parameter: should be a time blob");
 
     let u = tri!(Time::try_from(blob));
 
@@ -561,11 +588,11 @@ fn time_compare(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
-    let blob = ok_tri!(args[1].to_blob());
+    let blob = ok_tri!(args[1].to_blob(), "2nd parameter: should be a time blob");
 
     let u = tri!(Time::try_from(blob));
 
@@ -584,11 +611,11 @@ fn time_equal(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
-    let blob = ok_tri!(args[1].to_blob());
+    let blob = ok_tri!(args[1].to_blob(), "2nd parameter: should be a time blob");
 
     let u = tri!(Time::try_from(blob));
 
@@ -604,7 +631,7 @@ fn dur_ns(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    Value::from_integer(ok_tri!(chrono::Duration::nanoseconds(1).num_nanoseconds()))
+    Value::from_integer(chrono::Duration::nanoseconds(1).num_nanoseconds().unwrap())
 }
 
 /// 1 microsecond
@@ -614,7 +641,7 @@ fn dur_us(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    Value::from_integer(ok_tri!(chrono::Duration::microseconds(1).num_nanoseconds()))
+    Value::from_integer(chrono::Duration::microseconds(1).num_nanoseconds().unwrap())
 }
 
 /// 1 millisecond
@@ -624,7 +651,7 @@ fn dur_ms(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    Value::from_integer(ok_tri!(chrono::Duration::milliseconds(1).num_nanoseconds()))
+    Value::from_integer(chrono::Duration::milliseconds(1).num_nanoseconds().unwrap())
 }
 
 /// 1 second
@@ -634,7 +661,7 @@ fn dur_s(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    Value::from_integer(ok_tri!(chrono::Duration::seconds(1).num_nanoseconds()))
+    Value::from_integer(chrono::Duration::seconds(1).num_nanoseconds().unwrap())
 }
 
 /// 1 minute
@@ -644,7 +671,7 @@ fn dur_m(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    Value::from_integer(ok_tri!(chrono::Duration::minutes(1).num_nanoseconds()))
+    Value::from_integer(chrono::Duration::minutes(1).num_nanoseconds().unwrap())
 }
 
 /// 1 hour
@@ -654,7 +681,7 @@ fn dur_h(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    Value::from_integer(ok_tri!(chrono::Duration::hours(1).num_nanoseconds()))
+    Value::from_integer(chrono::Duration::hours(1).num_nanoseconds().unwrap())
 }
 
 // Time Arithmetic
@@ -666,11 +693,14 @@ fn time_add(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
-
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
     let t = tri!(Time::try_from(blob));
 
-    value_tri!(args[1].value_type(), ValueType::Integer);
+    value_tri!(
+        args[1].value_type(),
+        ValueType::Integer,
+        "2nd parameter: should be an integer"
+    );
 
     let d = ok_tri!(args[1].to_integer());
 
@@ -685,23 +715,35 @@ fn time_add_date(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
     let t = tri!(Time::try_from(blob));
 
-    value_tri!(args[1].value_type(), ValueType::Integer);
+    value_tri!(
+        args[1].value_type(),
+        ValueType::Integer,
+        "2nd parameter: should be an integer"
+    );
 
     let years = ok_tri!(args[1].to_integer());
     let mut months = 0;
     let mut days = 0;
 
     if args.len() >= 3 {
-        value_tri!(args[2].value_type(), ValueType::Integer);
+        value_tri!(
+            args[2].value_type(),
+            ValueType::Integer,
+            "3rd parameter: should be an integer"
+        );
 
         months = ok_tri!(args[2].to_integer());
     }
 
     if args.len() == 4 {
-        value_tri!(args[3].value_type(), ValueType::Integer);
+        value_tri!(
+            args[3].value_type(),
+            ValueType::Integer,
+            "4th parameter: should be an integer"
+        );
 
         days = ok_tri!(args[3].to_integer());
     }
@@ -737,10 +779,10 @@ fn time_sub(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
     let t = tri!(Time::try_from(blob));
 
-    let blob = ok_tri!(args[1].to_blob());
+    let blob = ok_tri!(args[1].to_blob(), "2nd parameter: should be a time blob");
     let u = tri!(Time::try_from(blob));
 
     time_sub_internal(t, u)
@@ -754,7 +796,7 @@ fn time_since(args: &[Value]) -> Value {
 
     let now = Time::new();
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
     let t = tri!(Time::try_from(blob));
 
     time_sub_internal(now, t)
@@ -768,7 +810,7 @@ fn time_until(args: &[Value]) -> Value {
 
     let now = Time::new();
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "parameter should be a time blob");
     let t = tri!(Time::try_from(blob));
 
     time_sub_internal(t, now)
@@ -782,7 +824,7 @@ fn time_trunc(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
@@ -800,7 +842,7 @@ fn time_trunc(args: &[Value]) -> Value {
 
             tri!(t.trunc_duration(duration)).into_blob()
         }
-        _ => Value::error(ResultCode::Error),
+        _ => Value::error_with_message("2nd parameter: should be a field name".to_string()),
     }
 }
 
@@ -810,11 +852,15 @@ fn time_round(args: &[Value]) -> Value {
         return Value::error(ResultCode::InvalidArgs);
     }
 
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
-    value_tri!(args[1].value_type(), ValueType::Integer);
+    value_tri!(
+        args[1].value_type(),
+        ValueType::Integer,
+        "2nd parameter: should be an integer"
+    );
 
     let duration = ok_tri!(args[1].to_integer());
     let duration = Duration::from(duration);
@@ -829,13 +875,17 @@ fn time_fmt_iso(args: &[Value]) -> Value {
     if args.len() != 1 && args.len() != 2 {
         return Value::error(ResultCode::InvalidArgs);
     }
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
     let offset_sec = {
         if args.len() == 2 {
-            value_tri!(args[1].value_type(), ValueType::Integer);
+            value_tri!(
+                args[1].value_type(),
+                ValueType::Integer,
+                "2nd parameter: should be an integer"
+            );
             ok_tri!(args[1].to_integer()) as i32
         } else {
             0
@@ -852,13 +902,17 @@ fn time_fmt_datetime(args: &[Value]) -> Value {
     if args.len() != 1 && args.len() != 2 {
         return Value::error(ResultCode::InvalidArgs);
     }
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
     let offset_sec = {
         if args.len() == 2 {
-            value_tri!(args[1].value_type(), ValueType::Integer);
+            value_tri!(
+                args[1].value_type(),
+                ValueType::Integer,
+                "2nd parameter: should be an integer"
+            );
             ok_tri!(args[1].to_integer()) as i32
         } else {
             0
@@ -875,13 +929,17 @@ fn time_fmt_date(args: &[Value]) -> Value {
     if args.len() != 1 && args.len() != 2 {
         return Value::error(ResultCode::InvalidArgs);
     }
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
     let offset_sec = {
         if args.len() == 2 {
-            value_tri!(args[1].value_type(), ValueType::Integer);
+            value_tri!(
+                args[1].value_type(),
+                ValueType::Integer,
+                "2nd parameter: should be an integer"
+            );
             ok_tri!(args[1].to_integer()) as i32
         } else {
             0
@@ -898,13 +956,17 @@ fn time_fmt_time(args: &[Value]) -> Value {
     if args.len() != 1 && args.len() != 2 {
         return Value::error(ResultCode::InvalidArgs);
     }
-    let blob = ok_tri!(args[0].to_blob());
+    let blob = ok_tri!(args[0].to_blob(), "1st parameter: should be a time blob");
 
     let t = tri!(Time::try_from(blob));
 
     let offset_sec = {
         if args.len() == 2 {
-            value_tri!(args[1].value_type(), ValueType::Integer);
+            value_tri!(
+                args[1].value_type(),
+                ValueType::Integer,
+                "2nd parameter: should be an integer"
+            );
             ok_tri!(args[1].to_integer()) as i32
         } else {
             0
@@ -945,7 +1007,10 @@ fn time_parse(args: &[Value]) -> Value {
         return Time::from_datetime(dt.and_utc()).into_blob();
     }
 
-    let time = tri!(chrono::NaiveTime::parse_from_str(&dt_str, "%H:%M:%S"));
+    let time = tri!(
+        chrono::NaiveTime::parse_from_str(&dt_str, "%H:%M:%S"),
+        "error parsing datetime string"
+    );
     let dt = NaiveDateTime::new(NaiveDate::from_ymd_opt(1, 1, 1).unwrap(), time)
         .with_nanosecond(0)
         .unwrap();

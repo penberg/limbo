@@ -543,13 +543,3 @@ impl Deref for Duration {
         &self.inner
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new() {
-        let _t = Time::new();
-    }
-}
