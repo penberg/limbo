@@ -35,25 +35,32 @@ Limbo is an in-process OLTP database engine library that has:
 
 ### CLI
 
-Install `limbo` with:
+You can install the latest `limbo` release with:
 
 ```shell 
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/tursodatabase/limbo/releases/latest/download/limbo-installer.sh | sh
 ```
 
-Then use the SQL shell to create and query a database:
+Then launch the shell to execute SQL statements:
 
 ```console
-$ limbo database.db
-Limbo v0.0.6
+Limbo
 Enter ".help" for usage hints.
+Connected to a transient in-memory database.
+Use ".open FILENAME" to reopen on a persistent database
 limbo> CREATE TABLE users (id INT PRIMARY KEY, username TEXT);
 limbo> INSERT INTO users VALUES (1, 'alice');
 limbo> INSERT INTO users VALUES (2, 'bob');
 limbo> SELECT * FROM users;
 1|alice
 2|bob
+```
+
+You can also build and run the latest development version with:
+
+```shell
+cargo run
 ```
 
 ### JavaScript (wip)
@@ -92,48 +99,6 @@ res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
 ```
 
-## Developing
-
-Build and run `limbo` cli: 
-
-```shell 
-cargo run --package limbo --bin limbo database.db
-```
-
-Run tests:
-
-```console
-cargo test
-```
-
-Test coverage report:
-
-```
-cargo tarpaulin -o html
-```
-
-> [!NOTE]
-> Generation of coverage report requires [tarpaulin](https://github.com/xd009642/tarpaulin) binary to be installed.
-> You can install it with `cargo install cargo-tarpaulin`
-
-[//]: # (TODO remove the below tip when the bug is solved)
-
-> [!TIP]
-> If coverage fails with "Test failed during run" error and all of the tests passed it might be the result of tarpaulin [bug](https://github.com/xd009642/tarpaulin/issues/1642). You can temporarily set [dynamic libraries linking manually](https://doc.rust-lang.org/cargo/reference/environment-variables.html#dynamic-library-paths) as a workaround, e.g. for linux  `LD_LIBRARY_PATH="$(rustc --print=target-libdir)" cargo tarpaulin -o html`.
-
-Run benchmarks:
-
-```console
-cargo bench
-```
-
-Run benchmarks and generate flamegraphs:
-
-```console
-echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
-cargo bench --bench benchmark -- --profile-time=5
-```
-
 ## FAQ
 
 ### How is Limbo different from libSQL?
@@ -145,15 +110,13 @@ Limbo is a research project to build a SQLite compatible in-process database in 
 * Pekka Enberg, Sasu Tarkoma, Jon Crowcroft Ashwin Rao (2024). Serverless Runtime / Database Co-Design With Asynchronous I/O. In _EdgeSys ‘24_. [[PDF]](https://penberg.org/papers/penberg-edgesys24.pdf)
 * Pekka Enberg, Sasu Tarkoma, and Ashwin Rao (2023). Towards Database and Serverless Runtime Co-Design. In _CoNEXT-SW ’23_. [[PDF](https://penberg.org/papers/penberg-conext-sw-23.pdf)] [[Slides](https://penberg.org/papers/penberg-conext-sw-23-slides.pdf)]
 
-## Contributing
-
-We'd love to have you contribute to Limbo! Check out the [contribution guide] to get started.
-
 ## License
 
 This project is licensed under the [MIT license].
 
 ### Contribution
+
+We'd love to have you contribute to Limbo! Please check out the [contribution guide] to get started.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in Limbo by you, shall be licensed as MIT, without any additional
