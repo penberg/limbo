@@ -306,204 +306,98 @@ impl Display for Aggregate {
     }
 }
 
-// For EXPLAIN QUERY PLAN
-impl Display for SourceOperator {
+/// For EXPLAIN QUERY PLAN
+impl Display for Plan {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Select(select_plan) => select_plan.fmt(f),
+            Delete(delete_plan) => delete_plan.fmt(f),
+        }
+    }
+}
+
+impl Display for SelectPlan {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        fn fmt_operator(
-            operator: &SourceOperator,
-            f: &mut Formatter,
-            level: usize,
-            last: bool,
-        ) -> fmt::Result {
-            let indent = if level == 0 {
-                if last { "`--" } else { "|--" }.to_string()
+        writeln!(f, "QUERY PLAN")?;
+
+        // Print each table reference with appropriate indentation based on join depth
+        for (i, reference) in self.table_references.iter().enumerate() {
+            let is_last = i == self.table_references.len() - 1;
+            let indent = if i == 0 {
+                if is_last { "`--" } else { "|--" }.to_string()
             } else {
                 format!(
                     "   {}{}",
-                    "|  ".repeat(level - 1),
-                    if last { "`--" } else { "|--" }
+                    "|  ".repeat(i - 1),
+                    if is_last { "`--" } else { "|--" }
                 )
             };
 
-            match operator {
-                SourceOperator::Join {
-                    left,
-                    right,
-                    predicates,
-                    outer,
-                    ..
-                } => {
-                    let join_name = if *outer { "OUTER JOIN" } else { "JOIN" };
-                    match predicates
-                        .as_ref()
-                        .and_then(|ps| if ps.is_empty() { None } else { Some(ps) })
-                    {
-                        Some(ps) => {
-                            let predicates_string = ps
-                                .iter()
-                                .map(|p| p.to_string())
-                                .collect::<Vec<String>>()
-                                .join(" AND ");
-                            writeln!(f, "{}{} ON {}", indent, join_name, predicates_string)?;
-                        }
-                        None => writeln!(f, "{}{}", indent, join_name)?,
+            match &reference.op {
+                Operation::Scan { .. } => {
+                    let table_name = if reference.table.get_name() == reference.identifier {
+                        reference.identifier.clone()
+                    } else {
+                        format!("{} AS {}", reference.table.get_name(), reference.identifier)
+                    };
+
+                    writeln!(f, "{}SCAN {}", indent, table_name)?;
+                }
+                Operation::Search(search) => match search {
+                    Search::RowidEq { .. } | Search::RowidSearch { .. } => {
+                        writeln!(
+                            f,
+                            "{}SEARCH {} USING INTEGER PRIMARY KEY (rowid=?)",
+                            indent, reference.identifier
+                        )?;
                     }
-                    fmt_operator(left, f, level + 1, false)?;
-                    fmt_operator(right, f, level + 1, true)
-                }
-                SourceOperator::Scan {
-                    table_reference,
-                    predicates: filter,
-                    ..
-                } => {
-                    let table_name =
-                        if table_reference.table.get_name() == table_reference.table_identifier {
-                            table_reference.table_identifier.clone()
-                        } else {
-                            format!(
-                                "{} AS {}",
-                                &table_reference.table.get_name(),
-                                &table_reference.table_identifier
-                            )
-                        };
-                    let filter_string = filter.as_ref().map(|f| {
-                        let filters_string = f
-                            .iter()
-                            .map(|p| p.to_string())
-                            .collect::<Vec<String>>()
-                            .join(" AND ");
-                        format!("FILTER {}", filters_string)
-                    });
-                    match filter_string {
-                        Some(fs) => writeln!(f, "{}SCAN {} {}", indent, table_name, fs),
-                        None => writeln!(f, "{}SCAN {}", indent, table_name),
-                    }?;
-                    Ok(())
-                }
-                SourceOperator::Search {
-                    table_reference,
-                    search,
-                    ..
-                } => {
-                    match search {
-                        Search::RowidEq { .. } | Search::RowidSearch { .. } => {
-                            writeln!(
-                                f,
-                                "{}SEARCH {} USING INTEGER PRIMARY KEY (rowid=?)",
-                                indent, table_reference.table_identifier
-                            )?;
-                        }
-                        Search::IndexSearch { index, .. } => {
-                            writeln!(
-                                f,
-                                "{}SEARCH {} USING INDEX {}",
-                                indent, table_reference.table_identifier, index.name
-                            )?;
-                        }
+                    Search::IndexSearch { index, .. } => {
+                        writeln!(
+                            f,
+                            "{}SEARCH {} USING INDEX {}",
+                            indent, reference.identifier, index.name
+                        )?;
                     }
-                    Ok(())
+                },
+                Operation::Subquery { plan, .. } => {
+                    writeln!(f, "{}SUBQUERY {}", indent, reference.identifier)?;
+                    // Indent and format the subquery plan
+                    for line in format!("{}", plan).lines() {
+                        writeln!(f, "{}   {}", indent, line)?;
+                    }
                 }
-                SourceOperator::Subquery { plan, .. } => {
-                    fmt_operator(&plan.source, f, level + 1, last)
-                }
-                SourceOperator::Nothing { .. } => Ok(()),
             }
         }
+        Ok(())
+    }
+}
+
+impl Display for DeletePlan {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         writeln!(f, "QUERY PLAN")?;
-        fmt_operator(self, f, 0, true)
-    }
-}
 
-/**
-  Returns a bitmask where each bit corresponds to a table in the `tables` vector.
-  If a table is referenced in the given Operator, the corresponding bit is set to 1.
-  Example:
-    if tables = [(table1, "t1"), (table2, "t2"), (table3, "t3")],
-    and the Operator is a join between table2 and table3,
-    then the return value will be (in bits): 110
-*/
-pub fn get_table_ref_bitmask_for_operator<'a>(
-    tables: &'a Vec<TableReference>,
-    operator: &'a SourceOperator,
-) -> Result<usize> {
-    let mut table_refs_mask = 0;
-    match operator {
-        SourceOperator::Join { left, right, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, left)?;
-            table_refs_mask |= get_table_ref_bitmask_for_operator(tables, right)?;
-        }
-        SourceOperator::Scan {
-            table_reference, ..
-        } => {
-            table_refs_mask |= 1
-                << tables
-                    .iter()
-                    .position(|t| t.table_identifier == table_reference.table_identifier)
-                    .unwrap();
-        }
-        SourceOperator::Search {
-            table_reference, ..
-        } => {
-            table_refs_mask |= 1
-                << tables
-                    .iter()
-                    .position(|t| t.table_identifier == table_reference.table_identifier)
-                    .unwrap();
-        }
-        SourceOperator::Subquery { .. } => {}
-        SourceOperator::Nothing { .. } => {}
-    }
-    Ok(table_refs_mask)
-}
+        // Delete plan should only have one table reference
+        if let Some(reference) = self.table_references.first() {
+            let indent = "`--";
 
-/**
-  Returns a bitmask where each bit corresponds to a table in the `tables` vector.
-  If a table is referenced in the given AST expression, the corresponding bit is set to 1.
-  Example:
-    if tables = [(table1, "t1"), (table2, "t2"), (table3, "t3")],
-    and predicate = "t1.a = t2.b"
-    then the return value will be (in bits): 011
-*/
-#[allow(clippy::only_used_in_recursion)]
-pub fn get_table_ref_bitmask_for_ast_expr<'a>(
-    tables: &'a Vec<TableReference>,
-    predicate: &'a ast::Expr,
-) -> Result<usize> {
-    let mut table_refs_mask = 0;
-    match predicate {
-        ast::Expr::Binary(e1, _, e2) => {
-            table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, e1)?;
-            table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, e2)?;
-        }
-        ast::Expr::Column { table, .. } => {
-            table_refs_mask |= 1 << table;
-        }
-        ast::Expr::Id(_) => unreachable!("Id should be resolved to a Column before optimizer"),
-        ast::Expr::Qualified(_, _) => {
-            unreachable!("Qualified should be resolved to a Column before optimizer")
-        }
-        ast::Expr::Literal(_) => {}
-        ast::Expr::Like { lhs, rhs, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, lhs)?;
-            table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, rhs)?;
-        }
-        ast::Expr::FunctionCall {
-            args: Some(args), ..
-        } => {
-            for arg in args {
-                table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, arg)?;
-            }
-        }
-        ast::Expr::InList { lhs, rhs, .. } => {
-            table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, lhs)?;
-            if let Some(rhs_list) = rhs {
-                for rhs_expr in rhs_list {
-                    table_refs_mask |= get_table_ref_bitmask_for_ast_expr(tables, rhs_expr)?;
+            match &reference.op {
+                Operation::Scan { .. } => {
+                    let table_name = if reference.table.get_name() == reference.identifier {
+                        reference.identifier.clone()
+                    } else {
+                        format!("{} AS {}", reference.table.get_name(), reference.identifier)
+                    };
+
+                    writeln!(f, "{}DELETE FROM {}", indent, table_name)?;
+                }
+                Operation::Search { .. } => {
+                    panic!("DELETE plans should not contain search operations");
+                }
+                Operation::Subquery { .. } => {
+                    panic!("DELETE plans should not contain subqueries");
                 }
             }
         }
-        _ => {}
+        Ok(())
     }
-
-    Ok(table_refs_mask)
 }
