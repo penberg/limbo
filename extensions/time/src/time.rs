@@ -128,9 +128,9 @@ impl Time {
         let timezone_date = self.inner.with_timezone(offset);
 
         if timezone_date.nanosecond() == 0 {
-            return Ok(timezone_date.format("%FT%T%:z").to_string());
+            Ok(timezone_date.format("%FT%T%:z").to_string())
         } else {
-            return Ok(timezone_date.format("%FT%T%.9f%:z").to_string());
+            Ok(timezone_date.format("%FT%T%.9f%:z").to_string())
         }
     }
 
@@ -145,7 +145,7 @@ impl Time {
 
         let timezone_date = self.inner.with_timezone(offset);
 
-        return Ok(timezone_date.format(fmt).to_string());
+        Ok(timezone_date.format(fmt).to_string())
     }
 
     pub fn fmt_date(&self, offset_sec: i32) -> Result<String> {
@@ -159,7 +159,7 @@ impl Time {
 
         let timezone_date = self.inner.with_timezone(offset);
 
-        return Ok(timezone_date.format(fmt).to_string());
+        Ok(timezone_date.format(fmt).to_string())
     }
 
     pub fn fmt_time(&self, offset_sec: i32) -> Result<String> {
@@ -173,7 +173,7 @@ impl Time {
 
         let timezone_date = self.inner.with_timezone(offset);
 
-        return Ok(timezone_date.format(fmt).to_string());
+        Ok(timezone_date.format(fmt).to_string())
     }
 
     /// Adjust the datetime to the offset
@@ -182,6 +182,7 @@ impl Time {
     }
 
     //
+    #[allow(clippy::too_many_arguments)]
     pub fn time_date(
         year: i32,
         month: i32,
@@ -197,25 +198,33 @@ impl Time {
             .and_hms_opt(0, 0, 0)
             .unwrap();
 
-        if year > 0 {
-            dt = dt
-                .checked_add_months(chrono::Months::new((year - 1).abs() as u32 * 12))
-                .ok_or(TimeError::CreationError)?;
-        } else if year < 0 {
-            dt = dt
-                .checked_sub_months(chrono::Months::new((year - 1).abs() as u32 * 12))
-                .ok_or(TimeError::CreationError)?;
-        }
+        match year.cmp(&0) {
+            std::cmp::Ordering::Greater => {
+                dt = dt
+                    .checked_add_months(chrono::Months::new((year - 1).unsigned_abs() * 12))
+                    .ok_or(TimeError::CreationError)?
+            }
+            std::cmp::Ordering::Less => {
+                dt = dt
+                    .checked_sub_months(chrono::Months::new((year - 1).unsigned_abs() * 12))
+                    .ok_or(TimeError::CreationError)?
+            }
+            std::cmp::Ordering::Equal => (),
+        };
 
-        if month > 0 {
-            dt = dt
-                .checked_add_months(chrono::Months::new((month - 1).abs() as u32))
-                .ok_or(TimeError::CreationError)?;
-        } else if month < 0 {
-            dt = dt
-                .checked_sub_months(chrono::Months::new((month - 1).abs() as u32))
-                .ok_or(TimeError::CreationError)?;
-        }
+        match month.cmp(&0) {
+            std::cmp::Ordering::Greater => {
+                dt = dt
+                    .checked_add_months(chrono::Months::new((month - 1).unsigned_abs()))
+                    .ok_or(TimeError::CreationError)?
+            }
+            std::cmp::Ordering::Less => {
+                dt = dt
+                    .checked_sub_months(chrono::Months::new((month - 1).unsigned_abs()))
+                    .ok_or(TimeError::CreationError)?
+            }
+            std::cmp::Ordering::Equal => (),
+        };
 
         dt += chrono::Duration::try_days(day - 1).ok_or(TimeError::CreationError)?;
 
@@ -237,25 +246,33 @@ impl Time {
     pub fn time_add_date(self, years: i32, months: i32, days: i64) -> Result<Self> {
         let mut dt: NaiveDateTime = self.into();
 
-        if years > 0 {
-            dt = dt
-                .checked_add_months(chrono::Months::new(years.abs() as u32 * 12))
-                .ok_or(TimeError::CreationError)?;
-        } else if years < 0 {
-            dt = dt
-                .checked_sub_months(chrono::Months::new(years.abs() as u32 * 12))
-                .ok_or(TimeError::CreationError)?;
-        }
+        match years.cmp(&0) {
+            std::cmp::Ordering::Greater => {
+                dt = dt
+                    .checked_add_months(chrono::Months::new(years.unsigned_abs() * 12))
+                    .ok_or(TimeError::CreationError)?;
+            }
+            std::cmp::Ordering::Less => {
+                dt = dt
+                    .checked_sub_months(chrono::Months::new(years.unsigned_abs() * 12))
+                    .ok_or(TimeError::CreationError)?;
+            }
+            std::cmp::Ordering::Equal => (),
+        };
 
-        if months > 0 {
-            dt = dt
-                .checked_add_months(chrono::Months::new(months.abs() as u32))
-                .ok_or(TimeError::CreationError)?;
-        } else if months < 0 {
-            dt = dt
-                .checked_sub_months(chrono::Months::new(months.abs() as u32))
-                .ok_or(TimeError::CreationError)?;
-        }
+        match months.cmp(&0) {
+            std::cmp::Ordering::Greater => {
+                dt = dt
+                    .checked_add_months(chrono::Months::new(months.unsigned_abs()))
+                    .ok_or(TimeError::CreationError)?
+            }
+            std::cmp::Ordering::Less => {
+                dt = dt
+                    .checked_sub_months(chrono::Months::new(months.unsigned_abs()))
+                    .ok_or(TimeError::CreationError)?
+            }
+            std::cmp::Ordering::Equal => (),
+        };
 
         dt += chrono::Duration::try_days(days).ok_or(TimeError::CreationError)?;
 
@@ -423,8 +440,7 @@ impl Time {
             Hour => Value::from_integer(self.inner.hour() as i64),
             Minute => Value::from_integer(self.inner.minute() as i64),
             Second => Value::from_float(
-                self.inner.second() as f64
-                    + (self.inner.nanosecond() as f64) / (1_000_000_000 as f64),
+                self.inner.second() as f64 + (self.inner.nanosecond() as f64) / (1_000_000_000_f64),
             ),
             MilliSecond | Milli => {
                 Value::from_integer((self.inner.nanosecond() / 1_000_000 % 1_000) as i64)
@@ -441,7 +457,7 @@ impl Time {
             YearDay => Value::from_integer(self.inner.ordinal() as i64),
             WeekDay => Value::from_integer(self.inner.weekday().num_days_from_sunday() as i64),
             Epoch => Value::from_float(
-                self.inner.timestamp() as f64 + self.inner.nanosecond() as f64 / 1_000_000_000 as f64,
+                self.inner.timestamp() as f64 + self.inner.nanosecond() as f64 / 1_000_000_000_f64,
             ),
         }
     }
@@ -499,7 +515,7 @@ impl TryFrom<Vec<u8>> for Time {
 
         Ok(Self {
             inner: DateTime::from_timestamp(seconds - (3600 * 24 * DAYS_BEFORE_EPOCH), nanoseconds)
-                .ok_or_else(|| TimeError::InvalidFormat)?
+                .ok_or(TimeError::InvalidFormat)?
                 .to_utc(),
         })
     }

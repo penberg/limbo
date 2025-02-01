@@ -134,7 +134,7 @@ type Result<T> = core::result::Result<T, TimeError>;
 
 #[scalar(name = "time_now", alias = "now")]
 fn time_now(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
     let t = Time::new();
@@ -241,7 +241,7 @@ fn time_get(args: &[Value]) -> Value {
 
     let field = ok_tri!(args[1].to_text(), "2nd parameter: should be a field name");
 
-    let field = tri!(TimeField::from_str(&field));
+    let field = tri!(TimeField::from_str(field));
 
     t.time_get(field)
 }
@@ -627,7 +627,7 @@ fn time_equal(args: &[Value]) -> Value {
 /// 1 nanosecond
 #[scalar(name = "dur_ns")]
 fn dur_ns(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
 
@@ -637,7 +637,7 @@ fn dur_ns(args: &[Value]) -> Value {
 /// 1 microsecond
 #[scalar(name = "dur_us")]
 fn dur_us(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
 
@@ -647,7 +647,7 @@ fn dur_us(args: &[Value]) -> Value {
 /// 1 millisecond
 #[scalar(name = "dur_ms")]
 fn dur_ms(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
 
@@ -657,7 +657,7 @@ fn dur_ms(args: &[Value]) -> Value {
 /// 1 second
 #[scalar(name = "dur_s")]
 fn dur_s(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
 
@@ -667,7 +667,7 @@ fn dur_s(args: &[Value]) -> Value {
 /// 1 minute
 #[scalar(name = "dur_m")]
 fn dur_m(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
 
@@ -677,7 +677,7 @@ fn dur_m(args: &[Value]) -> Value {
 /// 1 hour
 #[scalar(name = "dur_h")]
 fn dur_h(args: &[Value]) -> Value {
-    if args.len() != 0 {
+    if !args.is_empty() {
         return Value::error(ResultCode::InvalidArgs);
     }
 
@@ -832,7 +832,7 @@ fn time_trunc(args: &[Value]) -> Value {
         ValueType::Text => {
             let field = ok_tri!(args[1].to_text());
 
-            let field = tri!(TimeRoundField::from_str(&field));
+            let field = tri!(TimeRoundField::from_str(field));
 
             tri!(t.trunc_field(field)).into_blob()
         }
@@ -986,17 +986,17 @@ fn time_parse(args: &[Value]) -> Value {
 
     let dt_str = ok_tri!(args[0].to_text());
 
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&dt_str) {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(dt_str) {
         return Time::from_datetime(dt.to_utc()).into_blob();
     }
 
-    if let Ok(mut dt) = chrono::NaiveDateTime::parse_from_str(&dt_str, "%Y-%m-%d %H:%M:%S") {
+    if let Ok(mut dt) = chrono::NaiveDateTime::parse_from_str(dt_str, "%Y-%m-%d %H:%M:%S") {
         // Unwrap is safe here
         dt = dt.with_nanosecond(0).unwrap();
         return Time::from_datetime(dt.and_utc()).into_blob();
     }
 
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(&dt_str, "%Y-%m-%d") {
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(dt_str, "%Y-%m-%d") {
         // Unwrap is safe here
 
         let dt = date
@@ -1008,7 +1008,7 @@ fn time_parse(args: &[Value]) -> Value {
     }
 
     let time = tri!(
-        chrono::NaiveTime::parse_from_str(&dt_str, "%H:%M:%S"),
+        chrono::NaiveTime::parse_from_str(dt_str, "%H:%M:%S"),
         "error parsing datetime string"
     );
     let dt = NaiveDateTime::new(NaiveDate::from_ymd_opt(1, 1, 1).unwrap(), time)
