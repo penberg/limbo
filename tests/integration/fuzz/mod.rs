@@ -146,4 +146,92 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    pub fn logical_expression_fuzz_ex1() {
+        let _ = env_logger::try_init();
+        let db = TempDatabase::new_empty();
+        let limbo_conn = db.connect_limbo();
+        let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        for query in [
+            "SELECT FALSE",
+            "SELECT NOT FALSE",
+            "SELECT ((NULL) IS NOT TRUE <= ((NOT (FALSE))))",
+        ] {
+            let limbo = limbo_exec_row(&limbo_conn, query);
+            let sqlite = sqlite_exec_row(&sqlite_conn, query);
+            assert_eq!(
+                limbo, sqlite,
+                "query: {}, limbo: {:?}, sqlite: {:?}",
+                query, limbo, sqlite
+            );
+        }
+    }
+
+    #[test]
+    pub fn logical_expression_fuzz_run() {
+        let _ = env_logger::try_init();
+        let g = GrammarGenerator::new();
+        let (expr, expr_builder) = g.create_handle();
+        let (bin_op, bin_op_builder) = g.create_handle();
+        let (unary_infix_op, unary_infix_op_builder) = g.create_handle();
+        let (paren, paren_builder) = g.create_handle();
+
+        paren_builder
+            .concat("")
+            .push_str("(")
+            .push(expr)
+            .push_str(")")
+            .build();
+
+        unary_infix_op_builder
+            .concat(" ")
+            .push(g.create().choice().options_str(["NOT"]).build())
+            .push(expr)
+            .build();
+
+        bin_op_builder
+            .concat(" ")
+            .push(expr)
+            .push(
+                g.create()
+                    .choice()
+                    .options_str(["AND", "OR", "IS", "IS NOT", "=", "<>", ">", "<", ">=", "<="])
+                    .build(),
+            )
+            .push(expr)
+            .build();
+
+        expr_builder
+            .choice()
+            .option_w(unary_infix_op, 1.0)
+            .option_w(bin_op, 1.0)
+            .option_w(paren, 1.0)
+            // unfortunatelly, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
+            // e.g. 8 IS TRUE == 1 (although 8 = TRUE == 0)
+            // so, we do not use TRUE/FALSE constants as they will produce diff with sqlite results
+            .options_str(["1", "0", "NULL", "1.0", "1.5", "-0.5", "-1.0", "'x'"])
+            .build();
+
+        let sql = g.create().concat(" ").push_str("SELECT").push(expr).build();
+
+        let db = TempDatabase::new_empty();
+        let limbo_conn = db.connect_limbo();
+        let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        let (mut rng, seed) = rng_from_time();
+        log::info!("seed: {}", seed);
+        for _ in 0..16 * 1024 {
+            let query = g.generate(&mut rng, sql, 50);
+            log::info!("query: {}", query);
+            let limbo = limbo_exec_row(&limbo_conn, &query);
+            let sqlite = sqlite_exec_row(&sqlite_conn, &query);
+            assert_eq!(
+                limbo, sqlite,
+                "query: {}, limbo: {:?}, sqlite: {:?}",
+                query, limbo, sqlite
+            );
+        }
+    }
 }
