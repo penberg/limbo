@@ -35,6 +35,21 @@ do_execsql_test_small where-not-equals-a-with-nulls {
     select count(*) from demo where value != 'A';
 } {2}
 
+do_execsql_test_small where-is-null-combined {
+    select * from demo where value is null or id = 3;
+} {2|
+3|B
+4|
+}
+
+do_execsql_test_small where-is-not-null-combined {
+    select * from demo where value is not null or id = 2;
+} {1|A
+2|
+3|B
+5|C
+}
+
 do_execsql_test where-clause-eq {
     select last_name from users where id = 2000;
 } {Rodriguez}
