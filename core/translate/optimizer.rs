@@ -675,6 +675,10 @@ fn rewrite_expr(expr: &mut ast::Expr) -> Result<()> {
             }
             Ok(())
         }
+        ast::Expr::Unary(_, arg) => {
+            rewrite_expr(arg)?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
