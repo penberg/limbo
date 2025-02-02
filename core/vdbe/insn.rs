@@ -605,6 +605,11 @@ pub enum Insn {
         dest: usize,
     },
     Noop,
+    /// Write the current number of pages in database P1 to memory cell P2.
+    PageCount {
+        db: usize,
+        dest: usize,
+    },
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {

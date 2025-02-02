@@ -2406,6 +2406,20 @@ impl Program {
                         state.pc += 1;
                     }
                 }
+                Insn::PageCount { db, dest } => {
+                    if *db > 0 {
+                        // TODO: implement temp databases
+                        todo!("temp databases not implemented yet");
+                    }
+                    // SQLite returns "0" on an empty database, and 2 on the first insertion,
+                    // so we'll mimick that behavior.
+                    let mut pages = pager.db_header.borrow().database_size.into();
+                    if pages == 1 {
+                        pages = 0;
+                    }
+                    state.registers[*dest] = OwnedValue::Integer(pages);
+                    state.pc += 1;
+                }
                 Insn::ParseSchema {
                     db: _,
                     where_clause,

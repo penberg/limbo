@@ -135,7 +135,7 @@ The current status of Limbo is:
 | PRAGMA mmap_size                 | No         |                                              |
 | PRAGMA module_list               | No         |                                              |
 | PRAGMA optimize                  | No         |                                              |
-| PRAGMA page_count                | No         |                                              |
+| PRAGMA page_count                | Yes        |                                              |
 | PRAGMA page_size                 | No         |                                              |
 | PRAGMA parser_trace              | No         |                                              |
 | PRAGMA pragma_list               | Yes        |                                              |
@@ -504,7 +504,7 @@ Modifiers:
 | OpenWriteAsync | Yes    |         |
 | OpenWriteAwait | Yes    |         |
 | Or             | Yes    |         |
-| Pagecount      | No     |         |
+| Pagecount      | Partial| no temp databases |
 | Param          | No     |         |
 | ParseSchema    | No     |         |
 | Permutation    | No     |         |
