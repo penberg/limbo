@@ -80,9 +80,9 @@ public final class LimboDB extends AbstractDB {
 
   /**
    * This method attempts to load the native library required for Limbo operations. It first tries
-   * to load the library from the system's library path using {@link #defaultLoad()}. If that fails,
-   * it attempts to load the library from the JAR file using {@link #loadFromJar()}. If either
-   * method succeeds, the `isLoaded` flag is set to true. If both methods fail, an {@link
+   * to load the library from the system's library path using {@link #loadFromSystemPath()}. If that
+   * fails, it attempts to load the library from the JAR file using {@link #loadFromJar()}. If
+   * either method succeeds, the `isLoaded` flag is set to true. If both methods fail, an {@link
    * InternalError} is thrown indicating that the necessary native library could not be loaded.
    *
    * @throws InternalError if the native library cannot be loaded from either the system path or the
@@ -93,7 +93,7 @@ public final class LimboDB extends AbstractDB {
       return;
     }
 
-    if (defaultLoad() || loadFromJar()) {
+    if (loadFromSystemPath() || loadFromJar()) {
       isLoaded = true;
       return;
     }
@@ -109,7 +109,7 @@ public final class LimboDB extends AbstractDB {
    *
    * @return true if the library was successfully loaded, false otherwise.
    */
-  private static boolean defaultLoad() {
+  private static boolean loadFromSystemPath() {
     try {
       System.loadLibrary("_limbo_java");
       return true;
@@ -179,8 +179,6 @@ public final class LimboDB extends AbstractDB {
     super(url, filePath);
   }
 
-  // WRAPPER FUNCTIONS ////////////////////////////////////////////
-
   // TODO: add support for JNI
   @Override
   protected native long openUtf8(byte[] file, int openFlags) throws SQLException;
@@ -188,9 +186,6 @@ public final class LimboDB extends AbstractDB {
   // TODO: add support for JNI
   @Override
   protected native void close0() throws SQLException;
-
-  // TODO: add support for JNI
-  native int execUtf8(byte[] sqlUtf8) throws SQLException;
 
   // TODO: add support for JNI
   @Override
