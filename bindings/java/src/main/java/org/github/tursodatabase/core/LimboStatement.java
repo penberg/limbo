@@ -90,6 +90,23 @@ public class LimboStatement {
   private native void _close(long statementPointer);
 
   /**
+   * Initializes the column metadata, such as the names of the columns. Since {@link LimboStatement}
+   * can only have a single {@link LimboResultSet}, it is appropriate to place the initialization of
+   * column metadata here.
+   *
+   * @throws SQLException if a database access error occurs while retrieving column names
+   */
+  public void initializeColumnMetadata() throws SQLException {
+    final String[] columnNames = this.columnNames(statementPointer);
+    if (columnNames != null) {
+      this.resultSet.setColumnNames(columnNames);
+    }
+  }
+
+  @Nullable
+  private native String[] columnNames(long statementPointer) throws SQLException;
+
+  /**
    * Checks if the statement is closed.
    *
    * @return true if the statement is closed, false otherwise.

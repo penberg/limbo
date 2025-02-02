@@ -2,7 +2,7 @@ use crate::errors::Result;
 use crate::errors::{LimboError, LIMBO_ETC};
 use crate::limbo_connection::LimboConnection;
 use crate::utils::set_err_msg_and_throw_exception;
-use jni::objects::{JObject, JValue};
+use jni::objects::{JObject, JObjectArray, JValue};
 use jni::sys::jlong;
 use jni::JNIEnv;
 use limbo_core::{Statement, StepResult};
@@ -123,6 +123,27 @@ fn row_to_obj_array<'local>(
     }
 
     Ok(obj_array.into())
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_columnNames<'local>(
+    mut env: JNIEnv<'local>,
+    _obj: JObject<'local>,
+    stmt_ptr: jlong,
+) -> JObject<'local> {
+    let stmt = to_limbo_statement(stmt_ptr).unwrap();
+    let columns = stmt.stmt.columns();
+    let obj_arr: JObjectArray = env
+        .new_object_array(columns.len() as i32, "java/lang/String", JObject::null())
+        .unwrap();
+
+    for (i, value) in columns.iter().enumerate() {
+        let str = env.new_string(value).unwrap();
+        env.set_object_array_element(&obj_arr, i as i32, str)
+            .unwrap();
+    }
+
+    obj_arr.into()
 }
 
 /// Converts an optional `JObject` into Java's `LimboStepResult`.
