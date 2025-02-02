@@ -187,7 +187,7 @@ impl GrammarGenerator {
                     } => {
                         let mut s = fixed_prefix.clone();
                         for _ in 0..*random_length {
-                            s.push(rng.random_range('A'..'Z'));
+                            s.push(rng.random_range('A'..='Z'));
                         }
                         next.push(GrammarFrontierNode::String(s));
                     }

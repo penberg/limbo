@@ -87,6 +87,7 @@ mod tests {
 
     #[test]
     pub fn arithmetic_expression_fuzz() {
+        let _ = env_logger::try_init();
         let g = GrammarGenerator::new();
         let (expr, expr_builder) = g.create_handle();
         let (bin_op, bin_op_builder) = g.create_handle();
@@ -133,7 +134,7 @@ mod tests {
         let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
 
         let (mut rng, seed) = rng_from_time();
-        println!("seed: {}", seed);
+        log::info!("seed: {}", seed);
         for _ in 0..1024 {
             let query = g.generate(&mut rng, sql, 50);
             let limbo = limbo_exec_row(&limbo_conn, &query);
