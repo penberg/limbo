@@ -158,6 +158,8 @@ mod tests {
             "SELECT FALSE",
             "SELECT NOT FALSE",
             "SELECT ((NULL) IS NOT TRUE <= ((NOT (FALSE))))",
+            "SELECT ifnull(0, NOT 0)",
+            "SELECT like('a%', 'a') = 1",
         ] {
             let limbo = limbo_exec_row(&limbo_conn, query);
             let sqlite = sqlite_exec_row(&sqlite_conn, query);
