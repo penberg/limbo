@@ -55,6 +55,27 @@ mod tests {
     }
 
     #[test]
+    pub fn arithmetic_expression_fuzz_ex1() {
+        let io = Arc::new(limbo_core::PlatformIO::new().unwrap());
+        let limbo_db = Database::open_file(io, ":memory:").unwrap();
+        let limbo_conn = limbo_db.connect();
+        let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        for query in [
+            "SELECT ~1 >> 1536",
+            "SELECT ~ + 3 << - ~ (~ (8)) - + -1 - 3 >> 3 + -6 * (-7 * 9 >> - 2)",
+        ] {
+            let limbo = limbo_exec_row(&limbo_conn, query);
+            let sqlite = sqlite_exec_row(&sqlite_conn, query);
+            assert_eq!(
+                limbo, sqlite,
+                "query: {}, limbo: {:?}, sqlite: {:?}",
+                query, limbo, sqlite
+            );
+        }
+    }
+
+    #[test]
     pub fn arithmetic_expression_fuzz() {
         let g = GrammarGenerator::new();
         let (expr, expr_builder) = g.create_handle();
