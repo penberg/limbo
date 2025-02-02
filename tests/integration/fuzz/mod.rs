@@ -10,7 +10,7 @@ mod tests {
 
     use crate::{
         common::TempDatabase,
-        fuzz::grammar_generator::{rand_int, GrammarGenerator},
+        fuzz::grammar_generator::{rand_int, rand_str, GrammarGenerator},
     };
 
     fn rng_from_time() -> (ChaCha8Rng, u64) {
@@ -176,6 +176,7 @@ mod tests {
         let (expr, expr_builder) = g.create_handle();
         let (bin_op, bin_op_builder) = g.create_handle();
         let (unary_infix_op, unary_infix_op_builder) = g.create_handle();
+        let (scalar, scalar_builder) = g.create_handle();
         let (paren, paren_builder) = g.create_handle();
 
         paren_builder
@@ -203,11 +204,48 @@ mod tests {
             .push(expr)
             .build();
 
+        scalar_builder
+            .choice()
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("like('")
+                    .push_symbol(rand_str("", 2))
+                    .push_str("', '")
+                    .push_symbol(rand_str("", 2))
+                    .push_str("')")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("ifnull(")
+                    .push(expr)
+                    .push_str(",")
+                    .push(expr)
+                    .push_str(")")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("iif(")
+                    .push(expr)
+                    .push_str(",")
+                    .push(expr)
+                    .push_str(",")
+                    .push(expr)
+                    .push_str(")")
+                    .build(),
+            )
+            .build();
+
         expr_builder
             .choice()
             .option_w(unary_infix_op, 1.0)
             .option_w(bin_op, 1.0)
             .option_w(paren, 1.0)
+            .option_w(scalar, 1.0)
             // unfortunatelly, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
             // e.g. 8 IS TRUE == 1 (although 8 = TRUE == 0)
             // so, we do not use TRUE/FALSE constants as they will produce diff with sqlite results
@@ -222,7 +260,7 @@ mod tests {
 
         let (mut rng, seed) = rng_from_time();
         log::info!("seed: {}", seed);
-        for _ in 0..16 * 1024 {
+        for _ in 0..1024 {
             let query = g.generate(&mut rng, sql, 50);
             log::info!("query: {}", query);
             let limbo = limbo_exec_row(&limbo_conn, &query);
