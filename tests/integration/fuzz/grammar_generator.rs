@@ -28,10 +28,12 @@ pub enum SymbolType {
     Int {
         range: Range<i32>,
     },
+    #[allow(dead_code)]
     Optional {
         value: SymbolHandle,
         prob: f64,
     },
+    #[allow(dead_code)]
     Repeat {
         value: SymbolHandle,
         range: Range<usize>,
@@ -53,6 +55,7 @@ pub fn const_str(s: &str) -> SymbolType {
     }
 }
 
+#[allow(dead_code)]
 pub fn rand_str(fixed_prefix: &str, random_length: usize) -> SymbolType {
     SymbolType::Str {
         fixed_prefix: fixed_prefix.to_string(),
@@ -323,6 +326,7 @@ impl SymbolDefinitionBuilder {
             ..self
         }
     }
+    #[allow(dead_code)]
     pub fn option(self, handle: SymbolHandle) -> Self {
         self.option_w(handle, 1.0)
     }
@@ -337,6 +341,7 @@ impl SymbolDefinitionBuilder {
     pub fn option_str(self, s: &str) -> Self {
         self.option_symbol(const_str(s))
     }
+    #[allow(dead_code)]
     pub fn options_symbol<const N: usize>(mut self, symbols: [SymbolType; N]) -> Self {
         for symbol in symbols {
             self = self.option_symbol(symbol)
@@ -349,7 +354,7 @@ impl SymbolDefinitionBuilder {
         }
         self
     }
-
+    #[allow(dead_code)]
     pub fn repeat(self, range: Range<usize>, separator: &str) -> Self {
         let symbol = self.symbol.expect("symbol must be set");
         let (handle, builder) = self.generator.create_handle();
@@ -363,7 +368,7 @@ impl SymbolDefinitionBuilder {
             ..self
         }
     }
-
+    #[allow(dead_code)]
     pub fn optional(self, prob: f64) -> Self {
         let symbol = self.symbol.expect("symbol must be set");
         let (handle, builder) = self.generator.create_handle();
