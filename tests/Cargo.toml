@@ -14,10 +14,6 @@ path = "lib.rs"
 name = "integration_tests"
 path = "integration/mod.rs"
 
-[[test]]
-name = "fuzz_tests"
-path = "fuzz/mod.rs"
-
 [dependencies]
 anyhow = "1.0.75"
 clap = { version = "4.5", features = ["derive"] }

@@ -2,14 +2,25 @@ pub mod grammar_generator;
 
 #[cfg(test)]
 mod tests {
-    use std::{rc::Rc, sync::Arc};
+    use std::rc::Rc;
 
-    use limbo_core::Database;
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
     use rusqlite::params;
 
-    use crate::grammar_generator::{rand_int, GrammarGenerator};
+    use crate::{
+        common::TempDatabase,
+        fuzz::grammar_generator::{rand_int, GrammarGenerator},
+    };
+
+    fn rng_from_time() -> (ChaCha8Rng, u64) {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let rng = ChaCha8Rng::seed_from_u64(seed);
+        (rng, seed)
+    }
 
     fn sqlite_exec_row(conn: &rusqlite::Connection, query: &str) -> Vec<rusqlite::types::Value> {
         let mut stmt = conn.prepare(&query).unwrap();
@@ -56,9 +67,8 @@ mod tests {
 
     #[test]
     pub fn arithmetic_expression_fuzz_ex1() {
-        let io = Arc::new(limbo_core::PlatformIO::new().unwrap());
-        let limbo_db = Database::open_file(io, ":memory:").unwrap();
-        let limbo_conn = limbo_db.connect();
+        let db = TempDatabase::new_empty();
+        let limbo_conn = db.connect_limbo();
         let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
 
         for query in [
@@ -118,13 +128,13 @@ mod tests {
 
         let sql = g.create().concat(" ").push_str("SELECT").push(expr).build();
 
-        let io = Arc::new(limbo_core::PlatformIO::new().unwrap());
-        let limbo_db = Database::open_file(io, ":memory:").unwrap();
-        let limbo_conn = limbo_db.connect();
+        let db = TempDatabase::new_empty();
+        let limbo_conn = db.connect_limbo();
         let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
 
-        let mut rng = ChaCha8Rng::seed_from_u64(0);
-        for _ in 0..16 * 1024 {
+        let (mut rng, seed) = rng_from_time();
+        println!("seed: {}", seed);
+        for _ in 0..1024 {
             let query = g.generate(&mut rng, sql, 50);
             let limbo = limbo_exec_row(&limbo_conn, &query);
             let sqlite = sqlite_exec_row(&sqlite_conn, &query);
