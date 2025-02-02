@@ -474,6 +474,17 @@ impl Optimizable for ast::Expr {
     }
 }
 
+fn opposite_cmp_op(op: ast::Operator) -> ast::Operator {
+    match op {
+        ast::Operator::Equals => ast::Operator::Equals,
+        ast::Operator::Greater => ast::Operator::Less,
+        ast::Operator::GreaterEquals => ast::Operator::LessEquals,
+        ast::Operator::Less => ast::Operator::Greater,
+        ast::Operator::LessEquals => ast::Operator::GreaterEquals,
+        _ => panic!("unexpected operator: {:?}", op),
+    }
+}
+
 pub fn try_extract_index_search_expression(
     cond: &mut WhereTerm,
     table_index: usize,
@@ -533,7 +544,7 @@ pub fn try_extract_index_search_expression(
                     | ast::Operator::LessEquals => {
                         let lhs_owned = lhs.take_ownership();
                         return Ok(Some(Search::RowidSearch {
-                            cmp_op: *operator,
+                            cmp_op: opposite_cmp_op(*operator),
                             cmp_expr: WhereTerm {
                                 expr: lhs_owned,
                                 from_outer_join: cond.from_outer_join,
@@ -581,7 +592,7 @@ pub fn try_extract_index_search_expression(
                         let lhs_owned = lhs.take_ownership();
                         return Ok(Some(Search::IndexSearch {
                             index: available_indexes[index_index].clone(),
-                            cmp_op: *operator,
+                            cmp_op: opposite_cmp_op(*operator),
                             cmp_expr: WhereTerm {
                                 expr: lhs_owned,
                                 from_outer_join: cond.from_outer_join,
