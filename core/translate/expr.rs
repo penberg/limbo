@@ -1146,9 +1146,10 @@ pub fn translate_expr(
                                 temp_reg,
                                 resolver,
                             )?;
+                            let before_copy_label = program.allocate_label();
                             program.emit_insn(Insn::NotNull {
                                 reg: temp_reg,
-                                target_pc: program.offset().add(2u32),
+                                target_pc: before_copy_label,
                             });
 
                             translate_expr(
@@ -1158,6 +1159,7 @@ pub fn translate_expr(
                                 temp_reg,
                                 resolver,
                             )?;
+                            program.resolve_label(before_copy_label, program.offset());
                             program.emit_insn(Insn::Copy {
                                 src_reg: temp_reg,
                                 dst_reg: target_register,
