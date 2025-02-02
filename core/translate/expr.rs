@@ -44,23 +44,19 @@ macro_rules! emit_cmp_insn {
         $op_true:ident,
         $op_false:ident,
         $lhs:expr,
-        $rhs:expr,
-        $tables:expr,
-        $resolver:expr
+        $rhs:expr
     ) => {{
-        let lhs_reg = translate_and_mark($program, Some($tables), $lhs, $resolver)?;
-        let rhs_reg = translate_and_mark($program, Some($tables), $rhs, $resolver)?;
         if $cond.jump_if_condition_is_true {
             $program.emit_insn(Insn::$op_true {
-                lhs: lhs_reg,
-                rhs: rhs_reg,
+                lhs: $lhs,
+                rhs: $rhs,
                 target_pc: $cond.jump_target_when_true,
                 flags: CmpInsFlags::default(),
             });
         } else {
             $program.emit_insn(Insn::$op_false {
-                lhs: lhs_reg,
-                rhs: rhs_reg,
+                lhs: $lhs,
+                rhs: $rhs,
                 target_pc: $cond.jump_target_when_false,
                 flags: CmpInsFlags::default().jump_if_null(),
             });
@@ -74,42 +70,23 @@ macro_rules! emit_cmp_null_insn {
         $cond:expr,
         $op_true:ident,
         $op_false:ident,
-        $op_null:ident,
         $lhs:expr,
-        $rhs:expr,
-        $tables:expr,
-        $resolver:expr
+        $rhs:expr
     ) => {{
-        if **$rhs == ast::Expr::Literal(ast::Literal::Null) {
-            let lhs_reg = translate_and_mark($program, Some($tables), $lhs, $resolver)?;
-            $program.emit_insn(Insn::$op_null {
-                reg: lhs_reg,
-                target_pc: $cond.jump_target_when_false,
-            });
-        } else if **$lhs == ast::Expr::Literal(ast::Literal::Null) {
-            let rhs_reg = translate_and_mark($program, Some($tables), $rhs, $resolver)?;
-            $program.emit_insn(Insn::$op_null {
-                reg: rhs_reg,
-                target_pc: $cond.jump_target_when_false,
+        if $cond.jump_if_condition_is_true {
+            $program.emit_insn(Insn::$op_true {
+                lhs: $lhs,
+                rhs: $rhs,
+                target_pc: $cond.jump_target_when_true,
+                flags: CmpInsFlags::default().null_eq(),
             });
         } else {
-            let lhs_reg = translate_and_mark($program, Some($tables), $lhs, $resolver)?;
-            let rhs_reg = translate_and_mark($program, Some($tables), $rhs, $resolver)?;
-            if $cond.jump_if_condition_is_true {
-                $program.emit_insn(Insn::$op_true {
-                    lhs: lhs_reg,
-                    rhs: rhs_reg,
-                    target_pc: $cond.jump_target_when_true,
-                    flags: CmpInsFlags::default().null_eq(),
-                });
-            } else {
-                $program.emit_insn(Insn::$op_false {
-                    lhs: lhs_reg,
-                    rhs: rhs_reg,
-                    target_pc: $cond.jump_target_when_false,
-                    flags: CmpInsFlags::default().jump_if_null().null_eq(),
-                });
-            }
+            $program.emit_insn(Insn::$op_false {
+                lhs: $lhs,
+                rhs: $rhs,
+                target_pc: $cond.jump_target_when_false,
+                flags: CmpInsFlags::default().null_eq(),
+            });
         }
     }};
 }
@@ -258,109 +235,39 @@ pub fn translate_condition_expr(
                 resolver,
             )?;
         }
-        ast::Expr::Binary(lhs, op, rhs) => match op {
-            ast::Operator::Greater => {
-                emit_cmp_insn!(
-                    program,
-                    condition_metadata,
-                    Gt,
-                    Le,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
+        ast::Expr::Binary(lhs, op, rhs) => {
+            let lhs_reg = translate_and_mark(program, Some(referenced_tables), lhs, resolver)?;
+            let rhs_reg = translate_and_mark(program, Some(referenced_tables), rhs, resolver)?;
+            match op {
+                ast::Operator::Greater => {
+                    emit_cmp_insn!(program, condition_metadata, Gt, Le, lhs_reg, rhs_reg)
+                }
+                ast::Operator::GreaterEquals => {
+                    emit_cmp_insn!(program, condition_metadata, Ge, Lt, lhs_reg, rhs_reg)
+                }
+                ast::Operator::Less => {
+                    emit_cmp_insn!(program, condition_metadata, Lt, Ge, lhs_reg, rhs_reg)
+                }
+                ast::Operator::LessEquals => {
+                    emit_cmp_insn!(program, condition_metadata, Le, Gt, lhs_reg, rhs_reg)
+                }
+                ast::Operator::Equals => {
+                    emit_cmp_insn!(program, condition_metadata, Eq, Ne, lhs_reg, rhs_reg)
+                }
+                ast::Operator::NotEquals => {
+                    emit_cmp_insn!(program, condition_metadata, Ne, Eq, lhs_reg, rhs_reg)
+                }
+                ast::Operator::Is => {
+                    emit_cmp_null_insn!(program, condition_metadata, Eq, Ne, lhs_reg, rhs_reg)
+                }
+                ast::Operator::IsNot => {
+                    emit_cmp_null_insn!(program, condition_metadata, Ne, Eq, lhs_reg, rhs_reg)
+                }
+                _ => {
+                    todo!("op {:?} not implemented", op);
+                }
             }
-            ast::Operator::GreaterEquals => {
-                emit_cmp_insn!(
-                    program,
-                    condition_metadata,
-                    Ge,
-                    Lt,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            ast::Operator::Less => {
-                emit_cmp_insn!(
-                    program,
-                    condition_metadata,
-                    Lt,
-                    Ge,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            ast::Operator::LessEquals => {
-                emit_cmp_insn!(
-                    program,
-                    condition_metadata,
-                    Le,
-                    Gt,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            ast::Operator::Equals => {
-                emit_cmp_insn!(
-                    program,
-                    condition_metadata,
-                    Eq,
-                    Ne,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            ast::Operator::NotEquals => {
-                emit_cmp_insn!(
-                    program,
-                    condition_metadata,
-                    Ne,
-                    Eq,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            ast::Operator::Is => {
-                emit_cmp_null_insn!(
-                    program,
-                    condition_metadata,
-                    Eq,
-                    Ne,
-                    NotNull,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            ast::Operator::IsNot => {
-                emit_cmp_null_insn!(
-                    program,
-                    condition_metadata,
-                    Ne,
-                    Eq,
-                    IsNull,
-                    lhs,
-                    rhs,
-                    referenced_tables,
-                    resolver
-                )
-            }
-            _ => {
-                todo!("op {:?} not implemented", op);
-            }
-        },
+        }
         ast::Expr::Literal(lit) => match lit {
             ast::Literal::Numeric(val) => {
                 let maybe_int = val.parse::<i64>();
