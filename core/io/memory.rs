@@ -3,7 +3,7 @@ use crate::Result;
 
 use log::debug;
 use std::{
-    cell::{RefCell, UnsafeCell},
+    cell::{Cell, RefCell, UnsafeCell},
     collections::BTreeMap,
     rc::Rc,
     sync::Arc,
@@ -11,7 +11,7 @@ use std::{
 
 pub struct MemoryIO {
     pages: UnsafeCell<BTreeMap<usize, MemPage>>,
-    size: UnsafeCell<usize>,
+    size: Cell<usize>,
 }
 
 // TODO: page size flag
@@ -40,15 +40,6 @@ impl MemoryIO {
 
     fn get_page(&self, page_no: usize) -> Option<&MemPage> {
         unsafe { (*self.pages.get()).get(&page_no) }
-    }
-
-    #[allow(clippy::mut_from_ref)]
-    fn get_size_mut(&self) -> &mut usize {
-        unsafe { &mut *self.size.get() }
-    }
-
-    fn get_size(&self) -> usize {
-        unsafe { *self.size.get() }
     }
 }
 
@@ -98,7 +89,7 @@ impl File for MemoryFile {
             return Ok(());
         }
 
-        let file_size = self.io.get_size();
+        let file_size = self.io.size.get();
         if pos >= file_size {
             c.complete(0);
             return Ok(());
@@ -160,8 +151,9 @@ impl File for MemoryFile {
             remaining -= bytes_to_write;
         }
 
-        let size = self.io.get_size_mut();
-        *size = (*size).max(pos + buf_len);
+        self.io
+            .size
+            .set(core::cmp::max(pos + buf_len, self.io.size.get()));
 
         c.complete(buf_len as i32);
         Ok(())
@@ -174,7 +166,7 @@ impl File for MemoryFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(self.io.get_size() as u64)
+        Ok(self.io.size.get() as u64)
     }
 }
 
