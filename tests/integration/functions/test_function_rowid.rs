@@ -101,5 +101,22 @@ fn test_integer_primary_key() -> anyhow::Result<()> {
             }
         }
     }
+    let mut rowids = Vec::new();
+    let mut select_query = conn.query("SELECT * FROM test_rowid")?.unwrap();
+    loop {
+        match select_query.step()? {
+            StepResult::Row(row) => {
+                if let Value::Integer(id) = row.values[0] {
+                    rowids.push(id);
+                }
+            }
+            StepResult::IO => tmp_db.io.run_once()?,
+            StepResult::Interrupt | StepResult::Done => break,
+            StepResult::Busy => panic!("Database is busy"),
+        }
+    }
+    assert_eq!(rowids.len(), 2);
+    assert!(rowids[0] > 0);
+    assert!(rowids[1] == -1);
     Ok(())
 }
