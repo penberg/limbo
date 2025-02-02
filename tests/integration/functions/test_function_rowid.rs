@@ -81,3 +81,25 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     do_flush(&conn, &tmp_db)?;
     Ok(())
 }
+
+#[test]
+fn test_integer_primary_key() -> anyhow::Result<()> {
+    let _ = env_logger::try_init();
+    let tmp_db = TempDatabase::new("CREATE TABLE test_rowid (id INTEGER PRIMARY KEY);");
+    let conn = tmp_db.connect_limbo();
+
+    for query in &[
+        "INSERT INTO test_rowid VALUES (-1)",
+        "INSERT INTO test_rowid VALUES (NULL)",
+    ] {
+        let mut insert_query = conn.query(query)?.unwrap();
+        loop {
+            match insert_query.step()? {
+                StepResult::IO => tmp_db.io.run_once()?,
+                StepResult::Done => break,
+                _ => unreachable!(),
+            }
+        }
+    }
+    Ok(())
+}
