@@ -6,6 +6,8 @@ import org.gradle.api.tasks.testing.logging.TestLogEvent
 plugins {
     java
     application
+    `java-library`
+    `maven-publish`
     id("net.ltgt.errorprone") version "3.1.0"
 
     // If you're stuck on JRE 8, use id 'com.diffplug.spotless' version '6.13.0' or older.
@@ -18,6 +20,17 @@ version = "0.0.1-SNAPSHOT"
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
     targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            from(components["java"])
+            groupId = "org.github.tursodatabase"
+            artifactId = "limbo"
+            version = "0.0.1-SNAPSHOT"
+        }
+    }
 }
 
 repositories {
@@ -37,13 +50,17 @@ dependencies {
 }
 
 application {
-    mainClass.set("org.github.tursodatabase.Main")
-
-    val limboSystemLibraryPath = System.getenv("LIMBO_SYSTEM_PATH")
+    val limboSystemLibraryPath = System.getenv("LIMBO_LIBRARY_PATH")
     if (limboSystemLibraryPath != null) {
         applicationDefaultJvmArgs = listOf(
             "-Djava.library.path=${System.getProperty("java.library.path")}:$limboSystemLibraryPath"
         )
+    }
+}
+
+tasks.jar {
+    from("libs") {
+        into("libs")
     }
 }
 
