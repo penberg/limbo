@@ -5,7 +5,7 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Integration tests"
+description = "Integration & fuzz tests"
 
 [lib]
 path = "lib.rs"
@@ -13,6 +13,10 @@ path = "lib.rs"
 [[test]]
 name = "integration_tests"
 path = "integration/mod.rs"
+
+[[test]]
+name = "fuzz_tests"
+path = "fuzz/mod.rs"
 
 [dependencies]
 anyhow = "1.0.75"
