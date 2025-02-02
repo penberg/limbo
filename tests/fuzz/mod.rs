@@ -1,9 +1,15 @@
+pub mod grammar_generator;
+
 #[cfg(test)]
 mod tests {
     use std::{rc::Rc, sync::Arc};
 
     use limbo_core::Database;
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
     use rusqlite::params;
+
+    use crate::grammar_generator::{rand_int, GrammarGenerator};
 
     fn sqlite_exec_row(conn: &rusqlite::Connection, query: &str) -> Vec<rusqlite::types::Value> {
         let mut stmt = conn.prepare(&query).unwrap();
@@ -49,19 +55,63 @@ mod tests {
     }
 
     #[test]
-    pub fn kek() {
+    pub fn arithmetic_expression_fuzz() {
+        let g = GrammarGenerator::new();
+        let (expr, expr_builder) = g.create_handle();
+        let (bin_op, bin_op_builder) = g.create_handle();
+        let (unary_op, unary_op_builder) = g.create_handle();
+        let (paren, paren_builder) = g.create_handle();
+
+        paren_builder
+            .concat("")
+            .push_str("(")
+            .push(expr)
+            .push_str(")")
+            .build();
+
+        unary_op_builder
+            .concat(" ")
+            .push(g.create().choice().options_str(["~", "+", "-"]).build())
+            .push(expr)
+            .build();
+
+        bin_op_builder
+            .concat(" ")
+            .push(expr)
+            .push(
+                g.create()
+                    .choice()
+                    .options_str(["+", "-", "*", "/", "%", "&", "|", "<<", ">>"])
+                    .build(),
+            )
+            .push(expr)
+            .build();
+
+        expr_builder
+            .choice()
+            .option_w(unary_op, 1.0)
+            .option_w(bin_op, 1.0)
+            .option_w(paren, 1.0)
+            .option_symbol_w(rand_int(-10..10), 1.0)
+            .build();
+
+        let sql = g.create().concat(" ").push_str("SELECT").push(expr).build();
+
         let io = Arc::new(limbo_core::PlatformIO::new().unwrap());
         let limbo_db = Database::open_file(io, ":memory:").unwrap();
         let limbo_conn = limbo_db.connect();
         let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
 
-        println!(
-            "column: {:?}",
-            sqlite_exec_row(&sqlite_conn, "SELECT 1 = 1.0")
-        );
-        println!(
-            "column: {:?}",
-            limbo_exec_row(&limbo_conn, "SELECT 1 = 1.0")
-        );
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+        for _ in 0..16 * 1024 {
+            let query = g.generate(&mut rng, sql, 50);
+            let limbo = limbo_exec_row(&limbo_conn, &query);
+            let sqlite = sqlite_exec_row(&sqlite_conn, &query);
+            assert_eq!(
+                limbo, sqlite,
+                "query: {}, limbo: {:?}, sqlite: {:?}",
+                query, limbo, sqlite
+            );
+        }
     }
 }
