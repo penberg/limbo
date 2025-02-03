@@ -16,8 +16,8 @@ use super::{
     expr::{translate_condition_expr, translate_expr, ConditionMetadata},
     order_by::{order_by_sorter_insert, sorter_insert},
     plan::{
-        IterationDirection, JoinAwareConditionExpr, Operation, Search, SelectPlan, SelectQueryType,
-        TableReference,
+        IterationDirection, Operation, Search, SelectPlan, SelectQueryType, TableReference,
+        WhereTerm,
     },
 };
 
@@ -164,7 +164,7 @@ pub fn open_loop(
     program: &mut ProgramBuilder,
     t_ctx: &mut TranslateCtx,
     tables: &[TableReference],
-    predicates: &[JoinAwareConditionExpr],
+    predicates: &[WhereTerm],
 ) -> Result<()> {
     for (table_index, table) in tables.iter().enumerate() {
         let LoopLabels {

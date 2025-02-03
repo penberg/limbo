@@ -1,8 +1,5 @@
 use super::{
-    plan::{
-        Aggregate, JoinAwareConditionExpr, JoinInfo, Operation, Plan, SelectQueryType,
-        TableReference,
-    },
+    plan::{Aggregate, JoinInfo, Operation, Plan, SelectQueryType, TableReference, WhereTerm},
     select::prepare_select_plan,
     SymbolTable,
 };
@@ -307,7 +304,7 @@ pub fn parse_from(
     schema: &Schema,
     mut from: Option<FromClause>,
     syms: &SymbolTable,
-    out_where_clause: &mut Vec<JoinAwareConditionExpr>,
+    out_where_clause: &mut Vec<WhereTerm>,
 ) -> Result<Vec<TableReference>> {
     if from.as_ref().and_then(|f| f.select.as_ref()).is_none() {
         return Ok(vec![]);
@@ -331,7 +328,7 @@ pub fn parse_from(
 pub fn parse_where(
     where_clause: Option<Expr>,
     table_references: &[TableReference],
-    out_where_clause: &mut Vec<JoinAwareConditionExpr>,
+    out_where_clause: &mut Vec<WhereTerm>,
 ) -> Result<()> {
     if let Some(where_expr) = where_clause {
         let mut predicates = vec![];
@@ -341,7 +338,7 @@ pub fn parse_where(
         }
         for expr in predicates {
             let eval_at_loop = get_rightmost_table_referenced_in_expr(&expr)?;
-            out_where_clause.push(JoinAwareConditionExpr {
+            out_where_clause.push(WhereTerm {
                 expr,
                 from_outer_join: false,
                 eval_at_loop,
@@ -409,7 +406,7 @@ fn parse_join(
     join: ast::JoinedSelectTable,
     syms: &SymbolTable,
     tables: &mut Vec<TableReference>,
-    out_where_clause: &mut Vec<JoinAwareConditionExpr>,
+    out_where_clause: &mut Vec<WhereTerm>,
 ) -> Result<()> {
     let ast::JoinedSelectTable {
         operator: join_operator,
@@ -493,7 +490,7 @@ fn parse_join(
                     } else {
                         get_rightmost_table_referenced_in_expr(&pred)?
                     };
-                    out_where_clause.push(JoinAwareConditionExpr {
+                    out_where_clause.push(WhereTerm {
                         expr: pred,
                         from_outer_join: outer,
                         eval_at_loop,
@@ -559,7 +556,7 @@ fn parse_join(
                     } else {
                         get_rightmost_table_referenced_in_expr(&expr)?
                     };
-                    out_where_clause.push(JoinAwareConditionExpr {
+                    out_where_clause.push(WhereTerm {
                         expr,
                         from_outer_join: outer,
                         eval_at_loop,

@@ -30,14 +30,14 @@ pub struct GroupBy {
     pub having: Option<Vec<ast::Expr>>,
 }
 
-/// In a query plan, WHERE clause conditions and JOIN conditions are all folded into a vector of JoinAwareConditionExpr.
+/// In a query plan, WHERE clause conditions and JOIN conditions are all folded into a vector of WhereTerm.
 /// This is done so that we can evaluate the conditions at the correct loop depth.
 /// We also need to keep track of whether the condition came from an OUTER JOIN. Take this example:
 /// SELECT * FROM users u LEFT JOIN products p ON u.id = 5.
 /// Even though the condition only refers to 'u', we CANNOT evaluate it at the users loop, because we need to emit NULL
 /// values for the columns of 'p', for EVERY row in 'u', instead of completely skipping any rows in 'u' where the condition is false.
 #[derive(Debug, Clone)]
-pub struct JoinAwareConditionExpr {
+pub struct WhereTerm {
     /// The original condition expression.
     pub expr: ast::Expr,
     /// Is this condition originally from an OUTER JOIN?
@@ -78,7 +78,7 @@ pub struct SelectPlan {
     pub result_columns: Vec<ResultSetColumn>,
     /// where clause split into a vec at 'AND' boundaries. all join conditions also get shoved in here,
     /// and we keep track of which join they came from (mainly for OUTER JOIN processing)
-    pub where_clause: Vec<JoinAwareConditionExpr>,
+    pub where_clause: Vec<WhereTerm>,
     /// group by clause
     pub group_by: Option<GroupBy>,
     /// order by clause
@@ -105,7 +105,7 @@ pub struct DeletePlan {
     /// the columns inside SELECT ... FROM
     pub result_columns: Vec<ResultSetColumn>,
     /// where clause split into a vec at 'AND' boundaries.
-    pub where_clause: Vec<JoinAwareConditionExpr>,
+    pub where_clause: Vec<WhereTerm>,
     /// order by clause
     pub order_by: Option<Vec<(ast::Expr, Direction)>>,
     /// limit clause
@@ -258,17 +258,17 @@ impl TableReference {
 #[derive(Clone, Debug)]
 pub enum Search {
     /// A rowid equality point lookup. This is a special case that uses the SeekRowid bytecode instruction and does not loop.
-    RowidEq { cmp_expr: JoinAwareConditionExpr },
+    RowidEq { cmp_expr: WhereTerm },
     /// A rowid search. Uses bytecode instructions like SeekGT, SeekGE etc.
     RowidSearch {
         cmp_op: ast::Operator,
-        cmp_expr: JoinAwareConditionExpr,
+        cmp_expr: WhereTerm,
     },
     /// A secondary index search. Uses bytecode instructions like SeekGE, SeekGT etc.
     IndexSearch {
         index: Rc<Index>,
         cmp_op: ast::Operator,
-        cmp_expr: JoinAwareConditionExpr,
+        cmp_expr: WhereTerm,
     },
 }
 

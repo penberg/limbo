@@ -5,8 +5,8 @@ use sqlite3_parser::ast;
 use crate::{schema::Index, Result};
 
 use super::plan::{
-    DeletePlan, Direction, IterationDirection, JoinAwareConditionExpr, Operation, Plan, Search,
-    SelectPlan, TableReference,
+    DeletePlan, Direction, IterationDirection, Operation, Plan, Search, SelectPlan, TableReference,
+    WhereTerm,
 };
 
 pub fn optimize_plan(plan: &mut Plan) -> Result<()> {
@@ -137,7 +137,7 @@ fn eliminate_unnecessary_orderby(plan: &mut SelectPlan) -> Result<()> {
 fn use_indexes(
     table_references: &mut [TableReference],
     available_indexes: &Vec<Rc<Index>>,
-    where_clause: &mut Vec<JoinAwareConditionExpr>,
+    where_clause: &mut Vec<WhereTerm>,
 ) -> Result<()> {
     if where_clause.is_empty() {
         return Ok(());
@@ -176,7 +176,7 @@ enum ConstantConditionEliminationResult {
 /// Returns a ConstantEliminationResult indicating whether any predicates are always false.
 /// This is used to determine whether the query can be aborted early.
 fn eliminate_constant_conditions(
-    where_clause: &mut Vec<JoinAwareConditionExpr>,
+    where_clause: &mut Vec<WhereTerm>,
 ) -> Result<ConstantConditionEliminationResult> {
     let mut i = 0;
     while i < where_clause.len() {
@@ -475,7 +475,7 @@ impl Optimizable for ast::Expr {
 }
 
 pub fn try_extract_index_search_expression(
-    cond: &mut JoinAwareConditionExpr,
+    cond: &mut WhereTerm,
     table_index: usize,
     table_reference: &TableReference,
     available_indexes: &[Rc<Index>],
@@ -490,7 +490,7 @@ pub fn try_extract_index_search_expression(
                     ast::Operator::Equals => {
                         let rhs_owned = rhs.take_ownership();
                         return Ok(Some(Search::RowidEq {
-                            cmp_expr: JoinAwareConditionExpr {
+                            cmp_expr: WhereTerm {
                                 expr: rhs_owned,
                                 from_outer_join: cond.from_outer_join,
                                 eval_at_loop: cond.eval_at_loop,
@@ -504,7 +504,7 @@ pub fn try_extract_index_search_expression(
                         let rhs_owned = rhs.take_ownership();
                         return Ok(Some(Search::RowidSearch {
                             cmp_op: *operator,
-                            cmp_expr: JoinAwareConditionExpr {
+                            cmp_expr: WhereTerm {
                                 expr: rhs_owned,
                                 from_outer_join: cond.from_outer_join,
                                 eval_at_loop: cond.eval_at_loop,
@@ -520,7 +520,7 @@ pub fn try_extract_index_search_expression(
                     ast::Operator::Equals => {
                         let lhs_owned = lhs.take_ownership();
                         return Ok(Some(Search::RowidEq {
-                            cmp_expr: JoinAwareConditionExpr {
+                            cmp_expr: WhereTerm {
                                 expr: lhs_owned,
                                 from_outer_join: cond.from_outer_join,
                                 eval_at_loop: cond.eval_at_loop,
@@ -534,7 +534,7 @@ pub fn try_extract_index_search_expression(
                         let lhs_owned = lhs.take_ownership();
                         return Ok(Some(Search::RowidSearch {
                             cmp_op: *operator,
-                            cmp_expr: JoinAwareConditionExpr {
+                            cmp_expr: WhereTerm {
                                 expr: lhs_owned,
                                 from_outer_join: cond.from_outer_join,
                                 eval_at_loop: cond.eval_at_loop,
@@ -558,7 +558,7 @@ pub fn try_extract_index_search_expression(
                         return Ok(Some(Search::IndexSearch {
                             index: available_indexes[index_index].clone(),
                             cmp_op: *operator,
-                            cmp_expr: JoinAwareConditionExpr {
+                            cmp_expr: WhereTerm {
                                 expr: rhs_owned,
                                 from_outer_join: cond.from_outer_join,
                                 eval_at_loop: cond.eval_at_loop,
@@ -582,7 +582,7 @@ pub fn try_extract_index_search_expression(
                         return Ok(Some(Search::IndexSearch {
                             index: available_indexes[index_index].clone(),
                             cmp_op: *operator,
-                            cmp_expr: JoinAwareConditionExpr {
+                            cmp_expr: WhereTerm {
                                 expr: lhs_owned,
                                 from_outer_join: cond.from_outer_join,
                                 eval_at_loop: cond.eval_at_loop,
