@@ -13,7 +13,7 @@ use crate::vdbe::{
 use crate::Result;
 
 use super::emitter::Resolver;
-use super::plan::{TableReference, TableReferenceType};
+use super::plan::{Operation, TableReference};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ConditionMetadata {
@@ -1738,12 +1738,12 @@ pub fn translate_expr(
             column,
             is_rowid_alias,
         } => {
-            let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
-            match tbl_ref.reference_type {
+            let table_reference = referenced_tables.as_ref().unwrap().get(*table).unwrap();
+            match table_reference.op {
                 // If we are reading a column from a table, we find the cursor that corresponds to
                 // the table and read the column from the cursor.
-                TableReferenceType::BTreeTable => {
-                    let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
+                Operation::Scan { .. } | Operation::Search(_) => {
+                    let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
                     if *is_rowid_alias {
                         program.emit_insn(Insn::RowId {
                             cursor_id,
@@ -1756,13 +1756,13 @@ pub fn translate_expr(
                             dest: target_register,
                         });
                     }
-                    let column = tbl_ref.table.get_column_at(*column);
+                    let column = table_reference.table.get_column_at(*column);
                     maybe_apply_affinity(column.ty, target_register, program);
                     Ok(target_register)
                 }
                 // If we are reading a column from a subquery, we instead copy the column from the
                 // subquery's result registers.
-                TableReferenceType::Subquery {
+                Operation::Subquery {
                     result_columns_start_reg,
                     ..
                 } => {
@@ -1776,8 +1776,8 @@ pub fn translate_expr(
             }
         }
         ast::Expr::RowId { database: _, table } => {
-            let tbl_ref = referenced_tables.as_ref().unwrap().get(*table).unwrap();
-            let cursor_id = program.resolve_cursor_id(&tbl_ref.table_identifier);
+            let table_reference = referenced_tables.as_ref().unwrap().get(*table).unwrap();
+            let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
             program.emit_insn(Insn::RowId {
                 cursor_id,
                 dest: target_register,
@@ -2087,8 +2087,8 @@ pub fn get_name(
     }
     match expr {
         ast::Expr::Column { table, column, .. } => {
-            let table_ref = referenced_tables.get(*table).unwrap();
-            table_ref.table.get_column_at(*column).name.clone()
+            let table_reference = referenced_tables.get(*table).unwrap();
+            table_reference.table.get_column_at(*column).name.clone()
         }
         _ => fallback(),
     }
