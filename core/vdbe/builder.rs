@@ -15,7 +15,6 @@ use super::{BranchOffset, CursorID, Insn, InsnReference, Program};
 #[allow(dead_code)]
 pub struct ProgramBuilder {
     next_free_register: usize,
-    next_free_label: u32,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
     // for temporarily storing instructions that will be put after Transaction opcode
@@ -23,7 +22,7 @@ pub struct ProgramBuilder {
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
-    // Hashmap of label to insn reference. Resolved in build().
+    /// A vector where index=label number, value=resolved offset. Resolved in build().
     label_to_resolved_offset: Vec<Option<InsnReference>>,
     // Bitmask of cursors that have emitted a SeekRowid instruction.
     seekrowid_emitted_bitmask: u64,
@@ -51,7 +50,6 @@ impl ProgramBuilder {
     pub fn new() -> Self {
         Self {
             next_free_register: 1,
-            next_free_label: 0,
             next_free_cursor_id: 0,
             insns: Vec::new(),
             next_insn_label: None,
@@ -185,10 +183,9 @@ impl ProgramBuilder {
     }
 
     pub fn allocate_label(&mut self) -> BranchOffset {
-        let label_n = self.next_free_label;
-        self.next_free_label += 1;
+        let label_n = self.label_to_resolved_offset.len();
         self.label_to_resolved_offset.push(None);
-        BranchOffset::Label(label_n)
+        BranchOffset::Label(label_n as u32)
     }
 
     // Effectively a GOTO <next insn> without the need to emit an explicit GOTO instruction.

@@ -302,14 +302,13 @@ impl Optimizable for ast::Expr {
                 if *table != table_index {
                     return Ok(None);
                 }
-                let available_indexes_for_table =
-                    available_indexes.get(table_reference.table.get_name());
-                if available_indexes_for_table.is_none() {
+                let Some(available_indexes_for_table) =
+                    available_indexes.get(table_reference.table.get_name())
+                else {
                     return Ok(None);
-                }
-                let available_indexes_for_table = available_indexes_for_table.unwrap();
+                };
+                let column = table_reference.table.get_column_at(*column);
                 for index in available_indexes_for_table.iter() {
-                    let column = table_reference.table.get_column_at(*column);
                     if index.columns.first().unwrap().name == column.name {
                         return Ok(Some(index.clone()));
                     }

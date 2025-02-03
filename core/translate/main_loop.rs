@@ -60,6 +60,10 @@ pub fn init_loop(
     tables: &[TableReference],
     mode: &OperationMode,
 ) -> Result<()> {
+    assert!(
+        t_ctx.meta_left_joins.len() == tables.len(),
+        "meta_left_joins length does not match tables length"
+    );
     for (table_index, table) in tables.iter().enumerate() {
         // Initialize bookkeeping for OUTER JOIN
         if let Some(join_info) = table.join_info.as_ref() {
