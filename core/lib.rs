@@ -42,6 +42,7 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 pub use types::Value;
 use util::parse_schema_rows;
+use vdbe::builder::QueryMode;
 
 pub use error::LimboError;
 use translate::select::prepare_select_plan;
@@ -273,6 +274,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Normal,
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -307,6 +309,7 @@ impl Connection {
                     self.pager.clone(),
                     Rc::downgrade(self),
                     syms,
+                    QueryMode::Normal,
                 )?);
                 let stmt = Statement::new(program, self.pager.clone());
                 Ok(Some(stmt))
@@ -319,6 +322,7 @@ impl Connection {
                     self.pager.clone(),
                     Rc::downgrade(self),
                     syms,
+                    QueryMode::Explain,
                 )?;
                 program.explain();
                 Ok(None)
@@ -361,6 +365,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Explain,
                     )?;
                     program.explain();
                 }
@@ -373,6 +378,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Normal,
                     )?;
 
                     let mut state =
