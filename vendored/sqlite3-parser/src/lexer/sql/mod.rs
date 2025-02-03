@@ -30,6 +30,7 @@ pub struct Parser<'input> {
     scanner: Scanner<Tokenizer>,
     /// lemon parser
     parser: yyParser<'input>,
+    had_error: bool,
 }
 
 impl<'input> Parser<'input> {
@@ -43,12 +44,14 @@ impl<'input> Parser<'input> {
             input,
             scanner,
             parser,
+            had_error: false,
         }
     }
     /// Parse new `input`
     pub fn reset(&mut self, input: &'input [u8]) {
         self.input = input;
         self.scanner.reset();
+        self.had_error = false;
     }
     /// Current line position in input
     pub fn line(&self) -> u64 {
@@ -182,6 +185,10 @@ impl FallibleIterator for Parser<'_> {
 
     fn next(&mut self) -> Result<Option<Cmd>, Error> {
         //print!("line: {}, column: {}: ", self.scanner.line(), self.scanner.column());
+        // if we have already encountered an error, return None to signal that to fallible_iterator that we are done parsing
+        if self.had_error {
+            return Ok(None);
+        }
         self.parser.ctx.reset();
         let mut last_token_parsed = TK_EOF;
         let mut eof = false;
@@ -197,6 +204,7 @@ impl FallibleIterator for Parser<'_> {
             if token_type == TK_ILLEGAL {
                 //  break out of parsing loop and return error
                 self.parser.sqlite3ParserFinalize();
+                self.had_error = true;
                 return Err(Error::UnrecognizedToken(
                     Some((self.scanner.line(), self.scanner.column())),
                     Some(start.into()),
@@ -242,12 +250,18 @@ impl FallibleIterator for Parser<'_> {
                     self.parser
                         .sqlite3Parser(TK_SEMI, sentinel(self.input.len()))
                 );
+                if self.parser.ctx.error().is_some() {
+                    self.had_error = true;
+                }
             }
             try_with_position!(
                 self.scanner,
                 self.parser
                     .sqlite3Parser(TK_EOF, sentinel(self.input.len()))
             );
+            if self.parser.ctx.error().is_some() {
+                self.had_error = true;
+            }
         }
         self.parser.sqlite3ParserFinalize();
         if let Some(e) = self.parser.ctx.error() {
@@ -256,6 +270,7 @@ impl FallibleIterator for Parser<'_> {
                 Some((self.scanner.line(), self.scanner.column())),
                 Some((self.offset() - 1).into()),
             );
+            self.had_error = true;
             return Err(err);
         }
         let cmd = self.parser.ctx.cmd();
@@ -266,6 +281,7 @@ impl FallibleIterator for Parser<'_> {
                     Some((self.scanner.line(), self.scanner.column())),
                     Some((self.offset() - 1).into()),
                 );
+                self.had_error = true;
                 return Err(err);
             }
         }
