@@ -142,7 +142,7 @@ pub fn emit_order_by(
         let reg = start_reg + i;
         program.emit_insn(Insn::Column {
             cursor_id,
-            column: t_ctx.result_column_indexes_in_orderby_sorter[&i],
+            column: t_ctx.result_column_indexes_in_orderby_sorter[i],
             dest: reg,
         });
     }

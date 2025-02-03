@@ -43,6 +43,16 @@ pub struct LoopLabels {
     loop_end: BranchOffset,
 }
 
+impl LoopLabels {
+    pub fn new(program: &mut ProgramBuilder) -> Self {
+        Self {
+            loop_start: program.allocate_label(),
+            next: program.allocate_label(),
+            loop_end: program.allocate_label(),
+        }
+    }
+}
+
 /// Initialize resources needed for the source operators (tables, joins, etc)
 pub fn init_loop(
     program: &mut ProgramBuilder,
@@ -51,13 +61,6 @@ pub fn init_loop(
     mode: &OperationMode,
 ) -> Result<()> {
     for (table_index, table) in tables.iter().enumerate() {
-        let loop_labels = LoopLabels {
-            next: program.allocate_label(),
-            loop_start: program.allocate_label(),
-            loop_end: program.allocate_label(),
-        };
-        t_ctx.labels_main_loop.push(loop_labels);
-
         // Initialize bookkeeping for OUTER JOIN
         if let Some(join_info) = table.join_info.as_ref() {
             if join_info.outer {
@@ -66,7 +69,7 @@ pub fn init_loop(
                     label_match_flag_set_true: program.allocate_label(),
                     label_match_flag_check_value: program.allocate_label(),
                 };
-                t_ctx.meta_left_joins.insert(table_index, lj_metadata);
+                t_ctx.meta_left_joins[table_index] = Some(lj_metadata);
             }
         }
         match &table.op {
@@ -181,7 +184,7 @@ pub fn open_loop(
         // This is used to determine whether to emit actual columns or NULLs for the columns of the right table.
         if let Some(join_info) = table.join_info.as_ref() {
             if join_info.outer {
-                let lj_meta = t_ctx.meta_left_joins.get(&table_index).unwrap();
+                let lj_meta = t_ctx.meta_left_joins[table_index].as_ref().unwrap();
                 program.emit_insn(Insn::Integer {
                     value: 0,
                     dest: lj_meta.reg_match_flag,
@@ -465,7 +468,7 @@ pub fn open_loop(
         // for the right table's cursor.
         if let Some(join_info) = table.join_info.as_ref() {
             if join_info.outer {
-                let lj_meta = t_ctx.meta_left_joins.get(&table_index).unwrap();
+                let lj_meta = t_ctx.meta_left_joins[table_index].as_ref().unwrap();
                 program.resolve_label(lj_meta.label_match_flag_set_true, program.offset());
                 program.emit_insn(Insn::Integer {
                     value: 1,
@@ -731,7 +734,7 @@ pub fn close_loop(
         // and emit a row with NULLs for the right table, and then jump back to the next row of the left table.
         if let Some(join_info) = table.join_info.as_ref() {
             if join_info.outer {
-                let lj_meta = t_ctx.meta_left_joins.get(&table_index).unwrap();
+                let lj_meta = t_ctx.meta_left_joins[table_index].as_ref().unwrap();
                 // The left join match flag is set to 1 when there is any match on the right table
                 // (e.g. SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a).
                 // If the left join match flag has been set to 1, we jump to the next row on the outer table,

@@ -1,8 +1,6 @@
 // This module contains code for emitting bytecode instructions for SQL query execution.
 // It handles translating high-level SQL operations into low-level bytecode that can be executed by the virtual machine.
 
-use std::collections::HashMap;
-
 use sqlite3_parser::ast::{self};
 
 use crate::function::Func;
@@ -76,11 +74,12 @@ pub struct TranslateCtx<'a> {
     pub meta_group_by: Option<GroupByMetadata>,
     // metadata for the order by operator
     pub meta_sort: Option<SortMetadata>,
-    // mapping between Join operator id and associated metadata (for left joins only)
-    pub meta_left_joins: HashMap<usize, LeftJoinMetadata>,
+    /// mapping between table loop index and associated metadata (for left joins only)
+    /// this metadata exists for the right table in a given left join
+    pub meta_left_joins: Vec<Option<LeftJoinMetadata>>,
     // We need to emit result columns in the order they are present in the SELECT, but they may not be in the same order in the ORDER BY sorter.
     // This vector holds the indexes of the result columns in the ORDER BY sorter.
-    pub result_column_indexes_in_orderby_sorter: HashMap<usize, usize>,
+    pub result_column_indexes_in_orderby_sorter: Vec<usize>,
     // We might skip adding a SELECT result column into the ORDER BY sorter if it is an exact match in the ORDER BY keys.
     // This vector holds the indexes of the result columns that we need to skip.
     pub result_columns_to_skip_in_orderby_sorter: Option<Vec<usize>>,
@@ -101,6 +100,8 @@ pub enum OperationMode {
 fn prologue<'a>(
     program: &mut ProgramBuilder,
     syms: &'a SymbolTable,
+    table_count: usize,
+    result_column_count: usize,
 ) -> Result<(TranslateCtx<'a>, BranchOffset, BranchOffset)> {
     let init_label = program.allocate_label();
 
@@ -111,7 +112,7 @@ fn prologue<'a>(
     let start_offset = program.offset();
 
     let t_ctx = TranslateCtx {
-        labels_main_loop: Vec::new(),
+        labels_main_loop: (0..table_count).map(|_| LoopLabels::new(program)).collect(),
         label_main_loop_end: None,
         reg_agg_start: None,
         reg_limit: None,
@@ -119,9 +120,9 @@ fn prologue<'a>(
         reg_limit_offset_sum: None,
         reg_result_cols_start: None,
         meta_group_by: None,
-        meta_left_joins: HashMap::new(),
+        meta_left_joins: (0..table_count).map(|_| None).collect(),
         meta_sort: None,
-        result_column_indexes_in_orderby_sorter: HashMap::new(),
+        result_column_indexes_in_orderby_sorter: (0..result_column_count).collect(),
         result_columns_to_skip_in_orderby_sorter: None,
         resolver: Resolver::new(syms),
     };
@@ -167,7 +168,12 @@ fn emit_program_for_select(
     mut plan: SelectPlan,
     syms: &SymbolTable,
 ) -> Result<()> {
-    let (mut t_ctx, init_label, start_offset) = prologue(program, syms)?;
+    let (mut t_ctx, init_label, start_offset) = prologue(
+        program,
+        syms,
+        plan.table_references.len(),
+        plan.result_columns.len(),
+    )?;
 
     // Trivial exit on LIMIT 0
     if let Some(limit) = plan.limit {
@@ -274,7 +280,12 @@ fn emit_program_for_delete(
     mut plan: DeletePlan,
     syms: &SymbolTable,
 ) -> Result<()> {
-    let (mut t_ctx, init_label, start_offset) = prologue(program, syms)?;
+    let (mut t_ctx, init_label, start_offset) = prologue(
+        program,
+        syms,
+        plan.table_references.len(),
+        plan.result_columns.len(),
+    )?;
 
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
     let after_main_loop_label = program.allocate_label();
