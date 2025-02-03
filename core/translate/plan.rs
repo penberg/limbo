@@ -89,8 +89,6 @@ pub struct SelectPlan {
     pub limit: Option<isize>,
     /// offset clause
     pub offset: Option<isize>,
-    /// all the indexes available
-    pub available_indexes: Vec<Rc<Index>>,
     /// query contains a constant condition that is always false
     pub contains_constant_false_condition: bool,
     /// query type (top level or subquery)
@@ -112,8 +110,6 @@ pub struct DeletePlan {
     pub limit: Option<isize>,
     /// offset clause
     pub offset: Option<isize>,
-    /// all the indexes available
-    pub available_indexes: Vec<Rc<Index>>,
     /// query contains a constant condition that is always false
     pub contains_constant_false_condition: bool,
 }

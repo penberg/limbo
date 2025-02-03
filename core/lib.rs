@@ -331,7 +331,7 @@ impl Connection {
                             *select,
                             &self.db.syms.borrow(),
                         )?;
-                        optimize_plan(&mut plan)?;
+                        optimize_plan(&mut plan, &self.schema.borrow())?;
                         println!("{}", plan);
                     }
                     _ => todo!(),

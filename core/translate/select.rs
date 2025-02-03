@@ -21,7 +21,7 @@ pub fn translate_select(
     syms: &SymbolTable,
 ) -> Result<()> {
     let mut select_plan = prepare_select_plan(schema, select, syms)?;
-    optimize_plan(&mut select_plan)?;
+    optimize_plan(&mut select_plan, schema)?;
     emit_program(program, select_plan, syms)
 }
 
@@ -78,7 +78,6 @@ pub fn prepare_select_plan(
                 aggregates: vec![],
                 limit: None,
                 offset: None,
-                available_indexes: schema.indexes.clone().into_values().flatten().collect(),
                 contains_constant_false_condition: false,
                 query_type: SelectQueryType::TopLevel,
             };
