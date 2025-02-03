@@ -74,7 +74,7 @@ pub enum BranchOffset {
     /// A label is a named location in the program.
     /// If there are references to it, it must always be resolved to an Offset
     /// via program.resolve_label().
-    Label(i32),
+    Label(u32),
     /// An offset is a direct index into the instruction list.
     Offset(InsnReference),
     /// A placeholder is a temporary value to satisfy the compiler.
@@ -103,7 +103,7 @@ impl BranchOffset {
     }
 
     /// Returns the label value. Panics if the branch offset is an offset or placeholder.
-    pub fn to_label_value(&self) -> i32 {
+    pub fn to_label_value(&self) -> u32 {
         match self {
             BranchOffset::Label(v) => *v,
             BranchOffset::Offset(_) => unreachable!("Offset cannot be converted to label value"),
@@ -116,7 +116,7 @@ impl BranchOffset {
     /// label or placeholder.
     pub fn to_debug_int(&self) -> i32 {
         match self {
-            BranchOffset::Label(v) => *v,
+            BranchOffset::Label(v) => *v as i32,
             BranchOffset::Offset(v) => *v as i32,
             BranchOffset::Placeholder => i32::MAX,
         }
