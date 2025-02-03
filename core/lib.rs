@@ -363,7 +363,7 @@ impl Connection {
     pub fn execute(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<()> {
         let sql = sql.as_ref();
         let db = &self.db;
-        let syms: &SymbolTable = &db.syms.borrow();
+        let syms: &SymbolTable = &db.syms.borrow_mut();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
@@ -417,7 +417,7 @@ impl Connection {
 
     #[cfg(not(target_family = "wasm"))]
     pub fn load_extension<P: AsRef<std::ffi::OsStr>>(&self, path: P) -> Result<()> {
-        Database::load_extension(self.db.as_ref(), path)
+        Database::load_extension(&self.db, path)
     }
 
     /// Close a connection and checkpoint.

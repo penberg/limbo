@@ -1839,7 +1839,9 @@ pub fn translate_expr(
                                     dest: target_register,
                                 });
                             }
-                            let column = table_reference.table.get_column_at(*column);
+                            let Some(column) = table_reference.table.get_column_at(*column) else {
+                                crate::bail_parse_error!("column index out of bounds");
+                            };
                             maybe_apply_affinity(column.ty, target_register, program);
                             Ok(target_register)
                         }

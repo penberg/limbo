@@ -68,20 +68,11 @@ impl Table {
         }
     }
 
-    pub fn get_column_at(&self, index: usize) -> &Column {
+    pub fn get_column_at(&self, index: usize) -> Option<&Column> {
         match self {
-            Self::BTree(table) => table
-                .columns
-                .get(index)
-                .expect("column index out of bounds"),
-            Self::Pseudo(table) => table
-                .columns
-                .get(index)
-                .expect("column index out of bounds"),
-            Self::Virtual(table) => table
-                .columns
-                .get(index)
-                .expect("column index out of bounds"),
+            Self::BTree(table) => table.columns.get(index),
+            Self::Pseudo(table) => table.columns.get(index),
+            Self::Virtual(table) => table.columns.get(index),
         }
     }
 
@@ -100,6 +91,7 @@ impl Table {
             Self::Virtual(_) => None,
         }
     }
+
     pub fn virtual_table(&self) -> Option<Rc<VirtualTable>> {
         match self {
             Self::Virtual(table) => Some(table.clone()),
@@ -172,7 +164,7 @@ impl BTreeTable {
                 sql.push_str(",\n");
             }
             sql.push_str("  ");
-            sql.push_str(&column.name.as_ref().expect("column name is None"));
+            sql.push_str(column.name.as_ref().expect("column name is None"));
             sql.push(' ');
             sql.push_str(&column.ty.to_string());
         }

@@ -324,6 +324,89 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Macro to derive a VTabModule for your extension. This macro will generate
+/// the necessary functions to register your module with core. You must implement
+/// the VTabModule trait for your struct, and the VTabCursor trait for your cursor.
+/// ```ignore
+///#[derive(Debug, VTabModuleDerive)]
+///struct CsvVTab;
+///impl VTabModule for CsvVTab {
+///    type VCursor = CsvCursor;
+///    const NAME: &'static str = "csv_data";
+///
+///    /// Declare the schema for your virtual table
+///    fn connect(api: &ExtensionApi) -> ResultCode {
+///        let sql = "CREATE TABLE csv_data(
+///            name TEXT,
+///            age TEXT,
+///            city TEXT
+///        )";
+///        api.declare_virtual_table(Self::NAME, sql)
+///    }
+///    /// Open the virtual table and return a cursor
+///  fn open() -> Self::VCursor {
+///       let csv_content = fs::read_to_string("data.csv").unwrap_or_default();
+///       let rows: Vec<Vec<String>> = csv_content
+///           .lines()
+///           .skip(1)
+///           .map(|line| {
+///               line.split(',')
+///                   .map(|s| s.trim().to_string())
+///                   .collect()
+///           })
+///           .collect();
+///       CsvCursor { rows, index: 0 }
+///   }
+///   /// Filter the virtual table based on arguments (omitted here for simplicity)
+///   fn filter(_cursor: &mut Self::VCursor, _arg_count: i32, _args: &[Value]) -> ResultCode {
+///       ResultCode::OK
+///   }
+///   /// Return the value for a given column index
+///   fn column(cursor: &Self::VCursor, idx: u32) -> Value {
+///      cursor.column(idx)
+///  }
+///  /// Move the cursor to the next row
+///  fn next(cursor: &mut Self::VCursor) -> ResultCode {
+///      if cursor.index < cursor.rows.len() - 1 {
+///          cursor.index += 1;
+///          ResultCode::OK
+///      } else {
+///          ResultCode::EOF
+///      }
+///  }
+///  fn eof(cursor: &Self::VCursor) -> bool {
+///      cursor.index >= cursor.rows.len()
+///  }
+///  #[derive(Debug)]
+/// struct CsvCursor {
+///   rows: Vec<Vec<String>>,
+///   index: usize,
+///
+/// impl CsvCursor {
+///   /// Returns the value for a given column index.
+///   fn column(&self, idx: u32) -> Value {
+///       let row = &self.rows[self.index];
+///       if (idx as usize) < row.len() {
+///           Value::from_text(&row[idx as usize])
+///       } else {
+///           Value::null()
+///       }
+///   }
+/// // Implement the VTabCursor trait for your virtual cursor
+/// impl VTabCursor for CsvCursor {
+///   fn next(&mut self) -> ResultCode {
+///       Self::next(self)
+///   }
+///  fn eof(&self) -> bool {
+///      self.index >= self.rows.len()
+///  }
+///  fn column(&self, idx: u32) -> Value {
+///      self.column(idx)
+///  }
+///  fn rowid(&self) -> i64 {
+///      self.index as i64
+///  }
+
 #[proc_macro_derive(VTabModuleDerive)]
 pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);

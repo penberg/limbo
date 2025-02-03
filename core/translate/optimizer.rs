@@ -307,7 +307,9 @@ impl Optimizable for ast::Expr {
                 else {
                     return Ok(None);
                 };
-                let column = table_reference.table.get_column_at(*column);
+                let Some(column) = table_reference.table.get_column_at(*column) else {
+                    return Ok(None);
+                };
                 for index in available_indexes_for_table.iter() {
                     if let Some(name) = column.name.as_ref() {
                         if &index.columns.first().unwrap().name == name {

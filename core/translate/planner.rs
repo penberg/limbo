@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use super::{
     plan::{
         Aggregate, JoinInfo, Operation, Plan, ResultSetColumn, SelectQueryType, TableReference,
