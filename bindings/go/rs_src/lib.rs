@@ -42,11 +42,16 @@ pub unsafe extern "C" fn db_open(path: *const c_char) -> *mut c_void {
 struct LimboConn {
     conn: Rc<Connection>,
     io: Arc<dyn limbo_core::IO>,
+    err: Option<LimboError>,
 }
 
 impl<'conn> LimboConn {
     fn new(conn: Rc<Connection>, io: Arc<dyn limbo_core::IO>) -> Self {
-        LimboConn { conn, io }
+        LimboConn {
+            conn,
+            io,
+            err: None,
+        }
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -60,6 +65,28 @@ impl<'conn> LimboConn {
         }
         unsafe { &mut *(ptr as *mut LimboConn) }
     }
+
+    fn get_error(&mut self) -> *const c_char {
+        if let Some(err) = &self.err {
+            let err = format!("{}", err);
+            let c_str = std::ffi::CString::new(err).unwrap();
+            self.err = None;
+            c_str.into_raw() as *const c_char
+        } else {
+            std::ptr::null()
+        }
+    }
+}
+/// Get the error value from the connection, if any, as a null
+/// terminated string. The caller is responsible for freeing the
+/// memory with `free_string`.
+#[no_mangle]
+pub extern "C" fn db_get_error(ctx: *mut c_void) -> *const c_char {
+    if ctx.is_null() {
+        return std::ptr::null();
+    }
+    let conn = LimboConn::from_ptr(ctx);
+    conn.get_error()
 }
 
 /// Close the database connection

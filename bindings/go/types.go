@@ -67,9 +67,11 @@ func (rc ResultCode) String() string {
 const (
 	driverName            = "sqlite3"
 	libName               = "lib_limbo_go"
+	RowsClosedErr         = "sql: Rows closed"
 	FfiDbOpen             = "db_open"
 	FfiDbClose            = "db_close"
 	FfiDbPrepare          = "db_prepare"
+	FfiDbGetError         = "db_get_error"
 	FfiStmtExec           = "stmt_execute"
 	FfiStmtQuery          = "stmt_query"
 	FfiStmtParameterCount = "stmt_parameter_count"
