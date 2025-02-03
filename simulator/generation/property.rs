@@ -196,7 +196,7 @@ impl Property {
                     }),
                 });
 
-                let limit = select.limit.unwrap_or(0);
+                let limit = select.limit.expect("Property::SelectLimit without a LIMIT clause");
 
                 let assertion = Interaction::Assertion(Assertion {
                     message: "select query should respect the limit clause".to_string(),
