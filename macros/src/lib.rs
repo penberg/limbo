@@ -406,7 +406,7 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
 ///  fn rowid(&self) -> i64 {
 ///      self.index as i64
 ///  }
-
+///
 #[proc_macro_derive(VTabModuleDerive)]
 pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);

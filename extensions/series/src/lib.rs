@@ -47,7 +47,6 @@ impl VTabModule for GenerateSeriesVTab {
     fn filter(cursor: &mut Self::VCursor, arg_count: i32, args: &[Value]) -> ResultCode {
         // args are the start, stop, and step
         if arg_count == 0 || arg_count > 3 {
-            cursor.set_error("Expected between 1 and 3 arguments");
             return ResultCode::InvalidArgs;
         }
         let start = try_option!(args[0].to_integer(), ResultCode::InvalidArgs);
@@ -86,7 +85,7 @@ struct GenerateSeriesCursor {
     stop: i64,
     step: i64,
     current: i64,
-    error: Option<&'static str>,
+    error: Option<ResultCode>,
 }
 
 impl GenerateSeriesCursor {
@@ -104,7 +103,7 @@ impl GenerateSeriesCursor {
 }
 
 impl VTabCursor for GenerateSeriesCursor {
-    type Error = &'static str;
+    type Error = ResultCode;
 
     fn next(&mut self) -> ResultCode {
         GenerateSeriesCursor::next(self)
@@ -128,7 +127,7 @@ impl VTabCursor for GenerateSeriesCursor {
         self.error
     }
 
-    fn set_error(&mut self, err: &'static str) {
+    fn set_error(&mut self, err: ResultCode) {
         self.error = Some(err);
     }
 

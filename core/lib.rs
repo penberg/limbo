@@ -26,8 +26,8 @@ use fallible_iterator::FallibleIterator;
 #[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
 #[cfg(not(target_family = "wasm"))]
-use limbo_ext::{ExtensionApi, ExtensionEntryPoint, ResultCode};
-use limbo_ext::{VTabModuleImpl, Value as ExtValue};
+use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
+use limbo_ext::{ResultCode, VTabModuleImpl, Value as ExtValue};
 use log::trace;
 use parking_lot::RwLock;
 use schema::{Column, Schema};
