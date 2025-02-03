@@ -1012,6 +1012,15 @@ impl Program {
                         }
                     }
                     log::trace!("Halt auto_commit {}", self.auto_commit);
+                    let connection = self
+                        .connection
+                        .upgrade()
+                        .expect("only weak ref to connection?");
+                    let current_state = connection.transaction_state.borrow().clone();
+                    if current_state == TransactionState::Read {
+                        pager.end_read_tx()?;
+                        return Ok(StepResult::Done);
+                    }
                     return if self.auto_commit {
                         match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
