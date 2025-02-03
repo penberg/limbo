@@ -46,12 +46,12 @@ fn test_statement_bind() -> anyhow::Result<()> {
 
     let mut stmt = conn.prepare("select ?, ?1, :named, ?3, ?4")?;
 
-    stmt.bind_at(1.try_into()?, Value::Text(&"hello".to_string()));
+    stmt.bind_at(1.try_into()?, Value::Text("hello"));
 
     let i = stmt.parameters().index(":named").unwrap();
     stmt.bind_at(i, Value::Integer(42));
 
-    stmt.bind_at(3.try_into()?, Value::Blob(&vec![0x1, 0x2, 0x3]));
+    stmt.bind_at(3.try_into()?, Value::Blob(&[0x1, 0x2, 0x3]));
 
     stmt.bind_at(4.try_into()?, Value::Float(0.5));
 

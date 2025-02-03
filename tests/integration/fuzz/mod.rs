@@ -59,8 +59,8 @@ mod tests {
                 limbo_core::Value::Null => rusqlite::types::Value::Null,
                 limbo_core::Value::Integer(x) => rusqlite::types::Value::Integer(*x),
                 limbo_core::Value::Float(x) => rusqlite::types::Value::Real(*x),
-                limbo_core::Value::Text(x) => rusqlite::types::Value::Text((*x).clone()),
-                limbo_core::Value::Blob(x) => rusqlite::types::Value::Blob((*x).clone()),
+                limbo_core::Value::Text(x) => rusqlite::types::Value::Text(x.to_string()),
+                limbo_core::Value::Blob(x) => rusqlite::types::Value::Blob(x.to_vec()),
             })
             .collect()
     }
