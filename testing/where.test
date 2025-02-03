@@ -341,6 +341,16 @@ do_execsql_test where-id-index-seek-regression-test {
 9999
 10000}
 
+do_execsql_test where-id-index-seek-regression-test-opposite {
+    select id from users where 9999 < id;
+    select id from users where 10000 <= id;
+    select id from users where 2 > id;
+    select id from users where 1 >= id;
+} {10000
+10000
+1
+1}
+
 do_execsql_test where-id-index-seek-regression-test-2 {
     select count(1) from users where id > 0;
 } {10000}
