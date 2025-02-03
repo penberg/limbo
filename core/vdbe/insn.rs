@@ -880,16 +880,7 @@ pub fn exec_shift_left(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue
 }
 
 fn compute_shl(lhs: i64, rhs: i64) -> i64 {
-    if rhs == 0 {
-        lhs
-    } else if rhs >= 64 || rhs <= -64 {
-        0
-    } else if rhs < 0 {
-        // if negative do right shift
-        lhs >> (-rhs)
-    } else {
-        lhs << rhs
-    }
+    compute_shr(lhs, -rhs)
 }
 
 pub fn exec_shift_right(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
@@ -927,11 +918,15 @@ pub fn exec_shift_right(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValu
     }
 }
 
+// compute binary shift to the right if rhs >= 0 and binary shift to the left - if rhs < 0
+// note, that binary shift to the right is sign-extended
 fn compute_shr(lhs: i64, rhs: i64) -> i64 {
     if rhs == 0 {
         lhs
-    } else if rhs >= 64 || rhs <= -64 {
+    } else if rhs >= 64 && lhs >= 0 || rhs <= -64 {
         0
+    } else if rhs >= 64 && lhs < 0 {
+        -1
     } else if rhs < 0 {
         // if negative do left shift
         lhs << (-rhs)

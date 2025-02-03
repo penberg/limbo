@@ -12,6 +12,13 @@ pub struct TempDatabase {
 
 #[allow(dead_code, clippy::arc_with_non_send_sync)]
 impl TempDatabase {
+    pub fn new_empty() -> Self {
+        let mut path = TempDir::new().unwrap().into_path();
+        path.push("test.db");
+        let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new().unwrap());
+
+        Self { path, io }
+    }
     pub fn new(table_sql: &str) -> Self {
         let mut path = TempDir::new().unwrap().into_path();
         path.push("test.db");
