@@ -1146,9 +1146,10 @@ pub fn translate_expr(
                                 temp_reg,
                                 resolver,
                             )?;
+                            let before_copy_label = program.allocate_label();
                             program.emit_insn(Insn::NotNull {
                                 reg: temp_reg,
-                                target_pc: program.offset().add(2u32),
+                                target_pc: before_copy_label,
                             });
 
                             translate_expr(
@@ -1158,6 +1159,7 @@ pub fn translate_expr(
                                 temp_reg,
                                 resolver,
                             )?;
+                            program.resolve_label(before_copy_label, program.offset());
                             program.emit_insn(Insn::Copy {
                                 src_reg: temp_reg,
                                 dst_reg: target_register,
@@ -1225,15 +1227,21 @@ pub fn translate_expr(
                                     srf.to_string()
                                 );
                             };
-                            for arg in args {
-                                let _ =
-                                    translate_and_mark(program, referenced_tables, arg, resolver);
+                            let func_registers = program.alloc_registers(args.len());
+                            for (i, arg) in args.iter().enumerate() {
+                                let _ = translate_expr(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    func_registers + i,
+                                    resolver,
+                                )?;
                             }
                             program.emit_insn(Insn::Function {
                                 // Only constant patterns for LIKE are supported currently, so this
                                 // is always 1
                                 constant_mask: 1,
-                                start_reg: target_register + 1,
+                                start_reg: func_registers,
                                 dest: target_register,
                                 func: func_ctx,
                             });
