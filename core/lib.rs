@@ -63,7 +63,7 @@ pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum TransactionState {
     Write,
     Read,

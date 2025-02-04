@@ -215,6 +215,11 @@ impl Pager {
         Ok(CheckpointStatus::Done)
     }
 
+    pub fn end_read_tx(&self) -> Result<()> {
+        self.wal.borrow().end_read_tx()?;
+        Ok(())
+    }
+
     /// Reads a page from the database.
     pub fn read_page(&self, page_idx: usize) -> Result<PageRef> {
         trace!("read_page(page_idx = {})", page_idx);
