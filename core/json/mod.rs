@@ -15,6 +15,7 @@ pub use crate::json::ser::to_string;
 use crate::types::{OwnedValue, Text, TextSubtype};
 use indexmap::IndexMap;
 use jsonb::Error as JsonbError;
+use rustix::path::Arg;
 use ser::to_string_pretty;
 use serde::{Deserialize, Serialize};
 
@@ -671,6 +672,51 @@ pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
         },
         OwnedValue::Null => Ok(OwnedValue::Null),
         _ => Ok(OwnedValue::Integer(1)),
+    }
+}
+
+pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
+    match value {
+        OwnedValue::Text(ref t) => {
+            // If X is a JSON value returned by another JSON function,
+            // then this function is a no-op
+            if t.subtype == TextSubtype::Json {
+                // Should just return the json value with no quotes
+                return Ok(value.to_owned());
+            }
+
+            let escaped_value: String = t
+                .value.to_string_lossy()
+                .chars()
+                .flat_map(|c| match c {
+                    '"' => vec!['\\', c],
+                    '\n' => vec!['\\', 'n'],
+                    '\r' => vec!['\\', 'r'],
+                    '\t' => vec!['\\', 't'],
+                    '\\' => vec!['\\', '\\'],
+                    '\u{0008}' => vec!['\\', 'b'],
+                    '\u{000c}' => vec!['\\', 'f'],
+                    c => vec![c],
+                })
+                .collect();
+
+            let quoted_value = format!("\"{}\"", escaped_value);
+
+            Ok(OwnedValue::Text(Text::new(Rc::new(quoted_value))))
+        }
+        // Numbers are unquoted in json
+        OwnedValue::Integer(ref int) => Ok(OwnedValue::Integer(int.to_owned())),
+        OwnedValue::Float(ref float) => Ok(OwnedValue::Float(float.to_owned())),
+        OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
+        OwnedValue::Null => {
+            let null_value = "null".to_string();
+
+            Ok(OwnedValue::Text(Text::new(Rc::new(null_value))))
+        }
+        _ => {
+            // TODO not too sure what message should be here
+            crate::bail_parse_error!("Syntax error");
+        }
     }
 }
 
