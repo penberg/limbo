@@ -1,10 +1,10 @@
 <p align="center">
   <img src="limbo.png" alt="Limbo" width="800"/>
-  <h1 align="center">Limbo</h1>
+  <h1 align="center">Project Limbo</h1>
 </p>
 
 <p align="center">
-  <i>Limbo</i> is a project to build modern evolution of SQLite.
+  <i>Limbo</i> is a project to build the modern evolution of SQLite.
 </p>
 
 <p align="center">
