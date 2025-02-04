@@ -341,32 +341,9 @@ fn json_extract_single<'a>(
     path: &OwnedValue,
     strict: bool,
 ) -> crate::Result<Option<&'a Val>> {
-    let json_path = if strict {
-        match path {
-            OwnedValue::Text(t) => json_path(t.value.as_str())?,
-            OwnedValue::Null => return Ok(None),
-            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
-        }
-    } else {
-        match path {
-            OwnedValue::Text(t) => {
-                if t.value.starts_with("$") {
-                    json_path(t.value.as_str())?
-                } else {
-                    JsonPath {
-                        elements: vec![PathElement::Root(), PathElement::Key(t.value.to_string())],
-                    }
-                }
-            }
-            OwnedValue::Null => return Ok(None),
-            OwnedValue::Integer(i) => JsonPath {
-                elements: vec![PathElement::Root(), PathElement::ArrayLocator(*i as i32)],
-            },
-            OwnedValue::Float(f) => JsonPath {
-                elements: vec![PathElement::Root(), PathElement::Key(f.to_string())],
-            },
-            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
-        }
+    let json_path = match json_path_from_owned_value(path, strict)? {
+        Some(path) => path,
+        None => return Ok(None),
     };
 
     let mut current_element = &Val::Null;
@@ -410,6 +387,38 @@ fn json_extract_single<'a>(
     }
 
     Ok(Some(current_element))
+}
+
+fn json_path_from_owned_value(path: &OwnedValue, strict: bool) -> crate::Result<Option<JsonPath>> {
+    let json_path = if strict {
+        match path {
+            OwnedValue::Text(t) => json_path(t.value.as_str())?,
+            OwnedValue::Null => return Ok(None),
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+        }
+    } else {
+        match path {
+            OwnedValue::Text(t) => {
+                if t.value.starts_with("$") {
+                    json_path(t.value.as_str())?
+                } else {
+                    JsonPath {
+                        elements: vec![PathElement::Root(), PathElement::Key(t.value.to_string())],
+                    }
+                }
+            }
+            OwnedValue::Null => return Ok(None),
+            OwnedValue::Integer(i) => JsonPath {
+                elements: vec![PathElement::Root(), PathElement::ArrayLocator(*i as i32)],
+            },
+            OwnedValue::Float(f) => JsonPath {
+                elements: vec![PathElement::Root(), PathElement::Key(f.to_string())],
+            },
+            _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
+        }
+    };
+
+    Ok(Some(json_path))
 }
 
 enum Target<'a> {
@@ -1163,5 +1172,144 @@ mod tests {
         });
 
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_root_strict() {
+        let path = OwnedValue::Text(LimboText {
+            value: Rc::new("$".to_string()),
+            subtype: TextSubtype::Text,
+        });
+
+        let result = json_path_from_owned_value(&path, true);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_some());
+
+        let result = result.unwrap();
+        match result.elements[..] {
+            [PathElement::Root()] => {}
+            _ => panic!("Expected root"),
+        }
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_root_non_strict() {
+        let path = OwnedValue::Text(LimboText {
+            value: Rc::new("$".to_string()),
+            subtype: TextSubtype::Text,
+        });
+
+        let result = json_path_from_owned_value(&path, false);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_some());
+
+        let result = result.unwrap();
+        match result.elements[..] {
+            [PathElement::Root()] => {}
+            _ => panic!("Expected root"),
+        }
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_named_strict() {
+        let path = OwnedValue::Text(LimboText {
+            value: Rc::new("field".to_string()),
+            subtype: TextSubtype::Text,
+        });
+
+        assert!(json_path_from_owned_value(&path, true).is_err());
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_named_non_strict() {
+        let path = OwnedValue::Text(LimboText {
+            value: Rc::new("field".to_string()),
+            subtype: TextSubtype::Text,
+        });
+
+        let result = json_path_from_owned_value(&path, false);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_some());
+
+        let result = result.unwrap();
+        match &result.elements[..] {
+            [PathElement::Root(), PathElement::Key(field)] if *field == "field".to_string() => {}
+            _ => panic!("Expected root and field"),
+        }
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_integer_strict() {
+        let path = OwnedValue::Integer(3);
+        assert!(json_path_from_owned_value(&path, true).is_err());
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_integer_non_strict() {
+        let path = OwnedValue::Integer(3);
+
+        let result = json_path_from_owned_value(&path, false);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_some());
+
+        let result = result.unwrap();
+        match &result.elements[..] {
+            [PathElement::Root(), PathElement::ArrayLocator(index)] if *index == 3 => {}
+            _ => panic!("Expected root and array locator"),
+        }
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_null_strict() {
+        let path = OwnedValue::Null;
+
+        let result = json_path_from_owned_value(&path, true);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_null_non_strict() {
+        let path = OwnedValue::Null;
+
+        let result = json_path_from_owned_value(&path, false);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_float_strict() {
+        let path = OwnedValue::Float(3.14);
+
+        assert!(json_path_from_owned_value(&path, true).is_err());
+    }
+
+    #[test]
+    fn test_json_path_from_owned_value_float_non_strict() {
+        let path = OwnedValue::Float(3.14);
+
+        let result = json_path_from_owned_value(&path, false);
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+        assert!(result.is_some());
+
+        let result = result.unwrap();
+        match &result.elements[..] {
+            [PathElement::Root(), PathElement::Key(field)] if *field == "3.14".to_string() => {}
+            _ => panic!("Expected root and field"),
+        }
     }
 }
