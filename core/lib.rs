@@ -474,11 +474,6 @@ impl Statement {
         }
     }
 
-    pub fn query(&mut self) -> Result<Statement> {
-        let stmt = Statement::new(self.program.clone(), self.pager.clone());
-        Ok(stmt)
-    }
-
     pub fn columns(&self) -> &[String] {
         &self.program.columns
     }
