@@ -909,43 +909,7 @@ fn read_payload(unread: &[u8], payload_size: usize, pager: Rc<Pager>) -> (Vec<u8
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum SerialType {
-    Null,
-    Int8, // 8-bit twos-complement integer: https://www.sqlite.org/fileformat.html
-    BEInt16,
-    BEInt24,
-    BEInt32,
-    BEInt48,
-    BEInt64,
-    BEFloat64,
-    ConstInt0,
-    ConstInt1,
-    Blob(usize),
-    String(usize),
-}
-
-impl TryFrom<u64> for SerialType {
-    type Error = LimboError;
-
-    fn try_from(value: u64) -> Result<Self> {
-        match value {
-            0 => Ok(Self::Null),
-            1 => Ok(Self::Int8),
-            2 => Ok(Self::BEInt16),
-            3 => Ok(Self::BEInt24),
-            4 => Ok(Self::BEInt32),
-            5 => Ok(Self::BEInt48),
-            6 => Ok(Self::BEInt64),
-            7 => Ok(Self::BEFloat64),
-            8 => Ok(Self::ConstInt0),
-            9 => Ok(Self::ConstInt1),
-            n if value >= 12 && value % 2 == 0 => Ok(Self::Blob(((n - 12) / 2) as usize)),
-            n if value >= 13 && value % 2 == 1 => Ok(Self::String(((n - 13) / 2) as usize)),
-            _ => crate::bail_corrupt_error!("Invalid serial type: {}", value),
-        }
-    }
-}
+pub type SerialType = u64;
 
 pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
     let mut pos = 0;
@@ -956,7 +920,7 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
     let mut serial_types = Vec::with_capacity(header_size);
     while header_size > 0 {
         let (serial_type, nr) = read_varint(&payload[pos..])?;
-        let serial_type = SerialType::try_from(serial_type)?;
+        let serial_type = serial_type;
         serial_types.push(serial_type);
         pos += nr;
         assert!(header_size >= nr);
@@ -973,94 +937,75 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
 
 pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
     match *serial_type {
-        SerialType::Null => Ok((OwnedValue::Null, 0)),
-        SerialType::Int8 => {
+        0 => Ok((OwnedValue::Null, 0)),
+        1 => {
             if buf.is_empty() {
-                crate::bail_corrupt_error!("Invalid UInt8 value");
+                crate::bail_corrupt_error!("Invalid Int8 value");
             }
             let val = buf[0] as i8;
             Ok((OwnedValue::Integer(val as i64), 1))
-        }
-        SerialType::BEInt16 => {
+        },
+        2 => {
             if buf.len() < 2 {
                 crate::bail_corrupt_error!("Invalid BEInt16 value");
             }
-            Ok((
-                OwnedValue::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64),
-                2,
-            ))
-        }
-        SerialType::BEInt24 => {
+            Ok((OwnedValue::Integer(i16::from_be_bytes([buf[0], buf[1]]) as i64), 2))
+        },
+        3 => {
             if buf.len() < 3 {
                 crate::bail_corrupt_error!("Invalid BEInt24 value");
             }
-            Ok((
-                OwnedValue::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64),
-                3,
-            ))
-        }
-        SerialType::BEInt32 => {
+            Ok((OwnedValue::Integer(i32::from_be_bytes([0, buf[0], buf[1], buf[2]]) as i64), 3))
+        },
+        4 => {
             if buf.len() < 4 {
                 crate::bail_corrupt_error!("Invalid BEInt32 value");
             }
-            Ok((
-                OwnedValue::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64),
-                4,
-            ))
-        }
-        SerialType::BEInt48 => {
+            Ok((OwnedValue::Integer(i32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]) as i64), 4))
+        },
+        5 => {
             if buf.len() < 6 {
                 crate::bail_corrupt_error!("Invalid BEInt48 value");
             }
-            Ok((
-                OwnedValue::Integer(i64::from_be_bytes([
-                    0, 0, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5],
-                ])),
-                6,
-            ))
-        }
-        SerialType::BEInt64 => {
+            Ok((OwnedValue::Integer(i64::from_be_bytes([0, 0, buf[0], buf[1], buf[2], buf[3], buf[4], buf[5]])), 6))
+        },
+        6 => {
             if buf.len() < 8 {
                 crate::bail_corrupt_error!("Invalid BEInt64 value");
             }
-            Ok((
-                OwnedValue::Integer(i64::from_be_bytes([
-                    buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-                ])),
-                8,
-            ))
-        }
-        SerialType::BEFloat64 => {
+            Ok((OwnedValue::Integer(i64::from_be_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]])), 8))
+        },
+        7 => {
             if buf.len() < 8 {
                 crate::bail_corrupt_error!("Invalid BEFloat64 value");
             }
-            Ok((
-                OwnedValue::Float(f64::from_be_bytes([
-                    buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
-                ])),
-                8,
-            ))
-        }
-        SerialType::ConstInt0 => Ok((OwnedValue::Integer(0), 0)),
-        SerialType::ConstInt1 => Ok((OwnedValue::Integer(1), 0)),
-        SerialType::Blob(n) => {
-            if buf.len() < n {
-                crate::bail_corrupt_error!("Invalid Blob value");
+            Ok((OwnedValue::Float(f64::from_be_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]])), 8))
+        },
+        8 => Ok((OwnedValue::Integer(0), 0)),
+        9 => Ok((OwnedValue::Integer(1), 0)),
+        n if n >= 12 => {
+            let size = ((n - 12) / 2) as usize;
+            if n % 2 == 0 {
+                // Blob
+                if buf.len() < size {
+                    crate::bail_corrupt_error!("Invalid Blob value");
+                }
+                Ok((OwnedValue::Blob(buf[0..size].to_vec().into()), size))
+            } else {
+                // String 
+                if buf.len() < size {
+                    crate::bail_corrupt_error!(
+                        "Invalid String value, length {} < expected length {}",
+                        buf.len(),
+                        size
+                    );
+                }
+                let bytes = buf[0..size].to_vec();
+                let value = unsafe { String::from_utf8_unchecked(bytes) };
+                Ok((OwnedValue::build_text(value.into()), size))
             }
-            Ok((OwnedValue::Blob(buf[0..n].to_vec().into()), n))
-        }
-        SerialType::String(n) => {
-            if buf.len() < n {
-                crate::bail_corrupt_error!(
-                    "Invalid String value, length {} < expected length {}",
-                    buf.len(),
-                    n
-                );
-            }
-            let bytes = buf[0..n].to_vec();
-            let value = unsafe { String::from_utf8_unchecked(bytes) };
-            Ok((OwnedValue::build_text(value.into()), n))
-        }
+        },
+        _ => crate::bail_corrupt_error!("Invalid serial type"),
     }
 }
 
