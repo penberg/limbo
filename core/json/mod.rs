@@ -685,34 +685,26 @@ pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
                 return Ok(value.to_owned());
             }
 
-            let escaped_value: String = t
-                .value.to_string_lossy()
-                .chars()
-                .flat_map(|c| match c {
-                    '"' => vec!['\\', c],
-                    '\n' => vec!['\\', 'n'],
-                    '\r' => vec!['\\', 'r'],
-                    '\t' => vec!['\\', 't'],
-                    '\\' => vec!['\\', '\\'],
-                    '\u{0008}' => vec!['\\', 'b'],
-                    '\u{000c}' => vec!['\\', 'f'],
-                    c => vec![c],
-                })
-                .collect();
+            let mut escaped_value = String::with_capacity(t.value.len());
+            escaped_value.push('"');
+            for c in t.value.to_string_lossy().chars() {
+                match c {
+                    '"' | '\\' | '\n' | '\r' | '\t' | '\u{0008}' | '\u{000c}' => {
+                        escaped_value.push('\\');
+                        escaped_value.push(c);
+                    }
+                    c => escaped_value.push(c),
+                }
+            }
+            escaped_value.push('"');
 
-            let quoted_value = format!("\"{}\"", escaped_value);
-
-            Ok(OwnedValue::Text(Text::new(Rc::new(quoted_value))))
+            Ok(OwnedValue::Text(Text::new(Rc::new(escaped_value))))
         }
         // Numbers are unquoted in json
         OwnedValue::Integer(ref int) => Ok(OwnedValue::Integer(int.to_owned())),
         OwnedValue::Float(ref float) => Ok(OwnedValue::Float(float.to_owned())),
         OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
-        OwnedValue::Null => {
-            let null_value = "null".to_string();
-
-            Ok(OwnedValue::Text(Text::new(Rc::new(null_value))))
-        }
+        OwnedValue::Null => Ok(OwnedValue::Text(Text::new(Rc::new("null".to_string())))),
         _ => {
             // TODO not too sure what message should be here
             crate::bail_parse_error!("Syntax error");
