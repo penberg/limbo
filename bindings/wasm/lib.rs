@@ -192,7 +192,7 @@ fn to_js_value(value: limbo_core::Value) -> JsValue {
         }
         limbo_core::Value::Float(f) => JsValue::from(f),
         limbo_core::Value::Text(t) => JsValue::from_str(t),
-        limbo_core::Value::Blob(b) => js_sys::Uint8Array::from(b.as_slice()).into(),
+        limbo_core::Value::Blob(b) => js_sys::Uint8Array::from(b).into(),
     }
 }
 

@@ -58,8 +58,12 @@ pub(crate) fn do_flush(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::
     Ok(())
 }
 
-pub(crate) fn compare_string(a: &String, b: &String) {
+pub(crate) fn compare_string(a: impl AsRef<str>, b: impl AsRef<str>) {
+    let a = a.as_ref();
+    let b = b.as_ref();
+
     assert_eq!(a.len(), b.len(), "Strings are not equal in size!");
+
     let a = a.as_bytes();
     let b = b.as_bytes();
 
