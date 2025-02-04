@@ -24,13 +24,14 @@ use fallible_iterator::FallibleIterator;
 use libloading::{Library, Symbol};
 use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use log::trace;
+use parking_lot::RwLock;
 use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::num::NonZero;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]

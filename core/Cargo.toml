@@ -69,6 +69,7 @@ limbo_percentile = { path = "../extensions/percentile", optional = true, feature
 limbo_time = { path = "../extensions/time", optional = true, features = ["static"] }
 miette = "7.4.0"
 strum = "0.26"
+parking_lot = "0.12.3"
 
 [build-dependencies]
 chrono = "0.4.38"

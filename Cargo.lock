@@ -1590,6 +1590,7 @@ dependencies = [
  "miette",
  "mimalloc",
  "mockall",
+ "parking_lot",
  "pest",
  "pest_derive",
  "polling",
@@ -1681,7 +1682,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_time"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "chrono",
  "limbo_ext",
