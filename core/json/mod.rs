@@ -43,8 +43,8 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
 
             let json_val = get_json_value(json_value)?;
             let json = match indent {
-                Some(indent) => to_string_pretty(&json_val, indent).unwrap(),
-                None => to_string(&json_val).unwrap(),
+                Some(indent) => to_string_pretty(&json_val, indent)?,
+                None => to_string(&json_val)?,
             };
 
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
@@ -62,8 +62,8 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
         _ => {
             let json_val = get_json_value(json_value)?;
             let json = match indent {
-                Some(indent) => to_string_pretty(&json_val, indent).unwrap(),
-                None => to_string(&json_val).unwrap(),
+                Some(indent) => to_string_pretty(&json_val, indent)?,
+                None => to_string(&json_val)?,
             };
 
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
@@ -166,7 +166,7 @@ pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Resul
     let extracted = json_extract_single(&json, path, false)?;
 
     if let Some(val) = extracted {
-        let json = to_string(val).unwrap();
+        let json = to_string(val)?;
 
         Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
     } else {
@@ -223,7 +223,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
                     return Ok(OwnedValue::Null);
                 }
 
-                result.push_str(&to_string(&extracted).unwrap());
+                result.push_str(&to_string(&extracted)?);
                 result.push(',');
             }
         }
@@ -261,7 +261,7 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
         }
         Val::String(s) => Ok(OwnedValue::Text(LimboText::new(Rc::new(s.clone())))),
         _ => {
-            let json = to_string(&extracted).unwrap();
+            let json = to_string(&extracted)?;
             if all_as_db {
                 Ok(OwnedValue::Text(LimboText::new(Rc::new(json))))
             } else {
@@ -516,7 +516,7 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
         })
         .collect::<Result<IndexMap<String, Val>, _>>()?;
 
-    let result = crate::json::to_string(&value_map).unwrap();
+    let result = crate::json::to_string(&value_map)?;
     Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
 }
 
