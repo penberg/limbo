@@ -155,6 +155,45 @@ pub fn json_array_length(
     }
 }
 
+pub fn json_set(json: &OwnedValue, values: &[OwnedValue]) -> crate::Result<OwnedValue> {
+    let mut json_value = get_json_value(json)?;
+
+    values
+        .chunks(2)
+        .map(|chunk| match chunk {
+            [path, value] => {
+                let path = json_path_from_owned_value(path, true)?;
+
+                if let Some(path) = path {
+                    let new_value = match value {
+                        OwnedValue::Text(LimboText {
+                            value,
+                            subtype: TextSubtype::Text,
+                        }) => Val::String(value.to_string()),
+                        _ => get_json_value(value)?,
+                    };
+
+                    let mut new_json_value = json_value.clone();
+
+                    match create_and_mutate_json_by_path(&mut new_json_value, path, |val| match val
+                    {
+                        Target::Array(arr, index) => arr[index] = new_value.clone(),
+                        Target::Value(val) => *val = new_value.clone(),
+                    }) {
+                        Some(_) => json_value = new_json_value,
+                        _ => {}
+                    }
+                }
+
+                Ok(())
+            }
+            _ => crate::bail_constraint_error!("json_set needs an odd number of arguments"),
+        })
+        .collect::<crate::Result<()>>()?;
+
+    convert_json_to_db_type(&json_value, true)
+}
+
 /// Implements the -> operator. Always returns a proper JSON value.
 /// https://sqlite.org/json1.html#the_and_operators
 pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -468,6 +507,92 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
                         current = val;
                     } else {
                         return None;
+                    }
+                }
+                _ => {
+                    return None;
+                }
+            },
+        }
+    }
+    Some(Target::Value(current))
+}
+
+fn create_and_mutate_json_by_path<F, R>(json: &mut Val, path: JsonPath, closure: F) -> Option<R>
+where
+    F: FnOnce(Target) -> R,
+{
+    find_or_create_target(json, &path).map(closure)
+}
+
+fn find_or_create_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
+    let mut current = json;
+    for (i, key) in path.elements.iter().enumerate() {
+        let is_last = i == path.elements.len() - 1;
+        match key {
+            PathElement::Root() => continue,
+            PathElement::ArrayLocator(index) => match current {
+                Val::Array(arr) => {
+                    if let Some(index) = match index {
+                        i if *i < 0 => arr.len().checked_sub(i.unsigned_abs() as usize),
+                        i => Some(*i as usize),
+                    } {
+                        if is_last {
+                            if index == arr.len() {
+                                arr.push(Val::Null);
+                            }
+
+                            if index >= arr.len() {
+                                return None;
+                            }
+
+                            return Some(Target::Array(arr, index));
+                        } else {
+                            if index == arr.len() {
+                                arr.push(
+                                    if matches!(path.elements[i + 1], PathElement::ArrayLocator(_))
+                                    {
+                                        Val::Array(vec![])
+                                    } else {
+                                        Val::Object(vec![])
+                                    },
+                                );
+                            }
+
+                            if index >= arr.len() {
+                                return None;
+                            }
+
+                            current = &mut arr[index];
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                _ => {
+                    *current = Val::Array(vec![]);
+                }
+            },
+            PathElement::Key(key) => match current {
+                Val::Object(obj) => {
+                    if let Some(pos) = &obj
+                        .iter()
+                        .position(|(k, v)| k == key && !matches!(v, Val::Removed))
+                    {
+                        let val = &mut obj[*pos].1;
+                        current = val;
+                    } else {
+                        let element = if !is_last
+                            && matches!(path.elements[i + 1], PathElement::ArrayLocator(_))
+                        {
+                            Val::Array(vec![])
+                        } else {
+                            Val::Object(vec![])
+                        };
+
+                        obj.push((key.clone(), element));
+                        let index = obj.len() - 1;
+                        current = &mut obj[index].1;
                     }
                 }
                 _ => {
@@ -1239,7 +1364,7 @@ mod tests {
 
         let result = result.unwrap();
         match &result.elements[..] {
-            [PathElement::Root(), PathElement::Key(field)] if *field == "field".to_string() => {}
+            [PathElement::Root(), PathElement::Key(field)] if *field == "field" => {}
             _ => panic!("Expected root and field"),
         }
     }
@@ -1291,14 +1416,14 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_float_strict() {
-        let path = OwnedValue::Float(3.14);
+        let path = OwnedValue::Float(1.23);
 
         assert!(json_path_from_owned_value(&path, true).is_err());
     }
 
     #[test]
     fn test_json_path_from_owned_value_float_non_strict() {
-        let path = OwnedValue::Float(3.14);
+        let path = OwnedValue::Float(1.23);
 
         let result = json_path_from_owned_value(&path, false);
         assert!(result.is_ok());
@@ -1308,8 +1433,255 @@ mod tests {
 
         let result = result.unwrap();
         match &result.elements[..] {
-            [PathElement::Root(), PathElement::Key(field)] if *field == "3.14".to_string() => {}
+            [PathElement::Root(), PathElement::Key(field)] if *field == "1.23" => {}
             _ => panic!("Expected root and field"),
         }
+    }
+
+    #[test]
+    fn test_json_set_field_empty_object() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.field".to_string())),
+                OwnedValue::build_text(Rc::new("value".to_string())),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"{"field":"value"}"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_replace_field() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new(r#"{"field":"old_value"}"#.to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.field".to_string())),
+                OwnedValue::build_text(Rc::new("new_value".to_string())),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"{"field":"new_value"}"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_set_deeply_nested_key() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.object.doesnt.exist".to_string())),
+                OwnedValue::build_text(Rc::new("value".to_string())),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(
+                r#"{"object":{"doesnt":{"exist":"value"}}}"#.to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn test_json_set_add_value_to_empty_array() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("[]".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$[0]".to_string())),
+                OwnedValue::build_text(Rc::new("value".to_string())),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"["value"]"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_add_value_to_nonexistent_array() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.some_array[0]".to_string())),
+                OwnedValue::Integer(123),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"{"some_array":[123]}"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_add_value_to_array() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("[123]".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$[1]".to_string())),
+                OwnedValue::Integer(456),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new("[123,456]".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_add_value_to_array_out_of_bounds() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("[123]".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$[200]".to_string())),
+                OwnedValue::Integer(456),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new("[123]".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_replace_value_in_array() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("[123]".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$[0]".to_string())),
+                OwnedValue::Integer(456),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new("[456]".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_null_path() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[OwnedValue::Null, OwnedValue::Integer(456)],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new("{}".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_multiple_keys() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("[123]".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$[0]".to_string())),
+                OwnedValue::Integer(456),
+                OwnedValue::build_text(Rc::new("$[1]".to_string())),
+                OwnedValue::Integer(789),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new("[456,789]".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_missing_value() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("[123]".to_string())),
+            &[OwnedValue::build_text(Rc::new("$[0]".to_string()))],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_set_add_array_in_nested_object() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.object[0].field".to_string())),
+                OwnedValue::Integer(123),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"{"object":[{"field":123}]}"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_add_array_in_array_in_nested_object() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.object[0][0]".to_string())),
+                OwnedValue::Integer(123),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"{"object":[[123]]}"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn test_json_set_add_array_in_array_in_nested_object_out_of_bounds() {
+        let result = json_set(
+            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &[
+                OwnedValue::build_text(Rc::new("$.object[123].another".to_string())),
+                OwnedValue::build_text(Rc::new("value".to_string())),
+                OwnedValue::build_text(Rc::new("$.field".to_string())),
+                OwnedValue::build_text(Rc::new("value".to_string())),
+            ],
+        );
+
+        assert!(result.is_ok());
+
+        assert_eq!(
+            result.unwrap(),
+            OwnedValue::build_text(Rc::new(r#"{"field":"value"}"#.to_string()))
+        );
     }
 }

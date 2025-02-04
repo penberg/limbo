@@ -918,14 +918,16 @@ pub fn translate_expr(
                             func_ctx,
                         )
                     }
-                    JsonFunc::JsonArray | JsonFunc::JsonExtract => translate_function(
-                        program,
-                        args.as_deref().unwrap_or_default(),
-                        referenced_tables,
-                        resolver,
-                        target_register,
-                        func_ctx,
-                    ),
+                    JsonFunc::JsonArray | JsonFunc::JsonExtract | JsonFunc::JsonSet => {
+                        translate_function(
+                            program,
+                            args.as_deref().unwrap_or_default(),
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        )
+                    }
                     JsonFunc::JsonArrowExtract | JsonFunc::JsonArrowShiftExtract => {
                         unreachable!(
                             "These two functions are only reachable via the -> and ->> operators"

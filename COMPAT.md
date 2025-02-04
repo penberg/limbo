@@ -374,7 +374,7 @@ Modifiers:
 | jsonb_remove(json,path,...)        |         |                                                                                                                                              |
 | json_replace(json,path,value,...)  |         |                                                                                                                                              |
 | jsonb_replace(json,path,value,...) |         |                                                                                                                                              |
-| json_set(json,path,value,...)      |         |                                                                                                                                              |
+| json_set(json,path,value,...)      | Yes     |                                                                                                                                              |
 | jsonb_set(json,path,value,...)     |         |                                                                                                                                              |
 | json_type(json)                    | Yes     |                                                                                                                                              |
 | json_type(json,path)               | Yes     |                                                                                                                                              |
