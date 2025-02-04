@@ -99,7 +99,7 @@ res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
 ```
 
-### Go  (wip)
+### 🐹 Go (wip)
 
 1. Clone the repository
 2. Build the library and set your LD_LIBRARY_PATH to include limbo's target directory
