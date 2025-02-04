@@ -6,6 +6,11 @@ Steps
 3. Implement the function in a feature branch.
 4. Push it as a Merge Request, get it review.
 
+Sample Pull Requests of function contributing
+- [partial support for datetime() and julianday()](https://github.com/tursodatabase/limbo/pull/600)
+- [support for changes() and total_changes()](https://github.com/tursodatabase/limbo/pull/589)
+- [support for unhex(X)](https://github.com/tursodatabase/limbo/pull/353)
+
 ## An example with function `date(..)`
 
 > Note that the files, code location, steps might be not exactly the same because of refactor but the idea of the changes needed in each layer stays.
@@ -13,13 +18,24 @@ Steps
 [Issue #158](https://github.com/tursodatabase/limbo/issues/158) was created for it.
 Refer to commit [4ff7058](https://github.com/tursodatabase/limbo/commit/4ff705868a054643f6113cbe009655c32bc5f235).
 
+![limbo_architecture.png](limbo_architecture.png)
+
+To add a function we generally need to touch at least the following modules
+- SQL Command Processor
+  - The `SQL Command Processor` module is responsible for turning sql function string into a sequence of instructions to be executed by the `Virtual Machine` module.
+  - we need the following things: function definition, how the `bytecode generator` in `core/translate` generates bytecode program for this function to be executed.
+- Virtual Machine `core/vdbe`
+  - we need to add logic of how the `vdbe` should execute the logic of this function in Rust and write result to destination register of the vm.
+  - [more info](https://www.sqlite.org/opcode.html)
+- Tests
+
 ```
-sql function: string 
---Parser--> 
-enum Func
---translate-->
-Instruction 
---VDBE--> 
+SQL function string 
+--Tokenizer and Parser--> 
+AST (enum Func)
+--Bytecode Generator (core/translate)-->
+Bytecode Instructions 
+--Virtual Machine--> 
 Result
 ```
 

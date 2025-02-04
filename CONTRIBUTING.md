@@ -19,7 +19,7 @@ If you are new to Rust, the following books are recommended reading:
 
 Examples of contributing
 
-* [How to contribute a SQL function implementation](docs/internals/functions.md)
+* [How to contribute a SQL function implementation](docs/contributing/contributing_functions.md)
 
 To build and run `limbo` cli: 
 
