@@ -24,10 +24,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
 dependencies = [
  "cfg-if",
- "getrandom",
+ "getrandom 0.2.15",
  "once_cell",
  "version_check",
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -60,7 +60,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18a1e15a87b13ae79e04e07b3714fc41d5f6993dff11662fdbe0b207c6ad0fe0"
 dependencies = [
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -463,7 +463,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "core_tester"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -472,6 +472,8 @@ dependencies = [
  "env_logger 0.10.2",
  "limbo_core",
  "log",
+ "rand 0.9.0",
+ "rand_chacha 0.9.0",
  "rexpect",
  "rusqlite",
  "rustyline",
@@ -977,8 +979,20 @@ dependencies = [
  "cfg-if",
  "js-sys",
  "libc",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "getrandom"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43a49c392881ce6d5c3b8cb70f98717b7c07aabbdff06687b9030dbfbe2725f8"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "wasi 0.13.3+wasi-0.2.2",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -1341,7 +1355,7 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "java-limbo"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "jni",
  "limbo_core",
@@ -1400,7 +1414,7 @@ dependencies = [
  "itoa",
  "nom",
  "ordered-float",
- "rand",
+ "rand 0.8.5",
  "ryu",
  "serde_json",
 ]
@@ -1514,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "limbo"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "clap",
@@ -1530,14 +1544,14 @@ dependencies = [
 
 [[package]]
 name = "limbo-go"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_core",
 ]
 
 [[package]]
 name = "limbo-wasm"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -1549,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_core"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "built",
  "bumpalo",
@@ -1557,7 +1571,7 @@ dependencies = [
  "chrono",
  "criterion",
  "fallible-iterator 0.3.0",
- "getrandom",
+ "getrandom 0.2.15",
  "hex",
  "indexmap",
  "io-uring",
@@ -1580,7 +1594,7 @@ dependencies = [
  "pest_derive",
  "polling",
  "pprof",
- "rand",
+ "rand 0.8.5",
  "regex",
  "regex-syntax",
  "rstest",
@@ -1596,7 +1610,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_ext"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_macros",
  "log",
@@ -1604,7 +1618,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_libsql"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_core",
  "thiserror 2.0.11",
@@ -1613,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_macros"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1622,7 +1636,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_percentile"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_ext",
  "mimalloc",
@@ -1630,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_regexp"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_ext",
  "log",
@@ -1640,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sim"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anarchist-readable-name-generator-lib",
  "clap",
@@ -1648,8 +1662,8 @@ dependencies = [
  "limbo_core",
  "log",
  "notify",
- "rand",
- "rand_chacha",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -1657,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_sqlite3"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "env_logger 0.11.6",
  "libc",
@@ -1679,7 +1693,7 @@ dependencies = [
 
 [[package]]
 name = "limbo_uuid"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_ext",
  "mimalloc",
@@ -1688,12 +1702,12 @@ dependencies = [
 
 [[package]]
 name = "limbo_vector"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "limbo_ext",
  "quickcheck",
  "quickcheck_macros",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -1811,7 +1825,7 @@ checksum = "2886843bf800fba2e3377cff24abf6379b4c4d5c6681eaf9ea5b0d15090450bd"
 dependencies = [
  "libc",
  "log",
- "wasi",
+ "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
 ]
 
@@ -2080,7 +2094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -2189,7 +2203,7 @@ version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -2230,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "py-limbo"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "anyhow",
  "limbo_core",
@@ -2320,7 +2334,7 @@ checksum = "588f6378e4dd99458b60ec275b4477add41ce4fa9f64dcba6f15adccb19b50d6"
 dependencies = [
  "env_logger 0.8.4",
  "log",
- "rand",
+ "rand 0.8.5",
 ]
 
 [[package]]
@@ -2360,8 +2374,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
- "rand_chacha",
- "rand_core",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
+dependencies = [
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.0",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]
@@ -2371,7 +2396,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.9.0",
 ]
 
 [[package]]
@@ -2380,7 +2415,17 @@ version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b08f3c9802962f7e1b25113931d94f43ed9725bebc59db9d0c3e9a23b67e15ff"
+dependencies = [
+ "getrandom 0.3.1",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]
@@ -2418,7 +2463,7 @@ version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
  "libredox",
  "thiserror 1.0.69",
 ]
@@ -2860,7 +2905,7 @@ checksum = "9a8a559c81686f576e8cd0290cd2a24a2a9ad80c98b3478856500fcbd7acd704"
 dependencies = [
  "cfg-if",
  "fastrand",
- "getrandom",
+ "getrandom 0.2.15",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
@@ -3092,7 +3137,7 @@ version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "744018581f9a3454a9e15beb8a33b017183f1e7c0cd170232a2d1453b23a51c4"
 dependencies = [
- "getrandom",
+ "getrandom 0.2.15",
 ]
 
 [[package]]
@@ -3131,6 +3176,15 @@ name = "wasi"
 version = "0.11.0+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
+
+[[package]]
+name = "wasi"
+version = "0.13.3+wasi-0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26816d2e1a4a36a2940b96c5296ce403917633dff8f3440e9b236ed6f6bacad2"
+dependencies = [
+ "wit-bindgen-rt",
+]
 
 [[package]]
 name = "wasm-bindgen"
@@ -3468,6 +3522,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
+name = "wit-bindgen-rt"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3268f3d866458b787f390cf61f4bbb563b922d091359f9608842999eaee3943c"
+dependencies = [
+ "bitflags 2.8.0",
+]
+
+[[package]]
 name = "write16"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3510,7 +3573,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
 dependencies = [
  "byteorder",
- "zerocopy-derive",
+ "zerocopy-derive 0.7.35",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.8.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a367f292d93d4eab890745e75a778da40909cab4d6ff8173693812f79c4a2468"
+dependencies = [
+ "zerocopy-derive 0.8.14",
 ]
 
 [[package]]
@@ -3518,6 +3590,17 @@ name = "zerocopy-derive"
 version = "0.7.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3931cb58c62c13adec22e38686b559c86a30565e16ad6e8510a337cedc611e1"
 dependencies = [
  "proc-macro2",
  "quote",

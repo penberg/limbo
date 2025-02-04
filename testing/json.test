@@ -60,6 +60,128 @@ do_execsql_test json5-multi-comment {
           123 /* xyz */ , /* 123 */ }')
 } {{{"aaa":123}}}
 
+do_execsql_test json5-ecma-script-1-pretty {
+    select json_pretty('{a:5,b:6}') ;
+} {{{
+    "a": 5,
+    "b": 6
+}}}
+
+do_execsql_test json5-ecma-script-2-pretty {
+    select json_pretty('{a:5,a:3}') ;
+} {{{
+    "a": 5,
+    "a": 3
+}}}
+
+do_execsql_test json5-ecma-script-3-pretty {
+   SELECT json_pretty('{ MNO_123$xyz : 789 }');
+} {{{
+    "MNO_123$xyz": 789
+}}}
+
+do_execsql_test json5-with-single-trailing-comma-valid-pretty {
+    select json_pretty('{"a":5, "b":6, }');
+} {{{
+    "a": 5,
+    "b": 6
+}}}
+
+do_execsql_test json5-single-quoted-pretty {
+    SELECT json_pretty('{"a": ''abcd''}');
+} {{{
+    "a": "abcd"
+}}}
+
+do_execsql_test json5-hexadecimal-1-pretty {
+   SELECT json_pretty('{a: 0x0}');
+} {{{
+    "a": 0
+}}}
+
+do_execsql_test json5-hexadecimal-2-pretty {
+   SELECT json_pretty('{a: 0xabcdef}');
+} {{{
+    "a": 11259375
+}}}
+
+do_execsql_test json5-hexadecimal-2-pretty {
+   SELECT json_pretty('{a: -0xabcdef}');
+} {{{
+    "a": -11259375
+}}}
+
+do_execsql_test json5-number-1-pretty {
+   SELECT json_pretty('{x: 4.}');
+} {{{
+    "x": 4.0
+}}}
+
+do_execsql_test json5-number-2-pretty {
+   SELECT json_pretty('{x: +4.}');
+} {{{
+    "x": 4.0
+}}}
+
+do_execsql_test json5-number-3-pretty {
+   SELECT json_pretty('{x: -4.}');
+} {{{
+    "x": -4.0
+}}}
+
+do_execsql_test json5-number-5-pretty {
+   SELECT json_pretty('{x: Infinity}');
+} {{{
+    "x": 9e999
+}}}
+
+do_execsql_test json5-number-6-pretty {
+   SELECT json_pretty('{x: -Infinity}');
+} {{{
+    "x": -9e999
+}}}
+
+do_execsql_test json5-multi-comment-pretty {
+   SELECT json_pretty(' /* abc */ { /*def*/ aaa /* xyz */ : // to the end of line
+          123 /* xyz */ , /* 123 */ }');
+} {{{
+    "aaa": 123
+}}}
+
+do_execsql_test json-pretty-ident-1 {
+   SELECT json_pretty('{x: 1}', '');
+} {{{
+"x": 1
+}}}
+
+do_execsql_test json-pretty-ident-2 {
+   SELECT json_pretty('{x: 1}', '11');
+} {{{
+11"x": 1
+}}}
+
+do_execsql_test json-pretty-ident-null {
+   SELECT json_pretty('{x: 1}', NULL);
+} {{{
+    "x": 1
+}}}
+
+do_execsql_test json-pretty-ident-blob-1 {
+   SELECT json_pretty('{x: 1}', x'33');
+} {{{
+3"x": 1
+}}}
+
+# TODO
+# Currently conversion from blob to string is not exactly the same as in sqlite.
+# The blob below should evaluate to two whitespaces TEXT value
+
+# do_execsql_test json-pretty-ident-blob-2 {
+#    SELECT json_pretty('{x: 1}', x'1111');
+# } {{{
+#   "x": 1
+# }}}
+
 do_execsql_test json_array_str {
    SELECT json_array('a')
 } {{["a"]}}

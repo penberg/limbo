@@ -4,7 +4,7 @@ We'd love to have you contribute to Limbo!
 
 This document is a quick helper to get you going.
 
-## Getting started
+## Getting Started
 
 Limbo is a rewrite of SQLite in Rust. If you are new to SQLite, the following articles and books are a good starting point:
 
@@ -19,7 +19,47 @@ If you are new to Rust, the following books are recommended reading:
 
 Examples of contributing
 
-* [How to contribute a SQL function implementation](docs/internals/functions.md)
+* [How to contribute a SQL function implementation](docs/contributing/contributing_functions.md)
+
+To build and run `limbo` cli: 
+
+```shell 
+cargo run --package limbo --bin limbo database.db
+```
+
+Run tests:
+
+```console
+cargo test
+```
+
+Test coverage report:
+
+```
+cargo tarpaulin -o html
+```
+
+> [!NOTE]
+> Generation of coverage report requires [tarpaulin](https://github.com/xd009642/tarpaulin) binary to be installed.
+> You can install it with `cargo install cargo-tarpaulin`
+
+[//]: # (TODO remove the below tip when the bug is solved)
+
+> [!TIP]
+> If coverage fails with "Test failed during run" error and all of the tests passed it might be the result of tarpaulin [bug](https://github.com/xd009642/tarpaulin/issues/1642). You can temporarily set [dynamic libraries linking manually](https://doc.rust-lang.org/cargo/reference/environment-variables.html#dynamic-library-paths) as a workaround, e.g. for linux  `LD_LIBRARY_PATH="$(rustc --print=target-libdir)" cargo tarpaulin -o html`.
+
+Run benchmarks:
+
+```console
+cargo bench
+```
+
+Run benchmarks and generate flamegraphs:
+
+```console
+echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
+cargo bench --bench benchmark -- --profile-time=5
+```
 
 ## Finding things to work on
 

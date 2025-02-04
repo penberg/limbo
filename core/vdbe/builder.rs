@@ -27,8 +27,8 @@ pub struct ProgramBuilder {
     label_to_resolved_offset: HashMap<i32, u32>,
     // Bitmask of cursors that have emitted a SeekRowid instruction.
     seekrowid_emitted_bitmask: u64,
-    // map of instruction index to manual comment (used in EXPLAIN)
-    comments: HashMap<InsnReference, &'static str>,
+    // map of instruction index to manual comment (used in EXPLAIN only)
+    comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: Parameters,
     pub columns: Vec<String>,
 }
@@ -47,8 +47,14 @@ impl CursorType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryMode {
+    Normal,
+    Explain,
+}
+
 impl ProgramBuilder {
-    pub fn new() -> Self {
+    pub fn new(query_mode: QueryMode) -> Self {
         Self {
             next_free_register: 1,
             next_free_label: 0,
@@ -59,7 +65,11 @@ impl ProgramBuilder {
             constant_insns: Vec::new(),
             label_to_resolved_offset: HashMap::new(),
             seekrowid_emitted_bitmask: 0,
-            comments: HashMap::new(),
+            comments: if query_mode == QueryMode::Explain {
+                Some(HashMap::new())
+            } else {
+                None
+            },
             parameters: Parameters::new(),
             columns: Vec::new(),
         }
@@ -98,8 +108,74 @@ impl ProgramBuilder {
         self.insns.push(insn);
     }
 
+    pub fn emit_string8(&mut self, value: String, dest: usize) {
+        self.emit_insn(Insn::String8 { value, dest });
+    }
+
+    pub fn emit_string8_new_reg(&mut self, value: String) -> usize {
+        let dest = self.alloc_register();
+        self.emit_insn(Insn::String8 { value, dest });
+        dest
+    }
+
+    pub fn emit_int(&mut self, value: i64, dest: usize) {
+        self.emit_insn(Insn::Integer { value, dest });
+    }
+
+    pub fn emit_bool(&mut self, value: bool, dest: usize) {
+        self.emit_insn(Insn::Integer {
+            value: if value { 1 } else { 0 },
+            dest,
+        });
+    }
+
+    pub fn emit_null(&mut self, dest: usize) {
+        self.emit_insn(Insn::Null {
+            dest,
+            dest_end: None,
+        });
+    }
+
+    pub fn emit_result_row(&mut self, start_reg: usize, count: usize) {
+        self.emit_insn(Insn::ResultRow { start_reg, count });
+    }
+
+    pub fn emit_halt(&mut self) {
+        self.emit_insn(Insn::Halt {
+            err_code: 0,
+            description: String::new(),
+        });
+    }
+
+    // no users yet, but I want to avoid someone else in the future
+    // just adding parameters to emit_halt! If you use this, remove the
+    // clippy warning please.
+    #[allow(dead_code)]
+    pub fn emit_halt_err(&mut self, err_code: usize, description: String) {
+        self.emit_insn(Insn::Halt {
+            err_code,
+            description,
+        });
+    }
+
+    pub fn emit_init(&mut self) -> BranchOffset {
+        let target_pc = self.allocate_label();
+        self.emit_insn(Insn::Init { target_pc });
+        target_pc
+    }
+
+    pub fn emit_transaction(&mut self, write: bool) {
+        self.emit_insn(Insn::Transaction { write });
+    }
+
+    pub fn emit_goto(&mut self, target_pc: BranchOffset) {
+        self.emit_insn(Insn::Goto { target_pc });
+    }
+
     pub fn add_comment(&mut self, insn_index: BranchOffset, comment: &'static str) {
-        self.comments.insert(insn_index.to_offset_int(), comment);
+        if let Some(comments) = &mut self.comments {
+            comments.insert(insn_index.to_offset_int(), comment);
+        }
     }
 
     // Emit an instruction that will be put at the end of the program (after Transaction statement).
@@ -310,7 +386,7 @@ impl ProgramBuilder {
                 Insn::IdxGT { target_pc, .. } => {
                     resolve(target_pc, "IdxGT");
                 }
-                Insn::IsNull { src: _, target_pc } => {
+                Insn::IsNull { reg: _, target_pc } => {
                     resolve(target_pc, "IsNull");
                 }
                 _ => continue,

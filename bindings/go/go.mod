@@ -1,4 +1,4 @@
-module limbo
+module github.com/tursodatabase/limbo
 
 go 1.23.4
 

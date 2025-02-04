@@ -29,3 +29,6 @@ dist/
 
 # Javascript
 **/node_modules/
+
+# testing
+testing/limbo_output.txt

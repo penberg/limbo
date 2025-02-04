@@ -137,7 +137,7 @@ The current status of Limbo is:
 | PRAGMA mmap_size                 | No         |                                              |
 | PRAGMA module_list               | No         |                                              |
 | PRAGMA optimize                  | No         |                                              |
-| PRAGMA page_count                | No         |                                              |
+| PRAGMA page_count                | Yes        |                                              |
 | PRAGMA page_size                 | No         |                                              |
 | PRAGMA parser_trace              | No         |                                              |
 | PRAGMA pragma_list               | Yes        |                                              |
@@ -184,12 +184,12 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | (expr)                    | Yes     |                                          |
 | CAST (expr AS type)       | Yes     |                                          |
 | COLLATE                   | No      |                                          |
-| (NOT) LIKE                | No      |                                          |
-| (NOT) GLOB                | No      |                                          |
+| (NOT) LIKE                | Yes     |                                          |
+| (NOT) GLOB                | Yes     |                                          |
 | (NOT) REGEXP              | No      |                                          |
 | (NOT) MATCH               | No      |                                          |
-| IS (NOT)                  | No      |                                          |
-| IS (NOT) DISTINCT FROM    | No      |                                          |
+| IS (NOT)                  | Yes     |                                          |
+| IS (NOT) DISTINCT FROM    | Yes     |                                          |
 | (NOT) BETWEEN ... AND ... | No      |                                          |
 | (NOT) IN (subquery)       | No      |                                          |
 | (NOT) EXISTS (subquery)   | No      |                                          |
@@ -229,7 +229,7 @@ Feature support of [sqlite expr syntax](https://www.sqlite.org/lang_expr.html).
 | min(X,Y,...)                 | Yes     |                                                      |
 | nullif(X,Y)                  | Yes     |                                                      |
 | octet_length(X)              | Yes     |                                                      |
-| printf(FORMAT,...)           | No      |                                                      |
+| printf(FORMAT,...)           | Yes     | Still need support additional modifiers              |
 | quote(X)                     | Yes     |                                                      |
 | random()                     | Yes     |                                                      |
 | randomblob(N)                | Yes     |                                                      |
@@ -351,7 +351,7 @@ Modifiers:
 #### JSON functions
 
 | Function                           | Status  | Comment                                                                                                                                      |
-|------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | json(json)                         | Partial |                                                                                                                                              |
 | jsonb(json)                        |         |                                                                                                                                              |
 | json_array(value1,value2,...)      | Yes     |                                                                                                                                              |
@@ -369,7 +369,7 @@ Modifiers:
 | jsonb_object(label1,value1,...)    |         |                                                                                                                                              |
 | json_patch(json1,json2)            | Yes     |                                                                                                                                              |
 | jsonb_patch(json1,json2)           |         |                                                                                                                                              |
-| json_pretty(json)                  |         |                                                                                                                                              |
+| json_pretty(json)                  | Partial | Shares same json(val) limitations. Also, when passing blobs for indentation, conversion is not exactly the same as in SQLite                 |
 | json_remove(json,path,...)         | Partial | Uses same json path parser as json_extract so shares same limitations.                                                                       |
 | jsonb_remove(json,path,...)        |         |                                                                                                                                              |
 | json_replace(json,path,value,...)  |         |                                                                                                                                              |
@@ -506,7 +506,7 @@ Modifiers:
 | OpenWriteAsync | Yes    |         |
 | OpenWriteAwait | Yes    |         |
 | Or             | Yes    |         |
-| Pagecount      | No     |         |
+| Pagecount      | Partial| no temp databases |
 | Param          | No     |         |
 | ParseSchema    | No     |         |
 | Permutation    | No     |         |

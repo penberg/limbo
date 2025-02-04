@@ -25,6 +25,16 @@ where
     Ok(string)
 }
 
+/// Attempts to serialize the input as a JSON5 string (actually a JSON string).
+pub fn to_string_pretty<T>(value: &T, indent: &str) -> Result<String>
+where
+    T: Serialize,
+{
+    let vec = to_vec_pretty(value, indent)?;
+    let string = String::from_utf8(vec).map_err(|err| Error::from(err.utf8_error()))?;
+    Ok(string)
+}
+
 struct Serializer<W, F = CompactFormatter> {
     writer: W,
     formatter: F,
@@ -36,6 +46,17 @@ where
 {
     pub fn new(writer: W) -> Self {
         Serializer::with_formatter(writer, CompactFormatter)
+    }
+}
+
+impl<'a, W> Serializer<W, PrettyFormatter<'a>>
+where
+    W: io::Write,
+{
+    /// Creates a new JSON pretty print serializer.
+    #[inline]
+    pub fn pretty(writer: W, indent: &'a str) -> Self {
+        Serializer::with_formatter(writer, PrettyFormatter::with_indent(indent.as_bytes()))
     }
 }
 
@@ -550,6 +571,24 @@ where
 {
     let mut writer = Vec::with_capacity(128);
     to_writer(&mut writer, value)?;
+    Ok(writer)
+}
+
+pub fn to_writer_pretty<W, T>(writer: W, value: &T, indent: &str) -> Result<()>
+where
+    W: io::Write,
+    T: ?Sized + Serialize,
+{
+    let mut ser = Serializer::pretty(writer, indent);
+    value.serialize(&mut ser)
+}
+
+pub fn to_vec_pretty<T>(value: &T, indent: &str) -> Result<Vec<u8>>
+where
+    T: ?Sized + Serialize,
+{
+    let mut writer = Vec::with_capacity(128);
+    to_writer_pretty(&mut writer, value, indent)?;
     Ok(writer)
 }
 

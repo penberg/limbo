@@ -274,7 +274,7 @@ pub fn emit_group_by<'a>(
         let agg_result_reg = start_reg + i;
         translate_aggregation_step_groupby(
             program,
-            &plan.referenced_tables,
+            &plan.table_references,
             pseudo_cursor,
             cursor_index,
             agg,
@@ -384,7 +384,7 @@ pub fn emit_group_by<'a>(
         for expr in having.iter() {
             translate_condition_expr(
                 program,
-                &plan.referenced_tables,
+                &plan.table_references,
                 expr,
                 ConditionMetadata {
                     jump_if_condition_is_true: false,

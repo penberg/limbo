@@ -1,0 +1,10 @@
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+sample.db
+sample.db-wal
+
+### IntelliJ IDEA ###
+.idea

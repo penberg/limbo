@@ -32,3 +32,12 @@ do_execsql_test pragma-table-info-call-syntax {
 do_execsql_test pragma-table-info-invalid-table {
   PRAGMA table_info=pekka
 } {}
+
+do_execsql_test_on_specific_db ":memory:" pragma-page-count-empty {
+  PRAGMA page_count
+} {0}
+
+do_execsql_test_on_specific_db ":memory:" pragma-page-count-table {
+  CREATE TABLE foo(bar);
+  PRAGMA page_count
+} {2}

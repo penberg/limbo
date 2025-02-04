@@ -22,6 +22,7 @@ mod datetime;
 pub mod explain;
 pub mod insn;
 pub mod likeop;
+mod printf;
 pub mod sorter;
 mod strftime;
 
@@ -57,6 +58,7 @@ use insn::{
     exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
+use printf::exec_printf;
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
@@ -377,7 +379,7 @@ pub struct Program {
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
-    pub comments: HashMap<InsnReference, &'static str>,
+    pub comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
@@ -604,15 +606,18 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let cond = state.registers[lhs] == state.registers[rhs];
+                    let nulleq = flags.has_nulleq();
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if (nulleq && cond) || (!nulleq && jump_if_null) {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -631,15 +636,18 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let cond = state.registers[lhs] != state.registers[rhs];
+                    let nulleq = flags.has_nulleq();
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if (nulleq && cond) || (!nulleq && jump_if_null) {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -658,15 +666,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -685,15 +694,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -712,15 +722,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -739,15 +750,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -1002,6 +1014,15 @@ impl Program {
                         }
                     }
                     log::trace!("Halt auto_commit {}", self.auto_commit);
+                    let connection = self
+                        .connection
+                        .upgrade()
+                        .expect("only weak ref to connection?");
+                    let current_state = connection.transaction_state.borrow().clone();
+                    if current_state == TransactionState::Read {
+                        pager.end_read_tx()?;
+                        return Ok(StepResult::Done);
+                    }
                     return if self.auto_commit {
                         match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
@@ -1680,7 +1701,7 @@ impl Program {
                         crate::function::Func::Json(json_func) => match json_func {
                             JsonFunc::Json => {
                                 let json_value = &state.registers[*start_reg];
-                                let json_str = get_json(json_value);
+                                let json_str = get_json(json_value, None);
                                 match json_str {
                                     Ok(json) => state.registers[*dest] = json,
                                     Err(e) => return Err(e),
@@ -1776,6 +1797,40 @@ impl Program {
                                 state.registers[*dest] = json_remove(
                                     &state.registers[*start_reg..*start_reg + arg_count],
                                 )?;
+                            }
+                            JsonFunc::JsonPretty => {
+                                let json_value = &state.registers[*start_reg];
+                                let indent = if arg_count > 1 {
+                                    Some(&state.registers[*start_reg + 1])
+                                } else {
+                                    None
+                                };
+
+                                // Blob should be converted to Ascii in a lossy way
+                                // However, Rust strings uses utf-8
+                                // so the behavior at the moment is slightly different
+                                // To the way blobs are parsed here in SQLite.
+                                let indent = match indent {
+                                    Some(value) => match value {
+                                        OwnedValue::Text(text) => text.value.as_str(),
+                                        OwnedValue::Integer(val) => &val.to_string(),
+                                        OwnedValue::Float(val) => &val.to_string(),
+                                        OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
+                                        OwnedValue::Agg(ctx) => match ctx.final_value() {
+                                            OwnedValue::Text(text) => text.value.as_str(),
+                                            OwnedValue::Integer(val) => &val.to_string(),
+                                            OwnedValue::Float(val) => &val.to_string(),
+                                            OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
+                                            _ => "    ",
+                                        },
+                                        _ => "    ",
+                                    },
+                                    // If the second argument is omitted or is NULL, then indentation is four spaces per level
+                                    None => "    ",
+                                };
+
+                                let json_str = get_json(json_value, Some(indent))?;
+                                state.registers[*dest] = json_str;
                             }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
@@ -2098,6 +2153,12 @@ impl Program {
                                 );
                                 state.registers[*dest] = result;
                             }
+                            ScalarFunc::Printf => {
+                                let result = exec_printf(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
+                                state.registers[*dest] = result;
+                            }
                         },
                         crate::function::Func::External(f) => match f.func {
                             ExtFunc::Scalar(f) => {
@@ -2389,12 +2450,26 @@ impl Program {
                     cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
-                Insn::IsNull { src, target_pc } => {
-                    if matches!(state.registers[*src], OwnedValue::Null) {
+                Insn::IsNull { reg, target_pc } => {
+                    if matches!(state.registers[*reg], OwnedValue::Null) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
+                }
+                Insn::PageCount { db, dest } => {
+                    if *db > 0 {
+                        // TODO: implement temp databases
+                        todo!("temp databases not implemented yet");
+                    }
+                    // SQLite returns "0" on an empty database, and 2 on the first insertion,
+                    // so we'll mimick that behavior.
+                    let mut pages = pager.db_header.borrow().database_size.into();
+                    if pages == 1 {
+                        pages = 0;
+                    }
+                    state.registers[*dest] = OwnedValue::Integer(pages);
+                    state.pc += 1;
                 }
                 Insn::ParseSchema {
                     db: _,
@@ -2472,7 +2547,11 @@ fn get_new_rowid<R: Rng>(cursor: &mut BTreeCursor, mut rng: R) -> Result<CursorR
         CursorResult::Ok(()) => {}
         CursorResult::IO => return Ok(CursorResult::IO),
     }
-    let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
+    let mut rowid = cursor
+        .rowid()?
+        .unwrap_or(0) // if BTree is empty - use 0 as initial value for rowid
+        .checked_add(1) // add 1 but be careful with overflows
+        .unwrap_or(u64::MAX); // in case of overflow - use u64::MAX
     if rowid > i64::MAX.try_into().unwrap() {
         let distribution = Uniform::from(1..=i64::MAX);
         let max_attempts = 100;
@@ -2523,7 +2602,10 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
             addr,
             insn,
             String::new(),
-            program.comments.get(&{ addr }).copied()
+            program
+                .comments
+                .as_ref()
+                .and_then(|comments| comments.get(&{ addr }).copied())
         )
     );
 }
@@ -2534,7 +2616,10 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
         addr,
         insn,
         indent,
-        program.comments.get(&{ addr }).copied(),
+        program
+            .comments
+            .as_ref()
+            .and_then(|comments| comments.get(&{ addr }).copied()),
     );
     println!("{}", s);
 }

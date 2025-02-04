@@ -29,7 +29,7 @@ pub fn emit_select_result(
         let reg = start_reg + i;
         translate_expr(
             program,
-            Some(&plan.referenced_tables),
+            Some(&plan.table_references),
             &rc.expr,
             reg,
             &t_ctx.resolver,

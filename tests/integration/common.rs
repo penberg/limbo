@@ -12,6 +12,13 @@ pub struct TempDatabase {
 
 #[allow(dead_code, clippy::arc_with_non_send_sync)]
 impl TempDatabase {
+    pub fn new_empty() -> Self {
+        let mut path = TempDir::new().unwrap().into_path();
+        path.push("test.db");
+        let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new().unwrap());
+
+        Self { path, io }
+    }
     pub fn new(table_sql: &str) -> Self {
         let mut path = TempDir::new().unwrap().into_path();
         path.push("test.db");
@@ -51,8 +58,12 @@ pub(crate) fn do_flush(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::
     Ok(())
 }
 
-pub(crate) fn compare_string(a: &String, b: &String) {
+pub(crate) fn compare_string(a: impl AsRef<str>, b: impl AsRef<str>) {
+    let a = a.as_ref();
+    let b = b.as_ref();
+
     assert_eq!(a.len(), b.len(), "Strings are not equal in size!");
+
     let a = a.as_bytes();
     let b = b.as_bytes();
 

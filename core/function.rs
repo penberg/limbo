@@ -82,6 +82,7 @@ pub enum JsonFunc {
     JsonValid,
     JsonPatch,
     JsonRemove,
+    JsonPretty,
 }
 
 #[cfg(feature = "json")]
@@ -103,6 +104,7 @@ impl Display for JsonFunc {
                 Self::JsonValid => "json_valid".to_string(),
                 Self::JsonPatch => "json_patch".to_string(),
                 Self::JsonRemove => "json_remove".to_string(),
+                Self::JsonPretty => "json_pretty".to_string(),
             }
         )
     }
@@ -221,6 +223,7 @@ pub enum ScalarFunc {
     #[cfg(not(target_family = "wasm"))]
     LoadExtension,
     StrfTime,
+    Printf,
 }
 
 impl Display for ScalarFunc {
@@ -274,6 +277,7 @@ impl Display for ScalarFunc {
             #[cfg(not(target_family = "wasm"))]
             Self::LoadExtension => "load_extension".to_string(),
             Self::StrfTime => "strftime".to_string(),
+            Self::Printf => "printf".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -534,6 +538,8 @@ impl Func {
             "json_patch" => Ok(Self::Json(JsonFunc::JsonPatch)),
             #[cfg(feature = "json")]
             "json_remove" => Ok(Self::Json(JsonFunc::JsonRemove)),
+            #[cfg(feature = "json")]
+            "json_pretty" => Ok(Self::Json(JsonFunc::JsonPretty)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),
@@ -572,6 +578,7 @@ impl Func {
             #[cfg(not(target_family = "wasm"))]
             "load_extension" => Ok(Self::Scalar(ScalarFunc::LoadExtension)),
             "strftime" => Ok(Self::Scalar(ScalarFunc::StrfTime)),
+            "printf" => Ok(Self::Scalar(ScalarFunc::Printf)),
             _ => crate::bail_parse_error!("no such function: {}", name),
         }
     }

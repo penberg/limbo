@@ -42,6 +42,7 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 pub use types::Value;
 use util::parse_schema_rows;
+use vdbe::builder::QueryMode;
 
 pub use error::LimboError;
 use translate::select::prepare_select_plan;
@@ -63,7 +64,7 @@ pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum TransactionState {
     Write,
     Read,
@@ -273,6 +274,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Normal,
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -307,6 +309,7 @@ impl Connection {
                     self.pager.clone(),
                     Rc::downgrade(self),
                     syms,
+                    QueryMode::Normal,
                 )?);
                 let stmt = Statement::new(program, self.pager.clone());
                 Ok(Some(stmt))
@@ -319,6 +322,7 @@ impl Connection {
                     self.pager.clone(),
                     Rc::downgrade(self),
                     syms,
+                    QueryMode::Explain,
                 )?;
                 program.explain();
                 Ok(None)
@@ -361,6 +365,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Explain,
                     )?;
                     program.explain();
                 }
@@ -373,6 +378,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Normal,
                     )?;
 
                     let mut state =
@@ -468,11 +474,6 @@ impl Statement {
         }
     }
 
-    pub fn query(&mut self) -> Result<Statement> {
-        let stmt = Statement::new(self.program.clone(), self.pager.clone());
-        Ok(stmt)
-    }
-
     pub fn columns(&self) -> &[String] {
         &self.program.columns
     }
@@ -494,7 +495,7 @@ impl Statement {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum StepResult<'a> {
     Row(Row<'a>),
     IO,
@@ -503,7 +504,7 @@ pub enum StepResult<'a> {
     Busy,
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct Row<'a> {
     pub values: Vec<Value<'a>>,
 }
