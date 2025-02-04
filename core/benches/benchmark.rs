@@ -59,9 +59,8 @@ fn bench(criterion: &mut Criterion) {
                 .unwrap();
             let io = io.clone();
             b.iter(|| {
-                let mut rows = stmt.query().unwrap();
                 loop {
-                    match rows.step().unwrap() {
+                    match stmt.step().unwrap() {
                         limbo_core::StepResult::Row(row) => {
                             black_box(row);
                         }
@@ -106,9 +105,8 @@ fn bench(criterion: &mut Criterion) {
         let mut stmt = limbo_conn.prepare("SELECT 1").unwrap();
         let io = io.clone();
         b.iter(|| {
-            let mut rows = stmt.query().unwrap();
             loop {
-                match rows.step().unwrap() {
+                match stmt.step().unwrap() {
                     limbo_core::StepResult::Row(row) => {
                         black_box(row);
                     }
