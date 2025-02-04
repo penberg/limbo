@@ -1,5 +1,8 @@
 use super::{
-    plan::{Aggregate, JoinInfo, Operation, Plan, SelectQueryType, TableReference, WhereTerm},
+    plan::{
+        Aggregate, JoinInfo, Operation, Plan, ResultSetColumn, SelectQueryType, TableReference,
+        WhereTerm,
+    },
     select::prepare_select_plan,
     SymbolTable,
 };
@@ -78,7 +81,11 @@ pub fn resolve_aggregates(expr: &Expr, aggs: &mut Vec<Aggregate>) -> bool {
     }
 }
 
-pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReference]) -> Result<()> {
+pub fn bind_column_references(
+    expr: &mut Expr,
+    referenced_tables: &[TableReference],
+    result_columns: Option<&[ResultSetColumn]>,
+) -> Result<()> {
     match expr {
         Expr::Id(id) => {
             // true and false are special constants that are effectively aliases for 1 and 0
@@ -111,17 +118,25 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
                     match_result = Some((tbl_idx, col_idx.unwrap(), col.is_rowid_alias));
                 }
             }
-            if match_result.is_none() {
-                crate::bail_parse_error!("Column {} not found", id.0);
+            if let Some((tbl_idx, col_idx, is_rowid_alias)) = match_result {
+                *expr = Expr::Column {
+                    database: None, // TODO: support different databases
+                    table: tbl_idx,
+                    column: col_idx,
+                    is_rowid_alias,
+                };
+                return Ok(());
             }
-            let (tbl_idx, col_idx, is_rowid_alias) = match_result.unwrap();
-            *expr = Expr::Column {
-                database: None, // TODO: support different databases
-                table: tbl_idx,
-                column: col_idx,
-                is_rowid_alias,
-            };
-            Ok(())
+
+            if let Some(result_columns) = result_columns {
+                for result_column in result_columns.iter() {
+                    if result_column.name == normalized_id {
+                        *expr = result_column.expr.clone();
+                        return Ok(());
+                    }
+                }
+            }
+            crate::bail_parse_error!("Column {} not found", id.0);
         }
         Expr::Qualified(tbl, id) => {
             let normalized_table_name = normalize_ident(tbl.0.as_str());
@@ -164,14 +179,14 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
             start,
             end,
         } => {
-            bind_column_references(lhs, referenced_tables)?;
-            bind_column_references(start, referenced_tables)?;
-            bind_column_references(end, referenced_tables)?;
+            bind_column_references(lhs, referenced_tables, result_columns)?;
+            bind_column_references(start, referenced_tables, result_columns)?;
+            bind_column_references(end, referenced_tables, result_columns)?;
             Ok(())
         }
         Expr::Binary(expr, _operator, expr1) => {
-            bind_column_references(expr, referenced_tables)?;
-            bind_column_references(expr1, referenced_tables)?;
+            bind_column_references(expr, referenced_tables, result_columns)?;
+            bind_column_references(expr1, referenced_tables, result_columns)?;
             Ok(())
         }
         Expr::Case {
@@ -180,19 +195,23 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
             else_expr,
         } => {
             if let Some(base) = base {
-                bind_column_references(base, referenced_tables)?;
+                bind_column_references(base, referenced_tables, result_columns)?;
             }
             for (when, then) in when_then_pairs {
-                bind_column_references(when, referenced_tables)?;
-                bind_column_references(then, referenced_tables)?;
+                bind_column_references(when, referenced_tables, result_columns)?;
+                bind_column_references(then, referenced_tables, result_columns)?;
             }
             if let Some(else_expr) = else_expr {
-                bind_column_references(else_expr, referenced_tables)?;
+                bind_column_references(else_expr, referenced_tables, result_columns)?;
             }
             Ok(())
         }
-        Expr::Cast { expr, type_name: _ } => bind_column_references(expr, referenced_tables),
-        Expr::Collate(expr, _string) => bind_column_references(expr, referenced_tables),
+        Expr::Cast { expr, type_name: _ } => {
+            bind_column_references(expr, referenced_tables, result_columns)
+        }
+        Expr::Collate(expr, _string) => {
+            bind_column_references(expr, referenced_tables, result_columns)
+        }
         Expr::FunctionCall {
             name: _,
             distinctness: _,
@@ -202,7 +221,7 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
         } => {
             if let Some(args) = args {
                 for arg in args {
-                    bind_column_references(arg, referenced_tables)?;
+                    bind_column_references(arg, referenced_tables, result_columns)?;
                 }
             }
             Ok(())
@@ -213,10 +232,10 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
         Expr::Exists(_) => todo!(),
         Expr::FunctionCallStar { .. } => Ok(()),
         Expr::InList { lhs, not: _, rhs } => {
-            bind_column_references(lhs, referenced_tables)?;
+            bind_column_references(lhs, referenced_tables, result_columns)?;
             if let Some(rhs) = rhs {
                 for arg in rhs {
-                    bind_column_references(arg, referenced_tables)?;
+                    bind_column_references(arg, referenced_tables, result_columns)?;
                 }
             }
             Ok(())
@@ -224,30 +243,30 @@ pub fn bind_column_references(expr: &mut Expr, referenced_tables: &[TableReferen
         Expr::InSelect { .. } => todo!(),
         Expr::InTable { .. } => todo!(),
         Expr::IsNull(expr) => {
-            bind_column_references(expr, referenced_tables)?;
+            bind_column_references(expr, referenced_tables, result_columns)?;
             Ok(())
         }
         Expr::Like { lhs, rhs, .. } => {
-            bind_column_references(lhs, referenced_tables)?;
-            bind_column_references(rhs, referenced_tables)?;
+            bind_column_references(lhs, referenced_tables, result_columns)?;
+            bind_column_references(rhs, referenced_tables, result_columns)?;
             Ok(())
         }
         Expr::Literal(_) => Ok(()),
         Expr::Name(_) => todo!(),
         Expr::NotNull(expr) => {
-            bind_column_references(expr, referenced_tables)?;
+            bind_column_references(expr, referenced_tables, result_columns)?;
             Ok(())
         }
         Expr::Parenthesized(expr) => {
             for e in expr.iter_mut() {
-                bind_column_references(e, referenced_tables)?;
+                bind_column_references(e, referenced_tables, result_columns)?;
             }
             Ok(())
         }
         Expr::Raise(_, _) => todo!(),
         Expr::Subquery(_) => todo!(),
         Expr::Unary(_, expr) => {
-            bind_column_references(expr, referenced_tables)?;
+            bind_column_references(expr, referenced_tables, result_columns)?;
             Ok(())
         }
         Expr::Variable(_) => Ok(()),
@@ -328,13 +347,14 @@ pub fn parse_from(
 pub fn parse_where(
     where_clause: Option<Expr>,
     table_references: &[TableReference],
+    result_columns: Option<&[ResultSetColumn]>,
     out_where_clause: &mut Vec<WhereTerm>,
 ) -> Result<()> {
     if let Some(where_expr) = where_clause {
         let mut predicates = vec![];
         break_predicate_at_and_boundaries(where_expr, &mut predicates);
         for expr in predicates.iter_mut() {
-            bind_column_references(expr, table_references)?;
+            bind_column_references(expr, table_references, result_columns)?;
         }
         for expr in predicates {
             let eval_at_loop = get_rightmost_table_referenced_in_expr(&expr)?;
@@ -481,7 +501,7 @@ fn parse_join(
                 let mut preds = vec![];
                 break_predicate_at_and_boundaries(expr, &mut preds);
                 for predicate in preds.iter_mut() {
-                    bind_column_references(predicate, tables)?;
+                    bind_column_references(predicate, tables, None)?;
                 }
                 for pred in preds {
                     let cur_table_idx = tables.len() - 1;

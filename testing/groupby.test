@@ -175,3 +175,9 @@ David|165|53.0
 Robert|159|51.0
 Jennifer|151|51.0
 John|145|50.0}
+
+# Wanda = 9, Whitney = 11, William = 111
+do_execsql_test column_alias_in_group_by_order_by_having {
+  select first_name as fn, count(1) as fn_count from users where fn in ('Wanda', 'Whitney', 'William') group by fn having fn_count > 10 order by fn_count;
+} {Whitney|11
+William|111}

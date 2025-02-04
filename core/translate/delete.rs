@@ -43,7 +43,7 @@ pub fn prepare_delete_plan(
     let mut where_predicates = vec![];
 
     // Parse the WHERE clause
-    parse_where(where_clause, &table_references, &mut where_predicates)?;
+    parse_where(where_clause, &table_references, None, &mut where_predicates)?;
 
     // Parse the LIMIT/OFFSET clause
     let (resolved_limit, resolved_offset) = limit.map_or(Ok((None, None)), |l| parse_limit(*l))?;

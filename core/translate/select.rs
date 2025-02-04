@@ -62,9 +62,6 @@ pub fn prepare_select_plan(
                 query_type: SelectQueryType::TopLevel,
             };
 
-            // Parse the actual WHERE clause and add its conditions to the plan WHERE clause that already contains the join conditions.
-            parse_where(where_clause, &plan.table_references, &mut plan.where_clause)?;
-
             let mut aggregate_expressions = Vec::new();
             for (result_column_idx, column) in columns.iter_mut().enumerate() {
                 match column {
@@ -97,7 +94,11 @@ pub fn prepare_select_plan(
                         }
                     }
                     ResultColumn::Expr(ref mut expr, maybe_alias) => {
-                        bind_column_references(expr, &plan.table_references)?;
+                        bind_column_references(
+                            expr,
+                            &plan.table_references,
+                            Some(&plan.result_columns),
+                        )?;
                         match expr {
                             ast::Expr::FunctionCall {
                                 name,
@@ -255,9 +256,22 @@ pub fn prepare_select_plan(
                     }
                 }
             }
+
+            // Parse the actual WHERE clause and add its conditions to the plan WHERE clause that already contains the join conditions.
+            parse_where(
+                where_clause,
+                &plan.table_references,
+                Some(&plan.result_columns),
+                &mut plan.where_clause,
+            )?;
+
             if let Some(mut group_by) = group_by {
                 for expr in group_by.exprs.iter_mut() {
-                    bind_column_references(expr, &plan.table_references)?;
+                    bind_column_references(
+                        expr,
+                        &plan.table_references,
+                        Some(&plan.result_columns),
+                    )?;
                 }
 
                 plan.group_by = Some(GroupBy {
@@ -266,7 +280,11 @@ pub fn prepare_select_plan(
                         let mut predicates = vec![];
                         break_predicate_at_and_boundaries(having, &mut predicates);
                         for expr in predicates.iter_mut() {
-                            bind_column_references(expr, &plan.table_references)?;
+                            bind_column_references(
+                                expr,
+                                &plan.table_references,
+                                Some(&plan.result_columns),
+                            )?;
                             let contains_aggregates =
                                 resolve_aggregates(expr, &mut aggregate_expressions);
                             if !contains_aggregates {
@@ -312,7 +330,11 @@ pub fn prepare_select_plan(
                         o.expr
                     };
 
-                    bind_column_references(&mut expr, &plan.table_references)?;
+                    bind_column_references(
+                        &mut expr,
+                        &plan.table_references,
+                        Some(&plan.result_columns),
+                    )?;
                     resolve_aggregates(&expr, &mut plan.aggregates);
 
                     key.push((
