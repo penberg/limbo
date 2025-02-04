@@ -28,7 +28,7 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::delete::translate_delete;
 use crate::util::PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX;
-use crate::vdbe::builder::CursorType;
+use crate::vdbe::builder::{CursorType, QueryMode};
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
@@ -46,8 +46,9 @@ pub fn translate(
     pager: Rc<Pager>,
     connection: Weak<Connection>,
     syms: &SymbolTable,
+    query_mode: QueryMode,
 ) -> Result<Program> {
-    let mut program = ProgramBuilder::new();
+    let mut program = ProgramBuilder::new(query_mode);
     let mut change_cnt_on = false;
 
     match stmt {

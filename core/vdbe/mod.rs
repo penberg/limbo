@@ -377,7 +377,7 @@ pub struct Program {
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
-    pub comments: HashMap<InsnReference, &'static str>,
+    pub comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
@@ -2560,7 +2560,10 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
             addr,
             insn,
             String::new(),
-            program.comments.get(&{ addr }).copied()
+            program
+                .comments
+                .as_ref()
+                .and_then(|comments| comments.get(&{ addr }).copied())
         )
     );
 }
@@ -2571,7 +2574,10 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
         addr,
         insn,
         indent,
-        program.comments.get(&{ addr }).copied(),
+        program
+            .comments
+            .as_ref()
+            .and_then(|comments| comments.get(&{ addr }).copied()),
     );
     println!("{}", s);
 }
