@@ -132,7 +132,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: linux-wheels
+          name: wheels-linux
           path: bindings/python/dist
 
   macos-x86_64:
@@ -161,7 +161,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: macos-x86-wheels
+          name: wheels-macos-x86
           path: bindings/python/dist
 
   macos-arm64:
@@ -190,7 +190,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: macos-arm64-wheels
+          name: wheels-macos-arm64
           path: bindings/python/dist
 
   sdist:
@@ -209,7 +209,7 @@ jobs:
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
-          name: sdist-wheels
+          name: wheels-sdist
           path: bindings/python/dist
 
   release:
@@ -218,18 +218,11 @@ jobs:
     if: "startsWith(github.ref, 'refs/tags/')"
     needs: [linux, macos-arm64, macos-x86_64, sdist]
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
-          name: linux-wheels
-      - uses: actions/download-artifact@v3
-        with:
-          name: macos-x86-wheels
-      - uses: actions/download-artifact@v3
-        with:
-          name: macos-arm64-wheels
-      - uses: actions/download-artifact@v3
-        with:
-          name: sdist-wheels
+          path: bindings/python/dist
+          pattern: wheels-*
+          merge-multiple: true
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
         env:
