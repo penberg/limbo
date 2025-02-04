@@ -4,7 +4,7 @@ use limbo_core::{StepResult, Value};
 #[test]
 fn test_statement_reset_bind() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("create table test (i integer);");
+    let tmp_db = TempDatabase::new_with_rusqlite("create table test (i integer);");
     let conn = tmp_db.connect_limbo();
 
     let mut stmt = conn.prepare("select ?")?;
@@ -41,7 +41,7 @@ fn test_statement_reset_bind() -> anyhow::Result<()> {
 #[test]
 fn test_statement_bind() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("create table test (i integer);");
+    let tmp_db = TempDatabase::new_with_rusqlite("create table test (i integer);");
     let conn = tmp_db.connect_limbo();
 
     let mut stmt = conn.prepare("select ?, ?1, :named, ?3, ?4")?;

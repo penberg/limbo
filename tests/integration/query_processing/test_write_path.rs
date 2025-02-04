@@ -7,7 +7,8 @@ use std::rc::Rc;
 #[test]
 fn test_simple_overflow_page() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
+    let tmp_db =
+        TempDatabase::new_with_rusqlite("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
     let conn = tmp_db.connect_limbo();
 
     let mut huge_text = String::new();
@@ -75,7 +76,8 @@ fn test_simple_overflow_page() -> anyhow::Result<()> {
 #[test]
 fn test_sequential_overflow_page() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
+    let tmp_db =
+        TempDatabase::new_with_rusqlite("CREATE TABLE test (x INTEGER PRIMARY KEY, t TEXT);");
     let conn = tmp_db.connect_limbo();
     let iterations = 10_usize;
 
@@ -152,7 +154,7 @@ fn test_sequential_overflow_page() -> anyhow::Result<()> {
 fn test_sequential_write() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
 
-    let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+    let tmp_db = TempDatabase::new_with_rusqlite("CREATE TABLE test (x INTEGER PRIMARY KEY);");
     let conn = tmp_db.connect_limbo();
 
     let list_query = "SELECT * FROM test";
@@ -219,7 +221,7 @@ fn test_sequential_write() -> anyhow::Result<()> {
 /// https://github.com/tursodatabase/limbo/pull/679
 fn test_regression_multi_row_insert() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("CREATE TABLE test (x REAL);");
+    let tmp_db = TempDatabase::new_with_rusqlite("CREATE TABLE test (x REAL);");
     let conn = tmp_db.connect_limbo();
 
     let insert_query = "INSERT INTO test VALUES (-2), (-3), (-1)";
@@ -284,7 +286,7 @@ fn test_regression_multi_row_insert() -> anyhow::Result<()> {
 #[test]
 fn test_statement_reset() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("create table test (i integer);");
+    let tmp_db = TempDatabase::new_with_rusqlite("create table test (i integer);");
     let conn = tmp_db.connect_limbo();
 
     conn.execute("insert into test values (1)")?;
@@ -323,7 +325,7 @@ fn test_statement_reset() -> anyhow::Result<()> {
 #[ignore]
 fn test_wal_checkpoint() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+    let tmp_db = TempDatabase::new_with_rusqlite("CREATE TABLE test (x INTEGER PRIMARY KEY);");
     // threshold is 1000 by default
     let iterations = 1001_usize;
     let conn = tmp_db.connect_limbo();
@@ -386,7 +388,7 @@ fn test_wal_checkpoint() -> anyhow::Result<()> {
 #[test]
 fn test_wal_restart() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("CREATE TABLE test (x INTEGER PRIMARY KEY);");
+    let tmp_db = TempDatabase::new_with_rusqlite("CREATE TABLE test (x INTEGER PRIMARY KEY);");
     // threshold is 1000 by default
 
     fn insert(i: usize, conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {

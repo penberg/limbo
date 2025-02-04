@@ -33,6 +33,7 @@ use crate::info;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
+use crate::storage::wal::CheckpointResult;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{
     AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey,
@@ -139,6 +140,7 @@ pub type PageIdx = usize;
 // Index of insn in list of insns
 type InsnReference = u32;
 
+#[derive(Debug)]
 pub enum StepResult<'a> {
     Done,
     IO,
@@ -470,15 +472,18 @@ impl Program {
                 } => {
                     let result = self.connection.upgrade().unwrap().checkpoint();
                     match result {
-                        Ok(()) => {
+                        Ok(CheckpointResult {
+                            num_wal_frames: num_wal_pages,
+                            num_checkpointed_frames: num_checkpointed_pages,
+                        }) => {
                             // https://sqlite.org/pragma.html#pragma_wal_checkpoint
-                            // TODO make 2nd and 3rd cols available through checkpoint method
                             // 1st col: 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
                             state.registers[*dest] = OwnedValue::Integer(0);
                             // 2nd col: # modified pages written to wal file
-                            state.registers[*dest + 1] = OwnedValue::Integer(0);
+                            state.registers[*dest + 1] = OwnedValue::Integer(num_wal_pages as i64);
                             // 3rd col: # pages moved to db after checkpoint
-                            state.registers[*dest + 2] = OwnedValue::Integer(0);
+                            state.registers[*dest + 2] =
+                                OwnedValue::Integer(num_checkpointed_pages as i64);
                         }
                         Err(_err) => state.registers[*dest] = OwnedValue::Integer(1),
                     }
@@ -1026,7 +1031,7 @@ impl Program {
                     return if self.auto_commit {
                         match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
-                            Ok(crate::storage::wal::CheckpointStatus::Done) => {
+                            Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
                                 if self.change_cnt_on {
                                     if let Some(conn) = self.connection.upgrade() {
                                         conn.set_changes(self.n_change.get());

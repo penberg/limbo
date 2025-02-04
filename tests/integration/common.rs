@@ -13,13 +13,17 @@ pub struct TempDatabase {
 #[allow(dead_code, clippy::arc_with_non_send_sync)]
 impl TempDatabase {
     pub fn new_empty() -> Self {
-        let mut path = TempDir::new().unwrap().into_path();
-        path.push("test.db");
-        let io: Arc<dyn limbo_core::IO> = Arc::new(limbo_core::PlatformIO::new().unwrap());
+        Self::new("test.db")
+    }
 
+    pub fn new(db_name: &str) -> Self {
+        let mut path = TempDir::new().unwrap().into_path();
+        path.push(db_name);
+        let io: Arc<dyn IO> = Arc::new(limbo_core::PlatformIO::new().unwrap());
         Self { path, io }
     }
-    pub fn new(table_sql: &str) -> Self {
+
+    pub fn new_with_rusqlite(table_sql: &str) -> Self {
         let mut path = TempDir::new().unwrap().into_path();
         path.push("test.db");
         {
@@ -47,7 +51,7 @@ impl TempDatabase {
 pub(crate) fn do_flush(conn: &Rc<Connection>, tmp_db: &TempDatabase) -> anyhow::Result<()> {
     loop {
         match conn.cacheflush()? {
-            CheckpointStatus::Done => {
+            CheckpointStatus::Done(_) => {
                 break;
             }
             CheckpointStatus::IO => {
@@ -86,8 +90,9 @@ mod tests {
     #[test]
     fn test_statement_columns() -> anyhow::Result<()> {
         let _ = env_logger::try_init();
-        let tmp_db =
-            TempDatabase::new("create table test (foo integer, bar integer, baz integer);");
+        let tmp_db = TempDatabase::new_with_rusqlite(
+            "create table test (foo integer, bar integer, baz integer);",
+        );
         let conn = tmp_db.connect_limbo();
 
         let stmt = conn.prepare("select * from test;")?;
