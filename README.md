@@ -99,6 +99,43 @@ res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
 ```
 
+### Go  (wip)
+
+1. Clone the repository
+2. Build the library and set your LD_LIBRARY_PATH to include limbo's target directory
+```console
+cargo build --package limbo-go
+export LD_LIBRARY_PATH=/path/to/limbo/target/debug:$LD_LIBRARY_PATH
+```
+3. Use the driver
+
+```console
+go get github.com/tursodatabase/limbo
+go install github.com/tursodatabase/limbo
+```
+
+Example usage:
+```go
+import (
+    "database/sql"
+    _"github.com/tursodatabase/limbo"
+)
+
+conn, _ = sql.Open("sqlite3", "sqlite.db")
+defer conn.Close()
+
+stmt, _ := conn.Prepare("select * from users")
+defer stmt.Close()
+
+rows, _ = stmt.Query()
+for rows.Next() {
+    var id int 
+    var username string
+    _ := rows.Scan(&id, &username)
+    fmt.Printf("User: ID: %d, Username: %s\n", id, username)
+}
+```
+
 ## Contributing
 
 We'd love to have you contribute to Limbo! Please check out the [contribution guide] to get started.
