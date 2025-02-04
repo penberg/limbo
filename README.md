@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  Limbo is a <i>work-in-progress</i>, in-process OLTP database management system, compatible with SQLite.
+  <i>Limbo</i> is a project to build modern evolution of SQLite.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 
 ## Features
 
-Limbo is an in-process OLTP database engine library that has:
+Limbo is a _work-in-progress_, in-process OLTP database engine library written in Rust that has:
 
 * **Asynchronous I/O** support on Linux with `io_uring`
 * **SQLite compatibility** [[doc](COMPAT.md)] for SQL dialect, file formats, and the C API
@@ -144,7 +144,7 @@ We'd love to have you contribute to Limbo! Please check out the [contribution gu
 
 ### How is Limbo different from libSQL?
 
-Limbo is a research project to build a SQLite compatible in-process database in Rust with native async support. The libSQL project, on the other hand, is an open source, open contribution fork of SQLite, with focus on production features such as replication, backups, encryption, and so on. There is no hard dependency between the two projects. Of course, if Limbo becomes widely successful, we might consider merging with libSQL, but that is something that will be decided in the future.
+Limbo is a project to build modern evolution of SQLite in Rust with native async support and more. The libSQL project, on the other hand, is an open source, open contribution fork of SQLite, with focus on production features such as replication, backups, encryption, and so on. In the future we expect, Limbo to be renamed into Turso and essentially replace libSQL.
 
 ## Publications
 
