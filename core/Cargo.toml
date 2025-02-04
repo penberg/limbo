@@ -14,7 +14,7 @@ name = "limbo_core"
 path = "lib.rs"
 
 [features]
-default = ["fs", "json", "uuid", "vector", "io_uring"]
+default = ["fs", "json", "uuid", "vector", "io_uring", "time"]
 fs = []
 json = [
     "dep:jsonb",
@@ -26,6 +26,7 @@ vector = ["limbo_vector/static"]
 io_uring = ["dep:io-uring", "rustix/io_uring"]
 percentile = ["limbo_percentile/static"]
 regexp = ["limbo_regexp/static"]
+time = ["limbo_time/static"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.6.1", optional = true }
@@ -65,6 +66,7 @@ limbo_uuid = { path = "../extensions/uuid", optional = true, features = ["static
 limbo_vector = { path = "../extensions/vector", optional = true, features = ["static"] }
 limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["static"] }
 limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
+limbo_time = { path = "../extensions/time", optional = true, features = ["static"] }
 miette = "7.4.0"
 strum = "0.26"
 

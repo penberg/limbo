@@ -92,6 +92,10 @@ impl Database {
         if unsafe { !limbo_regexp::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register regexp extension".to_string());
         }
+        #[cfg(feature = "time")]
+        if unsafe { !limbo_time::register_extension_static(&ext_api).is_ok() } {
+            return Err("Failed to register time extension".to_string());
+        }
         Ok(())
     }
 }

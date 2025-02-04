@@ -24,6 +24,7 @@ This document describes the compatibility of Limbo with SQLite.
     - [UUID](#uuid)
     - [regexp](#regexp)
     - [Vector](#vector)
+    - [Time](#time)
 
 ## Features
 
@@ -630,3 +631,56 @@ The `vector` extension is compatible with libSQL native vector search.
 | vector64(x)                                    | Yes    |         |
 | vector_extract(x)                              | Yes    |         |
 | vector_distance_cos(x, y)                      | Yes    |         |
+
+### Time
+
+The `time` extension is compatible with [sqlean-time](https://github.com/nalgeon/sqlean/blob/main/docs/time.md).
+
+
+| Function                                                            | Status | Comment                      |
+| ------------------------------------------------------------------- | ------ | ---------------------------- |
+| time_now()                                                          | Yes    |                              |
+| time_date(year, month, day[, hour, min, sec[, nsec[, offset_sec]]]) | Yes    | offset_sec is not normalized |
+| time_get_year(t)                                                    | Yes    |                              |
+| time_get_month(t)                                                   | Yes    |                              |
+| time_get_day(t)                                                     | Yes    |                              |
+| time_get_hour(t)                                                    | Yes    |                              |
+| time_get_minute(t)                                                  | Yes    |                              |
+| time_get_second(t)                                                  | Yes    |                              |
+| time_get_nano(t)                                                    | Yes    |                              |
+| time_get_weekday(t)                                                 | Yes    |                              |
+| time_get_yearday(t)                                                 | Yes    |                              |
+| time_get_isoyear(t)                                                 | Yes    |                              |
+| time_get_isoweek(t)                                                 | Yes    |                              |
+| time_get(t, field)                                                  | Yes    |                              |
+| time_unix(sec[, nsec])                                              | Yes    |                              |
+| time_milli(msec)                                                    | Yes    |                              |
+| time_micro(usec)                                                    | Yes    |                              |
+| time_nano(nsec)                                                     | Yes    |                              |
+| time_to_unix(t)                                                     | Yes    |                              |
+| time_to_milli(t)                                                    | Yes    |                              |
+| time_to_micro(t)                                                    | Yes    |                              |
+| time_to_nano(t)                                                     | Yes    |                              |
+| time_after(t, u)                                                    | Yes    |                              |
+| time_before(t, u)                                                   | Yes    |                              |
+| time_compare(t, u)                                                  | Yes    |                              |
+| time_equal(t, u)                                                    | Yes    |                              |
+| time_add(t, d)                                                      | Yes    |                              |
+| time_add_date(t, years[, months[, days]])                           | Yes    |                              |
+| time_sub(t, u)                                                      | Yes    |                              |
+| time_since(t)                                                       | Yes    |                              |
+| time_until(t)                                                       | Yes    |                              |
+| time_trunc(t, field)                                                | Yes    |                              |
+| time_trunc(t, d)                                                    | Yes    |                              |
+| time_round(t, d)                                                    | Yes    |                              |
+| time_fmt_iso(t[, offset_sec])                                       | Yes    |                              |
+| time_fmt_datetime(t[, offset_sec])                                  | Yes    |                              |
+| time_fmt_date(t[, offset_sec])                                      | Yes    |                              |
+| time_fmt_time(t[, offset_sec])                                      | Yes    |                              |
+| time_parse(s)                                                       | Yes    |                              |
+| dur_ns()                                                            | Yes    |                              |
+| dur_us()                                                            | Yes    |                              |
+| dur_ms()                                                            | Yes    |                              |
+| dur_s()                                                             | Yes    |                              |
+| dur_m()                                                             | Yes    |                              |
+| dur_h()                                                             | Yes    |                              |

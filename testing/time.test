@@ -1,0 +1,401 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test time_date {
+  SELECT time_fmt_iso(time_date(2011, 11, 18));
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35));
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35, 666777888));
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35, 0, 3*3600));
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35, 666777888, 3*3600));
+} {
+  {2011-11-18T00:00:00Z} 
+  {2011-11-18T15:56:35Z} 
+  {2011-11-18T15:56:35.666777888Z} 
+  {2011-11-18T12:56:35Z}
+  {2011-11-18T12:56:35.666777888Z}
+}
+
+do_execsql_test time_get_year {
+  SELECT time_get_year(time_date(2011, 11, 18));
+  SELECT time_get_year(time_date(1842, 11, 18));
+  SELECT time_get_year(time_date(-1000, 11, 18));
+} {
+  {2011}
+  {1842}
+  {-1000}
+}
+
+do_execsql_test time_get_month {
+  SELECT time_get_month(time_date(2011, 12, 18));
+  SELECT time_get_month(time_date(1842, 1, 18));
+  SELECT time_get_month(time_date(-1000, 5, 18));
+} {
+  {12}
+  {1}
+  {5}
+}
+
+do_execsql_test time_get_day {
+  SELECT time_get_day(time_date(2011, 12, 31));
+  SELECT time_get_day(time_date(1842, 1, 10));
+  SELECT time_get_day(time_date(-1000, 5, 25));
+} {
+  {31}
+  {10}
+  {25}
+}
+
+do_execsql_test time_get_hour {
+  SELECT time_get_hour(time_date(2011, 12, 31, 10, 5, 30));
+} {
+  {10}
+}
+
+do_execsql_test time_get_minute {
+  SELECT time_get_minute(time_date(2011, 12, 31, 10, 5, 30));
+} {
+  {5}
+}
+
+do_execsql_test time_get_second {
+  SELECT time_get_second(time_date(2011, 12, 31, 10, 5, 30, 431295000));
+} {
+  {30}
+}
+
+do_execsql_test time_get_nanosecond {
+  SELECT time_get_nano(time_date(2011, 12, 31, 10, 5, 30, 431295000));
+} {
+  {431295000}
+}
+
+do_execsql_test time_get_weekday {
+  SELECT time_get_weekday(time_date(2011, 12, 31, 10, 5, 30, 431295000));
+  SELECT time_get_weekday(time_date(2012, 01, 01, 10, 5, 30, 431295000));
+} {
+  {6}
+  {0}
+}
+
+do_execsql_test time_get_yearday {
+  SELECT time_get_yearday(time_date(2011, 12, 31, 10, 5, 30, 431295000));
+  SELECT time_get_yearday(time_date(2012, 01, 01, 10, 5, 30, 431295000));
+} {
+  {365}
+  {1}
+}
+
+do_execsql_test time_get_isoyear {
+  SELECT time_get_isoyear(time_date(2011, 12, 31, 10, 5, 30, 431295000));
+  SELECT time_get_isoyear(time_date(2012, 01, 01, 10, 5, 30, 431295000));
+} {
+  {2011}
+  {2011}
+}
+
+do_execsql_test time_get_isoweek {
+  SELECT time_get_isoweek(time_date(2011, 12, 31, 10, 5, 30, 431295000));
+  SELECT time_get_isoweek(time_date(2012, 01, 01, 10, 5, 30, 431295000));
+  SELECT time_get_isoweek(time_date(2012, 01, 10, 10, 5, 30, 431295000));
+} {
+  {52}
+  {52}
+  {2}
+}
+
+do_execsql_test time_get {
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'millennium');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'century');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'decade');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'year');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'quarter');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'month');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'day');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'hour');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'minute');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'second');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'milli');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'millisecond');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'micro');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'microsecond');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'nano');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'nanosecond');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'isoyear');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'isoweek');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'isodow');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'yearday');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'weekday');
+  SELECT time_get(time_date(2024, 8, 6, 21, 22, 15, 431295000), 'epoch');
+} {
+  {2}
+  {20}
+  {202}
+  {2024}
+  {3}
+  {8}
+  {6}
+  {21}
+  {22}
+  {15.431295}
+  {431}
+  {431}
+  {431295}
+  {431295}
+  {431295000}
+  {431295000}
+  {2024}
+  {32}
+  {2}
+  {219}
+  {2}
+  {1722979335.431295}
+}
+
+do_execsql_test time_unix {
+  SELECT time_fmt_iso(time_unix(1321631795));
+  SELECT time_fmt_iso(time_unix(1321631795, 666777888));
+} {
+  {2011-11-18T15:56:35Z}
+  {2011-11-18T15:56:35.666777888Z}
+}
+
+do_execsql_test time_milli {
+  SELECT time_fmt_iso(time_milli(1321631795666));
+} {
+  {2011-11-18T15:56:35.666000000Z}
+}
+
+do_execsql_test time_micro {
+  SELECT time_fmt_iso(time_micro(1321631795666777));
+} {
+  {2011-11-18T15:56:35.666777000Z}
+}
+
+do_execsql_test time_nano {
+  SELECT time_fmt_iso(time_nano(1321631795666777888));
+} {
+  {2011-11-18T15:56:35.666777888Z}
+}
+
+do_execsql_test time_to_milli {
+  SELECT time_fmt_iso(time_milli(time_to_milli(time_date(2025, 01, 01))));
+} {
+  {2025-01-01T00:00:00Z}
+}
+
+do_execsql_test time_to_micro {
+  SELECT time_fmt_iso(time_micro(time_to_micro(time_date(2025, 01, 01))));
+} {
+  {2025-01-01T00:00:00Z}
+}
+
+do_execsql_test time_to_nano {
+  SELECT time_fmt_iso(time_nano(time_to_nano(time_date(2025, 01, 01))));
+} {
+  {2025-01-01T00:00:00Z}
+}
+
+do_execsql_test time_after {
+  SELECT time_after(time_date(2025, 10, 10), time_date(2011, 11, 18));
+} {
+  {1}
+}
+
+do_execsql_test time_before {
+  SELECT time_before(time_date(2025, 10, 10), time_date(2011, 11, 18));
+} {
+  {0}
+}
+
+do_execsql_test time_compare {
+  SELECT time_compare(time_date(2025, 10, 10), time_date(2011, 11, 18));
+  SELECT time_compare(time_date(2025, 10, 10), time_date(2026, 11, 18));
+  SELECT time_compare(time_date(2025, 10, 10), time_date(2025, 10, 10));
+} {
+  {1}
+  {-1}
+  {0}
+}
+
+do_execsql_test time_add {
+  SELECT time_fmt_iso(time_add(time_date(2025, 01, 01), 24*dur_h()));
+  SELECT time_fmt_iso(time_add(time_date(2025, 01, 01), 60*dur_m()));
+  SELECT time_fmt_iso(time_add(time_date(2025, 01, 01), 5*dur_m()+30*dur_s()));
+  SELECT time_fmt_iso(date_add(time_date(2025, 01, 01), 24*dur_h()));
+  SELECT time_fmt_iso(date_add(time_date(2025, 01, 01), 60*dur_m()));
+  SELECT time_fmt_iso(date_add(time_date(2025, 01, 01), 5*dur_m()+30*dur_s()));
+} {
+  {2025-01-02T00:00:00Z}
+  {2025-01-01T01:00:00Z}
+  {2025-01-01T00:05:30Z}
+  {2025-01-02T00:00:00Z}
+  {2025-01-01T01:00:00Z}
+  {2025-01-01T00:05:30Z}
+}
+
+do_execsql_test time_add_date {
+  SELECT time_fmt_date(time_add_date(time_date(2011, 11, 18), 5));
+  SELECT time_fmt_date(time_add_date(time_date(2011, 11, 18), 3, 5));
+  SELECT time_fmt_date(time_add_date(time_date(2011, 11, 18), 3, 5, -10));
+} {
+  {2016-11-18}
+  {2015-04-18}
+  {2015-04-08}
+}
+
+do_execsql_test time_sub {
+  SELECT time_sub(time_date(2011, 11, 19), time_date(2011, 11, 18));
+  SELECT time_sub(
+  time_date(2011, 11, 18, 16, 56, 35),
+  time_date(2011, 11, 18, 15, 56, 35)
+);
+  SELECT time_sub(time_unix(1321631795, 5000000), time_unix(1321631795, 0));
+} {
+  {86400000000000}
+  {3600000000000}
+  {5000000}
+}
+
+# time_since and time_until functions rely on time_now so it makes testing for these functions near impossible
+
+do_execsql_test time_sub {
+select 'original = '   || time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35, 666777888));
+select 'millennium = ' || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'millennium'));
+select 'century = '    || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'century'));
+select 'decade = '     || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'decade'));
+select 'year = '       || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'year'));
+select 'quarter = '    || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'quarter')); 
+select 'month = '      || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'month'));
+select 'week = '       || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'week'));
+select 'day = '        || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'day'));
+select 'hour = '       || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'hour'));
+select 'minute = '     || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'minute'));
+select 'second = '     || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'second'));
+select 'milli = '      || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'milli'));
+select 'micro = '      || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 'micro'));
+select '12h = '        || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 12*dur_h()));
+select '1h = '         || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), dur_h()));
+select '30m = '        || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 30*dur_m()));
+select '1m = '         || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), dur_m()));
+select '30s = '        || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), 30*dur_s()));
+select '1s = '         || time_fmt_iso(time_trunc(time_date(2011, 11, 18, 15, 56, 35, 666777888), dur_s()));
+} {
+  {original = 2011-11-18T15:56:35.666777888Z}
+  {millennium = 2000-01-01T00:00:00Z}
+  {century = 2000-01-01T00:00:00Z}
+  {decade = 2010-01-01T00:00:00Z}
+  {year = 2011-01-01T00:00:00Z}
+  {quarter = 2011-10-01T00:00:00Z}
+  {month = 2011-11-01T00:00:00Z}
+  {week = 2011-11-12T00:00:00Z}
+  {day = 2011-11-18T00:00:00Z}
+  {hour = 2011-11-18T15:00:00Z}
+  {minute = 2011-11-18T15:56:00Z}
+  {second = 2011-11-18T15:56:35Z}
+  {milli = 2011-11-18T15:56:35.666000000Z}
+  {micro = 2011-11-18T15:56:35.666777000Z}
+  {12h = 2011-11-18T12:00:00Z}
+  {1h = 2011-11-18T15:00:00Z}
+  {30m = 2011-11-18T15:30:00Z}
+  {1m = 2011-11-18T15:56:00Z}
+  {30s = 2011-11-18T15:56:30Z}
+  {1s = 2011-11-18T15:56:35Z}
+}
+
+do_execsql_test time_sub {
+  SELECT '12h = '        || time_fmt_iso(time_round(time_date(2011, 11, 18, 15, 56, 35, 666777888), 12*dur_h()));
+  SELECT '1h = '         || time_fmt_iso(time_round(time_date(2011, 11, 18, 15, 56, 35, 666777888), dur_h()));
+  SELECT '30m = '        || time_fmt_iso(time_round(time_date(2011, 11, 18, 15, 56, 35, 666777888), 30*dur_m()));
+  SELECT '1m = '         || time_fmt_iso(time_round(time_date(2011, 11, 18, 15, 56, 35, 666777888), dur_m()));
+  SELECT '30s = '        || time_fmt_iso(time_round(time_date(2011, 11, 18, 15, 56, 35, 666777888), 30*dur_s()));
+  SELECT '1s = '         || time_fmt_iso(time_round(time_date(2011, 11, 18, 15, 56, 35, 666777888), dur_s()));
+} {
+  {12h = 2011-11-18T12:00:00Z}
+  {1h = 2011-11-18T16:00:00Z}
+  {30m = 2011-11-18T16:00:00Z}
+  {1m = 2011-11-18T15:57:00Z}
+  {30s = 2011-11-18T15:56:30Z}
+  {1s = 2011-11-18T15:56:36Z}
+}
+
+do_execsql_test time_fmt_iso {
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35, 666777888), 3*3600);
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35, 666777888));
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35), 3*3600);
+  SELECT time_fmt_iso(time_date(2011, 11, 18, 15, 56, 35));
+} {
+  {2011-11-18T18:56:35.666777888+03:00}
+  {2011-11-18T15:56:35.666777888Z}
+  {2011-11-18T18:56:35+03:00}
+  {2011-11-18T15:56:35Z}
+}
+
+do_execsql_test time_fmt_datetime {
+  SELECT time_fmt_datetime(time_date(2011, 11, 18, 15, 56, 35), 3*3600);
+  SELECT time_fmt_datetime(time_date(2011, 11, 18, 15, 56, 35));
+  SELECT time_fmt_datetime(time_date(2011, 11, 18));
+} {
+  {2011-11-18 18:56:35}
+  {2011-11-18 15:56:35}
+  {2011-11-18 00:00:00}
+}
+
+do_execsql_test time_fmt_date {
+  SELECT time_fmt_date(time_date(2011, 11, 18, 15, 56, 35), 12*3600);
+  SELECT time_fmt_date(time_date(2011, 11, 18, 15, 56, 35));
+  SELECT time_fmt_date(time_date(2011, 11, 18));
+} {
+  {2011-11-19}
+  {2011-11-18}
+  {2011-11-18}
+}
+
+do_execsql_test time_fmt_time {
+  SELECT time_fmt_time(time_date(2011, 11, 18, 15, 56, 35), 3*3600);
+  SELECT time_fmt_time(time_date(2011, 11, 18, 15, 56, 35));
+  SELECT time_fmt_time(time_date(2011, 11, 18));
+} {
+  {18:56:35}
+  {15:56:35}
+  {00:00:00}
+}
+
+do_execsql_test time_parse {
+  SELECT time_parse('2011-11-18T15:56:35.666777888Z')      = time_unix(1321631795, 666777888);
+  SELECT time_parse('2011-11-18T19:26:35.666777888+03:30') = time_unix(1321631795, 666777888);
+  SELECT time_parse('2011-11-18T12:26:35.666777888-03:30') = time_unix(1321631795, 666777888);
+  SELECT time_parse('2011-11-18T15:56:35Z')                = time_unix(1321631795, 0);
+  SELECT time_parse('2011-11-18T19:26:35+03:30')           = time_unix(1321631795, 0);
+  SELECT time_parse('2011-11-18T12:26:35-03:30')           = time_unix(1321631795, 0);
+  SELECT time_parse('2011-11-18 15:56:35')                 = time_unix(1321631795, 0);
+  SELECT time_parse('2011-11-18')                          = time_date(2011, 11, 18);
+  SELECT time_parse('15:56:35')                            = time_date(1, 1, 1, 15, 56, 35);
+} {
+  {1}
+  {1}
+  {1}
+  {1}
+  {1}
+  {1}
+  {1}
+  {1}
+  {1}
+}
+
+do_execsql_test duration_constants {
+  SELECT dur_ns();
+  SELECT dur_us();
+  SELECT dur_ms();
+  SELECT dur_s();
+  SELECT dur_m();
+  SELECT dur_h();
+} {
+  {1}
+  {1000}
+  {1000000}
+  {1000000000}
+  {60000000000}
+  {3600000000000}
+}

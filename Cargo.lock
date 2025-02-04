@@ -1583,6 +1583,7 @@ dependencies = [
  "limbo_macros",
  "limbo_percentile",
  "limbo_regexp",
+ "limbo_time",
  "limbo_uuid",
  "limbo_vector",
  "log",
@@ -1676,6 +1677,18 @@ dependencies = [
  "libc",
  "limbo_core",
  "log",
+]
+
+[[package]]
+name = "limbo_time"
+version = "0.0.13"
+dependencies = [
+ "chrono",
+ "limbo_ext",
+ "mimalloc",
+ "strum",
+ "strum_macros",
+ "thiserror 2.0.11",
 ]
 
 [[package]]

@@ -82,6 +82,10 @@ test-vector:
 	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/vector.test
 .PHONY: test-vector
 
+test-time:
+	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/time.test
+.PHONY: test-time
+
 test-sqlite3: limbo-c
 	LIBS="$(SQLITE_LIB)" HEADERS="$(SQLITE_LIB_HEADERS)" make -C sqlite3/tests test
 .PHONY: test-sqlite3
