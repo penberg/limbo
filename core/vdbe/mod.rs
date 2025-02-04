@@ -1699,7 +1699,7 @@ impl Program {
                         crate::function::Func::Json(json_func) => match json_func {
                             JsonFunc::Json => {
                                 let json_value = &state.registers[*start_reg];
-                                let json_str = get_json(json_value);
+                                let json_str = get_json(json_value, None);
                                 match json_str {
                                     Ok(json) => state.registers[*dest] = json,
                                     Err(e) => return Err(e),
@@ -1795,6 +1795,40 @@ impl Program {
                                 state.registers[*dest] = json_remove(
                                     &state.registers[*start_reg..*start_reg + arg_count],
                                 )?;
+                            }
+                            JsonFunc::JsonPretty => {
+                                let json_value = &state.registers[*start_reg];
+                                let indent = if arg_count > 1 {
+                                    Some(&state.registers[*start_reg + 1])
+                                } else {
+                                    None
+                                };
+
+                                // Blob should be converted to Ascii in a lossy way
+                                // However, Rust strings uses utf-8
+                                // so the behavior at the moment is slightly different
+                                // To the way blobs are parsed here in SQLite.
+                                let indent = match indent {
+                                    Some(value) => match value {
+                                        OwnedValue::Text(text) => text.value.as_str(),
+                                        OwnedValue::Integer(val) => &val.to_string(),
+                                        OwnedValue::Float(val) => &val.to_string(),
+                                        OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
+                                        OwnedValue::Agg(ctx) => match ctx.final_value() {
+                                            OwnedValue::Text(text) => text.value.as_str(),
+                                            OwnedValue::Integer(val) => &val.to_string(),
+                                            OwnedValue::Float(val) => &val.to_string(),
+                                            OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
+                                            _ => "    ",
+                                        },
+                                        _ => "    ",
+                                    },
+                                    // If the second argument is omitted or is NULL, then indentation is four spaces per level
+                                    None => "    ",
+                                };
+
+                                let json_str = get_json(json_value, Some(indent))?;
+                                state.registers[*dest] = json_str;
                             }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {

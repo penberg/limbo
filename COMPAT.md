@@ -23,6 +23,7 @@ This document describes the compatibility of Limbo with SQLite.
   - [Extensions](#extensions)
     - [UUID](#uuid)
     - [regexp](#regexp)
+    - [Vector](#vector)
 
 ## Features
 
@@ -349,7 +350,7 @@ Modifiers:
 #### JSON functions
 
 | Function                           | Status  | Comment                                                                                                                                      |
-|------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | json(json)                         | Partial |                                                                                                                                              |
 | jsonb(json)                        |         |                                                                                                                                              |
 | json_array(value1,value2,...)      | Yes     |                                                                                                                                              |
@@ -367,7 +368,7 @@ Modifiers:
 | jsonb_object(label1,value1,...)    |         |                                                                                                                                              |
 | json_patch(json1,json2)            | Yes     |                                                                                                                                              |
 | jsonb_patch(json1,json2)           |         |                                                                                                                                              |
-| json_pretty(json)                  |         |                                                                                                                                              |
+| json_pretty(json)                  | Partial | Shares same json(val) limitations. Also, when passing blobs for indentation, conversion is not exactly the same as in SQLite                 |
 | json_remove(json,path,...)         | Partial | Uses same json path parser as json_extract so shares same limitations.                                                                       |
 | jsonb_remove(json,path,...)        |         |                                                                                                                                              |
 | json_replace(json,path,value,...)  |         |                                                                                                                                              |

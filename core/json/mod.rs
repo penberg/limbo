@@ -15,6 +15,7 @@ pub use crate::json::ser::to_string;
 use crate::types::{LimboText, OwnedValue, TextSubtype};
 use indexmap::IndexMap;
 use jsonb::Error as JsonbError;
+use ser::to_string_pretty;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -31,7 +32,7 @@ pub enum Val {
     Object(Vec<(String, Val)>),
 }
 
-pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
+pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<OwnedValue> {
     match json_value {
         OwnedValue::Text(ref t) => {
             // optimization: once we know the subtype is a valid JSON, we do not have
@@ -41,7 +42,10 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
             }
 
             let json_val = get_json_value(json_value)?;
-            let json = to_string(&json_val).unwrap();
+            let json = match indent {
+                Some(indent) => to_string_pretty(&json_val, indent).unwrap(),
+                None => to_string(&json_val).unwrap(),
+            };
 
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
         }
@@ -57,7 +61,10 @@ pub fn get_json(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
         OwnedValue::Null => Ok(OwnedValue::Null),
         _ => {
             let json_val = get_json_value(json_value)?;
-            let json = to_string(&json_val).unwrap();
+            let json = match indent {
+                Some(indent) => to_string_pretty(&json_val, indent).unwrap(),
+                None => to_string(&json_val).unwrap(),
+            };
 
             Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
         }
@@ -536,7 +543,7 @@ mod tests {
     #[test]
     fn test_get_json_valid_json5() {
         let input = OwnedValue::build_text(Rc::new("{ key: 'value' }".to_string()));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"key\":\"value\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -548,7 +555,7 @@ mod tests {
     #[test]
     fn test_get_json_valid_json5_double_single_quotes() {
         let input = OwnedValue::build_text(Rc::new("{ key: ''value'' }".to_string()));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"key\":\"value\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -560,7 +567,7 @@ mod tests {
     #[test]
     fn test_get_json_valid_json5_infinity() {
         let input = OwnedValue::build_text(Rc::new("{ \"key\": Infinity }".to_string()));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("{\"key\":9e999}"));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -572,7 +579,7 @@ mod tests {
     #[test]
     fn test_get_json_valid_json5_negative_infinity() {
         let input = OwnedValue::build_text(Rc::new("{ \"key\": -Infinity }".to_string()));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("{\"key\":-9e999}"));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -584,7 +591,7 @@ mod tests {
     #[test]
     fn test_get_json_valid_json5_nan() {
         let input = OwnedValue::build_text(Rc::new("{ \"key\": NaN }".to_string()));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("{\"key\":null}"));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -596,7 +603,7 @@ mod tests {
     #[test]
     fn test_get_json_invalid_json5() {
         let input = OwnedValue::build_text(Rc::new("{ key: value }".to_string()));
-        let result = get_json(&input);
+        let result = get_json(&input, None);
         match result {
             Ok(_) => panic!("Expected error for malformed JSON"),
             Err(e) => assert!(e.to_string().contains("malformed JSON")),
@@ -606,7 +613,7 @@ mod tests {
     #[test]
     fn test_get_json_valid_jsonb() {
         let input = OwnedValue::build_text(Rc::new("{\"key\":\"value\"}".to_string()));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"key\":\"value\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -618,7 +625,7 @@ mod tests {
     #[test]
     fn test_get_json_invalid_jsonb() {
         let input = OwnedValue::build_text(Rc::new("{key:\"value\"".to_string()));
-        let result = get_json(&input);
+        let result = get_json(&input, None);
         match result {
             Ok(_) => panic!("Expected error for malformed JSON"),
             Err(e) => assert!(e.to_string().contains("malformed JSON")),
@@ -629,7 +636,7 @@ mod tests {
     fn test_get_json_blob_valid_jsonb() {
         let binary_json = b"\x40\0\0\x01\x10\0\0\x03\x10\0\0\x03\x61\x73\x64\x61\x64\x66".to_vec();
         let input = OwnedValue::Blob(Rc::new(binary_json));
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.value.contains("\"asd\":\"adf\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
@@ -642,7 +649,7 @@ mod tests {
     fn test_get_json_blob_invalid_jsonb() {
         let binary_json: Vec<u8> = vec![0xA2, 0x62, 0x6B, 0x31, 0x62, 0x76]; // Incomplete binary JSON
         let input = OwnedValue::Blob(Rc::new(binary_json));
-        let result = get_json(&input);
+        let result = get_json(&input, None);
         match result {
             Ok(_) => panic!("Expected error for malformed JSON"),
             Err(e) => assert!(e.to_string().contains("malformed JSON")),
@@ -652,7 +659,7 @@ mod tests {
     #[test]
     fn test_get_json_non_text() {
         let input = OwnedValue::Null;
-        let result = get_json(&input).unwrap();
+        let result = get_json(&input, None).unwrap();
         if let OwnedValue::Null = result {
             // Test passed
         } else {
@@ -809,7 +816,7 @@ mod tests {
     #[test]
     fn test_json_array_length_simple_json_subtype() {
         let input = OwnedValue::build_text(Rc::new("[1,2,3]".to_string()));
-        let wrapped = get_json(&input).unwrap();
+        let wrapped = get_json(&input, None).unwrap();
         let result = json_array_length(&wrapped, None).unwrap();
 
         if let OwnedValue::Integer(res) = result {
