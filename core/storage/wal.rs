@@ -1,8 +1,9 @@
 use log::{debug, trace};
 use std::collections::HashMap;
+
+use parking_lot::RwLock;
 use std::fmt::Formatter;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::RwLock;
 use std::{cell::RefCell, fmt, rc::Rc, sync::Arc};
 
 use crate::io::{File, SyncCompletion, IO};
@@ -311,7 +312,7 @@ impl fmt::Debug for WalFileShared {
 impl Wal for WalFile {
     /// Begin a read transaction.
     fn begin_read_tx(&mut self) -> Result<LimboResult> {
-        let mut shared = self.shared.write().unwrap();
+        let mut shared = self.shared.write();
         let max_frame_in_wal = shared.max_frame;
         self.min_frame = shared.nbackfills + 1;
 
@@ -365,7 +366,7 @@ impl Wal for WalFile {
 
     /// End a read transaction.
     fn end_read_tx(&self) -> Result<LimboResult> {
-        let mut shared = self.shared.write().unwrap();
+        let mut shared = self.shared.write();
         let read_lock = &mut shared.read_locks[self.max_frame_read_lock_index];
         read_lock.unlock();
         Ok(LimboResult::Ok)
@@ -373,7 +374,7 @@ impl Wal for WalFile {
 
     /// Begin a write transaction
     fn begin_write_tx(&mut self) -> Result<LimboResult> {
-        let mut shared = self.shared.write().unwrap();
+        let mut shared = self.shared.write();
         let busy = !shared.write_lock.write();
         if busy {
             return Ok(LimboResult::Busy);
@@ -383,14 +384,14 @@ impl Wal for WalFile {
 
     /// End a write transaction
     fn end_write_tx(&self) -> Result<LimboResult> {
-        let mut shared = self.shared.write().unwrap();
+        let mut shared = self.shared.write();
         shared.write_lock.unlock();
         Ok(LimboResult::Ok)
     }
 
     /// Find the latest frame containing a page.
     fn find_frame(&self, page_id: u64) -> Result<Option<u64>> {
-        let shared = self.shared.read().unwrap();
+        let shared = self.shared.read();
         let frames = shared.frame_cache.get(&page_id);
         if frames.is_none() {
             return Ok(None);
@@ -408,7 +409,7 @@ impl Wal for WalFile {
     fn read_frame(&self, frame_id: u64, page: PageRef, buffer_pool: Rc<BufferPool>) -> Result<()> {
         debug!("read_frame({})", frame_id);
         let offset = self.frame_offset(frame_id);
-        let shared = self.shared.read().unwrap();
+        let shared = self.shared.read();
         page.set_locked();
         begin_read_wal_frame(
             &shared.file,
@@ -427,7 +428,7 @@ impl Wal for WalFile {
         write_counter: Rc<RefCell<usize>>,
     ) -> Result<()> {
         let page_id = page.get().id;
-        let mut shared = self.shared.write().unwrap();
+        let mut shared = self.shared.write();
         let frame_id = if shared.max_frame == 0 {
             1
         } else {
@@ -441,7 +442,7 @@ impl Wal for WalFile {
             page_id
         );
         let header = shared.wal_header.clone();
-        let header = header.read().unwrap();
+        let header = header.read();
         let checksums = shared.last_checksum;
         let checksums = begin_write_wal_frame(
             &shared.file,
@@ -468,7 +469,7 @@ impl Wal for WalFile {
     }
 
     fn should_checkpoint(&self) -> bool {
-        let shared = self.shared.read().unwrap();
+        let shared = self.shared.read();
         let frame_id = shared.max_frame as usize;
         frame_id >= self.checkpoint_threshold
     }
@@ -490,7 +491,7 @@ impl Wal for WalFile {
                 CheckpointState::Start => {
                     // TODO(pere): check what frames are safe to checkpoint between many readers!
                     self.ongoing_checkpoint.min_frame = self.min_frame;
-                    let mut shared = self.shared.write().unwrap();
+                    let mut shared = self.shared.write();
                     let max_frame_in_wal = shared.max_frame as u32;
                     let mut max_safe_frame = shared.max_frame;
                     for read_lock in shared.read_locks.iter_mut() {
@@ -515,7 +516,7 @@ impl Wal for WalFile {
                     );
                 }
                 CheckpointState::ReadFrame => {
-                    let shared = self.shared.read().unwrap();
+                    let shared = self.shared.read();
                     assert!(
                         self.ongoing_checkpoint.current_page as usize
                             <= shared.pages_in_frames.len()
@@ -574,7 +575,7 @@ impl Wal for WalFile {
                     if *write_counter.borrow() > 0 {
                         return Ok(CheckpointStatus::IO);
                     }
-                    let shared = self.shared.read().unwrap();
+                    let shared = self.shared.read();
                     if (self.ongoing_checkpoint.current_page as usize)
                         < shared.pages_in_frames.len()
                     {
@@ -587,7 +588,7 @@ impl Wal for WalFile {
                     if *write_counter.borrow() > 0 {
                         return Ok(CheckpointStatus::IO);
                     }
-                    let mut shared = self.shared.write().unwrap();
+                    let mut shared = self.shared.write();
 
                     // Record two num pages fields to return as checkpoint result to caller.
                     // Ref: pnLog, pnCkpt on https://www.sqlite.org/c3ref/wal_checkpoint_v2.html
@@ -618,7 +619,7 @@ impl Wal for WalFile {
         let state = *self.sync_state.borrow();
         match state {
             SyncState::NotSyncing => {
-                let shared = self.shared.write().unwrap();
+                let shared = self.shared.write();
                 debug!("wal_sync");
                 {
                     let syncing = self.syncing.clone();
@@ -756,7 +757,7 @@ impl WalFileShared {
             Arc::new(RwLock::new(wal_header))
         };
         let checksum = {
-            let checksum = header.read().unwrap();
+            let checksum = header.read();
             (checksum.checksum_1, checksum.checksum_2)
         };
         let shared = WalFileShared {
