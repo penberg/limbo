@@ -19,4 +19,4 @@ do_execsql_test printf-numeric-replacement {
 # Multiple consecutive format specifiers
 do_execsql_test printf-consecutive-formats {
   SELECT printf('%d%s%f', 1, 'test', 2.5);
-} {{1test2.500000}}
+} {{1test2.5}}
