@@ -685,7 +685,7 @@ pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
                 return Ok(value.to_owned());
             }
 
-            let mut escaped_value = String::with_capacity(t.value.len());
+            let mut escaped_value = String::with_capacity(t.value.len() + 4);
             escaped_value.push('"');
             for c in t.value.to_string_lossy().chars() {
                 match c {
