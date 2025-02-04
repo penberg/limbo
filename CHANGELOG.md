@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.0.14 - 2025-02-04
+
+### Added
+
+**Core:**
+
+* Improve changes() and total_changes() functions and add tests (Ben Li)
+* Add support for `json_object` function (Jorge Hermo)
+* Implemented json_valid function (Harin)
+* Implement Not (Vrishabh)
+* Initial support for wal_checkpoint pragma (Sonny)
+* Implement Or and And bytecodes (Diego Reis)
+* Implement strftime function (Pedro Muniz)
+* implement sqlite_source_id function (Glauber Costa)
+* json_patch() function implementation (Ihor Andrianov)
+* json_remove() function implementation (Ihor Andrianov)
+* Implement isnull / not null for filter expressions (Glauber Costa)
+* Add support for offset in select queries (Ben Li)
+* Support returning column names from prepared statement (Preston Thorpe)
+* Implement Concat opcode (Harin)
+* Table info (Glauber Costa)
+* Pragma list (Glauber Costa)
+* Implement Noop bytecode (Pedro Muniz)
+* implement is and is not where constraints (Glauber Costa)
+* Pagecount (Glauber Costa)
+* Support column aliases in GROUP BY, ORDER BY and HAVING (Jussi Saurio)
+* Implement json_pretty (Pedro Muniz)
+
+**Extensions:**
+
+* Initial pass on vector extension (Pekka Enberg)
+* Enable static linking for 'built-in' extensions (Preston Thorpe)
+
+**Go Bindings:**
+
+* Initial support for Go database/sql driver (Preston Thorpe)
+* Avoid potentially expensive operations on prepare' (Glauber Costa)
+
+**Java Bindings:**
+
+* Implement JDBC `ResultSet` (Kim Seon Woo)
+* Implement LimboConnection `close()` (Kim Seon Woo)
+* Implement close() for `LimboStatement` and `LimboResultSet` (Kim Seon Woo)
+* Implement methods in `JDBC4ResultSet` (Kim Seon Woo)
+* Load native library from Jar (Kim Seon Woo)
+* Change logger dependency (Kim Seon Woo)
+* Log driver loading error (Pekka Enberg)
+
+**Simulator:**
+
+* Implement `--load` and `--watch` flags (Alperen Keleş)
+
+**Build system and CI:**
+
+* Add Nyrkiö change point detection to 'cargo bench' workflow (Henrik Ingo)
+
+### Fixed
+
+* Fix `select X'1';` causes limbo to go in infinite loop (Krishna Vishal)
+* Fix rowid search codegen (Nikita Sivukhin)
+* Fix logical codegen (Nikita Sivukhin)
+* Fix parser panic when duplicate column names are given to `CREATE TABLE` (Krishna Vishal)
+* Fix panic when double quoted strings are used for column names. (Krishna Vishal)
+* Fix `SELECT -9223372036854775808` result differs from SQLite (Krishna Vishal)
+* Fix `SELECT ABS(-9223372036854775808)` causes limbo to panic.  (Krishna Vishal)
+* Fix memory leaks, make extension types more efficient (Preston Thorpe)
+* Fix table with single column PRIMARY KEY to not create extra btree (Krishna Vishal)
+* Fix null cmp codegen (Nikita Sivukhin)
+* Fix null expr codegen (Nikita Sivukhin)
+* Fix rowid generation (Nikita Sivukhin)
+* Fix shr instruction (Nikita Sivukhin)
+* Fix strftime function compatibility problems (Pedro Muniz)
+* Dont fsync the WAL on read queries (Jussi Saurio)
+
 ## 0.0.13 - 2025-01-19
 
 ### Added
