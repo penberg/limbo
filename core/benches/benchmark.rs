@@ -66,7 +66,7 @@ fn bench(criterion: &mut Criterion) {
                             black_box(row);
                         }
                         limbo_core::StepResult::IO => {
-                            io.run_once().unwrap();
+                            let _ = io.run_once();
                         }
                         limbo_core::StepResult::Done => {
                             break;
@@ -113,7 +113,7 @@ fn bench(criterion: &mut Criterion) {
                         black_box(row);
                     }
                     limbo_core::StepResult::IO => {
-                        io.run_once().unwrap();
+                        let _ = io.run_once();
                     }
                     limbo_core::StepResult::Done => {
                         break;
