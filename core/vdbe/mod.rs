@@ -22,6 +22,7 @@ mod datetime;
 pub mod explain;
 pub mod insn;
 pub mod likeop;
+mod printf;
 pub mod sorter;
 mod strftime;
 
@@ -57,6 +58,7 @@ use insn::{
     exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
+use printf::exec_printf;
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
@@ -2106,6 +2108,12 @@ impl Program {
                                 let result = exec_strftime(
                                     &state.registers[*start_reg..*start_reg + arg_count],
                                 );
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::Printf => {
+                                let result = exec_printf(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
                                 state.registers[*dest] = result;
                             }
                         },

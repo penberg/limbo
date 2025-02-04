@@ -1752,6 +1752,14 @@ pub fn translate_expr(
                             });
                             Ok(target_register)
                         }
+                        ScalarFunc::Printf => translate_function(
+                            program,
+                            args.as_deref().unwrap_or(&[]),
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        ),
                     }
                 }
                 Func::Math(math_func) => match math_func.arity() {

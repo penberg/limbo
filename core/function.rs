@@ -221,6 +221,7 @@ pub enum ScalarFunc {
     #[cfg(not(target_family = "wasm"))]
     LoadExtension,
     StrfTime,
+    Printf,
 }
 
 impl Display for ScalarFunc {
@@ -274,6 +275,7 @@ impl Display for ScalarFunc {
             #[cfg(not(target_family = "wasm"))]
             Self::LoadExtension => "load_extension".to_string(),
             Self::StrfTime => "strftime".to_string(),
+            Self::Printf => "printf".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -572,6 +574,7 @@ impl Func {
             #[cfg(not(target_family = "wasm"))]
             "load_extension" => Ok(Self::Scalar(ScalarFunc::LoadExtension)),
             "strftime" => Ok(Self::Scalar(ScalarFunc::StrfTime)),
+            "printf" => Ok(Self::Scalar(ScalarFunc::Printf)),
             _ => crate::bail_parse_error!("no such function: {}", name),
         }
     }
