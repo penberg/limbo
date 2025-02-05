@@ -1,9 +1,11 @@
 mod error;
 mod ext;
 mod function;
+mod info;
 mod io;
 #[cfg(feature = "json")]
 mod json;
+pub mod mvcc;
 mod parameters;
 mod pseudo;
 mod result;
@@ -21,16 +23,16 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 use fallible_iterator::FallibleIterator;
 #[cfg(not(target_family = "wasm"))]
 use libloading::{Library, Symbol};
-#[cfg(not(target_family = "wasm"))]
 use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use log::trace;
+use parking_lot::RwLock;
 use schema::Schema;
 use sqlite3_parser::ast;
 use sqlite3_parser::{ast::Cmd, lexer::sql::Parser};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::num::NonZero;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
 use std::{cell::RefCell, rc::Rc};
 use storage::btree::btree_init_page;
 #[cfg(feature = "fs")]
@@ -42,11 +44,13 @@ pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 pub use types::Value;
 use util::parse_schema_rows;
+use vdbe::builder::QueryMode;
 
 pub use error::LimboError;
 use translate::select::prepare_select_plan;
 pub type Result<T, E = LimboError> = std::result::Result<T, E>;
 
+use crate::storage::wal::CheckpointResult;
 use crate::translate::optimizer::optimize_plan;
 pub use io::OpenFlags;
 pub use io::PlatformIO;
@@ -61,9 +65,10 @@ pub use storage::pager::Page;
 pub use storage::pager::Pager;
 pub use storage::wal::CheckpointStatus;
 pub use storage::wal::Wal;
+
 pub static DATABASE_VERSION: OnceLock<String> = OnceLock::new();
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum TransactionState {
     Write,
     Read,
@@ -138,6 +143,9 @@ impl Database {
             _shared_wal: shared_wal.clone(),
             syms,
         };
+        if let Err(e) = db.register_builtins() {
+            return Err(LimboError::ExtensionError(e));
+        }
         let db = Arc::new(db);
         let conn = Rc::new(Connection {
             db: db.clone(),
@@ -253,10 +261,10 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn prepare(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Statement> {
-        let sql = sql.into();
+    pub fn prepare(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Statement> {
+        let sql = sql.as_ref();
         trace!("Preparing: {}", sql);
-        let db = self.db.clone();
+        let db = &self.db;
         let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -270,6 +278,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Normal,
                     )?);
                     Ok(Statement::new(program, self.pager.clone()))
                 }
@@ -281,8 +290,8 @@ impl Connection {
         }
     }
 
-    pub fn query(self: &Rc<Connection>, sql: impl Into<String>) -> Result<Option<Statement>> {
-        let sql = sql.into();
+    pub fn query(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Option<Statement>> {
+        let sql = sql.as_ref();
         trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -304,6 +313,7 @@ impl Connection {
                     self.pager.clone(),
                     Rc::downgrade(self),
                     syms,
+                    QueryMode::Normal,
                 )?);
                 let stmt = Statement::new(program, self.pager.clone());
                 Ok(Some(stmt))
@@ -316,6 +326,7 @@ impl Connection {
                     self.pager.clone(),
                     Rc::downgrade(self),
                     syms,
+                    QueryMode::Explain,
                 )?;
                 program.explain();
                 Ok(None)
@@ -328,7 +339,7 @@ impl Connection {
                             *select,
                             &self.db.syms.borrow(),
                         )?;
-                        optimize_plan(&mut plan)?;
+                        optimize_plan(&mut plan, &self.schema.borrow())?;
                         println!("{}", plan);
                     }
                     _ => todo!(),
@@ -342,9 +353,9 @@ impl Connection {
         QueryRunner::new(self, sql)
     }
 
-    pub fn execute(self: &Rc<Connection>, sql: impl Into<String>) -> Result<()> {
-        let sql = sql.into();
-        let db = self.db.clone();
+    pub fn execute(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<()> {
+        let sql = sql.as_ref();
+        let db = &self.db;
         let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
@@ -358,6 +369,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Explain,
                     )?;
                     program.explain();
                 }
@@ -370,6 +382,7 @@ impl Connection {
                         self.pager.clone(),
                         Rc::downgrade(self),
                         syms,
+                        QueryMode::Normal,
                     )?;
 
                     let mut state =
@@ -390,9 +403,9 @@ impl Connection {
         Ok(())
     }
 
-    pub fn checkpoint(&self) -> Result<()> {
-        self.pager.clear_page_cache();
-        Ok(())
+    pub fn checkpoint(&self) -> Result<CheckpointResult> {
+        let checkpoint_result = self.pager.clear_page_cache();
+        Ok(checkpoint_result)
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -405,7 +418,7 @@ impl Connection {
         loop {
             // TODO: make this async?
             match self.pager.checkpoint()? {
-                CheckpointStatus::Done => {
+                CheckpointStatus::Done(_) => {
                     return Ok(());
                 }
                 CheckpointStatus::IO => {
@@ -455,19 +468,7 @@ impl Statement {
     }
 
     pub fn step(&mut self) -> Result<StepResult<'_>> {
-        let result = self.program.step(&mut self.state, self.pager.clone())?;
-        match result {
-            vdbe::StepResult::Row(row) => Ok(StepResult::Row(Row { values: row.values })),
-            vdbe::StepResult::IO => Ok(StepResult::IO),
-            vdbe::StepResult::Done => Ok(StepResult::Done),
-            vdbe::StepResult::Interrupt => Ok(StepResult::Interrupt),
-            vdbe::StepResult::Busy => Ok(StepResult::Busy),
-        }
-    }
-
-    pub fn query(&mut self) -> Result<Statement> {
-        let stmt = Statement::new(self.program.clone(), self.pager.clone());
-        Ok(stmt)
+        self.program.step(&mut self.state, self.pager.clone())
     }
 
     pub fn columns(&self) -> &[String] {
@@ -491,19 +492,9 @@ impl Statement {
     }
 }
 
-#[derive(PartialEq)]
-pub enum StepResult<'a> {
-    Row(Row<'a>),
-    IO,
-    Done,
-    Interrupt,
-    Busy,
-}
+pub type StepResult<'a> = vdbe::StepResult<'a>;
 
-#[derive(PartialEq)]
-pub struct Row<'a> {
-    pub values: Vec<Value<'a>>,
-}
+pub type Row<'a> = types::Record<'a>;
 
 impl<'a> Row<'a> {
     pub fn get<T: types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
@@ -557,7 +548,6 @@ impl SymbolTable {
     pub fn new() -> Self {
         Self {
             functions: HashMap::new(),
-            // TODO: wasm libs will be very different
             #[cfg(not(target_family = "wasm"))]
             extensions: Vec::new(),
         }

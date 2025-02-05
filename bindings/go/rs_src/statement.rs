@@ -1,7 +1,7 @@
 use crate::rows::LimboRows;
 use crate::types::{AllocPool, LimboValue, ResultCode};
 use crate::LimboConn;
-use limbo_core::{Statement, StepResult};
+use limbo_core::{LimboError, Statement, StepResult};
 use std::ffi::{c_char, c_void};
 use std::num::NonZero;
 
@@ -13,11 +13,13 @@ pub extern "C" fn db_prepare(ctx: *mut c_void, query: *const c_char) -> *mut c_v
     let query_str = unsafe { std::ffi::CStr::from_ptr(query) }.to_str().unwrap();
 
     let db = LimboConn::from_ptr(ctx);
-
-    let stmt = db.conn.prepare(query_str.to_string());
+    let stmt = db.conn.prepare(query_str);
     match stmt {
-        Ok(stmt) => LimboStatement::new(stmt, db).to_ptr(),
-        Err(_) => std::ptr::null_mut(),
+        Ok(stmt) => LimboStatement::new(Some(stmt), db).to_ptr(),
+        Err(err) => {
+            db.err = Some(err);
+            std::ptr::null_mut()
+        }
     }
 }
 
@@ -38,21 +40,25 @@ pub extern "C" fn stmt_execute(
     } else {
         &[]
     };
+    let mut pool = AllocPool::new();
+    let Some(statement) = stmt.statement.as_mut() else {
+        return ResultCode::Error;
+    };
     for (i, arg) in args.iter().enumerate() {
-        let val = arg.to_value(&mut stmt.pool);
-        stmt.statement.bind_at(NonZero::new(i + 1).unwrap(), val);
+        let val = arg.to_value(&mut pool);
+        statement.bind_at(NonZero::new(i + 1).unwrap(), val);
     }
     loop {
-        match stmt.statement.step() {
+        match statement.step() {
             Ok(StepResult::Row(_)) => {
                 // unexpected row during execution, error out.
                 return ResultCode::Error;
             }
             Ok(StepResult::Done) => {
-                stmt.conn.conn.total_changes();
+                let total_changes = stmt.conn.conn.total_changes();
                 if !changes.is_null() {
                     unsafe {
-                        *changes = stmt.conn.conn.total_changes();
+                        *changes = total_changes;
                     }
                 }
                 return ResultCode::Done;
@@ -66,7 +72,8 @@ pub extern "C" fn stmt_execute(
             Ok(StepResult::Interrupt) => {
                 return ResultCode::Interrupt;
             }
-            Err(_) => {
+            Err(err) => {
+                stmt.conn.err = Some(err);
                 return ResultCode::Error;
             }
         }
@@ -79,7 +86,11 @@ pub extern "C" fn stmt_parameter_count(ctx: *mut c_void) -> i32 {
         return -1;
     }
     let stmt = LimboStatement::from_ptr(ctx);
-    stmt.statement.parameters_count() as i32
+    let Some(statement) = stmt.statement.as_ref() else {
+        stmt.err = Some(LimboError::InternalError("Statement is closed".to_string()));
+        return -1;
+    };
+    statement.parameters_count() as i32
 }
 
 #[no_mangle]
@@ -97,31 +108,50 @@ pub extern "C" fn stmt_query(
     } else {
         &[]
     };
+    let mut pool = AllocPool::new();
+    let Some(mut statement) = stmt.statement.take() else {
+        return std::ptr::null_mut();
+    };
     for (i, arg) in args.iter().enumerate() {
-        let val = arg.to_value(&mut stmt.pool);
-        stmt.statement.bind_at(NonZero::new(i + 1).unwrap(), val);
+        let val = arg.to_value(&mut pool);
+        statement.bind_at(NonZero::new(i + 1).unwrap(), val);
     }
-    match stmt.statement.query() {
-        Ok(rows) => {
-            let stmt = unsafe { Box::from_raw(stmt) };
-            LimboRows::new(rows, stmt).to_ptr()
-        }
-        Err(_) => std::ptr::null_mut(),
-    }
+    // ownership of the statement is transfered to the LimboRows object.
+    LimboRows::new(statement, stmt.conn).to_ptr()
 }
 
 pub struct LimboStatement<'conn> {
-    pub statement: Statement,
+    /// If 'query' is ran on the statement, ownership is transfered to the LimboRows object
+    pub statement: Option<Statement>,
     pub conn: &'conn mut LimboConn,
-    pub pool: AllocPool,
+    pub err: Option<LimboError>,
+}
+
+#[no_mangle]
+pub extern "C" fn stmt_close(ctx: *mut c_void) -> ResultCode {
+    if !ctx.is_null() {
+        let stmt = unsafe { Box::from_raw(ctx as *mut LimboStatement) };
+        drop(stmt);
+        return ResultCode::Ok;
+    }
+    ResultCode::Invalid
+}
+
+#[no_mangle]
+pub extern "C" fn stmt_get_error(ctx: *mut c_void) -> *const c_char {
+    if ctx.is_null() {
+        return std::ptr::null();
+    }
+    let stmt = LimboStatement::from_ptr(ctx);
+    stmt.get_error()
 }
 
 impl<'conn> LimboStatement<'conn> {
-    pub fn new(statement: Statement, conn: &'conn mut LimboConn) -> Self {
+    pub fn new(statement: Option<Statement>, conn: &'conn mut LimboConn) -> Self {
         LimboStatement {
             statement,
             conn,
-            pool: AllocPool::new(),
+            err: None,
         }
     }
 
@@ -130,10 +160,21 @@ impl<'conn> LimboStatement<'conn> {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    fn from_ptr(ptr: *mut c_void) -> &'static mut LimboStatement<'conn> {
+    fn from_ptr(ptr: *mut c_void) -> &'conn mut LimboStatement<'conn> {
         if ptr.is_null() {
             panic!("Null pointer");
         }
         unsafe { &mut *(ptr as *mut LimboStatement) }
+    }
+
+    fn get_error(&mut self) -> *const c_char {
+        if let Some(err) = &self.err {
+            let err = format!("{}", err);
+            let c_str = std::ffi::CString::new(err).unwrap();
+            self.err = None;
+            c_str.into_raw() as *const c_char
+        } else {
+            std::ptr::null()
+        }
     }
 }

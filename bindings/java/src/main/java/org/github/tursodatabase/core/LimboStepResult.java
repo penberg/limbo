@@ -47,6 +47,11 @@ public class LimboStepResult {
         || stepResultId == STEP_RESULT_ID_ERROR;
   }
 
+  @Nullable
+  public Object[] getResult() {
+    return result;
+  }
+
   @Override
   public String toString() {
     return "LimboStepResult{"

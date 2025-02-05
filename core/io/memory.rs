@@ -3,15 +3,15 @@ use crate::Result;
 
 use log::debug;
 use std::{
-    cell::{RefCell, RefMut},
+    cell::{Cell, RefCell, UnsafeCell},
     collections::BTreeMap,
     rc::Rc,
     sync::Arc,
 };
 
 pub struct MemoryIO {
-    pages: RefCell<BTreeMap<usize, MemPage>>,
-    size: RefCell<usize>,
+    pages: UnsafeCell<BTreeMap<usize, MemPage>>,
+    size: Cell<usize>,
 }
 
 // TODO: page size flag
@@ -23,23 +23,23 @@ impl MemoryIO {
     pub fn new() -> Result<Arc<Self>> {
         debug!("Using IO backend 'memory'");
         Ok(Arc::new(Self {
-            pages: RefCell::new(BTreeMap::new()),
-            size: RefCell::new(0),
+            pages: BTreeMap::new().into(),
+            size: 0.into(),
         }))
     }
 
-    fn get_or_allocate_page(&self, page_no: usize) -> RefMut<MemPage> {
-        let pages = self.pages.borrow_mut();
-        RefMut::map(pages, |p| {
-            p.entry(page_no).or_insert_with(|| Box::new([0; PAGE_SIZE]))
-        })
+    #[allow(clippy::mut_from_ref)]
+    fn get_or_allocate_page(&self, page_no: usize) -> &mut MemPage {
+        unsafe {
+            let pages = &mut *self.pages.get();
+            pages
+                .entry(page_no)
+                .or_insert_with(|| Box::new([0; PAGE_SIZE]))
+        }
     }
 
-    fn get_page(&self, page_no: usize) -> Option<RefMut<MemPage>> {
-        match RefMut::filter_map(self.pages.borrow_mut(), |pages| pages.get_mut(&page_no)) {
-            Ok(page) => Some(page),
-            Err(_) => None,
-        }
+    fn get_page(&self, page_no: usize) -> Option<&MemPage> {
+        unsafe { (*self.pages.get()).get(&page_no) }
     }
 }
 
@@ -71,7 +71,6 @@ pub struct MemoryFile {
 }
 
 impl File for MemoryFile {
-    // no-ops
     fn lock_file(&self, _exclusive: bool) -> Result<()> {
         Ok(())
     }
@@ -90,7 +89,7 @@ impl File for MemoryFile {
             return Ok(());
         }
 
-        let file_size = *self.io.size.borrow();
+        let file_size = self.io.size.get();
         if pos >= file_size {
             c.complete(0);
             return Ok(());
@@ -108,15 +107,10 @@ impl File for MemoryFile {
                 let page_offset = offset % PAGE_SIZE;
                 let bytes_to_read = remaining.min(PAGE_SIZE - page_offset);
                 if let Some(page) = self.io.get_page(page_no) {
-                    {
-                        let page_data = &*page;
-                        read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read]
-                            .copy_from_slice(&page_data[page_offset..page_offset + bytes_to_read]);
-                    }
+                    read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read]
+                        .copy_from_slice(&page[page_offset..page_offset + bytes_to_read]);
                 } else {
-                    for b in &mut read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read] {
-                        *b = 0;
-                    }
+                    read_buf.as_mut_slice()[buf_offset..buf_offset + bytes_to_read].fill(0);
                 }
 
                 offset += bytes_to_read;
@@ -147,7 +141,7 @@ impl File for MemoryFile {
             let bytes_to_write = remaining.min(PAGE_SIZE - page_offset);
 
             {
-                let mut page = self.io.get_or_allocate_page(page_no);
+                let page = self.io.get_or_allocate_page(page_no);
                 page[page_offset..page_offset + bytes_to_write]
                     .copy_from_slice(&data[buf_offset..buf_offset + bytes_to_write]);
             }
@@ -157,10 +151,9 @@ impl File for MemoryFile {
             remaining -= bytes_to_write;
         }
 
-        {
-            let mut size = self.io.size.borrow_mut();
-            *size = (*size).max(pos + buf_len);
-        }
+        self.io
+            .size
+            .set(core::cmp::max(pos + buf_len, self.io.size.get()));
 
         c.complete(buf_len as i32);
         Ok(())
@@ -173,7 +166,7 @@ impl File for MemoryFile {
     }
 
     fn size(&self) -> Result<u64> {
-        Ok(*self.io.size.borrow() as u64)
+        Ok(self.io.size.get() as u64)
     }
 }
 

@@ -1,8 +1,6 @@
 // This module contains code for emitting bytecode instructions for SQL query execution.
 // It handles translating high-level SQL operations into low-level bytecode that can be executed by the virtual machine.
 
-use std::collections::HashMap;
-
 use sqlite3_parser::ast::{self};
 
 use crate::function::Func;
@@ -16,8 +14,8 @@ use super::aggregation::emit_ungrouped_aggregation;
 use super::group_by::{emit_group_by, init_group_by, GroupByMetadata};
 use super::main_loop::{close_loop, emit_loop, init_loop, open_loop, LeftJoinMetadata, LoopLabels};
 use super::order_by::{emit_order_by, init_order_by, SortMetadata};
-use super::plan::SelectPlan;
-use super::plan::SourceOperator;
+use super::plan::Operation;
+use super::plan::{SelectPlan, TableReference};
 use super::subquery::emit_subqueries;
 
 #[derive(Debug)]
@@ -58,7 +56,7 @@ impl<'a> Resolver<'a> {
 #[derive(Debug)]
 pub struct TranslateCtx<'a> {
     // A typical query plan is a nested loop. Each loop has its own LoopLabels (see the definition of LoopLabels for more details)
-    pub labels_main_loop: HashMap<usize, LoopLabels>,
+    pub labels_main_loop: Vec<LoopLabels>,
     // label for the instruction that jumps to the next phase of the query after the main loop
     // we don't know ahead of time what that is (GROUP BY, ORDER BY, etc.)
     pub label_main_loop_end: Option<BranchOffset>,
@@ -68,15 +66,20 @@ pub struct TranslateCtx<'a> {
     pub reg_result_cols_start: Option<usize>,
     // The register holding the limit value, if any.
     pub reg_limit: Option<usize>,
+    // The register holding the offset value, if any.
+    pub reg_offset: Option<usize>,
+    // The register holding the limit+offset value, if any.
+    pub reg_limit_offset_sum: Option<usize>,
     // metadata for the group by operator
     pub meta_group_by: Option<GroupByMetadata>,
     // metadata for the order by operator
     pub meta_sort: Option<SortMetadata>,
-    // mapping between Join operator id and associated metadata (for left joins only)
-    pub meta_left_joins: HashMap<usize, LeftJoinMetadata>,
+    /// mapping between table loop index and associated metadata (for left joins only)
+    /// this metadata exists for the right table in a given left join
+    pub meta_left_joins: Vec<Option<LeftJoinMetadata>>,
     // We need to emit result columns in the order they are present in the SELECT, but they may not be in the same order in the ORDER BY sorter.
     // This vector holds the indexes of the result columns in the ORDER BY sorter.
-    pub result_column_indexes_in_orderby_sorter: HashMap<usize, usize>,
+    pub result_column_indexes_in_orderby_sorter: Vec<usize>,
     // We might skip adding a SELECT result column into the ORDER BY sorter if it is an exact match in the ORDER BY keys.
     // This vector holds the indexes of the result columns that we need to skip.
     pub result_columns_to_skip_in_orderby_sorter: Option<Vec<usize>>,
@@ -97,6 +100,8 @@ pub enum OperationMode {
 fn prologue<'a>(
     program: &mut ProgramBuilder,
     syms: &'a SymbolTable,
+    table_count: usize,
+    result_column_count: usize,
 ) -> Result<(TranslateCtx<'a>, BranchOffset, BranchOffset)> {
     let init_label = program.allocate_label();
 
@@ -107,15 +112,17 @@ fn prologue<'a>(
     let start_offset = program.offset();
 
     let t_ctx = TranslateCtx {
-        labels_main_loop: HashMap::new(),
+        labels_main_loop: (0..table_count).map(|_| LoopLabels::new(program)).collect(),
         label_main_loop_end: None,
         reg_agg_start: None,
         reg_limit: None,
+        reg_offset: None,
+        reg_limit_offset_sum: None,
         reg_result_cols_start: None,
         meta_group_by: None,
-        meta_left_joins: HashMap::new(),
+        meta_left_joins: (0..table_count).map(|_| None).collect(),
         meta_sort: None,
-        result_column_indexes_in_orderby_sorter: HashMap::new(),
+        result_column_indexes_in_orderby_sorter: (0..result_column_count).collect(),
         result_columns_to_skip_in_orderby_sorter: None,
         resolver: Resolver::new(syms),
     };
@@ -161,7 +168,12 @@ fn emit_program_for_select(
     mut plan: SelectPlan,
     syms: &SymbolTable,
 ) -> Result<()> {
-    let (mut t_ctx, init_label, start_offset) = prologue(program, syms)?;
+    let (mut t_ctx, init_label, start_offset) = prologue(
+        program,
+        syms,
+        plan.table_references.len(),
+        plan.result_columns.len(),
+    )?;
 
     // Trivial exit on LIMIT 0
     if let Some(limit) = plan.limit {
@@ -189,15 +201,18 @@ pub fn emit_query<'a>(
     t_ctx: &'a mut TranslateCtx<'a>,
 ) -> Result<usize> {
     // Emit subqueries first so the results can be read in the main query loop.
-    emit_subqueries(
-        program,
-        t_ctx,
-        &mut plan.referenced_tables,
-        &mut plan.source,
-    )?;
+    emit_subqueries(program, t_ctx, &mut plan.table_references)?;
 
     if t_ctx.reg_limit.is_none() {
         t_ctx.reg_limit = plan.limit.map(|_| program.alloc_register());
+    }
+
+    if t_ctx.reg_offset.is_none() {
+        t_ctx.reg_offset = plan.offset.map(|_| program.alloc_register());
+    }
+
+    if t_ctx.reg_limit_offset_sum.is_none() {
+        t_ctx.reg_limit_offset_sum = plan.offset.map(|_| program.alloc_register());
     }
 
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
@@ -222,16 +237,21 @@ pub fn emit_query<'a>(
     if let Some(ref mut group_by) = plan.group_by {
         init_group_by(program, t_ctx, group_by, &plan.aggregates)?;
     }
-    init_loop(program, t_ctx, &plan.source, &OperationMode::SELECT)?;
+    init_loop(
+        program,
+        t_ctx,
+        &plan.table_references,
+        &OperationMode::SELECT,
+    )?;
 
     // Set up main query execution loop
-    open_loop(program, t_ctx, &mut plan.source, &plan.referenced_tables)?;
+    open_loop(program, t_ctx, &plan.table_references, &plan.where_clause)?;
 
     // Process result columns and expressions in the inner loop
     emit_loop(program, t_ctx, plan)?;
 
     // Clean up and close the main execution loop
-    close_loop(program, t_ctx, &plan.source)?;
+    close_loop(program, t_ctx, &plan.table_references)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
@@ -260,7 +280,12 @@ fn emit_program_for_delete(
     mut plan: DeletePlan,
     syms: &SymbolTable,
 ) -> Result<()> {
-    let (mut t_ctx, init_label, start_offset) = prologue(program, syms)?;
+    let (mut t_ctx, init_label, start_offset) = prologue(
+        program,
+        syms,
+        plan.table_references.len(),
+        plan.result_columns.len(),
+    )?;
 
     // No rows will be read from source table loops if there is a constant false condition eg. WHERE 0
     let after_main_loop_label = program.allocate_label();
@@ -271,20 +296,25 @@ fn emit_program_for_delete(
     }
 
     // Initialize cursors and other resources needed for query execution
-    init_loop(program, &mut t_ctx, &plan.source, &OperationMode::DELETE)?;
+    init_loop(
+        program,
+        &mut t_ctx,
+        &plan.table_references,
+        &OperationMode::DELETE,
+    )?;
 
     // Set up main query execution loop
     open_loop(
         program,
         &mut t_ctx,
-        &mut plan.source,
-        &plan.referenced_tables,
+        &mut plan.table_references,
+        &plan.where_clause,
     )?;
 
-    emit_delete_insns(program, &mut t_ctx, &plan.source, &plan.limit)?;
+    emit_delete_insns(program, &mut t_ctx, &plan.table_references, &plan.limit)?;
 
     // Clean up and close the main execution loop
-    close_loop(program, &mut t_ctx, &plan.source)?;
+    close_loop(program, &mut t_ctx, &plan.table_references)?;
 
     program.resolve_label(after_main_loop_label, program.offset());
 
@@ -301,20 +331,15 @@ fn emit_program_for_delete(
 fn emit_delete_insns(
     program: &mut ProgramBuilder,
     t_ctx: &mut TranslateCtx,
-    source: &SourceOperator,
-    limit: &Option<usize>,
+    table_references: &[TableReference],
+    limit: &Option<isize>,
 ) -> Result<()> {
-    let cursor_id = match source {
-        SourceOperator::Scan {
-            table_reference, ..
-        } => program.resolve_cursor_id(&table_reference.table_identifier),
-        SourceOperator::Search {
-            table_reference,
-            search,
-            ..
-        } => match search {
+    let table_reference = table_references.first().unwrap();
+    let cursor_id = match &table_reference.op {
+        Operation::Scan { .. } => program.resolve_cursor_id(&table_reference.identifier),
+        Operation::Search(search) => match search {
             Search::RowidEq { .. } | Search::RowidSearch { .. } => {
-                program.resolve_cursor_id(&table_reference.table_identifier)
+                program.resolve_cursor_id(&table_reference.identifier)
             }
             Search::IndexSearch { index, .. } => program.resolve_cursor_id(&index.name),
         },

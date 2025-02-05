@@ -22,14 +22,18 @@ mod datetime;
 pub mod explain;
 pub mod insn;
 pub mod likeop;
+mod printf;
 pub mod sorter;
+mod strftime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
 use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::info;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
+use crate::storage::wal::CheckpointResult;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::types::{
     AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey,
@@ -42,7 +46,8 @@ use crate::vdbe::insn::Insn;
 use crate::{
     function::JsonFunc, json::get_json, json::is_json_valid, json::json_array,
     json::json_array_length, json::json_arrow_extract, json::json_arrow_shift_extract,
-    json::json_error_position, json::json_extract, json::json_object, json::json_type,
+    json::json_error_position, json::json_extract, json::json_object, json::json_patch,
+    json::json_remove, json::json_set, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VERSION};
 use datetime::{
@@ -54,6 +59,7 @@ use insn::{
     exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
+use printf::exec_printf;
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
@@ -71,7 +77,7 @@ pub enum BranchOffset {
     /// A label is a named location in the program.
     /// If there are references to it, it must always be resolved to an Offset
     /// via program.resolve_label().
-    Label(i32),
+    Label(u32),
     /// An offset is a direct index into the instruction list.
     Offset(InsnReference),
     /// A placeholder is a temporary value to satisfy the compiler.
@@ -100,7 +106,7 @@ impl BranchOffset {
     }
 
     /// Returns the label value. Panics if the branch offset is an offset or placeholder.
-    pub fn to_label_value(&self) -> i32 {
+    pub fn to_label_value(&self) -> u32 {
         match self {
             BranchOffset::Label(v) => *v,
             BranchOffset::Offset(_) => unreachable!("Offset cannot be converted to label value"),
@@ -113,7 +119,7 @@ impl BranchOffset {
     /// label or placeholder.
     pub fn to_debug_int(&self) -> i32 {
         match self {
-            BranchOffset::Label(v) => *v,
+            BranchOffset::Label(v) => *v as i32,
             BranchOffset::Offset(v) => *v as i32,
             BranchOffset::Placeholder => i32::MAX,
         }
@@ -134,6 +140,7 @@ pub type PageIdx = usize;
 // Index of insn in list of insns
 type InsnReference = u32;
 
+#[derive(Debug)]
 pub enum StepResult<'a> {
     Done,
     IO,
@@ -163,8 +170,16 @@ macro_rules! call_external_function {
     ) => {{
         if $arg_count == 0 {
             let result_c_value: ExtValue = unsafe { ($func_ptr)(0, std::ptr::null()) };
-            let result_ov = OwnedValue::from_ffi(&result_c_value);
-            $state.registers[$dest_register] = result_ov;
+            match OwnedValue::from_ffi(&result_c_value) {
+                Ok(result_ov) => {
+                    $state.registers[$dest_register] = result_ov;
+                    unsafe { result_c_value.free() };
+                }
+                Err(e) => {
+                    unsafe { result_c_value.free() };
+                    return Err(e);
+                }
+            }
         } else {
             let register_slice = &$state.registers[$start_reg..$start_reg + $arg_count];
             let mut ext_values: Vec<ExtValue> = Vec::with_capacity($arg_count);
@@ -174,8 +189,16 @@ macro_rules! call_external_function {
             }
             let argv_ptr = ext_values.as_ptr();
             let result_c_value: ExtValue = unsafe { ($func_ptr)($arg_count as i32, argv_ptr) };
-            let result_ov = OwnedValue::from_ffi(&result_c_value);
-            $state.registers[$dest_register] = result_ov;
+            match OwnedValue::from_ffi(&result_c_value) {
+                Ok(result_ov) => {
+                    $state.registers[$dest_register] = result_ov;
+                    unsafe { result_c_value.free() };
+                }
+                Err(e) => {
+                    unsafe { result_c_value.free() };
+                    return Err(e);
+                }
+            }
         }
     }};
 }
@@ -358,7 +381,7 @@ pub struct Program {
     pub insns: Vec<Insn>,
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     pub database_header: Rc<RefCell<DatabaseHeader>>,
-    pub comments: HashMap<InsnReference, &'static str>,
+    pub comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
     pub auto_commit: bool,
@@ -397,7 +420,6 @@ impl Program {
             }
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
-            let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
                     assert!(target_pc.is_offset());
@@ -449,15 +471,18 @@ impl Program {
                 } => {
                     let result = self.connection.upgrade().unwrap().checkpoint();
                     match result {
-                        Ok(()) => {
+                        Ok(CheckpointResult {
+                            num_wal_frames: num_wal_pages,
+                            num_checkpointed_frames: num_checkpointed_pages,
+                        }) => {
                             // https://sqlite.org/pragma.html#pragma_wal_checkpoint
-                            // TODO make 2nd and 3rd cols available through checkpoint method
                             // 1st col: 1 (checkpoint SQLITE_BUSY) or 0 (not busy).
                             state.registers[*dest] = OwnedValue::Integer(0);
                             // 2nd col: # modified pages written to wal file
-                            state.registers[*dest + 1] = OwnedValue::Integer(0);
+                            state.registers[*dest + 1] = OwnedValue::Integer(num_wal_pages as i64);
                             // 3rd col: # pages moved to db after checkpoint
-                            state.registers[*dest + 2] = OwnedValue::Integer(0);
+                            state.registers[*dest + 2] =
+                                OwnedValue::Integer(num_checkpointed_pages as i64);
                         }
                         Err(_err) => state.registers[*dest] = OwnedValue::Integer(1),
                     }
@@ -475,6 +500,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::NullRow { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NullRow");
                     cursor.set_null_flag(true);
@@ -585,15 +611,18 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let cond = state.registers[lhs] == state.registers[rhs];
+                    let nulleq = flags.has_nulleq();
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if (nulleq && cond) || (!nulleq && jump_if_null) {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -612,15 +641,18 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let cond = state.registers[lhs] != state.registers[rhs];
+                    let nulleq = flags.has_nulleq();
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if (nulleq && cond) || (!nulleq && jump_if_null) {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -639,15 +671,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -666,15 +699,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -693,15 +727,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -720,15 +755,16 @@ impl Program {
                     lhs,
                     rhs,
                     target_pc,
-                    jump_if_null,
+                    flags,
                 } => {
                     assert!(target_pc.is_offset());
                     let lhs = *lhs;
                     let rhs = *rhs;
                     let target_pc = *target_pc;
+                    let jump_if_null = flags.has_jump_if_null();
                     match (&state.registers[lhs], &state.registers[rhs]) {
                         (_, OwnedValue::Null) | (OwnedValue::Null, _) => {
-                            if *jump_if_null {
+                            if jump_if_null {
                                 state.pc = target_pc.to_offset_int();
                             } else {
                                 state.pc += 1;
@@ -773,6 +809,7 @@ impl Program {
                 } => {
                     let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
                     let cursor = BTreeCursor::new(pager.clone(), *root_page);
+                    let mut cursors = state.cursors.borrow_mut();
                     match cursor_type {
                         CursorType::BTreeTable(_) => {
                             cursors
@@ -803,6 +840,7 @@ impl Program {
                     content_reg: _,
                     num_fields: _,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = PseudoCursor::new();
                     cursors
                         .get_mut(*cursor_id)
@@ -811,12 +849,14 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "RewindAsync");
                     return_if_io!(cursor.rewind());
                     state.pc += 1;
                 }
                 Insn::LastAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "LastAsync");
                     return_if_io!(cursor.last());
@@ -827,6 +867,7 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "LastAwait");
                     cursor.wait_for_completion()?;
@@ -841,6 +882,7 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "RewindAwait");
                     cursor.wait_for_completion()?;
@@ -855,6 +897,7 @@ impl Program {
                     column,
                     dest,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
                         let index_cursor = get_cursor_as_index_mut(&mut cursors, index_cursor_id);
                         let rowid = index_cursor.rowid()?;
@@ -922,6 +965,7 @@ impl Program {
                     return Ok(StepResult::Row(record));
                 }
                 Insn::NextAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NextAsync");
                     cursor.set_null_flag(false);
@@ -929,6 +973,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::PrevAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "PrevAsync");
                     cursor.set_null_flag(false);
@@ -939,6 +984,7 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     assert!(pc_if_next.is_offset());
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "PrevAwait");
@@ -954,6 +1000,7 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NextAwait");
                     cursor.wait_for_completion()?;
@@ -983,10 +1030,19 @@ impl Program {
                         }
                     }
                     log::trace!("Halt auto_commit {}", self.auto_commit);
+                    let connection = self
+                        .connection
+                        .upgrade()
+                        .expect("only weak ref to connection?");
+                    let current_state = connection.transaction_state.borrow().clone();
+                    if current_state == TransactionState::Read {
+                        pager.end_read_tx()?;
+                        return Ok(StepResult::Done);
+                    }
                     return if self.auto_commit {
                         match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
-                            Ok(crate::storage::wal::CheckpointStatus::Done) => {
+                            Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
                                 if self.change_cnt_on {
                                     if let Some(conn) = self.connection.upgrade() {
                                         conn.set_changes(self.n_change.get());
@@ -1084,6 +1140,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::RowId { cursor_id, dest } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
                         let index_cursor = get_cursor_as_index_mut(&mut cursors, index_cursor_id);
                         let rowid = index_cursor.rowid()?;
@@ -1111,6 +1168,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     let rowid = match &state.registers[*src_reg] {
                         OwnedValue::Integer(rowid) => *rowid as u64,
@@ -1146,6 +1204,7 @@ impl Program {
                     is_index,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     if *is_index {
                         let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                         let record_from_regs: OwnedRecord =
@@ -1191,6 +1250,7 @@ impl Program {
                     is_index,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     if *is_index {
                         let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                         let record_from_regs: OwnedRecord =
@@ -1235,6 +1295,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
@@ -1249,7 +1310,7 @@ impl Program {
                         }
                     } else {
                         state.pc = target_pc.to_offset_int();
-                    }
+                    };
                 }
                 Insn::IdxGT {
                     cursor_id,
@@ -1258,6 +1319,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
@@ -1272,7 +1334,7 @@ impl Program {
                         }
                     } else {
                         state.pc = target_pc.to_offset_int();
-                    }
+                    };
                 }
                 Insn::DecrJumpZero { reg, target_pc } => {
                     assert!(target_pc.is_offset());
@@ -1553,7 +1615,7 @@ impl Program {
                             AggFunc::Min => {}
                             AggFunc::GroupConcat | AggFunc::StringAgg => {}
                             AggFunc::External(_) => {
-                                agg.compute_external();
+                                agg.compute_external()?;
                             }
                         },
                         OwnedValue::Null => {
@@ -1588,6 +1650,7 @@ impl Program {
                         })
                         .collect();
                     let cursor = Sorter::new(order);
+                    let mut cursors = state.cursors.borrow_mut();
                     cursors
                         .get_mut(*cursor_id)
                         .unwrap()
@@ -1599,6 +1662,7 @@ impl Program {
                     dest_reg,
                     pseudo_cursor,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let sorter_cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     let record = match sorter_cursor.record() {
                         Some(record) => record.clone(),
@@ -1616,6 +1680,7 @@ impl Program {
                     cursor_id,
                     record_reg,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(record) => record,
@@ -1628,6 +1693,7 @@ impl Program {
                     cursor_id,
                     pc_if_empty,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     if cursor.is_empty() {
                         state.pc = pc_if_empty.to_offset_int();
@@ -1641,6 +1707,7 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     cursor.next();
                     if cursor.has_more() {
@@ -1661,7 +1728,7 @@ impl Program {
                         crate::function::Func::Json(json_func) => match json_func {
                             JsonFunc::Json => {
                                 let json_value = &state.registers[*start_reg];
-                                let json_str = get_json(json_value);
+                                let json_str = get_json(json_value, None);
                                 match json_str {
                                     Ok(json) => state.registers[*dest] = json,
                                     Err(e) => return Err(e),
@@ -1745,6 +1812,64 @@ impl Program {
                             JsonFunc::JsonValid => {
                                 let json_value = &state.registers[*start_reg];
                                 state.registers[*dest] = is_json_valid(json_value)?;
+                            }
+                            JsonFunc::JsonPatch => {
+                                assert_eq!(arg_count, 2);
+                                assert!(*start_reg + 1 < state.registers.len());
+                                let target = &state.registers[*start_reg];
+                                let patch = &state.registers[*start_reg + 1];
+                                state.registers[*dest] = json_patch(target, patch)?;
+                            }
+                            JsonFunc::JsonRemove => {
+                                state.registers[*dest] = json_remove(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
+                            }
+                            JsonFunc::JsonPretty => {
+                                let json_value = &state.registers[*start_reg];
+                                let indent = if arg_count > 1 {
+                                    Some(&state.registers[*start_reg + 1])
+                                } else {
+                                    None
+                                };
+
+                                // Blob should be converted to Ascii in a lossy way
+                                // However, Rust strings uses utf-8
+                                // so the behavior at the moment is slightly different
+                                // To the way blobs are parsed here in SQLite.
+                                let indent = match indent {
+                                    Some(value) => match value {
+                                        OwnedValue::Text(text) => text.value.as_str(),
+                                        OwnedValue::Integer(val) => &val.to_string(),
+                                        OwnedValue::Float(val) => &val.to_string(),
+                                        OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
+                                        OwnedValue::Agg(ctx) => match ctx.final_value() {
+                                            OwnedValue::Text(text) => text.value.as_str(),
+                                            OwnedValue::Integer(val) => &val.to_string(),
+                                            OwnedValue::Float(val) => &val.to_string(),
+                                            OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
+                                            _ => "    ",
+                                        },
+                                        _ => "    ",
+                                    },
+                                    // If the second argument is omitted or is NULL, then indentation is four spaces per level
+                                    None => "    ",
+                                };
+
+                                let json_str = get_json(json_value, Some(indent))?;
+                                state.registers[*dest] = json_str;
+                            }
+                            JsonFunc::JsonSet => {
+                                let reg_values =
+                                    &state.registers[*start_reg + 1..*start_reg + arg_count];
+
+                                let json_result =
+                                    json_set(&state.registers[*start_reg], reg_values);
+
+                                match json_result {
+                                    Ok(json) => state.registers[*dest] = json,
+                                    Err(e) => return Err(e),
+                                }
                             }
                         },
                         crate::function::Func::Scalar(scalar_func) => match scalar_func {
@@ -1879,7 +2004,7 @@ impl Program {
                                 let reg_value = state.registers[*start_reg].borrow_mut();
                                 let result = match scalar_func {
                                     ScalarFunc::Sign => exec_sign(reg_value),
-                                    ScalarFunc::Abs => exec_abs(reg_value),
+                                    ScalarFunc::Abs => Some(exec_abs(reg_value)?),
                                     ScalarFunc::Lower => exec_lower(reg_value),
                                     ScalarFunc::Upper => exec_upper(reg_value),
                                     ScalarFunc::Length => Some(exec_length(reg_value)),
@@ -2038,6 +2163,14 @@ impl Program {
                                 let version = execute_sqlite_version(version_integer);
                                 state.registers[*dest] = OwnedValue::build_text(Rc::new(version));
                             }
+                            ScalarFunc::SqliteSourceId => {
+                                let src_id = format!(
+                                    "{} {}",
+                                    info::build::BUILT_TIME_SQLITE,
+                                    info::build::GIT_COMMIT_HASH.unwrap_or("unknown")
+                                );
+                                state.registers[*dest] = OwnedValue::build_text(Rc::new(src_id));
+                            }
                             ScalarFunc::Replace => {
                                 assert_eq!(arg_count, 3);
                                 let source = &state.registers[*start_reg];
@@ -2057,6 +2190,12 @@ impl Program {
                                 let result = exec_strftime(
                                     &state.registers[*start_reg..*start_reg + arg_count],
                                 );
+                                state.registers[*dest] = result;
+                            }
+                            ScalarFunc::Printf => {
+                                let result = exec_printf(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
                                 state.registers[*dest] = result;
                             }
                         },
@@ -2180,6 +2319,7 @@ impl Program {
                     record_reg,
                     flag: _,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(r) => r,
@@ -2190,6 +2330,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     cursor.wait_for_completion()?;
                     // Only update last_insert_rowid for regular table inserts, not schema modifications
@@ -2205,11 +2346,13 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::DeleteAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     return_if_io!(cursor.delete());
                     state.pc += 1;
                 }
                 Insn::DeleteAwait { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     cursor.wait_for_completion()?;
                     let prev_changes = self.n_change.get();
@@ -2219,6 +2362,7 @@ impl Program {
                 Insn::NewRowid {
                     cursor, rowid_reg, ..
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
                     // TODO: make io handle rng
                     let rowid = return_if_io!(get_new_rowid(cursor, thread_rng()));
@@ -2259,6 +2403,7 @@ impl Program {
                     rowid_reg,
                     target_pc,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor, self.cursor_ref, cursors, "NotExists");
                     let exists = return_if_io!(cursor.exists(&state.registers[*rowid_reg]));
@@ -2268,6 +2413,37 @@ impl Program {
                         state.pc = target_pc.to_offset_int();
                     }
                 }
+                Insn::OffsetLimit {
+                    limit_reg,
+                    combined_reg,
+                    offset_reg,
+                } => {
+                    let limit_val = match state.registers[*limit_reg] {
+                        OwnedValue::Integer(val) => val,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "OffsetLimit: the value in limit_reg is not an integer".into(),
+                            ));
+                        }
+                    };
+                    let offset_val = match state.registers[*offset_reg] {
+                        OwnedValue::Integer(val) if val < 0 => 0,
+                        OwnedValue::Integer(val) if val >= 0 => val,
+                        _ => {
+                            return Err(LimboError::InternalError(
+                                "OffsetLimit: the value in offset_reg is not an integer".into(),
+                            ));
+                        }
+                    };
+
+                    let offset_limit_sum = limit_val.overflowing_add(offset_val);
+                    if limit_val <= 0 || offset_limit_sum.1 {
+                        state.registers[*combined_reg] = OwnedValue::Integer(-1);
+                    } else {
+                        state.registers[*combined_reg] = OwnedValue::Integer(offset_limit_sum.0);
+                    }
+                    state.pc += 1;
+                }
                 // this cursor may be reused for next insert
                 // Update: tablemoveto is used to travers on not exists, on insert depending on flags if nonseek it traverses again.
                 // If not there might be some optimizations obviously.
@@ -2276,6 +2452,7 @@ impl Program {
                     root_page,
                 } => {
                     let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let mut cursors = state.cursors.borrow_mut();
                     let is_index = cursor_type.is_index();
                     let cursor = BTreeCursor::new(pager.clone(), *root_page);
                     if is_index {
@@ -2316,15 +2493,30 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Close { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
-                Insn::IsNull { src, target_pc } => {
-                    if matches!(state.registers[*src], OwnedValue::Null) {
+                Insn::IsNull { reg, target_pc } => {
+                    if matches!(state.registers[*reg], OwnedValue::Null) {
                         state.pc = target_pc.to_offset_int();
                     } else {
                         state.pc += 1;
                     }
+                }
+                Insn::PageCount { db, dest } => {
+                    if *db > 0 {
+                        // TODO: implement temp databases
+                        todo!("temp databases not implemented yet");
+                    }
+                    // SQLite returns "0" on an empty database, and 2 on the first insertion,
+                    // so we'll mimick that behavior.
+                    let mut pages = pager.db_header.borrow().database_size.into();
+                    if pages == 1 {
+                        pages = 0;
+                    }
+                    state.registers[*dest] = OwnedValue::Integer(pages);
+                    state.pc += 1;
                 }
                 Insn::ParseSchema {
                     db: _,
@@ -2387,6 +2579,11 @@ impl Program {
                         exec_or(&state.registers[*lhs], &state.registers[*rhs]);
                     state.pc += 1;
                 }
+                Insn::Noop => {
+                    // Do nothing
+                    // Advance the program counter for the next opcode
+                    state.pc += 1
+                }
             }
         }
     }
@@ -2397,7 +2594,11 @@ fn get_new_rowid<R: Rng>(cursor: &mut BTreeCursor, mut rng: R) -> Result<CursorR
         CursorResult::Ok(()) => {}
         CursorResult::IO => return Ok(CursorResult::IO),
     }
-    let mut rowid = cursor.rowid()?.unwrap_or(0) + 1;
+    let mut rowid = cursor
+        .rowid()?
+        .unwrap_or(0) // if BTree is empty - use 0 as initial value for rowid
+        .checked_add(1) // add 1 but be careful with overflows
+        .unwrap_or(u64::MAX); // in case of overflow - use u64::MAX
     if rowid > i64::MAX.try_into().unwrap() {
         let distribution = Uniform::from(1..=i64::MAX);
         let max_attempts = 100;
@@ -2448,7 +2649,10 @@ fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
             addr,
             insn,
             String::new(),
-            program.comments.get(&{ addr }).copied()
+            program
+                .comments
+                .as_ref()
+                .and_then(|comments| comments.get(&{ addr }).copied())
         )
     );
 }
@@ -2459,7 +2663,10 @@ fn print_insn(program: &Program, addr: InsnReference, insn: &Insn, indent: Strin
         addr,
         insn,
         indent,
-        program.comments.get(&{ addr }).copied(),
+        program
+            .comments
+            .as_ref()
+            .and_then(|comments| comments.get(&{ addr }).copied()),
     );
     println!("{}", s);
 }
@@ -2696,24 +2903,25 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
     OwnedValue::build_text(Rc::new(result.to_uppercase()))
 }
 
-fn exec_abs(reg: &OwnedValue) -> Option<OwnedValue> {
+fn exec_abs(reg: &OwnedValue) -> Result<OwnedValue> {
     match reg {
         OwnedValue::Integer(x) => {
-            if x < &0 {
-                Some(OwnedValue::Integer(-x))
-            } else {
-                Some(OwnedValue::Integer(*x))
+            match i64::checked_abs(*x) {
+                Some(y) => Ok(OwnedValue::Integer(y)),
+                // Special case: if we do the abs of "-9223372036854775808", it causes overflow.
+                // return IntegerOverflow error
+                None => Err(LimboError::IntegerOverflow),
             }
         }
         OwnedValue::Float(x) => {
             if x < &0.0 {
-                Some(OwnedValue::Float(-x))
+                Ok(OwnedValue::Float(-x))
             } else {
-                Some(OwnedValue::Float(*x))
+                Ok(OwnedValue::Float(*x))
             }
         }
-        OwnedValue::Null => Some(OwnedValue::Null),
-        _ => Some(OwnedValue::Float(0.0)),
+        OwnedValue::Null => Ok(OwnedValue::Null),
+        _ => Ok(OwnedValue::Float(0.0)),
     }
 }
 
@@ -3746,6 +3954,9 @@ mod tests {
             OwnedValue::Float(0.0)
         );
         assert_eq!(exec_abs(&OwnedValue::Null).unwrap(), OwnedValue::Null);
+
+        // ABS(i64::MIN) should return RuntimeError
+        assert!(exec_abs(&OwnedValue::Integer(i64::MIN)).is_err());
     }
 
     #[test]

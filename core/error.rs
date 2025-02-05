@@ -39,12 +39,18 @@ pub enum LimboError {
     InvalidTime(String),
     #[error("Modifier parsing error: {0}")]
     InvalidModifier(String),
+    #[error("Invalid argument supplied: {0}")]
+    InvalidArgument(String),
+    #[error("Invalid formatter supplied: {0}")]
+    InvalidFormatter(String),
     #[error("Runtime error: {0}")]
     Constraint(String),
     #[error("Extension error: {0}")]
     ExtensionError(String),
     #[error("Unbound parameter at index {0}")]
     Unbound(NonZero<usize>),
+    #[error("Runtime error: integer overflow")]
+    IntegerOverflow,
 }
 
 #[macro_export]

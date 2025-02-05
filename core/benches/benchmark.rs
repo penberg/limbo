@@ -1,186 +1,145 @@
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use limbo_core::{Database, PlatformIO, IO};
 use pprof::criterion::{Output, PProfProfiler};
 use std::sync::Arc;
 
-fn bench(c: &mut Criterion) {
-    limbo_bench(c);
-
-    // https://github.com/penberg/limbo/issues/174
-    // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
-    if std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_ok() {
-        return;
-    }
-
-    rusqlite_bench(c)
+fn rusqlite_open() -> rusqlite::Connection {
+    let sqlite_conn = rusqlite::Connection::open("../testing/testing.db").unwrap();
+    sqlite_conn
+        .pragma_update(None, "locking_mode", "EXCLUSIVE")
+        .unwrap();
+    sqlite_conn
 }
 
-fn limbo_bench(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("limbo");
-    group.throughput(Throughput::Elements(1));
+fn bench(criterion: &mut Criterion) {
+    // https://github.com/penberg/limbo/issues/174
+    // The rusqlite benchmark crashes on Mac M1 when using the flamegraph features
+    let enable_rusqlite = std::env::var("DISABLE_RUSQLITE_BENCHMARK").is_err();
+
     #[allow(clippy::arc_with_non_send_sync)]
     let io = Arc::new(PlatformIO::new().unwrap());
     let db = Database::open_file(io.clone(), "../testing/testing.db").unwrap();
-    let conn = db.connect();
+    let limbo_conn = db.connect();
 
-    group.bench_function("Prepare statement: 'SELECT 1'", |b| {
-        b.iter(|| {
-            conn.prepare("SELECT 1").unwrap();
+    let queries = [
+        "SELECT 1",
+        "SELECT * FROM users LIMIT 1",
+        "SELECT first_name, count(1) FROM users GROUP BY first_name HAVING count(1) > 1 ORDER BY count(1)  LIMIT 1",
+    ];
+
+    for query in queries.iter() {
+        let mut group = criterion.benchmark_group(format!("Prepare `{}`", query));
+
+        group.bench_with_input(BenchmarkId::new("Limbo", query), query, |b, query| {
+            b.iter(|| {
+                limbo_conn.prepare(query).unwrap();
+            });
         });
-    });
 
-    group.bench_function("Prepare statement: 'SELECT * FROM users LIMIT 1'", |b| {
-        b.iter(|| {
-            conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
+        if enable_rusqlite {
+            let sqlite_conn = rusqlite_open();
+
+            group.bench_with_input(BenchmarkId::new("Sqlite3", query), query, |b, query| {
+                b.iter(|| {
+                    sqlite_conn.prepare(query).unwrap();
+                });
+            });
+        }
+
+        group.finish();
+    }
+
+    let mut group = criterion.benchmark_group("Execute `SELECT * FROM users LIMIT ?`");
+
+    for i in [1, 10, 50, 100] {
+        group.bench_with_input(BenchmarkId::new("Limbo", i), &i, |b, i| {
+            // TODO: LIMIT doesn't support query parameters.
+            let mut stmt = limbo_conn
+                .prepare(format!("SELECT * FROM users LIMIT {}", *i))
+                .unwrap();
+            let io = io.clone();
+            b.iter(|| {
+                loop {
+                    match stmt.step().unwrap() {
+                        limbo_core::StepResult::Row(row) => {
+                            black_box(row);
+                        }
+                        limbo_core::StepResult::IO => {
+                            let _ = io.run_once();
+                        }
+                        limbo_core::StepResult::Done => {
+                            break;
+                        }
+                        limbo_core::StepResult::Interrupt | limbo_core::StepResult::Busy => {
+                            unreachable!();
+                        }
+                    }
+                }
+                stmt.reset();
+            });
         });
-    });
 
-    group.bench_function("Prepare statement: 'SELECT first_name, count(1) FROM users GROUP BY first_name HAVING count(1) > 1 ORDER BY count(1)  LIMIT 1'", |b| {
-        b.iter(|| {
-            conn.prepare("SELECT first_name, count(1) FROM users GROUP BY first_name HAVING count(1) > 1 ORDER BY count(1) LIMIT 1").unwrap();
-        });
-    });
+        if enable_rusqlite {
+            let sqlite_conn = rusqlite_open();
 
-    let mut stmt = conn.prepare("SELECT 1").unwrap();
-    group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
+            group.bench_with_input(BenchmarkId::new("Sqlite3", i), &i, |b, i| {
+                // TODO: Use parameters once we fix the above.
+                let mut stmt = sqlite_conn
+                    .prepare(&format!("SELECT * FROM users LIMIT {}", *i))
+                    .unwrap();
+                b.iter(|| {
+                    let mut rows = stmt.raw_query();
+                    while let Some(row) = rows.next().unwrap() {
+                        black_box(row);
+                    }
+                });
+            });
+        }
+    }
+
+    group.finish();
+
+    let mut group = criterion.benchmark_group("Execute `SELECT 1`");
+
+    group.bench_function("Limbo", |b| {
+        let mut stmt = limbo_conn.prepare("SELECT 1").unwrap();
         let io = io.clone();
         b.iter(|| {
-            let mut rows = stmt.query().unwrap();
-            match rows.step().unwrap() {
-                limbo_core::StepResult::Row(row) => {
-                    assert_eq!(row.get::<i64>(0).unwrap(), 1);
-                }
-                limbo_core::StepResult::IO => {
-                    io.run_once().unwrap();
-                }
-                limbo_core::StepResult::Interrupt => {
-                    unreachable!();
-                }
-                limbo_core::StepResult::Done => {
-                    unreachable!();
-                }
-                limbo_core::StepResult::Busy => {
-                    unreachable!();
+            loop {
+                match stmt.step().unwrap() {
+                    limbo_core::StepResult::Row(row) => {
+                        black_box(row);
+                    }
+                    limbo_core::StepResult::IO => {
+                        let _ = io.run_once();
+                    }
+                    limbo_core::StepResult::Done => {
+                        break;
+                    }
+                    limbo_core::StepResult::Interrupt | limbo_core::StepResult::Busy => {
+                        unreachable!();
+                    }
                 }
             }
             stmt.reset();
         });
     });
 
-    let mut stmt = conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
-    group.bench_function(
-        "Execute prepared statement: 'SELECT * FROM users LIMIT 1'",
-        |b| {
-            let io = io.clone();
+    if enable_rusqlite {
+        let sqlite_conn = rusqlite_open();
+
+        group.bench_function("Sqlite3", |b| {
+            let mut stmt = sqlite_conn.prepare("SELECT 1").unwrap();
             b.iter(|| {
-                let mut rows = stmt.query().unwrap();
-                match rows.step().unwrap() {
-                    limbo_core::StepResult::Row(row) => {
-                        assert_eq!(row.get::<i64>(0).unwrap(), 1);
-                    }
-                    limbo_core::StepResult::IO => {
-                        io.run_once().unwrap();
-                    }
-                    limbo_core::StepResult::Interrupt => {
-                        unreachable!();
-                    }
-                    limbo_core::StepResult::Done => {
-                        unreachable!();
-                    }
-                    limbo_core::StepResult::Busy => {
-                        unreachable!()
-                    }
+                let mut rows = stmt.raw_query();
+                while let Some(row) = rows.next().unwrap() {
+                    black_box(row);
                 }
-                stmt.reset();
             });
-        },
-    );
-
-    let mut stmt = conn.prepare("SELECT * FROM users LIMIT 100").unwrap();
-    group.bench_function(
-        "Execute prepared statement: 'SELECT * FROM users LIMIT 100'",
-        |b| {
-            let io = io.clone();
-            b.iter(|| {
-                let mut rows = stmt.query().unwrap();
-                match rows.step().unwrap() {
-                    limbo_core::StepResult::Row(row) => {
-                        assert_eq!(row.get::<i64>(0).unwrap(), 1);
-                    }
-                    limbo_core::StepResult::IO => {
-                        io.run_once().unwrap();
-                    }
-                    limbo_core::StepResult::Interrupt => {
-                        unreachable!();
-                    }
-                    limbo_core::StepResult::Done => {
-                        unreachable!();
-                    }
-                    limbo_core::StepResult::Busy => {
-                        unreachable!()
-                    }
-                }
-                stmt.reset();
-            });
-        },
-    );
-}
-
-fn rusqlite_bench(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("rusqlite");
-    group.throughput(Throughput::Elements(1));
-
-    let conn = rusqlite::Connection::open("../testing/testing.db").unwrap();
-
-    conn.pragma_update(None, "locking_mode", "EXCLUSIVE")
-        .unwrap();
-    group.bench_function("Prepare statement: 'SELECT 1'", |b| {
-        b.iter(|| {
-            conn.prepare("SELECT 1").unwrap();
         });
-    });
+    }
 
-    group.bench_function("Prepare statement: 'SELECT * FROM users LIMIT 1'", |b| {
-        b.iter(|| {
-            conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
-        });
-    });
-
-    let mut stmt = conn.prepare("SELECT 1").unwrap();
-    group.bench_function("Execute prepared statement: 'SELECT 1'", |b| {
-        b.iter(|| {
-            let mut rows = stmt.query(()).unwrap();
-            let row = rows.next().unwrap().unwrap();
-            let val: i64 = row.get(0).unwrap();
-            assert_eq!(val, 1);
-        });
-    });
-
-    let mut stmt = conn.prepare("SELECT * FROM users LIMIT 1").unwrap();
-    group.bench_function(
-        "Execute prepared statement: 'SELECT * FROM users LIMIT 1'",
-        |b| {
-            b.iter(|| {
-                let mut rows = stmt.query(()).unwrap();
-                let row = rows.next().unwrap().unwrap();
-                let id: i64 = row.get(0).unwrap();
-                assert_eq!(id, 1);
-            });
-        },
-    );
-
-    let mut stmt = conn.prepare("SELECT * FROM users LIMIT 100").unwrap();
-    group.bench_function(
-        "Execute prepared statement: 'SELECT * FROM users LIMIT 100'",
-        |b| {
-            b.iter(|| {
-                let mut rows = stmt.query(()).unwrap();
-                let row = rows.next().unwrap().unwrap();
-                let id: i64 = row.get(0).unwrap();
-                assert_eq!(id, 1);
-            });
-        },
-    );
+    group.finish();
 }
 
 criterion_group! {

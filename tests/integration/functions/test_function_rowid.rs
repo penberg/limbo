@@ -4,7 +4,9 @@ use limbo_core::{StepResult, Value};
 #[test]
 fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("CREATE TABLE test_rowid (id INTEGER PRIMARY KEY, val TEXT);");
+    let tmp_db = TempDatabase::new_with_rusqlite(
+        "CREATE TABLE test_rowid (id INTEGER PRIMARY KEY, val TEXT);",
+    );
     let conn = tmp_db.connect_limbo();
 
     // Simple insert
@@ -79,5 +81,45 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     };
     assert_eq!(last_id, 5, "Explicit insert should have rowid 5");
     do_flush(&conn, &tmp_db)?;
+    Ok(())
+}
+
+#[test]
+fn test_integer_primary_key() -> anyhow::Result<()> {
+    let _ = env_logger::try_init();
+    let tmp_db =
+        TempDatabase::new_with_rusqlite("CREATE TABLE test_rowid (id INTEGER PRIMARY KEY);");
+    let conn = tmp_db.connect_limbo();
+
+    for query in &[
+        "INSERT INTO test_rowid VALUES (-1)",
+        "INSERT INTO test_rowid VALUES (NULL)",
+    ] {
+        let mut insert_query = conn.query(query)?.unwrap();
+        loop {
+            match insert_query.step()? {
+                StepResult::IO => tmp_db.io.run_once()?,
+                StepResult::Done => break,
+                _ => unreachable!(),
+            }
+        }
+    }
+    let mut rowids = Vec::new();
+    let mut select_query = conn.query("SELECT * FROM test_rowid")?.unwrap();
+    loop {
+        match select_query.step()? {
+            StepResult::Row(row) => {
+                if let Value::Integer(id) = row.values[0] {
+                    rowids.push(id);
+                }
+            }
+            StepResult::IO => tmp_db.io.run_once()?,
+            StepResult::Interrupt | StepResult::Done => break,
+            StepResult::Busy => panic!("Database is busy"),
+        }
+    }
+    assert_eq!(rowids.len(), 2);
+    assert!(rowids[0] > 0);
+    assert!(rowids[1] == -1);
     Ok(())
 }

@@ -1,0 +1,14 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+do_execsql_test vector-functions-valid {
+  SELECT vector_extract(vector('[]'));
+  SELECT vector_extract(vector('  [  1  ,  2  ,  3  ]  '));
+  SELECT vector_extract(vector('[-1000000000000000000]'));
+} {
+  {[]} 
+  {[1,2,3]} 
+  {[-1000000000000000000]} 
+}

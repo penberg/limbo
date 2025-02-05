@@ -1,22 +1,24 @@
 use crate::{
-    statement::LimboStatement,
     types::{LimboValue, ResultCode},
+    LimboConn,
 };
-use limbo_core::{Statement, StepResult, Value};
+use limbo_core::{LimboError, Row, Statement, StepResult};
 use std::ffi::{c_char, c_void};
 
-pub struct LimboRows<'a> {
-    rows: Statement,
-    cursor: Option<Vec<Value<'a>>>,
-    stmt: Box<LimboStatement<'a>>,
+pub struct LimboRows<'conn, 'a> {
+    stmt: Box<Statement>,
+    conn: &'conn mut LimboConn,
+    cursor: Option<Row<'a>>,
+    err: Option<LimboError>,
 }
 
-impl<'a> LimboRows<'a> {
-    pub fn new(rows: Statement, stmt: Box<LimboStatement<'a>>) -> Self {
+impl<'conn, 'a> LimboRows<'conn, 'a> {
+    pub fn new(stmt: Statement, conn: &'conn mut LimboConn) -> Self {
         LimboRows {
-            rows,
-            stmt,
+            stmt: Box::new(stmt),
             cursor: None,
+            conn,
+            err: None,
         }
     }
 
@@ -25,11 +27,22 @@ impl<'a> LimboRows<'a> {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    pub fn from_ptr(ptr: *mut c_void) -> &'static mut LimboRows<'a> {
+    pub fn from_ptr(ptr: *mut c_void) -> &'conn mut LimboRows<'conn, 'a> {
         if ptr.is_null() {
             panic!("Null pointer");
         }
         unsafe { &mut *(ptr as *mut LimboRows) }
+    }
+
+    fn get_error(&mut self) -> *const c_char {
+        if let Some(err) = &self.err {
+            let err = format!("{}", err);
+            let c_str = std::ffi::CString::new(err).unwrap();
+            self.err = None;
+            c_str.into_raw() as *const c_char
+        } else {
+            std::ptr::null()
+        }
     }
 }
 
@@ -40,19 +53,22 @@ pub extern "C" fn rows_next(ctx: *mut c_void) -> ResultCode {
     }
     let ctx = LimboRows::from_ptr(ctx);
 
-    match ctx.rows.step() {
+    match ctx.stmt.step() {
         Ok(StepResult::Row(row)) => {
-            ctx.cursor = Some(row.values);
+            ctx.cursor = Some(row);
             ResultCode::Row
         }
         Ok(StepResult::Done) => ResultCode::Done,
         Ok(StepResult::IO) => {
-            let _ = ctx.stmt.conn.io.run_once();
+            let _ = ctx.conn.io.run_once();
             ResultCode::Io
         }
         Ok(StepResult::Busy) => ResultCode::Busy,
         Ok(StepResult::Interrupt) => ResultCode::Interrupt,
-        Err(_) => ResultCode::Error,
+        Err(err) => {
+            ctx.err = Some(err);
+            ResultCode::Error
+        }
     }
 }
 
@@ -64,9 +80,8 @@ pub extern "C" fn rows_get_value(ctx: *mut c_void, col_idx: usize) -> *const c_v
     let ctx = LimboRows::from_ptr(ctx);
 
     if let Some(ref cursor) = ctx.cursor {
-        if let Some(value) = cursor.get(col_idx) {
-            let val = LimboValue::from_value(value);
-            return val.to_ptr();
+        if let Some(value) = cursor.values.get(col_idx) {
+            return LimboValue::from_value(value).to_ptr();
         }
     }
     std::ptr::null()
@@ -79,60 +94,53 @@ pub extern "C" fn free_string(s: *mut c_char) {
     }
 }
 
+/// Function to get the number of expected ResultColumns in the prepared statement.
+/// to avoid the needless complexity of returning an array of strings, this instead
+/// works like rows_next/rows_get_value
 #[no_mangle]
-pub extern "C" fn rows_get_columns(
-    rows_ptr: *mut c_void,
-    out_length: *mut usize,
-) -> *mut *const c_char {
-    if rows_ptr.is_null() || out_length.is_null() {
+pub extern "C" fn rows_get_columns(rows_ptr: *mut c_void) -> i32 {
+    if rows_ptr.is_null() {
+        return -1;
+    }
+    let rows = LimboRows::from_ptr(rows_ptr);
+    rows.stmt.columns().len() as i32
+}
+
+/// Returns a pointer to a string with the name of the column at the given index.
+/// The caller is responsible for freeing the memory, it should be copied on the Go side
+/// immediately and 'free_string' called
+#[no_mangle]
+pub extern "C" fn rows_get_column_name(rows_ptr: *mut c_void, idx: i32) -> *const c_char {
+    if rows_ptr.is_null() {
         return std::ptr::null_mut();
     }
     let rows = LimboRows::from_ptr(rows_ptr);
-    let c_strings: Vec<std::ffi::CString> = rows
-        .rows
-        .columns()
-        .iter()
-        .map(|name| std::ffi::CString::new(name.as_str()).unwrap())
-        .collect();
-
-    let c_ptrs: Vec<*const c_char> = c_strings.iter().map(|s| s.as_ptr()).collect();
-    unsafe {
-        *out_length = c_ptrs.len();
+    if idx < 0 || idx as usize >= rows.stmt.columns().len() {
+        return std::ptr::null_mut();
     }
-    let ptr = c_ptrs.as_ptr();
-    std::mem::forget(c_strings);
-    std::mem::forget(c_ptrs);
-    ptr as *mut *const c_char
+    let name = &rows.stmt.columns()[idx as usize];
+    let cstr = std::ffi::CString::new(name.as_bytes()).expect("Failed to create CString");
+    cstr.into_raw() as *const c_char
 }
 
 #[no_mangle]
-pub extern "C" fn rows_close(rows_ptr: *mut c_void) {
-    if !rows_ptr.is_null() {
-        let _ = unsafe { Box::from_raw(rows_ptr as *mut LimboRows) };
+pub extern "C" fn rows_get_error(ctx: *mut c_void) -> *const c_char {
+    if ctx.is_null() {
+        return std::ptr::null();
     }
+    let ctx = LimboRows::from_ptr(ctx);
+    ctx.get_error()
 }
 
 #[no_mangle]
-pub extern "C" fn free_columns(columns: *mut *const c_char) {
-    if columns.is_null() {
-        return;
+pub extern "C" fn rows_close(ctx: *mut c_void) {
+    if !ctx.is_null() {
+        let rows = LimboRows::from_ptr(ctx);
+        rows.stmt.reset();
+        rows.cursor = None;
+        rows.err = None;
     }
     unsafe {
-        let mut idx = 0;
-        while !(*columns.add(idx)).is_null() {
-            let _ = std::ffi::CString::from_raw(*columns.add(idx) as *mut c_char);
-            idx += 1;
-        }
-        let _ = Box::from_raw(columns);
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn free_rows(rows: *mut c_void) {
-    if rows.is_null() {
-        return;
-    }
-    unsafe {
-        let _ = Box::from_raw(rows as *mut Statement);
+        let _ = Box::from_raw(ctx.cast::<LimboRows>());
     }
 }

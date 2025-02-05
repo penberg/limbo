@@ -1,7 +1,8 @@
-use std::{fmt::Display, os::raw::c_void};
+use std::fmt::Display;
 
 /// Error type is of type ExtError which can be
 /// either a user defined error or an error code
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub enum ResultCode {
     OK = 0,
@@ -18,11 +19,16 @@ pub enum ResultCode {
     Unimplemented = 11,
     Internal = 12,
     Unavailable = 13,
+    CustomError = 14,
 }
 
 impl ResultCode {
     pub fn is_ok(&self) -> bool {
         matches!(self, ResultCode::OK)
+    }
+
+    pub fn has_error_set(&self) -> bool {
+        matches!(self, ResultCode::CustomError)
     }
 }
 
@@ -31,7 +37,7 @@ impl Display for ResultCode {
         match self {
             ResultCode::OK => write!(f, "OK"),
             ResultCode::Error => write!(f, "Error"),
-            ResultCode::InvalidArgs => write!(f, "InvalidArgs"),
+            ResultCode::InvalidArgs => write!(f, "Invalid Argument"),
             ResultCode::Unknown => write!(f, "Unknown"),
             ResultCode::OoM => write!(f, "Out of Memory"),
             ResultCode::Corrupt => write!(f, "Corrupt"),
@@ -43,6 +49,7 @@ impl Display for ResultCode {
             ResultCode::Unimplemented => write!(f, "Unimplemented"),
             ResultCode::Internal => write!(f, "Internal Error"),
             ResultCode::Unavailable => write!(f, "Unavailable"),
+            ResultCode::CustomError => write!(f, "Error "),
         }
     }
 }
@@ -61,31 +68,35 @@ pub enum ValueType {
 #[repr(C)]
 pub struct Value {
     value_type: ValueType,
-    value: *mut c_void,
+    value: ValueData,
+}
+
+#[repr(C)]
+union ValueData {
+    int: i64,
+    float: f64,
+    text: *const TextValue,
+    blob: *const Blob,
+    error: *const ErrValue,
 }
 
 impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.value.is_null() {
-            return write!(f, "{:?}: Null", self.value_type);
-        }
         match self.value_type {
             ValueType::Null => write!(f, "Value {{ Null }}"),
-            ValueType::Integer => write!(f, "Value {{ Integer: {} }}", unsafe {
-                *(self.value as *const i64)
-            }),
-            ValueType::Float => write!(f, "Value {{ Float: {} }}", unsafe {
-                *(self.value as *const f64)
-            }),
-            ValueType::Text => write!(f, "Value {{ Text: {:?} }}", unsafe {
-                &*(self.value as *const TextValue)
-            }),
-            ValueType::Blob => write!(f, "Value {{ Blob: {:?} }}", unsafe {
-                &*(self.value as *const Blob)
-            }),
-            ValueType::Error => write!(f, "Value {{ Error: {:?} }}", unsafe {
-                &*(self.value as *const TextValue)
-            }),
+            ValueType::Integer => write!(
+                f,
+                "Value {{ Integer: {} }}",
+                self.to_integer().unwrap_or_default()
+            ),
+            ValueType::Float => write!(
+                f,
+                "Value {{ Float: {} }}",
+                self.to_float().unwrap_or_default()
+            ),
+            ValueType::Text => write!(f, "Value {{ Text: {:?} }}", self.to_text()),
+            ValueType::Blob => write!(f, "Value {{ Blob: {:?} }}", self.to_blob()),
+            ValueType::Error => write!(f, "Value {{ Error }}"),
         }
     }
 }
@@ -123,12 +134,56 @@ impl TextValue {
         }
     }
 
+    pub(crate) fn new_boxed(s: String) -> Box<Self> {
+        let buffer = s.into_boxed_str();
+        let ptr = buffer.as_ptr();
+        let len = buffer.len();
+        std::mem::forget(buffer);
+        Box::new(Self {
+            text: ptr,
+            len: len as u32,
+        })
+    }
+
     fn as_str(&self) -> &str {
         if self.text.is_null() {
             return "";
         }
         unsafe {
             std::str::from_utf8_unchecked(std::slice::from_raw_parts(self.text, self.len as usize))
+        }
+    }
+}
+
+#[repr(C)]
+pub struct ErrValue {
+    code: ResultCode,
+    message: *mut TextValue,
+}
+
+impl ErrValue {
+    fn new(code: ResultCode) -> Self {
+        Self {
+            code,
+            message: std::ptr::null_mut(),
+        }
+    }
+
+    fn new_with_message(code: ResultCode, message: String) -> Self {
+        let buffer = message.into_boxed_str();
+        let ptr = buffer.as_ptr();
+        let len = buffer.len();
+        std::mem::forget(buffer);
+        let text_value = TextValue::new(ptr, len);
+        Self {
+            code,
+            message: Box::into_raw(Box::new(text_value)),
+        }
+    }
+
+    unsafe fn free(self) {
+        if !self.message.is_null() {
+            let _ = Box::from_raw(self.message); // Freed by the same library
         }
     }
 }
@@ -156,40 +211,42 @@ impl Value {
     pub fn null() -> Self {
         Self {
             value_type: ValueType::Null,
-            value: std::ptr::null_mut(),
+            value: ValueData { int: 0 },
         }
     }
 
     /// Returns the value type of the Value
+    /// # Safety
+    /// This function accesses the value_type field of the union.
+    /// it is safe to call this function as long as the value was properly
+    /// constructed with one of the provided methods
     pub fn value_type(&self) -> ValueType {
         self.value_type
     }
 
-    /// Returns the float value if the Value is the proper type
+    /// Returns the float value or casts the relevant value to a float
     pub fn to_float(&self) -> Option<f64> {
-        if self.value.is_null() {
-            return None;
-        }
         match self.value_type {
-            ValueType::Float => Some(unsafe { *(self.value as *const f64) }),
-            ValueType::Integer => Some(unsafe { *(self.value as *const i64) as f64 }),
+            ValueType::Float => Some(unsafe { self.value.float }),
+            ValueType::Integer => Some(unsafe { self.value.int } as f64),
             ValueType::Text => {
-                let txt = unsafe { &*(self.value as *const TextValue) };
-                txt.as_str().parse().ok()
+                let txt = self.to_text().unwrap_or_default();
+                txt.parse().ok()
             }
             _ => None,
         }
     }
+
     /// Returns the text value if the Value is the proper type
-    pub fn to_text(&self) -> Option<String> {
-        if self.value_type != ValueType::Text {
-            return None;
+    pub fn to_text(&self) -> Option<&str> {
+        unsafe {
+            if self.value_type == ValueType::Text && !self.value.text.is_null() {
+                let txt = &*self.value.text;
+                Some(txt.as_str())
+            } else {
+                None
+            }
         }
-        if self.value.is_null() {
-            return None;
-        }
-        let txt = unsafe { &*(self.value as *const TextValue) };
-        Some(String::from(txt.as_str()))
     }
 
     /// Returns the blob value if the Value is the proper type
@@ -197,119 +254,120 @@ impl Value {
         if self.value_type != ValueType::Blob {
             return None;
         }
-        if self.value.is_null() {
+        if unsafe { self.value.blob.is_null() } {
             return None;
         }
-        let blob = unsafe { &*(self.value as *const Blob) };
+        let blob = unsafe { &*(self.value.blob) };
         let slice = unsafe { std::slice::from_raw_parts(blob.data, blob.size as usize) };
         Some(slice.to_vec())
     }
 
     /// Returns the integer value if the Value is the proper type
     pub fn to_integer(&self) -> Option<i64> {
-        if self.value.is_null() {
-            return None;
-        }
         match self.value_type() {
-            ValueType::Integer => Some(unsafe { *(self.value as *const i64) }),
-            ValueType::Float => Some(unsafe { *(self.value as *const f64) } as i64),
-            ValueType::Text => {
-                let txt = unsafe { &*(self.value as *const TextValue) };
-                txt.as_str().parse().ok()
-            }
+            ValueType::Integer => Some(unsafe { self.value.int }),
+            ValueType::Float => Some(unsafe { self.value.float } as i64),
+            ValueType::Text => self
+                .to_text()
+                .map(|txt| txt.parse::<i64>().unwrap_or_default()),
             _ => None,
         }
     }
 
-    /// Returns the error message if the value is an error
-    pub fn to_error(&self) -> Option<String> {
+    /// Returns the error code if the value is an error
+    pub fn to_error(&self) -> Option<ResultCode> {
         if self.value_type != ValueType::Error {
             return None;
         }
-        if self.value.is_null() {
+        if unsafe { self.value.error.is_null() } {
             return None;
         }
-        let err = unsafe { &*(self.value as *const ExtError) };
-        match &err.error_type {
-            ErrorType::User => {
-                if err.message.is_null() {
-                    return None;
-                }
-                let txt = unsafe { &*(err.message as *const TextValue) };
-                Some(txt.as_str().to_string())
-            }
-            ErrorType::ErrCode { code } => Some(format!("{}", code)),
+        let err = unsafe { &*self.value.error };
+        Some(err.code)
+    }
+
+    /// Returns the error code and optional message if the value is an error
+    pub fn to_error_details(&self) -> Option<(ResultCode, Option<String>)> {
+        if self.value_type != ValueType::Error || unsafe { self.value.error.is_null() } {
+            return None;
+        }
+        let err_val = unsafe { &*(self.value.error) };
+        let code = err_val.code;
+
+        if err_val.message.is_null() {
+            Some((code, None))
+        } else {
+            let txt = unsafe { &*(err_val.message as *const TextValue) };
+            let msg = txt.as_str().to_owned();
+            Some((code, Some(msg)))
         }
     }
 
     /// Creates a new integer Value from an i64
-    pub fn from_integer(value: i64) -> Self {
-        let boxed = Box::new(value);
+    pub fn from_integer(i: i64) -> Self {
         Self {
             value_type: ValueType::Integer,
-            value: Box::into_raw(boxed) as *mut c_void,
+            value: ValueData { int: i },
         }
     }
 
     /// Creates a new float Value from an f64
     pub fn from_float(value: f64) -> Self {
-        let boxed = Box::new(value);
         Self {
             value_type: ValueType::Float,
-            value: Box::into_raw(boxed) as *mut c_void,
+            value: ValueData { float: value },
         }
     }
+
     /// Creates a new text Value from a String
+    /// This function allocates/leaks the string
+    /// and must be free'd manually
     pub fn from_text(s: String) -> Self {
-        let buffer = s.into_boxed_str();
-        let ptr = buffer.as_ptr();
-        let len = buffer.len();
-        std::mem::forget(buffer);
-        let text_value = TextValue::new(ptr, len);
-        let text_box = Box::new(text_value);
+        let txt_value = TextValue::new_boxed(s);
+        let ptr = Box::into_raw(txt_value);
         Self {
             value_type: ValueType::Text,
-            value: Box::into_raw(text_box) as *mut c_void,
+            value: ValueData { text: ptr },
         }
     }
 
     /// Creates a new error Value from a ResultCode
-    pub fn error(err: ResultCode) -> Self {
-        let error = ExtError {
-            error_type: ErrorType::ErrCode { code: err },
-            message: std::ptr::null_mut(),
-        };
+    /// This function allocates/leaks the error
+    /// and must be free'd manually
+    pub fn error(code: ResultCode) -> Self {
+        let err_val = ErrValue::new(code);
         Self {
             value_type: ValueType::Error,
-            value: Box::into_raw(Box::new(error)) as *mut c_void,
+            value: ValueData {
+                error: Box::into_raw(Box::new(err_val)) as *const ErrValue,
+            },
         }
     }
 
-    /// Create a new user defined error Value with a message
-    pub fn custom_error(s: String) -> Self {
-        let buffer = s.into_boxed_str();
-        let ptr = buffer.as_ptr();
-        let len = buffer.len();
-        std::mem::forget(buffer);
-        let text_value = TextValue::new(ptr, len);
-        let text_box = Box::new(text_value);
-        let error = ExtError {
-            error_type: ErrorType::User,
-            message: Box::into_raw(text_box) as *mut c_void,
-        };
+    /// Creates a new error Value from a ResultCode and a message
+    /// This function allocates/leaks the error, must be free'd manually
+    pub fn error_with_message(message: String) -> Self {
+        let err_value = ErrValue::new_with_message(ResultCode::CustomError, message);
+        let err_box = Box::new(err_value);
         Self {
             value_type: ValueType::Error,
-            value: Box::into_raw(Box::new(error)) as *mut c_void,
+            value: ValueData {
+                error: Box::into_raw(err_box) as *const ErrValue,
+            },
         }
     }
 
     /// Creates a new blob Value from a Vec<u8>
+    /// This function allocates/leaks the blob
+    /// and must be free'd manually
     pub fn from_blob(value: Vec<u8>) -> Self {
         let boxed = Box::new(Blob::new(value.as_ptr(), value.len() as u64));
         std::mem::forget(value);
         Self {
             value_type: ValueType::Blob,
-            value: Box::into_raw(boxed) as *mut c_void,
+            value: ValueData {
+                blob: Box::into_raw(boxed) as *const Blob,
+            },
         }
     }
 
@@ -318,41 +376,18 @@ impl Value {
     /// however this does assume that the type was properly constructed with
     /// the appropriate value_type and value.
     pub unsafe fn free(self) {
-        if self.value.is_null() {
-            return;
-        }
         match self.value_type {
-            ValueType::Integer => {
-                let _ = Box::from_raw(self.value as *mut i64);
-            }
-            ValueType::Float => {
-                let _ = Box::from_raw(self.value as *mut f64);
-            }
             ValueType::Text => {
-                let _ = Box::from_raw(self.value as *mut TextValue);
+                let _ = Box::from_raw(self.value.text as *mut TextValue);
             }
             ValueType::Blob => {
-                let _ = Box::from_raw(self.value as *mut Blob);
+                let _ = Box::from_raw(self.value.blob as *mut Blob);
             }
             ValueType::Error => {
-                let _ = Box::from_raw(self.value as *mut ExtError);
+                let err_val = Box::from_raw(self.value.error as *mut ErrValue);
+                err_val.free();
             }
-            ValueType::Null => {}
+            _ => {}
         }
     }
-}
-
-#[repr(C)]
-pub struct ExtError {
-    pub error_type: ErrorType,
-    pub message: *mut std::ffi::c_void,
-}
-
-#[repr(C)]
-pub enum ErrorType {
-    User,
-    /// User type has a user provided message
-    ErrCode {
-        code: ResultCode,
-    },
 }

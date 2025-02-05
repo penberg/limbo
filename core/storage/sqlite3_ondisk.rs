@@ -49,10 +49,11 @@ use crate::storage::pager::Pager;
 use crate::types::{OwnedRecord, OwnedValue};
 use crate::{File, Result};
 use log::trace;
+use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::pager::PageRef;
 
@@ -1147,7 +1148,7 @@ pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Arc<RwLock<WalHeader>>
 fn finish_read_wal_header(buf: Rc<RefCell<Buffer>>, header: Arc<RwLock<WalHeader>>) -> Result<()> {
     let buf = buf.borrow();
     let buf = buf.as_slice();
-    let mut header = header.write().unwrap();
+    let mut header = header.write();
     header.magic = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
     header.file_format = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
     header.page_size = u32::from_be_bytes([buf[8], buf[9], buf[10], buf[11]]);

@@ -6,6 +6,37 @@ use crate::storage::wal::CheckpointMode;
 use crate::types::{OwnedRecord, OwnedValue};
 use limbo_macros::Description;
 
+/// Flags provided to comparison instructions (e.g. Eq, Ne) which determine behavior related to NULL values.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CmpInsFlags(usize);
+
+impl CmpInsFlags {
+    const NULL_EQ: usize = 0x80;
+    const JUMP_IF_NULL: usize = 0x10;
+
+    fn has(&self, flag: usize) -> bool {
+        (self.0 & flag) != 0
+    }
+
+    pub fn null_eq(mut self) -> Self {
+        self.0 |= CmpInsFlags::NULL_EQ;
+        self
+    }
+
+    pub fn jump_if_null(mut self) -> Self {
+        self.0 |= CmpInsFlags::JUMP_IF_NULL;
+        self
+    }
+
+    pub fn has_jump_if_null(&self) -> bool {
+        self.has(CmpInsFlags::JUMP_IF_NULL)
+    }
+
+    pub fn has_nulleq(&self) -> bool {
+        self.has(CmpInsFlags::NULL_EQ)
+    }
+}
+
 #[derive(Description, Debug)]
 pub enum Insn {
     // Initialize the program state and jump to the given PC.
@@ -108,52 +139,56 @@ pub enum Insn {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
+        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
         /// Eg. "SELECT * FROM users WHERE id = NULL" becomes:
         /// <JUMP TO NEXT ROW IF id != NULL>
         /// Without the jump_if_null flag it would not jump because the logical comparison "id != NULL" is never true.
         /// This flag indicates that if either is null we should still jump.
-        jump_if_null: bool,
+        flags: CmpInsFlags,
     },
     // Compare two registers and jump to the given PC if they are not equal.
     Ne {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// CmpInsFlags are nulleq (null = null) or jump_if_null.
+        ///
+        /// jump_if_null jumps if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is less than the right-hand side.
     Lt {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is less than or equal to the right-hand side.
     Le {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is greater than the right-hand side.
     Gt {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
     },
     // Compare two registers and jump to the given PC if the left-hand side is greater than or equal to the right-hand side.
     Ge {
         lhs: usize,
         rhs: usize,
         target_pc: BranchOffset,
-        /// Jump if either of the operands is null. Used for "jump when false" logic.
-        jump_if_null: bool,
+        /// jump_if_null: Jump if either of the operands is null. Used for "jump when false" logic.
+        flags: CmpInsFlags,
     },
     /// Jump to target_pc if r\[reg\] != 0 or (r\[reg\] == NULL && r\[jump_if_null\] != 0)
     If {
@@ -473,6 +508,12 @@ pub enum Insn {
         target_pc: BranchOffset,
     },
 
+    OffsetLimit {
+        limit_reg: usize,
+        combined_reg: usize,
+        offset_reg: usize,
+    },
+
     OpenWriteAsync {
         cursor_id: CursorID,
         root_page: PageIdx,
@@ -504,7 +545,7 @@ pub enum Insn {
     /// Check if the register is null.
     IsNull {
         /// Source register (P1).
-        src: usize,
+        reg: usize,
 
         /// Jump to this PC if the register is null (P2).
         target_pc: BranchOffset,
@@ -561,6 +602,12 @@ pub enum Insn {
     Or {
         lhs: usize,
         rhs: usize,
+        dest: usize,
+    },
+    Noop,
+    /// Write the current number of pages in database P1 to memory cell P2.
+    PageCount {
+        db: usize,
         dest: usize,
     },
 }
@@ -833,16 +880,7 @@ pub fn exec_shift_left(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue
 }
 
 fn compute_shl(lhs: i64, rhs: i64) -> i64 {
-    if rhs == 0 {
-        lhs
-    } else if rhs >= 64 || rhs <= -64 {
-        0
-    } else if rhs < 0 {
-        // if negative do right shift
-        lhs >> (-rhs)
-    } else {
-        lhs << rhs
-    }
+    compute_shr(lhs, -rhs)
 }
 
 pub fn exec_shift_right(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
@@ -880,11 +918,15 @@ pub fn exec_shift_right(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValu
     }
 }
 
+// compute binary shift to the right if rhs >= 0 and binary shift to the left - if rhs < 0
+// note, that binary shift to the right is sign-extended
 fn compute_shr(lhs: i64, rhs: i64) -> i64 {
     if rhs == 0 {
         lhs
-    } else if rhs >= 64 || rhs <= -64 {
+    } else if rhs >= 64 && lhs >= 0 || rhs <= -64 {
         0
+    } else if rhs >= 64 && lhs < 0 {
+        -1
     } else if rhs < 0 {
         // if negative do left shift
         lhs << (-rhs)

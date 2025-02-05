@@ -5,40 +5,53 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"io"
+	"sync"
 	"unsafe"
 )
 
-// only construct limboStmt with initStmt function to ensure proper initialization
 type limboStmt struct {
-	ctx           uintptr
-	sql           string
-	query         stmtQueryFn
-	execute       stmtExecuteFn
-	getParamCount func(uintptr) int32
+	mu  sync.Mutex
+	ctx uintptr
+	sql string
+	err error
 }
 
-// Initialize/register the FFI function pointers for the statement methods
-func initStmt(ctx uintptr, sql string) *limboStmt {
-	var query stmtQueryFn
-	var execute stmtExecuteFn
-	var getParamCount func(uintptr) int32
-	methods := []ExtFunc{{query, FfiStmtQuery}, {execute, FfiStmtExec}, {getParamCount, FfiStmtParameterCount}}
-	for i := range methods {
-		methods[i].initFunc()
-	}
+func newStmt(ctx uintptr, sql string) *limboStmt {
 	return &limboStmt{
 		ctx: uintptr(ctx),
 		sql: sql,
+		err: nil,
 	}
 }
 
-func (st *limboStmt) NumInput() int {
-	return int(st.getParamCount(st.ctx))
+func (ls *limboStmt) NumInput() int {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	res := int(stmtParamCount(ls.ctx))
+	if res < 0 {
+		// set the error from rust
+		_ = ls.getError()
+	}
+	return res
 }
 
-func (st *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
-	argArray, err := buildArgs(args)
+func (ls *limboStmt) Close() error {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	if ls.ctx == 0 {
+		return nil
+	}
+	res := stmtClose(ls.ctx)
+	ls.ctx = 0
+	if ResultCode(res) != Ok {
+		return fmt.Errorf("error closing statement: %s", ResultCode(res).String())
+	}
+	return nil
+}
+
+func (ls *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
+	argArray, cleanup, err := buildArgs(args)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
@@ -48,9 +61,11 @@ func (st *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
 		argPtr = uintptr(unsafe.Pointer(&argArray[0]))
 	}
 	var changes uint64
-	rc := st.execute(st.ctx, argPtr, argCount, uintptr(unsafe.Pointer(&changes)))
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	rc := stmtExec(ls.ctx, argPtr, argCount, uintptr(unsafe.Pointer(&changes)))
 	switch ResultCode(rc) {
-	case Ok:
+	case Ok, Done:
 		return driver.RowsAffected(changes), nil
 	case Error:
 		return nil, errors.New("error executing statement")
@@ -61,134 +76,101 @@ func (st *limboStmt) Exec(args []driver.Value) (driver.Result, error) {
 	case Invalid:
 		return nil, errors.New("invalid statement")
 	default:
-		return nil, fmt.Errorf("unexpected status: %d", rc)
+		return nil, ls.getError()
 	}
 }
 
-func (st *limboStmt) Query(args []driver.Value) (driver.Rows, error) {
-	queryArgs, err := buildArgs(args)
+func (ls *limboStmt) Query(args []driver.Value) (driver.Rows, error) {
+	queryArgs, cleanup, err := buildArgs(args)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
-	rowsPtr := st.query(st.ctx, uintptr(unsafe.Pointer(&queryArgs[0])), uint64(len(queryArgs)))
-	if rowsPtr == 0 {
-		return nil, fmt.Errorf("query failed for: %q", st.sql)
+	argPtr := uintptr(0)
+	if len(args) > 0 {
+		argPtr = uintptr(unsafe.Pointer(&queryArgs[0]))
 	}
-	return initRows(rowsPtr), nil
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	rowsPtr := stmtQuery(ls.ctx, argPtr, uint64(len(queryArgs)))
+	if rowsPtr == 0 {
+		return nil, ls.getError()
+	}
+	return newRows(rowsPtr), nil
 }
 
-func (ts *limboStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+func (ls *limboStmt) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	stripped := namedValueToValue(args)
-	argArray, err := getArgsPtr(stripped)
+	argArray, cleanup, err := getArgsPtr(stripped)
+	defer cleanup()
 	if err != nil {
 		return nil, err
 	}
-	var changes uintptr
-	res := ts.execute(ts.ctx, argArray, uint64(len(args)), changes)
-	switch ResultCode(res) {
-	case Ok:
-		return driver.RowsAffected(changes), nil
-	case Error:
-		return nil, errors.New("error executing statement")
-	case Busy:
-		return nil, errors.New("busy")
-	case Interrupt:
-		return nil, errors.New("interrupted")
+	ls.mu.Lock()
+	select {
+	case <-ctx.Done():
+		ls.mu.Unlock()
+		return nil, ctx.Err()
 	default:
-		return nil, fmt.Errorf("unexpected status: %d", res)
+		var changes uint64
+		defer ls.mu.Unlock()
+		res := stmtExec(ls.ctx, argArray, uint64(len(args)), uintptr(unsafe.Pointer(&changes)))
+		switch ResultCode(res) {
+		case Ok, Done:
+			changes := uint64(changes)
+			return driver.RowsAffected(changes), nil
+		case Busy:
+			return nil, errors.New("Database is Busy")
+		case Interrupt:
+			return nil, errors.New("Interrupted")
+		default:
+			return nil, ls.getError()
+		}
 	}
 }
 
-func (st *limboStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
-	queryArgs, err := buildNamedArgs(args)
+func (ls *limboStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	queryArgs, allocs, err := buildNamedArgs(args)
+	defer allocs()
 	if err != nil {
 		return nil, err
 	}
-	rowsPtr := st.query(st.ctx, uintptr(unsafe.Pointer(&queryArgs[0])), uint64(len(queryArgs)))
-	if rowsPtr == 0 {
-		return nil, fmt.Errorf("query failed for: %q", st.sql)
+	argsPtr := uintptr(0)
+	if len(queryArgs) > 0 {
+		argsPtr = uintptr(unsafe.Pointer(&queryArgs[0]))
 	}
-	return initRows(rowsPtr), nil
-}
-
-// only construct limboRows with initRows function to ensure proper initialization
-type limboRows struct {
-	ctx       uintptr
-	columns   []string
-	closed    bool
-	getCols   func(uintptr, *uint) uintptr
-	next      func(uintptr) uintptr
-	getValue  func(uintptr, int32) uintptr
-	closeRows func(uintptr) uintptr
-	freeCols  func(uintptr) uintptr
-}
-
-// Initialize/register the FFI function pointers for the rows methods
-// DO NOT construct 'limboRows' without this function
-func initRows(ctx uintptr) *limboRows {
-	var getCols func(uintptr, *uint) uintptr
-	var getValue func(uintptr, int32) uintptr
-	var closeRows func(uintptr) uintptr
-	var freeCols func(uintptr) uintptr
-	var next func(uintptr) uintptr
-	methods := []ExtFunc{
-		{getCols, FfiRowsGetColumns},
-		{getValue, FfiRowsGetValue},
-		{closeRows, FfiRowsClose},
-		{freeCols, FfiFreeColumns},
-		{next, FfiRowsNext}}
-	for i := range methods {
-		methods[i].initFunc()
-	}
-
-	return &limboRows{
-		ctx:       ctx,
-		getCols:   getCols,
-		getValue:  getValue,
-		closeRows: closeRows,
-		freeCols:  freeCols,
-		next:      next,
-	}
-}
-
-func (r *limboRows) Columns() []string {
-	if r.columns == nil {
-		var columnCount uint
-		colArrayPtr := r.getCols(r.ctx, &columnCount)
-		if colArrayPtr != 0 && columnCount > 0 {
-			r.columns = cArrayToGoStrings(colArrayPtr, columnCount)
-			if r.freeCols == nil {
-				getFfiFunc(&r.freeCols, FfiFreeColumns)
-			}
-			defer r.freeCols(colArrayPtr)
-		}
-	}
-	return r.columns
-}
-
-func (r *limboRows) Close() error {
-	if r.closed {
-		return nil
-	}
-	r.closed = true
-	r.closeRows(r.ctx)
-	r.ctx = 0
-	return nil
-}
-
-func (r *limboRows) Next(dest []driver.Value) error {
-	status := r.next(r.ctx)
-	switch ResultCode(status) {
-	case Row:
-		for i := range dest {
-			valPtr := r.getValue(r.ctx, int32(i))
-			val := toGoValue(valPtr)
-			dest[i] = val
-		}
-		return nil
-	case Done:
-		return io.EOF
+	ls.mu.Lock()
+	select {
+	case <-ctx.Done():
+		ls.mu.Unlock()
+		return nil, ctx.Err()
 	default:
-		return fmt.Errorf("unexpected status: %d", status)
+		defer ls.mu.Unlock()
+		rowsPtr := stmtQuery(ls.ctx, argsPtr, uint64(len(queryArgs)))
+		if rowsPtr == 0 {
+			return nil, ls.getError()
+		}
+		return newRows(rowsPtr), nil
 	}
+}
+
+func (ls *limboStmt) Err() error {
+	if ls.err == nil {
+		ls.mu.Lock()
+		defer ls.mu.Unlock()
+		ls.getError()
+	}
+	return ls.err
+}
+
+// mutex should always be locked when calling - always called after FFI
+func (ls *limboStmt) getError() error {
+	err := stmtGetError(ls.ctx)
+	if err == 0 {
+		return nil
+	}
+	defer freeCString(err)
+	cpy := fmt.Sprintf("%s", GoString(err))
+	ls.err = errors.New(cpy)
+	return ls.err
 }

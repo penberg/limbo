@@ -3,10 +3,26 @@ package org.github.tursodatabase.jdbc4;
 import java.io.InputStream;
 import java.io.Reader;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URL;
-import java.sql.*;
+import java.sql.Array;
+import java.sql.Blob;
+import java.sql.Clob;
+import java.sql.Date;
+import java.sql.NClob;
+import java.sql.Ref;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.RowId;
+import java.sql.SQLException;
+import java.sql.SQLWarning;
+import java.sql.SQLXML;
+import java.sql.Statement;
+import java.sql.Time;
+import java.sql.Timestamp;
 import java.util.Calendar;
 import java.util.Map;
+import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboResultSet;
 
@@ -25,7 +41,7 @@ public class JDBC4ResultSet implements ResultSet {
 
   @Override
   public void close() throws SQLException {
-    // TODO
+    resultSet.close();
   }
 
   @Override
@@ -35,64 +51,99 @@ public class JDBC4ResultSet implements ResultSet {
   }
 
   @Override
+  @Nullable
   public String getString(int columnIndex) throws SQLException {
-    // TODO
-    return "";
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return null;
+    }
+    return wrapTypeConversion(() -> (String) result);
   }
 
   @Override
   public boolean getBoolean(int columnIndex) throws SQLException {
-    // TODO
-    return false;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return false;
+    }
+    return wrapTypeConversion(() -> (Long) result != 0);
   }
 
   @Override
   public byte getByte(int columnIndex) throws SQLException {
-    // TODO
-    return 0;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return 0;
+    }
+    return wrapTypeConversion(() -> ((Long) result).byteValue());
   }
 
   @Override
   public short getShort(int columnIndex) throws SQLException {
-    // TODO
-    return 0;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return 0;
+    }
+    return wrapTypeConversion(() -> ((Long) result).shortValue());
   }
 
   @Override
   public int getInt(int columnIndex) throws SQLException {
-    // TODO
-    return 0;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return 0;
+    }
+    return wrapTypeConversion(() -> ((Long) result).intValue());
   }
 
   @Override
   public long getLong(int columnIndex) throws SQLException {
-    // TODO
-    return 0;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return 0;
+    }
+    return wrapTypeConversion(() -> (long) result);
   }
 
   @Override
   public float getFloat(int columnIndex) throws SQLException {
-    // TODO
-    return 0;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return 0;
+    }
+    return wrapTypeConversion(() -> ((Double) result).floatValue());
   }
 
   @Override
   public double getDouble(int columnIndex) throws SQLException {
-    // TODO
-    return 0;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return 0;
+    }
+    return wrapTypeConversion(() -> (double) result);
   }
 
+  // TODO: customize rounding mode?
   @Override
-  @SkipNullableCheck
+  @Nullable
   public BigDecimal getBigDecimal(int columnIndex, int scale) throws SQLException {
-    // TODO
-    return null;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return null;
+    }
+    final double doubleResult = wrapTypeConversion(() -> (double) result);
+    final BigDecimal bigDecimalResult = BigDecimal.valueOf(doubleResult);
+    return bigDecimalResult.setScale(scale, RoundingMode.HALF_UP);
   }
 
   @Override
+  @Nullable
   public byte[] getBytes(int columnIndex) throws SQLException {
-    // TODO
-    return new byte[0];
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return null;
+    }
+    return wrapTypeConversion(() -> (byte[]) result);
   }
 
   @Override
@@ -300,10 +351,14 @@ public class JDBC4ResultSet implements ResultSet {
   }
 
   @Override
-  @SkipNullableCheck
+  @Nullable
   public BigDecimal getBigDecimal(int columnIndex) throws SQLException {
-    // TODO
-    return null;
+    final Object result = resultSet.get(columnIndex);
+    if (result == null) {
+      return null;
+    }
+    final double doubleResult = wrapTypeConversion(() -> (double) result);
+    return BigDecimal.valueOf(doubleResult);
   }
 
   @Override
@@ -866,8 +921,7 @@ public class JDBC4ResultSet implements ResultSet {
 
   @Override
   public boolean isClosed() throws SQLException {
-    // TODO
-    return false;
+    return !resultSet.isOpen();
   }
 
   @Override
@@ -1127,7 +1181,16 @@ public class JDBC4ResultSet implements ResultSet {
     return false;
   }
 
-  private SQLException throwNotSupportedException() {
-    return new SQLFeatureNotSupportedException("Not implemented by the driver");
+  @FunctionalInterface
+  public interface ResultSetSupplier<T> {
+    T get() throws Exception;
+  }
+
+  private <T> T wrapTypeConversion(ResultSetSupplier<T> supplier) throws SQLException {
+    try {
+      return supplier.get();
+    } catch (Exception e) {
+      throw new SQLException("Type conversion failed: " + e);
+    }
   }
 }

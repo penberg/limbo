@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     vdbe::{builder::ProgramBuilder, insn::Insn},
     Result,
@@ -7,7 +5,8 @@ use crate::{
 
 use super::{
     emitter::{emit_query, Resolver, TranslateCtx},
-    plan::{SelectPlan, SelectQueryType, SourceOperator, TableReference, TableReferenceType},
+    main_loop::LoopLabels,
+    plan::{Operation, SelectPlan, SelectQueryType, TableReference},
 };
 
 /// Emit the subqueries contained in the FROM clause.
@@ -15,42 +14,23 @@ use super::{
 pub fn emit_subqueries(
     program: &mut ProgramBuilder,
     t_ctx: &mut TranslateCtx,
-    referenced_tables: &mut [TableReference],
-    source: &mut SourceOperator,
+    tables: &mut [TableReference],
 ) -> Result<()> {
-    match source {
-        SourceOperator::Subquery {
-            table_reference,
+    for table in tables.iter_mut() {
+        if let Operation::Subquery {
             plan,
-            ..
-        } => {
+            result_columns_start_reg,
+        } = &mut table.op
+        {
             // Emit the subquery and get the start register of the result columns.
             let result_columns_start = emit_subquery(program, plan, t_ctx)?;
-            // Set the result_columns_start_reg in the TableReference object.
+            // Set the start register of the subquery's result columns.
             // This is done so that translate_expr() can read the result columns of the subquery,
             // as if it were reading from a regular table.
-            let table_ref = referenced_tables
-                .iter_mut()
-                .find(|t| t.table_identifier == table_reference.table_identifier)
-                .unwrap();
-            if let TableReferenceType::Subquery {
-                result_columns_start_reg,
-                ..
-            } = &mut table_ref.reference_type
-            {
-                *result_columns_start_reg = result_columns_start;
-            } else {
-                unreachable!("emit_subqueries called on non-subquery");
-            }
-            Ok(())
+            *result_columns_start_reg = result_columns_start;
         }
-        SourceOperator::Join { left, right, .. } => {
-            emit_subqueries(program, t_ctx, referenced_tables, left)?;
-            emit_subqueries(program, t_ctx, referenced_tables, right)?;
-            Ok(())
-        }
-        _ => Ok(()),
     }
+    Ok(())
 }
 
 /// Emit a subquery and return the start register of the result columns.
@@ -87,16 +67,20 @@ pub fn emit_subquery<'a>(
     }
     let end_coroutine_label = program.allocate_label();
     let mut metadata = TranslateCtx {
-        labels_main_loop: HashMap::new(),
+        labels_main_loop: (0..plan.table_references.len())
+            .map(|_| LoopLabels::new(program))
+            .collect(),
         label_main_loop_end: None,
         meta_group_by: None,
-        meta_left_joins: HashMap::new(),
+        meta_left_joins: (0..plan.table_references.len()).map(|_| None).collect(),
         meta_sort: None,
         reg_agg_start: None,
         reg_result_cols_start: None,
-        result_column_indexes_in_orderby_sorter: HashMap::new(),
+        result_column_indexes_in_orderby_sorter: (0..plan.result_columns.len()).collect(),
         result_columns_to_skip_in_orderby_sorter: None,
         reg_limit: plan.limit.map(|_| program.alloc_register()),
+        reg_offset: plan.offset.map(|_| program.alloc_register()),
+        reg_limit_offset_sum: plan.offset.map(|_| program.alloc_register()),
         resolver: Resolver::new(t_ctx.resolver.symbol_table),
     };
     let subquery_body_end_label = program.allocate_label();

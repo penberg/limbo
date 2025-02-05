@@ -74,7 +74,7 @@ macro_rules! return_if_locked {
 
 /// State machine of a write operation.
 /// May involve balancing due to overflow.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum WriteState {
     Start,
     BalanceStart,
@@ -97,6 +97,40 @@ struct WriteInfo {
     page_copy: RefCell<Option<PageContent>>,
 }
 
+impl WriteInfo {
+    fn new() -> WriteInfo {
+        WriteInfo {
+            state: WriteState::Start,
+            new_pages: RefCell::new(Vec::with_capacity(4)),
+            scratch_cells: RefCell::new(Vec::new()),
+            rightmost_pointer: RefCell::new(None),
+            page_copy: RefCell::new(None),
+        }
+    }
+}
+
+/// Holds the state machine for the operation that was in flight when the cursor
+/// was suspended due to IO.
+enum CursorState {
+    None,
+    Write(WriteInfo),
+}
+
+impl CursorState {
+    fn write_info(&self) -> Option<&WriteInfo> {
+        match self {
+            CursorState::Write(x) => Some(x),
+            _ => None,
+        }
+    }
+    fn mut_write_info(&mut self) -> Option<&mut WriteInfo> {
+        match self {
+            CursorState::Write(x) => Some(x),
+            _ => None,
+        }
+    }
+}
+
 pub struct BTreeCursor {
     pager: Rc<Pager>,
     /// Page id of the root page used to go back up fast.
@@ -109,9 +143,8 @@ pub struct BTreeCursor {
     /// we just moved to a parent page and the parent page is an internal index page which requires
     /// to be consumed.
     going_upwards: bool,
-    /// Write information kept in case of write yields due to I/O. Needs to be stored somewhere
-    /// right :).
-    write_info: WriteInfo,
+    /// Information maintained across execution attempts when an operation yields due to I/O.
+    state: CursorState,
     /// Page stack used to traverse the btree.
     /// Each cursor has a stack because each cursor traverses the btree independently.
     stack: PageStack,
@@ -144,13 +177,7 @@ impl BTreeCursor {
             record: RefCell::new(None),
             null_flag: false,
             going_upwards: false,
-            write_info: WriteInfo {
-                state: WriteState::Start,
-                new_pages: RefCell::new(Vec::with_capacity(4)),
-                scratch_cells: RefCell::new(Vec::new()),
-                rightmost_pointer: RefCell::new(None),
-                page_copy: RefCell::new(None),
-            },
+            state: CursorState::None,
             stack: PageStack {
                 current_page: RefCell::new(-1),
                 cell_indices: RefCell::new([0; BTCURSOR_MAX_DEPTH + 1]),
@@ -676,9 +703,18 @@ impl BTreeCursor {
         key: &OwnedValue,
         record: &OwnedRecord,
     ) -> Result<CursorResult<()>> {
-        loop {
-            let state = &self.write_info.state;
-            match state {
+        if let CursorState::None = &self.state {
+            self.state = CursorState::Write(WriteInfo::new());
+        }
+        let ret = loop {
+            let write_state = {
+                let write_info = self
+                    .state
+                    .mut_write_info()
+                    .expect("can't insert while counting");
+                write_info.state.clone()
+            };
+            match write_state {
                 WriteState::Start => {
                     let page = self.stack.top();
                     let int_key = match key {
@@ -718,10 +754,14 @@ impl BTreeCursor {
                         self.insert_into_cell(contents, cell_payload.as_slice(), cell_idx);
                         contents.overflow_cells.len()
                     };
+                    let write_info = self
+                        .state
+                        .mut_write_info()
+                        .expect("can't count while inserting");
                     if overflow > 0 {
-                        self.write_info.state = WriteState::BalanceStart;
+                        write_info.state = WriteState::BalanceStart;
                     } else {
-                        self.write_info.state = WriteState::Finish;
+                        write_info.state = WriteState::Finish;
                     }
                 }
                 WriteState::BalanceStart
@@ -731,11 +771,12 @@ impl BTreeCursor {
                     return_if_io!(self.balance());
                 }
                 WriteState::Finish => {
-                    self.write_info.state = WriteState::Start;
-                    return Ok(CursorResult::Ok(()));
+                    break Ok(CursorResult::Ok(()));
                 }
             };
-        }
+        };
+        self.state = CursorState::None;
+        return ret;
     }
 
     /// Insert a record into a cell.
@@ -879,7 +920,16 @@ impl BTreeCursor {
     /// It will try to split the page in half by keys not by content.
     /// Sqlite tries to have a page at least 40% full.
     fn balance(&mut self) -> Result<CursorResult<()>> {
-        let state = &self.write_info.state;
+        assert!(
+            matches!(self.state, CursorState::Write(_)),
+            "Cursor must be in balancing state"
+        );
+        let state = self
+            .state
+            .write_info()
+            .expect("must be balancing")
+            .state
+            .clone();
         match state {
             WriteState::BalanceStart => {
                 // drop divider cells and find right pointer
@@ -893,7 +943,8 @@ impl BTreeCursor {
                     // don't continue if there are no overflow cells
                     let page = current_page.get().contents.as_mut().unwrap();
                     if page.overflow_cells.is_empty() {
-                        self.write_info.state = WriteState::Finish;
+                        let write_info = self.state.mut_write_info().unwrap();
+                        write_info.state = WriteState::Finish;
                         return Ok(CursorResult::Ok(()));
                     }
                 }
@@ -903,7 +954,8 @@ impl BTreeCursor {
                     return Ok(CursorResult::Ok(()));
                 }
 
-                self.write_info.state = WriteState::BalanceNonRoot;
+                let write_info = self.state.mut_write_info().unwrap();
+                write_info.state = WriteState::BalanceNonRoot;
                 self.balance_non_root()
             }
             WriteState::BalanceNonRoot
@@ -915,8 +967,17 @@ impl BTreeCursor {
     }
 
     fn balance_non_root(&mut self) -> Result<CursorResult<()>> {
-        let state = &self.write_info.state;
-        match state {
+        assert!(
+            matches!(self.state, CursorState::Write(_)),
+            "Cursor must be in balancing state"
+        );
+        let state = self
+            .state
+            .write_info()
+            .expect("must be balancing")
+            .state
+            .clone();
+        let (next_write_state, result) = match state {
             WriteState::Start => todo!(),
             WriteState::BalanceStart => todo!(),
             WriteState::BalanceNonRoot => {
@@ -935,7 +996,8 @@ impl BTreeCursor {
 
                 // In memory in order copy of all cells in pages we want to balance. For now let's do a 2 page split.
                 // Right pointer in interior cells should be converted to regular cells if more than 2 pages are used for balancing.
-                let mut scratch_cells = self.write_info.scratch_cells.borrow_mut();
+                let write_info = self.state.write_info().unwrap();
+                let mut scratch_cells = write_info.scratch_cells.borrow_mut();
                 scratch_cells.clear();
 
                 for cell_idx in 0..page_copy.cell_count() {
@@ -952,9 +1014,9 @@ impl BTreeCursor {
                     scratch_cells
                         .insert(overflow_cell.index, to_static_buf(&overflow_cell.payload));
                 }
-                *self.write_info.rightmost_pointer.borrow_mut() = page_copy.rightmost_pointer();
 
-                self.write_info.page_copy.replace(Some(page_copy));
+                *write_info.rightmost_pointer.borrow_mut() = page_copy.rightmost_pointer();
+                write_info.page_copy.replace(Some(page_copy));
 
                 // allocate new pages and move cells to those new pages
                 // split procedure
@@ -970,15 +1032,9 @@ impl BTreeCursor {
                 let right_page = self.allocate_page(page.page_type(), 0);
                 let right_page_id = right_page.get().id;
 
-                self.write_info.new_pages.borrow_mut().clear();
-                self.write_info
-                    .new_pages
-                    .borrow_mut()
-                    .push(current_page.clone());
-                self.write_info
-                    .new_pages
-                    .borrow_mut()
-                    .push(right_page.clone());
+                write_info.new_pages.borrow_mut().clear();
+                write_info.new_pages.borrow_mut().push(current_page.clone());
+                write_info.new_pages.borrow_mut().push(right_page.clone());
 
                 debug!(
                     "splitting left={} right={}",
@@ -986,8 +1042,7 @@ impl BTreeCursor {
                     right_page_id
                 );
 
-                self.write_info.state = WriteState::BalanceGetParentPage;
-                Ok(CursorResult::Ok(()))
+                (WriteState::BalanceGetParentPage, Ok(CursorResult::Ok(())))
             }
             WriteState::BalanceGetParentPage => {
                 let parent = self.stack.parent();
@@ -1000,8 +1055,7 @@ impl BTreeCursor {
                     return Ok(CursorResult::IO);
                 }
                 parent.set_dirty();
-                self.write_info.state = WriteState::BalanceMoveUp;
-                Ok(CursorResult::Ok(()))
+                (WriteState::BalanceMoveUp, Ok(CursorResult::Ok(())))
             }
             WriteState::BalanceMoveUp => {
                 let parent = self.stack.parent();
@@ -1046,8 +1100,9 @@ impl BTreeCursor {
                     }
                 }
 
-                let mut new_pages = self.write_info.new_pages.borrow_mut();
-                let scratch_cells = self.write_info.scratch_cells.borrow();
+                let write_info = self.state.write_info().unwrap();
+                let mut new_pages = write_info.new_pages.borrow_mut();
+                let scratch_cells = write_info.scratch_cells.borrow();
 
                 // reset pages
                 for page in new_pages.iter() {
@@ -1140,7 +1195,7 @@ impl BTreeCursor {
                     let last_page_contents = last_page.get().contents.as_mut().unwrap();
                     last_page_contents.write_u32(
                         PAGE_HEADER_OFFSET_RIGHTMOST_PTR,
-                        self.write_info.rightmost_pointer.borrow().unwrap(),
+                        write_info.rightmost_pointer.borrow().unwrap(),
                     );
                 }
 
@@ -1197,12 +1252,14 @@ impl BTreeCursor {
                     parent_contents.write_u32(right_pointer, last_pointer);
                 }
                 self.stack.pop();
-                self.write_info.state = WriteState::BalanceStart;
-                let _ = self.write_info.page_copy.take();
-                Ok(CursorResult::Ok(()))
+                let _ = write_info.page_copy.take();
+                (WriteState::BalanceStart, Ok(CursorResult::Ok(())))
             }
             WriteState::Finish => todo!(),
-        }
+        };
+        let write_info = self.state.mut_write_info().unwrap();
+        write_info.state = next_write_state;
+        result
     }
 
     /// Balance the root page.

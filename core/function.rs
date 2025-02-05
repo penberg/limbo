@@ -80,6 +80,10 @@ pub enum JsonFunc {
     JsonType,
     JsonErrorPosition,
     JsonValid,
+    JsonPatch,
+    JsonRemove,
+    JsonPretty,
+    JsonSet,
 }
 
 #[cfg(feature = "json")]
@@ -99,6 +103,10 @@ impl Display for JsonFunc {
                 Self::JsonType => "json_type".to_string(),
                 Self::JsonErrorPosition => "json_error_position".to_string(),
                 Self::JsonValid => "json_valid".to_string(),
+                Self::JsonPatch => "json_patch".to_string(),
+                Self::JsonRemove => "json_remove".to_string(),
+                Self::JsonPretty => "json_pretty".to_string(),
+                Self::JsonSet => "json_set".to_string(),
             }
         )
     }
@@ -206,6 +214,7 @@ pub enum ScalarFunc {
     Unicode,
     Quote,
     SqliteVersion,
+    SqliteSourceId,
     UnixEpoch,
     JulianDay,
     Hex,
@@ -216,6 +225,7 @@ pub enum ScalarFunc {
     #[cfg(not(target_family = "wasm"))]
     LoadExtension,
     StrfTime,
+    Printf,
 }
 
 impl Display for ScalarFunc {
@@ -257,6 +267,7 @@ impl Display for ScalarFunc {
             Self::Unicode => "unicode".to_string(),
             Self::Quote => "quote".to_string(),
             Self::SqliteVersion => "sqlite_version".to_string(),
+            Self::SqliteSourceId => "sqlite_source_id".to_string(),
             Self::JulianDay => "julianday".to_string(),
             Self::UnixEpoch => "unixepoch".to_string(),
             Self::Hex => "hex".to_string(),
@@ -268,6 +279,7 @@ impl Display for ScalarFunc {
             #[cfg(not(target_family = "wasm"))]
             Self::LoadExtension => "load_extension".to_string(),
             Self::StrfTime => "strftime".to_string(),
+            Self::Printf => "printf".to_string(),
         };
         write!(f, "{}", str)
     }
@@ -506,6 +518,7 @@ impl Func {
             "unicode" => Ok(Self::Scalar(ScalarFunc::Unicode)),
             "quote" => Ok(Self::Scalar(ScalarFunc::Quote)),
             "sqlite_version" => Ok(Self::Scalar(ScalarFunc::SqliteVersion)),
+            "sqlite_source_id" => Ok(Self::Scalar(ScalarFunc::SqliteSourceId)),
             "replace" => Ok(Self::Scalar(ScalarFunc::Replace)),
             #[cfg(feature = "json")]
             "json" => Ok(Self::Json(JsonFunc::Json)),
@@ -523,6 +536,14 @@ impl Func {
             "json_error_position" => Ok(Self::Json(JsonFunc::JsonErrorPosition)),
             #[cfg(feature = "json")]
             "json_valid" => Ok(Self::Json(JsonFunc::JsonValid)),
+            #[cfg(feature = "json")]
+            "json_patch" => Ok(Self::Json(JsonFunc::JsonPatch)),
+            #[cfg(feature = "json")]
+            "json_remove" => Ok(Self::Json(JsonFunc::JsonRemove)),
+            #[cfg(feature = "json")]
+            "json_pretty" => Ok(Self::Json(JsonFunc::JsonPretty)),
+            #[cfg(feature = "json")]
+            "json_set" => Ok(Self::Json(JsonFunc::JsonSet)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),
@@ -561,6 +582,7 @@ impl Func {
             #[cfg(not(target_family = "wasm"))]
             "load_extension" => Ok(Self::Scalar(ScalarFunc::LoadExtension)),
             "strftime" => Ok(Self::Scalar(ScalarFunc::StrfTime)),
+            "printf" => Ok(Self::Scalar(ScalarFunc::Printf)),
             _ => crate::bail_parse_error!("no such function: {}", name),
         }
     }

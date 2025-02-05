@@ -8,6 +8,10 @@ do_execsql_test json5-ecma-script-1 {
 } {{{"a":5,"b":6}}}
 
 do_execsql_test json5-ecma-script-2 {
+    select json('{a:5,a:3}') ;
+} {{{"a":5,"a":3}}}
+
+do_execsql_test json5-ecma-script-3 {
    SELECT json('{ MNO_123$xyz : 789 }');
 } {{{"MNO_123$xyz":789}}}
 
@@ -55,6 +59,128 @@ do_execsql_test json5-multi-comment {
    SELECT json(' /* abc */ { /*def*/ aaa /* xyz */ : // to the end of line
           123 /* xyz */ , /* 123 */ }')
 } {{{"aaa":123}}}
+
+do_execsql_test json5-ecma-script-1-pretty {
+    select json_pretty('{a:5,b:6}') ;
+} {{{
+    "a": 5,
+    "b": 6
+}}}
+
+do_execsql_test json5-ecma-script-2-pretty {
+    select json_pretty('{a:5,a:3}') ;
+} {{{
+    "a": 5,
+    "a": 3
+}}}
+
+do_execsql_test json5-ecma-script-3-pretty {
+   SELECT json_pretty('{ MNO_123$xyz : 789 }');
+} {{{
+    "MNO_123$xyz": 789
+}}}
+
+do_execsql_test json5-with-single-trailing-comma-valid-pretty {
+    select json_pretty('{"a":5, "b":6, }');
+} {{{
+    "a": 5,
+    "b": 6
+}}}
+
+do_execsql_test json5-single-quoted-pretty {
+    SELECT json_pretty('{"a": ''abcd''}');
+} {{{
+    "a": "abcd"
+}}}
+
+do_execsql_test json5-hexadecimal-1-pretty {
+   SELECT json_pretty('{a: 0x0}');
+} {{{
+    "a": 0
+}}}
+
+do_execsql_test json5-hexadecimal-2-pretty {
+   SELECT json_pretty('{a: 0xabcdef}');
+} {{{
+    "a": 11259375
+}}}
+
+do_execsql_test json5-hexadecimal-2-pretty {
+   SELECT json_pretty('{a: -0xabcdef}');
+} {{{
+    "a": -11259375
+}}}
+
+do_execsql_test json5-number-1-pretty {
+   SELECT json_pretty('{x: 4.}');
+} {{{
+    "x": 4.0
+}}}
+
+do_execsql_test json5-number-2-pretty {
+   SELECT json_pretty('{x: +4.}');
+} {{{
+    "x": 4.0
+}}}
+
+do_execsql_test json5-number-3-pretty {
+   SELECT json_pretty('{x: -4.}');
+} {{{
+    "x": -4.0
+}}}
+
+do_execsql_test json5-number-5-pretty {
+   SELECT json_pretty('{x: Infinity}');
+} {{{
+    "x": 9e999
+}}}
+
+do_execsql_test json5-number-6-pretty {
+   SELECT json_pretty('{x: -Infinity}');
+} {{{
+    "x": -9e999
+}}}
+
+do_execsql_test json5-multi-comment-pretty {
+   SELECT json_pretty(' /* abc */ { /*def*/ aaa /* xyz */ : // to the end of line
+          123 /* xyz */ , /* 123 */ }');
+} {{{
+    "aaa": 123
+}}}
+
+do_execsql_test json-pretty-ident-1 {
+   SELECT json_pretty('{x: 1}', '');
+} {{{
+"x": 1
+}}}
+
+do_execsql_test json-pretty-ident-2 {
+   SELECT json_pretty('{x: 1}', '11');
+} {{{
+11"x": 1
+}}}
+
+do_execsql_test json-pretty-ident-null {
+   SELECT json_pretty('{x: 1}', NULL);
+} {{{
+    "x": 1
+}}}
+
+do_execsql_test json-pretty-ident-blob-1 {
+   SELECT json_pretty('{x: 1}', x'33');
+} {{{
+3"x": 1
+}}}
+
+# TODO
+# Currently conversion from blob to string is not exactly the same as in sqlite.
+# The blob below should evaluate to two whitespaces TEXT value
+
+# do_execsql_test json-pretty-ident-blob-2 {
+#    SELECT json_pretty('{x: 1}', x'1111');
+# } {{{
+#   "x": 1
+# }}}
 
 do_execsql_test json_array_str {
    SELECT json_array('a')
@@ -576,3 +702,179 @@ do_execsql_test json_valid_3 {
 do_execsql_test json_valid_9 {
     SELECT json_valid(NULL);
 } {}
+do_execsql_test json-patch-basic-1 {
+    select json_patch('{"a":1}', '{"b":2}');
+} {{{"a":1,"b":2}}}
+do_execsql_test json-patch-basic-2 {
+    select json_patch('{"x":100,"y":200}', '{"z":300}');
+} {{{"x":100,"y":200,"z":300}}}
+do_execsql_test json-patch-preserve-duplicates-1 {
+    select json_patch('{"x":100,"x":200}', '{"z":300}');
+} {{{"x":100,"x":200,"z":300}}}
+do_execsql_test json-patch-preserve-duplicates-2 {
+    select json_patch('{"x":100,"x":200}', '{"x":900}');
+} {{{"x":900,"x":200}}}
+do_execsql_test json-patch-last-update-wins {
+    select json_patch('{"x":100,"c":200}', '{"x":900, "x":null}');
+} {{{"c":200}}}
+do_execsql_test json-patch-override-1 {
+    select json_patch('{"a":1,"b":2}', '{"b":3}');
+} {{{"a":1,"b":3}}}
+do_execsql_test json-patch-override-2 {
+    select json_patch('{"name":"john","age":25}', '{"age":26,"city":"NYC"}');
+} {{{"name":"john","age":26,"city":"NYC"}}}
+do_execsql_test json-patch-nested-1 {
+    select json_patch('{"user":{"name":"john"}}', '{"user":{"age":30}}');
+} {{{"user":{"name":"john","age":30}}}}
+do_execsql_test json-patch-nested-2 {
+    select json_patch('{"settings":{"theme":"dark"}}', '{"settings":{"theme":"light","font":"arial"}}');
+} {{{"settings":{"theme":"light","font":"arial"}}}}
+do_execsql_test json-patch-array-1 {
+    select json_patch('{"arr":[1,2,3]}', '{"arr":[4,5,6]}');
+} {{{"arr":[4,5,6]}}}
+do_execsql_test json-patch-array-2 {
+    select json_patch('{"list":["a","b"]}', '{"list":["c"]}');
+} {{{"list":["c"]}}}
+do_execsql_test json-patch-empty-1 {
+    select json_patch('{}', '{"a":1}');
+} {{{"a":1}}}
+do_execsql_test json-patch-empty-2 {
+    select json_patch('{"a":1}', '{}');
+} {{{"a":1}}}
+do_execsql_test json-patch-deep-nested-1 {
+    select json_patch(
+        '{"level1":{"level2":{"value":100}}}',
+        '{"level1":{"level2":{"newValue":200}}}'
+    );
+} {{{"level1":{"level2":{"value":100,"newValue":200}}}}}
+do_execsql_test json-patch-mixed-types-1 {
+    select json_patch(
+        '{"str":"hello","num":42,"bool":true}',
+        '{"arr":[1,2,3],"obj":{"x":1}}'
+    );
+} {{{"str":"hello","num":42,"bool":true,"arr":[1,2,3],"obj":{"x":1}}}}
+do_execsql_test json-patch-add-all-dup-keys-from-patch {
+    select json_patch(
+        '{"x":100,"x":200}',
+        '{"z":{}, "z":5, "z":100}'
+    );
+} {{{"x":100,"x":200,"z":100}}}
+do_execsql_test json-patch-first-occurance-patch {
+    select json_patch('{"x":100,"x":200}','{"x":{}, "x":5, "x":100}');
+} {{{"x":100,"x":200}}}
+do_execsql_test json-patch-complex-nested-dup-keys {
+    select json_patch(
+        '{"a":{"x":1,"x":2},"a":{"y":3},"b":[{"z":4,"z":5}]}',
+        '{"a":{"w":6},"b":[{"z":7,"z":8}],"b":{"z":9}}'
+    );
+} {{{"a":{"x":1,"x":2,"w":6},"a":{"y":3},"b":{"z":9}}}}
+do_execsql_test json-patch-unicode-dup-keys {
+    select json_patch(
+        '{"🔑":1,"🔑":2}',
+        '{"🗝️":3,"🗝️":4}'
+    );
+} {{{"🔑":1,"🔑":2,"🗝️":4}}}
+do_execsql_test json-patch-empty-string-dup-keys {
+    select json_patch(
+        '{"":1,"":2}',
+        '{"":3,"":4}'
+    );
+} {{{"":4,"":2}}}
+do_execsql_test json-patch-multiple-types-dup-keys {
+    select json_patch(
+        '{"x":100,"x":"str","x":true,"x":null}',
+        '{"y":1,"y":{},"y":[],"y":false}'
+    );
+} {{{"x":100,"x":"str","x":true,"x":null,"y":false}}}
+do_execsql_test json-patch-deep-nested-dup-keys {
+    select json_patch(
+        '{"a":{"b":{"c":1}},"a":{"b":{"c":2}},"a":{"b":{"d":3}}}',
+        '{"x":{"y":{"z":4}},"x":{"y":{"z":5}}}'
+    );
+} {{{"a":{"b":{"c":1}},"a":{"b":{"c":2}},"a":{"b":{"d":3}},"x":{"y":{"z":5}}}}}
+do_execsql_test json-patch-abomination {
+    select json_patch(
+        '{"a":{"b":{"x":1,"x":2,"y":{"z":3,"z":{"w":4}}},"b":[{"c":5,"c":6},{"d":{"e":7,"e":null}}],"f":{"g":[1,2,3],"g":{"h":8,"h":[4,5,6]}},"i":{"j":true,"j":{"k":false,"k":{"l":null,"l":"string"}}},"m":{"n":{"o":{"p":9,"p":{"q":10}},"o":{"r":11}}},"m":[{"s":{"t":12}},{"s":{"t":13,"t":{"u":14}}}]},"a":{"v":{"w":{"x":{"y":{"z":15}}}},"v":{"w":{"x":16,"x":{"y":17}}},"aa":[{"bb":{"cc":18,"cc":{"dd":19}}},{"bb":{"cc":{"dd":20},"cc":21}}]}}',
+        '{"a":{"b":{"x":{"new":"value"},"y":null},"b":{"c":{"updated":true},"d":{"e":{"replaced":100}}},"f":{"g":{"h":{"nested":"deep"}}},"i":{"j":{"k":{"l":{"modified":false}}}},"m":{"n":{"o":{"p":{"q":{"extra":"level"}}}},"s":null},"aa":[{"bb":{"cc":{"dd":{"ee":"new"}}}},{"bb":{"cc":{"dd":{"ff":"value"}}}}],"v":{"w":{"x":{"y":{"z":{"final":"update"}}}}}},"newTop":{"level":{"key":{"with":{"deep":{"nesting":true}}},"key":[{"array":{"in":{"deep":{"structure":null}}}}]}}}'
+    );
+} {{{"a":{"b":{"x":{"new":"value"},"x":2,"c":{"updated":true},"d":{"e":{"replaced":100}}},"b":[{"c":5,"c":6},{"d":{"e":7,"e":null}}],"f":{"g":{"h":{"nested":"deep"}},"g":{"h":8,"h":[4,5,6]}},"i":{"j":{"k":{"l":{"modified":false}}},"j":{"k":false,"k":{"l":null,"l":"string"}}},"m":{"n":{"o":{"p":{"q":{"extra":"level"}},"p":{"q":10}},"o":{"r":11}}},"m":[{"s":{"t":12}},{"s":{"t":13,"t":{"u":14}}}],"aa":[{"bb":{"cc":{"dd":{"ee":"new"}}}},{"bb":{"cc":{"dd":{"ff":"value"}}}}],"v":{"w":{"x":{"y":{"z":{"final":"update"}}}}}},"a":{"v":{"w":{"x":{"y":{"z":15}}}},"v":{"w":{"x":16,"x":{"y":17}}},"aa":[{"bb":{"cc":18,"cc":{"dd":19}}},{"bb":{"cc":{"dd":20},"cc":21}}]},"newTop":{"level":{"key":[{"array":{"in":{"deep":{"structure":null}}}}]}}}}}
+
+do_execsql_test json-remove-1 {
+    select json_remove('{"a": 5, "a": [5,4,3,2,1]}','$.a', '$.a[4]', '$.a[5]', '$.a');
+} {{{}}}
+
+do_execsql_test json-remove-2 {
+    SELECT json_remove('{"a": {"b": {"c": 1, "c": 2}, "b": [1,2,3]}}', '$.a.b.c', '$.a.b[1]');
+} {{{"a":{"b":{"c":2},"b":[1,2,3]}}}}
+
+do_execsql_test json-remove-3 {
+    SELECT json_remove('[1,2,3,4,5]', '$[0]', '$[4]', '$[5]');
+} {{[2,3,4,5]}}
+
+do_execsql_test json-remove-4 {
+    SELECT json_remove('{"arr": [1,2,3,4,5]}', '$.arr[#-1]', '$.arr[#-3]', '$.arr[#-1]');
+} {{{"arr":[1,3]}}}
+
+do_execsql_test json-remove-5 {
+    SELECT json_remove('{}', '$.a');
+} {{{}}}
+
+do_execsql_test json-remove-6 {
+    SELECT json_remove('{"a": [[1,2], [3,4]]}', '$.a[0][1]', '$.a[1]');
+} {{{"a":[[1]]}}}
+
+do_execsql_test json-remove-7 {
+    SELECT json_remove('{"a": 1, "b": [1,2], "c": {"d": 3}}', '$.a', '$.b[0]', '$.c.d');
+} {{{"b":[2],"c":{}}}}
+
+do_execsql_test json_set_field_empty_object {
+   SELECT json_set('{}', '$.field', 'value');
+} {{{"field":"value"}}}
+
+do_execsql_test json_set_replace_field {
+   SELECT json_set('{"field":"old_value"}', '$.field', 'new_value');
+} {{{"field":"new_value"}}}
+
+do_execsql_test json_set_set_deeply_nested_key {
+   SELECT json_set('{}', '$.object.doesnt.exist', 'value');
+} {{{"object":{"doesnt":{"exist":"value"}}}}}
+
+do_execsql_test json_set_add_value_to_empty_array {
+   SELECT json_set('[]', '$[0]', 'value');
+} {{["value"]}}
+
+do_execsql_test json_set_add_value_to_nonexistent_array {
+   SELECT json_set('{}', '$.some_array[0]', 123);
+} {{{"some_array":[123]}}}
+
+do_execsql_test json_set_add_value_to_array {
+   SELECT json_set('[123]', '$[1]', 456);
+} {{[123,456]}}
+
+do_execsql_test json_set_add_value_to_array_out_of_bounds {
+   SELECT json_set('[123]', '$[200]', 456);
+} {{[123]}}
+
+do_execsql_test json_set_replace_value_in_array {
+   SELECT json_set('[123]', '$[0]', 456);
+} {{[456]}}
+
+do_execsql_test json_set_null_path {
+   SELECT json_set('{}', NULL, 456);
+} {{{}}}
+
+do_execsql_test json_set_multiple_keys {
+   SELECT json_set('[123]', '$[0]', 456, '$[1]', 789);
+} {{[456,789]}}
+
+do_execsql_test json_set_add_array_in_nested_object {
+   SELECT json_set('{}', '$.object[0].field', 123);
+} {{{"object":[{"field":123}]}}}
+
+do_execsql_test json_set_add_array_in_array_in_nested_object {
+   SELECT json_set('{}', '$.object[0][0]', 123);
+} {{{"object":[[123]]}}}
+
+do_execsql_test json_set_add_array_in_array_in_nested_object_out_of_bounds {
+   SELECT json_set('{}', '$.object[123].another', 'value', '$.field', 'value');
+} {{{"field":"value"}}}

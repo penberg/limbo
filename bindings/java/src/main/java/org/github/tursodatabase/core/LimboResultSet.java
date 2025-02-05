@@ -1,5 +1,6 @@
 package org.github.tursodatabase.core;
 
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import org.github.tursodatabase.annotations.Nullable;
 import org.slf4j.Logger;
@@ -40,6 +41,20 @@ public class LimboResultSet {
   }
 
   /**
+   * Consumes all the rows in this {@link ResultSet} until the {@link #next()} method returns
+   * `false`.
+   *
+   * @throws SQLException if the result set is not open or if an error occurs while iterating.
+   */
+  public void consumeAll() throws SQLException {
+    if (!open) {
+      throw new SQLException("The result set is not open");
+    }
+
+    while (next()) {}
+  }
+
+  /**
    * Moves the cursor forward one row from its current position. A {@link LimboResultSet} cursor is
    * initially positioned before the first fow; the first call to the method <code>next</code> makes
    * the first row the current row; the second call makes the second row the current row, and so on.
@@ -50,7 +65,11 @@ public class LimboResultSet {
    * cursor can only move forward.
    */
   public boolean next() throws SQLException {
-    if (!open || isEmptyResultSet || pastLastRow) {
+    if (!open) {
+      throw new SQLException("The resultSet is not open");
+    }
+
+    if (isEmptyResultSet || pastLastRow) {
       return false; // completed ResultSet
     }
 
@@ -70,9 +89,6 @@ public class LimboResultSet {
     }
 
     pastLastRow = lastStepResult.isDone();
-    if (pastLastRow) {
-      open = false;
-    }
     return !pastLastRow;
   }
 
@@ -95,6 +111,29 @@ public class LimboResultSet {
     if (!open) {
       throw new SQLException("ResultSet closed");
     }
+  }
+
+  public void close() throws SQLException {
+    this.open = false;
+  }
+
+  // Note that columnIndex starts from 1
+  @Nullable
+  public Object get(int columnIndex) throws SQLException {
+    if (!this.isOpen()) {
+      throw new SQLException("ResultSet is not open");
+    }
+
+    if (this.lastStepResult == null || this.lastStepResult.getResult() == null) {
+      throw new SQLException("ResultSet is null");
+    }
+
+    final Object[] resultSet = this.lastStepResult.getResult();
+    if (columnIndex > resultSet.length || columnIndex < 0) {
+      throw new SQLException("columnIndex out of bound");
+    }
+
+    return resultSet[columnIndex - 1];
   }
 
   @Override

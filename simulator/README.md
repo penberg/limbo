@@ -72,3 +72,10 @@ Todo
 ## Automatic Compatibility Testing with SQLite
 
 Todo
+
+## Resources
+- [(reading) TigerBeetle Deterministic Simulation Testing](https://docs.tigerbeetle.com/about/vopr/)
+- [(reading) sled simulation guide (jepsen-proof engineering)](https://sled.rs/simulation.html)
+- [(video) "Testing Distributed Systems w/ Deterministic Simulation" by Will Wilson](https://www.youtube.com/watch?v=4fFDFbi3toc)
+- [(video) FF meetup #4 - Deterministic simulation testing](https://www.youtube.com/live/29Vz5wkoUR8)
+- [(code) Hiisi: a proof of concept libSQL written in Rust following TigerBeetle-style with deterministic simulation testing](https://github.com/penberg/hiisi)

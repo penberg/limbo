@@ -15,8 +15,8 @@ pub enum Value<'a> {
     Null,
     Integer(i64),
     Float(f64),
-    Text(&'a String),
-    Blob(&'a Vec<u8>),
+    Text(&'a str),
+    Blob(&'a [u8]),
 }
 
 impl Display for Value<'_> {
@@ -130,38 +130,41 @@ impl OwnedValue {
         }
     }
 
-    pub fn from_ffi(v: &ExtValue) -> Self {
+    pub fn from_ffi(v: &ExtValue) -> Result<Self> {
         match v.value_type() {
-            ExtValueType::Null => OwnedValue::Null,
+            ExtValueType::Null => Ok(OwnedValue::Null),
             ExtValueType::Integer => {
                 let Some(int) = v.to_integer() else {
-                    return OwnedValue::Null;
+                    return Ok(OwnedValue::Null);
                 };
-                OwnedValue::Integer(int)
+                Ok(OwnedValue::Integer(int))
             }
             ExtValueType::Float => {
                 let Some(float) = v.to_float() else {
-                    return OwnedValue::Null;
+                    return Ok(OwnedValue::Null);
                 };
-                OwnedValue::Float(float)
+                Ok(OwnedValue::Float(float))
             }
             ExtValueType::Text => {
                 let Some(text) = v.to_text() else {
-                    return OwnedValue::Null;
+                    return Ok(OwnedValue::Null);
                 };
-                OwnedValue::build_text(Rc::new(text))
+                Ok(OwnedValue::build_text(Rc::new(text.to_string())))
             }
             ExtValueType::Blob => {
                 let Some(blob) = v.to_blob() else {
-                    return OwnedValue::Null;
+                    return Ok(OwnedValue::Null);
                 };
-                OwnedValue::Blob(Rc::new(blob))
+                Ok(OwnedValue::Blob(Rc::new(blob)))
             }
             ExtValueType::Error => {
-                let Some(err) = v.to_error() else {
-                    return OwnedValue::Null;
+                let Some(err) = v.to_error_details() else {
+                    return Ok(OwnedValue::Null);
                 };
-                OwnedValue::Text(LimboText::new(Rc::new(err)))
+                match err {
+                    (_, Some(msg)) => Err(LimboError::ExtensionError(msg)),
+                    (code, None) => Err(LimboError::ExtensionError(code.to_string())),
+                }
             }
         }
     }
@@ -181,13 +184,15 @@ pub enum AggContext {
 const NULL: OwnedValue = OwnedValue::Null;
 
 impl AggContext {
-    pub fn compute_external(&mut self) {
+    pub fn compute_external(&mut self) -> Result<()> {
         if let Self::External(ext_state) = self {
             if ext_state.finalized_value.is_none() {
                 let final_value = unsafe { (ext_state.finalize_fn)(ext_state.state) };
-                ext_state.cache_final_value(OwnedValue::from_ffi(&final_value));
+                ext_state.cache_final_value(OwnedValue::from_ffi(&final_value)?);
+                unsafe { final_value.free() };
             }
         }
+        Ok(())
     }
 
     pub fn final_value(&self) -> &OwnedValue {

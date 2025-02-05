@@ -19,13 +19,18 @@ Add the crate to your `Cargo.toml`:
 ```toml
 [dependencies]
 limbo_ext = { path = "path/to/limbo/extensions/core" } # temporary until crate is published
+
+# mimalloc is required if you intend on linking dynamically. It is imported for you by the register_extension
+# macro, so no configuration is needed. But it must be added to your Cargo.toml
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+mimalloc = { version = "*", default-features = false }
 ```
 
-**NOTE** Crate must be of type `cdylib`
+**NOTE** Crate must be of type `cdylib` if you wish to link dynamically
 
 ```
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 ```
 
 `cargo build` will output a shared library that can be loaded with `.load target/debug/libyour_crate_name`

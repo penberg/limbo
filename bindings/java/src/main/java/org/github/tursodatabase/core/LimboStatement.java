@@ -21,6 +21,8 @@ public class LimboStatement {
   private final long statementPointer;
   private final LimboResultSet resultSet;
 
+  private boolean closed;
+
   // TODO: what if the statement we ran was DDL, update queries and etc. Should we still create a
   // resultSet?
   public LimboStatement(String sql, long statementPointer) {
@@ -53,6 +55,11 @@ public class LimboStatement {
     return result;
   }
 
+  /**
+   * Because Limbo supports async I/O, it is possible to return a {@link LimboStepResult} with
+   * {@link LimboStepResult#STEP_RESULT_ID_ROW}. However, this is handled by the native side, so you
+   * can expect that this method will not return a {@link LimboStepResult#STEP_RESULT_ID_ROW}.
+   */
   @Nullable
   private native LimboStepResult step(long stmtPointer) throws SQLException;
 
@@ -65,6 +72,30 @@ public class LimboStatement {
   @NativeInvocation(invokedFrom = "limbo_statement.rs")
   private void throwLimboException(int errorCode, byte[] errorMessageBytes) throws SQLException {
     LimboExceptionUtils.throwLimboException(errorCode, errorMessageBytes);
+  }
+
+  /**
+   * Closes the current statement and releases any resources associated with it. This method calls
+   * the native `_close` method to perform the actual closing operation.
+   */
+  public void close() throws SQLException {
+    if (closed) {
+      return;
+    }
+    this.resultSet.close();
+    _close(statementPointer);
+    closed = true;
+  }
+
+  private native void _close(long statementPointer);
+
+  /**
+   * Checks if the statement is closed.
+   *
+   * @return true if the statement is closed, false otherwise.
+   */
+  public boolean isClosed() {
+    return closed;
   }
 
   @Override

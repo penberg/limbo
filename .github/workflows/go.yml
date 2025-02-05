@@ -1,0 +1,43 @@
+name: Go Tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - main
+
+env:
+  working-directory: bindings/go
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ${{ env.working-directory }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust(stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.23"
+
+      - name: build Go bindings library
+        run: cargo build --package limbo-go
+
+      - name: run Go tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/debug:$LD_LIBRARY_PATH
+        run: go test
+

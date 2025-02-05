@@ -4,7 +4,7 @@ use limbo_core::{StepResult, Value};
 #[test]
 fn test_statement_reset_bind() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("create table test (i integer);");
+    let tmp_db = TempDatabase::new_with_rusqlite("create table test (i integer);");
     let conn = tmp_db.connect_limbo();
 
     let mut stmt = conn.prepare("select ?")?;
@@ -41,17 +41,17 @@ fn test_statement_reset_bind() -> anyhow::Result<()> {
 #[test]
 fn test_statement_bind() -> anyhow::Result<()> {
     let _ = env_logger::try_init();
-    let tmp_db = TempDatabase::new("create table test (i integer);");
+    let tmp_db = TempDatabase::new_with_rusqlite("create table test (i integer);");
     let conn = tmp_db.connect_limbo();
 
     let mut stmt = conn.prepare("select ?, ?1, :named, ?3, ?4")?;
 
-    stmt.bind_at(1.try_into()?, Value::Text(&"hello".to_string()));
+    stmt.bind_at(1.try_into()?, Value::Text("hello"));
 
     let i = stmt.parameters().index(":named").unwrap();
     stmt.bind_at(i, Value::Integer(42));
 
-    stmt.bind_at(3.try_into()?, Value::Blob(&vec![0x1, 0x2, 0x3]));
+    stmt.bind_at(3.try_into()?, Value::Blob(&[0x1, 0x2, 0x3]));
 
     stmt.bind_at(4.try_into()?, Value::Float(0.5));
 

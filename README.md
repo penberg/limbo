@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="limbo.png" alt="Limbo" width="200"/>
-  <h1 align="center">Limbo</h1>
+  <img src="limbo.png" alt="Limbo" width="800"/>
+  <h1 align="center">Project Limbo</h1>
 </p>
 
 <p align="center">
-  Limbo is a <i>work-in-progress</i>, in-process OLTP database management system, compatible with SQLite.
+  <i>Limbo</i> is a project to build the modern evolution of SQLite.
 </p>
 
 <p align="center">
@@ -17,37 +17,38 @@
   <a title="Last Commit" target="_blank" href="https://github.com/tursodatabase/limbo/commits/main"><img src="https://img.shields.io/github/last-commit/tursodatabase/limbo.svg?style=flat-square&color=FF9900"></a>
 </p>
 <p align="center">
-  <a title="Discord" target="_blank" href="[https://discord.gg/jgjmyYgHwB](https://discord.gg/jgjmyYgHwB)"><img alt="Chat on Discord" src="https://img.shields.io/discord/1258658826257961020?label=Discord&logo=Discord&style=social"></a>
+  <a title="Developer's Discord" target="_blank" href="[https://discord.gg/jgjmyYgHwB](https://discord.gg/jgjmyYgHwB)"><img alt="Chat with developers on Discord" src="https://img.shields.io/discord/1258658826257961020?label=Discord&logo=Discord&style=social"></a>
 </p>
 
 ---
 
 ## Features
 
-Limbo is an in-process OLTP database engine library that has:
+Limbo is a _work-in-progress_, in-process OLTP database engine library written in Rust that has:
 
 * **Asynchronous I/O** support on Linux with `io_uring`
 * **SQLite compatibility** [[doc](COMPAT.md)] for SQL dialect, file formats, and the C API
-* **Language bindings** for JavaScript/WebAssembly, Rust, Python, and Java
+* **Language bindings** for JavaScript/WebAssembly, Rust, Go, Python, and [Java](bindings/java)
 * **OS support** for Linux, macOS, and Windows
 
 ## Getting Started
 
-### CLI
+### 💻 Command Line
 
-Install `limbo` with:
+You can install the latest `limbo` release with:
 
 ```shell 
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/tursodatabase/limbo/releases/latest/download/limbo-installer.sh | sh
 ```
 
-Then use the SQL shell to create and query a database:
+Then launch the shell to execute SQL statements:
 
 ```console
-$ limbo database.db
-Limbo v0.0.6
+Limbo
 Enter ".help" for usage hints.
+Connected to a transient in-memory database.
+Use ".open FILENAME" to reopen on a persistent database
 limbo> CREATE TABLE users (id INT PRIMARY KEY, username TEXT);
 limbo> INSERT INTO users VALUES (1, 'alice');
 limbo> INSERT INTO users VALUES (2, 'bob');
@@ -56,7 +57,13 @@ limbo> SELECT * FROM users;
 2|bob
 ```
 
-### JavaScript (wip)
+You can also build and run the latest development version with:
+
+```shell
+cargo run
+```
+
+### ✨ JavaScript (wip)
 
 Installation:
 
@@ -75,7 +82,7 @@ const users = stmt.all();
 console.log(users);
 ```
 
-### Python (wip)
+### 🐍 Python (wip)
 
 ```console
 pip install pylimbo
@@ -92,62 +99,59 @@ res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
 ```
 
-## Developing
+### 🐹 Go (wip)
 
-Build and run `limbo` cli: 
-
-```shell 
-cargo run --package limbo --bin limbo database.db
+1. Clone the repository
+2. Build the library and set your LD_LIBRARY_PATH to include limbo's target directory
+```console
+cargo build --package limbo-go
+export LD_LIBRARY_PATH=/path/to/limbo/target/debug:$LD_LIBRARY_PATH
 ```
-
-Run tests:
+3. Use the driver
 
 ```console
-cargo test
+go get github.com/tursodatabase/limbo
+go install github.com/tursodatabase/limbo
 ```
 
-Test coverage report:
+Example usage:
+```go
+import (
+    "database/sql"
+    _"github.com/tursodatabase/limbo"
+)
 
+conn, _ = sql.Open("sqlite3", "sqlite.db")
+defer conn.Close()
+
+stmt, _ := conn.Prepare("select * from users")
+defer stmt.Close()
+
+rows, _ = stmt.Query()
+for rows.Next() {
+    var id int 
+    var username string
+    _ := rows.Scan(&id, &username)
+    fmt.Printf("User: ID: %d, Username: %s\n", id, username)
+}
 ```
-cargo tarpaulin -o html
-```
 
-> [!NOTE]
-> Generation of coverage report requires [tarpaulin](https://github.com/xd009642/tarpaulin) binary to be installed.
-> You can install it with `cargo install cargo-tarpaulin`
+## Contributing
 
-[//]: # (TODO remove the below tip when the bug is solved)
-
-> [!TIP]
-> If coverage fails with "Test failed during run" error and all of the tests passed it might be the result of tarpaulin [bug](https://github.com/xd009642/tarpaulin/issues/1642). You can temporarily set [dynamic libraries linking manually](https://doc.rust-lang.org/cargo/reference/environment-variables.html#dynamic-library-paths) as a workaround, e.g. for linux  `LD_LIBRARY_PATH="$(rustc --print=target-libdir)" cargo tarpaulin -o html`.
-
-Run benchmarks:
-
-```console
-cargo bench
-```
-
-Run benchmarks and generate flamegraphs:
-
-```console
-echo -1 | sudo tee /proc/sys/kernel/perf_event_paranoid
-cargo bench --bench benchmark -- --profile-time=5
-```
+We'd love to have you contribute to Limbo! Please check out the [contribution guide] to get started.
 
 ## FAQ
 
-### How is Limbo different from libSQL?
+### How is Limbo different from Turso's libSQL?
 
-Limbo is a research project to build a SQLite compatible in-process database in Rust with native async support. The libSQL project, on the other hand, is an open source, open contribution fork of SQLite, with focus on production features such as replication, backups, encryption, and so on. There is no hard dependency between the two projects. Of course, if Limbo becomes widely successful, we might consider merging with libSQL, but that is something that will be decided in the future.
+Limbo is a project to build the modern evolution of SQLite in Rust, with a strong open contribution focus and features like native async support, vector search, and more. The libSQL project is also an attempt to evolve SQLite in a similar direction, but through a fork rather than a rewrite.
+
+Rewriting SQLite in Rust started as an unassuming experiment, and due to its incredible success, replaces libSQL as our intended direction. At this point, libSQL is production ready, Limbo is not - although it is evolving rapidly. As the project start to near production readiness, we plan to rename it to just "Turso". More details [here](https://turso.tech/blog/we-will-rewrite-sqlite-and-we-are-going-all-in).
 
 ## Publications
 
 * Pekka Enberg, Sasu Tarkoma, Jon Crowcroft Ashwin Rao (2024). Serverless Runtime / Database Co-Design With Asynchronous I/O. In _EdgeSys ‘24_. [[PDF]](https://penberg.org/papers/penberg-edgesys24.pdf)
 * Pekka Enberg, Sasu Tarkoma, and Ashwin Rao (2023). Towards Database and Serverless Runtime Co-Design. In _CoNEXT-SW ’23_. [[PDF](https://penberg.org/papers/penberg-conext-sw-23.pdf)] [[Slides](https://penberg.org/papers/penberg-conext-sw-23-slides.pdf)]
-
-## Contributing
-
-We'd love to have you contribute to Limbo! Check out the [contribution guide] to get started.
 
 ## License
 

@@ -7,6 +7,8 @@ use std::num::ParseIntError;
 use std::ops::Deref;
 use std::str::{self, Bytes, FromStr};
 
+use strum_macros::{EnumIter, EnumString};
+
 use fmt::{ToTokens, TokenStream};
 use indexmap::{IndexMap, IndexSet};
 
@@ -1585,27 +1587,19 @@ pub type PragmaValue = Expr; // TODO
 
 /// `PRAGMA` value
 // https://sqlite.org/pragma.html
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, EnumString, strum::Display)]
+#[strum(serialize_all = "snake_case")]
 pub enum PragmaName {
     /// `cache_size` pragma
     CacheSize,
     /// `journal_mode` pragma
     JournalMode,
+    /// Return the total number of pages in the database file.
+    PageCount,
+    /// returns information about the columns of a table
+    TableInfo,
     /// trigger a checkpoint to run on database(s) if WAL is enabled
     WalCheckpoint,
-}
-
-impl FromStr for PragmaName {
-    type Err = ();
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            "cache_size" => Ok(PragmaName::CacheSize),
-            "wal_checkpoint" => Ok(PragmaName::WalCheckpoint),
-            "journal_mode" => Ok(PragmaName::JournalMode),
-            _ => Err(()),
-        }
-    }
 }
 
 /// `CREATE TRIGGER` time
@@ -1902,7 +1896,8 @@ pub enum FrameExclude {
 
 #[cfg(test)]
 mod test {
-    use super::Name;
+    use super::{Name, PragmaName};
+    use strum::IntoEnumIterator;
 
     #[test]
     fn test_dequote() {
@@ -1912,6 +1907,16 @@ mod test {
         assert_eq!(name(r#""x""#), "x");
         assert_eq!(name(r#""x""y""#), "x\"y");
         assert_eq!(name("[x]"), "x");
+    }
+
+    #[test]
+    // pragma pragma_list expects this to be sorted. We can avoid allocations there if we keep
+    // the list sorted.
+    fn pragma_list_sorted() {
+        let pragma_strings: Vec<String> = PragmaName::iter().map(|x| x.to_string()).collect();
+        let mut pragma_strings_sorted = pragma_strings.clone();
+        pragma_strings_sorted.sort();
+        assert_eq!(pragma_strings, pragma_strings_sorted);
     }
 
     fn name(s: &'static str) -> Name {

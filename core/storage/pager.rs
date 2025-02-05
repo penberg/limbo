@@ -2,14 +2,15 @@ use crate::result::LimboResult;
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
-use crate::storage::wal::Wal;
+use crate::storage::wal::{CheckpointResult, Wal};
 use crate::{Buffer, Result};
 use log::trace;
+use parking_lot::RwLock;
 use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::page_cache::{DumbLruPageCache, PageCacheKey};
 use super::wal::{CheckpointMode, CheckpointStatus};
@@ -207,18 +208,25 @@ impl Pager {
     }
 
     pub fn end_tx(&self) -> Result<CheckpointStatus> {
-        match self.cacheflush()? {
-            CheckpointStatus::Done => {}
-            CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
-        };
+        let checkpoint_status = self.cacheflush()?;
+        match checkpoint_status {
+            CheckpointStatus::IO => Ok(checkpoint_status),
+            CheckpointStatus::Done(_) => {
+                self.wal.borrow().end_read_tx()?;
+                Ok(checkpoint_status)
+            }
+        }
+    }
+
+    pub fn end_read_tx(&self) -> Result<()> {
         self.wal.borrow().end_read_tx()?;
-        Ok(CheckpointStatus::Done)
+        Ok(())
     }
 
     /// Reads a page from the database.
     pub fn read_page(&self, page_idx: usize) -> Result<PageRef> {
         trace!("read_page(page_idx = {})", page_idx);
-        let mut page_cache = self.page_cache.write().unwrap();
+        let mut page_cache = self.page_cache.write();
         let page_key = PageCacheKey::new(page_idx, Some(self.wal.borrow().get_max_frame()));
         if let Some(page) = page_cache.get(&page_key) {
             trace!("read_page(page_idx = {}) = cached", page_idx);
@@ -254,7 +262,7 @@ impl Pager {
     pub fn load_page(&self, page: PageRef) -> Result<()> {
         let id = page.get().id;
         trace!("load_page(page_idx = {})", id);
-        let mut page_cache = self.page_cache.write().unwrap();
+        let mut page_cache = self.page_cache.write();
         page.set_locked();
         let page_key = PageCacheKey::new(id, Some(self.wal.borrow().get_max_frame()));
         if let Some(frame_id) = self.wal.borrow().find_frame(id as u64)? {
@@ -290,7 +298,7 @@ impl Pager {
 
     /// Changes the size of the page cache.
     pub fn change_page_cache_size(&self, capacity: usize) {
-        let mut page_cache = self.page_cache.write().unwrap();
+        let mut page_cache = self.page_cache.write();
         page_cache.resize(capacity);
     }
 
@@ -301,13 +309,14 @@ impl Pager {
     }
 
     pub fn cacheflush(&self) -> Result<CheckpointStatus> {
+        let mut checkpoint_result = CheckpointResult::new();
         loop {
             let state = self.flush_info.borrow().state.clone();
             match state {
                 FlushState::Start => {
                     let db_size = self.db_header.borrow().database_size;
                     for page_id in self.dirty_pages.borrow().iter() {
-                        let mut cache = self.page_cache.write().unwrap();
+                        let mut cache = self.page_cache.write();
                         let page_key =
                             PageCacheKey::new(*page_id, Some(self.wal.borrow().get_max_frame()));
                         let page = cache.get(&page_key).expect("we somehow added a page to dirty list but we didn't mark it as dirty, causing cache to drop it.");
@@ -334,7 +343,7 @@ impl Pager {
                 FlushState::SyncWal => {
                     match self.wal.borrow_mut().sync() {
                         Ok(CheckpointStatus::IO) => return Ok(CheckpointStatus::IO),
-                        Ok(CheckpointStatus::Done) => {}
+                        Ok(CheckpointStatus::Done(res)) => checkpoint_result = res,
                         Err(e) => return Err(e),
                     }
 
@@ -348,7 +357,8 @@ impl Pager {
                 }
                 FlushState::Checkpoint => {
                     match self.checkpoint()? {
-                        CheckpointStatus::Done => {
+                        CheckpointStatus::Done(res) => {
+                            checkpoint_result = res;
                             self.flush_info.borrow_mut().state = FlushState::SyncDbFile;
                         }
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
@@ -368,10 +378,11 @@ impl Pager {
                 }
             }
         }
-        Ok(CheckpointStatus::Done)
+        Ok(CheckpointStatus::Done(checkpoint_result))
     }
 
     pub fn checkpoint(&self) -> Result<CheckpointStatus> {
+        let mut checkpoint_result = CheckpointResult::new();
         loop {
             let state = self.checkpoint_state.borrow().clone();
             trace!("pager_checkpoint(state={:?})", state);
@@ -384,7 +395,8 @@ impl Pager {
                         CheckpointMode::Passive,
                     )? {
                         CheckpointStatus::IO => return Ok(CheckpointStatus::IO),
-                        CheckpointStatus::Done => {
+                        CheckpointStatus::Done(res) => {
+                            checkpoint_result = res;
                             self.checkpoint_state.replace(CheckpointState::SyncDbFile);
                         }
                     };
@@ -408,7 +420,7 @@ impl Pager {
                         Ok(CheckpointStatus::IO)
                     } else {
                         self.checkpoint_state.replace(CheckpointState::Checkpoint);
-                        Ok(CheckpointStatus::Done)
+                        Ok(CheckpointStatus::Done(checkpoint_result))
                     };
                 }
             }
@@ -416,7 +428,8 @@ impl Pager {
     }
 
     // WARN: used for testing purposes
-    pub fn clear_page_cache(&self) {
+    pub fn clear_page_cache(&self) -> CheckpointResult {
+        let checkpoint_result: CheckpointResult;
         loop {
             match self.wal.borrow_mut().checkpoint(
                 self,
@@ -426,14 +439,16 @@ impl Pager {
                 Ok(CheckpointStatus::IO) => {
                     let _ = self.io.run_once();
                 }
-                Ok(CheckpointStatus::Done) => {
+                Ok(CheckpointStatus::Done(res)) => {
+                    checkpoint_result = res;
                     break;
                 }
                 Err(err) => panic!("error while clearing cache {}", err),
             }
         }
         // TODO: only clear cache of things that are really invalidated
-        self.page_cache.write().unwrap().clear();
+        self.page_cache.write().clear();
+        checkpoint_result
     }
 
     /*
@@ -468,7 +483,7 @@ impl Pager {
             // setup page and add to cache
             page.set_dirty();
             self.add_dirty(page.get().id);
-            let mut cache = self.page_cache.write().unwrap();
+            let mut cache = self.page_cache.write();
             let page_key =
                 PageCacheKey::new(page.get().id, Some(self.wal.borrow().get_max_frame()));
             cache.insert(page_key, page.clone());
@@ -477,7 +492,7 @@ impl Pager {
     }
 
     pub fn put_loaded_page(&self, id: usize, page: PageRef) {
-        let mut cache = self.page_cache.write().unwrap();
+        let mut cache = self.page_cache.write();
         // cache insert invalidates previous page
         let page_key = PageCacheKey::new(id, Some(self.wal.borrow().get_max_frame()));
         cache.insert(page_key, page.clone());
@@ -511,7 +526,9 @@ pub fn allocate_page(page_id: usize, buffer_pool: &Rc<BufferPool>, offset: usize
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
 
     use crate::storage::page_cache::{DumbLruPageCache, PageCacheKey};
 
@@ -525,13 +542,13 @@ mod tests {
         let thread = {
             let cache = cache.clone();
             std::thread::spawn(move || {
-                let mut cache = cache.write().unwrap();
+                let mut cache = cache.write();
                 let page_key = PageCacheKey::new(1, None);
                 cache.insert(page_key, Arc::new(Page::new(1)));
             })
         };
         let _ = thread.join();
-        let mut cache = cache.write().unwrap();
+        let mut cache = cache.write();
         let page_key = PageCacheKey::new(1, None);
         let page = cache.get(&page_key);
         assert_eq!(page.unwrap().get().id, 1);

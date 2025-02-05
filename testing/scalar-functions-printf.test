@@ -1,0 +1,17 @@
+#!/usr/bin/env tclsh
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+# Basic string formatting
+do_execsql_test printf-basic-string {
+  SELECT printf('Hello World!');
+} {{Hello World!}}
+
+do_execsql_test printf-string-replacement {
+  SELECT printf('Hello, %s', 'Alice');
+} {{Hello, Alice}}
+
+do_execsql_test printf-numeric-replacement {
+  SELECT printf('My number is: %d', 42);
+} {{My number is: 42}}

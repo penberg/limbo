@@ -16,6 +16,7 @@ public abstract class LimboConnection implements Connection {
 
   private final long connectionPtr;
   private final AbstractDB database;
+  private boolean closed;
 
   public LimboConnection(String url, String filePath) throws SQLException {
     this(url, filePath, new Properties());
@@ -28,24 +29,8 @@ public abstract class LimboConnection implements Connection {
    * @param filePath path to file
    */
   public LimboConnection(String url, String filePath, Properties properties) throws SQLException {
-    AbstractDB db = null;
-
-    try {
-      db = open(url, filePath, properties);
-    } catch (Throwable t) {
-      try {
-        if (db != null) {
-          db.close();
-        }
-      } catch (Throwable t2) {
-        t.addSuppressed(t2);
-      }
-
-      throw t;
-    }
-
-    this.database = db;
-    this.connectionPtr = db.connect();
+    this.database = open(url, filePath, properties);
+    this.connectionPtr = this.database.connect();
   }
 
   private static AbstractDB open(String url, String filePath, Properties properties)
@@ -59,13 +44,18 @@ public abstract class LimboConnection implements Connection {
 
   @Override
   public void close() throws SQLException {
-    if (isClosed()) return;
-    database.close();
+    if (isClosed()) {
+      return;
+    }
+    this._close(this.connectionPtr);
+    this.closed = true;
   }
+
+  private native void _close(long connectionPtr);
 
   @Override
   public boolean isClosed() throws SQLException {
-    return database.isClosed();
+    return closed;
   }
 
   public AbstractDB getDatabase() {
@@ -114,12 +104,15 @@ public abstract class LimboConnection implements Connection {
    */
   protected void checkCursor(int resultSetType, int resultSetConcurrency, int resultSetHoldability)
       throws SQLException {
-    if (resultSetType != ResultSet.TYPE_FORWARD_ONLY)
+    if (resultSetType != ResultSet.TYPE_FORWARD_ONLY) {
       throw new SQLException("SQLite only supports TYPE_FORWARD_ONLY cursors");
-    if (resultSetConcurrency != ResultSet.CONCUR_READ_ONLY)
+    }
+    if (resultSetConcurrency != ResultSet.CONCUR_READ_ONLY) {
       throw new SQLException("SQLite only supports CONCUR_READ_ONLY cursors");
-    if (resultSetHoldability != ResultSet.CLOSE_CURSORS_AT_COMMIT)
+    }
+    if (resultSetHoldability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
       throw new SQLException("SQLite only supports closing cursors at commit");
+    }
   }
 
   public void setBusyTimeout(int busyTimeout) {

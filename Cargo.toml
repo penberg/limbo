@@ -18,11 +18,13 @@ members = [
     "sqlite3",
     "tests",
     "extensions/percentile",
+    "extensions/vector", 
+    "extensions/time",
 ]
 exclude = ["perf/latency/limbo"]
 
 [workspace.package]
-version = "0.0.13"
+version = "0.0.14"
 authors = ["the Limbo authors"]
 edition = "2021"
 license = "MIT"

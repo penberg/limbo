@@ -3,6 +3,53 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 
+do_execsql_test_small where-is-null {
+    select count(*) from demo where value is null;
+} {2}
+
+do_execsql_test_small where-equals-null {
+    select count(*) from demo where value = null;
+} {0}
+
+do_execsql_test_small where-is-not-null {
+    select count(*) from demo where value is not null;
+} {3}
+
+do_execsql_test_small where-not-equal-null {
+    select count(*) from demo where value != null;
+} {0}
+
+do_execsql_test_small where-is-a-with-nulls {
+    select count(*) from demo where value is 'A';
+} {1}
+
+do_execsql_test_small where-equals-a-with-nulls {
+    select count(*) from demo where value == 'A';
+} {1}
+
+do_execsql_test_small where-is-not-a-with-nulls {
+    select count(*) from demo where value is not 'A';
+} {4}
+
+do_execsql_test_small where-not-equals-a-with-nulls {
+    select count(*) from demo where value != 'A';
+} {2}
+
+do_execsql_test_small where-is-null-combined {
+    select * from demo where value is null or id = 3;
+} {2|
+3|B
+4|
+}
+
+do_execsql_test_small where-is-not-null-combined {
+    select * from demo where value is not null or id = 2;
+} {1|A
+2|
+3|B
+5|C
+}
+
 do_execsql_test where-clause-eq {
     select last_name from users where id = 2000;
 } {Rodriguez}
@@ -10,6 +57,14 @@ do_execsql_test where-clause-eq {
 do_execsql_test where-clause-eq-string {
     select count(1) from users where last_name = 'Rodriguez';
 } {61}
+
+do_execsql_test where-clause-isnull {
+    select count(1) from users where last_name isnull;
+} {0}
+
+do_execsql_test where-clause-notnull {
+    select count(1) from users where last_name not null;
+} {10000}
 
 do_execsql_test where-clause-ne {
     select count(1) from users where id != 2000;
@@ -285,6 +340,16 @@ do_execsql_test where-id-index-seek-regression-test {
 9998
 9999
 10000}
+
+do_execsql_test where-id-index-seek-regression-test-opposite {
+    select id from users where 9999 < id;
+    select id from users where 10000 <= id;
+    select id from users where 2 > id;
+    select id from users where 1 >= id;
+} {10000
+10000
+1
+1}
 
 do_execsql_test where-id-index-seek-regression-test-2 {
     select count(1) from users where id > 0;

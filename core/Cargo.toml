@@ -14,15 +14,19 @@ name = "limbo_core"
 path = "lib.rs"
 
 [features]
-default = ["fs", "json", "uuid", "io_uring"]
+default = ["fs", "json", "uuid", "vector", "io_uring", "time"]
 fs = []
 json = [
     "dep:jsonb",
     "dep:pest",
     "dep:pest_derive",
 ]
-uuid = ["dep:uuid"]
+uuid = ["limbo_uuid/static"]
+vector = ["limbo_vector/static"]
 io_uring = ["dep:io-uring", "rustix/io_uring"]
+percentile = ["limbo_percentile/static"]
+regexp = ["limbo_regexp/static"]
+time = ["limbo_time/static"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.6.1", optional = true }
@@ -33,6 +37,7 @@ rustix = "0.38.34"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 mimalloc = { version = "*", default-features = false }
+libloading = "0.8.6"
 
 [dependencies]
 limbo_ext = { path = "../extensions/core" }
@@ -57,9 +62,20 @@ pest_derive = { version = "2.0", optional = true }
 rand = "0.8.5"
 bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
 limbo_macros = { path = "../macros" }
-uuid = { version = "1.11.0", features = ["v4", "v7"], optional = true }
+limbo_uuid = { path = "../extensions/uuid", optional = true, features = ["static"] }
+limbo_vector = { path = "../extensions/vector", optional = true, features = ["static"] }
+limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["static"] }
+limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
+limbo_time = { path = "../extensions/time", optional = true, features = ["static"] }
 miette = "7.4.0"
-libloading = "0.8.6"
+strum = "0.26"
+parking_lot = "0.12.3"
+tracing = "0.1.41"
+crossbeam-skiplist = "0.1.3"
+
+[build-dependencies]
+chrono = "0.4.38"
+built = { version = "0.7.5", features = ["git2", "chrono"] }
 
 [target.'cfg(not(target_family = "windows"))'.dev-dependencies]
 pprof = { version = "0.14.0", features = ["criterion", "flamegraph"] }
@@ -77,4 +93,8 @@ tempfile = "3.8.0"
 
 [[bench]]
 name = "benchmark"
+harness = false
+
+[[bench]]
+name = "mvcc_benchmark"
 harness = false

@@ -17,26 +17,29 @@ impl syn::parse::Parse for RegisterExtensionInput {
             if input.peek(syn::Ident) && input.peek2(Token![:]) {
                 let section_name: Ident = input.parse()?;
                 input.parse::<Token![:]>()?;
-                let content;
-                syn::braced!(content in input);
 
-                if section_name == "aggregates" {
-                    aggregates = Punctuated::<Ident, Token![,]>::parse_terminated(&content)?
+                if section_name == "aggregates" || section_name == "scalars" {
+                    let content;
+                    syn::braced!(content in input);
+
+                    let parsed_items = Punctuated::<Ident, Token![,]>::parse_terminated(&content)?
                         .into_iter()
                         .collect();
-                } else if section_name == "scalars" {
-                    scalars = Punctuated::<Ident, Token![,]>::parse_terminated(&content)?
-                        .into_iter()
-                        .collect();
+
+                    if section_name == "aggregates" {
+                        aggregates = parsed_items;
+                    } else {
+                        scalars = parsed_items;
+                    }
+
+                    if input.peek(Token![,]) {
+                        input.parse::<Token![,]>()?;
+                    }
                 } else {
                     return Err(syn::Error::new(section_name.span(), "Unknown section"));
                 }
             } else {
                 return Err(input.error("Expected aggregates: or scalars: section"));
-            }
-
-            if input.peek(Token![,]) {
-                input.parse::<Token![,]>()?;
             }
         }
 

@@ -957,6 +957,22 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::OffsetLimit {
+                limit_reg,
+                combined_reg,
+                offset_reg,
+            } => (
+                "OffsetLimit",
+                *limit_reg as i32,
+                *combined_reg as i32,
+                *offset_reg as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                format!(
+                    "if r[{}]>0 then r[{}]=r[{}]+max(0,r[{}]) else r[{}]=(-1)",
+                    limit_reg, combined_reg, limit_reg, offset_reg, combined_reg
+                ),
+            ),
             Insn::OpenWriteAsync {
                 cursor_id,
                 root_page,
@@ -1018,14 +1034,14 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
-            Insn::IsNull { src, target_pc } => (
+            Insn::IsNull { reg, target_pc } => (
                 "IsNull",
-                *src as i32,
+                *reg as i32,
                 target_pc.to_debug_int(),
                 0,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
-                format!("if (r[{}]==NULL) goto {}", src, target_pc.to_debug_int()),
+                format!("if (r[{}]==NULL) goto {}", reg, target_pc.to_debug_int()),
             ),
             Insn::ParseSchema { db, where_clause } => (
                 "ParseSchema",
@@ -1137,6 +1153,24 @@ pub fn insn_to_str(
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 format!("r[{}]=(r[{}] || r[{}])", dest, lhs, rhs),
+            ),
+            Insn::Noop => (
+                "Noop",
+                0,
+                0,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                String::new(),
+            ),
+            Insn::PageCount { db, dest } => (
+                "Pagecount",
+                *db as i32,
+                *dest as i32,
+                0,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
             ),
         };
     format!(

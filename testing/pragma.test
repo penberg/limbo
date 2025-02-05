@@ -10,3 +10,34 @@ do_execsql_test pragma-cache-size {
 do_execsql_test pragma-update-journal-mode-wal {
   PRAGMA journal_mode=WAL
 } {wal}
+
+do_execsql_test pragma-table-info-equal-syntax {
+  PRAGMA table_info=sqlite_schema
+} {0|type|TEXT|0||0
+1|name|TEXT|0||0
+2|tbl_name|TEXT|0||0
+3|rootpage|INT|0||0
+4|sql|TEXT|0||0
+}
+
+do_execsql_test pragma-table-info-call-syntax {
+  PRAGMA table_info(sqlite_schema)
+} {0|type|TEXT|0||0
+1|name|TEXT|0||0
+2|tbl_name|TEXT|0||0
+3|rootpage|INT|0||0
+4|sql|TEXT|0||0
+}
+
+do_execsql_test pragma-table-info-invalid-table {
+  PRAGMA table_info=pekka
+} {}
+
+do_execsql_test_on_specific_db ":memory:" pragma-page-count-empty {
+  PRAGMA page_count
+} {0}
+
+do_execsql_test_on_specific_db ":memory:" pragma-page-count-table {
+  CREATE TABLE foo(bar);
+  PRAGMA page_count
+} {2}
