@@ -43,7 +43,7 @@ mod tests {
     use crate::mvcc::database::{Database, Row, RowID};
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
-    use std::sync::{Arc, Once};
+    use std::sync::Arc;
 
     static IDS: AtomicU64 = AtomicU64::new(1);
 
