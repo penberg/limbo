@@ -66,8 +66,14 @@ impl Table {
 
     pub fn get_column_at(&self, index: usize) -> &Column {
         match self {
-            Self::BTree(table) => table.columns.get(index).unwrap(),
-            Self::Pseudo(table) => table.columns.get(index).unwrap(),
+            Self::BTree(table) => table
+                .columns
+                .get(index)
+                .expect("column index out of bounds"),
+            Self::Pseudo(table) => table
+                .columns
+                .get(index)
+                .expect("column index out of bounds"),
         }
     }
 

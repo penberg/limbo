@@ -21,7 +21,7 @@ pub fn translate_select(
     syms: &SymbolTable,
 ) -> Result<()> {
     let mut select_plan = prepare_select_plan(schema, select, syms)?;
-    optimize_plan(&mut select_plan)?;
+    optimize_plan(&mut select_plan, schema)?;
     emit_program(program, select_plan, syms)
 }
 
@@ -48,16 +48,36 @@ pub fn prepare_select_plan(
             // Parse the FROM clause into a vec of TableReferences. Fold all the join conditions expressions into the WHERE clause.
             let table_references = parse_from(schema, from, syms, &mut where_predicates)?;
 
+            // Preallocate space for the result columns
+            let result_columns = Vec::with_capacity(
+                columns
+                    .iter()
+                    .map(|c| match c {
+                        // Allocate space for all columns in all tables
+                        ResultColumn::Star => {
+                            table_references.iter().map(|t| t.columns().len()).sum()
+                        }
+                        // Guess 5 columns if we can't find the table using the identifier (maybe it's in [brackets] or `tick_quotes`, or miXeDcAse)
+                        ResultColumn::TableStar(n) => table_references
+                            .iter()
+                            .find(|t| t.identifier == n.0)
+                            .map(|t| t.columns().len())
+                            .unwrap_or(5),
+                        // Otherwise allocate space for 1 column
+                        ResultColumn::Expr(_, _) => 1,
+                    })
+                    .sum(),
+            );
+
             let mut plan = SelectPlan {
                 table_references,
-                result_columns: vec![],
+                result_columns,
                 where_clause: where_predicates,
                 group_by: None,
                 order_by: None,
                 aggregates: vec![],
                 limit: None,
                 offset: None,
-                available_indexes: schema.indexes.clone().into_values().flatten().collect(),
                 contains_constant_false_condition: false,
                 query_type: SelectQueryType::TopLevel,
             };

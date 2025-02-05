@@ -15,7 +15,6 @@ use super::{BranchOffset, CursorID, Insn, InsnReference, Program};
 #[allow(dead_code)]
 pub struct ProgramBuilder {
     next_free_register: usize,
-    next_free_label: i32,
     next_free_cursor_id: usize,
     insns: Vec<Insn>,
     // for temporarily storing instructions that will be put after Transaction opcode
@@ -23,8 +22,8 @@ pub struct ProgramBuilder {
     next_insn_label: Option<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
-    // Hashmap of label to insn reference. Resolved in build().
-    label_to_resolved_offset: HashMap<i32, u32>,
+    /// A vector where index=label number, value=resolved offset. Resolved in build().
+    label_to_resolved_offset: Vec<Option<InsnReference>>,
     // Bitmask of cursors that have emitted a SeekRowid instruction.
     seekrowid_emitted_bitmask: u64,
     // map of instruction index to manual comment (used in EXPLAIN only)
@@ -57,13 +56,12 @@ impl ProgramBuilder {
     pub fn new(query_mode: QueryMode) -> Self {
         Self {
             next_free_register: 1,
-            next_free_label: 0,
             next_free_cursor_id: 0,
             insns: Vec::new(),
             next_insn_label: None,
             cursor_ref: Vec::new(),
             constant_insns: Vec::new(),
-            label_to_resolved_offset: HashMap::new(),
+            label_to_resolved_offset: Vec::with_capacity(4), // 4 is arbitrary, we guess to assign at least this much
             seekrowid_emitted_bitmask: 0,
             comments: if query_mode == QueryMode::Explain {
                 Some(HashMap::new())
@@ -101,8 +99,10 @@ impl ProgramBuilder {
 
     pub fn emit_insn(&mut self, insn: Insn) {
         if let Some(label) = self.next_insn_label {
-            self.label_to_resolved_offset
-                .insert(label.to_label_value(), self.insns.len() as InsnReference);
+            self.label_to_resolved_offset.insert(
+                label.to_label_value() as usize,
+                Some(self.insns.len() as InsnReference),
+            );
             self.next_insn_label = None;
         }
         self.insns.push(insn);
@@ -195,8 +195,9 @@ impl ProgramBuilder {
     }
 
     pub fn allocate_label(&mut self) -> BranchOffset {
-        self.next_free_label -= 1;
-        BranchOffset::Label(self.next_free_label)
+        let label_n = self.label_to_resolved_offset.len();
+        self.label_to_resolved_offset.push(None);
+        BranchOffset::Label(label_n as u32)
     }
 
     // Effectively a GOTO <next insn> without the need to emit an explicit GOTO instruction.
@@ -209,8 +210,8 @@ impl ProgramBuilder {
     pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {
         assert!(matches!(label, BranchOffset::Label(_)));
         assert!(matches!(to_offset, BranchOffset::Offset(_)));
-        self.label_to_resolved_offset
-            .insert(label.to_label_value(), to_offset.to_offset_int());
+        self.label_to_resolved_offset[label.to_label_value() as usize] =
+            Some(to_offset.to_offset_int());
     }
 
     /// Resolve unresolved labels to a specific offset in the instruction list.
@@ -221,10 +222,16 @@ impl ProgramBuilder {
     pub fn resolve_labels(&mut self) {
         let resolve = |pc: &mut BranchOffset, insn_name: &str| {
             if let BranchOffset::Label(label) = pc {
-                let to_offset = *self.label_to_resolved_offset.get(label).unwrap_or_else(|| {
-                    panic!("Reference to undefined label in {}: {}", insn_name, label)
-                });
-                *pc = BranchOffset::Offset(to_offset);
+                let to_offset = self
+                    .label_to_resolved_offset
+                    .get(*label as usize)
+                    .unwrap_or_else(|| {
+                        panic!("Reference to undefined label in {}: {}", insn_name, label)
+                    });
+                *pc = BranchOffset::Offset(
+                    to_offset
+                        .unwrap_or_else(|| panic!("Unresolved label in {}: {}", insn_name, label)),
+                );
             }
         };
         for insn in self.insns.iter_mut() {

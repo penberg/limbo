@@ -1,18 +1,21 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use sqlite3_parser::ast;
 
-use crate::{schema::Index, Result};
+use crate::{
+    schema::{Index, Schema},
+    Result,
+};
 
 use super::plan::{
     DeletePlan, Direction, IterationDirection, Operation, Plan, Search, SelectPlan, TableReference,
     WhereTerm,
 };
 
-pub fn optimize_plan(plan: &mut Plan) -> Result<()> {
+pub fn optimize_plan(plan: &mut Plan, schema: &Schema) -> Result<()> {
     match plan {
-        Plan::Select(plan) => optimize_select_plan(plan),
-        Plan::Delete(plan) => optimize_delete_plan(plan),
+        Plan::Select(plan) => optimize_select_plan(plan, schema),
+        Plan::Delete(plan) => optimize_delete_plan(plan, schema),
     }
 }
 
@@ -21,8 +24,8 @@ pub fn optimize_plan(plan: &mut Plan) -> Result<()> {
  * TODO: these could probably be done in less passes,
  * but having them separate makes them easier to understand
  */
-fn optimize_select_plan(plan: &mut SelectPlan) -> Result<()> {
-    optimize_subqueries(plan)?;
+fn optimize_select_plan(plan: &mut SelectPlan, schema: &Schema) -> Result<()> {
+    optimize_subqueries(plan, schema)?;
     rewrite_exprs_select(plan)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constant_conditions(&mut plan.where_clause)?
@@ -33,16 +36,16 @@ fn optimize_select_plan(plan: &mut SelectPlan) -> Result<()> {
 
     use_indexes(
         &mut plan.table_references,
-        &plan.available_indexes,
+        &schema.indexes,
         &mut plan.where_clause,
     )?;
 
-    eliminate_unnecessary_orderby(plan)?;
+    eliminate_unnecessary_orderby(plan, schema)?;
 
     Ok(())
 }
 
-fn optimize_delete_plan(plan: &mut DeletePlan) -> Result<()> {
+fn optimize_delete_plan(plan: &mut DeletePlan, schema: &Schema) -> Result<()> {
     rewrite_exprs_delete(plan)?;
     if let ConstantConditionEliminationResult::ImpossibleCondition =
         eliminate_constant_conditions(&mut plan.where_clause)?
@@ -53,17 +56,17 @@ fn optimize_delete_plan(plan: &mut DeletePlan) -> Result<()> {
 
     use_indexes(
         &mut plan.table_references,
-        &plan.available_indexes,
+        &schema.indexes,
         &mut plan.where_clause,
     )?;
 
     Ok(())
 }
 
-fn optimize_subqueries(plan: &mut SelectPlan) -> Result<()> {
+fn optimize_subqueries(plan: &mut SelectPlan, schema: &Schema) -> Result<()> {
     for table in plan.table_references.iter_mut() {
         if let Operation::Subquery { plan, .. } = &mut table.op {
-            optimize_select_plan(&mut *plan)?;
+            optimize_select_plan(&mut *plan, schema)?;
         }
     }
 
@@ -73,7 +76,7 @@ fn optimize_subqueries(plan: &mut SelectPlan) -> Result<()> {
 fn query_is_already_ordered_by(
     table_references: &[TableReference],
     key: &mut ast::Expr,
-    available_indexes: &Vec<Rc<Index>>,
+    available_indexes: &HashMap<String, Vec<Rc<Index>>>,
 ) -> Result<bool> {
     let first_table = table_references.first();
     if first_table.is_none() {
@@ -86,10 +89,9 @@ fn query_is_already_ordered_by(
             Search::RowidEq { .. } => Ok(key.is_rowid_alias_of(0)),
             Search::RowidSearch { .. } => Ok(key.is_rowid_alias_of(0)),
             Search::IndexSearch { index, .. } => {
-                let index_idx = key.check_index_scan(0, &table_reference, available_indexes)?;
-                let index_is_the_same = index_idx
-                    .map(|i| Rc::ptr_eq(&available_indexes[i], index))
-                    .unwrap_or(false);
+                let index_rc = key.check_index_scan(0, &table_reference, available_indexes)?;
+                let index_is_the_same =
+                    index_rc.map(|irc| Rc::ptr_eq(index, &irc)).unwrap_or(false);
                 Ok(index_is_the_same)
             }
         },
@@ -97,7 +99,7 @@ fn query_is_already_ordered_by(
     }
 }
 
-fn eliminate_unnecessary_orderby(plan: &mut SelectPlan) -> Result<()> {
+fn eliminate_unnecessary_orderby(plan: &mut SelectPlan, schema: &Schema) -> Result<()> {
     if plan.order_by.is_none() {
         return Ok(());
     }
@@ -115,7 +117,7 @@ fn eliminate_unnecessary_orderby(plan: &mut SelectPlan) -> Result<()> {
     let (key, direction) = o.first_mut().unwrap();
 
     let already_ordered =
-        query_is_already_ordered_by(&plan.table_references, key, &plan.available_indexes)?;
+        query_is_already_ordered_by(&plan.table_references, key, &schema.indexes)?;
 
     if already_ordered {
         push_scan_direction(&mut plan.table_references[0], direction);
@@ -136,7 +138,7 @@ fn eliminate_unnecessary_orderby(plan: &mut SelectPlan) -> Result<()> {
  */
 fn use_indexes(
     table_references: &mut [TableReference],
-    available_indexes: &Vec<Rc<Index>>,
+    available_indexes: &HashMap<String, Vec<Rc<Index>>>,
     where_clause: &mut Vec<WhereTerm>,
 ) -> Result<()> {
     if where_clause.is_empty() {
@@ -274,8 +276,8 @@ pub trait Optimizable {
         &mut self,
         table_index: usize,
         table_reference: &TableReference,
-        available_indexes: &[Rc<Index>],
-    ) -> Result<Option<usize>>;
+        available_indexes: &HashMap<String, Vec<Rc<Index>>>,
+    ) -> Result<Option<Rc<Index>>>;
 }
 
 impl Optimizable for ast::Expr {
@@ -293,19 +295,22 @@ impl Optimizable for ast::Expr {
         &mut self,
         table_index: usize,
         table_reference: &TableReference,
-        available_indexes: &[Rc<Index>],
-    ) -> Result<Option<usize>> {
+        available_indexes: &HashMap<String, Vec<Rc<Index>>>,
+    ) -> Result<Option<Rc<Index>>> {
         match self {
             Self::Column { table, column, .. } => {
                 if *table != table_index {
                     return Ok(None);
                 }
-                for (idx, index) in available_indexes.iter().enumerate() {
-                    if index.table_name == table_reference.table.get_name() {
-                        let column = table_reference.table.get_column_at(*column);
-                        if index.columns.first().unwrap().name == column.name {
-                            return Ok(Some(idx));
-                        }
+                let Some(available_indexes_for_table) =
+                    available_indexes.get(table_reference.table.get_name())
+                else {
+                    return Ok(None);
+                };
+                let column = table_reference.table.get_column_at(*column);
+                for index in available_indexes_for_table.iter() {
+                    if index.columns.first().unwrap().name == column.name {
+                        return Ok(Some(index.clone()));
                     }
                 }
                 Ok(None)
@@ -489,7 +494,7 @@ pub fn try_extract_index_search_expression(
     cond: &mut WhereTerm,
     table_index: usize,
     table_reference: &TableReference,
-    available_indexes: &[Rc<Index>],
+    available_indexes: &HashMap<String, Vec<Rc<Index>>>,
 ) -> Result<Option<Search>> {
     if cond.eval_at_loop != table_index {
         return Ok(None);
@@ -556,7 +561,7 @@ pub fn try_extract_index_search_expression(
                 }
             }
 
-            if let Some(index_index) =
+            if let Some(index_rc) =
                 lhs.check_index_scan(table_index, &table_reference, available_indexes)?
             {
                 match operator {
@@ -567,7 +572,7 @@ pub fn try_extract_index_search_expression(
                     | ast::Operator::LessEquals => {
                         let rhs_owned = rhs.take_ownership();
                         return Ok(Some(Search::IndexSearch {
-                            index: available_indexes[index_index].clone(),
+                            index: index_rc,
                             cmp_op: *operator,
                             cmp_expr: WhereTerm {
                                 expr: rhs_owned,
@@ -580,7 +585,7 @@ pub fn try_extract_index_search_expression(
                 }
             }
 
-            if let Some(index_index) =
+            if let Some(index_rc) =
                 rhs.check_index_scan(table_index, &table_reference, available_indexes)?
             {
                 match operator {
@@ -591,7 +596,7 @@ pub fn try_extract_index_search_expression(
                     | ast::Operator::LessEquals => {
                         let lhs_owned = lhs.take_ownership();
                         return Ok(Some(Search::IndexSearch {
-                            index: available_indexes[index_index].clone(),
+                            index: index_rc,
                             cmp_op: opposite_cmp_op(*operator),
                             cmp_expr: WhereTerm {
                                 expr: lhs_owned,

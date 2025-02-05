@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     vdbe::{builder::ProgramBuilder, insn::Insn},
     Result,
@@ -7,6 +5,7 @@ use crate::{
 
 use super::{
     emitter::{emit_query, Resolver, TranslateCtx},
+    main_loop::LoopLabels,
     plan::{Operation, SelectPlan, SelectQueryType, TableReference},
 };
 
@@ -68,14 +67,16 @@ pub fn emit_subquery<'a>(
     }
     let end_coroutine_label = program.allocate_label();
     let mut metadata = TranslateCtx {
-        labels_main_loop: vec![],
+        labels_main_loop: (0..plan.table_references.len())
+            .map(|_| LoopLabels::new(program))
+            .collect(),
         label_main_loop_end: None,
         meta_group_by: None,
-        meta_left_joins: HashMap::new(),
+        meta_left_joins: (0..plan.table_references.len()).map(|_| None).collect(),
         meta_sort: None,
         reg_agg_start: None,
         reg_result_cols_start: None,
-        result_column_indexes_in_orderby_sorter: HashMap::new(),
+        result_column_indexes_in_orderby_sorter: (0..plan.result_columns.len()).collect(),
         result_columns_to_skip_in_orderby_sorter: None,
         reg_limit: plan.limit.map(|_| program.alloc_register()),
         reg_offset: plan.offset.map(|_| program.alloc_register()),

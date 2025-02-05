@@ -18,7 +18,7 @@ pub fn translate_delete(
     syms: &SymbolTable,
 ) -> Result<()> {
     let mut delete_plan = prepare_delete_plan(schema, tbl_name, where_clause, limit)?;
-    optimize_plan(&mut delete_plan)?;
+    optimize_plan(&mut delete_plan, schema)?;
     emit_program(program, delete_plan, syms)
 }
 
@@ -55,7 +55,6 @@ pub fn prepare_delete_plan(
         order_by: None,
         limit: resolved_limit,
         offset: resolved_offset,
-        available_indexes: vec![],
         contains_constant_false_condition: false,
     };
 
