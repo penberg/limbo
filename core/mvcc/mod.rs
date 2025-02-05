@@ -47,8 +47,6 @@ mod tests {
 
     static IDS: AtomicU64 = AtomicU64::new(1);
 
-    static START: Once = Once::new();
-
     #[test]
     fn test_non_overlapping_concurrent_inserts() {
         // Two threads insert to the database concurrently using non-overlapping

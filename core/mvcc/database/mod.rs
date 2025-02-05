@@ -630,7 +630,7 @@ impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> Database<Clo
             }
         }
 
-        let tx = tx_unlocked.value().write().unwrap();
+        let tx = tx_unlocked.value().read().unwrap();
         tx.state.store(TransactionState::Terminated);
         tracing::trace!("TERMINATE {tx}");
         // FIXME: verify that we can already remove the transaction here!
