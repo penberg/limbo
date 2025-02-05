@@ -15,13 +15,6 @@ fn bench(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let db = bench_db();
-    group.bench_function("begin_tx", |b| {
-        b.to_async(FuturesExecutor).iter(|| async {
-            db.begin_tx();
-        })
-    });
-
-    let db = bench_db();
     group.bench_function("begin_tx + rollback_tx", |b| {
         b.to_async(FuturesExecutor).iter(|| async {
             let tx_id = db.begin_tx();
