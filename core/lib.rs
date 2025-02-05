@@ -471,8 +471,12 @@ impl Statement {
         self.program.step(&mut self.state, self.pager.clone())
     }
 
-    pub fn columns(&self) -> &[String] {
-        &self.program.columns
+    pub fn num_columns(&self) -> usize {
+        self.program.result_columns.len()
+    }
+
+    pub fn get_column_name(&self, idx: usize) -> Option<&String> {
+        self.program.result_columns[idx].name(&self.program.table_references)
     }
 
     pub fn parameters(&self) -> &parameters::Parameters {

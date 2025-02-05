@@ -97,30 +97,30 @@ mod tests {
 
         let stmt = conn.prepare("select * from test;")?;
 
-        let columns = stmt.columns();
-        assert_eq!(columns.len(), 3);
-        assert_eq!(&columns[0], "foo");
-        assert_eq!(&columns[1], "bar");
-        assert_eq!(&columns[2], "baz");
+        let columns = stmt.num_columns();
+        assert_eq!(columns, 3);
+        assert_eq!(stmt.get_column_name(0), Some(&"foo".to_string()));
+        assert_eq!(stmt.get_column_name(1), Some(&"bar".to_string()));
+        assert_eq!(stmt.get_column_name(2), Some(&"baz".to_string()));
 
         let stmt = conn.prepare("select foo, bar from test;")?;
 
-        let columns = stmt.columns();
-        assert_eq!(columns.len(), 2);
-        assert_eq!(&columns[0], "foo");
-        assert_eq!(&columns[1], "bar");
+        let columns = stmt.num_columns();
+        assert_eq!(columns, 2);
+        assert_eq!(stmt.get_column_name(0), Some(&"foo".to_string()));
+        assert_eq!(stmt.get_column_name(1), Some(&"bar".to_string()));
 
         let stmt = conn.prepare("delete from test;")?;
-        let columns = stmt.columns();
-        assert_eq!(columns.len(), 0);
+        let columns = stmt.num_columns();
+        assert_eq!(columns, 0);
 
         let stmt = conn.prepare("insert into test (foo, bar, baz) values (1, 2, 3);")?;
-        let columns = stmt.columns();
-        assert_eq!(columns.len(), 0);
+        let columns = stmt.num_columns();
+        assert_eq!(columns, 0);
 
         let stmt = conn.prepare("delete from test where foo = 1")?;
-        let columns = stmt.columns();
-        assert_eq!(columns.len(), 0);
+        let columns = stmt.num_columns();
+        assert_eq!(columns, 0);
 
         Ok(())
     }

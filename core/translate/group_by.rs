@@ -167,8 +167,8 @@ pub fn emit_group_by<'a>(
     // sorter column names do not matter
     let ty = crate::schema::Type::Null;
     let pseudo_columns = (0..sorter_column_count)
-        .map(|i| Column {
-            name: i.to_string(),
+        .map(|_| Column {
+            name: None,
             primary_key: false,
             ty,
             ty_str: ty.to_string(),

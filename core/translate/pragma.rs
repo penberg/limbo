@@ -210,7 +210,7 @@ fn query_pragma(
                     // cid
                     program.emit_int(i as i64, base_reg);
                     // name
-                    program.emit_string8(column.name.clone(), base_reg + 1);
+                    program.emit_string8(column.name.clone().unwrap_or_default(), base_reg + 1);
 
                     // type
                     program.emit_string8(column.ty_str.clone(), base_reg + 2);

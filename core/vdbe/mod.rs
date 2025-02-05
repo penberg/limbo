@@ -35,6 +35,7 @@ use crate::result::LimboResult;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::storage::wal::CheckpointResult;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
+use crate::translate::plan::{ResultSetColumn, TableReference};
 use crate::types::{
     AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey,
     SeekOp,
@@ -387,7 +388,8 @@ pub struct Program {
     pub auto_commit: bool,
     pub n_change: Cell<i64>,
     pub change_cnt_on: bool,
-    pub columns: Vec<String>,
+    pub result_columns: Vec<ResultSetColumn>,
+    pub table_references: Vec<TableReference>,
 }
 
 impl Program {

@@ -210,7 +210,13 @@ pub fn translate_insert(
             target_pc: make_record_label,
         });
         let rowid_column_name = if let Some(index) = rowid_alias_index {
-            &table.columns.get(index).unwrap().name
+            &table
+                .columns
+                .get(index)
+                .unwrap()
+                .name
+                .as_ref()
+                .expect("column name is None")
         } else {
             "rowid"
         };
@@ -341,9 +347,11 @@ fn resolve_columns_for_insert<'a>(
     // Map each named column to its value index
     for (value_index, column_name) in columns.as_ref().unwrap().iter().enumerate() {
         let column_name = normalize_ident(column_name.0.as_str());
-        let table_index = table_columns
-            .iter()
-            .position(|c| c.name.eq_ignore_ascii_case(&column_name));
+        let table_index = table_columns.iter().position(|c| {
+            c.name
+                .as_ref()
+                .map_or(false, |name| name.eq_ignore_ascii_case(&column_name))
+        });
 
         if table_index.is_none() {
             crate::bail_parse_error!("table {} has no column named {}", &table.name, column_name);
@@ -401,7 +409,10 @@ fn populate_column_registers(
                 });
                 program.mark_last_insn_constant();
             } else {
-                crate::bail_parse_error!("column {} is not nullable", mapping.column.name);
+                crate::bail_parse_error!(
+                    "column {} is not nullable",
+                    mapping.column.name.as_ref().expect("column name is None")
+                );
             }
         }
     }

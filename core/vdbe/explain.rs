@@ -409,15 +409,18 @@ pub fn insn_to_str(
                 dest,
             } => {
                 let (table_identifier, cursor_type) = &program.cursor_ref[*cursor_id];
-                let column_name = match cursor_type {
+                let column_name: Option<&String> = match cursor_type {
                     CursorType::BTreeTable(table) => {
-                        Some(&table.columns.get(*column).unwrap().name)
+                        let name = table.columns.get(*column).unwrap().name.as_ref();
+                        name
                     }
                     CursorType::BTreeIndex(index) => {
-                        Some(&index.columns.get(*column).unwrap().name)
+                        let name = &index.columns.get(*column).unwrap().name;
+                        Some(name)
                     }
                     CursorType::Pseudo(pseudo_table) => {
-                        Some(&pseudo_table.columns.get(*column).unwrap().name)
+                        let name = pseudo_table.columns.get(*column).unwrap().name.as_ref();
+                        name
                     }
                     CursorType::Sorter => None,
                 };

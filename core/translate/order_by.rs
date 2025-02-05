@@ -66,11 +66,11 @@ pub fn emit_order_by(
     let sort_loop_next_label = program.allocate_label();
     let sort_loop_end_label = program.allocate_label();
     let mut pseudo_columns = vec![];
-    for (i, _) in order_by.iter().enumerate() {
+    for _ in 0..order_by.len() {
         let ty = crate::schema::Type::Null;
         pseudo_columns.push(Column {
             // Names don't matter. We are tracking which result column is in which position in the ORDER BY clause in m.result_column_indexes_in_orderby_sorter.
-            name: format!("sort_key_{}", i),
+            name: None,
             primary_key: false,
             ty,
             ty_str: ty.to_string(),
@@ -79,7 +79,7 @@ pub fn emit_order_by(
             default: None,
         });
     }
-    for (i, rc) in result_columns.iter().enumerate() {
+    for i in 0..result_columns.len() {
         // If any result columns are not in the ORDER BY sorter, it's because they are equal to a sort key and were already added to the pseudo columns above.
         if let Some(ref v) = t_ctx.result_columns_to_skip_in_orderby_sorter {
             if v.contains(&i) {
@@ -88,7 +88,7 @@ pub fn emit_order_by(
         }
         let ty = crate::schema::Type::Null;
         pseudo_columns.push(Column {
-            name: rc.expr.to_string(),
+            name: None,
             primary_key: false,
             ty,
             ty_str: ty.to_string(),

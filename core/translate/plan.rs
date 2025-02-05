@@ -18,9 +18,23 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct ResultSetColumn {
     pub expr: ast::Expr,
-    pub name: String,
+    pub alias: Option<String>,
     // TODO: encode which aggregates (e.g. index bitmask of plan.aggregates) are present in this column
     pub contains_aggregates: bool,
+}
+
+impl ResultSetColumn {
+    pub fn name<'a>(&'a self, tables: &'a [TableReference]) -> Option<&'a String> {
+        if let Some(alias) = &self.alias {
+            return Some(alias);
+        }
+        match &self.expr {
+            ast::Expr::Column { table, column, .. } => {
+                tables[*table].columns()[*column].name.as_ref()
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -135,15 +149,17 @@ pub fn select_star(tables: &[TableReference], out_columns: &mut Vec<ResultSetCol
                     // If we are joining with USING, we need to deduplicate the columns from the right table
                     // that are also present in the USING clause.
                     if let Some(using_cols) = maybe_using_cols {
-                        !using_cols
-                            .iter()
-                            .any(|using_col| col.name.eq_ignore_ascii_case(&using_col.0))
+                        !using_cols.iter().any(|using_col| {
+                            col.name
+                                .as_ref()
+                                .map_or(false, |name| name.eq_ignore_ascii_case(&using_col.0))
+                        })
                     } else {
                         true
                     }
                 })
                 .map(|(i, col)| ResultSetColumn {
-                    name: col.name.clone(),
+                    alias: None,
                     expr: ast::Expr::Column {
                         database: None,
                         table: current_table_index,
@@ -222,7 +238,7 @@ impl TableReference {
             plan.result_columns
                 .iter()
                 .map(|rc| Column {
-                    name: rc.name.clone(),
+                    name: rc.name(&plan.table_references).map(String::clone),
                     ty: Type::Text, // FIXME: infer proper type
                     ty_str: "TEXT".to_string(),
                     is_rowid_alias: false,
