@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = [
+  "mvcc-rs",
+  "bindings/c",
+]
+
+[profile.release]
+codegen-units = 1
+panic = "abort"
+strip = true

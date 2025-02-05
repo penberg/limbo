@@ -1,0 +1,22 @@
+[package]
+name = "mvcc-c"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+doc = false
+
+[build-dependencies]
+cbindgen = "0.24.0"
+
+[dependencies]
+base64 = "0.21.0"
+mvcc-rs = { path = "../../mvcc-rs" }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0" }
+
+[features]
+default = []
+json_on_disk_storage = []
+s3_storage = []
