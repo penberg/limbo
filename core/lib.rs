@@ -467,14 +467,7 @@ impl Statement {
     }
 
     pub fn step(&mut self) -> Result<StepResult<'_>> {
-        let result = self.program.step(&mut self.state, self.pager.clone())?;
-        match result {
-            vdbe::StepResult::Row(row) => Ok(StepResult::Row(Row { values: row.values })),
-            vdbe::StepResult::IO => Ok(StepResult::IO),
-            vdbe::StepResult::Done => Ok(StepResult::Done),
-            vdbe::StepResult::Interrupt => Ok(StepResult::Interrupt),
-            vdbe::StepResult::Busy => Ok(StepResult::Busy),
-        }
+        self.program.step(&mut self.state, self.pager.clone())
     }
 
     pub fn columns(&self) -> &[String] {
@@ -498,14 +491,7 @@ impl Statement {
     }
 }
 
-#[derive(Debug)]
-pub enum StepResult<'a> {
-    Row(Row<'a>),
-    IO,
-    Done,
-    Interrupt,
-    Busy,
-}
+pub type StepResult<'a> = vdbe::StepResult<'a>;
 
 pub type Row<'a> = types::Record<'a>;
 
