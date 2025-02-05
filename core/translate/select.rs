@@ -1,5 +1,4 @@
 use super::emitter::emit_program;
-use super::expr::get_name;
 use super::plan::{select_star, SelectQueryType};
 use crate::function::{AggFunc, ExtFunc, Func};
 use crate::translate::optimizer::optimize_plan;
@@ -83,7 +82,7 @@ pub fn prepare_select_plan(
             };
 
             let mut aggregate_expressions = Vec::new();
-            for (result_column_idx, column) in columns.iter_mut().enumerate() {
+            for column in columns.iter_mut() {
                 match column {
                     ResultColumn::Star => {
                         select_star(&plan.table_references, &mut plan.result_columns);
@@ -108,7 +107,7 @@ pub fn prepare_select_plan(
                                     column: idx,
                                     is_rowid_alias: col.is_rowid_alias,
                                 },
-                                name: col.name.clone(),
+                                alias: None,
                                 contains_aggregates: false,
                             });
                         }
@@ -158,12 +157,10 @@ pub fn prepare_select_plan(
                                         };
                                         aggregate_expressions.push(agg.clone());
                                         plan.result_columns.push(ResultSetColumn {
-                                            name: get_name(
-                                                maybe_alias.as_ref(),
-                                                expr,
-                                                &plan.table_references,
-                                                || format!("expr_{}", result_column_idx),
-                                            ),
+                                            alias: maybe_alias.as_ref().map(|alias| match alias {
+                                                ast::As::Elided(alias) => alias.0.clone(),
+                                                ast::As::As(alias) => alias.0.clone(),
+                                            }),
                                             expr: expr.clone(),
                                             contains_aggregates: true,
                                         });
@@ -172,12 +169,10 @@ pub fn prepare_select_plan(
                                         let contains_aggregates =
                                             resolve_aggregates(expr, &mut aggregate_expressions);
                                         plan.result_columns.push(ResultSetColumn {
-                                            name: get_name(
-                                                maybe_alias.as_ref(),
-                                                expr,
-                                                &plan.table_references,
-                                                || format!("expr_{}", result_column_idx),
-                                            ),
+                                            alias: maybe_alias.as_ref().map(|alias| match alias {
+                                                ast::As::Elided(alias) => alias.0.clone(),
+                                                ast::As::As(alias) => alias.0.clone(),
+                                            }),
                                             expr: expr.clone(),
                                             contains_aggregates,
                                         });
@@ -191,12 +186,14 @@ pub fn prepare_select_plan(
                                                     &mut aggregate_expressions,
                                                 );
                                                 plan.result_columns.push(ResultSetColumn {
-                                                    name: get_name(
-                                                        maybe_alias.as_ref(),
-                                                        expr,
-                                                        &plan.table_references,
-                                                        || format!("expr_{}", result_column_idx),
-                                                    ),
+                                                    alias: maybe_alias.as_ref().map(|alias| {
+                                                        match alias {
+                                                            ast::As::Elided(alias) => {
+                                                                alias.0.clone()
+                                                            }
+                                                            ast::As::As(alias) => alias.0.clone(),
+                                                        }
+                                                    }),
                                                     expr: expr.clone(),
                                                     contains_aggregates,
                                                 });
@@ -208,12 +205,14 @@ pub fn prepare_select_plan(
                                                 };
                                                 aggregate_expressions.push(agg.clone());
                                                 plan.result_columns.push(ResultSetColumn {
-                                                    name: get_name(
-                                                        maybe_alias.as_ref(),
-                                                        expr,
-                                                        &plan.table_references,
-                                                        || format!("expr_{}", result_column_idx),
-                                                    ),
+                                                    alias: maybe_alias.as_ref().map(|alias| {
+                                                        match alias {
+                                                            ast::As::Elided(alias) => {
+                                                                alias.0.clone()
+                                                            }
+                                                            ast::As::As(alias) => alias.0.clone(),
+                                                        }
+                                                    }),
                                                     expr: expr.clone(),
                                                     contains_aggregates: true,
                                                 });
@@ -242,12 +241,10 @@ pub fn prepare_select_plan(
                                     };
                                     aggregate_expressions.push(agg.clone());
                                     plan.result_columns.push(ResultSetColumn {
-                                        name: get_name(
-                                            maybe_alias.as_ref(),
-                                            expr,
-                                            &plan.table_references,
-                                            || format!("expr_{}", result_column_idx),
-                                        ),
+                                        alias: maybe_alias.as_ref().map(|alias| match alias {
+                                            ast::As::Elided(alias) => alias.0.clone(),
+                                            ast::As::As(alias) => alias.0.clone(),
+                                        }),
                                         expr: expr.clone(),
                                         contains_aggregates: true,
                                     });
@@ -262,12 +259,10 @@ pub fn prepare_select_plan(
                                 let contains_aggregates =
                                     resolve_aggregates(expr, &mut aggregate_expressions);
                                 plan.result_columns.push(ResultSetColumn {
-                                    name: get_name(
-                                        maybe_alias.as_ref(),
-                                        expr,
-                                        &plan.table_references,
-                                        || format!("expr_{}", result_column_idx),
-                                    ),
+                                    alias: maybe_alias.as_ref().map(|alias| match alias {
+                                        ast::As::Elided(alias) => alias.0.clone(),
+                                        ast::As::As(alias) => alias.0.clone(),
+                                    }),
                                     expr: expr.clone(),
                                     contains_aggregates,
                                 });

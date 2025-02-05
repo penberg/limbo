@@ -106,10 +106,11 @@ pub fn bind_column_references(
             }
             let mut match_result = None;
             for (tbl_idx, table) in referenced_tables.iter().enumerate() {
-                let col_idx = table
-                    .columns()
-                    .iter()
-                    .position(|c| c.name.eq_ignore_ascii_case(&normalized_id));
+                let col_idx = table.columns().iter().position(|c| {
+                    c.name
+                        .as_ref()
+                        .map_or(false, |name| name.eq_ignore_ascii_case(&normalized_id))
+                });
                 if col_idx.is_some() {
                     if match_result.is_some() {
                         crate::bail_parse_error!("Column {} is ambiguous", id.0);
@@ -130,7 +131,10 @@ pub fn bind_column_references(
 
             if let Some(result_columns) = result_columns {
                 for result_column in result_columns.iter() {
-                    if result_column.name == normalized_id {
+                    if result_column
+                        .name(referenced_tables)
+                        .map_or(false, |name| name == &normalized_id)
+                    {
                         *expr = result_column.expr.clone();
                         return Ok(());
                     }
@@ -154,10 +158,11 @@ pub fn bind_column_references(
 
                 return Ok(());
             }
-            let col_idx = referenced_tables[tbl_idx]
-                .columns()
-                .iter()
-                .position(|c| c.name.eq_ignore_ascii_case(&normalized_id));
+            let col_idx = referenced_tables[tbl_idx].columns().iter().position(|c| {
+                c.name
+                    .as_ref()
+                    .map_or(false, |name| name.eq_ignore_ascii_case(&normalized_id))
+            });
             if col_idx.is_none() {
                 crate::bail_parse_error!("Column {} not found", normalized_id);
             }
@@ -329,13 +334,10 @@ pub fn parse_from(
         return Ok(vec![]);
     }
 
-    let mut tables = vec![];
-
     let mut from_owned = std::mem::take(&mut from).unwrap();
     let select_owned = *std::mem::take(&mut from_owned.select).unwrap();
     let joins_owned = std::mem::take(&mut from_owned.joins).unwrap_or_default();
-    let table_reference = parse_from_clause_table(schema, select_owned, 0, syms)?;
-    tables.push(table_reference);
+    let mut tables = vec![parse_from_clause_table(schema, select_owned, 0, syms)?];
 
     for join in joins_owned.into_iter() {
         parse_join(schema, join, syms, &mut tables, out_where_clause)?;
@@ -435,12 +437,8 @@ fn parse_join(
     } = join;
 
     let cur_table_index = tables.len();
-    tables.push(parse_from_clause_table(
-        schema,
-        table,
-        cur_table_index,
-        syms,
-    )?);
+    let table = parse_from_clause_table(schema, table, cur_table_index, syms)?;
+    tables.push(table);
 
     let (outer, natural) = match join_operator {
         ast::JoinOperator::TypedJoin(Some(join_type)) => {
@@ -471,11 +469,14 @@ fn parse_join(
                     if left_col.name == right_col.name {
                         if let Some(distinct_names) = distinct_names.as_mut() {
                             distinct_names
-                                .insert(ast::Name(left_col.name.clone()))
+                                .insert(ast::Name(
+                                    left_col.name.clone().expect("column name is None"),
+                                ))
                                 .unwrap();
                         } else {
-                            distinct_names =
-                                Some(ast::DistinctNames::new(ast::Name(left_col.name.clone())));
+                            distinct_names = Some(ast::DistinctNames::new(ast::Name(
+                                left_col.name.clone().expect("column name is None"),
+                            )));
                         }
                         found_match = true;
                         break;
@@ -531,7 +532,11 @@ fn parse_join(
                             .columns()
                             .iter()
                             .enumerate()
-                            .find(|(_, col)| col.name == name_normalized)
+                            .find(|(_, col)| {
+                                col.name
+                                    .as_ref()
+                                    .map_or(false, |name| *name == name_normalized)
+                            })
                             .map(|(idx, col)| (left_table_idx, idx, col));
                         if left_col.is_some() {
                             break;
@@ -543,11 +548,11 @@ fn parse_join(
                             distinct_name.0
                         );
                     }
-                    let right_col = right_table
-                        .columns()
-                        .iter()
-                        .enumerate()
-                        .find(|(_, col)| col.name == name_normalized);
+                    let right_col = right_table.columns().iter().enumerate().find(|(_, col)| {
+                        col.name
+                            .as_ref()
+                            .map_or(false, |name| *name == name_normalized)
+                    });
                     if right_col.is_none() {
                         crate::bail_parse_error!(
                             "cannot join using column {} - column not present in all tables",

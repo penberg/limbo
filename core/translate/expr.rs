@@ -2096,32 +2096,6 @@ pub fn translate_and_mark(
     Ok(target_register)
 }
 
-/// Get an appropriate name for an expression.
-/// If the query provides an alias (e.g. `SELECT a AS b FROM t`), use that (e.g. `b`).
-/// If the expression is a column from a table, use the column name (e.g. `a`).
-/// Otherwise we just use a generic fallback name (e.g. `expr_<index>`).
-pub fn get_name(
-    maybe_alias: Option<&ast::As>,
-    expr: &ast::Expr,
-    referenced_tables: &[TableReference],
-    fallback: impl Fn() -> String,
-) -> String {
-    let alias = maybe_alias.map(|a| match a {
-        ast::As::As(id) => id.0.clone(),
-        ast::As::Elided(id) => id.0.clone(),
-    });
-    if let Some(alias) = alias {
-        return alias;
-    }
-    match expr {
-        ast::Expr::Column { table, column, .. } => {
-            let table_reference = referenced_tables.get(*table).unwrap();
-            table_reference.table.get_column_at(*column).name.clone()
-        }
-        _ => fallback(),
-    }
-}
-
 /// Sanitaizes a string literal by removing single quote at front and back
 /// and escaping double single quotes
 pub fn sanitize_string(input: &str) -> String {

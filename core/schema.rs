@@ -129,7 +129,7 @@ impl BTreeTable {
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         let name = normalize_ident(name);
         for (i, column) in self.columns.iter().enumerate() {
-            if column.name == name {
+            if column.name.as_ref().map_or(false, |n| *n == name) {
                 return Some((i, column));
             }
         }
@@ -155,7 +155,7 @@ impl BTreeTable {
                 sql.push_str(",\n");
             }
             sql.push_str("  ");
-            sql.push_str(&column.name);
+            sql.push_str(&column.name.as_ref().expect("column name is None"));
             sql.push(' ');
             sql.push_str(&column.ty.to_string());
         }
@@ -180,7 +180,7 @@ impl PseudoTable {
 
     pub fn add_column(&mut self, name: &str, ty: Type, primary_key: bool) {
         self.columns.push(Column {
-            name: normalize_ident(name),
+            name: Some(normalize_ident(name)),
             ty,
             ty_str: ty.to_string(),
             primary_key,
@@ -192,7 +192,7 @@ impl PseudoTable {
     pub fn get_column(&self, name: &str) -> Option<(usize, &Column)> {
         let name = normalize_ident(name);
         for (i, column) in self.columns.iter().enumerate() {
-            if column.name == name {
+            if column.name.as_ref().map_or(false, |n| *n == name) {
                 return Some((i, column));
             }
         }
@@ -315,7 +315,7 @@ fn create_table(
                 }
 
                 cols.push(Column {
-                    name: normalize_ident(&name),
+                    name: Some(normalize_ident(&name)),
                     ty,
                     ty_str,
                     primary_key,
@@ -366,7 +366,7 @@ pub fn _build_pseudo_table(columns: &[ResultColumn]) -> PseudoTable {
 
 #[derive(Debug, Clone)]
 pub struct Column {
-    pub name: String,
+    pub name: Option<String>,
     pub ty: Type,
     // many sqlite operations like table_info retain the original string
     pub ty_str: String,
@@ -408,7 +408,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
         primary_key_column_names: vec![],
         columns: vec![
             Column {
-                name: "type".to_string(),
+                name: Some("type".to_string()),
                 ty: Type::Text,
                 ty_str: "TEXT".to_string(),
                 primary_key: false,
@@ -417,7 +417,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 default: None,
             },
             Column {
-                name: "name".to_string(),
+                name: Some("name".to_string()),
                 ty: Type::Text,
                 ty_str: "TEXT".to_string(),
                 primary_key: false,
@@ -426,7 +426,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 default: None,
             },
             Column {
-                name: "tbl_name".to_string(),
+                name: Some("tbl_name".to_string()),
                 ty: Type::Text,
                 ty_str: "TEXT".to_string(),
                 primary_key: false,
@@ -435,7 +435,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 default: None,
             },
             Column {
-                name: "rootpage".to_string(),
+                name: Some("rootpage".to_string()),
                 ty: Type::Integer,
                 ty_str: "INT".to_string(),
                 primary_key: false,
@@ -444,7 +444,7 @@ pub fn sqlite_schema_table() -> BTreeTable {
                 default: None,
             },
             Column {
-                name: "sql".to_string(),
+                name: Some("sql".to_string()),
                 ty: Type::Text,
                 ty_str: "TEXT".to_string(),
                 primary_key: false,
@@ -911,7 +911,7 @@ mod tests {
             has_rowid: true,
             primary_key_column_names: vec!["nonexistent".to_string()],
             columns: vec![Column {
-                name: "a".to_string(),
+                name: Some("a".to_string()),
                 ty: Type::Integer,
                 ty_str: "INT".to_string(),
                 primary_key: false,

@@ -309,7 +309,11 @@ impl Optimizable for ast::Expr {
                 };
                 let column = table_reference.table.get_column_at(*column);
                 for index in available_indexes_for_table.iter() {
-                    if index.columns.first().unwrap().name == column.name {
+                    if column
+                        .name
+                        .as_ref()
+                        .map_or(false, |name| *name == index.columns.first().unwrap().name)
+                    {
                         return Ok(Some(index.clone()));
                     }
                 }

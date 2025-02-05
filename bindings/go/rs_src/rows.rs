@@ -103,7 +103,7 @@ pub extern "C" fn rows_get_columns(rows_ptr: *mut c_void) -> i32 {
         return -1;
     }
     let rows = LimboRows::from_ptr(rows_ptr);
-    rows.stmt.columns().len() as i32
+    rows.stmt.num_columns() as i32
 }
 
 /// Returns a pointer to a string with the name of the column at the given index.
@@ -115,11 +115,16 @@ pub extern "C" fn rows_get_column_name(rows_ptr: *mut c_void, idx: i32) -> *cons
         return std::ptr::null_mut();
     }
     let rows = LimboRows::from_ptr(rows_ptr);
-    if idx < 0 || idx as usize >= rows.stmt.columns().len() {
+    if idx < 0 || idx as usize >= rows.stmt.num_columns() {
         return std::ptr::null_mut();
     }
-    let name = &rows.stmt.columns()[idx as usize];
-    let cstr = std::ffi::CString::new(name.as_bytes()).expect("Failed to create CString");
+    let name = rows.stmt.get_column_name(idx as usize);
+    let cstr = std::ffi::CString::new(
+        name.as_ref()
+            .unwrap_or(&&format!("column_{}", idx))
+            .as_bytes(),
+    )
+    .expect("Failed to create CString");
     cstr.into_raw() as *const c_char
 }
 

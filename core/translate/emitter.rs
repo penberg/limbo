@@ -187,11 +187,8 @@ fn emit_program_for_select(
 
     // Finalize program
     epilogue(program, init_label, start_offset)?;
-    program.columns = plan
-        .result_columns
-        .iter()
-        .map(|rc| rc.name.clone())
-        .collect::<Vec<_>>();
+    program.result_columns = plan.result_columns;
+    program.table_references = plan.table_references;
     Ok(())
 }
 
@@ -320,11 +317,8 @@ fn emit_program_for_delete(
 
     // Finalize program
     epilogue(program, init_label, start_offset)?;
-    program.columns = plan
-        .result_columns
-        .iter()
-        .map(|rc| rc.name.clone())
-        .collect::<Vec<_>>();
+    program.result_columns = plan.result_columns;
+    program.table_references = plan.table_references;
     Ok(())
 }
 

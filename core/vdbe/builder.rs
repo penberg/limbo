@@ -8,6 +8,7 @@ use crate::{
     parameters::Parameters,
     schema::{BTreeTable, Index, PseudoTable},
     storage::sqlite3_ondisk::DatabaseHeader,
+    translate::plan::{ResultSetColumn, TableReference},
     Connection,
 };
 
@@ -29,7 +30,8 @@ pub struct ProgramBuilder {
     // map of instruction index to manual comment (used in EXPLAIN only)
     comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: Parameters,
-    pub columns: Vec<String>,
+    pub result_columns: Vec<ResultSetColumn>,
+    pub table_references: Vec<TableReference>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +71,8 @@ impl ProgramBuilder {
                 None
             },
             parameters: Parameters::new(),
-            columns: Vec::new(),
+            result_columns: Vec::new(),
+            table_references: Vec::new(),
         }
     }
 
@@ -437,7 +440,8 @@ impl ProgramBuilder {
             parameters: self.parameters,
             n_change: Cell::new(0),
             change_cnt_on,
-            columns: self.columns,
+            result_columns: self.result_columns,
+            table_references: self.table_references,
         }
     }
 }
