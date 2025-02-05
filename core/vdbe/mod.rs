@@ -420,7 +420,6 @@ impl Program {
             }
             let insn = &self.insns[state.pc as usize];
             trace_insn(self, state.pc as InsnReference, insn);
-            let mut cursors = state.cursors.borrow_mut();
             match insn {
                 Insn::Init { target_pc } => {
                     assert!(target_pc.is_offset());
@@ -501,6 +500,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::NullRow { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NullRow");
                     cursor.set_null_flag(true);
@@ -809,6 +809,7 @@ impl Program {
                 } => {
                     let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
                     let cursor = BTreeCursor::new(pager.clone(), *root_page);
+                    let mut cursors = state.cursors.borrow_mut();
                     match cursor_type {
                         CursorType::BTreeTable(_) => {
                             cursors
@@ -839,6 +840,7 @@ impl Program {
                     content_reg: _,
                     num_fields: _,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = PseudoCursor::new();
                     cursors
                         .get_mut(*cursor_id)
@@ -847,12 +849,14 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::RewindAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "RewindAsync");
                     return_if_io!(cursor.rewind());
                     state.pc += 1;
                 }
                 Insn::LastAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "LastAsync");
                     return_if_io!(cursor.last());
@@ -863,6 +867,7 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "LastAwait");
                     cursor.wait_for_completion()?;
@@ -877,6 +882,7 @@ impl Program {
                     pc_if_empty,
                 } => {
                     assert!(pc_if_empty.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "RewindAwait");
                     cursor.wait_for_completion()?;
@@ -891,6 +897,7 @@ impl Program {
                     column,
                     dest,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
                         let index_cursor = get_cursor_as_index_mut(&mut cursors, index_cursor_id);
                         let rowid = index_cursor.rowid()?;
@@ -958,6 +965,7 @@ impl Program {
                     return Ok(StepResult::Row(record));
                 }
                 Insn::NextAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NextAsync");
                     cursor.set_null_flag(false);
@@ -965,6 +973,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::PrevAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "PrevAsync");
                     cursor.set_null_flag(false);
@@ -975,6 +984,7 @@ impl Program {
                     cursor_id,
                     pc_if_next,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     assert!(pc_if_next.is_offset());
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "PrevAwait");
@@ -990,6 +1000,7 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor_id, self.cursor_ref, cursors, "NextAwait");
                     cursor.wait_for_completion()?;
@@ -1129,6 +1140,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::RowId { cursor_id, dest } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     if let Some((index_cursor_id, table_cursor_id)) = state.deferred_seek.take() {
                         let index_cursor = get_cursor_as_index_mut(&mut cursors, index_cursor_id);
                         let rowid = index_cursor.rowid()?;
@@ -1156,6 +1168,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     let rowid = match &state.registers[*src_reg] {
                         OwnedValue::Integer(rowid) => *rowid as u64,
@@ -1191,6 +1204,7 @@ impl Program {
                     is_index,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     if *is_index {
                         let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                         let record_from_regs: OwnedRecord =
@@ -1236,6 +1250,7 @@ impl Program {
                     is_index,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     if *is_index {
                         let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                         let record_from_regs: OwnedRecord =
@@ -1280,6 +1295,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
@@ -1294,7 +1310,7 @@ impl Program {
                         }
                     } else {
                         state.pc = target_pc.to_offset_int();
-                    }
+                    };
                 }
                 Insn::IdxGT {
                     cursor_id,
@@ -1303,6 +1319,7 @@ impl Program {
                     target_pc,
                 } => {
                     assert!(target_pc.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
                     let record_from_regs: OwnedRecord =
                         make_owned_record(&state.registers, start_reg, num_regs);
@@ -1317,7 +1334,7 @@ impl Program {
                         }
                     } else {
                         state.pc = target_pc.to_offset_int();
-                    }
+                    };
                 }
                 Insn::DecrJumpZero { reg, target_pc } => {
                     assert!(target_pc.is_offset());
@@ -1633,6 +1650,7 @@ impl Program {
                         })
                         .collect();
                     let cursor = Sorter::new(order);
+                    let mut cursors = state.cursors.borrow_mut();
                     cursors
                         .get_mut(*cursor_id)
                         .unwrap()
@@ -1644,6 +1662,7 @@ impl Program {
                     dest_reg,
                     pseudo_cursor,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let sorter_cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     let record = match sorter_cursor.record() {
                         Some(record) => record.clone(),
@@ -1661,6 +1680,7 @@ impl Program {
                     cursor_id,
                     record_reg,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(record) => record,
@@ -1673,6 +1693,7 @@ impl Program {
                     cursor_id,
                     pc_if_empty,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     if cursor.is_empty() {
                         state.pc = pc_if_empty.to_offset_int();
@@ -1686,6 +1707,7 @@ impl Program {
                     pc_if_next,
                 } => {
                     assert!(pc_if_next.is_offset());
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                     cursor.next();
                     if cursor.has_more() {
@@ -2285,6 +2307,7 @@ impl Program {
                     record_reg,
                     flag: _,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
                     let record = match &state.registers[*record_reg] {
                         OwnedValue::Record(r) => r,
@@ -2295,6 +2318,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     cursor.wait_for_completion()?;
                     // Only update last_insert_rowid for regular table inserts, not schema modifications
@@ -2310,11 +2334,13 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::DeleteAsync { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     return_if_io!(cursor.delete());
                     state.pc += 1;
                 }
                 Insn::DeleteAwait { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor_id);
                     cursor.wait_for_completion()?;
                     let prev_changes = self.n_change.get();
@@ -2324,6 +2350,7 @@ impl Program {
                 Insn::NewRowid {
                     cursor, rowid_reg, ..
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
                     // TODO: make io handle rng
                     let rowid = return_if_io!(get_new_rowid(cursor, thread_rng()));
@@ -2364,6 +2391,7 @@ impl Program {
                     rowid_reg,
                     target_pc,
                 } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     let cursor =
                         must_be_btree_cursor!(*cursor, self.cursor_ref, cursors, "NotExists");
                     let exists = return_if_io!(cursor.exists(&state.registers[*rowid_reg]));
@@ -2412,6 +2440,7 @@ impl Program {
                     root_page,
                 } => {
                     let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let mut cursors = state.cursors.borrow_mut();
                     let is_index = cursor_type.is_index();
                     let cursor = BTreeCursor::new(pager.clone(), *root_page);
                     if is_index {
@@ -2452,6 +2481,7 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::Close { cursor_id } => {
+                    let mut cursors = state.cursors.borrow_mut();
                     cursors.get_mut(*cursor_id).unwrap().take();
                     state.pc += 1;
                 }
