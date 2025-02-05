@@ -94,3 +94,7 @@ tempfile = "3.8.0"
 [[bench]]
 name = "benchmark"
 harness = false
+
+[[bench]]
+name = "mvcc_benchmark"
+harness = false
