@@ -1,19 +1,28 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use crate::clock::LogicalClock;
-use crate::database::{Database, Result, Row, RowID};
+use crate::mvcc::clock::LogicalClock;
+use crate::mvcc::database::{Database, Result, Row, RowID};
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub struct ScanCursor<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug> {
+pub struct ScanCursor<
+    'a,
+    Clock: LogicalClock,
+    T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug,
+> {
     pub db: &'a Database<Clock, T>,
     pub row_ids: Vec<RowID>,
     pub index: usize,
     tx_id: u64,
 }
 
-impl<'a, Clock: LogicalClock, T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug + 'static> ScanCursor<'a, Clock, T> {
+impl<
+        'a,
+        Clock: LogicalClock,
+        T: Sync + Send + Clone + Serialize + DeserializeOwned + Debug + 'static,
+    > ScanCursor<'a, Clock, T>
+{
     pub fn new(
         db: &'a Database<Clock, T>,
         tx_id: u64,

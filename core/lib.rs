@@ -5,6 +5,7 @@ mod info;
 mod io;
 #[cfg(feature = "json")]
 mod json;
+pub mod mvcc;
 mod parameters;
 mod pseudo;
 mod result;

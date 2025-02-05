@@ -1,12 +1,12 @@
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use mvcc_rs::clock::LocalClock;
-use mvcc_rs::database::{Database, Row, RowID};
+use limbo_core::mvcc::clock::LocalClock;
+use limbo_core::mvcc::database::{Database, Row, RowID};
 use pprof::criterion::{Output, PProfProfiler};
 
 fn bench_db() -> Database<LocalClock, String> {
     let clock = LocalClock::default();
-    let storage = mvcc_rs::persistent_storage::Storage::new_noop();
+    let storage = limbo_core::mvcc::persistent_storage::Storage::new_noop();
     Database::new(clock, storage)
 }
 

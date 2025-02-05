@@ -1,9 +1,7 @@
-use crate::clock::LogicalClock;
-use crate::errors::DatabaseError;
-use crate::persistent_storage::Storage;
+use crate::mvcc::clock::LogicalClock;
+use crate::mvcc::errors::DatabaseError;
+use crate::mvcc::persistent_storage::Storage;
 use crossbeam_skiplist::{SkipMap, SkipSet};
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
@@ -13,13 +11,13 @@ pub type Result<T> = std::result::Result<T, DatabaseError>;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RowID {
     pub table_id: u64,
     pub row_id: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 
 pub struct Row<T> {
     pub id: RowID,
@@ -27,7 +25,7 @@ pub struct Row<T> {
 }
 
 /// A row version.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RowVersion<T> {
     begin: TxTimestampOrID,
     end: Option<TxTimestampOrID>,
@@ -37,7 +35,7 @@ pub struct RowVersion<T> {
 pub type TxID = u64;
 
 /// A log record contains all the versions inserted and deleted by a transaction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct LogRecord<T> {
     pub(crate) tx_timestamp: TxID,
     row_versions: Vec<RowVersion<T>>,
@@ -58,14 +56,14 @@ impl<T> LogRecord<T> {
 /// phase of the transaction. During the active phase, new versions track the
 /// transaction ID in the `begin` and `end` fields. After a transaction commits,
 /// versions switch to tracking timestamps.
-#[derive(Clone, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 enum TxTimestampOrID {
     Timestamp(u64),
     TxID(TxID),
 }
 
 /// Transaction
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Transaction {
     /// The state of the transaction.
     state: AtomicTransactionState,
@@ -74,55 +72,9 @@ pub struct Transaction {
     /// The transaction begin timestamp.
     begin_ts: u64,
     /// The transaction write set.
-    #[serde(with = "skipset_rowid")]
     write_set: SkipSet<RowID>,
     /// The transaction read set.
-    #[serde(with = "skipset_rowid")]
     read_set: SkipSet<RowID>,
-}
-
-mod skipset_rowid {
-    use super::*;
-    use serde::{de, ser, ser::SerializeSeq};
-
-    struct SkipSetDeserializer;
-
-    impl<'de> serde::de::Visitor<'de> for SkipSetDeserializer {
-        type Value = SkipSet<RowID>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("SkipSet<RowID> key value sequence.")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
-        where
-            A: serde::de::SeqAccess<'de>,
-        {
-            let new_skipset = SkipSet::new();
-            while let Some(elem) = seq.next_element()? {
-                new_skipset.insert(elem);
-            }
-
-            Ok(new_skipset)
-        }
-    }
-
-    pub fn serialize<S: ser::Serializer>(
-        value: &SkipSet<RowID>,
-        ser: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        let mut set = ser.serialize_seq(Some(value.len()))?;
-        for v in value {
-            set.serialize_element(v.value())?;
-        }
-        set.end()
-    }
-
-    pub fn deserialize<'de, D: de::Deserializer<'de>>(
-        de: D,
-    ) -> std::result::Result<SkipSet<RowID>, D::Error> {
-        de.deserialize_seq(SkipSetDeserializer)
-    }
 }
 
 impl Transaction {
@@ -167,7 +119,7 @@ impl std::fmt::Display for Transaction {
 }
 
 /// Transaction state.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 enum TransactionState {
     Active,
     Preparing,
@@ -207,7 +159,7 @@ impl TransactionState {
 }
 
 // Transaction state encoded into a single 64-bit atomic.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub(crate) struct AtomicTransactionState {
     pub(crate) state: AtomicU64,
 }
@@ -256,10 +208,7 @@ impl AtomicTransactionState {
 }
 
 #[derive(Debug)]
-pub struct Database<
-    Clock: LogicalClock,
-    T: Sync + Send + Clone + Serialize + Debug + DeserializeOwned,
-> {
+pub struct Database<Clock: LogicalClock, T: Sync + Send + Clone + Debug> {
     rows: SkipMap<RowID, RwLock<Vec<RowVersion<T>>>>,
     txs: SkipMap<TxID, RwLock<Transaction>>,
     tx_ids: AtomicU64,
@@ -267,9 +216,7 @@ pub struct Database<
     storage: Storage,
 }
 
-impl<Clock: LogicalClock, T: Sync + Send + Clone + Serialize + Debug + DeserializeOwned + 'static>
-    Database<Clock, T>
-{
+impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> Database<Clock, T> {
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
         Self {
@@ -672,7 +619,7 @@ impl<Clock: LogicalClock, T: Sync + Send + Clone + Serialize + Debug + Deseriali
         tracing::trace!("ABORT     {tx}");
         let write_set: Vec<RowID> = tx.write_set.iter().map(|v| *v.value()).collect();
         drop(tx);
-        
+
         for ref id in write_set {
             if let Some(row_versions) = self.rows.get(id) {
                 let mut row_versions = row_versions.value().write().unwrap();

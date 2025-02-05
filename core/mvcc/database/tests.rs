@@ -1,14 +1,12 @@
 use super::*;
-use crate::clock::LocalClock;
-use tracing_test::traced_test;
+use crate::mvcc::clock::LocalClock;
 
 fn test_db() -> Database<LocalClock, String> {
     let clock = LocalClock::new();
-    let storage = crate::persistent_storage::Storage::new_noop();
+    let storage = crate::mvcc::persistent_storage::Storage::new_noop();
     Database::new(clock, storage)
 }
 
-#[traced_test]
 #[test]
 fn test_insert_read() {
     let db = test_db();
@@ -49,7 +47,6 @@ fn test_insert_read() {
     assert_eq!(tx1_row, row);
 }
 
-#[traced_test]
 #[test]
 fn test_read_nonexistent() {
     let db = test_db();
@@ -64,7 +61,6 @@ fn test_read_nonexistent() {
     assert!(row.unwrap().is_none());
 }
 
-#[traced_test]
 #[test]
 fn test_delete() {
     let db = test_db();
@@ -122,7 +118,6 @@ fn test_delete() {
     assert!(row.is_none());
 }
 
-#[traced_test]
 #[test]
 fn test_delete_nonexistent() {
     let db = test_db();
@@ -138,7 +133,6 @@ fn test_delete_nonexistent() {
         .unwrap());
 }
 
-#[traced_test]
 #[test]
 fn test_commit() {
     let db = test_db();
@@ -199,7 +193,6 @@ fn test_commit() {
     db.drop_unused_row_versions();
 }
 
-#[traced_test]
 #[test]
 fn test_rollback() {
     let db = test_db();
@@ -256,7 +249,6 @@ fn test_rollback() {
     assert_eq!(row5, None);
 }
 
-#[traced_test]
 #[test]
 fn test_dirty_write() {
     let db = test_db();
@@ -307,7 +299,6 @@ fn test_dirty_write() {
     assert_eq!(tx1_row, row);
 }
 
-#[traced_test]
 #[test]
 fn test_dirty_read() {
     let db = test_db();
@@ -337,7 +328,6 @@ fn test_dirty_read() {
     assert_eq!(row2, None);
 }
 
-#[traced_test]
 #[test]
 fn test_dirty_read_deleted() {
     let db = test_db();
@@ -381,7 +371,6 @@ fn test_dirty_read_deleted() {
     assert_eq!(tx1_row, row);
 }
 
-#[traced_test]
 #[test]
 fn test_fuzzy_read() {
     let db = test_db();
@@ -449,7 +438,6 @@ fn test_fuzzy_read() {
     assert_eq!(tx1_row, row);
 }
 
-#[traced_test]
 #[test]
 fn test_lost_update() {
     let db = test_db();
@@ -521,7 +509,6 @@ fn test_lost_update() {
 
 // Test for the visibility to check if a new transaction can see old committed values.
 // This test checks for the typo present in the paper, explained in https://github.com/penberg/mvcc-rs/issues/15
-#[traced_test]
 #[test]
 fn test_committed_visibility() {
     let db = test_db();
@@ -576,7 +563,6 @@ fn test_committed_visibility() {
 }
 
 // Test to check if a older transaction can see (un)committed future rows
-#[traced_test]
 #[test]
 fn test_future_row() {
     let db = test_db();
@@ -617,164 +603,6 @@ fn test_future_row() {
         )
         .unwrap();
     assert_eq!(row, None);
-}
-
-#[traced_test]
-#[test]
-fn test_storage1() {
-    let clock = LocalClock::new();
-    let mut path = std::env::temp_dir();
-    path.push(format!(
-        "mvcc-rs-storage-test-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-    ));
-    let storage = crate::persistent_storage::Storage::new_json_on_disk(path.clone());
-    let db = Database::new(clock, storage);
-
-    let tx1 = db.begin_tx();
-    let tx2 = db.begin_tx();
-    let tx3 = db.begin_tx();
-
-    db.insert(
-        tx3,
-        Row {
-            id: RowID {
-                table_id: 1,
-                row_id: 1,
-            },
-            data: "testme".to_string(),
-        },
-    )
-    .unwrap();
-
-    db.commit_tx(tx1).unwrap();
-    db.rollback_tx(tx2);
-    db.commit_tx(tx3).unwrap();
-
-    let tx4 = db.begin_tx();
-    db.insert(
-        tx4,
-        Row {
-            id: RowID {
-                table_id: 1,
-                row_id: 2,
-            },
-            data: "testme2".to_string(),
-        },
-    )
-    .unwrap();
-    db.insert(
-        tx4,
-        Row {
-            id: RowID {
-                table_id: 1,
-                row_id: 3,
-            },
-            data: "testme3".to_string(),
-        },
-    )
-    .unwrap();
-
-    assert_eq!(
-        db.read(
-            tx4,
-            RowID {
-                table_id: 1,
-                row_id: 1
-            }
-        )
-        .unwrap()
-        .unwrap()
-        .data,
-        "testme"
-    );
-    assert_eq!(
-        db.read(
-            tx4,
-            RowID {
-                table_id: 1,
-                row_id: 2
-            }
-        )
-        .unwrap()
-        .unwrap()
-        .data,
-        "testme2"
-    );
-    assert_eq!(
-        db.read(
-            tx4,
-            RowID {
-                table_id: 1,
-                row_id: 3
-            }
-        )
-        .unwrap()
-        .unwrap()
-        .data,
-        "testme3"
-    );
-    db.commit_tx(tx4).unwrap();
-
-    let clock = LocalClock::new();
-    let storage = crate::persistent_storage::Storage::new_json_on_disk(path);
-    let db: Database<LocalClock, String> = Database::new(clock, storage);
-    db.recover().unwrap();
-    println!("{:#?}", db);
-
-    let tx5 = db.begin_tx();
-    println!(
-        "{:#?}",
-        db.read(
-            tx5,
-            RowID {
-                table_id: 1,
-                row_id: 1
-            }
-        )
-    );
-    assert_eq!(
-        db.read(
-            tx5,
-            RowID {
-                table_id: 1,
-                row_id: 1
-            }
-        )
-        .unwrap()
-        .unwrap()
-        .data,
-        "testme"
-    );
-    assert_eq!(
-        db.read(
-            tx5,
-            RowID {
-                table_id: 1,
-                row_id: 2
-            }
-        )
-        .unwrap()
-        .unwrap()
-        .data,
-        "testme2"
-    );
-    assert_eq!(
-        db.read(
-            tx5,
-            RowID {
-                table_id: 1,
-                row_id: 3
-            }
-        )
-        .unwrap()
-        .unwrap()
-        .data,
-        "testme3"
-    );
 }
 
 /* States described in the Hekaton paper *for serializability*:
@@ -832,7 +660,6 @@ fn new_tx(tx_id: TxID, begin_ts: u64, state: TransactionState) -> RwLock<Transac
     })
 }
 
-#[traced_test]
 #[test]
 fn test_snapshot_isolation_tx_visible1() {
     let txs: SkipMap<TxID, RwLock<Transaction>> = SkipMap::from_iter([
