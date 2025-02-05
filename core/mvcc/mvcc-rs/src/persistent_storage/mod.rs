@@ -5,13 +5,10 @@ use std::fmt::Debug;
 use crate::database::{LogRecord, Result};
 use crate::errors::DatabaseError;
 
-pub mod s3;
-
 #[derive(Debug)]
 pub enum Storage {
     Noop,
     JsonOnDisk(std::path::PathBuf),
-    S3(s3::Replicator),
 }
 
 impl Storage {
@@ -22,11 +19,6 @@ impl Storage {
     pub fn new_json_on_disk(path: impl Into<std::path::PathBuf>) -> Self {
         let path = path.into();
         Self::JsonOnDisk(path)
-    }
-
-    pub fn new_s3(options: s3::Options) -> Result<Self> {
-        let replicator = futures::executor::block_on(s3::Replicator::new(options))?;
-        Ok(Self::S3(replicator))
     }
 }
 
@@ -45,9 +37,6 @@ impl Storage {
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
                 file.write_all(b"\n")
                     .map_err(|e| DatabaseError::Io(e.to_string()))?;
-            }
-            Self::S3(replicator) => {
-                futures::executor::block_on(replicator.replicate_tx(m))?;
             }
             Self::Noop => (),
         }
