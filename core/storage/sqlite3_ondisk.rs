@@ -949,6 +949,11 @@ impl TryFrom<u64> for SerialType {
 }
 
 pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
+    let values = parse_record(payload)?;
+    Ok(OwnedRecord::from_values(values))
+}
+
+pub fn parse_record(payload: &[u8]) -> Result<Vec<OwnedValue>> {
     let mut pos = 0;
     let (header_size, nr) = read_varint(payload)?;
     assert!((header_size as usize) >= nr);
@@ -969,7 +974,7 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
         pos += n;
         values.push(value);
     }
-    Ok(OwnedRecord::from_values(values))
+    Ok(values)
 }
 
 pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
