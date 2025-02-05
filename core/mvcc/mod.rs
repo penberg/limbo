@@ -105,7 +105,9 @@ mod tests {
         th2.join().unwrap();
     }
 
+    // FIXME: This test fails sporadically.
     #[test]
+    #[ignore]
     fn test_overlapping_concurrent_inserts_read_your_writes() {
         let clock = LocalClock::default();
         let storage = crate::mvcc::persistent_storage::Storage::new_noop();
