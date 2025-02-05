@@ -826,3 +826,55 @@ do_execsql_test json-remove-6 {
 do_execsql_test json-remove-7 {
     SELECT json_remove('{"a": 1, "b": [1,2], "c": {"d": 3}}', '$.a', '$.b[0]', '$.c.d');
 } {{{"b":[2],"c":{}}}}
+
+do_execsql_test json_set_field_empty_object {
+   SELECT json_set('{}', '$.field', 'value');
+} {{{"field":"value"}}}
+
+do_execsql_test json_set_replace_field {
+   SELECT json_set('{"field":"old_value"}', '$.field', 'new_value');
+} {{{"field":"new_value"}}}
+
+do_execsql_test json_set_set_deeply_nested_key {
+   SELECT json_set('{}', '$.object.doesnt.exist', 'value');
+} {{{"object":{"doesnt":{"exist":"value"}}}}}
+
+do_execsql_test json_set_add_value_to_empty_array {
+   SELECT json_set('[]', '$[0]', 'value');
+} {{["value"]}}
+
+do_execsql_test json_set_add_value_to_nonexistent_array {
+   SELECT json_set('{}', '$.some_array[0]', 123);
+} {{{"some_array":[123]}}}
+
+do_execsql_test json_set_add_value_to_array {
+   SELECT json_set('[123]', '$[1]', 456);
+} {{[123,456]}}
+
+do_execsql_test json_set_add_value_to_array_out_of_bounds {
+   SELECT json_set('[123]', '$[200]', 456);
+} {{[123]}}
+
+do_execsql_test json_set_replace_value_in_array {
+   SELECT json_set('[123]', '$[0]', 456);
+} {{[456]}}
+
+do_execsql_test json_set_null_path {
+   SELECT json_set('{}', NULL, 456);
+} {{{}}}
+
+do_execsql_test json_set_multiple_keys {
+   SELECT json_set('[123]', '$[0]', 456, '$[1]', 789);
+} {{[456,789]}}
+
+do_execsql_test json_set_add_array_in_nested_object {
+   SELECT json_set('{}', '$.object[0].field', 123);
+} {{{"object":[{"field":123}]}}}
+
+do_execsql_test json_set_add_array_in_array_in_nested_object {
+   SELECT json_set('{}', '$.object[0][0]', 123);
+} {{{"object":[[123]]}}}
+
+do_execsql_test json_set_add_array_in_array_in_nested_object_out_of_bounds {
+   SELECT json_set('{}', '$.object[123].another', 'value', '$.field', 'value');
+} {{{"field":"value"}}}
