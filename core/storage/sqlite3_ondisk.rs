@@ -949,8 +949,7 @@ impl TryFrom<u64> for SerialType {
 }
 
 pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
-    let values = parse_record(payload)?;
-    Ok(OwnedRecord::from_values(values))
+    Ok(OwnedRecord::from_payload(payload))
 }
 
 pub fn parse_record(payload: &[u8]) -> Result<Vec<OwnedValue>> {

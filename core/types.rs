@@ -4,9 +4,10 @@ use crate::error::LimboError;
 use crate::ext::{ExtValue, ExtValueType};
 use crate::pseudo::PseudoCursor;
 use crate::storage::btree::BTreeCursor;
-use crate::storage::sqlite3_ondisk::write_varint;
+use crate::storage::sqlite3_ondisk::{parse_record, write_varint};
 use crate::vdbe::sorter::Sorter;
 use crate::Result;
+use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::Rc;
 
@@ -479,7 +480,13 @@ impl<'a> Record<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OwnedRecord {
-    values: Vec<OwnedValue>,
+    state: RefCell<OwnedRecordState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum OwnedRecordState {
+    Serialized(Vec<u8>),
+    Parsed(Vec<OwnedValue>),
 }
 
 const I8_LOW: i64 = -128;
@@ -552,19 +559,51 @@ impl From<SerialType> for u64 {
 }
 
 impl OwnedRecord {
+    pub fn from_payload(payload: &[u8]) -> Self {
+        Self {
+            state: RefCell::new(OwnedRecordState::Serialized(payload.to_vec())),
+        }
+    }
+
     pub fn from_values(values: Vec<OwnedValue>) -> Self {
-        Self { values }
+        Self {
+            state: RefCell::new(OwnedRecordState::Parsed(values)),
+        }
     }
 
     pub fn get(&self, idx: usize) -> &OwnedValue {
-        &self.values[idx]
+        self.ensure_parsed();
+        let state = self.state.borrow();
+        match &*state {
+            OwnedRecordState::Parsed(values) => {
+                // SAFETY: The RefCell ensures that the reference cannot be invalidated
+                // while it is borrowed, and the OwnedRecord owns the data.
+                unsafe { std::mem::transmute(&values[idx]) }
+            }
+            OwnedRecordState::Serialized(_) => {
+                unreachable!()
+            }
+        }
     }
 
-    pub fn values(&self) -> &[OwnedValue] {
-        &self.values
+    pub fn values<'a>(&'a self) -> &'a [OwnedValue] {
+        self.ensure_parsed();
+        let state = self.state.borrow();
+        match &*state {
+            OwnedRecordState::Parsed(values) => {
+                // SAFETY: The RefCell ensures that the reference cannot be invalidated
+                // while it is borrowed, and the OwnedRecord owns the data.
+                unsafe { std::mem::transmute(values.as_slice()) }
+            }
+            OwnedRecordState::Serialized(_) => {
+                unreachable!()
+            }
+        }
     }
 
     pub fn serialize(&self, buf: &mut Vec<u8>) {
+        self.ensure_parsed();
+
         let initial_i = buf.len();
 
         // write serial types
@@ -617,6 +656,27 @@ impl OwnedRecord {
         let n = write_varint(header_bytes_buf.as_mut_slice(), header_size as u64);
         header_bytes_buf.truncate(n);
         buf.splice(initial_i..initial_i, header_bytes_buf.iter().cloned());
+    }
+
+    fn ensure_parsed(&self) {
+        let needs_parsing = {
+            let state = self.state.borrow();
+            matches!(&*state, OwnedRecordState::Serialized(_))
+        };
+
+        if needs_parsing {
+            let payload = {
+                let state = self.state.borrow();
+                if let OwnedRecordState::Serialized(ref payload) = &*state {
+                    payload.clone()
+                } else {
+                    unreachable!()
+                }
+            };
+            let parsed = parse_record(&payload).unwrap();
+            let mut state = self.state.borrow_mut();
+            *state = OwnedRecordState::Parsed(parsed);
+        }
     }
 }
 
