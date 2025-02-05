@@ -12,7 +12,7 @@ use crate::json::error::Error as JsonError;
 pub use crate::json::json_operations::{json_patch, json_remove};
 use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
-use crate::types::{Text, OwnedValue, TextSubtype};
+use crate::types::{OwnedValue, Text, TextSubtype};
 use indexmap::IndexMap;
 use jsonb::Error as JsonbError;
 use ser::to_string_pretty;
@@ -298,7 +298,7 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
                 Ok(OwnedValue::Integer(0))
             }
         }
-        Val::String(s) => Ok(OwnedValue::Text(Text::new(Rc::new(s.clone())))),
+        Val::String(s) => Ok(OwnedValue::Text(Text::from_str(s))),
         _ => {
             let json = to_string(&extracted)?;
             if all_as_db {

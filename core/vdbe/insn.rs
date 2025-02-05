@@ -1066,10 +1066,8 @@ pub fn exec_or(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use crate::{
-        types::{Text, OwnedValue},
+        types::{OwnedValue, Text},
         vdbe::insn::exec_or,
     };
 
@@ -1085,15 +1083,15 @@ mod tests {
             (OwnedValue::Integer(1), OwnedValue::Float(2.2)),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(Text::new(Rc::new("string".to_string()))),
+                OwnedValue::Text(Text::from_str("string")),
             ),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(Text::new(Rc::new("1".to_string()))),
+                OwnedValue::Text(Text::from_str("1")),
             ),
             (
                 OwnedValue::Integer(1),
-                OwnedValue::Text(Text::new(Rc::new("1".to_string()))),
+                OwnedValue::Text(Text::from_str("1")),
             ),
         ];
         let outpus = [
@@ -1134,16 +1132,13 @@ mod tests {
             (OwnedValue::Float(0.0), OwnedValue::Integer(0)),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(Text::new(Rc::new("string".to_string()))),
+                OwnedValue::Text(Text::from_str("string")),
             ),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(Text::new(Rc::new("1".to_string()))),
+                OwnedValue::Text(Text::from_str("1")),
             ),
-            (
-                OwnedValue::Integer(0),
-                OwnedValue::Text(Text::new(Rc::new("".to_string()))),
-            ),
+            (OwnedValue::Integer(0), OwnedValue::Text(Text::from_str(""))),
         ];
         let outpus = [
             OwnedValue::Null,

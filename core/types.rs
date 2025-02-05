@@ -44,6 +44,10 @@ pub struct Text {
 }
 
 impl Text {
+    pub fn from_str<S: Into<String>>(value: S) -> Self {
+        Self::new(Rc::new(value.into()))
+    }
+
     pub fn new(value: Rc<String>) -> Self {
         Self {
             value,
@@ -388,7 +392,7 @@ impl From<Value<'_>> for OwnedValue {
             Value::Null => OwnedValue::Null,
             Value::Integer(i) => OwnedValue::Integer(i),
             Value::Float(f) => OwnedValue::Float(f),
-            Value::Text(s) => OwnedValue::Text(Text::new(Rc::new(s.to_owned()))),
+            Value::Text(s) => OwnedValue::Text(Text::from_str(s)),
             Value::Blob(b) => OwnedValue::Blob(Rc::new(b.to_owned())),
         }
     }

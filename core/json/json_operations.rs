@@ -193,7 +193,7 @@ mod tests {
     use super::*;
 
     fn create_text(s: &str) -> OwnedValue {
-        OwnedValue::Text(Text::new(Rc::new(s.to_string())))
+        OwnedValue::Text(Text::from_str(s))
     }
 
     fn create_json(s: &str) -> OwnedValue {
