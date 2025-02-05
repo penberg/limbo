@@ -72,7 +72,7 @@ pub fn init_group_by(
     program.emit_insn(Insn::SorterOpen {
         cursor_id: sort_cursor,
         columns: aggregates.len() + group_by.exprs.len(),
-        order: OwnedRecord::new(order),
+        order: OwnedRecord::from_values(order),
     });
 
     program.add_comment(program.offset(), "clear group by abort flag");

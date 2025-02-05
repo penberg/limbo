@@ -2635,7 +2635,7 @@ fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize)
     for r in registers.iter().skip(*start_reg).take(*count) {
         values.push(r.clone())
     }
-    OwnedRecord::new(values)
+    OwnedRecord::from_values(values)
 }
 
 fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {

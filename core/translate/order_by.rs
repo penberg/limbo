@@ -47,7 +47,7 @@ pub fn init_order_by(
     program.emit_insn(Insn::SorterOpen {
         cursor_id: sort_cursor,
         columns: order_by.len(),
-        order: OwnedRecord::new(order),
+        order: OwnedRecord::from_values(order),
     });
     Ok(())
 }

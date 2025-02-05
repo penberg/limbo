@@ -57,6 +57,6 @@ impl Sorter {
 
     pub fn insert(&mut self, record: &OwnedRecord) {
         self.records
-            .push(OwnedRecord::new(record.values().to_vec()));
+            .push(OwnedRecord::from_values(record.values().to_vec()));
     }
 }

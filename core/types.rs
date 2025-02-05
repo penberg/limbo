@@ -552,7 +552,7 @@ impl From<SerialType> for u64 {
 }
 
 impl OwnedRecord {
-    pub fn new(values: Vec<OwnedValue>) -> Self {
+    pub fn from_values(values: Vec<OwnedValue>) -> Self {
         Self { values }
     }
 
@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn test_serialize_null() {
-        let record = OwnedRecord::new(vec![OwnedValue::Null]);
+        let record = OwnedRecord::from_values(vec![OwnedValue::Null]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn test_serialize_integers() {
-        let record = OwnedRecord::new(vec![
+        let record = OwnedRecord::from_values(vec![
             OwnedValue::Integer(42),                // Should use SERIAL_TYPE_I8
             OwnedValue::Integer(1000),              // Should use SERIAL_TYPE_I16
             OwnedValue::Integer(1_000_000),         // Should use SERIAL_TYPE_I24
@@ -790,7 +790,7 @@ mod tests {
     #[test]
     fn test_serialize_float() {
         #[warn(clippy::approx_constant)]
-        let record = OwnedRecord::new(vec![OwnedValue::Float(3.15555)]);
+        let record = OwnedRecord::from_values(vec![OwnedValue::Float(3.15555)]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -811,7 +811,7 @@ mod tests {
     #[test]
     fn test_serialize_text() {
         let text = Rc::new("hello".to_string());
-        let record = OwnedRecord::new(vec![OwnedValue::Text(LimboText::new(text.clone()))]);
+        let record = OwnedRecord::from_values(vec![OwnedValue::Text(LimboText::new(text.clone()))]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -830,7 +830,7 @@ mod tests {
     #[test]
     fn test_serialize_blob() {
         let blob = Rc::new(vec![1, 2, 3, 4, 5]);
-        let record = OwnedRecord::new(vec![OwnedValue::Blob(blob.clone())]);
+        let record = OwnedRecord::from_values(vec![OwnedValue::Blob(blob.clone())]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -849,7 +849,7 @@ mod tests {
     #[test]
     fn test_serialize_mixed_types() {
         let text = Rc::new("test".to_string());
-        let record = OwnedRecord::new(vec![
+        let record = OwnedRecord::from_values(vec![
             OwnedValue::Null,
             OwnedValue::Integer(42),
             OwnedValue::Float(3.15),
