@@ -737,7 +737,7 @@ pub fn insn_to_str(
             } => {
                 let _p4 = String::new();
                 let to_print: Vec<String> = order
-                    .values
+                    .values()
                     .iter()
                     .map(|v| match v {
                         OwnedValue::Integer(i) => {
@@ -757,7 +757,7 @@ pub fn insn_to_str(
                     0,
                     OwnedValue::build_text(Rc::new(format!(
                         "k({},{})",
-                        order.values.len(),
+                        order.values().len(),
                         to_print.join(",")
                     ))),
                     0,

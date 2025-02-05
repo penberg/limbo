@@ -27,8 +27,8 @@ impl Sorter {
     pub fn sort(&mut self) {
         self.records.sort_by(|a, b| {
             let cmp_by_idx = |idx: usize, ascending: bool| {
-                let a = &a.values[idx];
-                let b = &b.values[idx];
+                let a = a.get(idx);
+                let b = b.get(idx);
                 if ascending {
                     a.cmp(b)
                 } else {
@@ -56,6 +56,7 @@ impl Sorter {
     }
 
     pub fn insert(&mut self, record: &OwnedRecord) {
-        self.records.push(OwnedRecord::new(record.values.to_vec()));
+        self.records
+            .push(OwnedRecord::new(record.values().to_vec()));
     }
 }

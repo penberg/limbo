@@ -479,7 +479,7 @@ impl<'a> Record<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OwnedRecord {
-    pub values: Vec<OwnedValue>,
+    values: Vec<OwnedValue>,
 }
 
 const I8_LOW: i64 = -128;
@@ -556,11 +556,19 @@ impl OwnedRecord {
         Self { values }
     }
 
+    pub fn get(&self, idx: usize) -> &OwnedValue {
+        &self.values[idx]
+    }
+
+    pub fn values(&self) -> &[OwnedValue] {
+        &self.values
+    }
+
     pub fn serialize(&self, buf: &mut Vec<u8>) {
         let initial_i = buf.len();
 
         // write serial types
-        for value in &self.values {
+        for value in self.values() {
             let serial_type = SerialType::from(value);
             buf.resize(buf.len() + 9, 0); // Ensure space for varint (1-9 bytes in length)
             let len = buf.len();
@@ -570,7 +578,7 @@ impl OwnedRecord {
 
         let mut header_size = buf.len() - initial_i;
         // write content
-        for value in &self.values {
+        for value in self.values() {
             match value {
                 OwnedValue::Null => {}
                 OwnedValue::Integer(i) => {
@@ -694,7 +702,7 @@ mod tests {
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.values().len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -717,7 +725,7 @@ mod tests {
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.values().len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8); // Header should be larger than number of values
@@ -786,7 +794,7 @@ mod tests {
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.values().len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -807,7 +815,7 @@ mod tests {
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.values().len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -826,7 +834,7 @@ mod tests {
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.values().len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
@@ -850,7 +858,7 @@ mod tests {
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
-        let header_length = record.values.len() + 1;
+        let header_length = record.values().len() + 1;
         let header = &buf[0..header_length];
         // First byte should be header size
         assert_eq!(header[0], header_length as u8);
