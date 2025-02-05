@@ -101,16 +101,17 @@ impl Cursor {
         // For DDL and DML statements,
         // we need to execute the statement immediately
         if stmt_is_ddl || stmt_is_dml {
-            while stmt
-                .borrow_mut()
-                .step()
-                .map_err(|e| PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e)))?
-                .eq(&limbo_core::StepResult::IO)
-            {
-                self.conn
-                    .io
-                    .run_once()
-                    .map_err(|e| PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e)))?;
+            loop {
+                match stmt.borrow_mut().step().map_err(|e| {
+                    PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
+                })? {
+                    limbo_core::StepResult::IO => {
+                        self.conn.io.run_once().map_err(|e| {
+                            PyErr::new::<OperationalError, _>(format!("IO error: {:?}", e))
+                        })?;
+                    }
+                    _ => break,
+                }
             }
         }
 

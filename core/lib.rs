@@ -498,7 +498,7 @@ impl Statement {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum StepResult<'a> {
     Row(Row<'a>),
     IO,
@@ -507,10 +507,7 @@ pub enum StepResult<'a> {
     Busy,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Row<'a> {
-    pub values: Vec<Value<'a>>,
-}
+pub type Row<'a> = types::Record<'a>;
 
 impl<'a> Row<'a> {
     pub fn get<T: types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
