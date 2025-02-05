@@ -1069,7 +1069,7 @@ mod tests {
     use std::rc::Rc;
 
     use crate::{
-        types::{LimboText, OwnedValue},
+        types::{Text, OwnedValue},
         vdbe::insn::exec_or,
     };
 
@@ -1085,15 +1085,15 @@ mod tests {
             (OwnedValue::Integer(1), OwnedValue::Float(2.2)),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(LimboText::new(Rc::new("string".to_string()))),
+                OwnedValue::Text(Text::new(Rc::new("string".to_string()))),
             ),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+                OwnedValue::Text(Text::new(Rc::new("1".to_string()))),
             ),
             (
                 OwnedValue::Integer(1),
-                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+                OwnedValue::Text(Text::new(Rc::new("1".to_string()))),
             ),
         ];
         let outpus = [
@@ -1134,15 +1134,15 @@ mod tests {
             (OwnedValue::Float(0.0), OwnedValue::Integer(0)),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(LimboText::new(Rc::new("string".to_string()))),
+                OwnedValue::Text(Text::new(Rc::new("string".to_string()))),
             ),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(LimboText::new(Rc::new("1".to_string()))),
+                OwnedValue::Text(Text::new(Rc::new("1".to_string()))),
             ),
             (
                 OwnedValue::Integer(0),
-                OwnedValue::Text(LimboText::new(Rc::new("".to_string()))),
+                OwnedValue::Text(Text::new(Rc::new("".to_string()))),
             ),
         ];
         let outpus = [
