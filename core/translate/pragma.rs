@@ -10,7 +10,7 @@ use crate::schema::Schema;
 use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::storage::wal::CheckpointMode;
 use crate::util::normalize_ident;
-use crate::vdbe::builder::ProgramBuilder;
+use crate::vdbe::builder::{ProgramBuilder, ProgramBuilderOpts, QueryMode};
 use crate::vdbe::insn::Insn;
 use crate::vdbe::BranchOffset;
 use crate::{bail_parse_error, Pager};
@@ -34,20 +34,26 @@ fn list_pragmas(
 }
 
 pub fn translate_pragma(
-    program: &mut ProgramBuilder,
+    query_mode: QueryMode,
     schema: &Schema,
     name: &ast::QualifiedName,
     body: Option<ast::PragmaBody>,
     database_header: Rc<RefCell<DatabaseHeader>>,
     pager: Rc<Pager>,
-) -> crate::Result<()> {
+) -> crate::Result<ProgramBuilder> {
+    let mut program = ProgramBuilder::new(ProgramBuilderOpts {
+        query_mode,
+        num_cursors: 0,
+        approx_num_insns: 20,
+        approx_num_labels: 0,
+    });
     let init_label = program.emit_init();
     let start_offset = program.offset();
     let mut write = false;
 
     if name.name.0.to_lowercase() == "pragma_list" {
-        list_pragmas(program, init_label, start_offset);
-        return Ok(());
+        list_pragmas(&mut program, init_label, start_offset);
+        return Ok(program);
     }
 
     let pragma = match PragmaName::from_str(&name.name.0) {
@@ -57,7 +63,7 @@ pub fn translate_pragma(
 
     match body {
         None => {
-            query_pragma(pragma, schema, None, database_header.clone(), program)?;
+            query_pragma(pragma, schema, None, database_header.clone(), &mut program)?;
         }
         Some(ast::PragmaBody::Equals(value)) => match pragma {
             PragmaName::TableInfo => {
@@ -66,7 +72,7 @@ pub fn translate_pragma(
                     schema,
                     Some(value),
                     database_header.clone(),
-                    program,
+                    &mut program,
                 )?;
             }
             _ => {
@@ -77,7 +83,7 @@ pub fn translate_pragma(
                     value,
                     database_header.clone(),
                     pager,
-                    program,
+                    &mut program,
                 )?;
             }
         },
@@ -88,7 +94,7 @@ pub fn translate_pragma(
                     schema,
                     Some(value),
                     database_header.clone(),
-                    program,
+                    &mut program,
                 )?;
             }
             _ => {
@@ -102,7 +108,7 @@ pub fn translate_pragma(
     program.emit_constant_insns();
     program.emit_goto(start_offset);
 
-    Ok(())
+    Ok(program)
 }
 
 fn update_pragma(

@@ -3,23 +3,33 @@ use crate::translate::emitter::emit_program;
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{DeletePlan, Operation, Plan};
 use crate::translate::planner::{parse_limit, parse_where};
-use crate::vdbe::builder::ProgramBuilder;
+use crate::vdbe::builder::{ProgramBuilder, ProgramBuilderOpts, QueryMode};
 use crate::{schema::Schema, Result, SymbolTable};
 use sqlite3_parser::ast::{Expr, Limit, QualifiedName};
 
 use super::plan::TableReference;
 
 pub fn translate_delete(
-    program: &mut ProgramBuilder,
+    query_mode: QueryMode,
     schema: &Schema,
     tbl_name: &QualifiedName,
     where_clause: Option<Expr>,
     limit: Option<Box<Limit>>,
     syms: &SymbolTable,
-) -> Result<()> {
+) -> Result<ProgramBuilder> {
     let mut delete_plan = prepare_delete_plan(schema, tbl_name, where_clause, limit)?;
     optimize_plan(&mut delete_plan, schema)?;
-    emit_program(program, delete_plan, syms)
+    let Plan::Delete(ref delete) = delete_plan else {
+        panic!("delete_plan is not a DeletePlan");
+    };
+    let mut program = ProgramBuilder::new(ProgramBuilderOpts {
+        query_mode,
+        num_cursors: 1,
+        approx_num_insns: estimate_num_instructions(&delete),
+        approx_num_labels: 0,
+    });
+    emit_program(&mut program, delete_plan, syms)?;
+    Ok(program)
 }
 
 pub fn prepare_delete_plan(
@@ -59,4 +69,12 @@ pub fn prepare_delete_plan(
     };
 
     Ok(Plan::Delete(plan))
+}
+
+fn estimate_num_instructions(plan: &DeletePlan) -> usize {
+    let base = 20;
+
+    let num_instructions = base + plan.table_references.len() * 10;
+
+    num_instructions
 }

@@ -54,18 +54,25 @@ pub enum QueryMode {
     Explain,
 }
 
+pub struct ProgramBuilderOpts {
+    pub query_mode: QueryMode,
+    pub num_cursors: usize,
+    pub approx_num_insns: usize,
+    pub approx_num_labels: usize,
+}
+
 impl ProgramBuilder {
-    pub fn new(query_mode: QueryMode) -> Self {
+    pub fn new(opts: ProgramBuilderOpts) -> Self {
         Self {
             next_free_register: 1,
             next_free_cursor_id: 0,
-            insns: Vec::new(),
+            insns: Vec::with_capacity(opts.approx_num_insns),
             next_insn_label: None,
-            cursor_ref: Vec::new(),
+            cursor_ref: Vec::with_capacity(opts.num_cursors),
             constant_insns: Vec::new(),
-            label_to_resolved_offset: Vec::with_capacity(4), // 4 is arbitrary, we guess to assign at least this much
+            label_to_resolved_offset: Vec::with_capacity(opts.approx_num_labels),
             seekrowid_emitted_bitmask: 0,
-            comments: if query_mode == QueryMode::Explain {
+            comments: if opts.query_mode == QueryMode::Explain {
                 Some(HashMap::new())
             } else {
                 None

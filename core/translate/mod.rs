@@ -28,7 +28,7 @@ use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::DatabaseHeader;
 use crate::translate::delete::translate_delete;
 use crate::util::PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX;
-use crate::vdbe::builder::{CursorType, QueryMode};
+use crate::vdbe::builder::{CursorType, ProgramBuilderOpts, QueryMode};
 use crate::vdbe::{builder::ProgramBuilder, insn::Insn, Program};
 use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
@@ -48,10 +48,9 @@ pub fn translate(
     syms: &SymbolTable,
     query_mode: QueryMode,
 ) -> Result<Program> {
-    let mut program = ProgramBuilder::new(query_mode);
     let mut change_cnt_on = false;
 
-    match stmt {
+    let program = match stmt {
         ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
         ast::Stmt::Attach { .. } => bail_parse_error!("ATTACH not supported yet"),
@@ -68,7 +67,7 @@ pub fn translate(
                 bail_parse_error!("TEMPORARY table not supported yet");
             }
 
-            translate_create_table(&mut program, tbl_name, body, if_not_exists, schema)?;
+            translate_create_table(query_mode, tbl_name, body, if_not_exists, schema)?
         }
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
         ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
@@ -82,30 +81,26 @@ pub fn translate(
             ..
         } => {
             change_cnt_on = true;
-            translate_delete(&mut program, schema, &tbl_name, where_clause, limit, syms)?;
+            translate_delete(query_mode, schema, &tbl_name, where_clause, limit, syms)?
         }
         ast::Stmt::Detach(_) => bail_parse_error!("DETACH not supported yet"),
         ast::Stmt::DropIndex { .. } => bail_parse_error!("DROP INDEX not supported yet"),
         ast::Stmt::DropTable { .. } => bail_parse_error!("DROP TABLE not supported yet"),
         ast::Stmt::DropTrigger { .. } => bail_parse_error!("DROP TRIGGER not supported yet"),
         ast::Stmt::DropView { .. } => bail_parse_error!("DROP VIEW not supported yet"),
-        ast::Stmt::Pragma(name, body) => {
-            pragma::translate_pragma(
-                &mut program,
-                &schema,
-                &name,
-                body,
-                database_header.clone(),
-                pager,
-            )?;
-        }
+        ast::Stmt::Pragma(name, body) => pragma::translate_pragma(
+            query_mode,
+            &schema,
+            &name,
+            body,
+            database_header.clone(),
+            pager,
+        )?,
         ast::Stmt::Reindex { .. } => bail_parse_error!("REINDEX not supported yet"),
         ast::Stmt::Release(_) => bail_parse_error!("RELEASE not supported yet"),
         ast::Stmt::Rollback { .. } => bail_parse_error!("ROLLBACK not supported yet"),
         ast::Stmt::Savepoint(_) => bail_parse_error!("SAVEPOINT not supported yet"),
-        ast::Stmt::Select(select) => {
-            translate_select(&mut program, schema, *select, syms)?;
-        }
+        ast::Stmt::Select(select) => translate_select(query_mode, schema, *select, syms)?,
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
         ast::Stmt::Insert {
@@ -118,7 +113,7 @@ pub fn translate(
         } => {
             change_cnt_on = true;
             translate_insert(
-                &mut program,
+                query_mode,
                 schema,
                 &with,
                 &or_conflict,
@@ -127,9 +122,9 @@ pub fn translate(
                 &body,
                 &returning,
                 syms,
-            )?;
+            )?
         }
-    }
+    };
 
     Ok(program.build(database_header, connection, change_cnt_on))
 }
@@ -377,12 +372,18 @@ fn check_automatic_pk_index_required(
 }
 
 fn translate_create_table(
-    program: &mut ProgramBuilder,
+    query_mode: QueryMode,
     tbl_name: ast::QualifiedName,
     body: ast::CreateTableBody,
     if_not_exists: bool,
     schema: &Schema,
-) -> Result<()> {
+) -> Result<ProgramBuilder> {
+    let mut program = ProgramBuilder::new(ProgramBuilderOpts {
+        query_mode,
+        num_cursors: 1,
+        approx_num_insns: 30,
+        approx_num_labels: 1,
+    });
     if schema.get_table(tbl_name.name.0.as_str()).is_some() {
         if if_not_exists {
             let init_label = program.emit_init();
@@ -393,7 +394,7 @@ fn translate_create_table(
             program.emit_constant_insns();
             program.emit_goto(start_offset);
 
-            return Ok(());
+            return Ok(program);
         }
         bail_parse_error!("Table {} already exists", tbl_name);
     }
@@ -440,7 +441,7 @@ fn translate_create_table(
     // https://github.com/sqlite/sqlite/blob/95f6df5b8d55e67d1e34d2bff217305a2f21b1fb/src/build.c#L2856-L2871
     // https://github.com/sqlite/sqlite/blob/95f6df5b8d55e67d1e34d2bff217305a2f21b1fb/src/build.c#L1334C5-L1336C65
 
-    let index_root_reg = check_automatic_pk_index_required(&body, program, &tbl_name.name.0)?;
+    let index_root_reg = check_automatic_pk_index_required(&body, &mut program, &tbl_name.name.0)?;
     if let Some(index_root_reg) = index_root_reg {
         program.emit_insn(Insn::CreateBtree {
             db: 0,
@@ -463,7 +464,7 @@ fn translate_create_table(
 
     // Add the table entry to sqlite_schema
     emit_schema_entry(
-        program,
+        &mut program,
         sqlite_schema_cursor_id,
         SchemaEntryType::Table,
         &tbl_name.name.0,
@@ -479,7 +480,7 @@ fn translate_create_table(
             PRIMARY_KEY_AUTOMATIC_INDEX_NAME_PREFIX, tbl_name.name.0
         );
         emit_schema_entry(
-            program,
+            &mut program,
             sqlite_schema_cursor_id,
             SchemaEntryType::Index,
             &index_name,
@@ -506,7 +507,7 @@ fn translate_create_table(
     program.emit_constant_insns();
     program.emit_goto(start_offset);
 
-    Ok(())
+    Ok(program)
 }
 
 enum PrimaryKeyDefinitionType<'a> {
