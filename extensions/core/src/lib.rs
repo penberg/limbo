@@ -110,7 +110,7 @@ pub trait VTabModule: 'static {
 }
 
 pub trait VTabCursor: Sized {
-    type Error;
+    type Error: std::fmt::Display;
     fn rowid(&self) -> i64;
     fn column(&self, idx: u32) -> Value;
     fn eof(&self) -> bool;

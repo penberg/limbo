@@ -272,8 +272,8 @@ impl Connection {
         let sql = sql.as_ref();
         trace!("Preparing: {}", sql);
         let db = &self.db;
-        let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
+        let syms = &db.syms.borrow();
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
             match cmd {
@@ -363,7 +363,7 @@ impl Connection {
     pub fn execute(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<()> {
         let sql = sql.as_ref();
         let db = &self.db;
-        let syms: &SymbolTable = &db.syms.borrow_mut();
+        let syms: &SymbolTable = &db.syms.borrow();
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         if let Some(cmd) = cmd {
@@ -551,7 +551,7 @@ impl VirtualTable {
         };
         match rc {
             ResultCode::OK => Ok(()),
-            _ => Err(LimboError::ExtensionError("Filter failed".to_string())),
+            _ => Err(LimboError::ExtensionError(rc.to_string())),
         }
     }
 

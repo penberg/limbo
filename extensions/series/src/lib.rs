@@ -88,25 +88,16 @@ struct GenerateSeriesCursor {
     error: Option<ResultCode>,
 }
 
-impl GenerateSeriesCursor {
-    fn next(&mut self) -> ResultCode {
-        let current = self.current;
-
-        // Check if we've reached the end
-        if (self.step > 0 && current >= self.stop) || (self.step < 0 && current <= self.stop) {
-            return ResultCode::EOF;
-        }
-
-        self.current = current.saturating_add(self.step);
-        ResultCode::OK
-    }
-}
-
 impl VTabCursor for GenerateSeriesCursor {
     type Error = ResultCode;
 
     fn next(&mut self) -> ResultCode {
-        GenerateSeriesCursor::next(self)
+        let next_val = self.current.saturating_add(self.step);
+        if (self.step > 0 && next_val > self.stop) || (self.step < 0 && next_val < self.stop) {
+            return ResultCode::EOF;
+        }
+        self.current = next_val;
+        ResultCode::OK
     }
 
     fn eof(&self) -> bool {
