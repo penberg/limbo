@@ -1,6 +1,6 @@
 use super::emitter::emit_program;
 use super::expr::get_name;
-use super::plan::{select_star, SelectQueryType};
+use super::plan::{select_star, Operation, Search, SelectQueryType};
 use crate::function::{AggFunc, ExtFunc, Func};
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{Aggregate, Direction, GroupBy, Plan, ResultSetColumn, SelectPlan};
@@ -9,20 +9,32 @@ use crate::translate::planner::{
     parse_where, resolve_aggregates,
 };
 use crate::util::normalize_ident;
+use crate::vdbe::builder::{ProgramBuilderOpts, QueryMode};
 use crate::SymbolTable;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
 use sqlite3_parser::ast::ResultColumn;
 use sqlite3_parser::ast::{self};
 
 pub fn translate_select(
-    program: &mut ProgramBuilder,
+    query_mode: QueryMode,
     schema: &Schema,
     select: ast::Select,
     syms: &SymbolTable,
-) -> Result<()> {
+) -> Result<ProgramBuilder> {
     let mut select_plan = prepare_select_plan(schema, select, syms)?;
     optimize_plan(&mut select_plan, schema)?;
-    emit_program(program, select_plan, syms)
+    let Plan::Select(ref select) = select_plan else {
+        panic!("select_plan is not a SelectPlan");
+    };
+
+    let mut program = ProgramBuilder::new(ProgramBuilderOpts {
+        query_mode,
+        num_cursors: count_plan_required_cursors(&select),
+        approx_num_insns: estimate_num_instructions(&select),
+        approx_num_labels: estimate_num_labels(&select),
+    });
+    emit_program(&mut program, select_plan, syms)?;
+    Ok(program)
 }
 
 pub fn prepare_select_plan(
@@ -377,4 +389,71 @@ pub fn prepare_select_plan(
         }
         _ => todo!(),
     }
+}
+
+fn count_plan_required_cursors(plan: &SelectPlan) -> usize {
+    let num_table_cursors: usize = plan
+        .table_references
+        .iter()
+        .map(|t| match &t.op {
+            Operation::Scan { .. } => 1,
+            Operation::Search(search) => match search {
+                Search::RowidEq { .. } | Search::RowidSearch { .. } => 1,
+                Search::IndexSearch { .. } => 2, // btree cursor and index cursor
+            },
+            Operation::Subquery { plan, .. } => count_plan_required_cursors(plan),
+        })
+        .sum();
+    let num_sorter_cursors = plan.group_by.is_some() as usize + plan.order_by.is_some() as usize;
+    let num_pseudo_cursors = plan.group_by.is_some() as usize + plan.order_by.is_some() as usize;
+
+    num_table_cursors + num_sorter_cursors + num_pseudo_cursors
+}
+
+fn estimate_num_instructions(select: &SelectPlan) -> usize {
+    let table_instructions: usize = select
+        .table_references
+        .iter()
+        .map(|t| match &t.op {
+            Operation::Scan { .. } => 10,
+            Operation::Search(_) => 15,
+            Operation::Subquery { plan, .. } => 10 + estimate_num_instructions(plan),
+        })
+        .sum();
+
+    let group_by_instructions = select.group_by.is_some() as usize * 10;
+    let order_by_instructions = select.order_by.is_some() as usize * 10;
+    let condition_instructions = select.where_clause.len() * 3;
+
+    let num_instructions = 20
+        + table_instructions
+        + group_by_instructions
+        + order_by_instructions
+        + condition_instructions;
+
+    num_instructions
+}
+
+fn estimate_num_labels(select: &SelectPlan) -> usize {
+    let init_halt_labels = 2;
+    // 3 loop labels for each table in main loop + 1 to signify end of main loop
+    let table_labels = select
+        .table_references
+        .iter()
+        .map(|t| match &t.op {
+            Operation::Scan { .. } => 3,
+            Operation::Search(_) => 3,
+            Operation::Subquery { plan, .. } => 3 + estimate_num_labels(plan),
+        })
+        .sum::<usize>()
+        + 1;
+
+    let group_by_labels = select.group_by.is_some() as usize * 10;
+    let order_by_labels = select.order_by.is_some() as usize * 10;
+    let condition_labels = select.where_clause.len() * 2;
+
+    let num_labels =
+        init_halt_labels + table_labels + group_by_labels + order_by_labels + condition_labels;
+
+    num_labels
 }

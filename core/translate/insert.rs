@@ -7,6 +7,7 @@ use sqlite3_parser::ast::{
 use crate::error::SQLITE_CONSTRAINT_PRIMARYKEY;
 use crate::schema::BTreeTable;
 use crate::util::normalize_ident;
+use crate::vdbe::builder::{ProgramBuilderOpts, QueryMode};
 use crate::vdbe::BranchOffset;
 use crate::Result;
 use crate::{
@@ -23,7 +24,7 @@ use super::emitter::Resolver;
 
 #[allow(clippy::too_many_arguments)]
 pub fn translate_insert(
-    program: &mut ProgramBuilder,
+    query_mode: QueryMode,
     schema: &Schema,
     with: &Option<With>,
     on_conflict: &Option<ResolveType>,
@@ -32,7 +33,13 @@ pub fn translate_insert(
     body: &InsertBody,
     _returning: &Option<Vec<ResultColumn>>,
     syms: &SymbolTable,
-) -> Result<()> {
+) -> Result<ProgramBuilder> {
+    let mut program = ProgramBuilder::new(ProgramBuilderOpts {
+        query_mode,
+        num_cursors: 1,
+        approx_num_insns: 30,
+        approx_num_labels: 5,
+    });
     if with.is_some() {
         crate::bail_parse_error!("WITH clause is not supported");
     }
@@ -113,7 +120,7 @@ pub fn translate_insert(
 
         for value in values {
             populate_column_registers(
-                program,
+                &mut program,
                 value,
                 &column_mappings,
                 column_registers_start,
@@ -152,7 +159,7 @@ pub fn translate_insert(
         program.emit_insn(Insn::OpenWriteAwait {});
 
         populate_column_registers(
-            program,
+            &mut program,
             &values[0],
             &column_mappings,
             column_registers_start,
@@ -258,7 +265,7 @@ pub fn translate_insert(
         target_pc: start_offset,
     });
 
-    Ok(())
+    Ok(program)
 }
 
 #[derive(Debug)]
