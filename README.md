@@ -17,7 +17,7 @@
   <a title="Last Commit" target="_blank" href="https://github.com/tursodatabase/limbo/commits/main"><img src="https://img.shields.io/github/last-commit/tursodatabase/limbo.svg?style=flat-square&color=FF9900"></a>
 </p>
 <p align="center">
-  <a title="Discord" target="_blank" href="[https://discord.gg/jgjmyYgHwB](https://discord.gg/jgjmyYgHwB)"><img alt="Chat on Discord" src="https://img.shields.io/discord/1258658826257961020?label=Discord&logo=Discord&style=social"></a>
+  <a title="Developer's Discord" target="_blank" href="[https://discord.gg/jgjmyYgHwB](https://discord.gg/jgjmyYgHwB)"><img alt="Chat with developers on Discord" src="https://img.shields.io/discord/1258658826257961020?label=Discord&logo=Discord&style=social"></a>
 </p>
 
 ---
@@ -142,9 +142,11 @@ We'd love to have you contribute to Limbo! Please check out the [contribution gu
 
 ## FAQ
 
-### How is Limbo different from libSQL?
+### How is Limbo different from Turso's libSQL?
 
-Limbo is a project to build modern evolution of SQLite in Rust with native async support and more. The libSQL project, on the other hand, is an open source, open contribution fork of SQLite, with focus on production features such as replication, backups, encryption, and so on. In the future we expect, Limbo to be renamed into Turso and essentially replace libSQL.
+Limbo is a project to build the modern evolution of SQLite in Rust, with a strong open contribution focus and features like native async support, vector search, and more. The libSQL project is also an attempt to evolve SQLite in a similar direction, but through a fork rather than a rewrite.
+
+Rewriting SQLite in Rust started as an unassuming experiment, and due to its incredible success, replaces libSQL as our intended direction. At this point, libSQL is production ready, Limbo is not - although it is evolving rapidly. As the project start to near production readiness, we plan to rename it to just "Turso". More details [here](https://turso.tech/blog/we-will-rewrite-sqlite-and-we-are-going-all-in).
 
 ## Publications
 
