@@ -115,10 +115,6 @@ pub trait VTabCursor: Sized {
     fn column(&self, idx: u32) -> Value;
     fn eof(&self) -> bool;
     fn next(&mut self) -> ResultCode;
-    fn set_error(&mut self, error: Self::Error);
-    fn error(&self) -> Option<Self::Error> {
-        None
-    }
 }
 
 #[repr(C)]

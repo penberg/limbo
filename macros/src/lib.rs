@@ -463,9 +463,6 @@ pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
                     return ::limbo_ext::Value::error(ResultCode::Error);
                 }
                 let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
-                if let Some(err) = <#struct_name as ::limbo_ext::VTabModule>::VCursor::error(cursor) {
-                    return ::limbo_ext::Value::error_with_message(err.to_string());
-                }
                 <#struct_name as ::limbo_ext::VTabModule>::column(cursor, idx)
             }
 

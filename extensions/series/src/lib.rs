@@ -40,7 +40,6 @@ impl VTabModule for GenerateSeriesVTab {
             stop: 0,
             step: 0,
             current: 0,
-            error: None,
         }
     }
 
@@ -85,7 +84,6 @@ struct GenerateSeriesCursor {
     stop: i64,
     step: i64,
     current: i64,
-    error: Option<ResultCode>,
 }
 
 impl VTabCursor for GenerateSeriesCursor {
@@ -112,14 +110,6 @@ impl VTabCursor for GenerateSeriesCursor {
             3 => Value::from_integer(self.step),
             _ => Value::null(),
         }
-    }
-
-    fn error(&self) -> Option<Self::Error> {
-        self.error
-    }
-
-    fn set_error(&mut self, err: ResultCode) {
-        self.error = Some(err);
     }
 
     fn rowid(&self) -> i64 {
