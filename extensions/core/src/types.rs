@@ -1,4 +1,4 @@
-use std::{fmt::Display, mem};
+use std::fmt::Display;
 
 /// Error type is of type ExtError which can be
 /// either a user defined error or an error code

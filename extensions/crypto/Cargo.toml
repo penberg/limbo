@@ -13,7 +13,6 @@ crate-type = ["cdylib", "lib"]
 static= [ "limbo_ext/static" ]
 
 [dependencies]
-ascii85 = "0.2.1"
 blake3 = "1.5.5"
 data-encoding = "2.7.0"
 limbo_ext = { path = "../core", features = ["static"] }

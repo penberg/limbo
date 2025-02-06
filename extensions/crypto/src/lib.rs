@@ -1,4 +1,4 @@
-use crypto::{blake3, encode, md5, sha1, sha256, sha384, sha512};
+use crypto::{blake3, decode, encode, md5, sha1, sha256, sha384, sha512};
 use limbo_ext::{register_extension, scalar, ResultCode, Value};
 
 mod crypto;
@@ -7,6 +7,8 @@ mod crypto;
 enum Error {
     InvalidType,
     UnknownOperation,
+    DecodeFailed,
+    InvalidUtf8,
 }
 
 #[scalar(name = "crypto_sha256", alias = "crypto_sha256")]
@@ -100,6 +102,19 @@ fn crypto_encode(args: &[Value]) -> Value {
     payload
 }
 
+#[scalar(name = "crypto_decode", alias = "crypto_decode")]
+fn crypto_decode(args: &[Value]) -> Value {
+    if args.len() != 2 {
+        return Value::error(ResultCode::Error);
+    }
+
+    let Ok(payload) = decode(&args[0], &args[1]) else {
+        return Value::error(ResultCode::Error);
+    };
+
+    payload
+}
+
 register_extension! {
-    scalars: { crypto_sha256, crypto_sha512, crypto_sha384, crypto_blake3, crypto_sha1, crypto_md5, crypto_encode },
+    scalars: { crypto_sha256, crypto_sha512, crypto_sha384, crypto_blake3, crypto_sha1, crypto_md5, crypto_encode, crypto_decode },
 }
