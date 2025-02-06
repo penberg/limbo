@@ -84,25 +84,16 @@ impl VTabModule for GenerateSeriesVTab {
 
     fn next(cursor: &mut Self::VCursor) -> ResultCode {
         // Check for invalid ranges (empty series) first
-        if cursor.is_invalid_range() {
+        if cursor.eof() {
             return ResultCode::EOF;
         }
 
-        // Check if we've reached the end of the sequence
-        if cursor.would_exceed() {
-            return ResultCode::EOF;
-        }
-
-        // Handle overflow by truncating to MAX/MIN
-        cursor.current = match cursor.step {
-            step if step > 0 => match cursor.current.checked_add(step) {
-                Some(val) => val,
-                None => i64::MAX,
-            },
-            step => match cursor.current.checked_add(step) {
-                Some(val) => val,
-                None => i64::MIN,
-            },
+        // Handle overflow
+        cursor.current = match cursor.current.checked_add(cursor.step) {
+            Some(val) => val,
+            None => {
+                return ResultCode::EOF;
+            }
         };
 
         ResultCode::OK
@@ -140,8 +131,8 @@ impl GenerateSeriesCursor {
 
     /// Returns true if we would exceed the stop value in the current direction
     fn would_exceed(&self) -> bool {
-        (self.step > 0 && self.current + self.step > self.stop)
-            || (self.step < 0 && self.current + self.step < self.stop)
+        (self.step > 0 && self.current.saturating_add(self.step) > self.stop)
+            || (self.step < 0 && self.current.saturating_add(self.step) < self.stop)
     }
 }
 
@@ -155,7 +146,12 @@ impl VTabCursor for GenerateSeriesCursor {
         }
 
         // Handle overflow by truncating to MAX/MIN
-        self.current = self.current.saturating_add(self.step);
+        self.current = match self.current.checked_add(self.step) {
+            Some(val) => val,
+            None => {
+                return ResultCode::EOF;
+            }
+        };
 
         ResultCode::OK
     }
@@ -168,6 +164,14 @@ impl VTabCursor for GenerateSeriesCursor {
 
         // Check if we would exceed the stop value in the current direction
         if self.would_exceed() {
+            return true;
+        }
+
+        if self.current == i64::MAX && self.step > 0 {
+            return true;
+        }
+
+        if self.current == i64::MIN && self.step < 0 {
             return true;
         }
 
@@ -204,25 +208,50 @@ impl VTabCursor for GenerateSeriesCursor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quickcheck::{Arbitrary, Gen};
     use quickcheck_macros::quickcheck;
 
+    #[derive(Debug, Clone)]
+    struct Series {
+        start: i64,
+        stop: i64,
+        step: i64,
+    }
+
+    impl Arbitrary for Series {
+        fn arbitrary(g: &mut Gen) -> Self {
+            let mut start = i64::arbitrary(g);
+            let mut stop = i64::arbitrary(g);
+            let mut iters = 0;
+            while stop.checked_sub(start).is_none() {
+                start = i64::arbitrary(g);
+                stop = i64::arbitrary(g);
+                iters += 1;
+                if iters > 1000 {
+                    panic!("Failed to generate valid range after 1000 attempts");
+                }
+            }
+            // step should be a reasonable value proportional to the range
+            let mut divisor = i8::arbitrary(g);
+            if divisor == 0 {
+                divisor = 1;
+            }
+            let step = (stop - start).saturating_abs() / divisor as i64;
+            Series { start, stop, step }
+        }
+    }
     // Helper function to collect all values from a cursor, returns Result with error code
-    fn collect_series(start: i64, stop: i64, step: i64) -> Result<Vec<i64>, ResultCode> {
-        let mut cursor = GenerateSeriesCursor {
-            start: 0,
-            stop: 0,
-            step: 0,
-            current: 0,
-        };
+    fn collect_series(series: Series) -> Result<Vec<i64>, ResultCode> {
+        let mut cursor = GenerateSeriesVTab::open();
 
         // Create args array for filter
         let args = vec![
-            Value::from_integer(start),
-            Value::from_integer(stop),
-            Value::from_integer(step),
+            Value::from_integer(series.start),
+            Value::from_integer(series.stop),
+            Value::from_integer(series.step),
         ];
 
-        // Validate inputs through filter
+        // Initialize cursor through filter
         match GenerateSeriesVTab::filter(&mut cursor, 3, &args) {
             ResultCode::OK => (),
             ResultCode::EOF => return Ok(vec![]),
@@ -232,6 +261,12 @@ mod tests {
         let mut values = Vec::new();
         loop {
             values.push(cursor.column(0).to_integer().unwrap());
+            if values.len() > 1000 {
+                panic!(
+                    "Generated more than 1000 values, expected this many: {:?}",
+                    (series.stop - series.start) / series.step + 1
+                );
+            }
             match GenerateSeriesVTab::next(&mut cursor) {
                 ResultCode::OK => (),
                 ResultCode::EOF => break,
@@ -242,24 +277,22 @@ mod tests {
     }
 
     #[quickcheck]
-    /// Test that the series length is correct for a positive step
+    /// Test that the series length is correct
     /// Example:
     /// start = 1, stop = 10, step = 1
     /// expected length = 10
-    fn prop_series_length_positive_step(start: i64, stop: i64) {
-        // Limit the range to make test run faster, since we're testing with step 1.
-        let start = start % 1000;
-        let stop = stop % 1000;
-        let step = 1;
-
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
+    fn prop_series_length(series: Series) {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
+        let values = collect_series(series.clone()).unwrap_or_else(|e| {
             panic!(
                 "Failed to generate series for start={}, stop={}, step={}: {:?}",
                 start, stop, step, e
             )
         });
 
-        if start > stop {
+        if series_is_invalid_or_empty(&series) {
             assert!(
                 values.is_empty(),
                 "Series should be empty for invalid range: start={}, stop={}, step={}, got {:?}",
@@ -269,57 +302,17 @@ mod tests {
                 values
             );
         } else {
-            let expected_len = ((stop - start) / step + 1) as usize;
+            let expected_len = series_expected_length(&series);
             assert_eq!(
                 values.len(),
-                expected_len,
-                "Series length mismatch for start={}, stop={}, step={}: expected {}, got {}",
+                expected_len as usize,
+                "Series length mismatch for start={}, stop={}, step={}: expected {}, got {}, values: {:?}",
                 start,
                 stop,
                 step,
                 expected_len,
-                values.len()
-            );
-        }
-    }
-
-    #[quickcheck]
-    /// Test that the series length is correct for a negative step
-    /// Example:
-    /// start = 10, stop = 1, step = -1
-    /// expected length = 10
-    fn prop_series_length_negative_step(start: i64, stop: i64) {
-        // Limit the range to make test run faster, since we're testing with step -1.
-        let start = start % 1000;
-        let stop = stop % 1000;
-        let step = -1;
-
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
-            panic!(
-                "Failed to generate series for start={}, stop={}, step={}: {:?}",
-                start, stop, step, e
-            )
-        });
-
-        if start < stop {
-            assert!(
-                values.is_empty(),
-                "Series should be empty for invalid range: start={}, stop={}, step={}",
-                start,
-                stop,
-                step
-            );
-        } else {
-            let expected_len = ((start - stop) / step.abs() + 1) as usize;
-            assert_eq!(
                 values.len(),
-                expected_len,
-                "Series length mismatch for start={}, stop={}, step={}: expected {}, got {}",
-                start,
-                stop,
-                step,
-                expected_len,
-                values.len()
+                values
             );
         }
     }
@@ -329,20 +322,19 @@ mod tests {
     /// Example:
     /// start = 1, stop = 10, step = 1
     /// expected series = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    fn prop_series_monotonic_increasing(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster.
-        let start = start % 10000;
-        let stop = stop % 10000;
-        let step = (step % 100).max(1); // Ensure positive non-zero step
+    fn prop_series_monotonic_increasing_or_decreasing(series: Series) {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
 
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
+        let values = collect_series(series.clone()).unwrap_or_else(|e| {
             panic!(
                 "Failed to generate series for start={}, stop={}, step={}: {:?}",
                 start, stop, step, e
             )
         });
 
-        if start > stop {
+        if series_is_invalid_or_empty(&series) {
             assert!(
                 values.is_empty(),
                 "Series should be empty for invalid range: start={}, stop={}, step={}",
@@ -352,46 +344,11 @@ mod tests {
             );
         } else {
             assert!(
-                values.windows(2).all(|w| w[0] < w[1]),
-                "Series not monotonically increasing: {:?} (start={}, stop={}, step={})",
-                values,
-                start,
-                stop,
-                step
-            );
-        }
-    }
-
-    #[quickcheck]
-    /// Test that the series is monotonically decreasing
-    /// Example:
-    /// start = 10, stop = 1, step = -1
-    /// expected series = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
-    fn prop_series_monotonic_decreasing(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster.
-        let start = start % 10000;
-        let stop = stop % 10000;
-        let step = -((step % 100).max(1)); // Ensure negative non-zero step
-
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
-            panic!(
-                "Failed to generate series for start={}, stop={}, step={}: {:?}",
-                start, stop, step, e
-            )
-        });
-
-        if start < stop {
-            assert!(
-                values.is_empty(),
-                "Series should be empty for invalid range: start={}, stop={}, step={}",
-                start,
-                stop,
-                step
-            );
-        } else {
-            assert!(
-                values.windows(2).all(|w| w[0] > w[1]),
-                "Series not monotonically decreasing: {:?} (start={}, stop={}, step={})",
+                values
+                    .windows(2)
+                    .all(|w| if step > 0 { w[0] < w[1] } else { w[0] > w[1] }),
+                "Series not monotonically {}: {:?} (start={}, stop={}, step={})",
+                if step > 0 { "increasing" } else { "decreasing" },
                 values,
                 start,
                 stop,
@@ -405,20 +362,19 @@ mod tests {
     /// Example:
     /// start = 1, stop = 10, step = 1
     /// expected step size = 1
-    fn prop_series_step_size_positive(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster.
-        let start = start % 1000;
-        let stop = stop % 1000;
-        let step = (step % 100).max(1); // Ensure positive non-zero step
+    fn prop_series_step_size(series: Series) {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
 
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
+        let values = collect_series(series.clone()).unwrap_or_else(|e| {
             panic!(
                 "Failed to generate series for start={}, stop={}, step={}: {:?}",
                 start, stop, step, e
             )
         });
 
-        if start > stop {
+        if series_is_invalid_or_empty(&series) {
             assert!(
                 values.is_empty(),
                 "Series should be empty for invalid range: start={}, stop={}, step={}",
@@ -428,69 +384,37 @@ mod tests {
             );
         } else if !values.is_empty() {
             assert!(
-                values.windows(2).all(|w| (w[1] - w[0]).abs() == step.abs()),
+                values
+                    .windows(2)
+                    .all(|w| (w[1].saturating_sub(w[0])).abs() == step.abs()),
                 "Step size not consistent: {:?} (expected step size: {})",
-                values,
+                values
+                    .windows(2)
+                    .map(|w| w[1].saturating_sub(w[0]))
+                    .collect::<Vec<_>>(),
                 step.abs()
             );
         }
     }
 
     #[quickcheck]
-    /// Test that the series step size is consistent for a negative step
-    /// Example:
-    /// start = 10, stop = 1, step = -1
-    /// expected step size = 1
-    fn prop_series_step_size_negative(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster.
-        let start = start % 1000;
-        let stop = stop % 1000;
-        let step = -((step % 100).max(1)); // Ensure negative non-zero step
-
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
-            panic!(
-                "Failed to generate series for start={}, stop={}, step={}: {:?}",
-                start, stop, step, e
-            )
-        });
-
-        if start < stop {
-            assert!(
-                values.is_empty(),
-                "Series should be empty for invalid range: start={}, stop={}, step={}",
-                start,
-                stop,
-                step
-            );
-        } else if !values.is_empty() {
-            assert!(
-                values.windows(2).all(|w| (w[1] - w[0]).abs() == step.abs()),
-                "Step size not consistent: {:?} (expected step size: {})",
-                values,
-                step.abs()
-            );
-        }
-    }
-
-    #[quickcheck]
-    /// Test that the series bounds are correct for a positive step
+    /// Test that the series bounds are correct
     /// Example:
     /// start = 1, stop = 10, step = 1
     /// expected bounds = [1, 10]
-    fn prop_series_bounds_positive(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster.
-        let start = start % 10000;
-        let stop = stop % 10000;
-        let step = (step % 100).max(1); // Ensure positive non-zero step
+    fn prop_series_bounds(series: Series) {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
 
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
+        let values = collect_series(series.clone()).unwrap_or_else(|e| {
             panic!(
                 "Failed to generate series for start={}, stop={}, step={}: {:?}",
                 start, stop, step, e
             )
         });
 
-        if start > stop {
+        if series_is_invalid_or_empty(&series) {
             assert!(
                 values.is_empty(),
                 "Series should be empty for invalid range: start={}, stop={}, step={}",
@@ -507,50 +431,11 @@ mod tests {
                 start
             );
             assert!(
-                values.last().map_or(true, |&last| last <= stop),
-                "Series exceeds stop value: {:?} (stop: {})",
-                values,
-                stop
-            );
-        }
-    }
-
-    #[quickcheck]
-    /// Test that the series bounds are correct for a negative step
-    /// Example:
-    /// start = 10, stop = 1, step = -1
-    /// expected bounds = [10, 1]
-    fn prop_series_bounds_negative(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster.
-        let start = start % 10000;
-        let stop = stop % 10000;
-        let step = -((step % 100).max(1)); // Ensure negative non-zero step
-
-        let values = collect_series(start, stop, step).unwrap_or_else(|e| {
-            panic!(
-                "Failed to generate series for start={}, stop={}, step={}: {:?}",
-                start, stop, step, e
-            )
-        });
-
-        if start < stop {
-            assert!(
-                values.is_empty(),
-                "Series should be empty for invalid range: start={}, stop={}, step={}",
-                start,
-                stop,
-                step
-            );
-        } else if !values.is_empty() {
-            assert_eq!(
-                values.first(),
-                Some(&start),
-                "Series doesn't start with start value: {:?} (expected start: {})",
-                values,
-                start
-            );
-            assert!(
-                values.last().map_or(true, |&last| last >= stop),
+                values.last().map_or(true, |&last| if step > 0 {
+                    last <= stop
+                } else {
+                    last >= stop
+                }),
                 "Series exceeds stop value: {:?} (stop: {})",
                 values,
                 stop
@@ -561,7 +446,12 @@ mod tests {
     #[test]
 
     fn test_series_empty_positive_step() {
-        let values = collect_series(10, 5, 1).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: 10,
+            stop: 5,
+            step: 1,
+        })
+        .expect("Failed to generate series");
         assert!(
             values.is_empty(),
             "Series should be empty when start > stop with positive step"
@@ -570,7 +460,12 @@ mod tests {
 
     #[test]
     fn test_series_empty_negative_step() {
-        let values = collect_series(5, 10, -1).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: 5,
+            stop: 10,
+            step: -1,
+        })
+        .expect("Failed to generate series");
         assert!(
             values.is_empty(),
             "Series should be empty when start < stop with negative step"
@@ -579,7 +474,12 @@ mod tests {
 
     #[test]
     fn test_series_single_element() {
-        let values = collect_series(5, 5, 1).expect("Failed to generate single element series");
+        let values = collect_series(Series {
+            start: 5,
+            stop: 5,
+            step: 1,
+        })
+        .expect("Failed to generate single element series");
         assert_eq!(
             values,
             vec![5],
@@ -589,7 +489,12 @@ mod tests {
 
     #[test]
     fn test_zero_step_is_interpreted_as_1() {
-        let values = collect_series(1, 10, 0).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: 1,
+            stop: 10,
+            step: 0,
+        })
+        .expect("Failed to generate series");
         assert_eq!(
             values,
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -600,27 +505,47 @@ mod tests {
     #[test]
     fn test_invalid_inputs() {
         // Test that invalid ranges return empty series instead of errors
-        let values = collect_series(10, 1, 1).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: 10,
+            stop: 1,
+            step: 1,
+        })
+        .expect("Failed to generate series");
         assert!(
             values.is_empty(),
             "Invalid positive range should return empty series, got {:?}",
             values
         );
 
-        let values = collect_series(1, 10, -1).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: 1,
+            stop: 10,
+            step: -1,
+        })
+        .expect("Failed to generate series");
         assert!(
             values.is_empty(),
             "Invalid negative range should return empty series"
         );
 
         // Test that extreme ranges return empty series
-        let values = collect_series(i64::MAX, i64::MIN, 1).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: i64::MAX,
+            stop: i64::MIN,
+            step: 1,
+        })
+        .expect("Failed to generate series");
         assert!(
             values.is_empty(),
             "Extreme range (MAX to MIN) should return empty series"
         );
 
-        let values = collect_series(i64::MIN, i64::MAX, -1).expect("Failed to generate series");
+        let values = collect_series(Series {
+            start: i64::MIN,
+            stop: i64::MAX,
+            step: -1,
+        })
+        .expect("Failed to generate series");
         assert!(
             values.is_empty(),
             "Extreme range (MIN to MAX) should return empty series"
@@ -629,18 +554,12 @@ mod tests {
 
     #[quickcheck]
     /// Test that rowid is always monotonically increasing regardless of step direction
-    fn prop_series_rowid_monotonic(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster
-        let start = start % 1000;
-        let stop = stop % 1000;
-        let step = if step == 0 { 1 } else { step % 100 }; // Ensure non-zero step
+    fn prop_series_rowid_monotonic(series: Series) {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
 
-        let mut cursor = GenerateSeriesCursor {
-            start: 0,
-            stop: 0,
-            step: 0,
-            current: 0,
-        };
+        let mut cursor = GenerateSeriesVTab::open();
 
         let args = vec![
             Value::from_integer(start),
@@ -674,79 +593,56 @@ mod tests {
         );
     }
 
-    // #[quickcheck]
-    // /// Test that integer overflow is properly handled
-    // fn prop_series_overflow(start: i64, step: i64) {
-    //     // Use values close to MAX/MIN to test overflow
-    //     let start = if start >= 0 {
-    //         i64::MAX - (start % 100)
-    //     } else {
-    //         i64::MIN + (start.abs() % 100)
-    //     };
-    //     let step = if step == 0 { 1 } else { step }; // Ensure non-zero step
-    //     let stop = if step > 0 { i64::MAX } else { i64::MIN };
-
-    //     let result = collect_series(start, stop, step);
-
-    //     // If we would overflow, expect InvalidArgs
-    //     if start.checked_add(step).is_none() {
-    //         assert!(
-    //             matches!(result, Err(ResultCode::InvalidArgs)),
-    //             "Expected InvalidArgs for overflow case: start={}, stop={}, step={}",
-    //             start, stop, step
-    //         );
-    //     } else {
-    //         // Otherwise the series should be valid
-    //         let values = result.unwrap_or_else(|e| {
-    //             panic!(
-    //                 "Failed to generate series for start={}, stop={}, step={}: {:?}",
-    //                 start, stop, step, e
-    //             )
-    //         });
-
-    //         // Verify no values overflow
-    //         for window in values.windows(2) {
-    //             assert!(
-    //                 window[0].checked_add(step).is_some(),
-    //                 "Overflow occurred in series: {:?} + {} (start={}, stop={}, step={})",
-    //                 window[0], step, start, stop, step
-    //             );
-    //         }
-    //     }
-    // }
-
     #[quickcheck]
     /// Test that empty series are handled consistently
-    fn prop_series_empty(start: i64, stop: i64, step: i64) {
-        // Limit the range to make test run faster
-        let start = start % 1000;
-        let stop = stop % 1000;
-        let step = if step == 0 { 1 } else { step % 100 }; // Ensure non-zero step
+    fn prop_series_empty(series: Series) {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
 
-        let result = collect_series(start, stop, step);
-
-        match result {
-            Ok(values) => {
-                if (step > 0 && start > stop) || (step < 0 && start < stop) {
-                    assert!(
-                        values.is_empty(),
-                        "Series should be empty for invalid range: start={}, stop={}, step={}",
-                        start,
-                        stop,
-                        step
-                    );
-                } else if start == stop {
-                    assert_eq!(
-                        values,
-                        vec![start],
-                        "Series with start==stop should contain exactly one element"
-                    );
-                }
-            }
-            Err(e) => panic!(
-                "Unexpected error for start={}, stop={}, step={}: {:?}",
+        let values = collect_series(series.clone()).unwrap_or_else(|e| {
+            panic!(
+                "Failed to generate series for start={}, stop={}, step={}: {:?}",
                 start, stop, step, e
-            ),
+            )
+        });
+
+        if series_is_invalid_or_empty(&series) {
+            assert!(
+                values.is_empty(),
+                "Series should be empty for invalid range: start={}, stop={}, step={}",
+                start,
+                stop,
+                step
+            );
+        } else if start == stop {
+            assert_eq!(
+                values,
+                vec![start],
+                "Series with start==stop should contain exactly one element"
+            );
+        }
+    }
+
+    fn series_is_invalid_or_empty(series: &Series) -> bool {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
+        (start > stop && step > 0) || (start < stop && step < 0) || (step == 0 && start != stop)
+    }
+
+    fn series_expected_length(series: &Series) -> usize {
+        let start = series.start;
+        let stop = series.stop;
+        let step = series.step;
+        if step == 0 {
+            if start == stop {
+                1
+            } else {
+                0
+            }
+        } else {
+            ((stop.saturating_sub(start)).saturating_div(step)).saturating_add(1) as usize
         }
     }
 }
