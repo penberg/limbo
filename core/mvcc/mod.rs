@@ -40,7 +40,7 @@ pub mod persistent_storage;
 #[cfg(test)]
 mod tests {
     use crate::mvcc::clock::LocalClock;
-    use crate::mvcc::database::{Database, Row, RowID};
+    use crate::mvcc::database::{MvStore, Row, RowID};
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -53,7 +53,7 @@ mod tests {
         // row IDs.
         let clock = LocalClock::default();
         let storage = crate::mvcc::persistent_storage::Storage::new_noop();
-        let db = Arc::new(Database::new(clock, storage));
+        let db = Arc::new(MvStore::new(clock, storage));
         let iterations = 100000;
 
         let th1 = {
@@ -111,7 +111,7 @@ mod tests {
     fn test_overlapping_concurrent_inserts_read_your_writes() {
         let clock = LocalClock::default();
         let storage = crate::mvcc::persistent_storage::Storage::new_noop();
-        let db = Arc::new(Database::new(clock, storage));
+        let db = Arc::new(MvStore::new(clock, storage));
         let iterations = 100000;
 
         let work = |prefix: &'static str| {

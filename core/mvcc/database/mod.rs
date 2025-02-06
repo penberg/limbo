@@ -207,8 +207,9 @@ impl AtomicTransactionState {
     }
 }
 
+/// A multi-version concurrency control database.
 #[derive(Debug)]
-pub struct Database<Clock: LogicalClock, T: Sync + Send + Clone + Debug> {
+pub struct MvStore<Clock: LogicalClock, T: Sync + Send + Clone + Debug> {
     rows: SkipMap<RowID, RwLock<Vec<RowVersion<T>>>>,
     txs: SkipMap<TxID, RwLock<Transaction>>,
     tx_ids: AtomicU64,
@@ -216,7 +217,7 @@ pub struct Database<Clock: LogicalClock, T: Sync + Send + Clone + Debug> {
     storage: Storage,
 }
 
-impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> Database<Clock, T> {
+impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> MvStore<Clock, T> {
     /// Creates a new database.
     pub fn new(clock: Clock, storage: Storage) -> Self {
         Self {

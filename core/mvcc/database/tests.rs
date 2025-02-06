@@ -1,10 +1,10 @@
 use super::*;
 use crate::mvcc::clock::LocalClock;
 
-fn test_db() -> Database<LocalClock, String> {
+fn test_db() -> MvStore<LocalClock, String> {
     let clock = LocalClock::new();
     let storage = crate::mvcc::persistent_storage::Storage::new_noop();
-    Database::new(clock, storage)
+    MvStore::new(clock, storage)
 }
 
 #[test]
