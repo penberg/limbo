@@ -73,7 +73,7 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
 
 fn get_json_value(json_value: &OwnedValue) -> crate::Result<Val> {
     match json_value {
-        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
+        OwnedValue::Text(ref t) => match from_str::<Val>(t.as_str()) {
             Ok(json) => Ok(json),
             Err(_) => {
                 crate::bail_parse_error!("malformed JSON")
@@ -104,9 +104,9 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
             OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
             OwnedValue::Text(t) => {
                 if t.subtype == TextSubtype::Json {
-                    s.push_str(&t.value);
+                    s.push_str(t.as_str());
                 } else {
-                    match to_string(&*t.value) {
+                    match to_string(&t.as_str().to_string()) {
                         Ok(json) => s.push_str(&json),
                         Err(_) => crate::bail_parse_error!("malformed JSON"),
                     }
@@ -166,10 +166,12 @@ pub fn json_set(json: &OwnedValue, values: &[OwnedValue]) -> crate::Result<Owned
 
                 if let Some(path) = path {
                     let new_value = match value {
-                        OwnedValue::Text(Text {
-                            value,
-                            subtype: TextSubtype::Text,
-                        }) => Val::String(value.to_string()),
+                        OwnedValue::Text(
+                            t @ Text {
+                                subtype: TextSubtype::Text,
+                                ..
+                            },
+                        ) => Val::String(t.as_str().to_string()),
                         _ => get_json_value(value)?,
                     };
 
@@ -323,7 +325,7 @@ fn convert_db_type_to_json(value: &OwnedValue) -> crate::Result<Val> {
         OwnedValue::Text(t) => match t.subtype {
             // Convert only to json if the subtype is json (if we got it from another json function)
             TextSubtype::Json => get_json_value(value)?,
-            TextSubtype::Text => Val::String(t.value.to_string()),
+            TextSubtype::Text => Val::String(t.as_str().to_string()),
         },
         OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
         unsupported_value => crate::bail_constraint_error!(
@@ -431,18 +433,21 @@ fn json_extract_single<'a>(
 fn json_path_from_owned_value(path: &OwnedValue, strict: bool) -> crate::Result<Option<JsonPath>> {
     let json_path = if strict {
         match path {
-            OwnedValue::Text(t) => json_path(t.value.as_str())?,
+            OwnedValue::Text(t) => json_path(t.as_str())?,
             OwnedValue::Null => return Ok(None),
             _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
         }
     } else {
         match path {
             OwnedValue::Text(t) => {
-                if t.value.starts_with("$") {
-                    json_path(t.value.as_str())?
+                if t.as_str().starts_with("$") {
+                    json_path(t.as_str())?
                 } else {
                     JsonPath {
-                        elements: vec![PathElement::Root(), PathElement::Key(t.value.to_string())],
+                        elements: vec![
+                            PathElement::Root(),
+                            PathElement::Key(t.as_str().to_string()),
+                        ],
                     }
                 }
             }
@@ -606,7 +611,7 @@ fn find_or_create_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Targe
 
 pub fn json_error_position(json: &OwnedValue) -> crate::Result<OwnedValue> {
     match json {
-        OwnedValue::Text(t) => match from_str::<Val>(&t.value) {
+        OwnedValue::Text(t) => match from_str::<Val>(t.as_str()) {
             Ok(_) => Ok(OwnedValue::Integer(0)),
             Err(JsonError::Message { location, .. }) => {
                 if let Some(loc) = location {
@@ -639,7 +644,7 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
         .map(|chunk| match chunk {
             [key, value] => {
                 let key = match key {
-                    OwnedValue::Text(t) => t.value.to_string(),
+                    OwnedValue::Text(t) => t.as_str().to_string(),
                     _ => crate::bail_constraint_error!("labels must be TEXT"),
                 };
                 let json_val = convert_db_type_to_json(value)?;
@@ -656,7 +661,7 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
 
 pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
     match json_value {
-        OwnedValue::Text(ref t) => match from_str::<Val>(&t.value) {
+        OwnedValue::Text(ref t) => match from_str::<Val>(t.as_str()) {
             Ok(_) => Ok(OwnedValue::Integer(1)),
             Err(_) => Ok(OwnedValue::Integer(0)),
         },
@@ -679,7 +684,7 @@ mod tests {
         let input = OwnedValue::build_text(Rc::new("{ key: 'value' }".to_string()));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("\"key\":\"value\""));
+            assert!(result_str.as_str().contains("\"key\":\"value\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -691,7 +696,7 @@ mod tests {
         let input = OwnedValue::build_text(Rc::new("{ key: ''value'' }".to_string()));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("\"key\":\"value\""));
+            assert!(result_str.as_str().contains("\"key\":\"value\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -703,7 +708,7 @@ mod tests {
         let input = OwnedValue::build_text(Rc::new("{ \"key\": Infinity }".to_string()));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("{\"key\":9e999}"));
+            assert!(result_str.as_str().contains("{\"key\":9e999}"));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -715,7 +720,7 @@ mod tests {
         let input = OwnedValue::build_text(Rc::new("{ \"key\": -Infinity }".to_string()));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("{\"key\":-9e999}"));
+            assert!(result_str.as_str().contains("{\"key\":-9e999}"));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -727,7 +732,7 @@ mod tests {
         let input = OwnedValue::build_text(Rc::new("{ \"key\": NaN }".to_string()));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("{\"key\":null}"));
+            assert!(result_str.as_str().contains("{\"key\":null}"));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -749,7 +754,7 @@ mod tests {
         let input = OwnedValue::build_text(Rc::new("{\"key\":\"value\"}".to_string()));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("\"key\":\"value\""));
+            assert!(result_str.as_str().contains("\"key\":\"value\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -772,7 +777,7 @@ mod tests {
         let input = OwnedValue::Blob(Rc::new(binary_json));
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
-            assert!(result_str.value.contains("\"asd\":\"adf\""));
+            assert!(result_str.as_str().contains("\"asd\":\"adf\""));
             assert_eq!(result_str.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -809,7 +814,7 @@ mod tests {
 
         let result = json_array(&input).unwrap();
         if let OwnedValue::Text(res) = result {
-            assert_eq!(res.value.as_str(), "[\"value1\",\"value2\",1,1.1]");
+            assert_eq!(res.as_str(), "[\"value1\",\"value2\",1,1.1]");
             assert_eq!(res.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -822,7 +827,7 @@ mod tests {
 
         let result = json_array(&input).unwrap();
         if let OwnedValue::Text(res) = result {
-            assert_eq!(res.value.as_str(), "[]");
+            assert_eq!(res.as_str(), "[]");
             assert_eq!(res.subtype, TextSubtype::Json);
         } else {
             panic!("Expected OwnedValue::Text");
@@ -1064,7 +1069,7 @@ mod tests {
         let OwnedValue::Text(json_text) = result else {
             panic!("Expected OwnedValue::Text");
         };
-        assert_eq!(json_text.value.as_str(), r#"{"key":"value"}"#);
+        assert_eq!(json_text.as_str(), r#"{"key":"value"}"#);
     }
 
     #[test]
@@ -1100,7 +1105,7 @@ mod tests {
             panic!("Expected OwnedValue::Text");
         };
         assert_eq!(
-            json_text.value.as_str(),
+            json_text.as_str(),
             r#"{"text_key":"text_value","json_key":{"json":"value","number":1},"integer_key":1,"float_key":1.1,"null_key":null}"#
         );
     }
@@ -1115,7 +1120,7 @@ mod tests {
         let OwnedValue::Text(json_text) = result else {
             panic!("Expected OwnedValue::Text");
         };
-        assert_eq!(json_text.value.as_str(), r#"{"key":{"json":"value"}}"#);
+        assert_eq!(json_text.as_str(), r#"{"key":{"json":"value"}}"#);
     }
 
     #[test]
@@ -1128,10 +1133,7 @@ mod tests {
         let OwnedValue::Text(json_text) = result else {
             panic!("Expected OwnedValue::Text");
         };
-        assert_eq!(
-            json_text.value.as_str(),
-            r#"{"key":"{\"json\":\"value\"}"}"#
-        );
+        assert_eq!(json_text.as_str(), r#"{"key":"{\"json\":\"value\"}"}"#);
     }
 
     #[test]
@@ -1149,10 +1151,7 @@ mod tests {
         let OwnedValue::Text(json_text) = result else {
             panic!("Expected OwnedValue::Text");
         };
-        assert_eq!(
-            json_text.value.as_str(),
-            r#"{"parent_key":{"key":"value"}}"#
-        );
+        assert_eq!(json_text.as_str(), r#"{"parent_key":{"key":"value"}}"#);
     }
 
     #[test]
@@ -1165,7 +1164,7 @@ mod tests {
         let OwnedValue::Text(json_text) = result else {
             panic!("Expected OwnedValue::Text");
         };
-        assert_eq!(json_text.value.as_str(), r#"{"key":"value"}"#);
+        assert_eq!(json_text.as_str(), r#"{"key":"value"}"#);
     }
 
     #[test]
@@ -1176,7 +1175,7 @@ mod tests {
         let OwnedValue::Text(json_text) = result else {
             panic!("Expected OwnedValue::Text");
         };
-        assert_eq!(json_text.value.as_str(), r#"{}"#);
+        assert_eq!(json_text.as_str(), r#"{}"#);
     }
 
     #[test]
@@ -1301,10 +1300,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_root_strict() {
-        let path = OwnedValue::Text(Text {
-            value: Rc::new("$".to_string()),
-            subtype: TextSubtype::Text,
-        });
+        let path = OwnedValue::Text(Text::new(Rc::new("$".to_string())));
 
         let result = json_path_from_owned_value(&path, true);
         assert!(result.is_ok());
@@ -1321,10 +1317,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_root_non_strict() {
-        let path = OwnedValue::Text(Text {
-            value: Rc::new("$".to_string()),
-            subtype: TextSubtype::Text,
-        });
+        let path = OwnedValue::Text(Text::new(Rc::new("$".to_string())));
 
         let result = json_path_from_owned_value(&path, false);
         assert!(result.is_ok());
@@ -1341,20 +1334,14 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_named_strict() {
-        let path = OwnedValue::Text(Text {
-            value: Rc::new("field".to_string()),
-            subtype: TextSubtype::Text,
-        });
+        let path = OwnedValue::Text(Text::new(Rc::new("field".to_string())));
 
         assert!(json_path_from_owned_value(&path, true).is_err());
     }
 
     #[test]
     fn test_json_path_from_owned_value_named_non_strict() {
-        let path = OwnedValue::Text(Text {
-            value: Rc::new("field".to_string()),
-            subtype: TextSubtype::Text,
-        });
+        let path = OwnedValue::Text(Text::new(Rc::new("field".to_string())));
 
         let result = json_path_from_owned_value(&path, false);
         assert!(result.is_ok());
