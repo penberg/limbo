@@ -28,7 +28,7 @@ mod strftime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
-use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc};
+use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc, VectorFunc};
 use crate::info;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
@@ -43,6 +43,7 @@ use crate::types::{
 use crate::util::parse_schema_rows;
 use crate::vdbe::builder::CursorType;
 use crate::vdbe::insn::Insn;
+use crate::vector::{vector32, vector64, vector_distance_cos, vector_extract};
 #[cfg(feature = "json")]
 use crate::{
     function::JsonFunc, json::get_json, json::is_json_valid, json::json_array,
@@ -2196,6 +2197,35 @@ impl Program {
                             }
                             ScalarFunc::Printf => {
                                 let result = exec_printf(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
+                                state.registers[*dest] = result;
+                            }
+                        },
+                        crate::function::Func::Vector(vector_func) => match vector_func {
+                            VectorFunc::Vector => {
+                                let result =
+                                    vector32(&state.registers[*start_reg..*start_reg + arg_count])?;
+                                state.registers[*dest] = result;
+                            }
+                            VectorFunc::Vector32 => {
+                                let result =
+                                    vector32(&state.registers[*start_reg..*start_reg + arg_count])?;
+                                state.registers[*dest] = result;
+                            }
+                            VectorFunc::Vector64 => {
+                                let result =
+                                    vector64(&state.registers[*start_reg..*start_reg + arg_count])?;
+                                state.registers[*dest] = result;
+                            }
+                            VectorFunc::VectorExtract => {
+                                let result = vector_extract(
+                                    &state.registers[*start_reg..*start_reg + arg_count],
+                                )?;
+                                state.registers[*dest] = result;
+                            }
+                            VectorFunc::VectorDistanceCos => {
+                                let result = vector_distance_cos(
                                     &state.registers[*start_reg..*start_reg + arg_count],
                                 )?;
                                 state.registers[*dest] = result;
