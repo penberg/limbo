@@ -300,6 +300,7 @@ pub fn open_loop(
                         }
                         program.emit_insn(Insn::VFilter {
                             cursor_id,
+                            pc_if_empty: loop_end,
                             arg_count: args.len(),
                             args_reg: start_reg,
                         });

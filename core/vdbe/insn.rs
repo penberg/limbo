@@ -224,6 +224,7 @@ pub enum Insn {
     /// Initialize the position of the virtual table cursor.
     VFilter {
         cursor_id: CursorID,
+        pc_if_empty: BranchOffset,
         arg_count: usize,
         args_reg: usize,
     },

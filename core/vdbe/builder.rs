@@ -410,7 +410,10 @@ impl ProgramBuilder {
                 Insn::VNext { pc_if_next, .. } => {
                     resolve(pc_if_next, "VNext");
                 }
-                _ => continue,
+                Insn::VFilter { pc_if_empty, .. } => {
+                    resolve(pc_if_empty, "VFilter");
+                }
+                _ => {}
             }
         }
         self.label_to_resolved_offset.clear();
