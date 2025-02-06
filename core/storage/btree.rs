@@ -841,7 +841,7 @@ impl BTreeCursor {
         let mut next_free_block_ptr = PAGE_HEADER_OFFSET_FIRST_FREEBLOCK as u16;
 
         let usable_size = {
-            let db_header = self.database_header.borrow();
+            let db_header = self.pager.db_header.borrow();
             (db_header.page_size - db_header.reserved_space as u16) as u32
         };
 
@@ -1499,7 +1499,7 @@ impl BTreeCursor {
         let mut top = page_ref.cell_content_area() as usize;
 
         if page_ref.first_freeblock() != 0 && gap + 2 <= top {
-            let db_header = RefCell::borrow(&self.database_header);
+            let db_header = RefCell::borrow(&self.pager.db_header);
             let pc = self.find_free_cell(page_ref, amount, db_header)?;
             if pc != 0 {
                 // Corruption check
@@ -1522,7 +1522,7 @@ impl BTreeCursor {
         top -= amount;
         page_ref.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, top as u16);
 
-        let db_header = RefCell::borrow(&self.database_header);
+        let db_header = RefCell::borrow(&self.pager.db_header);
         let usable_space = (db_header.page_size - db_header.reserved_space as u16) as usize;
         assert!(top + amount <= usable_space);
 
@@ -2179,7 +2179,7 @@ impl BTreeCursor {
         let Some(first_page) = first_overflow_page else {
             return Ok(CursorResult::Ok(()));
         };
-        let page_count = self.database_header.borrow().database_size as usize;
+        let page_count = self.pager.db_header.borrow().database_size as usize;
         let mut pages_left = n_overflow;
         let mut current_page = first_page;
         // Clear overflow pages
@@ -2373,7 +2373,7 @@ mod tests {
     use crate::storage::sqlite3_ondisk;
     use crate::{BufferPool, DatabaseStorage, WalFile, WalFileShared, WriteCompletion};
     use std::cell::RefCell;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     #[allow(clippy::arc_with_non_send_sync)]
     fn setup_test_env(database_size: u32) -> (Rc<Pager>, Rc<RefCell<DatabaseHeader>>) {
@@ -2422,7 +2422,7 @@ mod tests {
                 page_io,
                 wal,
                 io,
-                Arc::new(RwLock::new(DumbLruPageCache::new(10))),
+                Arc::new(parking_lot::RwLock::new(DumbLruPageCache::new(10))),
                 buffer_pool,
             )
             .unwrap(),
@@ -2436,7 +2436,7 @@ mod tests {
     #[test]
     fn test_clear_overflow_pages() -> Result<()> {
         let (pager, db_header) = setup_test_env(5);
-        let cursor = BTreeCursor::new(pager.clone(), 1, db_header.clone());
+        let cursor = BTreeCursor::new(pager.clone(), 1);
 
         let max_local = cursor.payload_overflow_threshold_max(PageType::TableLeaf);
         let usable_size = cursor.usable_space();
@@ -2533,7 +2533,7 @@ mod tests {
     #[test]
     fn test_clear_overflow_pages_no_overflow() -> Result<()> {
         let (pager, db_header) = setup_test_env(5);
-        let cursor = BTreeCursor::new(pager.clone(), 1, db_header.clone());
+        let cursor = BTreeCursor::new(pager.clone(), 1);
 
         let small_payload = vec![b'A'; 10];
 
