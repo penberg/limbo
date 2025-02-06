@@ -514,6 +514,7 @@ pub type StepResult = vdbe::StepResult;
 #[derive(Clone, Debug)]
 pub struct VirtualTable {
     name: String,
+    args: Option<Vec<ast::Expr>>,
     pub implementation: Rc<VTabModuleImpl>,
     columns: Vec<Column>,
 }
@@ -537,7 +538,7 @@ impl VirtualTable {
                 OwnedValue::Null => Ok(ExtValue::null()),
                 OwnedValue::Integer(i) => Ok(ExtValue::from_integer(*i)),
                 OwnedValue::Float(f) => Ok(ExtValue::from_float(*f)),
-                OwnedValue::Text(t) => Ok(ExtValue::from_text((*t.value).clone())),
+                OwnedValue::Text(t) => Ok(ExtValue::from_text(t.as_str().to_string())),
                 OwnedValue::Blob(b) => Ok(ExtValue::from_blob((**b).clone())),
                 other => Err(LimboError::ExtensionError(format!(
                     "Unsupported value type: {:?}",

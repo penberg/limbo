@@ -136,6 +136,7 @@ impl Database {
             name: name.to_string(),
             implementation: vtab_module,
             columns,
+            args: None,
         };
         self.syms.borrow_mut().vtabs.insert(name.to_string(), vtab);
         ResultCode::OK

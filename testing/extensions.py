@@ -307,7 +307,7 @@ def test_crypto(pipe):
     run_test(
         pipe,
         "SELECT crypto_blake('a');",
-        lambda res: "Error" in res,
+        lambda res: "Parse error" in res,
         "crypto_blake3 returns null when ext not loaded",
     )
     run_test(

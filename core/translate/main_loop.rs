@@ -1,6 +1,7 @@
 use sqlite3_parser::ast;
 
 use crate::{
+    schema::Table,
     translate::result_row::emit_select_result,
     vdbe::{
         builder::{CursorType, ProgramBuilder},
@@ -17,7 +18,7 @@ use super::{
     order_by::{order_by_sorter_insert, sorter_insert},
     plan::{
         IterationDirection, Operation, Search, SelectPlan, SelectQueryType, TableReference,
-        TableReferenceType, WhereTerm,
+        WhereTerm,
     },
 };
 
@@ -78,21 +79,18 @@ pub fn init_loop(
         }
         match &table.op {
             Operation::Scan { .. } => {
-                let ref_type = &table.reference_type;
                 let cursor_id = program.alloc_cursor_id(
                     Some(table.identifier.clone()),
-                    match ref_type {
-                        TableReferenceType::BTreeTable => {
-                            CursorType::BTreeTable(table.btree().unwrap().clone())
-                        }
-                        TableReferenceType::VirtualTable { .. } => {
+                    match &table.table {
+                        Table::BTree(_) => CursorType::BTreeTable(table.btree().unwrap().clone()),
+                        Table::Virtual(_) => {
                             CursorType::VirtualTable(table.virtual_table().unwrap().clone())
                         }
                         other => panic!("Invalid table reference type in Scan: {:?}", other),
                     },
                 );
-                match (mode, ref_type) {
-                    (OperationMode::SELECT, TableReferenceType::BTreeTable) => {
+                match (mode, &table.table) {
+                    (OperationMode::SELECT, Table::BTree(_)) => {
                         let root_page = table.btree().unwrap().root_page;
                         program.emit_insn(Insn::OpenReadAsync {
                             cursor_id,
@@ -100,7 +98,7 @@ pub fn init_loop(
                         });
                         program.emit_insn(Insn::OpenReadAwait {});
                     }
-                    (OperationMode::DELETE, TableReferenceType::BTreeTable) => {
+                    (OperationMode::DELETE, Table::BTree(_)) => {
                         let root_page = table.btree().unwrap().root_page;
                         program.emit_insn(Insn::OpenWriteAsync {
                             cursor_id,
@@ -108,7 +106,7 @@ pub fn init_loop(
                         });
                         program.emit_insn(Insn::OpenWriteAwait {});
                     }
-                    (OperationMode::SELECT, TableReferenceType::VirtualTable { .. }) => {
+                    (OperationMode::SELECT, Table::Virtual(_)) => {
                         program.emit_insn(Insn::VOpenAsync { cursor_id });
                         program.emit_insn(Insn::VOpenAwait {});
                     }
@@ -258,10 +256,9 @@ pub fn open_loop(
                 }
             }
             Operation::Scan { iter_dir } => {
-                let ref_type = &table.reference_type;
                 let cursor_id = program.resolve_cursor_id(&table.identifier);
 
-                if !matches!(ref_type, TableReferenceType::VirtualTable { .. }) {
+                if !matches!(&table.table, Table::Virtual(_)) {
                     if iter_dir
                         .as_ref()
                         .is_some_and(|dir| *dir == IterationDirection::Backwards)
@@ -271,8 +268,8 @@ pub fn open_loop(
                         program.emit_insn(Insn::RewindAsync { cursor_id });
                     }
                 }
-                match ref_type {
-                    TableReferenceType::BTreeTable => program.emit_insn(
+                match &table.table {
+                    Table::BTree(_) => program.emit_insn(
                         if iter_dir
                             .as_ref()
                             .is_some_and(|dir| *dir == IterationDirection::Backwards)
@@ -288,13 +285,18 @@ pub fn open_loop(
                             }
                         },
                     ),
-                    TableReferenceType::VirtualTable { args, .. } => {
+                    Table::Virtual(ref table) => {
+                        let args = if let Some(args) = table.args.as_ref() {
+                            args
+                        } else {
+                            &vec![]
+                        };
                         let start_reg = program.alloc_registers(args.len());
                         let mut cur_reg = start_reg;
                         for arg in args {
                             let reg = cur_reg;
                             cur_reg += 1;
-                            translate_expr(program, Some(tables), arg, reg, &t_ctx.resolver)?;
+                            translate_expr(program, Some(tables), &arg, reg, &t_ctx.resolver)?;
                         }
                         program.emit_insn(Insn::VFilter {
                             cursor_id,
@@ -722,11 +724,10 @@ pub fn close_loop(
                 });
             }
             Operation::Scan { iter_dir, .. } => {
-                let ref_type = &table.reference_type;
                 program.resolve_label(loop_labels.next, program.offset());
                 let cursor_id = program.resolve_cursor_id(&table.identifier);
-                match ref_type {
-                    TableReferenceType::BTreeTable { .. } => {
+                match &table.table {
+                    Table::BTree(_) => {
                         if iter_dir
                             .as_ref()
                             .is_some_and(|dir| *dir == IterationDirection::Backwards)
@@ -750,7 +751,7 @@ pub fn close_loop(
                             });
                         }
                     }
-                    TableReferenceType::VirtualTable { .. } => {
+                    Table::Virtual(_) => {
                         program.emit_insn(Insn::VNext {
                             cursor_id,
                             pc_if_next: loop_labels.loop_start,
