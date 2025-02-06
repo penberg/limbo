@@ -468,7 +468,7 @@ impl Statement {
         self.state.interrupt();
     }
 
-    pub fn step(&mut self) -> Result<StepResult<'_>> {
+    pub fn step(&mut self) -> Result<StepResult> {
         self.program.step(&mut self.state, self.pager.clone())
     }
 
@@ -495,18 +495,15 @@ impl Statement {
     pub fn reset(&mut self) {
         self.state.reset();
     }
-}
 
-pub type StepResult<'a> = vdbe::StepResult<'a>;
-
-pub type Row<'a> = types::Record<'a>;
-
-impl<'a> Row<'a> {
-    pub fn get<T: types::FromValue<'a> + 'a>(&self, idx: usize) -> Result<T> {
-        let value = &self.values[idx];
-        T::from_value(value)
+    pub fn row(&self) -> Option<&Row> {
+        self.state.result_row.as_ref()
     }
 }
+
+pub type Row = types::OwnedRecord;
+
+pub type StepResult = vdbe::StepResult;
 
 pub(crate) struct SymbolTable {
     pub functions: HashMap<String, Rc<function::ExternalFunc>>,

@@ -107,7 +107,7 @@ impl<'a> ImportFile<'a> {
                                             self.writer.write_all("database is busy\n".as_bytes());
                                         break;
                                     }
-                                    limbo_core::StepResult::Row(_) => todo!(),
+                                    limbo_core::StepResult::Row => todo!(),
                                 }
                             }
                         }

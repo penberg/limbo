@@ -28,8 +28,9 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     if let Some(ref mut rows) = select_query {
         loop {
             match rows.step()? {
-                StepResult::Row(row) => {
-                    if let Value::Integer(id) = row.values[0] {
+                StepResult::Row => {
+                    let row = rows.row().unwrap();
+                    if let Value::Integer(id) = row.values[0].to_value() {
                         assert_eq!(id, 1, "First insert should have rowid 1");
                     }
                 }
@@ -63,8 +64,9 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
     match conn.query("SELECT last_insert_rowid()") {
         Ok(Some(ref mut rows)) => loop {
             match rows.step()? {
-                StepResult::Row(row) => {
-                    if let Value::Integer(id) = row.values[0] {
+                StepResult::Row => {
+                    let row = rows.row().unwrap();
+                    if let Value::Integer(id) = row.values[0].to_value() {
                         last_id = id;
                     }
                 }
@@ -108,8 +110,9 @@ fn test_integer_primary_key() -> anyhow::Result<()> {
     let mut select_query = conn.query("SELECT * FROM test_rowid")?.unwrap();
     loop {
         match select_query.step()? {
-            StepResult::Row(row) => {
-                if let Value::Integer(id) = row.values[0] {
+            StepResult::Row => {
+                let row = select_query.row().unwrap();
+                if let Value::Integer(id) = row.values[0].to_value() {
                     rowids.push(id);
                 }
             }

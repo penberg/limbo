@@ -416,13 +416,15 @@ impl Interaction {
             let mut out = Vec::new();
             while let Ok(row) = rows.step() {
                 match row {
-                    StepResult::Row(row) => {
+                    StepResult::Row => {
+                        let row = rows.row().unwrap();
                         let mut r = Vec::new();
                         for el in &row.values {
-                            let v = match el {
+                            let v = el.to_value();
+                            let v = match v {
                                 limbo_core::Value::Null => Value::Null,
-                                limbo_core::Value::Integer(i) => Value::Integer(*i),
-                                limbo_core::Value::Float(f) => Value::Float(*f),
+                                limbo_core::Value::Integer(i) => Value::Integer(i),
+                                limbo_core::Value::Float(f) => Value::Float(f),
                                 limbo_core::Value::Text(t) => Value::Text(t.to_string()),
                                 limbo_core::Value::Blob(b) => Value::Blob(b.to_vec()),
                             };

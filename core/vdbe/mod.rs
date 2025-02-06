@@ -37,8 +37,7 @@ use crate::storage::wal::CheckpointResult;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::translate::plan::{ResultSetColumn, TableReference};
 use crate::types::{
-    AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, Record, SeekKey,
-    SeekOp,
+    AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, SeekKey, SeekOp,
 };
 use crate::util::parse_schema_rows;
 use crate::vdbe::builder::CursorType;
@@ -143,10 +142,10 @@ pub type PageIdx = usize;
 type InsnReference = u32;
 
 #[derive(Debug)]
-pub enum StepResult<'a> {
+pub enum StepResult {
     Done,
     IO,
-    Row(Record<'a>),
+    Row,
     Interrupt,
     Busy,
 }
@@ -299,6 +298,7 @@ pub struct ProgramState {
     pub pc: InsnReference,
     cursors: RefCell<Vec<Option<Cursor>>>,
     registers: Vec<OwnedValue>,
+    pub(crate) result_row: Option<OwnedRecord>,
     last_compare: Option<std::cmp::Ordering>,
     deferred_seek: Option<(CursorID, CursorID)>,
     ended_coroutine: Bitfield<4>, // flag to indicate that a coroutine has ended (key is the yield register. currently we assume that the yield register is always between 0-255, YOLO)
@@ -316,6 +316,7 @@ impl ProgramState {
             pc: 0,
             cursors,
             registers,
+            result_row: None,
             last_compare: None,
             deferred_seek: None,
             ended_coroutine: Bitfield::new(),
@@ -412,11 +413,7 @@ impl Program {
         }
     }
 
-    pub fn step<'a>(
-        &self,
-        state: &'a mut ProgramState,
-        pager: Rc<Pager>,
-    ) -> Result<StepResult<'a>> {
+    pub fn step(&self, state: &mut ProgramState, pager: Rc<Pager>) -> Result<StepResult> {
         loop {
             if state.is_interrupted() {
                 return Ok(StepResult::Interrupt);
@@ -963,9 +960,10 @@ impl Program {
                     state.pc += 1;
                 }
                 Insn::ResultRow { start_reg, count } => {
-                    let record = make_record(&state.registers, start_reg, count);
+                    let record = make_owned_record(&state.registers, start_reg, count);
+                    state.result_row = Some(record);
                     state.pc += 1;
-                    return Ok(StepResult::Row(record));
+                    return Ok(StepResult::Row);
                 }
                 Insn::NextAsync { cursor_id } => {
                     let mut cursors = state.cursors.borrow_mut();
@@ -2652,14 +2650,6 @@ fn get_new_rowid<R: Rng>(cursor: &mut BTreeCursor, mut rng: R) -> Result<CursorR
         }
     }
     Ok(CursorResult::Ok(rowid.try_into().unwrap()))
-}
-
-fn make_record<'a>(registers: &'a [OwnedValue], start_reg: &usize, count: &usize) -> Record<'a> {
-    let mut values = Vec::with_capacity(*count);
-    for r in registers.iter().skip(*start_reg).take(*count) {
-        values.push(crate::types::to_value(r))
-    }
-    Record::new(values)
 }
 
 fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize) -> OwnedRecord {
