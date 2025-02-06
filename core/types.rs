@@ -31,6 +31,16 @@ impl Display for Value<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OwnedValueType {
+    Null,
+    Integer,
+    Float,
+    Text,
+    Blob,
+    Error,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextSubtype {
     Text,
@@ -74,6 +84,40 @@ impl OwnedValue {
     // A helper function that makes building a text OwnedValue easier.
     pub fn build_text(text: Rc<String>) -> Self {
         Self::Text(LimboText::new(text))
+    }
+
+    pub fn to_blob(&self) -> Option<&[u8]> {
+        match self {
+            Self::Blob(blob) => Some(blob),
+            _ => None,
+        }
+    }
+
+    pub fn from_blob(data: Vec<u8>) -> Self {
+        OwnedValue::Blob(std::rc::Rc::new(data))
+    }
+
+    pub fn to_text(&self) -> Option<&str> {
+        match self {
+            OwnedValue::Text(t) => Some(&t.value),
+            _ => None,
+        }
+    }
+
+    pub fn from_text(text: &str) -> Self {
+        OwnedValue::Text(LimboText::new(Rc::new(text.to_string())))
+    }
+
+    pub fn value_type(&self) -> OwnedValueType {
+        match self {
+            OwnedValue::Null => OwnedValueType::Null,
+            OwnedValue::Integer(_) => OwnedValueType::Integer,
+            OwnedValue::Float(_) => OwnedValueType::Float,
+            OwnedValue::Text(_) => OwnedValueType::Text,
+            OwnedValue::Blob(_) => OwnedValueType::Blob,
+            OwnedValue::Agg(_) => OwnedValueType::Null, // Map Agg to Null for FFI
+            OwnedValue::Record(_) => OwnedValueType::Null, // Map Record to Null for FFI
+        }
     }
 }
 
