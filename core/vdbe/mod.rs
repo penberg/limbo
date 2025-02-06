@@ -18,16 +18,18 @@
 //! https://www.sqlite.org/opcode.html
 
 pub mod builder;
-mod datetime;
 pub mod explain;
 pub mod insn;
 pub mod likeop;
 pub mod sorter;
-mod strftime;
+pub mod strftime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
 use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc, VectorFunc};
+use crate::functions::datetime::{
+    exec_date, exec_datetime_full, exec_julianday, exec_strftime, exec_time, exec_unixepoch,
+};
 use crate::functions::printf::exec_printf;
 use crate::info;
 use crate::pseudo::PseudoCursor;
@@ -51,9 +53,6 @@ use crate::{
     json::json_remove, json::json_set, json::json_type,
 };
 use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VERSION};
-use datetime::{
-    exec_date, exec_datetime_full, exec_julianday, exec_strftime, exec_time, exec_unixepoch,
-};
 use insn::{
     exec_add, exec_and, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_concat,
     exec_divide, exec_multiply, exec_or, exec_remainder, exec_shift_left, exec_shift_right,
