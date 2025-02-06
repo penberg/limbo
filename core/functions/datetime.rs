@@ -122,7 +122,7 @@ fn format_dt(dt: NaiveDateTime, output_type: DateTimeOutput, subsec: bool) -> St
 // Not as fast as if the formatting was native to chrono, but a good enough
 // for now, just to have the feature implemented
 fn strftime_format(dt: &NaiveDateTime, format_str: &str) -> String {
-    use super::strftime::CustomStrftimeItems;
+    use crate::functions::strftime::CustomStrftimeItems;
     use std::fmt::Write;
     // Necessary to remove %f and %J that are exclusive formatters to sqlite
     // Chrono does not support them, so it is necessary to replace the modifiers manually
