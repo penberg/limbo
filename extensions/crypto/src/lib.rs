@@ -1,4 +1,4 @@
-use crypto::{blake3, sha1, sha256, sha384, sha512};
+use crypto::{blake3, encode, md5, sha1, sha256, sha384, sha512};
 use limbo_ext::{register_extension, scalar, ResultCode, Value};
 
 mod crypto;
@@ -6,6 +6,7 @@ mod crypto;
 #[derive(Debug)]
 enum Error {
     InvalidType,
+    UnknownOperation,
 }
 
 #[scalar(name = "crypto_sha256", alias = "crypto_sha256")]
@@ -73,6 +74,32 @@ fn crypto_sha1(args: &[Value]) -> Value {
     Value::from_blob(hash)
 }
 
+#[scalar(name = "crypto_md5", alias = "crypto_md5")]
+fn crypto_md5(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::error(ResultCode::Error);
+    }
+
+    let Ok(hash) = md5(&args[0]) else {
+        return Value::error(ResultCode::Error);
+    };
+
+    Value::from_blob(hash)
+}
+
+#[scalar(name = "crypto_encode", alias = "crypto_encode")]
+fn crypto_encode(args: &[Value]) -> Value {
+    if args.len() != 2 {
+        return Value::error(ResultCode::Error);
+    }
+
+    let Ok(payload) = encode(&args[0], &args[1]) else {
+        return Value::error(ResultCode::Error);
+    };
+
+    payload
+}
+
 register_extension! {
-    scalars: { crypto_sha256, crypto_sha512, crypto_sha384, crypto_blake3, crypto_sha1 },
+    scalars: { crypto_sha256, crypto_sha512, crypto_sha384, crypto_blake3, crypto_sha1, crypto_md5, crypto_encode },
 }
