@@ -109,7 +109,7 @@ impl OwnedValue {
     }
 
     pub fn from_text(text: &str) -> Self {
-        OwnedValue::Text(LimboText::new(Rc::new(text.to_string())))
+        OwnedValue::Text(Text::new(Rc::new(text.to_string())))
     }
 
     pub fn value_type(&self) -> OwnedValueType {

@@ -56,14 +56,14 @@ pub fn vector_extract(args: &[OwnedValue]) -> Result<OwnedValue> {
     };
 
     if blob.is_empty() {
-        return Ok(OwnedValue::Text(crate::types::LimboText::new(
+        return Ok(OwnedValue::Text(crate::types::Text::new(
             std::rc::Rc::new("[]".to_string()),
         )));
     }
 
     let vector_type = vector_type(blob)?;
     let vector = vector_deserialize(vector_type, blob)?;
-    Ok(OwnedValue::Text(crate::types::LimboText::new(
+    Ok(OwnedValue::Text(crate::types::Text::new(
         std::rc::Rc::new(vector_to_text(&vector)),
     )))
 }
