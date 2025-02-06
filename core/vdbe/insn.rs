@@ -643,11 +643,11 @@ pub fn exec_add(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         | (OwnedValue::Integer(i), OwnedValue::Float(f)) => OwnedValue::Float(*f + *i as f64),
         (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_add(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
-            exec_add(&cast_text_to_numerical(&text.value), other)
+            exec_add(&cast_text_to_numerical(text.as_str()), other)
         }
         _ => todo!(),
     }
@@ -674,14 +674,14 @@ pub fn exec_subtract(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(*lhs as f64 - rhs),
         (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_subtract(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) => {
-            exec_subtract(&cast_text_to_numerical(&text.value), other)
+            exec_subtract(&cast_text_to_numerical(text.as_str()), other)
         }
         (other, OwnedValue::Text(text)) => {
-            exec_subtract(other, &cast_text_to_numerical(&text.value))
+            exec_subtract(other, &cast_text_to_numerical(text.as_str()))
         }
         _ => todo!(),
     }
@@ -707,11 +707,11 @@ pub fn exec_multiply(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         | (OwnedValue::Float(f), OwnedValue::Integer(i)) => OwnedValue::Float(*i as f64 * { *f }),
         (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_multiply(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
-            exec_multiply(&cast_text_to_numerical(&text.value), other)
+            exec_multiply(&cast_text_to_numerical(text.as_str()), other)
         }
 
         _ => todo!(),
@@ -740,11 +740,15 @@ pub fn exec_divide(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         (OwnedValue::Integer(lhs), OwnedValue::Float(rhs)) => OwnedValue::Float(*lhs as f64 / rhs),
         (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_divide(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
-        (OwnedValue::Text(text), other) => exec_divide(&cast_text_to_numerical(&text.value), other),
-        (other, OwnedValue::Text(text)) => exec_divide(other, &cast_text_to_numerical(&text.value)),
+        (OwnedValue::Text(text), other) => {
+            exec_divide(&cast_text_to_numerical(text.as_str()), other)
+        }
+        (other, OwnedValue::Text(text)) => {
+            exec_divide(other, &cast_text_to_numerical(text.as_str()))
+        }
         _ => todo!(),
     }
 }
@@ -769,11 +773,11 @@ pub fn exec_bit_and(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         (OwnedValue::Float(lh), OwnedValue::Integer(rh)) => OwnedValue::Integer(*lh as i64 & rh),
         (OwnedValue::Integer(lh), OwnedValue::Float(rh)) => OwnedValue::Integer(lh & *rh as i64),
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_bit_and(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
-            exec_bit_and(&cast_text_to_numerical(&text.value), other)
+            exec_bit_and(&cast_text_to_numerical(text.as_str()), other)
         }
         _ => todo!(),
     }
@@ -795,11 +799,11 @@ pub fn exec_bit_or(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
             OwnedValue::Integer(*lh as i64 | *rh as i64)
         }
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_bit_or(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
-            exec_bit_or(&cast_text_to_numerical(&text.value), other)
+            exec_bit_or(&cast_text_to_numerical(text.as_str()), other)
         }
         _ => todo!(),
     }
@@ -839,7 +843,7 @@ pub fn exec_bit_not(mut reg: &OwnedValue) -> OwnedValue {
         OwnedValue::Null => OwnedValue::Null,
         OwnedValue::Integer(i) => OwnedValue::Integer(!i),
         OwnedValue::Float(f) => OwnedValue::Integer(!(*f as i64)),
-        OwnedValue::Text(text) => exec_bit_not(&cast_text_to_numerical(&text.value)),
+        OwnedValue::Text(text) => exec_bit_not(&cast_text_to_numerical(text.as_str())),
         _ => todo!(),
     }
 }
@@ -866,14 +870,14 @@ pub fn exec_shift_left(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue
             OwnedValue::Integer(compute_shl(*lh as i64, *rh as i64))
         }
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_shift_left(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) => {
-            exec_shift_left(&cast_text_to_numerical(&text.value), other)
+            exec_shift_left(&cast_text_to_numerical(text.as_str()), other)
         }
         (other, OwnedValue::Text(text)) => {
-            exec_shift_left(other, &cast_text_to_numerical(&text.value))
+            exec_shift_left(other, &cast_text_to_numerical(text.as_str()))
         }
         _ => todo!(),
     }
@@ -905,14 +909,14 @@ pub fn exec_shift_right(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValu
             OwnedValue::Integer(compute_shr(*lh as i64, *rh as i64))
         }
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_shift_right(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) => {
-            exec_shift_right(&cast_text_to_numerical(&text.value), other)
+            exec_shift_right(&cast_text_to_numerical(text.as_str()), other)
         }
         (other, OwnedValue::Text(text)) => {
-            exec_shift_right(other, &cast_text_to_numerical(&text.value))
+            exec_shift_right(other, &cast_text_to_numerical(text.as_str()))
         }
         _ => todo!(),
     }
@@ -943,7 +947,7 @@ pub fn exec_boolean_not(mut reg: &OwnedValue) -> OwnedValue {
         OwnedValue::Null => OwnedValue::Null,
         OwnedValue::Integer(i) => OwnedValue::Integer((*i == 0) as i64),
         OwnedValue::Float(f) => OwnedValue::Integer((*f == 0.0) as i64),
-        OwnedValue::Text(text) => exec_boolean_not(&cast_text_to_numerical(&text.value)),
+        OwnedValue::Text(text) => exec_boolean_not(&cast_text_to_numerical(text.as_str())),
         _ => todo!(),
     }
 }
@@ -951,20 +955,20 @@ pub fn exec_boolean_not(mut reg: &OwnedValue) -> OwnedValue {
 pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
     match (lhs, rhs) {
         (OwnedValue::Text(lhs_text), OwnedValue::Text(rhs_text)) => {
-            OwnedValue::build_text(Rc::new(lhs_text.value.as_ref().clone() + &rhs_text.value))
+            OwnedValue::build_text(Rc::new(lhs_text.as_str().to_string() + &rhs_text.as_str()))
         }
         (OwnedValue::Text(lhs_text), OwnedValue::Integer(rhs_int)) => OwnedValue::build_text(
-            Rc::new(lhs_text.value.as_ref().clone() + &rhs_int.to_string()),
+            Rc::new(lhs_text.as_str().to_string() + &rhs_int.to_string()),
         ),
         (OwnedValue::Text(lhs_text), OwnedValue::Float(rhs_float)) => OwnedValue::build_text(
-            Rc::new(lhs_text.value.as_ref().clone() + &rhs_float.to_string()),
+            Rc::new(lhs_text.as_str().to_string() + &rhs_float.to_string()),
         ),
         (OwnedValue::Text(lhs_text), OwnedValue::Agg(rhs_agg)) => OwnedValue::build_text(Rc::new(
-            lhs_text.value.as_ref().clone() + &rhs_agg.final_value().to_string(),
+            lhs_text.as_str().to_string() + &rhs_agg.final_value().to_string(),
         )),
 
         (OwnedValue::Integer(lhs_int), OwnedValue::Text(rhs_text)) => {
-            OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_text.value))
+            OwnedValue::build_text(Rc::new(lhs_int.to_string() + rhs_text.as_str()))
         }
         (OwnedValue::Integer(lhs_int), OwnedValue::Integer(rhs_int)) => {
             OwnedValue::build_text(Rc::new(lhs_int.to_string() + &rhs_int.to_string()))
@@ -977,7 +981,7 @@ pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
         ),
 
         (OwnedValue::Float(lhs_float), OwnedValue::Text(rhs_text)) => {
-            OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_text.value))
+            OwnedValue::build_text(Rc::new(lhs_float.to_string() + rhs_text.as_str()))
         }
         (OwnedValue::Float(lhs_float), OwnedValue::Integer(rhs_int)) => {
             OwnedValue::build_text(Rc::new(lhs_float.to_string() + &rhs_int.to_string()))
@@ -989,9 +993,9 @@ pub fn exec_concat(lhs: &OwnedValue, rhs: &OwnedValue) -> OwnedValue {
             Rc::new(lhs_float.to_string() + &rhs_agg.final_value().to_string()),
         ),
 
-        (OwnedValue::Agg(lhs_agg), OwnedValue::Text(rhs_text)) => {
-            OwnedValue::build_text(Rc::new(lhs_agg.final_value().to_string() + &rhs_text.value))
-        }
+        (OwnedValue::Agg(lhs_agg), OwnedValue::Text(rhs_text)) => OwnedValue::build_text(Rc::new(
+            lhs_agg.final_value().to_string() + rhs_text.as_str(),
+        )),
         (OwnedValue::Agg(lhs_agg), OwnedValue::Integer(rhs_int)) => OwnedValue::build_text(
             Rc::new(lhs_agg.final_value().to_string() + &rhs_int.to_string()),
         ),
@@ -1025,11 +1029,11 @@ pub fn exec_and(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         | (OwnedValue::Float(0.0), _) => OwnedValue::Integer(0),
         (OwnedValue::Null, _) | (_, OwnedValue::Null) => OwnedValue::Null,
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_and(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
-            exec_and(&cast_text_to_numerical(&text.value), other)
+            exec_and(&cast_text_to_numerical(text.as_str()), other)
         }
         _ => OwnedValue::Integer(1),
     }
@@ -1054,11 +1058,11 @@ pub fn exec_or(mut lhs: &OwnedValue, mut rhs: &OwnedValue) -> OwnedValue {
         | (OwnedValue::Float(0.0), OwnedValue::Float(0.0))
         | (OwnedValue::Integer(0), OwnedValue::Integer(0)) => OwnedValue::Integer(0),
         (OwnedValue::Text(lhs), OwnedValue::Text(rhs)) => exec_or(
-            &cast_text_to_numerical(&lhs.value),
-            &cast_text_to_numerical(&rhs.value),
+            &cast_text_to_numerical(lhs.as_str()),
+            &cast_text_to_numerical(rhs.as_str()),
         ),
         (OwnedValue::Text(text), other) | (other, OwnedValue::Text(text)) => {
-            exec_or(&cast_text_to_numerical(&text.value), other)
+            exec_or(&cast_text_to_numerical(text.as_str()), other)
         }
         _ => OwnedValue::Integer(1),
     }

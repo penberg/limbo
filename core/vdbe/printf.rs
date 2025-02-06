@@ -9,7 +9,7 @@ pub fn exec_printf(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
         return Ok(OwnedValue::Null);
     }
     let format_str = match &values[0] {
-        OwnedValue::Text(t) => &t.value,
+        OwnedValue::Text(t) => t.as_str(),
         _ => return Ok(OwnedValue::Null),
     };
 
@@ -44,7 +44,7 @@ pub fn exec_printf(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
                     return Err(LimboError::InvalidArgument("not enough arguments".into()));
                 }
                 match &values[args_index] {
-                    OwnedValue::Text(t) => result.push_str(&t.value),
+                    OwnedValue::Text(t) => result.push_str(t.as_str()),
                     OwnedValue::Null => result.push_str("(null)"),
                     v => result.push_str(&v.to_string()),
                 }
