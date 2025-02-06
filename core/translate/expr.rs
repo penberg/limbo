@@ -2,7 +2,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
-use crate::function::{Func, FuncCtx, MathFuncArity, ScalarFunc};
+use crate::function::{Func, FuncCtx, MathFuncArity, ScalarFunc, VectorFunc};
 use crate::schema::Type;
 use crate::util::normalize_ident;
 use crate::vdbe::{
@@ -1028,6 +1028,57 @@ pub fn translate_expr(
                             target_register,
                             func_ctx,
                         )
+                    }
+                },
+                Func::Vector(vector_func) => match vector_func {
+                    VectorFunc::Vector | VectorFunc::Vector32 => {
+                        let args = expect_arguments_exact!(args, 1, vector_func);
+                        let start_reg = program.alloc_register();
+                        translate_expr(program, referenced_tables, &args[0], start_reg, resolver)?;
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+                    VectorFunc::Vector64 => {
+                        let args = expect_arguments_exact!(args, 1, vector_func);
+                        let start_reg = program.alloc_register();
+                        translate_expr(program, referenced_tables, &args[0], start_reg, resolver)?;
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+                    VectorFunc::VectorExtract => {
+                        let args = expect_arguments_exact!(args, 1, vector_func);
+                        let start_reg = program.alloc_register();
+                        translate_expr(program, referenced_tables, &args[0], start_reg, resolver)?;
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
+                    }
+                    VectorFunc::VectorDistanceCos => {
+                        let args = expect_arguments_exact!(args, 2, vector_func);
+                        let regs = program.alloc_registers(2);
+                        translate_expr(program, referenced_tables, &args[0], regs, resolver)?;
+                        translate_expr(program, referenced_tables, &args[1], regs + 1, resolver)?;
+                        program.emit_insn(Insn::Function {
+                            constant_mask: 0,
+                            start_reg: regs,
+                            dest: target_register,
+                            func: func_ctx,
+                        });
+                        Ok(target_register)
                     }
                 },
                 Func::Scalar(srf) => {

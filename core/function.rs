@@ -113,6 +113,28 @@ impl Display for JsonFunc {
 }
 
 #[derive(Debug, Clone)]
+pub enum VectorFunc {
+    Vector,
+    Vector32,
+    Vector64,
+    VectorExtract,
+    VectorDistanceCos,
+}
+
+impl Display for VectorFunc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let str = match self {
+            Self::Vector => "vector".to_string(),
+            Self::Vector32 => "vector32".to_string(),
+            Self::Vector64 => "vector64".to_string(),
+            Self::VectorExtract => "vector_extract".to_string(),
+            Self::VectorDistanceCos => "vector_distance_cos".to_string(),
+        };
+        write!(f, "{}", str)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum AggFunc {
     Avg,
     Count,
@@ -402,6 +424,7 @@ pub enum Func {
     Agg(AggFunc),
     Scalar(ScalarFunc),
     Math(MathFunc),
+    Vector(VectorFunc),
     #[cfg(feature = "json")]
     Json(JsonFunc),
     External(Rc<ExternalFunc>),
@@ -413,6 +436,7 @@ impl Display for Func {
             Self::Agg(agg_func) => write!(f, "{}", agg_func.to_string()),
             Self::Scalar(scalar_func) => write!(f, "{}", scalar_func),
             Self::Math(math_func) => write!(f, "{}", math_func),
+            Self::Vector(vector_func) => write!(f, "{}", vector_func),
             #[cfg(feature = "json")]
             Self::Json(json_func) => write!(f, "{}", json_func),
             Self::External(generic_func) => write!(f, "{}", generic_func),
@@ -583,6 +607,11 @@ impl Func {
             "load_extension" => Ok(Self::Scalar(ScalarFunc::LoadExtension)),
             "strftime" => Ok(Self::Scalar(ScalarFunc::StrfTime)),
             "printf" => Ok(Self::Scalar(ScalarFunc::Printf)),
+            "vector" => Ok(Self::Vector(VectorFunc::Vector)),
+            "vector32" => Ok(Self::Vector(VectorFunc::Vector32)),
+            "vector64" => Ok(Self::Vector(VectorFunc::Vector64)),
+            "vector_extract" => Ok(Self::Vector(VectorFunc::VectorExtract)),
+            "vector_distance_cos" => Ok(Self::Vector(VectorFunc::VectorDistanceCos)),
             _ => crate::bail_parse_error!("no such function: {}", name),
         }
     }

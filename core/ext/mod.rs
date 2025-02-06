@@ -80,10 +80,6 @@ impl Database {
         if unsafe { !limbo_uuid::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register uuid extension".to_string());
         }
-        #[cfg(feature = "vector")]
-        if unsafe { !limbo_vector::register_extension_static(&ext_api).is_ok() } {
-            return Err("Failed to register vector extension".to_string());
-        }
         #[cfg(feature = "percentile")]
         if unsafe { !limbo_percentile::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register percentile extension".to_string());
