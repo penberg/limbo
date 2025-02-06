@@ -324,6 +324,201 @@ pub fn derive_agg_func(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Macro to derive a VTabModule for your extension. This macro will generate
+/// the necessary functions to register your module with core. You must implement
+/// the VTabModule trait for your struct, and the VTabCursor trait for your cursor.
+/// ```ignore
+///#[derive(Debug, VTabModuleDerive)]
+///struct CsvVTab;
+///impl VTabModule for CsvVTab {
+///    type VCursor = CsvCursor;
+///    const NAME: &'static str = "csv_data";
+///
+///    /// Declare the schema for your virtual table
+///    fn connect(api: &ExtensionApi) -> ResultCode {
+///        let sql = "CREATE TABLE csv_data(
+///            name TEXT,
+///            age TEXT,
+///            city TEXT
+///        )";
+///        api.declare_virtual_table(Self::NAME, sql)
+///    }
+///    /// Open the virtual table and return a cursor
+///  fn open() -> Self::VCursor {
+///       let csv_content = fs::read_to_string("data.csv").unwrap_or_default();
+///       let rows: Vec<Vec<String>> = csv_content
+///           .lines()
+///           .skip(1)
+///           .map(|line| {
+///               line.split(',')
+///                   .map(|s| s.trim().to_string())
+///                   .collect()
+///           })
+///           .collect();
+///       CsvCursor { rows, index: 0 }
+///   }
+///   /// Filter the virtual table based on arguments (omitted here for simplicity)
+///   fn filter(_cursor: &mut Self::VCursor, _arg_count: i32, _args: &[Value]) -> ResultCode {
+///       ResultCode::OK
+///   }
+///   /// Return the value for a given column index
+///   fn column(cursor: &Self::VCursor, idx: u32) -> Value {
+///      cursor.column(idx)
+///  }
+///  /// Move the cursor to the next row
+///  fn next(cursor: &mut Self::VCursor) -> ResultCode {
+///      if cursor.index < cursor.rows.len() - 1 {
+///          cursor.index += 1;
+///          ResultCode::OK
+///      } else {
+///          ResultCode::EOF
+///      }
+///  }
+///  fn eof(cursor: &Self::VCursor) -> bool {
+///      cursor.index >= cursor.rows.len()
+///  }
+///  #[derive(Debug)]
+/// struct CsvCursor {
+///   rows: Vec<Vec<String>>,
+///   index: usize,
+///
+/// impl CsvCursor {
+///   /// Returns the value for a given column index.
+///   fn column(&self, idx: u32) -> Value {
+///       let row = &self.rows[self.index];
+///       if (idx as usize) < row.len() {
+///           Value::from_text(&row[idx as usize])
+///       } else {
+///           Value::null()
+///       }
+///   }
+/// // Implement the VTabCursor trait for your virtual cursor
+/// impl VTabCursor for CsvCursor {
+///   fn next(&mut self) -> ResultCode {
+///       Self::next(self)
+///   }
+///  fn eof(&self) -> bool {
+///      self.index >= self.rows.len()
+///  }
+///  fn column(&self, idx: u32) -> Value {
+///      self.column(idx)
+///  }
+///  fn rowid(&self) -> i64 {
+///      self.index as i64
+///  }
+///
+#[proc_macro_derive(VTabModuleDerive)]
+pub fn derive_vtab_module(input: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    let struct_name = &ast.ident;
+
+    let register_fn_name = format_ident!("register_{}", struct_name);
+    let connect_fn_name = format_ident!("connect_{}", struct_name);
+    let open_fn_name = format_ident!("open_{}", struct_name);
+    let filter_fn_name = format_ident!("filter_{}", struct_name);
+    let column_fn_name = format_ident!("column_{}", struct_name);
+    let next_fn_name = format_ident!("next_{}", struct_name);
+    let eof_fn_name = format_ident!("eof_{}", struct_name);
+
+    let expanded = quote! {
+        impl #struct_name {
+            #[no_mangle]
+            unsafe extern "C" fn #connect_fn_name(
+                db: *const ::std::ffi::c_void,
+            ) -> ::limbo_ext::ResultCode {
+                if db.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
+                let api = unsafe { &*(db as *const ExtensionApi) };
+                <#struct_name as ::limbo_ext::VTabModule>::connect(api)
+            }
+
+            #[no_mangle]
+            unsafe extern "C" fn #open_fn_name(
+            ) -> *mut ::std::ffi::c_void {
+                let cursor = <#struct_name as ::limbo_ext::VTabModule>::open();
+                Box::into_raw(Box::new(cursor)) as *mut ::std::ffi::c_void
+            }
+
+            #[no_mangle]
+            unsafe extern "C" fn #filter_fn_name(
+                cursor: *mut ::std::ffi::c_void,
+                argc: i32,
+                argv: *const ::limbo_ext::Value,
+            ) -> ::limbo_ext::ResultCode {
+                if cursor.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
+                let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
+                let args = std::slice::from_raw_parts(argv, argc as usize);
+                <#struct_name as ::limbo_ext::VTabModule>::filter(cursor, argc, args)
+            }
+
+            #[no_mangle]
+            unsafe extern "C" fn #column_fn_name(
+                cursor: *mut ::std::ffi::c_void,
+                idx: u32,
+            ) -> ::limbo_ext::Value {
+                if cursor.is_null() {
+                    return ::limbo_ext::Value::error(ResultCode::Error);
+                }
+                let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
+                <#struct_name as ::limbo_ext::VTabModule>::column(cursor, idx)
+            }
+
+            #[no_mangle]
+            unsafe extern "C" fn #next_fn_name(
+                cursor: *mut ::std::ffi::c_void,
+            ) -> ::limbo_ext::ResultCode {
+                if cursor.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
+                let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
+                <#struct_name as ::limbo_ext::VTabModule>::next(cursor)
+            }
+
+            #[no_mangle]
+            unsafe extern "C" fn #eof_fn_name(
+                cursor: *mut ::std::ffi::c_void,
+            ) -> bool {
+                if cursor.is_null() {
+                    return true;
+                }
+                let cursor = unsafe { &mut *(cursor as *mut <#struct_name as ::limbo_ext::VTabModule>::VCursor) };
+                <#struct_name as ::limbo_ext::VTabModule>::eof(cursor)
+            }
+
+            #[no_mangle]
+            pub unsafe extern "C" fn #register_fn_name(
+                api: *const ::limbo_ext::ExtensionApi
+            ) -> ::limbo_ext::ResultCode {
+                if api.is_null() {
+                    return ::limbo_ext::ResultCode::Error;
+                }
+
+                let api = &*api;
+                let name = <#struct_name as ::limbo_ext::VTabModule>::NAME;
+                // name needs to be a c str FFI compatible, NOT CString
+                let name_c = std::ffi::CString::new(name).unwrap();
+
+                let module = ::limbo_ext::VTabModuleImpl {
+                    name: name_c.as_ptr(),
+                    connect: Self::#connect_fn_name,
+                    open: Self::#open_fn_name,
+                    filter: Self::#filter_fn_name,
+                    column: Self::#column_fn_name,
+                    next: Self::#next_fn_name,
+                    eof: Self::#eof_fn_name,
+                };
+
+                (api.register_module)(api.ctx, name_c.as_ptr(), module)
+            }
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
 /// Register your extension with 'core' by providing the relevant functions
 ///```ignore
 ///use limbo_ext::{register_extension, scalar, Value, AggregateDerive, AggFunc};
@@ -362,6 +557,7 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
     let RegisterExtensionInput {
         aggregates,
         scalars,
+        vtabs,
     } = input_ast;
 
     let scalar_calls = scalars.iter().map(|scalar_ident| {
@@ -388,8 +584,23 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
             }
         }
     });
+    let vtab_calls = vtabs.iter().map(|vtab_ident| {
+        let register_fn = syn::Ident::new(&format!("register_{}", vtab_ident), vtab_ident.span());
+        quote! {
+            {
+                let result = unsafe{ #vtab_ident::#register_fn(api)};
+                if result == ::limbo_ext::ResultCode::OK {
+                    let result = <#vtab_ident as ::limbo_ext::VTabModule>::connect(api);
+                    if !result.is_ok() {
+                        return result;
+                     }
+                }
+            }
+        }
+    });
     let static_aggregates = aggregate_calls.clone();
     let static_scalars = scalar_calls.clone();
+    let static_vtabs = vtab_calls.clone();
 
     let expanded = quote! {
     #[cfg(not(target_family = "wasm"))]
@@ -404,19 +615,23 @@ pub fn register_extension(input: TokenStream) -> TokenStream {
 
                 #(#static_aggregates)*
 
+                #(#static_vtabs)*
+
                 ::limbo_ext::ResultCode::OK
               }
 
             #[cfg(not(feature = "static"))]
-                #[no_mangle]
-                pub unsafe extern "C" fn register_extension(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
-                    let api = unsafe { &*api };
-                    #(#scalar_calls)*
+            #[no_mangle]
+            pub unsafe extern "C" fn register_extension(api: &::limbo_ext::ExtensionApi) -> ::limbo_ext::ResultCode {
+                let api = unsafe { &*api };
+                #(#scalar_calls)*
 
-                    #(#aggregate_calls)*
+                #(#aggregate_calls)*
 
-                    ::limbo_ext::ResultCode::OK
-                }
+                #(#vtab_calls)*
+
+                ::limbo_ext::ResultCode::OK
+            }
         };
 
     TokenStream::from(expanded)

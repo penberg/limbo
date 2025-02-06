@@ -1,4 +1,4 @@
-package org.github.seonwkim;
+package org.github.tursodatabase;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -14,9 +14,9 @@ public class Main {
               ResultSet.CONCUR_READ_ONLY,
               ResultSet.CLOSE_CURSORS_AT_COMMIT);
       stmt.execute("CREATE TABLE users (id INT PRIMARY KEY, username TEXT);");
-      stmt.execute("INSERT INTO users VALUES (1, 'seonwoo');");
-      stmt.execute("INSERT INTO users VALUES (2, 'seonwoo');");
-      stmt.execute("INSERT INTO users VALUES (3, 'seonwoo');");
+      stmt.execute("INSERT INTO users VALUES (1, 'limbo');");
+      stmt.execute("INSERT INTO users VALUES (2, 'turso');");
+      stmt.execute("INSERT INTO users VALUES (3, 'who knows');");
       stmt.execute("SELECT * FROM users");
       System.out.println(
           "result: " + stmt.getResultSet().getInt(1) + ", " + stmt.getResultSet().getString(2));

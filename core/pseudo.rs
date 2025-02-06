@@ -1,7 +1,7 @@
-use crate::types::OwnedRecord;
+use crate::types::Record;
 
 pub struct PseudoCursor {
-    current: Option<OwnedRecord>,
+    current: Option<Record>,
 }
 
 impl PseudoCursor {
@@ -9,11 +9,11 @@ impl PseudoCursor {
         Self { current: None }
     }
 
-    pub fn record(&self) -> Option<&OwnedRecord> {
+    pub fn record(&self) -> Option<&Record> {
         self.current.as_ref()
     }
 
-    pub fn insert(&mut self, record: OwnedRecord) {
+    pub fn insert(&mut self, record: Record) {
         self.current = Some(record);
     }
 }

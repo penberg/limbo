@@ -2,7 +2,7 @@ plugins {
     id("java")
 }
 
-group = "org.github.seonwkim"
+group = "org.github.tursodatabase"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -18,4 +18,10 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.register<JavaExec>("run") {
+    group = "application"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("org.github.tursodatabase.Main")
 }

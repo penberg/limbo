@@ -1,6 +1,7 @@
 use sqlite3_parser::ast;
 
 use crate::{
+    schema::Table,
     translate::result_row::emit_select_result,
     vdbe::{
         builder::{CursorType, ProgramBuilder},
@@ -80,24 +81,34 @@ pub fn init_loop(
             Operation::Scan { .. } => {
                 let cursor_id = program.alloc_cursor_id(
                     Some(table.identifier.clone()),
-                    CursorType::BTreeTable(table.btree().unwrap().clone()),
+                    match &table.table {
+                        Table::BTree(_) => CursorType::BTreeTable(table.btree().unwrap().clone()),
+                        Table::Virtual(_) => {
+                            CursorType::VirtualTable(table.virtual_table().unwrap().clone())
+                        }
+                        other => panic!("Invalid table reference type in Scan: {:?}", other),
+                    },
                 );
-                let root_page = table.table.get_root_page();
-
-                match mode {
-                    OperationMode::SELECT => {
+                match (mode, &table.table) {
+                    (OperationMode::SELECT, Table::BTree(_)) => {
+                        let root_page = table.btree().unwrap().root_page;
                         program.emit_insn(Insn::OpenReadAsync {
                             cursor_id,
                             root_page,
                         });
                         program.emit_insn(Insn::OpenReadAwait {});
                     }
-                    OperationMode::DELETE => {
+                    (OperationMode::DELETE, Table::BTree(_)) => {
+                        let root_page = table.btree().unwrap().root_page;
                         program.emit_insn(Insn::OpenWriteAsync {
                             cursor_id,
                             root_page,
                         });
                         program.emit_insn(Insn::OpenWriteAwait {});
+                    }
+                    (OperationMode::SELECT, Table::Virtual(_)) => {
+                        program.emit_insn(Insn::VOpenAsync { cursor_id });
+                        program.emit_insn(Insn::VOpenAwait {});
                     }
                     _ => {
                         unimplemented!()
@@ -246,30 +257,55 @@ pub fn open_loop(
             }
             Operation::Scan { iter_dir } => {
                 let cursor_id = program.resolve_cursor_id(&table.identifier);
-                if iter_dir
-                    .as_ref()
-                    .is_some_and(|dir| *dir == IterationDirection::Backwards)
-                {
-                    program.emit_insn(Insn::LastAsync { cursor_id });
-                } else {
-                    program.emit_insn(Insn::RewindAsync { cursor_id });
-                }
-                program.emit_insn(
+
+                if !matches!(&table.table, Table::Virtual(_)) {
                     if iter_dir
                         .as_ref()
                         .is_some_and(|dir| *dir == IterationDirection::Backwards)
                     {
-                        Insn::LastAwait {
-                            cursor_id,
-                            pc_if_empty: loop_end,
-                        }
+                        program.emit_insn(Insn::LastAsync { cursor_id });
                     } else {
-                        Insn::RewindAwait {
-                            cursor_id,
-                            pc_if_empty: loop_end,
+                        program.emit_insn(Insn::RewindAsync { cursor_id });
+                    }
+                }
+                match &table.table {
+                    Table::BTree(_) => program.emit_insn(
+                        if iter_dir
+                            .as_ref()
+                            .is_some_and(|dir| *dir == IterationDirection::Backwards)
+                        {
+                            Insn::LastAwait {
+                                cursor_id,
+                                pc_if_empty: loop_end,
+                            }
+                        } else {
+                            Insn::RewindAwait {
+                                cursor_id,
+                                pc_if_empty: loop_end,
+                            }
+                        },
+                    ),
+                    Table::Virtual(ref table) => {
+                        let args = if let Some(args) = table.args.as_ref() {
+                            args
+                        } else {
+                            &vec![]
+                        };
+                        let start_reg = program.alloc_registers(args.len());
+                        let mut cur_reg = start_reg;
+                        for arg in args {
+                            let reg = cur_reg;
+                            cur_reg += 1;
+                            translate_expr(program, Some(tables), &arg, reg, &t_ctx.resolver)?;
                         }
-                    },
-                );
+                        program.emit_insn(Insn::VFilter {
+                            cursor_id,
+                            arg_count: args.len(),
+                            args_reg: start_reg,
+                        });
+                    }
+                    other => panic!("Unsupported table reference type: {:?}", other),
+                }
                 program.resolve_label(loop_start, program.offset());
 
                 for cond in predicates
@@ -690,27 +726,38 @@ pub fn close_loop(
             Operation::Scan { iter_dir, .. } => {
                 program.resolve_label(loop_labels.next, program.offset());
                 let cursor_id = program.resolve_cursor_id(&table.identifier);
-                if iter_dir
-                    .as_ref()
-                    .is_some_and(|dir| *dir == IterationDirection::Backwards)
-                {
-                    program.emit_insn(Insn::PrevAsync { cursor_id });
-                } else {
-                    program.emit_insn(Insn::NextAsync { cursor_id });
-                }
-                if iter_dir
-                    .as_ref()
-                    .is_some_and(|dir| *dir == IterationDirection::Backwards)
-                {
-                    program.emit_insn(Insn::PrevAwait {
-                        cursor_id,
-                        pc_if_next: loop_labels.loop_start,
-                    });
-                } else {
-                    program.emit_insn(Insn::NextAwait {
-                        cursor_id,
-                        pc_if_next: loop_labels.loop_start,
-                    });
+                match &table.table {
+                    Table::BTree(_) => {
+                        if iter_dir
+                            .as_ref()
+                            .is_some_and(|dir| *dir == IterationDirection::Backwards)
+                        {
+                            program.emit_insn(Insn::PrevAsync { cursor_id });
+                        } else {
+                            program.emit_insn(Insn::NextAsync { cursor_id });
+                        }
+                        if iter_dir
+                            .as_ref()
+                            .is_some_and(|dir| *dir == IterationDirection::Backwards)
+                        {
+                            program.emit_insn(Insn::PrevAwait {
+                                cursor_id,
+                                pc_if_next: loop_labels.loop_start,
+                            });
+                        } else {
+                            program.emit_insn(Insn::NextAwait {
+                                cursor_id,
+                                pc_if_next: loop_labels.loop_start,
+                            });
+                        }
+                    }
+                    Table::Virtual(_) => {
+                        program.emit_insn(Insn::VNext {
+                            cursor_id,
+                            pc_if_next: loop_labels.loop_start,
+                        });
+                    }
+                    other => unreachable!("Unsupported table reference type: {:?}", other),
                 }
             }
             Operation::Search(search) => {

@@ -5,7 +5,8 @@ use crate::storage::sqlite3_ondisk::{
     read_btree_cell, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
     TableInteriorCell, TableLeafCell,
 };
-use crate::types::{CursorResult, OwnedRecord, OwnedValue, SeekKey, SeekOp};
+
+use crate::types::{CursorResult, OwnedValue, Record, SeekKey, SeekOp};
 use crate::{LimboError, Result};
 
 use std::cell::{Ref, RefCell};
@@ -138,7 +139,7 @@ pub struct BTreeCursor {
     root_page: usize,
     /// Rowid and record are stored before being consumed.
     rowid: RefCell<Option<u64>>,
-    record: RefCell<Option<OwnedRecord>>,
+    record: RefCell<Option<Record>>,
     null_flag: bool,
     /// Index internal pages are consumed on the way up, so we store going upwards flag in case
     /// we just moved to a parent page and the parent page is an internal index page which requires
@@ -199,7 +200,7 @@ impl BTreeCursor {
 
     /// Move the cursor to the previous record and return it.
     /// Used in backwards iteration.
-    fn get_prev_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+    fn get_prev_record(&mut self) -> Result<CursorResult<(Option<u64>, Option<Record>)>> {
         loop {
             let page = self.stack.top();
             let cell_idx = self.stack.current_cell_index();
@@ -267,8 +268,7 @@ impl BTreeCursor {
                     _rowid, _payload, ..
                 }) => {
                     self.stack.retreat();
-                    let record: OwnedRecord =
-                        crate::storage::sqlite3_ondisk::read_record(&_payload)?;
+                    let record: Record = crate::storage::sqlite3_ondisk::read_record(&_payload)?;
                     return Ok(CursorResult::Ok((Some(_rowid), Some(record))));
                 }
                 BTreeCell::IndexInteriorCell(_) => todo!(),
@@ -282,7 +282,7 @@ impl BTreeCursor {
     fn get_next_record(
         &mut self,
         predicate: Option<(SeekKey<'_>, SeekOp)>,
-    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+    ) -> Result<CursorResult<(Option<u64>, Option<Record>)>> {
         loop {
             let mem_page_rc = self.stack.top();
             let cell_idx = self.stack.current_cell_index() as usize;
@@ -445,7 +445,7 @@ impl BTreeCursor {
         &mut self,
         key: SeekKey<'_>,
         op: SeekOp,
-    ) -> Result<CursorResult<(Option<u64>, Option<OwnedRecord>)>> {
+    ) -> Result<CursorResult<(Option<u64>, Option<Record>)>> {
         return_if_io!(self.move_to(key.clone(), op.clone()));
 
         {
@@ -699,11 +699,7 @@ impl BTreeCursor {
 
     /// Insert a record into the btree.
     /// If the insert operation overflows the page, it will be split and the btree will be balanced.
-    fn insert_into_page(
-        &mut self,
-        key: &OwnedValue,
-        record: &OwnedRecord,
-    ) -> Result<CursorResult<()>> {
+    fn insert_into_page(&mut self, key: &OwnedValue, record: &Record) -> Result<CursorResult<()>> {
         if let CursorState::None = &self.state {
             self.state = CursorState::Write(WriteInfo::new());
         }
@@ -1713,7 +1709,7 @@ impl BTreeCursor {
         page_type: PageType,
         int_key: Option<u64>,
         cell_payload: &mut Vec<u8>,
-        record: &OwnedRecord,
+        record: &Record,
     ) {
         assert!(matches!(
             page_type,
@@ -1947,14 +1943,14 @@ impl BTreeCursor {
         Ok(CursorResult::Ok(rowid.is_some()))
     }
 
-    pub fn record(&self) -> Result<Ref<Option<OwnedRecord>>> {
+    pub fn record(&self) -> Result<Ref<Option<Record>>> {
         Ok(self.record.borrow())
     }
 
     pub fn insert(
         &mut self,
         key: &OwnedValue,
-        _record: &OwnedRecord,
+        _record: &Record,
         moved_before: bool, /* Indicate whether it's necessary to traverse to find the leaf page */
     ) -> Result<CursorResult<()>> {
         let int_key = match key {

@@ -46,7 +46,7 @@ use crate::io::{Buffer, Completion, ReadCompletion, SyncCompletion, WriteComplet
 use crate::storage::buffer_pool::BufferPool;
 use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::Pager;
-use crate::types::{OwnedRecord, OwnedValue};
+use crate::types::{OwnedValue, Record, Text, TextSubtype};
 use crate::{File, Result};
 use log::trace;
 use parking_lot::RwLock;
@@ -948,7 +948,7 @@ impl TryFrom<u64> for SerialType {
     }
 }
 
-pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
+pub fn read_record(payload: &[u8]) -> Result<Record> {
     let mut pos = 0;
     let (header_size, nr) = read_varint(payload)?;
     assert!((header_size as usize) >= nr);
@@ -969,7 +969,7 @@ pub fn read_record(payload: &[u8]) -> Result<OwnedRecord> {
         pos += n;
         values.push(value);
     }
-    Ok(OwnedRecord::new(values))
+    Ok(Record::new(values))
 }
 
 pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, usize)> {
@@ -1059,8 +1059,13 @@ pub fn read_value(buf: &[u8], serial_type: &SerialType) -> Result<(OwnedValue, u
                 );
             }
             let bytes = buf[0..n].to_vec();
-            let value = unsafe { String::from_utf8_unchecked(bytes) };
-            Ok((OwnedValue::build_text(value.into()), n))
+            Ok((
+                OwnedValue::Text(Text {
+                    value: Rc::new(bytes),
+                    subtype: TextSubtype::Text,
+                }),
+                n,
+            ))
         }
     }
 }

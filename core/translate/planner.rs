@@ -11,7 +11,7 @@ use crate::{
     schema::{Schema, Table},
     util::{exprs_are_equivalent, normalize_ident},
     vdbe::BranchOffset,
-    Result,
+    Result, VirtualTable,
 };
 use sqlite3_parser::ast::{self, Expr, FromClause, JoinType, Limit, UnaryOperator};
 
@@ -317,8 +317,36 @@ fn parse_from_clause_table(
                     ast::As::Elided(id) => id.0.clone(),
                 })
                 .unwrap_or(format!("subquery_{}", cur_table_index));
-            let table_reference = TableReference::new_subquery(identifier, subplan, None);
-            Ok(table_reference)
+            Ok(TableReference::new_subquery(identifier, subplan, None))
+        }
+        ast::SelectTable::TableCall(qualified_name, maybe_args, maybe_alias) => {
+            let normalized_name = &normalize_ident(qualified_name.name.0.as_str());
+            let Some(vtab) = syms.vtabs.get(normalized_name) else {
+                crate::bail_parse_error!("Virtual table {} not found", normalized_name);
+            };
+            let alias = maybe_alias
+                .as_ref()
+                .map(|a| match a {
+                    ast::As::As(id) => id.0.clone(),
+                    ast::As::Elided(id) => id.0.clone(),
+                })
+                .unwrap_or(normalized_name.to_string());
+
+            Ok(TableReference {
+                op: Operation::Scan { iter_dir: None },
+                join_info: None,
+                table: Table::Virtual(
+                    VirtualTable {
+                        name: normalized_name.clone(),
+                        args: maybe_args,
+                        implementation: vtab.implementation.clone(),
+                        columns: vtab.columns.clone(),
+                    }
+                    .into(),
+                )
+                .into(),
+                identifier: alias.clone(),
+            })
         }
         _ => todo!(),
     }

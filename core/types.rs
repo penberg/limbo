@@ -6,6 +6,7 @@ use crate::pseudo::PseudoCursor;
 use crate::storage::btree::BTreeCursor;
 use crate::storage::sqlite3_ondisk::write_varint;
 use crate::vdbe::sorter::Sorter;
+use crate::vdbe::VTabOpaqueCursor;
 use crate::Result;
 use std::fmt::Display;
 use std::rc::Rc;
@@ -49,7 +50,7 @@ pub enum TextSubtype {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Text {
-    pub value: Rc<String>,
+    pub value: Rc<Vec<u8>>,
     pub subtype: TextSubtype,
 }
 
@@ -60,16 +61,20 @@ impl Text {
 
     pub fn new(value: Rc<String>) -> Self {
         Self {
-            value,
+            value: Rc::new(value.as_bytes().to_vec()),
             subtype: TextSubtype::Text,
         }
     }
 
     pub fn json(value: Rc<String>) -> Self {
         Self {
-            value,
+            value: Rc::new(value.as_bytes().to_vec()),
             subtype: TextSubtype::Json,
         }
+    }
+
+    pub fn as_str(&self) -> &str {
+        unsafe { std::str::from_utf8_unchecked(self.value.as_ref()) }
     }
 }
 
@@ -81,7 +86,7 @@ pub enum OwnedValue {
     Text(Text),
     Blob(Rc<Vec<u8>>),
     Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
-    Record(OwnedRecord),
+    Record(Record),
 }
 
 impl OwnedValue {
@@ -103,7 +108,7 @@ impl OwnedValue {
 
     pub fn to_text(&self) -> Option<&str> {
         match self {
-            OwnedValue::Text(t) => Some(&t.value),
+            OwnedValue::Text(t) => Some(t.as_str()),
             _ => None,
         }
     }
@@ -129,7 +134,7 @@ impl OwnedValue {
             OwnedValue::Null => Value::Null,
             OwnedValue::Integer(i) => Value::Integer(*i),
             OwnedValue::Float(f) => Value::Float(*f),
-            OwnedValue::Text(s) => Value::Text(&s.value),
+            OwnedValue::Text(s) => Value::Text(s.as_str()),
             OwnedValue::Blob(b) => Value::Blob(b),
             OwnedValue::Agg(a) => match a.as_ref() {
                 AggContext::Avg(acc, _count) => match acc {
@@ -187,7 +192,7 @@ impl Display for OwnedValue {
             Self::Null => write!(f, "NULL"),
             Self::Integer(i) => write!(f, "{}", i),
             Self::Float(fl) => write!(f, "{:?}", fl),
-            Self::Text(s) => write!(f, "{}", s.value),
+            Self::Text(s) => write!(f, "{}", s.as_str()),
             Self::Blob(b) => write!(f, "{}", String::from_utf8_lossy(b)),
             Self::Agg(a) => match a.as_ref() {
                 AggContext::Avg(acc, _count) => write!(f, "{}", acc),
@@ -211,7 +216,7 @@ impl OwnedValue {
             Self::Null => ExtValue::null(),
             Self::Integer(i) => ExtValue::from_integer(*i),
             Self::Float(fl) => ExtValue::from_float(*fl),
-            Self::Text(text) => ExtValue::from_text(text.value.to_string()),
+            Self::Text(text) => ExtValue::from_text(text.as_str().to_string()),
             Self::Blob(blob) => ExtValue::from_blob(blob.to_vec()),
             Self::Agg(_) => todo!(),
             Self::Record(_) => todo!("Record values not yet supported"),
@@ -377,21 +382,21 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
                 Self::Float(float_left + float_right)
             }
             (Self::Text(string_left), Self::Text(string_right)) => Self::build_text(Rc::new(
-                string_left.value.to_string() + &string_right.value.to_string(),
+                string_left.as_str().to_string() + &string_right.as_str(),
             )),
             (Self::Text(string_left), Self::Integer(int_right)) => Self::build_text(Rc::new(
-                string_left.value.to_string() + &int_right.to_string(),
+                string_left.as_str().to_string() + &int_right.to_string(),
             )),
-            (Self::Integer(int_left), Self::Text(string_right)) => Self::build_text(Rc::new(
-                int_left.to_string() + &string_right.value.to_string(),
-            )),
+            (Self::Integer(int_left), Self::Text(string_right)) => {
+                Self::build_text(Rc::new(int_left.to_string() + &string_right.as_str()))
+            }
             (Self::Text(string_left), Self::Float(float_right)) => {
                 let string_right = Self::Float(float_right).to_string();
-                Self::build_text(Rc::new(string_left.value.to_string() + &string_right))
+                Self::build_text(Rc::new(string_left.as_str().to_string() + &string_right))
             }
             (Self::Float(float_left), Self::Text(string_right)) => {
                 let string_left = Self::Float(float_left).to_string();
-                Self::build_text(Rc::new(string_left + &string_right.value.to_string()))
+                Self::build_text(Rc::new(string_left + &string_right.as_str()))
             }
             (lhs, Self::Null) => lhs,
             (Self::Null, rhs) => rhs,
@@ -500,7 +505,7 @@ impl<'a> FromValue<'a> for i64 {
 impl<'a> FromValue<'a> for String {
     fn from_value(value: &'a OwnedValue) -> Result<Self> {
         match value {
-            OwnedValue::Text(s) => Ok(s.value.to_string()),
+            OwnedValue::Text(s) => Ok(s.as_str().to_string()),
             _ => Err(LimboError::ConversionError("Expected text value".into())),
         }
     }
@@ -509,18 +514,18 @@ impl<'a> FromValue<'a> for String {
 impl<'a> FromValue<'a> for &'a str {
     fn from_value(value: &'a OwnedValue) -> Result<Self> {
         match value {
-            OwnedValue::Text(s) => Ok(s.value.as_str()),
+            OwnedValue::Text(s) => Ok(s.as_str()),
             _ => Err(LimboError::ConversionError("Expected text value".into())),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct OwnedRecord {
+pub struct Record {
     pub values: Vec<OwnedValue>,
 }
 
-impl OwnedRecord {
+impl Record {
     pub fn get<'a, T: FromValue<'a> + 'a>(&'a self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
@@ -600,7 +605,7 @@ impl From<SerialType> for u64 {
     }
 }
 
-impl OwnedRecord {
+impl Record {
     pub fn new(values: Vec<OwnedValue>) -> Self {
         Self { values }
     }
@@ -635,7 +640,7 @@ impl OwnedRecord {
                     }
                 }
                 OwnedValue::Float(f) => buf.extend_from_slice(&f.to_be_bytes()),
-                OwnedValue::Text(t) => buf.extend_from_slice(t.value.as_bytes()),
+                OwnedValue::Text(t) => buf.extend_from_slice(&t.value),
                 OwnedValue::Blob(b) => buf.extend_from_slice(b),
                 // non serializable
                 OwnedValue::Agg(_) => unreachable!(),
@@ -666,6 +671,7 @@ pub enum Cursor {
     Index(BTreeCursor),
     Pseudo(PseudoCursor),
     Sorter(Sorter),
+    Virtual(VTabOpaqueCursor),
 }
 
 impl Cursor {
@@ -712,6 +718,13 @@ impl Cursor {
             _ => panic!("Cursor is not a sorter cursor"),
         }
     }
+
+    pub fn as_virtual_mut(&mut self) -> &mut VTabOpaqueCursor {
+        match self {
+            Self::Virtual(cursor) => cursor,
+            _ => panic!("Cursor is not a virtual cursor"),
+        }
+    }
 }
 
 pub enum CursorResult<T> {
@@ -729,7 +742,7 @@ pub enum SeekOp {
 #[derive(Clone, PartialEq, Debug)]
 pub enum SeekKey<'a> {
     TableRowId(u64),
-    IndexKey(&'a OwnedRecord),
+    IndexKey(&'a Record),
 }
 
 #[cfg(test)]
@@ -739,7 +752,7 @@ mod tests {
 
     #[test]
     fn test_serialize_null() {
-        let record = OwnedRecord::new(vec![OwnedValue::Null]);
+        let record = Record::new(vec![OwnedValue::Null]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -755,7 +768,7 @@ mod tests {
 
     #[test]
     fn test_serialize_integers() {
-        let record = OwnedRecord::new(vec![
+        let record = Record::new(vec![
             OwnedValue::Integer(42),                // Should use SERIAL_TYPE_I8
             OwnedValue::Integer(1000),              // Should use SERIAL_TYPE_I16
             OwnedValue::Integer(1_000_000),         // Should use SERIAL_TYPE_I24
@@ -831,7 +844,7 @@ mod tests {
     #[test]
     fn test_serialize_float() {
         #[warn(clippy::approx_constant)]
-        let record = OwnedRecord::new(vec![OwnedValue::Float(3.15555)]);
+        let record = Record::new(vec![OwnedValue::Float(3.15555)]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -852,7 +865,7 @@ mod tests {
     #[test]
     fn test_serialize_text() {
         let text = Rc::new("hello".to_string());
-        let record = OwnedRecord::new(vec![OwnedValue::Text(Text::new(text.clone()))]);
+        let record = Record::new(vec![OwnedValue::Text(Text::new(text.clone()))]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -871,7 +884,7 @@ mod tests {
     #[test]
     fn test_serialize_blob() {
         let blob = Rc::new(vec![1, 2, 3, 4, 5]);
-        let record = OwnedRecord::new(vec![OwnedValue::Blob(blob.clone())]);
+        let record = Record::new(vec![OwnedValue::Blob(blob.clone())]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -890,7 +903,7 @@ mod tests {
     #[test]
     fn test_serialize_mixed_types() {
         let text = Rc::new("test".to_string());
-        let record = OwnedRecord::new(vec![
+        let record = Record::new(vec![
             OwnedValue::Null,
             OwnedValue::Integer(42),
             OwnedValue::Float(3.15),

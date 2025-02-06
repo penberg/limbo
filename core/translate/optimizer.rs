@@ -204,16 +204,16 @@ fn eliminate_constant_conditions(
 }
 
 fn push_scan_direction(table: &mut TableReference, direction: &Direction) {
-    match &mut table.op {
-        Operation::Scan { iter_dir, .. } => {
-            if iter_dir.is_none() {
-                match direction {
-                    Direction::Ascending => *iter_dir = Some(IterationDirection::Forwards),
-                    Direction::Descending => *iter_dir = Some(IterationDirection::Backwards),
-                }
+    if let Operation::Scan {
+        ref mut iter_dir, ..
+    } = table.op
+    {
+        if iter_dir.is_none() {
+            match direction {
+                Direction::Ascending => *iter_dir = Some(IterationDirection::Forwards),
+                Direction::Descending => *iter_dir = Some(IterationDirection::Backwards),
             }
         }
-        _ => {}
     }
 }
 
@@ -307,14 +307,14 @@ impl Optimizable for ast::Expr {
                 else {
                     return Ok(None);
                 };
-                let column = table_reference.table.get_column_at(*column);
+                let Some(column) = table_reference.table.get_column_at(*column) else {
+                    return Ok(None);
+                };
                 for index in available_indexes_for_table.iter() {
-                    if column
-                        .name
-                        .as_ref()
-                        .map_or(false, |name| *name == index.columns.first().unwrap().name)
-                    {
-                        return Ok(Some(index.clone()));
+                    if let Some(name) = column.name.as_ref() {
+                        if &index.columns.first().unwrap().name == name {
+                            return Ok(Some(index.clone()));
+                        }
                     }
                 }
                 Ok(None)
