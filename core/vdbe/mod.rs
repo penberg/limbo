@@ -1840,12 +1840,12 @@ impl Program {
                                 // To the way blobs are parsed here in SQLite.
                                 let indent = match indent {
                                     Some(value) => match value {
-                                        OwnedValue::Text(text) => text.value.as_str(),
+                                        OwnedValue::Text(text) => text.as_str(),
                                         OwnedValue::Integer(val) => &val.to_string(),
                                         OwnedValue::Float(val) => &val.to_string(),
                                         OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
                                         OwnedValue::Agg(ctx) => match ctx.final_value() {
-                                            OwnedValue::Text(text) => text.value.as_str(),
+                                            OwnedValue::Text(text) => text.as_str(),
                                             OwnedValue::Integer(val) => &val.to_string(),
                                             OwnedValue::Float(val) => &val.to_string(),
                                             OwnedValue::Blob(val) => &String::from_utf8_lossy(val),
@@ -1883,7 +1883,8 @@ impl Program {
                                 else {
                                     unreachable!("Cast with non-text type");
                                 };
-                                let result = exec_cast(&reg_value_argument, &reg_value_type.value);
+                                let result =
+                                    exec_cast(&reg_value_argument, &reg_value_type.as_str());
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::Changes => {
@@ -1921,8 +1922,8 @@ impl Program {
                                         };
                                         OwnedValue::Integer(exec_glob(
                                             cache,
-                                            &pattern.value,
-                                            &text.value,
+                                            &pattern.as_str(),
+                                            &text.as_str(),
                                         )
                                             as i64)
                                     }
@@ -1964,8 +1965,8 @@ impl Program {
                                         };
 
                                         OwnedValue::Integer(exec_like_with_escape(
-                                            &pattern.value,
-                                            &text.value,
+                                            &pattern.as_str(),
+                                            &text.as_str(),
                                             escape,
                                         )
                                             as i64)
@@ -1978,8 +1979,8 @@ impl Program {
                                         };
                                         OwnedValue::Integer(exec_like(
                                             cache,
-                                            &pattern.value,
-                                            &text.value,
+                                            &pattern.as_str(),
+                                            &text.as_str(),
                                         )
                                             as i64)
                                     }
@@ -2408,14 +2409,16 @@ impl Program {
                                 "MustBeInt: the value in register cannot be cast to integer"
                             ),
                         },
-                        OwnedValue::Text(text) => match checked_cast_text_to_numeric(&text.value) {
-                            Ok(OwnedValue::Integer(i)) => {
-                                state.registers[*reg] = OwnedValue::Integer(i)
+                        OwnedValue::Text(text) => {
+                            match checked_cast_text_to_numeric(&text.as_str()) {
+                                Ok(OwnedValue::Integer(i)) => {
+                                    state.registers[*reg] = OwnedValue::Integer(i)
+                                }
+                                _ => crate::bail_parse_error!(
+                                    "MustBeInt: the value in register cannot be cast to integer"
+                                ),
                             }
-                            _ => crate::bail_parse_error!(
-                                "MustBeInt: the value in register cannot be cast to integer"
-                            ),
-                        },
+                        }
                         _ => {
                             crate::bail_parse_error!(
                                 "MustBeInt: the value in register cannot be cast to integer"
@@ -2513,7 +2516,7 @@ impl Program {
                 }
                 Insn::CreateBtree { db, root, flags } => {
                     if *db > 0 {
-                        // TODO: implement temp datbases
+                        // TODO: implement temp databases
                         todo!("temp databases not implemented yet");
                     }
                     let mut cursor = Box::new(BTreeCursor::new(pager.clone(), 0));
@@ -2717,7 +2720,7 @@ fn get_indent_count(indent_count: usize, curr_insn: &Insn, prev_insn: Option<&In
 
 fn exec_lower(reg: &OwnedValue) -> Option<OwnedValue> {
     match reg {
-        OwnedValue::Text(t) => Some(OwnedValue::build_text(Rc::new(t.value.to_lowercase()))),
+        OwnedValue::Text(t) => Some(OwnedValue::build_text(Rc::new(t.as_str().to_lowercase()))),
         t => Some(t.to_owned()),
     }
 }
@@ -2746,7 +2749,7 @@ fn exec_octet_length(reg: &OwnedValue) -> OwnedValue {
 
 fn exec_upper(reg: &OwnedValue) -> Option<OwnedValue> {
     match reg {
-        OwnedValue::Text(t) => Some(OwnedValue::build_text(Rc::new(t.value.to_uppercase()))),
+        OwnedValue::Text(t) => Some(OwnedValue::build_text(Rc::new(t.as_str().to_uppercase()))),
         t => Some(t.to_owned()),
     }
 }
@@ -2755,7 +2758,7 @@ fn exec_concat_strings(registers: &[OwnedValue]) -> OwnedValue {
     let mut result = String::new();
     for reg in registers {
         match reg {
-            OwnedValue::Text(text) => result.push_str(&text.value),
+            OwnedValue::Text(text) => result.push_str(text.as_str()),
             OwnedValue::Integer(i) => result.push_str(&i.to_string()),
             OwnedValue::Float(f) => result.push_str(&f.to_string()),
             OwnedValue::Agg(aggctx) => result.push_str(&aggctx.final_value().to_string()),
@@ -2773,9 +2776,9 @@ fn exec_concat_ws(registers: &[OwnedValue]) -> OwnedValue {
     }
 
     let separator = match &registers[0] {
-        OwnedValue::Text(text) => text.value.clone(),
-        OwnedValue::Integer(i) => Rc::new(i.to_string()),
-        OwnedValue::Float(f) => Rc::new(f.to_string()),
+        OwnedValue::Text(text) => text.as_str().to_string(),
+        OwnedValue::Integer(i) => i.to_string(),
+        OwnedValue::Float(f) => f.to_string(),
         _ => return OwnedValue::Null,
     };
 
@@ -2785,7 +2788,7 @@ fn exec_concat_ws(registers: &[OwnedValue]) -> OwnedValue {
             result.push_str(&separator);
         }
         match reg {
-            OwnedValue::Text(text) => result.push_str(&text.value),
+            OwnedValue::Text(text) => result.push_str(text.as_str()),
             OwnedValue::Integer(i) => result.push_str(&i.to_string()),
             OwnedValue::Float(f) => result.push_str(&f.to_string()),
             _ => continue,
@@ -2800,9 +2803,9 @@ fn exec_sign(reg: &OwnedValue) -> Option<OwnedValue> {
         OwnedValue::Integer(i) => *i as f64,
         OwnedValue::Float(f) => *f,
         OwnedValue::Text(s) => {
-            if let Ok(i) = s.value.parse::<i64>() {
+            if let Ok(i) = s.as_str().parse::<i64>() {
                 i as f64
-            } else if let Ok(f) = s.value.parse::<f64>() {
+            } else if let Ok(f) = s.as_str().parse::<f64>() {
                 f
             } else {
                 return Some(OwnedValue::Null);
@@ -2840,7 +2843,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
         OwnedValue::Null => return OwnedValue::build_text(Rc::new("?000".to_string())),
         OwnedValue::Text(s) => {
             // return ?000 if non ASCII alphabet character is found
-            if !s.value.chars().all(|c| c.is_ascii_alphabetic()) {
+            if !s.as_str().chars().all(|c| c.is_ascii_alphabetic()) {
                 return OwnedValue::build_text(Rc::new("?000".to_string()));
             }
             s.clone()
@@ -2850,7 +2853,7 @@ pub fn exec_soundex(reg: &OwnedValue) -> OwnedValue {
 
     // Remove numbers and spaces
     let word: String = s
-        .value
+        .as_str()
         .chars()
         .filter(|c| !c.is_ascii_digit())
         .collect::<String>()
@@ -2958,7 +2961,7 @@ fn exec_randomblob(reg: &OwnedValue) -> OwnedValue {
     let length = match reg {
         OwnedValue::Integer(i) => *i,
         OwnedValue::Float(f) => *f as i64,
-        OwnedValue::Text(t) => t.value.parse().unwrap_or(1),
+        OwnedValue::Text(t) => t.as_str().parse().unwrap_or(1),
         _ => 1,
     }
     .max(1) as usize;
@@ -2974,9 +2977,9 @@ fn exec_quote(value: &OwnedValue) -> OwnedValue {
         OwnedValue::Integer(_) | OwnedValue::Float(_) => value.to_owned(),
         OwnedValue::Blob(_) => todo!(),
         OwnedValue::Text(s) => {
-            let mut quoted = String::with_capacity(s.value.len() + 2);
+            let mut quoted = String::with_capacity(s.as_str().len() + 2);
             quoted.push('\'');
-            for c in s.value.chars() {
+            for c in s.as_str().chars() {
                 if c == '\0' {
                     break;
                 } else {
@@ -3081,7 +3084,7 @@ fn exec_substring(
         (str_value, start_value, length_value)
     {
         let start = *start as usize;
-        let str_len = str.value.len();
+        let str_len = str.as_str().len();
 
         if start > str_len {
             return OwnedValue::build_text(Rc::new("".to_string()));
@@ -3093,19 +3096,19 @@ fn exec_substring(
         } else {
             str_len
         };
-        let substring = &str.value[start_idx..end.min(str_len)];
+        let substring = &str.as_str()[start_idx..end.min(str_len)];
 
         OwnedValue::build_text(Rc::new(substring.to_string()))
     } else if let (OwnedValue::Text(str), OwnedValue::Integer(start)) = (str_value, start_value) {
         let start = *start as usize;
-        let str_len = str.value.len();
+        let str_len = str.as_str().len();
 
         if start > str_len {
             return OwnedValue::build_text(Rc::new("".to_string()));
         }
 
         let start_idx = start - 1;
-        let substring = &str.value[start_idx..str_len];
+        let substring = &str.as_str()[start_idx..str_len];
 
         OwnedValue::build_text(Rc::new(substring.to_string()))
     } else {
@@ -3128,7 +3131,7 @@ fn exec_instr(reg: &OwnedValue, pattern: &OwnedValue) -> OwnedValue {
 
     let reg_str;
     let reg = match reg {
-        OwnedValue::Text(s) => s.value.as_str(),
+        OwnedValue::Text(s) => s.as_str(),
         _ => {
             reg_str = reg.to_string();
             reg_str.as_str()
@@ -3137,7 +3140,7 @@ fn exec_instr(reg: &OwnedValue, pattern: &OwnedValue) -> OwnedValue {
 
     let pattern_str;
     let pattern = match pattern {
-        OwnedValue::Text(s) => s.value.as_str(),
+        OwnedValue::Text(s) => s.as_str(),
         _ => {
             pattern_str = pattern.to_string();
             pattern_str.as_str()
@@ -3221,7 +3224,7 @@ fn exec_unicode(reg: &OwnedValue) -> OwnedValue {
 
 fn _to_float(reg: &OwnedValue) -> f64 {
     match reg {
-        OwnedValue::Text(x) => x.value.parse().unwrap_or(0.0),
+        OwnedValue::Text(x) => x.as_str().parse().unwrap_or(0.0),
         OwnedValue::Integer(x) => *x as f64,
         OwnedValue::Float(x) => *x,
         _ => 0.0,
@@ -3230,7 +3233,7 @@ fn _to_float(reg: &OwnedValue) -> f64 {
 
 fn exec_round(reg: &OwnedValue, precision: Option<OwnedValue>) -> OwnedValue {
     let precision = match precision {
-        Some(OwnedValue::Text(x)) => x.value.parse().unwrap_or(0.0),
+        Some(OwnedValue::Text(x)) => x.as_str().parse().unwrap_or(0.0),
         Some(OwnedValue::Integer(x)) => x as f64,
         Some(OwnedValue::Float(x)) => x,
         Some(OwnedValue::Null) => return OwnedValue::Null,
@@ -3259,7 +3262,9 @@ fn exec_trim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
             }
             _ => reg.to_owned(),
         },
-        (OwnedValue::Text(t), None) => OwnedValue::build_text(Rc::new(t.value.trim().to_string())),
+        (OwnedValue::Text(t), None) => {
+            OwnedValue::build_text(Rc::new(t.as_str().trim().to_string()))
+        }
         (reg, _) => reg.to_owned(),
     }
 }
@@ -3279,7 +3284,7 @@ fn exec_ltrim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
             _ => reg.to_owned(),
         },
         (OwnedValue::Text(t), None) => {
-            OwnedValue::build_text(Rc::new(t.value.trim_start().to_string()))
+            OwnedValue::build_text(Rc::new(t.as_str().trim_start().to_string()))
         }
         (reg, _) => reg.to_owned(),
     }
@@ -3300,7 +3305,7 @@ fn exec_rtrim(reg: &OwnedValue, pattern: Option<OwnedValue>) -> OwnedValue {
             _ => reg.to_owned(),
         },
         (OwnedValue::Text(t), None) => {
-            OwnedValue::build_text(Rc::new(t.value.trim_end().to_string()))
+            OwnedValue::build_text(Rc::new(t.as_str().trim_end().to_string()))
         }
         (reg, _) => reg.to_owned(),
     }
@@ -3310,7 +3315,7 @@ fn exec_zeroblob(req: &OwnedValue) -> OwnedValue {
     let length: i64 = match req {
         OwnedValue::Integer(i) => *i,
         OwnedValue::Float(f) => *f as i64,
-        OwnedValue::Text(s) => s.value.parse().unwrap_or(0),
+        OwnedValue::Text(s) => s.as_str().parse().unwrap_or(0),
         _ => 0,
     };
     OwnedValue::Blob(Rc::new(vec![0; length.max(0) as usize]))
@@ -3352,7 +3357,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
                 let text = String::from_utf8_lossy(b);
                 cast_text_to_real(&text)
             }
-            OwnedValue::Text(t) => cast_text_to_real(&t.value),
+            OwnedValue::Text(t) => cast_text_to_real(t.as_str()),
             OwnedValue::Integer(i) => OwnedValue::Float(*i as f64),
             OwnedValue::Float(f) => OwnedValue::Float(*f),
             _ => OwnedValue::Float(0.0),
@@ -3363,7 +3368,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
                 let text = String::from_utf8_lossy(b);
                 cast_text_to_integer(&text)
             }
-            OwnedValue::Text(t) => cast_text_to_integer(&t.value),
+            OwnedValue::Text(t) => cast_text_to_integer(t.as_str()),
             OwnedValue::Integer(i) => OwnedValue::Integer(*i),
             // A cast of a REAL value into an INTEGER results in the integer between the REAL value and zero
             // that is closest to the REAL value. If a REAL is greater than the greatest possible signed integer (+9223372036854775807)
@@ -3386,7 +3391,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
                 let text = String::from_utf8_lossy(b);
                 cast_text_to_numeric(&text)
             }
-            OwnedValue::Text(t) => cast_text_to_numeric(&t.value),
+            OwnedValue::Text(t) => cast_text_to_numeric(t.as_str()),
             OwnedValue::Integer(i) => OwnedValue::Integer(*i),
             OwnedValue::Float(f) => OwnedValue::Float(*f),
             _ => value.clone(), // TODO probably wrong
@@ -3414,13 +3419,13 @@ fn exec_replace(source: &OwnedValue, pattern: &OwnedValue, replacement: &OwnedVa
     // If any of the casts failed, panic as text casting is not expected to fail.
     match (&source, &pattern, &replacement) {
         (OwnedValue::Text(source), OwnedValue::Text(pattern), OwnedValue::Text(replacement)) => {
-            if pattern.value.is_empty() {
-                return OwnedValue::build_text(source.value.clone());
+            if pattern.as_str().is_empty() {
+                return OwnedValue::Text(source.clone());
             }
 
             let result = source
-                .value
-                .replace(pattern.value.as_str(), &replacement.value);
+                .as_str()
+                .replace(pattern.as_str(), replacement.as_str());
             OwnedValue::build_text(Rc::new(result))
         }
         _ => unreachable!("text cast should never fail"),
@@ -3567,7 +3572,7 @@ fn to_f64(reg: &OwnedValue) -> Option<f64> {
     match reg {
         OwnedValue::Integer(i) => Some(*i as f64),
         OwnedValue::Float(f) => Some(*f),
-        OwnedValue::Text(t) => t.value.parse::<f64>().ok(),
+        OwnedValue::Text(t) => t.as_str().parse::<f64>().ok(),
         OwnedValue::Agg(ctx) => to_f64(ctx.final_value()),
         _ => None,
     }
@@ -3934,7 +3939,7 @@ mod tests {
 
     #[test]
     fn test_unhex() {
-        let input = OwnedValue::build_text(Rc::new(String::from("6F")));
+        let input = OwnedValue::build_text(Rc::new(String::from("6f")));
         let expected = OwnedValue::Blob(Rc::new(vec![0x6f]));
         assert_eq!(exec_unhex(&input, None), expected);
 

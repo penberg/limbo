@@ -164,7 +164,7 @@ pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
         .iter()
         .map(|path| {
             if let OwnedValue::Text(path) = path {
-                json_path(&path.value)
+                json_path(path.as_str())
             } else {
                 crate::bail_constraint_error!("bad JSON path: {:?}", path.to_string())
             }
@@ -514,7 +514,7 @@ mod tests {
 
         let result = json_remove(&args).unwrap();
         match result {
-            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), "[1,2,4,5]"),
+            OwnedValue::Text(t) => assert_eq!(t.as_str(), "[1,2,4,5]"),
             _ => panic!("Expected Text value"),
         }
     }
@@ -529,7 +529,7 @@ mod tests {
 
         let result = json_remove(&args).unwrap();
         match result {
-            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"b":2}"#),
+            OwnedValue::Text(t) => assert_eq!(t.as_str(), r#"{"b":2}"#),
             _ => panic!("Expected Text value"),
         }
     }
@@ -543,7 +543,7 @@ mod tests {
 
         let result = json_remove(&args).unwrap();
         match result {
-            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"a":{"b":{"d":2}}}"#),
+            OwnedValue::Text(t) => assert_eq!(t.as_str(), r#"{"a":{"b":{"d":2}}}"#),
             _ => panic!("Expected Text value"),
         }
     }
@@ -557,7 +557,7 @@ mod tests {
 
         let result = json_remove(&args).unwrap();
         match result {
-            OwnedValue::Text(t) => assert_eq!(t.value.as_str(), r#"{"a":2,"a":3}"#),
+            OwnedValue::Text(t) => assert_eq!(t.as_str(), r#"{"a":2,"a":3}"#),
             _ => panic!("Expected Text value"),
         }
     }
@@ -584,7 +584,7 @@ mod tests {
         let result = json_remove(&args).unwrap();
         match result {
             OwnedValue::Text(t) => {
-                let value = t.value.as_str();
+                let value = t.as_str();
                 assert!(value.contains(r#"[1,3]"#));
                 assert!(value.contains(r#"{"x":2}"#));
             }
