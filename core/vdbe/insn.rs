@@ -639,6 +639,29 @@ pub enum Insn {
         db: usize,
         dest: usize,
     },
+    /// Read cookie number P3 from database P1 and write it into register P2
+    ReadCookie {
+        db: usize,
+        dest: usize,
+        cookie: Cookie,
+    },
+}
+
+// TODO: Add remaining cookies.
+#[derive(Description, Debug, Clone, Copy)]
+pub enum Cookie {
+    /// The schema cookie.
+    SchemaVersion = 1,
+    /// The schema format number. Supported schema formats are 1, 2, 3, and 4.
+    DatabaseFormat = 2,
+    /// Default page cache size.
+    DefaultPageCacheSize = 3,
+    /// The page number of the largest root b-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.
+    LargestRootPageNumber = 4,
+    /// The database text encoding. A value of 1 means UTF-8. A value of 2 means UTF-16le. A value of 3 means UTF-16be.
+    DatabaseTextEncoding = 5,
+    /// The "user version" as read and set by the user_version pragma.
+    UserVersion = 6,
 }
 
 fn cast_text_to_numerical(value: &str) -> OwnedValue {

@@ -41,3 +41,11 @@ do_execsql_test_on_specific_db ":memory:" pragma-page-count-table {
   CREATE TABLE foo(bar);
   PRAGMA page_count
 } {2}
+
+do_execsql_test_on_specific_db "testing/testing_user_version_10.db" pragma-user-version-user-set {
+  PRAGMA user_version
+} {10}
+
+do_execsql_test_on_specific_db ":memory:" pragma-user-version-default {
+  PRAGMA user_version
+} {0}

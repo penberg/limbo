@@ -11,7 +11,7 @@ use crate::storage::sqlite3_ondisk::{DatabaseHeader, MIN_PAGE_CACHE_SIZE};
 use crate::storage::wal::CheckpointMode;
 use crate::util::normalize_ident;
 use crate::vdbe::builder::{ProgramBuilder, ProgramBuilderOpts, QueryMode};
-use crate::vdbe::insn::Insn;
+use crate::vdbe::insn::{Cookie, Insn};
 use crate::vdbe::BranchOffset;
 use crate::{bail_parse_error, Pager};
 use std::str::FromStr;
@@ -148,6 +148,10 @@ fn update_pragma(
             query_pragma(PragmaName::PageCount, schema, None, header, program)?;
             Ok(())
         }
+        PragmaName::UserVersion => {
+            // TODO: Implement updating user_version
+            todo!("updating user_version not yet implemented")
+        }
         PragmaName::TableInfo => {
             // because we need control over the write parameter for the transaction,
             // this should be unreachable. We have to force-call query_pragma before
@@ -240,6 +244,15 @@ fn query_pragma(
                     program.emit_result_row(base_reg, 6);
                 }
             }
+        }
+        PragmaName::UserVersion => {
+            program.emit_transaction(false);
+            program.emit_insn(Insn::ReadCookie {
+                db: 0,
+                dest: register,
+                cookie: Cookie::UserVersion,
+            });
+            program.emit_result_row(register, 1);
         }
     }
 
