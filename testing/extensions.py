@@ -255,7 +255,6 @@ def test_aggregates(pipe):
         pipe, "SELECT percentile_disc(value, 0.55) from test;", validate_percentile_disc
     )
 
-
 def main():
     pipe = init_limbo()
     try:

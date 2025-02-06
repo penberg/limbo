@@ -1,0 +1,21 @@
+[package]
+name = "limbo_crypto"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+static= [ "limbo_ext/static" ]
+
+[dependencies]
+blake3 = "1.5.5"
+limbo_ext = { path = "../core", features = ["static"] }
+ring = "0.17.8"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+mimalloc = { version = "*", default-features = false }

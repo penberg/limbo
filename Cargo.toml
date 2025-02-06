@@ -20,6 +20,7 @@ members = [
     "extensions/percentile",
     "extensions/vector", 
     "extensions/time",
+    "extensions/crypto",
 ]
 exclude = ["perf/latency/limbo"]
 

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, mem};
 
 /// Error type is of type ExtError which can be
 /// either a user defined error or an error code
@@ -204,6 +204,13 @@ impl Blob {
     pub fn new(data: *const u8, size: u64) -> Self {
         Self { data, size }
     }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        if self.data.is_null() {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(self.data, self.size as usize) }
+    }
 }
 
 impl Value {
@@ -301,6 +308,29 @@ impl Value {
             let msg = txt.as_str().to_owned();
             Some((code, Some(msg)))
         }
+    }
+
+    // Return ValueData as raw bytes
+    pub fn as_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![];
+
+        unsafe {
+            match self.value_type {
+                ValueType::Integer => bytes.extend_from_slice(&self.value.int.to_le_bytes()),
+                ValueType::Float => bytes.extend_from_slice(&self.value.float.to_le_bytes()),
+                ValueType::Text => {
+                    let text = self.value.text.as_ref().expect("Invalid text pointer");
+                    bytes.extend_from_slice(text.as_str().as_bytes());
+                }
+                ValueType::Blob => {
+                    let blob = self.value.blob.as_ref().expect("Invalid blob pointer");
+                    bytes.extend_from_slice(blob.as_bytes());
+                }
+                ValueType::Error | ValueType::Null => {}
+            }
+        }
+
+        bytes
     }
 
     /// Creates a new integer Value from an i64
