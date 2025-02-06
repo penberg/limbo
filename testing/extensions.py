@@ -110,7 +110,6 @@ def validate_blob(result):
     # and assert they are valid hex digits
     return int(result, 16) is not None
 
-
 def validate_string_uuid(result):
     return len(result) == 36 and result.count("-") == 4
 
@@ -129,7 +128,6 @@ def assert_now_unixtime(result):
 
 def assert_specific_time(result):
     return result == "1736720789"
-
 
 def test_uuid(pipe):
     specific_time = "01945ca0-3189-76c0-9a8f-caf310fc8b8e"
@@ -207,7 +205,6 @@ def validate_percentile2(res):
 def validate_percentile_disc(res):
     return res == "40.0"
 
-
 def test_aggregates(pipe):
     extension_path = "./target/debug/liblimbo_percentile.so"
     # assert no function before extension loads
@@ -255,6 +252,172 @@ def test_aggregates(pipe):
         pipe, "SELECT percentile_disc(value, 0.55) from test;", validate_percentile_disc
     )
 
+# Hashes
+def validate_blake3(a):
+    return a == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+
+def validate_md5(a):
+    return a == "900150983cd24fb0d6963f7d28e17f72"
+
+def validate_sha1(a):
+    return a == "a9993e364706816aba3e25717850c26c9cd0d89d"
+
+def validate_sha256(a):
+    return a == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+def validate_sha384(a):
+    return a == "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"
+
+def validate_sha512(a):
+    return a == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+
+# Encoders and decoders
+def validate_url_encode(a):
+    return a == f"%2Fhello%3Ftext%3D%28%E0%B2%A0_%E0%B2%A0%29"
+
+def validate_url_decode(a):
+    return a == "/hello?text=(ಠ_ಠ)"
+
+def validate_hex_encode(a):
+    return a == "68656c6c6f"
+
+def validate_hex_decode(a):
+    return a == "hello"
+
+def validate_base85_encode(a):
+    return a == "BOu!rDZ"
+
+def validate_base85_decode(a):
+    return a == "hello"
+
+def validate_base32_encode(a):
+    return a == "NBSWY3DP"
+
+def validate_base32_decode(a):
+    return a == "hello"
+
+def validate_base64_encode(a):
+    return a == "aGVsbG8="
+
+def validate_base64_decode(a):
+    return a == "hello"
+
+def test_crypto(pipe):
+    extension_path = "./target/debug/liblimbo_crypto.so"
+    # assert no function before extension loads
+    run_test(
+        pipe,
+        "SELECT crypto_blake('a');",
+        returns_error,
+        "crypto_blake3 returns null when ext not loaded",
+    )
+    run_test(
+        pipe,
+        f".load {extension_path}",
+        returns_null,
+        "load extension command works properly",
+    )
+    # Hashing and Decode
+    run_test(
+        pipe,
+        "SELECT crypto_encode(crypto_blake3('abc'), 'hex');",
+        validate_blake3,
+        "blake3 should encrypt correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode(crypto_md5('abc'), 'hex');",
+        validate_md5,
+        "md5 should encrypt correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode(crypto_sha1('abc'), 'hex');",
+        validate_sha1,
+        "sha1 should encrypt correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode(crypto_sha256('abc'), 'hex');",
+        validate_sha256,
+        "sha256 should encrypt correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode(crypto_sha384('abc'), 'hex');",
+        validate_sha384,
+        "sha384 should encrypt correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode(crypto_sha512('abc'), 'hex');",
+        validate_sha512,
+        "sha512 should encrypt correctly"
+    )  
+
+    # Encoding and Decoding
+    run_test(
+        pipe,
+        "SELECT crypto_encode('hello', 'base32');",
+        validate_base32_encode,
+        "base32 should encode correctly"
+    )  
+    run_test(
+        pipe,
+        "SELECT crypto_decode('NBSWY3DP', 'base32');",
+        validate_base32_decode,
+        "base32 should decode correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode('hello', 'base64');",
+        validate_base64_encode,
+        "base64 should encode correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_decode('aGVsbG8=', 'base64');",
+        validate_base64_decode,
+        "base64 should decode correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_encode('hello', 'base85');",
+        validate_base85_encode,
+        "base85 should encode correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_decode('BOu!rDZ', 'base85');",
+        validate_base85_decode,
+        "base85 should decode correctly"
+    )
+
+    run_test(
+        pipe,
+        "SELECT crypto_encode('hello', 'hex');",
+        validate_hex_encode,
+        "hex should encode correctly"
+    )
+    run_test(
+        pipe,
+        "SELECT crypto_decode('68656c6c6f', 'hex');",
+        validate_hex_decode,
+        "hex should decode correctly"
+    )
+    
+    run_test(
+        pipe,
+        "SELECT crypto_encode('/hello?text=(ಠ_ಠ)', 'url');",
+        validate_url_encode,
+        "url should encode correctly"
+    )
+    run_test(
+        pipe,
+        f"SELECT crypto_decode('%2Fhello%3Ftext%3D%28%E0%B2%A0_%E0%B2%A0%29', 'url');",
+        validate_url_decode,
+        "url should decode correctly"
+    )
 
 def main():
     pipe = init_limbo()
@@ -262,6 +425,7 @@ def main():
         test_regexp(pipe)
         test_uuid(pipe)
         test_aggregates(pipe)
+        test_crypto(pipe)
     except Exception as e:
         print(f"Test FAILED: {e}")
         pipe.terminate()

@@ -92,6 +92,10 @@ impl Database {
         if unsafe { !limbo_time::register_extension_static(&ext_api).is_ok() } {
             return Err("Failed to register time extension".to_string());
         }
+        #[cfg(feature = "crypto")]
+        if unsafe { !limbo_crypto::register_extension_static(&ext_api).is_ok() } {
+            return Err("Failed to register crypto extension".to_string());
+        }
         Ok(())
     }
 }
