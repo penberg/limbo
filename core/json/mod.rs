@@ -12,7 +12,7 @@ use crate::json::error::Error as JsonError;
 pub use crate::json::json_operations::{json_patch, json_remove};
 use crate::json::json_path::{json_path, JsonPath, PathElement};
 pub use crate::json::ser::to_string;
-use crate::types::{LimboText, OwnedValue, TextSubtype};
+use crate::types::{OwnedValue, Text, TextSubtype};
 use indexmap::IndexMap;
 use jsonb::Error as JsonbError;
 use ser::to_string_pretty;
@@ -47,13 +47,13 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
                 None => to_string(&json_val)?,
             };
 
-            Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+            Ok(OwnedValue::Text(Text::json(Rc::new(json))))
         }
         OwnedValue::Blob(b) => {
             // TODO: use get_json_value after we implement a single Struct
             //   to represent both JSON and JSONB
             if let Ok(json) = jsonb::from_slice(b) {
-                Ok(OwnedValue::Text(LimboText::json(Rc::new(json.to_string()))))
+                Ok(OwnedValue::Text(Text::json(Rc::new(json.to_string()))))
             } else {
                 crate::bail_parse_error!("malformed JSON");
             }
@@ -66,7 +66,7 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
                 None => to_string(&json_val)?,
             };
 
-            Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+            Ok(OwnedValue::Text(Text::json(Rc::new(json))))
         }
     }
 }
@@ -130,7 +130,7 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     }
 
     s.push(']');
-    Ok(OwnedValue::Text(LimboText::json(Rc::new(s))))
+    Ok(OwnedValue::Text(Text::json(Rc::new(s))))
 }
 
 pub fn json_array_length(
@@ -166,7 +166,7 @@ pub fn json_set(json: &OwnedValue, values: &[OwnedValue]) -> crate::Result<Owned
 
                 if let Some(path) = path {
                     let new_value = match value {
-                        OwnedValue::Text(LimboText {
+                        OwnedValue::Text(Text {
                             value,
                             subtype: TextSubtype::Text,
                         }) => Val::String(value.to_string()),
@@ -207,7 +207,7 @@ pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Resul
     if let Some(val) = extracted {
         let json = to_string(val)?;
 
-        Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+        Ok(OwnedValue::Text(Text::json(Rc::new(json))))
     } else {
         Ok(OwnedValue::Null)
     }
@@ -271,7 +271,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
     result.pop(); // remove the final comma
     result.push(']');
 
-    Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+    Ok(OwnedValue::Text(Text::json(Rc::new(result))))
 }
 
 /// Returns a value with type defined by SQLite documentation:
@@ -298,13 +298,13 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
                 Ok(OwnedValue::Integer(0))
             }
         }
-        Val::String(s) => Ok(OwnedValue::Text(LimboText::new(Rc::new(s.clone())))),
+        Val::String(s) => Ok(OwnedValue::Text(Text::from_str(s))),
         _ => {
             let json = to_string(&extracted)?;
             if all_as_db {
-                Ok(OwnedValue::Text(LimboText::new(Rc::new(json))))
+                Ok(OwnedValue::Text(Text::new(Rc::new(json))))
             } else {
-                Ok(OwnedValue::Text(LimboText::json(Rc::new(json))))
+                Ok(OwnedValue::Text(Text::json(Rc::new(json))))
             }
         }
     }
@@ -366,7 +366,7 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
         Val::Removed => unreachable!(),
     };
 
-    Ok(OwnedValue::Text(LimboText::json(Rc::new(val.to_string()))))
+    Ok(OwnedValue::Text(Text::json(Rc::new(val.to_string()))))
 }
 
 /// Returns the value at the given JSON path. If the path does not exist, it returns None.
@@ -651,7 +651,7 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
         .collect::<Result<IndexMap<String, Val>, _>>()?;
 
     let result = crate::json::to_string(&value_map)?;
-    Ok(OwnedValue::Text(LimboText::json(Rc::new(result))))
+    Ok(OwnedValue::Text(Text::json(Rc::new(result))))
 }
 
 pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -804,7 +804,7 @@ mod tests {
     #[test]
     fn test_json_array_simple() {
         let text = OwnedValue::build_text(Rc::new("value1".to_string()));
-        let json = OwnedValue::Text(LimboText::json(Rc::new("\"value2\"".to_string())));
+        let json = OwnedValue::Text(Text::json(Rc::new("\"value2\"".to_string())));
         let input = vec![text, json, OwnedValue::Integer(1), OwnedValue::Float(1.1)];
 
         let result = json_array(&input).unwrap();
@@ -1072,7 +1072,7 @@ mod tests {
         let text_key = OwnedValue::build_text(Rc::new("text_key".to_string()));
         let text_value = OwnedValue::build_text(Rc::new("text_value".to_string()));
         let json_key = OwnedValue::build_text(Rc::new("json_key".to_string()));
-        let json_value = OwnedValue::Text(LimboText::json(Rc::new(
+        let json_value = OwnedValue::Text(Text::json(Rc::new(
             r#"{"json":"value","number":1}"#.to_string(),
         )));
         let integer_key = OwnedValue::build_text(Rc::new("integer_key".to_string()));
@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn test_json_object_json_value_is_rendered_as_json() {
         let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::Text(LimboText::json(Rc::new(r#"{"json":"value"}"#.to_string())));
+        let value = OwnedValue::Text(Text::json(Rc::new(r#"{"json":"value"}"#.to_string())));
         let input = vec![key, value];
 
         let result = json_object(&input).unwrap();
@@ -1121,7 +1121,7 @@ mod tests {
     #[test]
     fn test_json_object_json_text_value_is_rendered_as_regular_text() {
         let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::Text(LimboText::new(Rc::new(r#"{"json":"value"}"#.to_string())));
+        let value = OwnedValue::Text(Text::new(Rc::new(r#"{"json":"value"}"#.to_string())));
         let input = vec![key, value];
 
         let result = json_object(&input).unwrap();
@@ -1301,7 +1301,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_root_strict() {
-        let path = OwnedValue::Text(LimboText {
+        let path = OwnedValue::Text(Text {
             value: Rc::new("$".to_string()),
             subtype: TextSubtype::Text,
         });
@@ -1321,7 +1321,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_root_non_strict() {
-        let path = OwnedValue::Text(LimboText {
+        let path = OwnedValue::Text(Text {
             value: Rc::new("$".to_string()),
             subtype: TextSubtype::Text,
         });
@@ -1341,7 +1341,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_named_strict() {
-        let path = OwnedValue::Text(LimboText {
+        let path = OwnedValue::Text(Text {
             value: Rc::new("field".to_string()),
             subtype: TextSubtype::Text,
         });
@@ -1351,7 +1351,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_named_non_strict() {
-        let path = OwnedValue::Text(LimboText {
+        let path = OwnedValue::Text(Text {
             value: Rc::new("field".to_string()),
             subtype: TextSubtype::Text,
         });

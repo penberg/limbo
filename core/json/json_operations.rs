@@ -188,16 +188,16 @@ pub fn json_remove(args: &[OwnedValue]) -> crate::Result<OwnedValue> {
 mod tests {
     use std::rc::Rc;
 
-    use crate::types::LimboText;
+    use crate::types::Text;
 
     use super::*;
 
     fn create_text(s: &str) -> OwnedValue {
-        OwnedValue::Text(LimboText::new(Rc::new(s.to_string())))
+        OwnedValue::Text(Text::from_str(s))
     }
 
     fn create_json(s: &str) -> OwnedValue {
-        OwnedValue::Text(LimboText::json(Rc::new(s.to_string())))
+        OwnedValue::Text(Text::json(Rc::new(s.to_string())))
     }
 
     #[test]
