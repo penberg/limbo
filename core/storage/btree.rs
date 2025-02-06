@@ -1894,6 +1894,10 @@ impl BTreeCursor {
         let id = page.get().id;
         id as u32
     }
+
+    pub fn table_id(&self) -> usize {
+        self.root_page
+    }
 }
 
 impl PageStack {

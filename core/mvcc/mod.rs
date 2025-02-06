@@ -37,6 +37,8 @@ pub mod database;
 pub mod errors;
 pub mod persistent_storage;
 
+pub use clock::LocalClock;
+pub use database::MvStore;
 #[cfg(test)]
 mod tests {
     use crate::mvcc::clock::LocalClock;

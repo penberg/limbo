@@ -44,6 +44,7 @@ use crate::util::parse_schema_rows;
 use crate::vdbe::builder::CursorType;
 use crate::vdbe::insn::Insn;
 use crate::vector::{vector32, vector64, vector_distance_cos, vector_extract};
+use crate::MvStore;
 #[cfg(feature = "json")]
 use crate::{
     function::JsonFunc, json::get_json, json::is_json_valid, json::json_array,
@@ -326,6 +327,7 @@ pub struct ProgramState {
     deferred_seek: Option<(CursorID, CursorID)>,
     ended_coroutine: Bitfield<4>, // flag to indicate that a coroutine has ended (key is the yield register. currently we assume that the yield register is always between 0-255, YOLO)
     regex_cache: RegexCache,
+    mv_tx_id: Option<crate::mvcc::database::TxID>,
     interrupted: bool,
     parameters: HashMap<NonZero<usize>, OwnedValue>,
 }
@@ -344,6 +346,7 @@ impl ProgramState {
             deferred_seek: None,
             ended_coroutine: Bitfield::new(),
             regex_cache: RegexCache::new(),
+            mv_tx_id: None,
             interrupted: false,
             parameters: HashMap::new(),
         }
@@ -437,7 +440,12 @@ impl Program {
         }
     }
 
-    pub fn step(&self, state: &mut ProgramState, pager: Rc<Pager>) -> Result<StepResult> {
+    pub fn step(
+        &self,
+        state: &mut ProgramState,
+        mv_store: Option<&MvStore>,
+        pager: Rc<Pager>,
+    ) -> Result<StepResult> {
         loop {
             if state.is_interrupted() {
                 return Ok(StepResult::Interrupt);
@@ -1126,67 +1134,88 @@ impl Program {
                             )));
                         }
                     }
-                    log::trace!("Halt auto_commit {}", self.auto_commit);
-                    let connection = self
-                        .connection
-                        .upgrade()
-                        .expect("only weak ref to connection?");
-                    let current_state = connection.transaction_state.borrow().clone();
-                    if current_state == TransactionState::Read {
-                        pager.end_read_tx()?;
-                        return Ok(StepResult::Done);
-                    }
-                    return if self.auto_commit {
-                        match pager.end_tx() {
-                            Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
-                            Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
-                                if self.change_cnt_on {
-                                    if let Some(conn) = self.connection.upgrade() {
-                                        conn.set_changes(self.n_change.get());
-                                    }
-                                }
-                                Ok(StepResult::Done)
-                            }
-                            Err(e) => Err(e),
+                    if let Some(mv_store) = mv_store {
+                        let conn = self.connection.upgrade().unwrap();
+                        let mut mv_transactions = conn.mv_transactions.borrow_mut();
+                        for tx_id in mv_transactions.iter() {
+                            mv_store.commit_tx(*tx_id).unwrap();
                         }
+                        mv_transactions.clear();
+                        return Ok(StepResult::Done);
                     } else {
-                        if self.change_cnt_on {
-                            if let Some(conn) = self.connection.upgrade() {
-                                conn.set_changes(self.n_change.get());
-                            }
+                        log::trace!("Halt auto_commit {}", self.auto_commit);
+                        let connection = self
+                            .connection
+                            .upgrade()
+                            .expect("only weak ref to connection?");
+                        let current_state = connection.transaction_state.borrow().clone();
+                        if current_state == TransactionState::Read {
+                            pager.end_read_tx()?;
+                            return Ok(StepResult::Done);
                         }
-                        return Ok(StepResult::Done);
-                    };
+                        return if self.auto_commit {
+                            match pager.end_tx() {
+                                Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
+                                Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
+                                    if self.change_cnt_on {
+                                        if let Some(conn) = self.connection.upgrade() {
+                                            conn.set_changes(self.n_change.get());
+                                        }
+                                    }
+                                    Ok(StepResult::Done)
+                                }
+                                Err(e) => Err(e),
+                            }
+                        } else {
+                            if self.change_cnt_on {
+                                if let Some(conn) = self.connection.upgrade() {
+                                    conn.set_changes(self.n_change.get());
+                                }
+                            }
+                            return Ok(StepResult::Done);
+                        };
+                    }
                 }
                 Insn::Transaction { write } => {
-                    let connection = self.connection.upgrade().unwrap();
-                    let current_state = connection.transaction_state.borrow().clone();
-                    let (new_transaction_state, updated) = match (&current_state, write) {
-                        (TransactionState::Write, true) => (TransactionState::Write, false),
-                        (TransactionState::Write, false) => (TransactionState::Write, false),
-                        (TransactionState::Read, true) => (TransactionState::Write, true),
-                        (TransactionState::Read, false) => (TransactionState::Read, false),
-                        (TransactionState::None, true) => (TransactionState::Write, true),
-                        (TransactionState::None, false) => (TransactionState::Read, true),
-                    };
+                    if let Some(mv_store) = mv_store {
+                        let tx_id = mv_store.begin_tx();
+                        self.connection
+                            .upgrade()
+                            .unwrap()
+                            .mv_transactions
+                            .borrow_mut()
+                            .push(tx_id);
+                        state.mv_tx_id = Some(tx_id);
+                    } else {
+                        let connection = self.connection.upgrade().unwrap();
+                        let current_state = connection.transaction_state.borrow().clone();
+                        let (new_transaction_state, updated) = match (&current_state, write) {
+                            (TransactionState::Write, true) => (TransactionState::Write, false),
+                            (TransactionState::Write, false) => (TransactionState::Write, false),
+                            (TransactionState::Read, true) => (TransactionState::Write, true),
+                            (TransactionState::Read, false) => (TransactionState::Read, false),
+                            (TransactionState::None, true) => (TransactionState::Write, true),
+                            (TransactionState::None, false) => (TransactionState::Read, true),
+                        };
 
-                    if updated && matches!(current_state, TransactionState::None) {
-                        if let LimboResult::Busy = pager.begin_read_tx()? {
-                            log::trace!("begin_read_tx busy");
-                            return Ok(StepResult::Busy);
+                        if updated && matches!(current_state, TransactionState::None) {
+                            if let LimboResult::Busy = pager.begin_read_tx()? {
+                                log::trace!("begin_read_tx busy");
+                                return Ok(StepResult::Busy);
+                            }
                         }
-                    }
 
-                    if updated && matches!(new_transaction_state, TransactionState::Write) {
-                        if let LimboResult::Busy = pager.begin_write_tx()? {
-                            log::trace!("begin_write_tx busy");
-                            return Ok(StepResult::Busy);
+                        if updated && matches!(new_transaction_state, TransactionState::Write) {
+                            if let LimboResult::Busy = pager.begin_write_tx()? {
+                                log::trace!("begin_write_tx busy");
+                                return Ok(StepResult::Busy);
+                            }
                         }
-                    }
-                    if updated {
-                        connection
-                            .transaction_state
-                            .replace(new_transaction_state.clone());
+                        if updated {
+                            connection
+                                .transaction_state
+                                .replace(new_transaction_state.clone());
+                        }
                     }
                     state.pc += 1;
                 }
@@ -2446,14 +2475,38 @@ impl Program {
                     record_reg,
                     flag: _,
                 } => {
-                    let mut cursors = state.cursors.borrow_mut();
-                    let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
-                    let record = match &state.registers[*record_reg] {
-                        OwnedValue::Record(r) => r,
-                        _ => unreachable!("Not a record! Cannot insert a non record value."),
-                    };
-                    let key = &state.registers[*key_reg];
-                    return_if_io!(cursor.insert(key, record, true));
+                    if let (Some(mv_store), Some(tx_id)) = (mv_store, state.mv_tx_id) {
+                        let record = match &state.registers[*record_reg] {
+                            OwnedValue::Record(r) => r,
+                            _ => unreachable!("Not a record! Cannot insert a non record value."),
+                        };
+                        let key = &state.registers[*key_reg];
+                        let int_key = match key {
+                            OwnedValue::Integer(i) => i,
+                            _ => unreachable!("btree tables are indexed by integers!"),
+                        };
+                        let cursors = state.cursors.borrow();
+                        let cursor = &cursors[*cursor].as_ref().unwrap();
+                        let table_id = match cursor {
+                            Cursor::Table(table) => table.table_id(),
+                            _ => unreachable!("Expected a table cursor"),
+                        };
+                        let row_id =
+                            crate::mvcc::database::RowID::new(table_id as u64, *int_key as u64);
+                        let mut record_buf = Vec::new();
+                        record.serialize(&mut record_buf);
+                        let row = crate::mvcc::database::Row::new(row_id, record_buf);
+                        mv_store.insert(tx_id, row).unwrap();
+                    } else {
+                        let mut cursors = state.cursors.borrow_mut();
+                        let cursor = get_cursor_as_table_mut(&mut cursors, *cursor);
+                        let record = match &state.registers[*record_reg] {
+                            OwnedValue::Record(r) => r,
+                            _ => unreachable!("Not a record! Cannot insert a non record value."),
+                        };
+                        let key = &state.registers[*key_reg];
+                        return_if_io!(cursor.insert(key, record, true));
+                    }
                     state.pc += 1;
                 }
                 Insn::InsertAwait { cursor_id } => {
