@@ -28,9 +28,9 @@ pub fn translate_select(
 
     let mut program = ProgramBuilder::new(ProgramBuilderOpts {
         query_mode,
-        num_cursors: count_plan_required_cursors(&select),
-        approx_num_insns: estimate_num_instructions(&select),
-        approx_num_labels: estimate_num_labels(&select),
+        num_cursors: count_plan_required_cursors(select),
+        approx_num_insns: estimate_num_instructions(select),
+        approx_num_labels: estimate_num_labels(select),
     });
     emit_program(&mut program, select_plan, syms)?;
     Ok(program)

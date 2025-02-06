@@ -3,7 +3,7 @@ use sqlite3_parser::ast::{self, UnaryOperator};
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;
 use crate::function::{Func, FuncCtx, MathFuncArity, ScalarFunc, VectorFunc};
-use crate::schema::Type;
+use crate::schema::{Table, Type};
 use crate::util::normalize_ident;
 use crate::vdbe::{
     builder::ProgramBuilder,
@@ -1823,24 +1823,38 @@ pub fn translate_expr(
             match table_reference.op {
                 // If we are reading a column from a table, we find the cursor that corresponds to
                 // the table and read the column from the cursor.
-                Operation::Scan { .. } | Operation::Search(_) => {
-                    let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
-                    if *is_rowid_alias {
-                        program.emit_insn(Insn::RowId {
-                            cursor_id,
-                            dest: target_register,
-                        });
-                    } else {
-                        program.emit_insn(Insn::Column {
+                Operation::Scan { .. } | Operation::Search(_) => match &table_reference.table {
+                    Table::BTree(_) => {
+                        let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
+                        if *is_rowid_alias {
+                            program.emit_insn(Insn::RowId {
+                                cursor_id,
+                                dest: target_register,
+                            });
+                        } else {
+                            program.emit_insn(Insn::Column {
+                                cursor_id,
+                                column: *column,
+                                dest: target_register,
+                            });
+                        }
+                        let Some(column) = table_reference.table.get_column_at(*column) else {
+                            crate::bail_parse_error!("column index out of bounds");
+                        };
+                        maybe_apply_affinity(column.ty, target_register, program);
+                        Ok(target_register)
+                    }
+                    Table::Virtual(_) => {
+                        let cursor_id = program.resolve_cursor_id(&table_reference.identifier);
+                        program.emit_insn(Insn::VColumn {
                             cursor_id,
                             column: *column,
                             dest: target_register,
                         });
+                        Ok(target_register)
                     }
-                    let column = table_reference.table.get_column_at(*column);
-                    maybe_apply_affinity(column.ty, target_register, program);
-                    Ok(target_register)
-                }
+                    _ => unreachable!(),
+                },
                 // If we are reading a column from a subquery, we instead copy the column from the
                 // subquery's result registers.
                 Operation::Subquery {

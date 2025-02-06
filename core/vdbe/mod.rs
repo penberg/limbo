@@ -65,6 +65,7 @@ use sorter::Sorter;
 use std::borrow::BorrowMut;
 use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
+use std::ffi::c_void;
 use std::num::NonZero;
 use std::rc::{Rc, Weak};
 
@@ -267,6 +268,19 @@ fn get_cursor_as_sorter_mut<'long, 'short>(
     cursor
 }
 
+fn get_cursor_as_virtual_mut<'long, 'short>(
+    cursors: &'short mut RefMut<'long, Vec<Option<Cursor>>>,
+    cursor_id: CursorID,
+) -> &'short mut VTabOpaqueCursor {
+    let cursor = cursors
+        .get_mut(cursor_id)
+        .expect("cursor id out of bounds")
+        .as_mut()
+        .expect("cursor not allocated")
+        .as_virtual_mut();
+    cursor
+}
+
 struct Bitfield<const N: usize>([u64; N]);
 
 impl<const N: usize> Bitfield<N> {
@@ -287,6 +301,18 @@ impl<const N: usize> Bitfield<N> {
     fn get(&self, bit: usize) -> bool {
         assert!(bit < N * 64, "bit out of bounds");
         (self.0[bit / 64] & (1 << (bit % 64))) != 0
+    }
+}
+
+pub struct VTabOpaqueCursor(*mut c_void);
+
+impl VTabOpaqueCursor {
+    pub fn new(cursor: *mut c_void) -> Self {
+        Self(cursor)
+    }
+
+    pub fn as_ptr(&self) -> *mut c_void {
+        self.0
     }
 }
 
@@ -370,6 +396,7 @@ macro_rules! must_be_btree_cursor {
             CursorType::BTreeIndex(_) => get_cursor_as_index_mut(&mut $cursors, $cursor_id),
             CursorType::Pseudo(_) => panic!("{} on pseudo cursor", $insn_name),
             CursorType::Sorter => panic!("{} on sorter cursor", $insn_name),
+            CursorType::VirtualTable(_) => panic!("{} on virtual table cursor", $insn_name),
         };
         cursor
     }};
@@ -826,11 +853,78 @@ impl Program {
                         CursorType::Sorter => {
                             panic!("OpenReadAsync on sorter cursor");
                         }
+                        CursorType::VirtualTable(_) => {
+                            panic!("OpenReadAsync on virtual table cursor, use Insn::VOpenAsync instead");
+                        }
                     }
                     state.pc += 1;
                 }
                 Insn::OpenReadAwait => {
                     state.pc += 1;
+                }
+                Insn::VOpenAsync { cursor_id } => {
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let CursorType::VirtualTable(virtual_table) = cursor_type else {
+                        panic!("VOpenAsync on non-virtual table cursor");
+                    };
+                    let cursor = virtual_table.open();
+                    state
+                        .cursors
+                        .borrow_mut()
+                        .insert(*cursor_id, Some(Cursor::Virtual(cursor)));
+                    state.pc += 1;
+                }
+                Insn::VOpenAwait => {
+                    state.pc += 1;
+                }
+                Insn::VFilter {
+                    cursor_id,
+                    arg_count,
+                    args_reg,
+                } => {
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let CursorType::VirtualTable(virtual_table) = cursor_type else {
+                        panic!("VFilter on non-virtual table cursor");
+                    };
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = get_cursor_as_virtual_mut(&mut cursors, *cursor_id);
+                    let mut args = Vec::new();
+                    for i in 0..*arg_count {
+                        args.push(state.registers[args_reg + i].clone());
+                    }
+                    virtual_table.filter(cursor, *arg_count, args)?;
+                    state.pc += 1;
+                }
+                Insn::VColumn {
+                    cursor_id,
+                    column,
+                    dest,
+                } => {
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let CursorType::VirtualTable(virtual_table) = cursor_type else {
+                        panic!("VColumn on non-virtual table cursor");
+                    };
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = get_cursor_as_virtual_mut(&mut cursors, *cursor_id);
+                    state.registers[*dest] = virtual_table.column(cursor, *column)?;
+                    state.pc += 1;
+                }
+                Insn::VNext {
+                    cursor_id,
+                    pc_if_next,
+                } => {
+                    let (_, cursor_type) = self.cursor_ref.get(*cursor_id).unwrap();
+                    let CursorType::VirtualTable(virtual_table) = cursor_type else {
+                        panic!("VNextAsync on non-virtual table cursor");
+                    };
+                    let mut cursors = state.cursors.borrow_mut();
+                    let cursor = get_cursor_as_virtual_mut(&mut cursors, *cursor_id);
+                    let has_more = virtual_table.next(cursor)?;
+                    if has_more {
+                        state.pc = pc_if_next.to_offset_int();
+                    } else {
+                        state.pc += 1;
+                    }
                 }
                 Insn::OpenPseudo {
                     cursor_id,
@@ -942,6 +1036,11 @@ impl Program {
                             } else {
                                 state.registers[*dest] = OwnedValue::Null;
                             }
+                        }
+                        CursorType::VirtualTable(_) => {
+                            panic!(
+                                "Insn::Column on virtual table cursor, use Insn::VColumn instead"
+                            );
                         }
                     }
 

@@ -1,3 +1,4 @@
+use crate::VirtualTable;
 use crate::{util::normalize_ident, Result};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
@@ -47,6 +48,7 @@ impl Schema {
 pub enum Table {
     BTree(Rc<BTreeTable>),
     Pseudo(Rc<PseudoTable>),
+    Virtual(Rc<VirtualTable>),
 }
 
 impl Table {
@@ -54,6 +56,7 @@ impl Table {
         match self {
             Table::BTree(table) => table.root_page,
             Table::Pseudo(_) => unimplemented!(),
+            Table::Virtual(_) => unimplemented!(),
         }
     }
 
@@ -61,19 +64,15 @@ impl Table {
         match self {
             Self::BTree(table) => &table.name,
             Self::Pseudo(_) => "",
+            Self::Virtual(table) => &table.name,
         }
     }
 
-    pub fn get_column_at(&self, index: usize) -> &Column {
+    pub fn get_column_at(&self, index: usize) -> Option<&Column> {
         match self {
-            Self::BTree(table) => table
-                .columns
-                .get(index)
-                .expect("column index out of bounds"),
-            Self::Pseudo(table) => table
-                .columns
-                .get(index)
-                .expect("column index out of bounds"),
+            Self::BTree(table) => table.columns.get(index),
+            Self::Pseudo(table) => table.columns.get(index),
+            Self::Virtual(table) => table.columns.get(index),
         }
     }
 
@@ -81,6 +80,7 @@ impl Table {
         match self {
             Self::BTree(table) => &table.columns,
             Self::Pseudo(table) => &table.columns,
+            Self::Virtual(table) => &table.columns,
         }
     }
 
@@ -88,6 +88,14 @@ impl Table {
         match self {
             Self::BTree(table) => Some(table.clone()),
             Self::Pseudo(_) => None,
+            Self::Virtual(_) => None,
+        }
+    }
+
+    pub fn virtual_table(&self) -> Option<Rc<VirtualTable>> {
+        match self {
+            Self::Virtual(table) => Some(table.clone()),
+            _ => None,
         }
     }
 }
@@ -97,6 +105,7 @@ impl PartialEq for Table {
         match (self, other) {
             (Self::BTree(a), Self::BTree(b)) => Rc::ptr_eq(a, b),
             (Self::Pseudo(a), Self::Pseudo(b)) => Rc::ptr_eq(a, b),
+            (Self::Virtual(a), Self::Virtual(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -155,7 +164,7 @@ impl BTreeTable {
                 sql.push_str(",\n");
             }
             sql.push_str("  ");
-            sql.push_str(&column.name.as_ref().expect("column name is None"));
+            sql.push_str(column.name.as_ref().expect("column name is None"));
             sql.push(' ');
             sql.push_str(&column.ty.to_string());
         }

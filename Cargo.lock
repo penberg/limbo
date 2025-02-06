@@ -1616,6 +1616,7 @@ dependencies = [
  "limbo_macros",
  "limbo_percentile",
  "limbo_regexp",
+ "limbo_series",
  "limbo_time",
  "limbo_uuid",
  "log",
@@ -1699,6 +1700,15 @@ dependencies = [
  "log",
  "mimalloc",
  "regex",
+]
+
+[[package]]
+name = "limbo_series"
+version = "0.0.14"
+dependencies = [
+ "limbo_ext",
+ "log",
+ "mimalloc",
 ]
 
 [[package]]

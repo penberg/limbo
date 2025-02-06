@@ -9,6 +9,7 @@ use crate::{
     function::AggFunc,
     schema::{BTreeTable, Column, Index, Table},
     vdbe::BranchOffset,
+    VirtualTable,
 };
 use crate::{
     schema::{PseudoTable, Type},
@@ -199,9 +200,6 @@ pub struct TableReference {
     pub join_info: Option<JoinInfo>,
 }
 
-/**
-  A SourceOperator is a reference in the query plan that reads data from a table.
-*/
 #[derive(Clone, Debug)]
 pub enum Operation {
     // Scan operation
@@ -229,7 +227,16 @@ pub enum Operation {
 impl TableReference {
     /// Returns the btree table for this table reference, if it is a BTreeTable.
     pub fn btree(&self) -> Option<Rc<BTreeTable>> {
-        self.table.btree()
+        match &self.table {
+            Table::BTree(_) => self.table.btree(),
+            _ => None,
+        }
+    }
+    pub fn virtual_table(&self) -> Option<Rc<VirtualTable>> {
+        match &self.table {
+            Table::Virtual(_) => self.table.virtual_table(),
+            _ => None,
+        }
     }
 
     /// Creates a new TableReference for a subquery.
