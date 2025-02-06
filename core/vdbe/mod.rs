@@ -37,7 +37,7 @@ use crate::storage::wal::CheckpointResult;
 use crate::storage::{btree::BTreeCursor, pager::Pager};
 use crate::translate::plan::{ResultSetColumn, TableReference};
 use crate::types::{
-    AggContext, Cursor, CursorResult, ExternalAggState, OwnedRecord, OwnedValue, SeekKey, SeekOp,
+    AggContext, Cursor, CursorResult, ExternalAggState, OwnedValue, Record, SeekKey, SeekOp,
 };
 use crate::util::parse_schema_rows;
 use crate::vdbe::builder::CursorType;
@@ -298,7 +298,7 @@ pub struct ProgramState {
     pub pc: InsnReference,
     cursors: RefCell<Vec<Option<Cursor>>>,
     registers: Vec<OwnedValue>,
-    pub(crate) result_row: Option<OwnedRecord>,
+    pub(crate) result_row: Option<Record>,
     last_compare: Option<std::cmp::Ordering>,
     deferred_seek: Option<(CursorID, CursorID)>,
     ended_coroutine: Bitfield<4>, // flag to indicate that a coroutine has ended (key is the yield register. currently we assume that the yield register is always between 0-255, YOLO)
@@ -1208,7 +1208,7 @@ impl Program {
                     let mut cursors = state.cursors.borrow_mut();
                     if *is_index {
                         let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
-                        let record_from_regs: OwnedRecord =
+                        let record_from_regs: Record =
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let found = return_if_io!(
                             cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GE)
@@ -1254,7 +1254,7 @@ impl Program {
                     let mut cursors = state.cursors.borrow_mut();
                     if *is_index {
                         let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
-                        let record_from_regs: OwnedRecord =
+                        let record_from_regs: Record =
                             make_owned_record(&state.registers, start_reg, num_regs);
                         let found = return_if_io!(
                             cursor.seek(SeekKey::IndexKey(&record_from_regs), SeekOp::GT)
@@ -1298,7 +1298,7 @@ impl Program {
                     assert!(target_pc.is_offset());
                     let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
-                    let record_from_regs: OwnedRecord =
+                    let record_from_regs: Record =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
                         // omit the rowid from the idx_record, which is the last value
@@ -1322,7 +1322,7 @@ impl Program {
                     assert!(target_pc.is_offset());
                     let mut cursors = state.cursors.borrow_mut();
                     let cursor = get_cursor_as_index_mut(&mut cursors, *cursor_id);
-                    let record_from_regs: OwnedRecord =
+                    let record_from_regs: Record =
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
                         // omit the rowid from the idx_record, which is the last value
@@ -2655,12 +2655,12 @@ fn get_new_rowid<R: Rng>(cursor: &mut BTreeCursor, mut rng: R) -> Result<CursorR
     Ok(CursorResult::Ok(rowid.try_into().unwrap()))
 }
 
-fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize) -> OwnedRecord {
+fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize) -> Record {
     let mut values = Vec::with_capacity(*count);
     for r in registers.iter().skip(*start_reg).take(*count) {
         values.push(r.clone())
     }
-    OwnedRecord::new(values)
+    Record::new(values)
 }
 
 fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {

@@ -85,7 +85,7 @@ pub enum OwnedValue {
     Text(Text),
     Blob(Rc<Vec<u8>>),
     Agg(Box<AggContext>), // TODO(pere): make this without Box. Currently this might cause cache miss but let's leave it for future analysis
-    Record(OwnedRecord),
+    Record(Record),
 }
 
 impl OwnedValue {
@@ -520,11 +520,11 @@ impl<'a> FromValue<'a> for &'a str {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct OwnedRecord {
+pub struct Record {
     pub values: Vec<OwnedValue>,
 }
 
-impl OwnedRecord {
+impl Record {
     pub fn get<'a, T: FromValue<'a> + 'a>(&'a self, idx: usize) -> Result<T> {
         let value = &self.values[idx];
         T::from_value(value)
@@ -604,7 +604,7 @@ impl From<SerialType> for u64 {
     }
 }
 
-impl OwnedRecord {
+impl Record {
     pub fn new(values: Vec<OwnedValue>) -> Self {
         Self { values }
     }
@@ -733,7 +733,7 @@ pub enum SeekOp {
 #[derive(Clone, PartialEq, Debug)]
 pub enum SeekKey<'a> {
     TableRowId(u64),
-    IndexKey(&'a OwnedRecord),
+    IndexKey(&'a Record),
 }
 
 #[cfg(test)]
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_serialize_null() {
-        let record = OwnedRecord::new(vec![OwnedValue::Null]);
+        let record = Record::new(vec![OwnedValue::Null]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_serialize_integers() {
-        let record = OwnedRecord::new(vec![
+        let record = Record::new(vec![
             OwnedValue::Integer(42),                // Should use SERIAL_TYPE_I8
             OwnedValue::Integer(1000),              // Should use SERIAL_TYPE_I16
             OwnedValue::Integer(1_000_000),         // Should use SERIAL_TYPE_I24
@@ -835,7 +835,7 @@ mod tests {
     #[test]
     fn test_serialize_float() {
         #[warn(clippy::approx_constant)]
-        let record = OwnedRecord::new(vec![OwnedValue::Float(3.15555)]);
+        let record = Record::new(vec![OwnedValue::Float(3.15555)]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -856,7 +856,7 @@ mod tests {
     #[test]
     fn test_serialize_text() {
         let text = Rc::new("hello".to_string());
-        let record = OwnedRecord::new(vec![OwnedValue::Text(Text::new(text.clone()))]);
+        let record = Record::new(vec![OwnedValue::Text(Text::new(text.clone()))]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -875,7 +875,7 @@ mod tests {
     #[test]
     fn test_serialize_blob() {
         let blob = Rc::new(vec![1, 2, 3, 4, 5]);
-        let record = OwnedRecord::new(vec![OwnedValue::Blob(blob.clone())]);
+        let record = Record::new(vec![OwnedValue::Blob(blob.clone())]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -894,7 +894,7 @@ mod tests {
     #[test]
     fn test_serialize_mixed_types() {
         let text = Rc::new("test".to_string());
-        let record = OwnedRecord::new(vec![
+        let record = Record::new(vec![
             OwnedValue::Null,
             OwnedValue::Integer(42),
             OwnedValue::Float(3.15),

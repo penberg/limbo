@@ -501,7 +501,7 @@ impl Statement {
     }
 }
 
-pub type Row = types::OwnedRecord;
+pub type Row = types::Record;
 
 pub type StepResult = vdbe::StepResult;
 

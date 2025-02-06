@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use super::{AggFunc, BranchOffset, CursorID, FuncCtx, PageIdx};
 use crate::storage::wal::CheckpointMode;
-use crate::types::{OwnedRecord, OwnedValue};
+use crate::types::{OwnedValue, Record};
 use limbo_macros::Description;
 
 /// Flags provided to comparison instructions (e.g. Eq, Ne) which determine behavior related to NULL values.
@@ -418,7 +418,7 @@ pub enum Insn {
     SorterOpen {
         cursor_id: CursorID, // P1
         columns: usize,      // P2
-        order: OwnedRecord,  // P4. 0 if ASC and 1 if DESC
+        order: Record,       // P4. 0 if ASC and 1 if DESC
     },
 
     // Insert a row into the sorter.

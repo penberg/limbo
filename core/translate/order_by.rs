@@ -4,7 +4,7 @@ use sqlite3_parser::ast;
 
 use crate::{
     schema::{Column, PseudoTable},
-    types::{OwnedRecord, OwnedValue},
+    types::{OwnedValue, Record},
     util::exprs_are_equivalent,
     vdbe::{
         builder::{CursorType, ProgramBuilder},
@@ -47,7 +47,7 @@ pub fn init_order_by(
     program.emit_insn(Insn::SorterOpen {
         cursor_id: sort_cursor,
         columns: order_by.len(),
-        order: OwnedRecord::new(order),
+        order: Record::new(order),
     });
     Ok(())
 }
