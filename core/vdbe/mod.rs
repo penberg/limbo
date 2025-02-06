@@ -22,13 +22,13 @@ mod datetime;
 pub mod explain;
 pub mod insn;
 pub mod likeop;
-mod printf;
 pub mod sorter;
 mod strftime;
 
 use crate::error::{LimboError, SQLITE_CONSTRAINT_PRIMARYKEY};
 use crate::ext::ExtValue;
 use crate::function::{AggFunc, ExtFunc, FuncCtx, MathFunc, MathFuncArity, ScalarFunc, VectorFunc};
+use crate::functions::printf::exec_printf;
 use crate::info;
 use crate::pseudo::PseudoCursor;
 use crate::result::LimboResult;
@@ -60,7 +60,6 @@ use insn::{
     exec_subtract,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
-use printf::exec_printf;
 use rand::distributions::{Distribution, Uniform};
 use rand::{thread_rng, Rng};
 use regex::{Regex, RegexBuilder};
