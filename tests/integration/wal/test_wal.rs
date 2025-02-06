@@ -39,9 +39,11 @@ pub(crate) fn execute_and_get_strings(
     let stmt = Rc::new(RefCell::new(statement));
     let mut result = Vec::new();
 
-    while let Ok(step_result) = stmt.borrow_mut().step() {
+    let mut stmt = stmt.borrow_mut();
+    while let Ok(step_result) = stmt.step() {
         match step_result {
-            StepResult::Row(row) => {
+            StepResult::Row => {
+                let row = stmt.row().unwrap();
                 for el in &row.values {
                     result.push(format!("{el}"));
                 }
@@ -65,12 +67,15 @@ pub(crate) fn execute_and_get_ints(
     let stmt = Rc::new(RefCell::new(statement));
     let mut result = Vec::new();
 
-    while let Ok(step_result) = stmt.borrow_mut().step() {
+    let mut stmt = stmt.borrow_mut();
+    while let Ok(step_result) = stmt.step() {
         match step_result {
-            StepResult::Row(row) => {
+            StepResult::Row => {
+                let row = stmt.row().unwrap();
                 for value in &row.values {
+                    let value = value.to_value();
                     let out = match value {
-                        Value::Integer(i) => *i,
+                        Value::Integer(i) => i,
                         _ => {
                             return Err(LimboError::ConversionError(format!(
                                 "cannot convert {value} to int"

@@ -50,7 +50,7 @@ pub extern "C" fn stmt_execute(
     }
     loop {
         match statement.step() {
-            Ok(StepResult::Row(_)) => {
+            Ok(StepResult::Row) => {
                 // unexpected row during execution, error out.
                 return ResultCode::Error;
             }

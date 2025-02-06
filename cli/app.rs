@@ -625,8 +625,10 @@ impl Limbo {
                     }
 
                     match rows.step() {
-                        Ok(StepResult::Row(row)) => {
+                        Ok(StepResult::Row) => {
+                            let row = rows.row().unwrap();
                             for (i, value) in row.values.iter().enumerate() {
+                                let value = value.to_value();
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
                                 }
@@ -670,11 +672,12 @@ impl Limbo {
                     let mut table_rows: Vec<Vec<_>> = vec![];
                     loop {
                         match rows.step() {
-                            Ok(StepResult::Row(row)) => {
+                            Ok(StepResult::Row) => {
+                                let row = rows.row().unwrap();
                                 table_rows.push(
                                     row.values
                                         .iter()
-                                        .map(|value| match value {
+                                        .map(|value| match value.to_value() {
                                             Value::Null => self.opts.null_value.clone().cell(),
                                             Value::Integer(i) => i.to_string().cell(),
                                             Value::Float(f) => f.to_string().cell(),
@@ -740,8 +743,11 @@ impl Limbo {
                 let mut found = false;
                 loop {
                     match rows.step()? {
-                        StepResult::Row(row) => {
-                            if let Some(Value::Text(schema)) = row.values.first() {
+                        StepResult::Row => {
+                            let row = rows.row().unwrap();
+                            if let Some(Value::Text(schema)) =
+                                row.values.first().map(|v| v.to_value())
+                            {
                                 let _ = self.write_fmt(format_args!("{};", schema));
                                 found = true;
                             }
@@ -797,8 +803,11 @@ impl Limbo {
                 let mut tables = String::new();
                 loop {
                     match rows.step()? {
-                        StepResult::Row(row) => {
-                            if let Some(Value::Text(table)) = row.values.first() {
+                        StepResult::Row => {
+                            let row = rows.row().unwrap();
+                            if let Some(Value::Text(table)) =
+                                row.values.first().map(|v| v.to_value())
+                            {
                                 tables.push_str(table);
                                 tables.push(' ');
                             }

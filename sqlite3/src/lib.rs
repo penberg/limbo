@@ -2,7 +2,6 @@
 #![allow(non_camel_case_types)]
 
 use log::trace;
-use std::cell::RefCell;
 use std::ffi::{self, CStr, CString};
 
 use std::rc::Rc;
@@ -63,15 +62,13 @@ impl sqlite3 {
     }
 }
 
-pub struct sqlite3_stmt<'a> {
+pub struct sqlite3_stmt {
     pub(crate) stmt: limbo_core::Statement,
-    pub(crate) row: RefCell<Option<limbo_core::Row<'a>>>,
 }
 
-impl sqlite3_stmt<'_> {
+impl sqlite3_stmt {
     pub fn new(stmt: limbo_core::Statement) -> Self {
-        let row = RefCell::new(None);
-        Self { stmt, row }
+        Self { stmt }
     }
 }
 
@@ -242,10 +239,7 @@ pub unsafe extern "C" fn sqlite3_step(stmt: *mut sqlite3_stmt) -> ffi::c_int {
             limbo_core::StepResult::IO => SQLITE_BUSY,
             limbo_core::StepResult::Done => SQLITE_DONE,
             limbo_core::StepResult::Interrupt => SQLITE_INTERRUPT,
-            limbo_core::StepResult::Row(row) => {
-                stmt.row.replace(Some(row));
-                SQLITE_ROW
-            }
+            limbo_core::StepResult::Row => SQLITE_ROW,
             limbo_core::StepResult::Busy => SQLITE_BUSY,
         }
     } else {
@@ -288,7 +282,7 @@ pub unsafe extern "C" fn sqlite3_exec(
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_reset(stmt: *mut sqlite3_stmt) -> ffi::c_int {
     let stmt = &mut *stmt;
-    stmt.row.replace(None);
+    stmt.stmt.reset();
     SQLITE_OK
 }
 
@@ -447,11 +441,7 @@ pub unsafe extern "C" fn sqlite3_expanded_sql(_stmt: *mut sqlite3_stmt) -> *mut 
 #[no_mangle]
 pub unsafe extern "C" fn sqlite3_data_count(stmt: *mut sqlite3_stmt) -> ffi::c_int {
     let stmt = &*stmt;
-    let row = stmt.row.borrow();
-    let row = match row.as_ref() {
-        Some(row) => row,
-        None => return 0,
-    };
+    let row = stmt.stmt.row().unwrap();
     row.values.len() as ffi::c_int
 }
 
@@ -640,12 +630,12 @@ pub unsafe extern "C" fn sqlite3_column_text(
     idx: ffi::c_int,
 ) -> *const ffi::c_uchar {
     let stmt = &mut *stmt;
-    let row = stmt.row.borrow();
+    let row = stmt.stmt.row();
     let row = match row.as_ref() {
         Some(row) => row,
         None => return std::ptr::null(),
     };
-    match row.values.get(idx as usize) {
+    match row.values.get(idx as usize).map(|v| v.to_value()) {
         Some(limbo_core::Value::Text(text)) => text.as_bytes().as_ptr(),
         _ => std::ptr::null(),
     }

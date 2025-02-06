@@ -63,14 +63,15 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_step<'l
         };
 
         match step_result {
-            StepResult::Row(row) => {
+            StepResult::Row => {
+                let row = stmt.stmt.row().unwrap();
                 return match row_to_obj_array(&mut env, &row) {
                     Ok(row) => to_limbo_step_result(&mut env, STEP_RESULT_ID_ROW, Some(row)),
                     Err(e) => {
                         set_err_msg_and_throw_exception(&mut env, obj, LIMBO_ETC, e.to_string());
                         to_limbo_step_result(&mut env, STEP_RESULT_ID_ERROR, None)
                     }
-                }
+                };
             }
             StepResult::IO => {
                 if let Err(e) = stmt.connection.io.run_once() {
@@ -104,13 +105,14 @@ fn row_to_obj_array<'local>(
         env.new_object_array(row.values.len() as i32, "java/lang/Object", JObject::null())?;
 
     for (i, value) in row.values.iter().enumerate() {
+        let value = value.to_value();
         let obj = match value {
             limbo_core::Value::Null => JObject::null(),
             limbo_core::Value::Integer(i) => {
-                env.new_object("java/lang/Long", "(J)V", &[JValue::Long(*i)])?
+                env.new_object("java/lang/Long", "(J)V", &[JValue::Long(i)])?
             }
             limbo_core::Value::Float(f) => {
-                env.new_object("java/lang/Double", "(D)V", &[JValue::Double(*f)])?
+                env.new_object("java/lang/Double", "(D)V", &[JValue::Double(f)])?
             }
             limbo_core::Value::Text(s) => env.new_string(s)?.into(),
             limbo_core::Value::Blob(b) => env.byte_array_from_slice(b)?.into(),

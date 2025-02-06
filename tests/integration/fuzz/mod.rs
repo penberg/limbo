@@ -48,17 +48,20 @@ mod tests {
         let result = stmt.step().unwrap();
         let row = loop {
             match result {
-                limbo_core::StepResult::Row(row) => break row,
+                limbo_core::StepResult::Row => {
+                    let row = stmt.row().unwrap();
+                    break row;
+                }
                 limbo_core::StepResult::IO => continue,
                 r => panic!("unexpected result {:?}: expecting single row", r),
             }
         };
         row.values
             .iter()
-            .map(|x| match x {
+            .map(|x| match x.to_value() {
                 limbo_core::Value::Null => rusqlite::types::Value::Null,
-                limbo_core::Value::Integer(x) => rusqlite::types::Value::Integer(*x),
-                limbo_core::Value::Float(x) => rusqlite::types::Value::Real(*x),
+                limbo_core::Value::Integer(x) => rusqlite::types::Value::Integer(x),
+                limbo_core::Value::Float(x) => rusqlite::types::Value::Real(x),
                 limbo_core::Value::Text(x) => rusqlite::types::Value::Text(x.to_string()),
                 limbo_core::Value::Blob(x) => rusqlite::types::Value::Blob(x.to_vec()),
             })

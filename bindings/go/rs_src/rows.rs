@@ -2,21 +2,19 @@ use crate::{
     types::{LimboValue, ResultCode},
     LimboConn,
 };
-use limbo_core::{LimboError, Row, Statement, StepResult};
+use limbo_core::{LimboError, Statement, StepResult};
 use std::ffi::{c_char, c_void};
 
-pub struct LimboRows<'conn, 'a> {
+pub struct LimboRows<'conn> {
     stmt: Box<Statement>,
     conn: &'conn mut LimboConn,
-    cursor: Option<Row<'a>>,
     err: Option<LimboError>,
 }
 
-impl<'conn, 'a> LimboRows<'conn, 'a> {
+impl<'conn> LimboRows<'conn> {
     pub fn new(stmt: Statement, conn: &'conn mut LimboConn) -> Self {
         LimboRows {
             stmt: Box::new(stmt),
-            cursor: None,
             conn,
             err: None,
         }
@@ -27,7 +25,7 @@ impl<'conn, 'a> LimboRows<'conn, 'a> {
         Box::into_raw(Box::new(self)) as *mut c_void
     }
 
-    pub fn from_ptr(ptr: *mut c_void) -> &'conn mut LimboRows<'conn, 'a> {
+    pub fn from_ptr(ptr: *mut c_void) -> &'conn mut LimboRows<'conn> {
         if ptr.is_null() {
             panic!("Null pointer");
         }
@@ -54,10 +52,7 @@ pub extern "C" fn rows_next(ctx: *mut c_void) -> ResultCode {
     let ctx = LimboRows::from_ptr(ctx);
 
     match ctx.stmt.step() {
-        Ok(StepResult::Row(row)) => {
-            ctx.cursor = Some(row);
-            ResultCode::Row
-        }
+        Ok(StepResult::Row) => ResultCode::Row,
         Ok(StepResult::Done) => ResultCode::Done,
         Ok(StepResult::IO) => {
             let _ = ctx.conn.io.run_once();
@@ -79,9 +74,10 @@ pub extern "C" fn rows_get_value(ctx: *mut c_void, col_idx: usize) -> *const c_v
     }
     let ctx = LimboRows::from_ptr(ctx);
 
-    if let Some(ref cursor) = ctx.cursor {
-        if let Some(value) = cursor.values.get(col_idx) {
-            return LimboValue::from_value(value).to_ptr();
+    if let Some(row) = ctx.stmt.row() {
+        if let Some(value) = row.values.get(col_idx) {
+            let value = value.to_value();
+            return LimboValue::from_value(&value).to_ptr();
         }
     }
     std::ptr::null()
@@ -142,7 +138,6 @@ pub extern "C" fn rows_close(ctx: *mut c_void) {
     if !ctx.is_null() {
         let rows = LimboRows::from_ptr(ctx);
         rows.stmt.reset();
-        rows.cursor = None;
         rows.err = None;
     }
     unsafe {

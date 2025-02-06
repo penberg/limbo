@@ -39,6 +39,7 @@ fn main() {
                         let row = rows.step().unwrap();
                         match row {
                             limbo_core::StepResult::Row(_) => {
+                                let row = statement.row();
                                 count += 1;
                             }
                             limbo_core::StepResult::IO => yield,

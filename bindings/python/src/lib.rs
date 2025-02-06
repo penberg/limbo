@@ -129,10 +129,12 @@ impl Cursor {
     pub fn fetchone(&mut self, py: Python) -> Result<Option<PyObject>> {
         if let Some(smt) = &self.smt {
             loop {
-                match smt.borrow_mut().step().map_err(|e| {
+                let mut stmt = smt.borrow_mut();
+                match stmt.step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::StepResult::Row(row) => {
+                    limbo_core::StepResult::Row => {
+                        let row = stmt.row().unwrap();
                         let py_row = row_to_py(py, &row);
                         return Ok(Some(py_row));
                     }
@@ -163,10 +165,12 @@ impl Cursor {
         let mut results = Vec::new();
         if let Some(smt) = &self.smt {
             loop {
-                match smt.borrow_mut().step().map_err(|e| {
+                let mut stmt = smt.borrow_mut();
+                match stmt.step().map_err(|e| {
                     PyErr::new::<OperationalError, _>(format!("Step error: {:?}", e))
                 })? {
-                    limbo_core::StepResult::Row(row) => {
+                    limbo_core::StepResult::Row => {
+                        let row = stmt.row().unwrap();
                         let py_row = row_to_py(py, &row);
                         results.push(py_row);
                     }
@@ -298,7 +302,7 @@ fn row_to_py(py: Python, row: &limbo_core::Row) -> PyObject {
     let py_values: Vec<PyObject> = row
         .values
         .iter()
-        .map(|value| match value {
+        .map(|value| match value.to_value() {
             limbo_core::Value::Null => py.None(),
             limbo_core::Value::Integer(i) => i.to_object(py),
             limbo_core::Value::Float(f) => f.to_object(py),

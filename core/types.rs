@@ -123,6 +123,46 @@ impl OwnedValue {
             OwnedValue::Record(_) => OwnedValueType::Null, // Map Record to Null for FFI
         }
     }
+
+    pub fn to_value(&self) -> Value<'_> {
+        match self {
+            OwnedValue::Null => Value::Null,
+            OwnedValue::Integer(i) => Value::Integer(*i),
+            OwnedValue::Float(f) => Value::Float(*f),
+            OwnedValue::Text(s) => Value::Text(&s.value),
+            OwnedValue::Blob(b) => Value::Blob(b),
+            OwnedValue::Agg(a) => match a.as_ref() {
+                AggContext::Avg(acc, _count) => match acc {
+                    OwnedValue::Integer(i) => Value::Integer(*i),
+                    OwnedValue::Float(f) => Value::Float(*f),
+                    _ => Value::Float(0.0),
+                },
+                AggContext::Sum(acc) => match acc {
+                    OwnedValue::Integer(i) => Value::Integer(*i),
+                    OwnedValue::Float(f) => Value::Float(*f),
+                    _ => Value::Float(0.0),
+                },
+                AggContext::Count(count) => count.to_value(),
+                AggContext::Max(max) => match max {
+                    Some(max) => max.to_value(),
+                    None => Value::Null,
+                },
+                AggContext::Min(min) => match min {
+                    Some(min) => min.to_value(),
+                    None => Value::Null,
+                },
+                AggContext::GroupConcat(s) => s.to_value(),
+                AggContext::External(ext_state) => {
+                    let v = ext_state
+                        .finalized_value
+                        .as_ref()
+                        .unwrap_or(&OwnedValue::Null);
+                    v.to_value()
+                }
+            },
+            OwnedValue::Record(_) => todo!(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -442,92 +482,53 @@ impl From<Value<'_>> for OwnedValue {
     }
 }
 
-pub fn to_value(value: &OwnedValue) -> Value<'_> {
-    match value {
-        OwnedValue::Null => Value::Null,
-        OwnedValue::Integer(i) => Value::Integer(*i),
-        OwnedValue::Float(f) => Value::Float(*f),
-        OwnedValue::Text(s) => Value::Text(&s.value),
-        OwnedValue::Blob(b) => Value::Blob(b),
-        OwnedValue::Agg(a) => match a.as_ref() {
-            AggContext::Avg(acc, _count) => match acc {
-                OwnedValue::Integer(i) => Value::Integer(*i),
-                OwnedValue::Float(f) => Value::Float(*f),
-                _ => Value::Float(0.0),
-            },
-            AggContext::Sum(acc) => match acc {
-                OwnedValue::Integer(i) => Value::Integer(*i),
-                OwnedValue::Float(f) => Value::Float(*f),
-                _ => Value::Float(0.0),
-            },
-            AggContext::Count(count) => to_value(count),
-            AggContext::Max(max) => match max {
-                Some(max) => to_value(max),
-                None => Value::Null,
-            },
-            AggContext::Min(min) => match min {
-                Some(min) => to_value(min),
-                None => Value::Null,
-            },
-            AggContext::GroupConcat(s) => to_value(s),
-            AggContext::External(ext_state) => to_value(
-                ext_state
-                    .finalized_value
-                    .as_ref()
-                    .unwrap_or(&OwnedValue::Null),
-            ),
-        },
-        OwnedValue::Record(_) => todo!(),
-    }
-}
-
 pub trait FromValue<'a> {
-    fn from_value(value: &Value<'a>) -> Result<Self>
+    fn from_value(value: &'a OwnedValue) -> Result<Self>
     where
         Self: Sized + 'a;
 }
 
 impl<'a> FromValue<'a> for i64 {
-    fn from_value(value: &Value<'a>) -> Result<Self> {
+    fn from_value(value: &'a OwnedValue) -> Result<Self> {
         match value {
-            Value::Integer(i) => Ok(*i),
+            OwnedValue::Integer(i) => Ok(*i),
             _ => Err(LimboError::ConversionError("Expected integer value".into())),
         }
     }
 }
 
 impl<'a> FromValue<'a> for String {
-    fn from_value(value: &Value<'a>) -> Result<Self> {
+    fn from_value(value: &'a OwnedValue) -> Result<Self> {
         match value {
-            Value::Text(s) => Ok(s.to_string()),
+            OwnedValue::Text(s) => Ok(s.value.to_string()),
             _ => Err(LimboError::ConversionError("Expected text value".into())),
         }
     }
 }
 
 impl<'a> FromValue<'a> for &'a str {
-    fn from_value(value: &Value<'a>) -> Result<&'a str> {
+    fn from_value(value: &'a OwnedValue) -> Result<Self> {
         match value {
-            Value::Text(s) => Ok(s),
+            OwnedValue::Text(s) => Ok(s.value.as_str()),
             _ => Err(LimboError::ConversionError("Expected text value".into())),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct Record<'a> {
-    pub values: Vec<Value<'a>>,
-}
-
-impl<'a> Record<'a> {
-    pub fn new(values: Vec<Value<'a>>) -> Self {
-        Self { values }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OwnedRecord {
     pub values: Vec<OwnedValue>,
+}
+
+impl OwnedRecord {
+    pub fn get<'a, T: FromValue<'a> + 'a>(&'a self, idx: usize) -> Result<T> {
+        let value = &self.values[idx];
+        T::from_value(value)
+    }
+
+    pub fn count(&self) -> usize {
+        self.values.len()
+    }
 }
 
 const I8_LOW: i64 = -128;

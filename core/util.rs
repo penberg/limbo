@@ -34,7 +34,8 @@ pub fn parse_schema_rows(
         let mut automatic_indexes = Vec::new();
         loop {
             match rows.step()? {
-                StepResult::Row(row) => {
+                StepResult::Row => {
+                    let row = rows.row().unwrap();
                     let ty = row.get::<&str>(0)?;
                     if ty != "table" && ty != "index" {
                         continue;
