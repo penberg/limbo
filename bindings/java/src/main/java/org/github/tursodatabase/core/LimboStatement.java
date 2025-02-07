@@ -90,6 +90,131 @@ public class LimboStatement {
   private native void _close(long statementPointer);
 
   /**
+   * Initializes the column metadata, such as the names of the columns. Since {@link LimboStatement}
+   * can only have a single {@link LimboResultSet}, it is appropriate to place the initialization of
+   * column metadata here.
+   *
+   * @throws SQLException if a database access error occurs while retrieving column names
+   */
+  public void initializeColumnMetadata() throws SQLException {
+    final String[] columnNames = this.columns(statementPointer);
+    if (columnNames != null) {
+      this.resultSet.setColumnNames(columnNames);
+    }
+  }
+
+  @Nullable
+  private native String[] columns(long statementPointer) throws SQLException;
+
+  /**
+   * Binds a NULL value to the prepared statement at the specified position.
+   *
+   * @param position The index of the SQL parameter to be set to NULL.
+   * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindNull(int position) throws SQLException {
+    final int result = bindNull(statementPointer, position);
+    if (result != 0) {
+      throw new SQLException("Exception while binding NULL value at position " + position);
+    }
+    return result;
+  }
+
+  private native int bindNull(long statementPointer, int position) throws SQLException;
+
+  /**
+   * Binds an integer value to the prepared statement at the specified position. This function calls
+   * bindLong because Limbo treats all integers as long (as well as SQLite).
+   *
+   * <p>According to SQLite documentation, the value is a signed integer, stored in 0, 1, 2, 3, 4,
+   * 6, or 8 bytes depending on the magnitude of the value.
+   *
+   * @param position The index of the SQL parameter to be set.
+   * @param value The integer value to bind to the parameter.
+   * @return A result code indicating the success or failure of the operation.
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindInt(int position, int value) throws SQLException {
+    return bindLong(position, value);
+  }
+
+  /**
+   * Binds a long value to the prepared statement at the specified position.
+   *
+   * @param position The index of the SQL parameter to be set.
+   * @param value The value to bind to the parameter.
+   * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindLong(int position, long value) throws SQLException {
+    final int result = bindLong(statementPointer, position, value);
+    if (result != 0) {
+      throw new SQLException("Exception while binding long value at position " + position);
+    }
+    return result;
+  }
+
+  private native int bindLong(long statementPointer, int position, long value) throws SQLException;
+
+  /**
+   * Binds a double value to the prepared statement at the specified position.
+   *
+   * @param position The index of the SQL parameter to be set.
+   * @param value The value to bind to the parameter.
+   * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindDouble(int position, double value) throws SQLException {
+    final int result = bindDouble(statementPointer, position, value);
+    if (result != 0) {
+      throw new SQLException("Exception while binding double value at position " + position);
+    }
+    return result;
+  }
+
+  private native int bindDouble(long statementPointer, int position, double value)
+      throws SQLException;
+
+  /**
+   * Binds a text value to the prepared statement at the specified position.
+   *
+   * @param position The index of the SQL parameter to be set.
+   * @param value The value to bind to the parameter.
+   * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindText(int position, String value) throws SQLException {
+    final int result = bindText(statementPointer, position, value);
+    if (result != 0) {
+      throw new SQLException("Exception while binding text value at position " + position);
+    }
+    return result;
+  }
+
+  private native int bindText(long statementPointer, int position, String value)
+      throws SQLException;
+
+  /**
+   * Binds a blob value to the prepared statement at the specified position.
+   *
+   * @param position The index of the SQL parameter to be set.
+   * @param value The value to bind to the parameter.
+   * @return <a href="https://www.sqlite.org/c3ref/c_abort.html">Result Codes</a>
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindBlob(int position, byte[] value) throws SQLException {
+    final int result = bindBlob(statementPointer, position, value);
+    if (result != 0) {
+      throw new SQLException("Exception while binding blob value at position " + position);
+    }
+    return result;
+  }
+
+  private native int bindBlob(long statementPointer, int position, byte[] value)
+      throws SQLException;
+
+  /**
    * Checks if the statement is closed.
    *
    * @return true if the statement is closed, false otherwise.

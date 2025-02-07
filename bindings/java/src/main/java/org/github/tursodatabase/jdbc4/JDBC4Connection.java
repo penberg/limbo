@@ -40,10 +40,8 @@ public class JDBC4Connection extends LimboConnection {
   }
 
   @Override
-  @SkipNullableCheck
   public PreparedStatement prepareStatement(String sql) throws SQLException {
-    // TODO
-    return null;
+    return new JDBC4PreparedStatement(this, sql);
   }
 
   @Override

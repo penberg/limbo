@@ -19,6 +19,8 @@ public class LimboResultSet {
 
   private final LimboStatement statement;
 
+  // Name of the columns
+  private String[] columnNames = new String[0];
   // Whether the result set does not have any rows.
   private boolean isEmptyResultSet = false;
   // If the result set is open. Doesn't mean it has results.
@@ -134,6 +136,14 @@ public class LimboResultSet {
     }
 
     return resultSet[columnIndex - 1];
+  }
+
+  public String[] getColumnNames() {
+    return this.columnNames;
+  }
+
+  public void setColumnNames(String[] columnNames) {
+    this.columnNames = columnNames;
   }
 
   @Override

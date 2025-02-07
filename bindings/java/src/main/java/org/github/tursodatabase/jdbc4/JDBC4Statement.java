@@ -17,7 +17,7 @@ import org.github.tursodatabase.core.LimboStatement;
 public class JDBC4Statement implements Statement {
 
   private final LimboConnection connection;
-  @Nullable private LimboStatement statement = null;
+  @Nullable protected LimboStatement statement = null;
 
   // Because JDBC4Statement has different life cycle in compared to LimboStatement, let's use this
   // field to manage JDBC4Statement lifecycle
