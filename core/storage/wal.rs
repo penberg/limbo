@@ -630,7 +630,7 @@ impl Wal for WalFile {
                             *syncing.borrow_mut() = false;
                         }),
                     });
-                    shared.file.sync(Rc::new(completion))?;
+                    shared.file.sync(completion)?;
                 }
                 self.sync_state.replace(SyncState::Syncing);
                 Ok(CheckpointStatus::IO)

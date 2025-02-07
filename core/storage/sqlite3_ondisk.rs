@@ -253,8 +253,8 @@ pub fn begin_read_database_header(
         let header = header.clone();
         finish_read_database_header(buf, header).unwrap();
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_io.read_page(1, c.clone())?;
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
+    page_io.read_page(1, c)?;
     Ok(result)
 }
 
@@ -313,7 +313,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
 
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, read_complete)));
+    let c = Completion::Read(ReadCompletion::new(buf, read_complete));
     page_source.read_page(1, c)?;
     // run get header block
     pager.io.run_once()?;
@@ -327,7 +327,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
         // finish_read_database_header(buf, header).unwrap();
     });
 
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     page_source.write_page(0, buffer_to_copy, c)?;
 
     Ok(())
@@ -675,8 +675,8 @@ pub fn begin_read_page(
             page.set_error();
         }
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_io.read_page(page_idx, c.clone())?;
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
+    page_io.read_page(page_idx, c)?;
     Ok(())
 }
 
@@ -733,7 +733,7 @@ pub fn begin_write_btree_page(
             }
         })
     };
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     page_source.write_page(page_id, buffer.clone(), c)?;
     Ok(())
 }
@@ -746,7 +746,7 @@ pub fn begin_sync(page_io: Rc<dyn DatabaseStorage>, syncing: Rc<RefCell<bool>>) 
             *syncing.borrow_mut() = false;
         }),
     });
-    page_io.sync(Rc::new(completion))?;
+    page_io.sync(completion)?;
     Ok(())
 }
 
@@ -1145,7 +1145,7 @@ pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Arc<RwLock<WalHeader>>
         let header = header.clone();
         finish_read_wal_header(buf, header).unwrap();
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
     io.pread(0, c)?;
     Ok(result)
 }
@@ -1187,7 +1187,7 @@ pub fn begin_read_wal_frame(
         let frame = frame.clone();
         finish_read_page(2, buf, frame).unwrap();
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
     io.pread(offset, c)?;
     Ok(())
 }
@@ -1262,7 +1262,7 @@ pub fn begin_write_wal_frame(
             }
         })
     };
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     io.pwrite(offset, buffer.clone(), c)?;
     Ok(checksums)
 }
@@ -1295,7 +1295,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
             }
         })
     };
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     io.pwrite(0, buffer.clone(), c)?;
     Ok(())
 }

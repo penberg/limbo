@@ -2401,7 +2401,7 @@ mod tests {
         }
 
         let write_complete = Box::new(|_| {});
-        let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+        let c = Completion::Write(WriteCompletion::new(write_complete));
         page_io.write_page(1, buf.clone(), c).unwrap();
 
         let wal_shared = WalFileShared::open_shared(&io, "test.wal", page_size).unwrap();
@@ -2449,7 +2449,7 @@ mod tests {
                 drop_fn,
             )));
             let write_complete = Box::new(|_| {});
-            let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+            let c = Completion::Write(WriteCompletion::new(write_complete));
             pager
                 .page_io
                 .write_page(current_page as usize, buf.clone(), c)?;
