@@ -4,8 +4,8 @@ import java.sql.SQLException;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.github.tursodatabase.utils.Logger;
+import org.github.tursodatabase.utils.LoggerFactory;
 
 /**
  * By default, only one <code>resultSet</code> object per <code>LimboStatement</code> can be open at

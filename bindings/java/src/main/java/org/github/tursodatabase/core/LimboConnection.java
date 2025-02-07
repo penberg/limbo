@@ -8,8 +8,8 @@ import java.sql.SQLException;
 import java.util.Properties;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.github.tursodatabase.utils.Logger;
+import org.github.tursodatabase.utils.LoggerFactory;
 
 public abstract class LimboConnection implements Connection {
   private static final Logger logger = LoggerFactory.getLogger(LimboConnection.class);
