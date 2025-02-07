@@ -83,24 +83,11 @@ impl VTabModule for GenerateSeriesVTab {
     }
 
     fn next(cursor: &mut Self::VCursor) -> ResultCode {
-        // Check for invalid ranges (empty series) first
-        if cursor.eof() {
-            return ResultCode::EOF;
-        }
-
-        // Handle overflow
-        cursor.current = match cursor.current.checked_add(cursor.step) {
-            Some(val) => val,
-            None => {
-                return ResultCode::EOF;
-            }
-        };
-
-        ResultCode::OK
+        cursor.next()
     }
 
     fn eof(cursor: &Self::VCursor) -> bool {
-        cursor.is_invalid_range() || cursor.would_exceed()
+        cursor.eof()
     }
 }
 
