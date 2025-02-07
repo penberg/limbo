@@ -136,7 +136,6 @@ impl Display for VectorFunc {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub enum AggFunc {
     Avg,
