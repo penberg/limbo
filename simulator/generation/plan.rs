@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
-        query::{Create, Insert, Query, Select},
+        query::{Create, Delete, Distinctness, Insert, Query, Select},
         table::Value,
     },
     runner::env::SimConnection,
@@ -14,10 +14,7 @@ use crate::{
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
 
-use super::{
-    property::{remaining, Property},
-    table,
-};
+use super::property::{remaining, Property};
 
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
@@ -283,6 +280,29 @@ impl Interactions {
                         }
                     }
                     Property::SelectLimit { select } => {
+                        select.shadow(env);
+                    }
+                    Property::DeleteSelect {
+                        table,
+                        predicate,
+                        queries,
+                    } => {
+                        let delete = Query::Delete(Delete {
+                            table: table.clone(),
+                            predicate: predicate.clone(),
+                        });
+
+                        let select = Query::Select(Select {
+                            table: table.clone(),
+                            predicate: predicate.clone(),
+                            distinct: Distinctness::All,
+                            limit: None,
+                        });
+
+                        delete.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
                         select.shadow(env);
                     }
                 }

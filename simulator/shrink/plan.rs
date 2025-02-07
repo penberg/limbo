@@ -31,7 +31,8 @@ impl InteractionPlan {
             if let Interactions::Property(p) = interaction {
                 match p {
                     Property::InsertValuesSelect { queries, .. }
-                    | Property::DoubleCreateFailure { queries, .. } => {
+                    | Property::DoubleCreateFailure { queries, .. }
+                    | Property::DeleteSelect { queries, .. } => {
                         queries.clear();
                     }
                     Property::SelectLimit { .. } => {}

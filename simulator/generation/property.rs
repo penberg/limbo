@@ -65,13 +65,34 @@ pub(crate) enum Property {
     /// Select Limit is a property in which the select query
     /// has a limit clause that is respected by the query.
     /// The execution of the property is as follows
-    ///    SELECT * FROM <t> WHERE <predicate> LIMIT <n>
+    ///     SELECT * FROM <t> WHERE <predicate> LIMIT <n>
     /// This property is a single-interaction property.
     /// The interaction has the following constraints;
     /// - The select query will respect the limit clause.
     SelectLimit {
         /// The select query
         select: Select,
+    },
+    /// Delete-Select is a property in which the deleted row
+    /// must not be in the resulting rows of a select query that has a
+    /// where clause that matches the deleted row. In practice, `p1` of
+    /// the delete query will be used as the predicate for the select query,
+    /// hence the select should return NO ROWS.
+    /// The execution of the property is as follows
+    ///     DELETE FROM <t> WHERE <predicate>
+    ///     I_0
+    ///     I_1
+    ///     ...
+    ///     I_n
+    ///     SELECT * FROM <t> WHERE <predicate>
+    /// The interactions in the middle has the following constraints;
+    /// - There will be no errors in the middle interactions.
+    /// - A row that holds for the predicate will not be inserted.
+    /// - The table `t` will not be renamed, dropped, or altered.
+    DeleteSelect {
+        table: String,
+        predicate: Predicate,
+        queries: Vec<Query>,
     },
 }
 
@@ -81,6 +102,7 @@ impl Property {
             Property::InsertValuesSelect { .. } => "Insert-Values-Select".to_string(),
             Property::DoubleCreateFailure { .. } => "Double-Create-Failure".to_string(),
             Property::SelectLimit { .. } => "Select-Limit".to_string(),
+            Property::DeleteSelect { .. } => "Delete-Select".to_string(),
         }
     }
     /// interactions construct a list of interactions, which is an executable representation of the property.
@@ -216,6 +238,56 @@ impl Property {
                     Interaction::Query(Query::Select(select.clone())),
                     assertion,
                 ]
+            }
+            Property::DeleteSelect {
+                table,
+                predicate,
+                queries,
+            } => {
+                let assumption = Interaction::Assumption(Assertion {
+                    message: format!("table {} exists", table),
+                    func: Box::new({
+                        let table = table.clone();
+                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
+                            Ok(env.tables.iter().any(|t| t.name == table))
+                        }
+                    }),
+                });
+
+                let assertion = Interaction::Assertion(Assertion {
+                    message: format!(
+                        "select '{}' should return no values for table '{}'",
+                        predicate, table,
+                    ),
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                        let rows = stack.last().unwrap();
+                        match rows {
+                            Ok(rows) => Ok(rows.is_empty()),
+                            Err(err) => Err(LimboError::InternalError(err.to_string())),
+                        }
+                    }),
+                });
+
+                let delete = Interaction::Query(Query::Delete(Delete {
+                    table: table.clone(),
+                    predicate: predicate.clone(),
+                }));
+
+                let select = Interaction::Query(Query::Select(Select {
+                    table: table.clone(),
+                    predicate: predicate.clone(),
+                    limit: None,
+                    distinct: Distinctness::All,
+                }));
+
+                let mut interactions = Vec::new();
+                interactions.push(assumption);
+                interactions.push(delete);
+                interactions.extend(queries.clone().into_iter().map(Interaction::Query));
+                interactions.push(select);
+                interactions.push(assertion);
+
+                interactions
             }
         }
     }
@@ -365,6 +437,48 @@ fn property_double_create_failure<R: rand::Rng>(
     }
 }
 
+fn property_delete_select<R: rand::Rng>(
+    rng: &mut R,
+    env: &SimulatorEnv,
+    remaining: &Remaining,
+) -> Property {
+    // Get a random table
+    let table = pick(&env.tables, rng);
+    // Generate a random predicate
+    let predicate = Predicate::arbitrary_from(rng, table);
+
+    // Create random queries respecting the constraints
+    let mut queries = Vec::new();
+    // - [x] There will be no errors in the middle interactions. (this constraint is impossible to check, so this is just best effort)
+    // - [x] A row that holds for the predicate will not be inserted.
+    // - [ ] The table `t` will not be renamed, dropped, or altered. (todo: add this constraint once ALTER or DROP is implemented)
+    for _ in 0..rng.gen_range(0..3) {
+        let query = Query::arbitrary_from(rng, (env, remaining));
+        match &query {
+            Query::Insert(Insert::Values { table: t, values }) => {
+                // A row that holds for the predicate will not be inserted.
+                if t == &table.name && values.iter().any(|v| predicate.test(v, table)) {
+                    continue;
+                }
+            }
+            Query::Create(Create { table: t }) => {
+                // There will be no errors in the middle interactions.
+                // - Creating the same table is an error
+                if t.name == table.name {
+                    continue;
+                }
+            }
+            _ => (),
+        }
+        queries.push(query);
+    }
+
+    Property::DeleteSelect {
+        table: table.name.clone(),
+        predicate,
+        queries,
+    }
+}
 impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
     fn arbitrary_from<R: rand::Rng>(
         rng: &mut R,
@@ -384,6 +498,10 @@ impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
                 (
                     remaining_.read,
                     Box::new(|rng: &mut R| property_select_limit(rng, env)),
+                ),
+                (
+                    f64::min(remaining_.read, remaining_.write),
+                    Box::new(|rng: &mut R| property_delete_select(rng, env, &remaining_)),
                 ),
             ],
             rng,
