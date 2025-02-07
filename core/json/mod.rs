@@ -15,7 +15,6 @@ pub use crate::json::ser::to_string;
 use crate::types::{OwnedValue, Text, TextSubtype};
 use indexmap::IndexMap;
 use jsonb::Error as JsonbError;
-use rustix::path::Arg;
 use ser::to_string_pretty;
 use serde::{Deserialize, Serialize};
 
@@ -687,7 +686,8 @@ pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
 
             let mut escaped_value = String::with_capacity(t.value.len() + 4);
             escaped_value.push('"');
-            for c in t.value.to_string_lossy().chars() {
+
+            for c in t.as_str().chars() {
                 match c {
                     '"' | '\\' | '\n' | '\r' | '\t' | '\u{0008}' | '\u{000c}' => {
                         escaped_value.push('\\');
