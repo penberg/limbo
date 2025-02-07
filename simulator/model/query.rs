@@ -288,7 +288,7 @@ pub(crate) struct Delete {
 
 impl Delete {
     pub(crate) fn shadow(&self, _env: &mut SimulatorEnv) -> Vec<Vec<Value>> {
-        todo!()
+        vec![]
     }
 }
 

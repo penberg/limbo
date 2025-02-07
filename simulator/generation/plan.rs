@@ -14,7 +14,10 @@ use crate::{
 
 use crate::generation::{frequency, Arbitrary, ArbitraryFrom};
 
-use super::property::{remaining, Property};
+use super::{
+    property::{remaining, Property},
+    table,
+};
 
 pub(crate) type ResultSet = Result<Vec<Vec<Value>>>;
 
@@ -303,7 +306,15 @@ impl Interactions {
                                     .unwrap();
                                 table.rows.extend(values);
                             }
-                            Query::Delete(_) => todo!(),
+                            Query::Delete(delete) => {
+                                let table = env
+                                    .tables
+                                    .iter_mut()
+                                    .find(|t| t.name == delete.table)
+                                    .unwrap();
+                                let t2 = &table.clone();
+                                table.rows.retain_mut(|r| delete.predicate.test(r, t2));
+                            }
                             Query::Select(_) => {}
                         },
                         Interaction::Assertion(_) => {}
