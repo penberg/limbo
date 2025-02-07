@@ -22,7 +22,7 @@
 
 ---
 
-## Features
+## Features and Roadmap
 
 Limbo is a _work-in-progress_, in-process OLTP database engine library written in Rust that has:
 
@@ -30,6 +30,12 @@ Limbo is a _work-in-progress_, in-process OLTP database engine library written i
 * **SQLite compatibility** [[doc](COMPAT.md)] for SQL dialect, file formats, and the C API
 * **Language bindings** for JavaScript/WebAssembly, Rust, Go, Python, and [Java](bindings/java)
 * **OS support** for Linux, macOS, and Windows
+
+In the future, we will be also workin on:
+
+* **Integrated vector search** for embeddings and vector similarity.
+* **`BEGIN CONCURRENT`** for improved write throughput.
+* **Improved schema management** including better `ALTER` support and strict column types by default.
 
 ## Getting Started
 
