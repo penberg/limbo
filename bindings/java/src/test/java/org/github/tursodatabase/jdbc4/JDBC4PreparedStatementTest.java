@@ -227,8 +227,12 @@ class JDBC4PreparedStatementTest {
 
   @Test
   void testInsertMultipleTypes() throws SQLException {
-    connection.prepareStatement("CREATE TABLE test (col1 INTEGER, col2 REAL, col3 TEXT, col4 BLOB)").execute();
-    PreparedStatement stmt = connection.prepareStatement("INSERT INTO test (col1, col2, col3, col4) VALUES (?, ?, ?, ?), (?, ?, ?, ?)");
+    connection
+        .prepareStatement("CREATE TABLE test (col1 INTEGER, col2 REAL, col3 TEXT, col4 BLOB)")
+        .execute();
+    PreparedStatement stmt =
+        connection.prepareStatement(
+            "INSERT INTO test (col1, col2, col3, col4) VALUES (?, ?, ?, ?), (?, ?, ?, ?)");
 
     stmt.setInt(1, 1);
     stmt.setFloat(2, 1.1f);
