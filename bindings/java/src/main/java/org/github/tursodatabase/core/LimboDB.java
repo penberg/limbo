@@ -12,8 +12,8 @@ import org.github.tursodatabase.LimboErrorCode;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.VisibleForTesting;
 import org.github.tursodatabase.utils.LimboExceptionUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.github.tursodatabase.utils.Logger;
+import org.github.tursodatabase.utils.LoggerFactory;
 
 /** This class provides a thin JNI layer over the SQLite3 C API. */
 public final class LimboDB extends AbstractDB {

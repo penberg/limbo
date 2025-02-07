@@ -7,8 +7,8 @@ import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.jdbc4.JDBC4Connection;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.github.tursodatabase.utils.Logger;
+import org.github.tursodatabase.utils.LoggerFactory;
 
 public class JDBC implements Driver {
   private static final Logger logger = LoggerFactory.getLogger(JDBC.class);
