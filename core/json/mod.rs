@@ -706,8 +706,7 @@ pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
         OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
         OwnedValue::Null => Ok(OwnedValue::Text(Text::new(Rc::new("null".to_string())))),
         _ => {
-            // TODO not too sure what message should be here
-            crate::bail_parse_error!("Syntax error");
+            unreachable!()
         }
     }
 }
