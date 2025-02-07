@@ -106,10 +106,10 @@ pub struct DatabaseHeader {
     pub database_size: u32,
 
     /// Page number of the first freelist trunk page.
-    freelist_trunk_page: u32,
+    pub freelist_trunk_page: u32,
 
     /// Total number of freelist pages.
-    freelist_pages: u32,
+    pub freelist_pages: u32,
 
     /// The schema cookie. Incremented when the database schema changes.
     schema_cookie: u32,
@@ -333,7 +333,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     Ok(())
 }
 
-fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
+pub fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
     buf[0..16].copy_from_slice(&header.magic);
     buf[16..18].copy_from_slice(&header.page_size.to_be_bytes());
     buf[18] = header.write_version;
@@ -429,7 +429,7 @@ impl PageContent {
         }
     }
 
-    fn read_u8(&self, pos: usize) -> u8 {
+    pub fn read_u8(&self, pos: usize) -> u8 {
         let buf = self.as_ptr();
         buf[self.offset + pos]
     }
@@ -439,7 +439,7 @@ impl PageContent {
         u16::from_be_bytes([buf[self.offset + pos], buf[self.offset + pos + 1]])
     }
 
-    fn read_u32(&self, pos: usize) -> u32 {
+    pub fn read_u32(&self, pos: usize) -> u32 {
         let buf = self.as_ptr();
         u32::from_be_bytes([
             buf[self.offset + pos],
