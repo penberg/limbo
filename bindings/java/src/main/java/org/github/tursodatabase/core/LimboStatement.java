@@ -124,6 +124,22 @@ public class LimboStatement {
   private native int bindNull(long statementPointer, int position) throws SQLException;
 
   /**
+   * Binds an integer value to the prepared statement at the specified position. This function calls
+   * bindLong because Limbo treats all integers as long (as well as SQLite).
+   *
+   * <p>According to SQLite documentation, the value is a signed integer, stored in 0, 1, 2, 3, 4,
+   * 6, or 8 bytes depending on the magnitude of the value.
+   *
+   * @param position The index of the SQL parameter to be set.
+   * @param value The integer value to bind to the parameter.
+   * @return A result code indicating the success or failure of the operation.
+   * @throws SQLException If a database access error occurs.
+   */
+  public int bindInt(int position, int value) throws SQLException {
+    return bindLong(position, value);
+  }
+
+  /**
    * Binds a long value to the prepared statement at the specified position.
    *
    * @param position The index of the SQL parameter to be set.
