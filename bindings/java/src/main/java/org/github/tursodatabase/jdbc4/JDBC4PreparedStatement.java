@@ -23,13 +23,12 @@ import java.sql.Time;
 import java.sql.Timestamp;
 import java.util.Calendar;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.LimboConnection;
 
 public class JDBC4PreparedStatement extends JDBC4Statement implements PreparedStatement {
 
   private final String sql;
 
-  public JDBC4PreparedStatement(LimboConnection connection, String sql) throws SQLException {
+  public JDBC4PreparedStatement(JDBC4Connection connection, String sql) throws SQLException {
     super(connection);
 
     this.sql = sql;
