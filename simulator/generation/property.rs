@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
-        query::{Create, Delete, Insert, Predicate, Query, Select},
+        query::{Create, Delete, Distinctness, Insert, Predicate, Query, Select},
         table::Value,
     },
     runner::env::SimulatorEnv,
@@ -34,7 +34,7 @@ pub(crate) enum Property {
     /// - The inserted row will not be deleted.
     /// - The inserted row will not be updated.
     /// - The table `t` will not be renamed, dropped, or altered.
-    InsertSelect {
+    InsertValuesSelect {
         /// The insert query
         insert: Insert,
         /// Selected row index
@@ -62,13 +62,25 @@ pub(crate) enum Property {
         /// Additional interactions in the middle of the property
         queries: Vec<Query>,
     },
+    /// Select Limit is a property in which the select query
+    /// has a limit clause that is respected by the query.
+    /// The execution of the property is as follows
+    ///    SELECT * FROM <t> WHERE <predicate> LIMIT <n>
+    /// This property is a single-interaction property.
+    /// The interaction has the following constraints;
+    /// - The select query will respect the limit clause.
+    SelectLimit {
+        /// The select query
+        select: Select,
+    },
 }
 
 impl Property {
     pub(crate) fn name(&self) -> String {
         match self {
-            Property::InsertSelect { .. } => "Insert-Select".to_string(),
+            Property::InsertValuesSelect { .. } => "Insert-Values-Select".to_string(),
             Property::DoubleCreateFailure { .. } => "Double-Create-Failure".to_string(),
+            Property::SelectLimit { .. } => "Select-Limit".to_string(),
         }
     }
     /// interactions construct a list of interactions, which is an executable representation of the property.
@@ -76,26 +88,33 @@ impl Property {
     /// and `interaction` cannot be serialized directly.
     pub(crate) fn interactions(&self) -> Vec<Interaction> {
         match self {
-            Property::InsertSelect {
+            Property::InsertValuesSelect {
                 insert,
                 row_index,
                 queries,
                 select,
             } => {
+                let (table, values) = if let Insert::Values { table, values } = insert {
+                    (table, values)
+                } else {
+                    unreachable!(
+                        "insert query should be Insert::Values for Insert-Values-Select property"
+                    )
+                };
                 // Check that the insert query has at least 1 value
                 assert!(
-                    !insert.values.is_empty(),
+                    !values.is_empty(),
                     "insert query should have at least 1 value"
                 );
 
                 // Pick a random row within the insert values
-                let row = insert.values[*row_index].clone();
+                let row = values[*row_index].clone();
 
                 // Assume that the table exists
                 let assumption = Interaction::Assumption(Assertion {
-                    message: format!("table {} exists", insert.table),
+                    message: format!("table {} exists", insert.table()),
                     func: Box::new({
-                        let table_name = insert.table.clone();
+                        let table_name = table.clone();
                         move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
                             Ok(env.tables.iter().any(|t| t.name == table_name))
                         }
@@ -106,7 +125,7 @@ impl Property {
                     message: format!(
                         "row [{:?}] not found in table {}",
                         row.iter().map(|v| v.to_string()).collect::<Vec<String>>(),
-                        insert.table,
+                        insert.table(),
                     ),
                     func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
                         let rows = stack.last().unwrap();
@@ -164,10 +183,45 @@ impl Property {
 
                 interactions
             }
+            Property::SelectLimit { select } => {
+                let table_name = select.table.clone();
+
+                let assumption = Interaction::Assumption(Assertion {
+                    message: format!("table {} exists", table_name),
+                    func: Box::new({
+                        let table_name = table_name.clone();
+                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
+                            Ok(env.tables.iter().any(|t| t.name == table_name))
+                        }
+                    }),
+                });
+
+                let limit = select
+                    .limit
+                    .expect("Property::SelectLimit without a LIMIT clause");
+
+                let assertion = Interaction::Assertion(Assertion {
+                    message: "select query should respect the limit clause".to_string(),
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                        let last = stack.last().unwrap();
+                        match last {
+                            Ok(rows) => Ok(limit >= rows.len()),
+                            Err(_) => Ok(true),
+                        }
+                    }),
+                });
+
+                vec![
+                    assumption,
+                    Interaction::Query(Query::Select(select.clone())),
+                    assertion,
+                ]
+            }
         }
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct Remaining {
     pub(crate) read: f64,
     pub(crate) write: f64,
@@ -192,7 +246,7 @@ pub(crate) fn remaining(env: &SimulatorEnv, stats: &InteractionStats) -> Remaini
     }
 }
 
-fn property_insert_select<R: rand::Rng>(
+fn property_insert_values_select<R: rand::Rng>(
     rng: &mut R,
     env: &SimulatorEnv,
     remaining: &Remaining,
@@ -209,7 +263,7 @@ fn property_insert_select<R: rand::Rng>(
     let row = rows[row_index].clone();
 
     // Insert the rows
-    let insert_query = Insert {
+    let insert_query = Insert::Values {
         table: table.name.clone(),
         values: rows,
     };
@@ -221,7 +275,7 @@ fn property_insert_select<R: rand::Rng>(
     // - [ ] The inserted row will not be updated. (todo: add this constraint once UPDATE is implemented)
     // - [ ] The table `t` will not be renamed, dropped, or altered. (todo: add this constraint once ALTER or DROP is implemented)
     for _ in 0..rng.gen_range(0..3) {
-        let query = Query::arbitrary_from(rng, (table, remaining));
+        let query = Query::arbitrary_from(rng, (env, remaining));
         match &query {
             Query::Delete(Delete {
                 table: t,
@@ -248,14 +302,29 @@ fn property_insert_select<R: rand::Rng>(
     let select_query = Select {
         table: table.name.clone(),
         predicate: Predicate::arbitrary_from(rng, (table, &row)),
+        limit: None,
+        distinct: Distinctness::All,
     };
 
-    Property::InsertSelect {
+    Property::InsertValuesSelect {
         insert: insert_query,
         row_index,
         queries,
         select: select_query,
     }
+}
+
+fn property_select_limit<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
+    // Get a random table
+    let table = pick(&env.tables, rng);
+    // Select the table
+    let select = Select {
+        table: table.name.clone(),
+        predicate: Predicate::arbitrary_from(rng, table),
+        limit: Some(rng.gen_range(1..=5)),
+        distinct: Distinctness::All,
+    };
+    Property::SelectLimit { select }
 }
 
 fn property_double_create_failure<R: rand::Rng>(
@@ -276,7 +345,7 @@ fn property_double_create_failure<R: rand::Rng>(
     // - [x] There will be no errors in the middle interactions.(best effort)
     // - [ ] Table `t` will not be renamed or dropped.(todo: add this constraint once ALTER or DROP is implemented)
     for _ in 0..rng.gen_range(0..3) {
-        let query = Query::arbitrary_from(rng, (table, remaining));
+        let query = Query::arbitrary_from(rng, (env, remaining));
         match &query {
             Query::Create(Create { table: t }) => {
                 // There will be no errors in the middle interactions.
@@ -306,11 +375,15 @@ impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
             vec![
                 (
                     f64::min(remaining_.read, remaining_.write),
-                    Box::new(|rng: &mut R| property_insert_select(rng, env, &remaining_)),
+                    Box::new(|rng: &mut R| property_insert_values_select(rng, env, &remaining_)),
                 ),
                 (
                     remaining_.create / 2.0,
                     Box::new(|rng: &mut R| property_double_create_failure(rng, env, &remaining_)),
+                ),
+                (
+                    remaining_.read,
+                    Box::new(|rng: &mut R| property_select_limit(rng, env)),
                 ),
             ],
             rng,
