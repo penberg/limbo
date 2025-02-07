@@ -84,6 +84,7 @@ pub enum JsonFunc {
     JsonRemove,
     JsonPretty,
     JsonSet,
+    JsonQuote,
 }
 
 #[cfg(feature = "json")]
@@ -107,6 +108,7 @@ impl Display for JsonFunc {
                 Self::JsonRemove => "json_remove".to_string(),
                 Self::JsonPretty => "json_pretty".to_string(),
                 Self::JsonSet => "json_set".to_string(),
+                Self::JsonQuote => "json_quote".to_string(),
             }
         )
     }
@@ -568,6 +570,8 @@ impl Func {
             "json_pretty" => Ok(Self::Json(JsonFunc::JsonPretty)),
             #[cfg(feature = "json")]
             "json_set" => Ok(Self::Json(JsonFunc::JsonSet)),
+            #[cfg(feature = "json")]
+            "json_quote" => Ok(Self::Json(JsonFunc::JsonQuote)),
             "unixepoch" => Ok(Self::Scalar(ScalarFunc::UnixEpoch)),
             "julianday" => Ok(Self::Scalar(ScalarFunc::JulianDay)),
             "hex" => Ok(Self::Scalar(ScalarFunc::Hex)),

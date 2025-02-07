@@ -878,3 +878,38 @@ do_execsql_test json_set_add_array_in_array_in_nested_object {
 do_execsql_test json_set_add_array_in_array_in_nested_object_out_of_bounds {
    SELECT json_set('{}', '$.object[123].another', 'value', '$.field', 'value');
 } {{{"field":"value"}}}
+
+# The json_quote() function transforms an SQL value into a JSON value.
+# String values are quoted and interior quotes are escaped.  NULL values
+# are rendered as the unquoted string "null".
+#
+do_execsql_test json_quote_string_literal {
+  SELECT json_quote('abc"xyz');
+} {{"abc\"xyz"}}
+do_execsql_test json_quote_float {
+  SELECT json_quote(3.14159);
+} {3.14159}
+do_execsql_test json_quote_integer {
+  SELECT json_quote(12345);
+} {12345}
+do_execsql_test json_quote_null {
+  SELECT json_quote(null);
+} {"null"}
+do_execsql_test json_quote_null_caps {
+  SELECT json_quote(NULL);
+} null
+do_execsql_test json_quote_json_value {
+  SELECT json_quote(json('{a:1, b: "test"}'));
+} {{{"a":1,"b":"test"}}}
+
+
+# Escape character tests in sqlite source depend on json_valid and in some syntax that is not implemented
+# yet in limbo.
+# See https://github.com/sqlite/sqlite/blob/255548562b125e6c148bb27d49aaa01b2fe61dba/test/json102.test#L690
+# So for now not all control characters escaped are tested
+
+# do_execsql_test json102-1501 {
+#   WITH RECURSIVE c(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM c WHERE x<0x1f)
+#   SELECT sum(json_valid(json_quote('a'||char(x)||'z'))) FROM c ORDER BY x;
+# } {31}
+

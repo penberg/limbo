@@ -975,7 +975,7 @@ pub fn translate_expr(
 
                         translate_function(
                             program,
-                            &args,
+                            args,
                             referenced_tables,
                             resolver,
                             target_register,
@@ -1016,6 +1016,17 @@ pub fn translate_expr(
                             func: func_ctx,
                         });
                         Ok(target_register)
+                    }
+                    JsonFunc::JsonQuote => {
+                        let args = expect_arguments_exact!(args, 1, j);
+                        translate_function(
+                            program,
+                            args,
+                            referenced_tables,
+                            resolver,
+                            target_register,
+                            func_ctx,
+                        )
                     }
                     JsonFunc::JsonPretty => {
                         let args = expect_arguments_max!(args, 2, j);
