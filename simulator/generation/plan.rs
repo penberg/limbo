@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
-        query::{Create, Insert, Query, Select},
+        query::{Create, Delete, Distinctness, Insert, Query, Select},
         table::Value,
     },
     runner::env::SimConnection,
@@ -282,6 +282,29 @@ impl Interactions {
                     Property::SelectLimit { select } => {
                         select.shadow(env);
                     }
+                    Property::DeleteSelect {
+                        table,
+                        predicate,
+                        queries,
+                    } => {
+                        let delete = Query::Delete(Delete {
+                            table: table.clone(),
+                            predicate: predicate.clone(),
+                        });
+
+                        let select = Query::Select(Select {
+                            table: table.clone(),
+                            predicate: predicate.clone(),
+                            distinct: Distinctness::All,
+                            limit: None,
+                        });
+
+                        delete.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
+                        select.shadow(env);
+                    }
                 }
                 for interaction in property.interactions() {
                     match interaction {
@@ -303,7 +326,15 @@ impl Interactions {
                                     .unwrap();
                                 table.rows.extend(values);
                             }
-                            Query::Delete(_) => todo!(),
+                            Query::Delete(delete) => {
+                                let table = env
+                                    .tables
+                                    .iter_mut()
+                                    .find(|t| t.name == delete.table)
+                                    .unwrap();
+                                let t2 = &table.clone();
+                                table.rows.retain_mut(|r| delete.predicate.test(r, t2));
+                            }
                             Query::Select(_) => {}
                         },
                         Interaction::Assertion(_) => {}
