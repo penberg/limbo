@@ -10,15 +10,15 @@ use rustix::{
     fs::{self, FlockOperation, OFlags, OpenOptionsExt},
     io::Errno,
 };
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::cell::{RefCell, UnsafeCell};
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::rc::Rc;
+const MAX_FD: usize = 1024;
 
 pub struct UnixIO {
-    poller: Rc<RefCell<Poller>>,
-    events: Rc<RefCell<Events>>,
-    callbacks: Rc<RefCell<HashMap<usize, CompletionCallback>>>,
+    poller: UnsafeCell<Poller>,
+    events: UnsafeCell<Events>,
+    callbacks: UnsafeCell<[Option<CompletionCallback>; MAX_FD]>,
 }
 
 impl UnixIO {
@@ -26,9 +26,9 @@ impl UnixIO {
     pub fn new() -> Result<Self> {
         debug!("Using IO backend 'syscall'");
         Ok(Self {
-            poller: Rc::new(RefCell::new(Poller::new()?)),
-            events: Rc::new(RefCell::new(Events::new())),
-            callbacks: Rc::new(RefCell::new(HashMap::new())),
+            poller: Poller::new()?.into(),
+            events: Events::new().into(),
+            callbacks: [const { None }; MAX_FD].into(),
         })
     }
 }
@@ -45,8 +45,8 @@ impl IO for UnixIO {
 
         let unix_file = Rc::new(UnixFile {
             file: Rc::new(RefCell::new(file)),
-            poller: self.poller.clone(),
-            callbacks: self.callbacks.clone(),
+            poller: UnsafeCell::new(unsafe { &mut *self.poller.get() }),
+            callbacks: UnsafeCell::new(unsafe { &mut *self.callbacks.get() }),
         });
         if std::env::var(common::ENV_DISABLE_FILE_LOCK).is_err() {
             unix_file.lock_file(true)?;
@@ -55,18 +55,22 @@ impl IO for UnixIO {
     }
 
     fn run_once(&self) -> Result<()> {
-        if self.callbacks.borrow().is_empty() {
-            return Ok(());
+        {
+            let callbacks = unsafe { &mut *self.callbacks.get() };
+            if callbacks.iter().all(|c| c.is_none()) {
+                return Ok(());
+            }
         }
-        let mut events = self.events.borrow_mut();
+        let events = unsafe { &mut *self.events.get() };
         events.clear();
 
         trace!("run_once() waits for events");
-        let poller = self.poller.borrow();
-        poller.wait(&mut events, None)?;
+        let poller = unsafe { &mut *self.poller.get() };
+        poller.wait(events, None)?;
 
         for event in events.iter() {
-            if let Some(cf) = self.callbacks.borrow_mut().remove(&event.key) {
+            let callbacks = unsafe { &mut *self.callbacks.get() };
+            if let Some(cf) = callbacks[event.key].as_ref() {
                 let result = {
                     match cf {
                         CompletionCallback::Read(ref file, ref c, pos) => {
@@ -77,13 +81,13 @@ impl IO for UnixIO {
                                 _ => unreachable!(),
                             };
                             let mut buf = r.buf_mut();
-                            file.seek(std::io::SeekFrom::Start(pos as u64))?;
+                            file.seek(std::io::SeekFrom::Start(*pos as u64))?;
                             file.read(buf.as_mut_slice())
                         }
                         CompletionCallback::Write(ref file, _, ref buf, pos) => {
                             let mut file = file.borrow_mut();
                             let buf = buf.borrow();
-                            file.seek(std::io::SeekFrom::Start(pos as u64))?;
+                            file.seek(std::io::SeekFrom::Start(*pos as u64))?;
                             file.write(buf.as_slice())
                         }
                     }
@@ -103,6 +107,7 @@ impl IO for UnixIO {
                     Err(e) => Err(e.into()),
                 };
             }
+            callbacks[event.key] = None;
         }
         Ok(())
     }
@@ -128,13 +133,13 @@ enum CompletionCallback {
     ),
 }
 
-pub struct UnixFile {
+pub struct UnixFile<'io> {
     file: Rc<RefCell<std::fs::File>>,
-    poller: Rc<RefCell<Poller>>,
-    callbacks: Rc<RefCell<HashMap<usize, CompletionCallback>>>,
+    poller: UnsafeCell<&'io mut Poller>,
+    callbacks: UnsafeCell<&'io mut [Option<CompletionCallback>; MAX_FD]>,
 }
 
-impl File for UnixFile {
+impl File for UnixFile<'_> {
     fn lock_file(&self, exclusive: bool) -> Result<()> {
         let fd = self.file.borrow();
         let fd = fd.as_fd();
@@ -196,14 +201,14 @@ impl File for UnixFile {
                 // Would block, set up polling
                 let fd = file.as_raw_fd();
                 unsafe {
-                    self.poller
-                        .borrow()
-                        .add(&file.as_fd(), Event::readable(fd as usize))?;
+                    let poller = &mut *self.poller.get();
+                    poller.add(&file.as_fd(), Event::readable(fd as usize))?;
                 }
-                self.callbacks.borrow_mut().insert(
-                    fd as usize,
-                    CompletionCallback::Read(self.file.clone(), c, pos),
-                );
+                {
+                    let callbacks = unsafe { &mut *self.callbacks.get() };
+                    callbacks[fd as usize] =
+                        Some(CompletionCallback::Read(self.file.clone(), c, pos));
+                }
                 Ok(())
             }
             Err(e) => Err(e.into()),
@@ -227,15 +232,21 @@ impl File for UnixFile {
                 trace!("pwrite blocks");
                 // Would block, set up polling
                 let fd = file.as_raw_fd();
-                unsafe {
-                    self.poller
-                        .borrow()
-                        .add(&file.as_fd(), Event::readable(fd as usize))?;
+                {
+                    unsafe {
+                        let poller = &mut *self.poller.get();
+                        poller.add(&file.as_fd(), Event::readable(fd as usize))?;
+                    }
                 }
-                self.callbacks.borrow_mut().insert(
-                    fd as usize,
-                    CompletionCallback::Write(self.file.clone(), c, buffer.clone(), pos),
-                );
+                {
+                    let callbacks = unsafe { &mut *self.callbacks.get() };
+                    callbacks[fd as usize] = Some(CompletionCallback::Write(
+                        self.file.clone(),
+                        c,
+                        buffer.clone(),
+                        pos,
+                    ));
+                }
                 Ok(())
             }
             Err(e) => Err(e.into()),
@@ -261,7 +272,7 @@ impl File for UnixFile {
     }
 }
 
-impl Drop for UnixFile {
+impl Drop for UnixFile<'_> {
     fn drop(&mut self) {
         self.unlock_file().expect("Failed to unlock file");
     }
