@@ -127,12 +127,10 @@ impl VTabCursor for GenerateSeriesCursor {
     type Error = ResultCode;
 
     fn next(&mut self) -> ResultCode {
-        // Check for invalid ranges (empty series) first
         if self.eof() {
             return ResultCode::EOF;
         }
 
-        // Handle overflow by truncating to MAX/MIN
         self.current = match self.current.checked_add(self.step) {
             Some(val) => val,
             None => {
