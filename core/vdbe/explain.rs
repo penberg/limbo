@@ -383,13 +383,14 @@ pub fn insn_to_str(
             ),
             Insn::VFilter {
                 cursor_id,
+                pc_if_empty,
                 arg_count,
-                args_reg,
+                ..
             } => (
                 "VFilter",
                 *cursor_id as i32,
+                pc_if_empty.to_debug_int(),
                 *arg_count as i32,
-                *args_reg as i32,
                 OwnedValue::build_text(Rc::new("".to_string())),
                 0,
                 "".to_string(),

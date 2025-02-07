@@ -434,7 +434,7 @@ def test_series(pipe):
     run_test(
         pipe,
         "SELECT * FROM generate_series(1, 10);",
-        lambda res: "Invalid Argument" in res,
+        lambda res: res == "1\n2\n3\n4\n5\n6\n7\n8\n9\n10",
     )
     run_test(
         pipe,

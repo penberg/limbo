@@ -879,6 +879,7 @@ impl Program {
                 }
                 Insn::VFilter {
                     cursor_id,
+                    pc_if_empty,
                     arg_count,
                     args_reg,
                 } => {
@@ -892,8 +893,12 @@ impl Program {
                     for i in 0..*arg_count {
                         args.push(state.registers[args_reg + i].clone());
                     }
-                    virtual_table.filter(cursor, *arg_count, args)?;
-                    state.pc += 1;
+                    let has_rows = virtual_table.filter(cursor, *arg_count, args)?;
+                    if !has_rows {
+                        state.pc = pc_if_empty.to_offset_int();
+                    } else {
+                        state.pc += 1;
+                    }
                 }
                 Insn::VColumn {
                     cursor_id,

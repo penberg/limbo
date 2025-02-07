@@ -530,7 +530,7 @@ impl VirtualTable {
         cursor: &VTabOpaqueCursor,
         arg_count: usize,
         args: Vec<OwnedValue>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut filter_args = Vec::with_capacity(arg_count);
         for i in 0..arg_count {
             let ownedvalue_arg = args.get(i).unwrap();
@@ -551,7 +551,8 @@ impl VirtualTable {
             (self.implementation.filter)(cursor.as_ptr(), arg_count as i32, filter_args.as_ptr())
         };
         match rc {
-            ResultCode::OK => Ok(()),
+            ResultCode::OK => Ok(true),
+            ResultCode::EOF => Ok(false),
             _ => Err(LimboError::ExtensionError(rc.to_string())),
         }
     }
