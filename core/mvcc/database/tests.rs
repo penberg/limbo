@@ -382,7 +382,7 @@ fn test_fuzzy_read() {
             table_id: 1,
             row_id: 1,
         },
-        data: "Hello".to_string(),
+        data: "First".to_string(),
     };
     db.insert(tx1, tx1_row.clone()).unwrap();
     let row = db
@@ -419,7 +419,7 @@ fn test_fuzzy_read() {
             table_id: 1,
             row_id: 1,
         },
-        data: "World".to_string(),
+        data: "Second".to_string(),
     };
     db.update(tx3, tx3_row).unwrap();
     db.commit_tx(tx3).unwrap();
@@ -436,6 +436,18 @@ fn test_fuzzy_read() {
         .unwrap()
         .unwrap();
     assert_eq!(tx1_row, row);
+
+    // T2 tries to update the row, but fails because T3 has already committed an update to the row,
+    // so T2 trying to write would violate snapshot isolation if it succeeded.
+    let tx2_newrow = Row {
+        id: RowID {
+            table_id: 1,
+            row_id: 1,
+        },
+        data: "Third".to_string(),
+    };
+    let update_result = db.update(tx2, tx2_newrow);
+    assert_eq!(Err(DatabaseError::WriteWriteConflict), update_result);
 }
 
 #[test]
