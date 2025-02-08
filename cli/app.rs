@@ -2,7 +2,7 @@ use crate::{
     import::{ImportFile, IMPORT_HELP},
     opcodes_dictionary::OPCODE_DESCRIPTIONS,
 };
-use cli_table::{Cell, Table};
+use cli_table::{Cell, Style, Table};
 use limbo_core::{Database, LimboError, Statement, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
@@ -670,6 +670,16 @@ impl Limbo {
                         return Ok(());
                     }
                     let mut table_rows: Vec<Vec<_>> = vec![];
+                    if rows.num_columns() > 0 {
+                        let columns = (0..rows.num_columns())
+                            .map(|i| {
+                                rows.get_column_name(i)
+                                    .map(|name| name.cell().bold(true))
+                                    .unwrap_or_else(|| " ".cell())
+                            })
+                            .collect::<Vec<_>>();
+                        table_rows.push(columns);
+                    }
                     loop {
                         match rows.step() {
                             Ok(StepResult::Row) => {
