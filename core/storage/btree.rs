@@ -1115,7 +1115,7 @@ impl BTreeCursor {
                 debug!("balance_non_root(page={})", current_page.get().id);
 
                 // Copy of page used to reference cell bytes.
-                // This needs to be saved somewhere safe so taht references still point to here,
+                // This needs to be saved somewhere safe so that references still point to here,
                 // this will be store in write_info below
                 let page_copy = current_page.get().contents.as_ref().unwrap().clone();
 
