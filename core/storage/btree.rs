@@ -1057,11 +1057,6 @@ impl BTreeCursor {
             .clone();
         match state {
             WriteState::BalanceStart => {
-                // drop divider cells and find right pointer
-                // NOTE: since we are doing a simple split we only finding the pointer we want to update (right pointer).
-                // Right pointer means cell that points to the last page, as we don't really want to drop this one. This one
-                // can be a "rightmost pointer" or a "cell".
-                // we always asumme there is a parent
                 let current_page = self.stack.top();
                 {
                     // check if we don't need to balance
