@@ -125,13 +125,13 @@ pub enum Stmt {
         /// `BEFORE`/`AFTER`/`INSTEAD OF`
         time: Option<TriggerTime>,
         /// `DELETE`/`INSERT`/`UPDATE`
-        event: TriggerEvent,
+        event: Box<TriggerEvent>,
         /// table name
         tbl_name: QualifiedName,
         /// `FOR EACH ROW`
         for_each_row: bool,
         /// `WHEN`
-        when_clause: Option<Expr>,
+        when_clause: Option<Box<Expr>>,
         /// statements
         commands: Vec<TriggerCmd>,
     },
