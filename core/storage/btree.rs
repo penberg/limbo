@@ -2459,26 +2459,47 @@ mod tests {
     }
 
     #[test]
-    pub fn btree_insert_fuzz() {
+    pub fn btree_insert_fuzz_ex() {
         let _ = env_logger::init();
-        let (pager, root_page) = empty_btree();
-        let mut cursor = BTreeCursor::new(pager.clone(), root_page);
-        let mut keys = Vec::new();
-        let mut rng = ChaCha8Rng::seed_from_u64(0);
-        for _ in 0..16 {
-            let size = (rng.next_u64() % 4096) as usize;
-            let key = (rng.next_u64() % (1 << 30)) as i64;
-            keys.push(key);
-            log::info!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
-            let key = OwnedValue::Integer(key);
-            let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
-            cursor.insert(&key, &value, false).unwrap();
-            log::info!(
-                "=========== btree ===========\n{}\n\n",
-                format_btree(pager.clone(), root_page, 0)
-            );
-
-            for key in keys.iter() {
+        for sequence in [
+            &[
+                (293471650, 2452),
+                (163608869, 627),
+                (544576229, 464),
+                (705823748, 3441),
+            ]
+            .as_slice(),
+            &[
+                (987283511, 2924),
+                (261851260, 1766),
+                (343847101, 1657),
+                (315844794, 572),
+            ]
+            .as_slice(),
+            &[
+                (987283511, 2924),
+                (261851260, 1766),
+                (343847101, 1657),
+                (315844794, 572),
+                (649272840, 1632),
+                (723398505, 3140),
+                (334416967, 3874),
+            ]
+            .as_slice(),
+        ] {
+            let (pager, root_page) = empty_btree();
+            let mut cursor = BTreeCursor::new(pager.clone(), root_page);
+            for (key, size) in sequence.iter() {
+                let key = OwnedValue::Integer(*key);
+                let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; *size]))]);
+                log::info!("insert key:{}", key);
+                cursor.insert(&key, &value, false).unwrap();
+                log::info!(
+                    "=========== btree ===========\n{}\n\n",
+                    format_btree(pager.clone(), root_page, 0)
+                );
+            }
+            for (key, _) in sequence.iter() {
                 let seek_key = SeekKey::TableRowId(*key as u64);
                 assert!(
                     matches!(
@@ -2488,6 +2509,44 @@ mod tests {
                     "key {} is not found",
                     key
                 );
+            }
+        }
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz_run() {
+        let _ = env_logger::init();
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+        for _ in 0..128 {
+            let (pager, root_page) = empty_btree();
+            let mut cursor = BTreeCursor::new(pager.clone(), root_page);
+            let mut keys = Vec::new();
+            let seed = rng.next_u64();
+            log::info!("seed: {}", seed);
+            let mut rng = ChaCha8Rng::seed_from_u64(seed);
+            for _ in 0..16 {
+                let size = (rng.next_u64() % 4096) as usize;
+                let key = (rng.next_u64() % (1 << 30)) as i64;
+                keys.push(key);
+                log::info!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
+                let key = OwnedValue::Integer(key);
+                let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
+                cursor.insert(&key, &value, false).unwrap();
+                log::info!(
+                    "=========== btree ===========\n{}\n\n",
+                    format_btree(pager.clone(), root_page, 0)
+                );
+                for key in keys.iter() {
+                    let seek_key = SeekKey::TableRowId(*key as u64);
+                    assert!(
+                        matches!(
+                            cursor.seek(seek_key, SeekOp::EQ).unwrap(),
+                            CursorResult::Ok(true)
+                        ),
+                        "key {} is not found",
+                        key
+                    );
+                }
             }
         }
     }
