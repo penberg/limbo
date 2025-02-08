@@ -339,6 +339,21 @@ fn qualified_table_name_within_triggers() {
 }
 
 #[test]
+fn select_from_error_stops_at_first_error() {
+    let mut parser = Parser::new(b"SELECT FROM foo;");
+
+    // First next() call should return the first syntax error
+    let err = parser.next().unwrap_err();
+    assert!(matches!(err, Error::ParserError(_, _, _)));
+
+    // Second next() call should return Ok(None) since parsing should have stopped
+    assert_eq!(parser.next().unwrap(), None);
+
+    // Third next() call should also return Ok(None)
+    assert_eq!(parser.next().unwrap(), None);
+}
+
+#[test]
 fn indexed_by_clause_within_triggers() {
     expect_parser_err_msg(
         b"CREATE TRIGGER main.t16err5 AFTER INSERT ON tA BEGIN

@@ -2,7 +2,8 @@ use crate::{
     import::{ImportFile, IMPORT_HELP},
     opcodes_dictionary::OPCODE_DESCRIPTIONS,
 };
-use cli_table::{Cell, Table};
+use cli_table::format::{Border, HorizontalLine, Separator, VerticalLine};
+use cli_table::{Cell, Style, Table};
 use limbo_core::{Database, LimboError, Statement, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
@@ -670,6 +671,16 @@ impl Limbo {
                         return Ok(());
                     }
                     let mut table_rows: Vec<Vec<_>> = vec![];
+                    if rows.num_columns() > 0 {
+                        let columns = (0..rows.num_columns())
+                            .map(|i| {
+                                rows.get_column_name(i)
+                                    .map(|name| name.cell().bold(true))
+                                    .unwrap_or_else(|| " ".cell())
+                            })
+                            .collect::<Vec<_>>();
+                        table_rows.push(columns);
+                    }
                     loop {
                         match rows.step() {
                             Ok(StepResult::Row) => {
@@ -707,11 +718,7 @@ impl Limbo {
                             }
                         }
                     }
-                    if let Ok(table) = table_rows.table().display() {
-                        let _ = self.write_fmt(format_args!("{}", table));
-                    } else {
-                        let _ = self.writeln("Error displaying table.");
-                    }
+                    self.print_table(table_rows);
                 }
             },
             Ok(None) => {}
@@ -725,6 +732,40 @@ impl Limbo {
         // for now let's cache flush always
         self.conn.cacheflush()?;
         Ok(())
+    }
+
+    fn print_table(&mut self, table_rows: Vec<Vec<cli_table::CellStruct>>) {
+        if table_rows.is_empty() {
+            return;
+        }
+
+        let horizontal_line = HorizontalLine::new('┌', '┐', '┬', '─');
+        let horizontal_line_mid = HorizontalLine::new('├', '┤', '┼', '─');
+        let horizontal_line_bottom = HorizontalLine::new('└', '┘', '┴', '─');
+        let vertical_line = VerticalLine::new('│');
+
+        let border = Border::builder()
+            .top(horizontal_line)
+            .bottom(horizontal_line_bottom)
+            .left(vertical_line.clone())
+            .right(vertical_line.clone())
+            .build();
+
+        let separator = Separator::builder()
+            .column(Some(vertical_line))
+            .row(Some(horizontal_line_mid))
+            .build();
+
+        if let Ok(table) = table_rows
+            .table()
+            .border(border)
+            .separator(separator)
+            .display()
+        {
+            let _ = self.write_fmt(format_args!("{}", table));
+        } else {
+            let _ = self.writeln("Error displaying table.");
+        }
     }
 
     fn display_schema(&mut self, table: Option<&str>) -> anyhow::Result<()> {

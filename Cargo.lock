@@ -1395,15 +1395,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
-name = "java-limbo"
-version = "0.0.14"
-dependencies = [
- "jni",
- "limbo_core",
- "thiserror 2.0.11",
-]
-
-[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1588,6 +1579,15 @@ name = "limbo-go"
 version = "0.0.14"
 dependencies = [
  "limbo_core",
+]
+
+[[package]]
+name = "limbo-java"
+version = "0.0.14"
+dependencies = [
+ "jni",
+ "limbo_core",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
