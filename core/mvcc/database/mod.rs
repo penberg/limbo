@@ -58,7 +58,9 @@ impl<T> LogRecord<T> {
 /// versions switch to tracking timestamps.
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 enum TxTimestampOrID {
+    /// A committed transaction's timestamp.
     Timestamp(u64),
+    /// The ID of a non-committed transaction.
     TxID(TxID),
 }
 
@@ -571,6 +573,7 @@ impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> MvStore<Cloc
                     if let TxTimestampOrID::TxID(id) = row_version.begin {
                         if id == tx_id {
                             // New version is valid STARTING FROM committing transaction's end timestamp
+                            // See diagram on page 299: https://www.cs.cmu.edu/~15721-f24/papers/Hekaton.pdf
                             row_version.begin = TxTimestampOrID::Timestamp(end_ts);
                             self.insert_version_raw(
                                 &mut log_record.row_versions,
@@ -581,6 +584,7 @@ impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> MvStore<Cloc
                     if let Some(TxTimestampOrID::TxID(id)) = row_version.end {
                         if id == tx_id {
                             // New version is valid UNTIL committing transaction's end timestamp
+                            // See diagram on page 299: https://www.cs.cmu.edu/~15721-f24/papers/Hekaton.pdf
                             row_version.end = Some(TxTimestampOrID::Timestamp(end_ts));
                             self.insert_version_raw(
                                 &mut log_record.row_versions,
