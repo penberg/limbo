@@ -47,9 +47,9 @@ impl InteractionPlan {
             .map(|i| i.interactions())
             .collect::<Vec<_>>();
 
-        let (mut i, mut j1, mut j2) = (0, 0, 0);
+        let (mut i, mut j) = (0, 0);
 
-        while i < interactions.len() && j1 < plan.len() {
+        while i < interactions.len() && j < plan.len() {
             if interactions[i].starts_with("-- begin")
                 || interactions[i].starts_with("-- end")
                 || interactions[i].is_empty()
@@ -57,32 +57,32 @@ impl InteractionPlan {
                 i += 1;
                 continue;
             }
-            if plan[j1].len() == j2 {
-                i += 1;
-                j1 += 1;
-                j2 = 0;
-            } else if interactions[i].contains(plan[j1][j2].to_string().as_str()) {
-                i += 1;
-                if j2 + 1 < plan[j1].len() {
-                    j2 += 1;
-                } else {
-                    j1 += 1;
-                    j2 = 0;
-                }
-            } else {
-                plan[j1].remove(j2);
 
-                if plan[j1].is_empty() {
-                    plan.remove(j1);
-                    j2 = 0;
+            // interactions[i] is the i'th line in the human readable plan
+            // plan[j][k] is the k'th interaction in the j'th property
+            let mut k = 0;
+
+            while k < plan[j].len() {
+
+                if i >= interactions.len() {
+                    let _ = plan.split_off(j + 1);
+                    let _ = plan[j].split_off(k);
+                    break;
+                }
+
+                if interactions[i].contains(plan[j][k].to_string().as_str()) {
+                    i += 1;
+                    k += 1;
+                } else {
+                    plan[j].remove(k);
                 }
             }
-        }
-        if j1 < plan.len() {
-            if j2 < plan[j1].len() {
-                let _ = plan[j1].split_off(j2);
+
+            if plan[j].is_empty() {
+                plan.remove(j);
+            } else {
+                j += 1;
             }
-            let _ = plan.split_off(j1);
         }
 
         plan
