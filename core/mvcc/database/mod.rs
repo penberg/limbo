@@ -231,55 +231,6 @@ impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> MvStore<Cloc
         }
     }
 
-    // Extracts the begin timestamp from a transaction
-    fn get_begin_timestamp(&self, ts_or_id: &TxTimestampOrID) -> u64 {
-        match ts_or_id {
-            TxTimestampOrID::Timestamp(ts) => *ts,
-            TxTimestampOrID::TxID(tx_id) => {
-                self.txs
-                    .get(tx_id)
-                    .unwrap()
-                    .value()
-                    .read()
-                    .unwrap()
-                    .begin_ts
-            }
-        }
-    }
-
-    /// Inserts a new row version into the database, while making sure that
-    /// the row version is inserted in the correct order.
-    fn insert_version(&self, id: RowID, row_version: RowVersion<T>) {
-        let versions = self.rows.get_or_insert_with(id, || RwLock::new(Vec::new()));
-        let mut versions = versions.value().write().unwrap();
-        self.insert_version_raw(&mut versions, row_version)
-    }
-
-    /// Inserts a new row version into the internal data structure for versions,
-    /// while making sure that the row version is inserted in the correct order.
-    fn insert_version_raw(&self, versions: &mut Vec<RowVersion<T>>, row_version: RowVersion<T>) {
-        // NOTICE: this is an insert a'la insertion sort, with pessimistic linear complexity.
-        // However, we expect the number of versions to be nearly sorted, so we deem it worthy
-        // to search linearly for the insertion point instead of paying the price of using
-        // another data structure, e.g. a BTreeSet. If it proves to be too quadratic empirically,
-        // we can either switch to a tree-like structure, or at least use partition_point()
-        // which performs a binary search for the insertion point.
-        let position = versions
-            .iter()
-            .rposition(|v| {
-                self.get_begin_timestamp(&v.begin) < self.get_begin_timestamp(&row_version.begin)
-            })
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        if versions.len() - position > 3 {
-            tracing::debug!(
-                "Inserting a row version {} positions from the end",
-                versions.len() - position
-            );
-        }
-        versions.insert(position, row_version);
-    }
-
     /// Inserts a new row into the database.
     ///
     /// This function inserts a new `row` into the database within the context
@@ -725,6 +676,55 @@ impl<Clock: LogicalClock, T: Sync + Send + Clone + Debug + 'static> MvStore<Cloc
             self.clock.reset(record.tx_timestamp);
         }
         Ok(())
+    }
+
+    // Extracts the begin timestamp from a transaction
+    fn get_begin_timestamp(&self, ts_or_id: &TxTimestampOrID) -> u64 {
+        match ts_or_id {
+            TxTimestampOrID::Timestamp(ts) => *ts,
+            TxTimestampOrID::TxID(tx_id) => {
+                self.txs
+                    .get(tx_id)
+                    .unwrap()
+                    .value()
+                    .read()
+                    .unwrap()
+                    .begin_ts
+            }
+        }
+    }
+
+    /// Inserts a new row version into the database, while making sure that
+    /// the row version is inserted in the correct order.
+    fn insert_version(&self, id: RowID, row_version: RowVersion<T>) {
+        let versions = self.rows.get_or_insert_with(id, || RwLock::new(Vec::new()));
+        let mut versions = versions.value().write().unwrap();
+        self.insert_version_raw(&mut versions, row_version)
+    }
+
+    /// Inserts a new row version into the internal data structure for versions,
+    /// while making sure that the row version is inserted in the correct order.
+    fn insert_version_raw(&self, versions: &mut Vec<RowVersion<T>>, row_version: RowVersion<T>) {
+        // NOTICE: this is an insert a'la insertion sort, with pessimistic linear complexity.
+        // However, we expect the number of versions to be nearly sorted, so we deem it worthy
+        // to search linearly for the insertion point instead of paying the price of using
+        // another data structure, e.g. a BTreeSet. If it proves to be too quadratic empirically,
+        // we can either switch to a tree-like structure, or at least use partition_point()
+        // which performs a binary search for the insertion point.
+        let position = versions
+            .iter()
+            .rposition(|v| {
+                self.get_begin_timestamp(&v.begin) < self.get_begin_timestamp(&row_version.begin)
+            })
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        if versions.len() - position > 3 {
+            tracing::debug!(
+                "Inserting a row version {} positions from the end",
+                versions.len() - position
+            );
+        }
+        versions.insert(position, row_version);
     }
 }
 
