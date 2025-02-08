@@ -2375,6 +2375,65 @@ mod tests {
     use std::cell::RefCell;
     use std::sync::Arc;
 
+    fn format_btree(pager: Rc<Pager>, page_idx: usize, depth: usize) -> String {
+        let cursor = BTreeCursor::new(pager.clone(), page_idx);
+        let page = pager.read_page(page_idx).unwrap();
+        let page = page.get();
+        let contents = page.contents.as_ref().unwrap();
+        let page_type = contents.page_type();
+        let mut current = Vec::new();
+        let mut child = Vec::new();
+        for cell_idx in 0..contents.cell_count() {
+            let cell = contents
+                .cell_get(
+                    cell_idx,
+                    pager.clone(),
+                    cursor.payload_overflow_threshold_max(page_type),
+                    cursor.payload_overflow_threshold_min(page_type),
+                    cursor.usable_space(),
+                )
+                .unwrap();
+            match cell {
+                BTreeCell::TableInteriorCell(cell) => {
+                    current.push(format!(
+                        "node[rowid:{}, ptr(<=):{}]",
+                        cell._rowid, cell._left_child_page
+                    ));
+                    child.push(format_btree(
+                        pager.clone(),
+                        cell._left_child_page as usize,
+                        depth + 2,
+                    ));
+                }
+                BTreeCell::TableLeafCell(cell) => {
+                    current.push(format!(
+                        "leaf[rowid:{}, len(payload):{}, overflow:{}]",
+                        cell._rowid,
+                        cell._payload.len(),
+                        cell.first_overflow_page.is_some()
+                    ));
+                }
+                _ => panic!("unsupported btree cell: {:?}", cell),
+            }
+        }
+        if let Some(rightmost) = contents.rightmost_pointer() {
+            child.push(format_btree(pager.clone(), rightmost as usize, depth + 2));
+        }
+        let current = format!(
+            "{}-page:{}, ptr(right):{}\n{}+cells:{}",
+            " ".repeat(depth),
+            page_idx,
+            contents.rightmost_pointer().unwrap_or(0),
+            " ".repeat(depth),
+            current.join(", ")
+        );
+        if child.is_empty() {
+            current
+        } else {
+            current + "\n" + &child.join("\n")
+        }
+    }
+
     fn empty_btree() -> (Rc<Pager>, usize) {
         let db_header = DatabaseHeader::default();
         let page_size = db_header.page_size as usize;
@@ -2401,30 +2460,35 @@ mod tests {
 
     #[test]
     pub fn btree_insert_fuzz() {
+        let _ = env_logger::init();
         let (pager, root_page) = empty_btree();
-        let mut cursor = BTreeCursor::new(pager, root_page);
+        let mut cursor = BTreeCursor::new(pager.clone(), root_page);
         let mut keys = Vec::new();
         let mut rng = ChaCha8Rng::seed_from_u64(0);
         for _ in 0..16 {
             let size = (rng.next_u64() % 4096) as usize;
             let key = (rng.next_u64() % (1 << 30)) as i64;
             keys.push(key);
-            println!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
+            log::info!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
             let key = OwnedValue::Integer(key);
             let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
             cursor.insert(&key, &value, false).unwrap();
-        }
-
-        for key in keys {
-            let seek_key = SeekKey::TableRowId(key as u64);
-            assert!(
-                matches!(
-                    cursor.seek(seek_key, SeekOp::EQ).unwrap(),
-                    CursorResult::Ok(true)
-                ),
-                "key {} is not found",
-                key
+            log::info!(
+                "=========== btree ===========\n{}\n\n",
+                format_btree(pager.clone(), root_page, 0)
             );
+
+            for key in keys.iter() {
+                let seek_key = SeekKey::TableRowId(*key as u64);
+                assert!(
+                    matches!(
+                        cursor.seek(seek_key, SeekOp::EQ).unwrap(),
+                        CursorResult::Ok(true)
+                    ),
+                    "key {} is not found",
+                    key
+                );
+            }
         }
     }
 

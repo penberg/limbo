@@ -96,6 +96,7 @@ quickcheck = { version = "1.0", default-features = false }
 quickcheck_macros = { version = "1.0", default-features = false }
 rand = "0.8.5"  # Required for quickcheck
 rand_chacha = "0.9.0"
+env_logger = "0.11.6"
 
 [[bench]]
 name = "benchmark"

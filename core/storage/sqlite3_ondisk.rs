@@ -362,7 +362,7 @@ pub fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PageType {
     IndexInterior = 2,
     TableInterior = 5,
