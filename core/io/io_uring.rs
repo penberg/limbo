@@ -242,10 +242,7 @@ impl File for UringFile {
     }
 
     fn pread(&self, pos: usize, c: Completion) -> Result<()> {
-        let r = match c {
-            Completion::Read(ref r) => r,
-            _ => unreachable!(),
-        };
+        let r = c.as_read();
         trace!("pread(pos = {}, length = {})", pos, r.buf().len());
         let fd = io_uring::types::Fd(self.file.as_raw_fd());
         let mut io = self.io.borrow_mut();

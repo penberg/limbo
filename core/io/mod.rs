@@ -59,26 +59,9 @@ impl Completion {
 
     /// only call this method if you are sure that the completion is
     /// a ReadCompletion, panics otherwise
-    pub fn read(&self) -> &ReadCompletion {
+    pub fn as_read(&self) -> &ReadCompletion {
         match self {
             Self::Read(ref r) => r,
-            _ => unreachable!(),
-        }
-    }
-    /// only call this method if you are sure that the completion is
-    /// a WriteCompletion, panics otherwise
-    pub fn write(&self) -> &WriteCompletion {
-        match self {
-            Self::Write(ref w) => w,
-            _ => unreachable!(),
-        }
-    }
-    ///
-    /// only call this method if you are sure that the completion is
-    /// a SyncCompletion, panics otherwise
-    pub fn sync(&self) -> &SyncCompletion {
-        match self {
-            Self::Sync(ref s) => s,
             _ => unreachable!(),
         }
     }

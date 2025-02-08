@@ -24,11 +24,21 @@ impl OwnedCallbacks {
     fn as_mut<'io>(&self) -> &'io mut Callbacks {
         unsafe { &mut *self.0.get() }
     }
+
+    fn is_empty(&self) -> bool {
+        self.as_mut().count == 0
+    }
+
+    fn remove(&self, fd: usize) -> Option<CompletionCallback> {
+        let callbacks = unsafe { &mut *self.0.get() };
+        callbacks.remove(fd)
+    }
 }
 
-impl<'io> BorrowedCallbacks<'io> {
-    fn as_mut(&self) -> &'io mut Callbacks {
-        unsafe { *self.0.get() }
+impl BorrowedCallbacks<'_> {
+    fn insert(&self, fd: usize, callback: CompletionCallback) {
+        let callbacks = unsafe { &mut *self.0.get() };
+        callbacks.insert(fd, callback);
     }
 }
 
@@ -39,6 +49,16 @@ impl EventsHandler {
         Self(UnsafeCell::new(Events::new()))
     }
 
+    fn clear(&self) {
+        let events = unsafe { &mut *self.0.get() };
+        events.clear();
+    }
+
+    fn iter(&self) -> impl Iterator<Item = Event> {
+        let events = unsafe { &*self.0.get() };
+        events.iter()
+    }
+
     fn as_mut<'io>(&self) -> &'io mut Events {
         unsafe { &mut *self.0.get() }
     }
@@ -46,15 +66,22 @@ impl EventsHandler {
 struct PollHandler(UnsafeCell<Poller>);
 struct BorrowedPollHandler<'io>(UnsafeCell<&'io mut Poller>);
 
-impl<'io> BorrowedPollHandler<'io> {
-    fn get(&self) -> &'io mut Poller {
-        unsafe { *self.0.get() }
+impl BorrowedPollHandler<'_> {
+    fn add(&self, fd: &rustix::fd::BorrowedFd, event: Event) -> Result<()> {
+        let poller = unsafe { &mut *self.0.get() };
+        unsafe { poller.add(fd, event)? }
+        Ok(())
     }
 }
 
 impl PollHandler {
     fn new() -> Self {
         Self(UnsafeCell::new(Poller::new().unwrap()))
+    }
+    fn wait(&self, events: &mut Events, timeout: Option<std::time::Duration>) -> Result<()> {
+        let poller = unsafe { &mut *self.0.get() };
+        poller.wait(events, timeout)?;
+        Ok(())
     }
 
     fn as_mut<'io>(&self) -> &'io mut Poller {
@@ -64,36 +91,56 @@ impl PollHandler {
 
 type CallbackEntry = (usize, CompletionCallback);
 
+const FD_INLINE_SIZE: usize = 32;
+
 struct Callbacks {
-    entries: Vec<CallbackEntry>,
+    inline_entries: [Option<(usize, CompletionCallback)>; FD_INLINE_SIZE],
+    heap_entries: Vec<CallbackEntry>,
+    count: usize,
 }
 
 impl Callbacks {
     fn new() -> Self {
         Self {
-            entries: Vec::with_capacity(32),
+            inline_entries: core::array::from_fn(|_| None),
+            heap_entries: Vec::new(),
+            count: 0,
         }
     }
 
     fn insert(&mut self, fd: usize, callback: CompletionCallback) {
-        if let Some(entry) = self.entries.iter_mut().find(|(key, _)| *key == fd) {
-            // replace existing
-            let _ = std::mem::replace(&mut entry.1, callback);
-            return;
+        if self.count < FD_INLINE_SIZE {
+            self.inline_entries[self.count] = Some((fd, callback));
+        } else {
+            self.heap_entries.push((fd, callback));
         }
-        self.entries.push((fd, callback));
+        self.count += 1;
     }
 
     fn remove(&mut self, fd: usize) -> Option<CompletionCallback> {
-        if let Some(pos) = self.entries.iter().position(|&(k, _)| k == fd) {
-            Some(self.entries.swap_remove(pos).1)
-        } else {
-            None
+        if let Some(pos) = self
+            .inline_entries
+            .iter()
+            .position(|cb| cb.as_ref().is_some_and(|cb| cb.0 == fd))
+        {
+            let callback = self.inline_entries[pos].take();
+            // swap with last valid entry
+            if pos < self.count - 1 {
+                self.inline_entries[pos] = self.inline_entries[self.count - 1].take();
+            }
+            self.count -= 1;
+            return callback.map(|c| c.1);
         }
+
+        if let Some(pos) = self.heap_entries.iter().position(|&(k, _)| k == fd) {
+            self.count -= 1;
+            return Some(self.heap_entries.swap_remove(pos).1);
+        }
+        None
     }
 }
 
-/// UnixIO lives longer than any of the files it creates, so it's
+/// UnixIO lives longer than any of the files it creates, so it is
 /// safe to store references to it's internals in the UnixFiles
 pub struct UnixIO {
     poller: PollHandler,
@@ -135,52 +182,37 @@ impl IO for UnixIO {
     }
 
     fn run_once(&self) -> Result<()> {
-        {
-            if self.callbacks.as_mut().entries.is_empty() {
-                return Ok(());
-            }
+        if self.callbacks.is_empty() {
+            return Ok(());
         }
-        {
-            self.events.as_mut().clear();
-        }
+        self.events.clear();
         trace!("run_once() waits for events");
-        {
-            self.poller.as_mut().wait(self.events.as_mut(), None)?;
-        }
-        for event in self.events.as_mut().iter() {
-            let callbacks = self.callbacks.as_mut();
-            if let Some(cf) = callbacks.remove(event.key) {
-                let result = {
-                    match cf {
-                        CompletionCallback::Read(ref file, ref c, pos) => {
-                            let mut file = file.borrow_mut();
-                            let r = c.read();
-                            let mut buf = r.buf_mut();
-                            file.seek(std::io::SeekFrom::Start(pos as u64))?;
-                            file.read(buf.as_mut_slice())
-                        }
-                        CompletionCallback::Write(ref file, _, ref buf, pos) => {
-                            let mut file = file.borrow_mut();
-                            let buf = buf.borrow();
-                            file.seek(std::io::SeekFrom::Start(pos as u64))?;
-                            file.write(buf.as_slice())
-                        }
+        self.poller.wait(self.events.as_mut(), None)?;
+
+        for event in self.events.iter() {
+            if let Some(cf) = self.callbacks.remove(event.key) {
+                let result = match cf {
+                    CompletionCallback::Read(ref file, ref c, pos) => {
+                        let mut file = file.borrow_mut();
+                        let r = c.as_read();
+                        let mut buf = r.buf_mut();
+                        file.seek(std::io::SeekFrom::Start(pos as u64))?;
+                        file.read(buf.as_mut_slice())
+                    }
+                    CompletionCallback::Write(ref file, _, ref buf, pos) => {
+                        let mut file = file.borrow_mut();
+                        let buf = buf.borrow();
+                        file.seek(std::io::SeekFrom::Start(pos as u64))?;
+                        file.write(buf.as_slice())
                     }
                 };
-                return match result {
-                    Ok(n) => {
-                        match &cf {
-                            CompletionCallback::Read(_, ref c, _) => {
-                                c.complete(0);
-                            }
-                            CompletionCallback::Write(_, ref c, _, _) => {
-                                c.complete(n as i32);
-                            }
-                        }
-                        Ok(())
-                    }
-                    Err(e) => Err(e.into()),
-                };
+                match result {
+                    Ok(n) => match &cf {
+                        CompletionCallback::Read(_, ref c, _) => c.complete(0),
+                        CompletionCallback::Write(_, ref c, _, _) => c.complete(n as i32),
+                    },
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
         Ok(())
@@ -256,7 +288,7 @@ impl File for UnixFile<'_> {
     fn pread(&self, pos: usize, c: Completion) -> Result<()> {
         let file = self.file.borrow();
         let result = {
-            let r = c.read();
+            let r = c.as_read();
             let mut buf = r.buf_mut();
             rustix::io::pread(file.as_fd(), buf.as_mut_slice(), pos as u64)
         };
@@ -271,12 +303,10 @@ impl File for UnixFile<'_> {
                 trace!("pread blocks");
                 // Would block, set up polling
                 let fd = file.as_raw_fd();
-                unsafe {
-                    let poller = &mut *self.poller.get();
-                    poller.add(&file.as_fd(), Event::readable(fd as usize))?;
-                }
+                self.poller
+                    .add(&file.as_fd(), Event::readable(fd as usize))?;
                 {
-                    self.callbacks.as_mut().insert(
+                    self.callbacks.insert(
                         fd as usize,
                         CompletionCallback::Read(self.file.clone(), c, pos),
                     );
@@ -304,18 +334,12 @@ impl File for UnixFile<'_> {
                 trace!("pwrite blocks");
                 // Would block, set up polling
                 let fd = file.as_raw_fd();
-                {
-                    unsafe {
-                        let poller = self.poller.get();
-                        poller.add(&file.as_fd(), Event::readable(fd as usize))?;
-                    }
-                }
-                {
-                    self.callbacks.as_mut().insert(
-                        fd as usize,
-                        CompletionCallback::Write(self.file.clone(), c, buffer.clone(), pos),
-                    );
-                }
+                self.poller
+                    .add(&file.as_fd(), Event::readable(fd as usize))?;
+                self.callbacks.insert(
+                    fd as usize,
+                    CompletionCallback::Write(self.file.clone(), c, buffer.clone(), pos),
+                );
                 Ok(())
             }
             Err(e) => Err(e.into()),
