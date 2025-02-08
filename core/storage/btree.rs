@@ -1109,10 +1109,14 @@ impl BTreeCursor {
                 let current_page = self.stack.top();
                 debug!("balance_non_root(page={})", current_page.get().id);
 
+                let current_page_inner = current_page.get();
+                let current_page_contents = &mut current_page_inner.contents;
+                let current_page_contents = current_page_contents.as_mut().unwrap();
                 // Copy of page used to reference cell bytes.
                 // This needs to be saved somewhere safe so that references still point to here,
                 // this will be store in write_info below
-                let page_copy = current_page.get().contents.as_ref().unwrap().clone();
+                let page_copy = current_page_contents.clone();
+                current_page_contents.overflow_cells.clear();
 
                 // In memory in order copy of all cells in pages we want to balance. For now let's do a 2 page split.
                 // Right pointer in interior cells should be converted to regular cells if more than 2 pages are used for balancing.
