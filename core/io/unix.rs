@@ -10,9 +10,12 @@ use rustix::{
     fs::{self, FlockOperation, OFlags, OpenOptionsExt},
     io::Errno,
 };
-use std::cell::{RefCell, UnsafeCell};
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::rc::Rc;
+use std::{
+    cell::{RefCell, UnsafeCell},
+    mem::MaybeUninit,
+};
 
 struct OwnedCallbacks(UnsafeCell<Callbacks>);
 struct BorrowedCallbacks<'io>(UnsafeCell<&'io mut Callbacks>);
@@ -26,7 +29,7 @@ impl OwnedCallbacks {
     }
 
     fn is_empty(&self) -> bool {
-        self.as_mut().count == 0
+        self.as_mut().inline_count == 0
     }
 
     fn remove(&self, fd: usize) -> Option<CompletionCallback> {
@@ -94,49 +97,61 @@ type CallbackEntry = (usize, CompletionCallback);
 const FD_INLINE_SIZE: usize = 32;
 
 struct Callbacks {
-    inline_entries: [Option<(usize, CompletionCallback)>; FD_INLINE_SIZE],
+    inline_entries: [MaybeUninit<(usize, CompletionCallback)>; FD_INLINE_SIZE],
     heap_entries: Vec<CallbackEntry>,
-    count: usize,
+    inline_count: usize,
 }
 
 impl Callbacks {
     fn new() -> Self {
         Self {
-            inline_entries: core::array::from_fn(|_| None),
+            inline_entries: [const { MaybeUninit::uninit() }; FD_INLINE_SIZE],
             heap_entries: Vec::new(),
-            count: 0,
+            inline_count: 0,
         }
     }
 
     fn insert(&mut self, fd: usize, callback: CompletionCallback) {
-        if self.count < FD_INLINE_SIZE {
-            self.inline_entries[self.count] = Some((fd, callback));
+        if self.inline_count < FD_INLINE_SIZE {
+            self.inline_entries[self.inline_count].write((fd, callback));
+            self.inline_count += 1;
         } else {
             self.heap_entries.push((fd, callback));
         }
-        self.count += 1;
     }
 
     fn remove(&mut self, fd: usize) -> Option<CompletionCallback> {
-        if let Some(pos) = self
-            .inline_entries
-            .iter()
-            .position(|cb| cb.as_ref().is_some_and(|cb| cb.0 == fd))
-        {
-            let callback = self.inline_entries[pos].take();
-            // swap with last valid entry
-            if pos < self.count - 1 {
-                self.inline_entries[pos] = self.inline_entries[self.count - 1].take();
+        if let Some(pos) = self.find_inline(fd) {
+            let (_, callback) = unsafe { self.inline_entries[pos].assume_init_read() };
+
+            // if not the last element, move the last valid entry into this position
+            if pos < self.inline_count - 1 {
+                let last_valid =
+                    unsafe { self.inline_entries[self.inline_count - 1].assume_init_read() };
+                self.inline_entries[pos].write(last_valid);
             }
-            self.count -= 1;
-            return callback.map(|c| c.1);
+
+            self.inline_count -= 1;
+            return Some(callback);
         }
 
         if let Some(pos) = self.heap_entries.iter().position(|&(k, _)| k == fd) {
-            self.count -= 1;
             return Some(self.heap_entries.swap_remove(pos).1);
         }
         None
+    }
+
+    fn find_inline(&self, fd: usize) -> Option<usize> {
+        (0..self.inline_count)
+            .find(|&i| unsafe { self.inline_entries[i].assume_init_ref().0 == fd })
+    }
+}
+
+impl Drop for Callbacks {
+    fn drop(&mut self) {
+        for i in 0..self.inline_count {
+            unsafe { self.inline_entries[i].assume_init_drop() };
+        }
     }
 }
 
