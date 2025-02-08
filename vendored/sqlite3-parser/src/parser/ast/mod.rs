@@ -1005,7 +1005,7 @@ pub struct GroupBy {
     /// expressions
     pub exprs: Vec<Expr>,
     /// `HAVING`
-    pub having: Option<Expr>, // HAVING clause on a non-aggregate query
+    pub having: Option<Box<Expr>>, // HAVING clause on a non-aggregate query
 }
 
 /// identifier or one of several keywords or `INDEXED`

@@ -731,7 +731,7 @@ nulls(A) ::= .                  {A = None;}
 
 %type groupby_opt {Option<GroupBy>}
 groupby_opt(A) ::= .                      {A = None;}
-groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs: X, having: Y });}
+groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs: X, having: Y.map(Box::new) });}
 
 %type having_opt {Option<Expr>}
 having_opt(A) ::= .                {A = None;}
