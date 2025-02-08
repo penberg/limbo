@@ -63,7 +63,6 @@ impl InteractionPlan {
             let mut k = 0;
 
             while k < plan[j].len() {
-
                 if i >= interactions.len() {
                     let _ = plan.split_off(j + 1);
                     let _ = plan[j].split_off(k);
