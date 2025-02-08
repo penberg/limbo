@@ -352,7 +352,45 @@ fn parse_from_clause_table(
     }
 }
 
-pub fn parse_from(
+/// A scope is a list of tables that are visible to the current query.
+/// It is used to resolve table references in the FROM clause.
+/// To resolve table references that are potentially ambiguous, the resolution
+/// first looks at schema tables and tables in the current scope (which currently just means CTEs in the current query),
+/// and only after that looks at whether a table from an outer (upper) query level matches.
+///
+/// For example:
+///
+/// WITH nested AS (SELECT foo FROM bar)
+/// WITH sub AS (SELECT foo FROM bar)
+/// SELECT * FROM sub
+///
+/// 'sub' would preferentially refer to the 'foo' column from the 'bar' table in the catalog.
+/// With an explicit reference like:
+///
+/// SELECT nested.foo FROM sub
+///
+/// 'nested.foo' would refer to the 'foo' column from the 'nested' CTE.
+///
+/// TODO: we should probably use Scope in all of our identifier resolution, because it allows for e.g.
+/// WITH users AS (SELECT * FROM products) SELECT * FROM users  <-- returns products, even if there is a table named 'users' in the catalog!
+///
+/// Currently we are treating Schema as a first-class object in identifier resolution, when in reality
+/// be part of the 'Scope' struct.
+pub struct Scope<'a> {
+    /// The tables that are explicitly present in the current query, including catalog tables and CTEs.
+    tables: Vec<TableReference>,
+    ctes: Vec<Cte>,
+    /// The parent scope, if any. For example, a second CTE has access to the first CTE via the parent scope.
+    parent: Option<&'a Scope<'a>>,
+}
+
+pub struct Cte {
+    /// The name of the CTE.
+    name: String,
+    /// The query plan for the CTE.
+    /// Currently we only support SELECT queries in CTEs.
+    plan: SelectPlan,
+}
     schema: &Schema,
     mut from: Option<FromClause>,
     syms: &SymbolTable,
