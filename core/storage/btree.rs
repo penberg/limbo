@@ -2362,6 +2362,10 @@ fn to_static_buf(buf: &[u8]) -> &'static [u8] {
 
 #[cfg(test)]
 mod tests {
+    use rand_chacha::rand_core::RngCore;
+    use rand_chacha::rand_core::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+
     use super::*;
     use crate::io::{Buffer, Completion, MemoryIO, OpenFlags, IO};
     use crate::storage::database::FileStorage;
@@ -2370,6 +2374,59 @@ mod tests {
     use crate::{BufferPool, DatabaseStorage, WalFile, WalFileShared, WriteCompletion};
     use std::cell::RefCell;
     use std::sync::Arc;
+
+    fn empty_btree() -> (Rc<Pager>, usize) {
+        let db_header = DatabaseHeader::default();
+        let page_size = db_header.page_size as usize;
+
+        let io: Arc<dyn IO> = Arc::new(MemoryIO::new().unwrap());
+        let io_file = io.open_file("test.db", OpenFlags::Create, false).unwrap();
+        let page_io = Rc::new(FileStorage::new(io_file));
+
+        let buffer_pool = Rc::new(BufferPool::new(db_header.page_size as usize));
+        let wal_shared = WalFileShared::open_shared(&io, "test.wal", db_header.page_size).unwrap();
+        let wal_file = WalFile::new(io.clone(), page_size, wal_shared, buffer_pool.clone());
+        let wal = Rc::new(RefCell::new(wal_file));
+
+        let page_cache = Arc::new(parking_lot::RwLock::new(DumbLruPageCache::new(10)));
+        let pager = {
+            let db_header = Rc::new(RefCell::new(db_header.clone()));
+            Pager::finish_open(db_header, page_io, wal, io, page_cache, buffer_pool).unwrap()
+        };
+        let pager = Rc::new(pager);
+        let page1 = pager.allocate_page().unwrap();
+        btree_init_page(&page1, PageType::TableLeaf, &db_header, 0);
+        (pager, page1.get().id)
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz() {
+        let (pager, root_page) = empty_btree();
+        let mut cursor = BTreeCursor::new(pager, root_page);
+        let mut keys = Vec::new();
+        let mut rng = ChaCha8Rng::seed_from_u64(0);
+        for _ in 0..16 {
+            let size = (rng.next_u64() % 4096) as usize;
+            let key = (rng.next_u64() % (1 << 30)) as i64;
+            keys.push(key);
+            println!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
+            let key = OwnedValue::Integer(key);
+            let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
+            cursor.insert(&key, &value, false).unwrap();
+        }
+
+        for key in keys {
+            let seek_key = SeekKey::TableRowId(key as u64);
+            assert!(
+                matches!(
+                    cursor.seek(seek_key, SeekOp::EQ).unwrap(),
+                    CursorResult::Ok(true)
+                ),
+                "key {} is not found",
+                key
+            );
+        }
+    }
 
     #[allow(clippy::arc_with_non_send_sync)]
     fn setup_test_env(database_size: u32) -> (Rc<Pager>, Rc<RefCell<DatabaseHeader>>) {

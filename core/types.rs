@@ -727,6 +727,7 @@ impl Cursor {
     }
 }
 
+#[derive(Debug)]
 pub enum CursorResult<T> {
     Ok(T),
     IO,

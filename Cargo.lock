@@ -1641,6 +1641,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.5",
+ "rand_chacha 0.9.0",
  "regex",
  "regex-syntax",
  "rstest",
