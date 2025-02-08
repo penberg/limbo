@@ -142,6 +142,11 @@ for rows.Next() {
 }
 ```
 
+### ☕️ Java (wip)
+
+We integrated Limbo into JDBC. For detailed instructions on how to use Limbo with java, please refer to
+the [README.md under bindings/java](bindings/java/README.md).
+
 ## Contributing
 
 We'd love to have you contribute to Limbo! Please check out the [contribution guide] to get started.
