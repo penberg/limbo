@@ -851,16 +851,16 @@ upsert(A) ::= ON CONFLICT LP sortlist(T) RP where_opt(TW)
               { let index = UpsertIndex{ targets: T, where_clause: TW };
                 let do_clause = UpsertDo::Set{ sets: Z, where_clause: W };
                 let (next, returning) = N;
-                A = (Some(Upsert{ index: Some(index), do_clause, next: next.map(Box::new) }), returning);}
+                A = (Some(Upsert{ index: Some(Box::new(index)), do_clause: Box::new(do_clause), next: next.map(Box::new) }), returning);}
 upsert(A) ::= ON CONFLICT LP sortlist(T) RP where_opt(TW) DO NOTHING upsert(N).
               { let index = UpsertIndex{ targets: T, where_clause: TW };
                 let (next, returning) = N;
-                A = (Some(Upsert{ index: Some(index), do_clause: UpsertDo::Nothing, next: next.map(Box::new) }), returning); }
+                A = (Some(Upsert{ index: Some(Box::new(index)), do_clause: Box::new(UpsertDo::Nothing), next: next.map(Box::new) }), returning); }
 upsert(A) ::= ON CONFLICT DO NOTHING returning(R).
-              { A = (Some(Upsert{ index: None, do_clause: UpsertDo::Nothing, next: None }), R); }
+              { A = (Some(Upsert{ index: None, do_clause: Box::new(UpsertDo::Nothing), next: None }), R); }
 upsert(A) ::= ON CONFLICT DO UPDATE SET setlist(Z) where_opt(W) returning(R).
               { let do_clause = UpsertDo::Set{ sets: Z, where_clause: W };
-                A = (Some(Upsert{ index: None, do_clause, next: None }), R);}
+                A = (Some(Upsert{ index: None, do_clause: Box::new(do_clause), next: None }), R);}
 
 %type returning {Option<Vec<ResultColumn>>}
 returning(A) ::= RETURNING selcollist(X).  {A = Some(X);}

@@ -1769,9 +1769,9 @@ pub enum TransactionType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Upsert {
     /// conflict targets
-    pub index: Option<UpsertIndex>,
+    pub index: Option<Box<UpsertIndex>>,
     /// `DO` clause
-    pub do_clause: UpsertDo,
+    pub do_clause: Box<UpsertDo>,
     /// next upsert
     pub next: Option<Box<Upsert>>,
 }
