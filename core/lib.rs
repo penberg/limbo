@@ -9,7 +9,7 @@ mod json;
 pub mod mvcc;
 mod parameters;
 mod pseudo;
-mod result;
+pub mod result;
 mod schema;
 mod storage;
 mod translate;
