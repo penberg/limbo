@@ -1276,7 +1276,7 @@ cmd ::= DROP TRIGGER ifexists(NOERR) fullname(X). {
 //////////////////////// ATTACH DATABASE file AS name /////////////////////////
 %ifndef SQLITE_OMIT_ATTACH
 cmd ::= ATTACH database_kw_opt expr(F) AS expr(D) key_opt(K). {
-  self.ctx.stmt = Some(Stmt::Attach{ expr: F, db_name: D, key: K });
+  self.ctx.stmt = Some(Stmt::Attach{ expr: Box::new(F), db_name: Box::new(D), key: K.map(Box::new) });
 }
 cmd ::= DETACH database_kw_opt expr(D). {
   self.ctx.stmt = Some(Stmt::Detach(D));

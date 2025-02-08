@@ -78,11 +78,11 @@ pub enum Stmt {
     Attach {
         /// filename
         // TODO distinction between ATTACH and ATTACH DATABASE
-        expr: Expr,
+        expr: Box<Expr>,
         /// schema name
-        db_name: Expr,
+        db_name: Box<Expr>,
         /// password
-        key: Option<Expr>,
+        key: Option<Box<Expr>>,
     },
     /// `BEGIN`: tx type, tx name
     Begin(Option<TransactionType>, Option<Name>),
