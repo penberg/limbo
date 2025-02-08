@@ -44,6 +44,7 @@ use storage::page_cache::DumbLruPageCache;
 use storage::pager::allocate_page;
 pub use storage::pager::PageRef;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
+pub use storage::wal::CheckpointMode;
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use types::OwnedValue;
