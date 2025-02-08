@@ -217,7 +217,7 @@ pub enum Stmt {
         /// `COLUMNS`
         columns: Option<DistinctNames>,
         /// `VALUES` or `SELECT`
-        body: InsertBody,
+        body: Box<InsertBody>,
         /// `RETURNING`
         returning: Option<Vec<ResultColumn>>,
     },

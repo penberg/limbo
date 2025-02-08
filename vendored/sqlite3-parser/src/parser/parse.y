@@ -828,13 +828,13 @@ cmd ::= with(W) insert_cmd(R) INTO xfullname(X) idlist_opt(F) select(S)
   let (upsert, returning) = U;
   let body = InsertBody::Select(Box::new(S), upsert);
   self.ctx.stmt = Some(Stmt::Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
-                                     body, returning });
+                                     body: Box::new(body), returning });
 }
 cmd ::= with(W) insert_cmd(R) INTO xfullname(X) idlist_opt(F) DEFAULT VALUES returning(Y).
 {
   let body = InsertBody::DefaultValues;
   self.ctx.stmt = Some(Stmt::Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
-                                     body, returning: Y });
+                                     body: Box::new(body), returning: Y });
 }
 
 %type upsert {(Option<Upsert>, Option<Vec<ResultColumn>>)}
