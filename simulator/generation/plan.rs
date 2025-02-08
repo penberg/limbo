@@ -57,8 +57,11 @@ impl InteractionPlan {
                 i += 1;
                 continue;
             }
-
-            if interactions[i].contains(plan[j1][j2].to_string().as_str()) {
+            if plan[j1].len() == j2 {
+                i += 1;
+                j1 += 1;
+                j2 = 0;
+            } else if interactions[i].contains(plan[j1][j2].to_string().as_str()) {
                 i += 1;
                 if j2 + 1 < plan[j1].len() {
                     j2 += 1;
