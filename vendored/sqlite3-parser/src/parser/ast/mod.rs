@@ -168,7 +168,7 @@ pub enum Stmt {
         /// `INDEXED`
         indexed: Option<Indexed>,
         /// `WHERE` clause
-        where_clause: Option<Expr>,
+        where_clause: Option<Box<Expr>>,
         /// `RETURNING`
         returning: Option<Vec<ResultColumn>>,
         /// `ORDER BY`
