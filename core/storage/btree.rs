@@ -1607,6 +1607,8 @@ impl BTreeCursor {
         page.write_u16(PAGE_HEADER_OFFSET_CELL_CONTENT_AREA, cbrk as u16);
         // set free block to 0, unused spaced can be retrieved from gap between cell pointer end and content start
         page.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
+        // set fragmented bytes counter to zero
+        page.write_u8(PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT, 0);
         // set unused space to 0
         let first_cell = cloned_page.cell_content_area() as u64;
         assert!(first_cell <= cbrk);
