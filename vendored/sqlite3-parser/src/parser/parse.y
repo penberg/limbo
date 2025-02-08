@@ -1454,9 +1454,9 @@ frame_bound_s(A) ::= UNBOUNDED PRECEDING. {A = FrameBound::UnboundedPreceding;}
 frame_bound_e(A) ::= frame_bound(X).      {A = X;}
 frame_bound_e(A) ::= UNBOUNDED FOLLOWING. {A = FrameBound::UnboundedFollowing;}
 
-frame_bound(A) ::= expr(X) PRECEDING.   { A = FrameBound::Preceding(X); }
+frame_bound(A) ::= expr(X) PRECEDING.   { A = FrameBound::Preceding(Box::new(X)); }
 frame_bound(A) ::= CURRENT ROW.         { A = FrameBound::CurrentRow; }
-frame_bound(A) ::= expr(X) FOLLOWING.   { A = FrameBound::Following(X); }
+frame_bound(A) ::= expr(X) FOLLOWING.   { A = FrameBound::Following(Box::new(X)); }
 
 %type frame_exclude_opt {Option<FrameExclude>}
 frame_exclude_opt(A) ::= . {A = None;}

@@ -1872,9 +1872,9 @@ pub enum FrameBound {
     /// `CURRENT ROW`
     CurrentRow,
     /// `FOLLOWING`
-    Following(Expr),
+    Following(Box<Expr>),
     /// `PRECEDING`
-    Preceding(Expr),
+    Preceding(Box<Expr>),
     /// `UNBOUNDED FOLLOWING`
     UnboundedFollowing,
     /// `UNBOUNDED PRECEDING`
