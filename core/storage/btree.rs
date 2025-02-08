@@ -1206,7 +1206,7 @@ impl BTreeCursor {
                         BTreeCell::TableInteriorCell(interior) => {
                             interior._left_child_page as usize == current_idx
                         }
-                        _ => unreachable!("Parent should always be a "),
+                        _ => unreachable!("Parent should always be an interior page"),
                     };
                     if found {
                         let (start, _len) = parent_contents.cell_get_raw_region(
