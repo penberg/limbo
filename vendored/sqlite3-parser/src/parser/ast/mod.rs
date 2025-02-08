@@ -256,7 +256,7 @@ pub enum Stmt {
         /// `FROM`
         from: Option<FromClause>,
         /// `WHERE` clause
-        where_clause: Option<Expr>,
+        where_clause: Option<Box<Expr>>,
         /// `RETURNING`
         returning: Option<Vec<ResultColumn>>,
         /// `ORDER BY`
