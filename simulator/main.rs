@@ -233,7 +233,6 @@ fn run_simulator(
                         })
                         .collect::<Vec<_>>();
 
-
                     // Write the shrunk plan to a file
                     let mut f = std::fs::File::create(&paths.shrunk_plan).unwrap();
                     f.write_all(shrunk_plans[0].to_string().as_bytes()).unwrap();
