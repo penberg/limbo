@@ -62,6 +62,7 @@ pub(crate) fn execute_plans(
 ) -> ExecutionResult {
     let mut history = ExecutionHistory::new();
     let now = std::time::Instant::now();
+    env.clear_poison();
     let mut env = env.lock().unwrap();
     for _tick in 0..env.opts.ticks {
         // Pick the connection to interact with
