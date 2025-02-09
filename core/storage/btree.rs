@@ -2503,6 +2503,7 @@ mod tests {
         let db_header = DatabaseHeader::default();
         let page_size = db_header.page_size as usize;
 
+        #[allow(clippy::arc_with_non_send_sync)]
         let io: Arc<dyn IO> = Arc::new(MemoryIO::new().unwrap());
         let io_file = io.open_file("test.db", OpenFlags::Create, false).unwrap();
         let page_io = Rc::new(FileStorage::new(io_file));
