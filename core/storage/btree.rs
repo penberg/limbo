@@ -1053,40 +1053,38 @@ impl BTreeCursor {
             matches!(self.state, CursorState::Write(_)),
             "Cursor must be in balancing state"
         );
-        let state = self
-            .state
-            .write_info()
-            .expect("must be balancing")
-            .state
-            .clone();
-        match state {
-            WriteState::BalanceStart => {
-                let current_page = self.stack.top();
-                {
-                    // check if we don't need to balance
-                    // don't continue if there are no overflow cells
-                    let page = current_page.get().contents.as_mut().unwrap();
-                    if page.overflow_cells.is_empty() {
-                        let write_info = self.state.mut_write_info().unwrap();
-                        write_info.state = WriteState::Finish;
+        loop {
+            let state = self.state.write_info().expect("must be balancing").state;
+            match state {
+                WriteState::BalanceStart => {
+                    let current_page = self.stack.top();
+                    {
+                        // check if we don't need to balance
+                        // don't continue if there are no overflow cells
+                        let page = current_page.get().contents.as_mut().unwrap();
+                        if page.overflow_cells.is_empty() {
+                            let write_info = self.state.mut_write_info().unwrap();
+                            write_info.state = WriteState::Finish;
+                            return Ok(CursorResult::Ok(()));
+                        }
+                    }
+
+                    if !self.stack.has_parent() {
+                        self.balance_root();
                         return Ok(CursorResult::Ok(()));
                     }
+
+                    let write_info = self.state.mut_write_info().unwrap();
+                    write_info.state = WriteState::BalanceNonRoot;
+                }
+                WriteState::BalanceNonRoot
+                | WriteState::BalanceGetParentPage
+                | WriteState::BalanceMoveUp => {
+                    return_if_io!(self.balance_non_root());
                 }
 
-                if !self.stack.has_parent() {
-                    self.balance_root();
-                    return Ok(CursorResult::Ok(()));
-                }
-
-                let write_info = self.state.mut_write_info().unwrap();
-                write_info.state = WriteState::BalanceNonRoot;
-                self.balance_non_root()
+                _ => unreachable!("invalid balance leaf state {:?}", state),
             }
-            WriteState::BalanceNonRoot
-            | WriteState::BalanceGetParentPage
-            | WriteState::BalanceMoveUp => self.balance_non_root(),
-
-            _ => unreachable!("invalid balance leaf state {:?}", state),
         }
     }
 
