@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
-        query::{Create, Delete, Distinctness, Insert, Query, Select},
+        query::{select::Distinctness, Create, Delete, Drop, Insert, Query, Select},
         table::Value,
     },
     runner::env::SimConnection,
@@ -201,14 +201,19 @@ pub(crate) struct InteractionStats {
     pub(crate) write_count: usize,
     pub(crate) delete_count: usize,
     pub(crate) create_count: usize,
+    pub(crate) drop_count: usize,
 }
 
 impl Display for InteractionStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Read: {}, Write: {}, Delete: {}, Create: {}",
-            self.read_count, self.write_count, self.delete_count, self.create_count
+            "Read: {}, Write: {}, Delete: {}, Create: {}, Drop: {}",
+            self.read_count,
+            self.write_count,
+            self.delete_count,
+            self.create_count,
+            self.drop_count
         )
     }
 }
@@ -307,37 +312,34 @@ impl Interactions {
                         }
                         select.shadow(env);
                     }
+                    Property::DropSelect { table, queries, select } => {
+                        let drop = Query::Drop(Drop { table: table.clone() });
+
+                        drop.shadow(env);
+                        for query in queries {
+                            query.shadow(env);
+                        }
+                        select.shadow(env);
+                    },
                 }
                 for interaction in property.interactions() {
                     match interaction {
                         Interaction::Query(query) => match query {
                             Query::Create(create) => {
-                                if !env.tables.iter().any(|t| t.name == create.table.name) {
-                                    env.tables.push(create.table.clone());
-                                }
+                                create.shadow(env);
                             }
                             Query::Insert(insert) => {
-                                let values = match &insert {
-                                    Insert::Values { values, .. } => values.clone(),
-                                    Insert::Select { select, .. } => select.shadow(env),
-                                };
-                                let table = env
-                                    .tables
-                                    .iter_mut()
-                                    .find(|t| t.name == insert.table())
-                                    .unwrap();
-                                table.rows.extend(values);
+                                insert.shadow(env);
                             }
                             Query::Delete(delete) => {
-                                let table = env
-                                    .tables
-                                    .iter_mut()
-                                    .find(|t| t.name == delete.table)
-                                    .unwrap();
-                                let t2 = &table.clone();
-                                table.rows.retain_mut(|r| delete.predicate.test(r, t2));
+                                delete.shadow(env);
                             }
-                            Query::Select(_) => {}
+                            Query::Drop(drop) => {
+                                drop.shadow(env);
+                            }
+                            Query::Select(select) => {
+                                select.shadow(env);
+                            }
                         },
                         Interaction::Assertion(_) => {}
                         Interaction::Assumption(_) => {}
@@ -363,6 +365,7 @@ impl InteractionPlan {
         let mut write = 0;
         let mut delete = 0;
         let mut create = 0;
+        let mut drop = 0;
 
         for interactions in &self.plan {
             match interactions {
@@ -374,6 +377,7 @@ impl InteractionPlan {
                                 Query::Insert(_) => write += 1,
                                 Query::Delete(_) => delete += 1,
                                 Query::Create(_) => create += 1,
+                                Query::Drop(_) => drop += 1,
                             }
                         }
                     }
@@ -383,6 +387,7 @@ impl InteractionPlan {
                     Query::Insert(_) => write += 1,
                     Query::Delete(_) => delete += 1,
                     Query::Create(_) => create += 1,
+                    Query::Drop(_) => drop += 1,
                 },
                 Interactions::Fault(_) => {}
             }
@@ -393,6 +398,7 @@ impl InteractionPlan {
             write_count: write,
             delete_count: delete,
             create_count: create,
+            drop_count: drop,
         }
     }
 }
@@ -579,7 +585,7 @@ impl Interaction {
     }
 }
 
-fn create_table<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
+fn random_create<R: rand::Rng>(rng: &mut R, _env: &SimulatorEnv) -> Interactions {
     Interactions::Query(Query::Create(Create::arbitrary(rng)))
 }
 
@@ -588,8 +594,15 @@ fn random_read<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
 }
 
 fn random_write<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
-    let insert_query = Query::Insert(Insert::arbitrary_from(rng, env));
-    Interactions::Query(insert_query)
+    Interactions::Query(Query::Insert(Insert::arbitrary_from(rng, env)))
+}
+
+fn random_delete<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+    Interactions::Query(Query::Delete(Delete::arbitrary_from(rng, env)))
+}
+
+fn random_drop<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Interactions {
+    Interactions::Query(Query::Drop(Drop::arbitrary_from(rng, env)))
 }
 
 fn random_fault<R: rand::Rng>(_rng: &mut R, _env: &SimulatorEnv) -> Interactions {
@@ -620,7 +633,16 @@ impl ArbitraryFrom<(&SimulatorEnv, InteractionStats)> for Interactions {
                 ),
                 (
                     remaining_.create,
-                    Box::new(|rng: &mut R| create_table(rng, env)),
+                    Box::new(|rng: &mut R| random_create(rng, env)),
+                ),
+                (
+                    remaining_.delete,
+                    Box::new(|rng: &mut R| random_delete(rng, env)),
+                ),
+                (
+                    // remaining_.drop,
+                    0.0,
+                    Box::new(|rng: &mut R| random_drop(rng, env)),
                 ),
                 (
                     remaining_

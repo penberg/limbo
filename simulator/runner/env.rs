@@ -26,18 +26,28 @@ impl SimulatorEnv {
     pub(crate) fn new(seed: u64, cli_opts: &SimulatorCLI, db_path: &Path) -> Self {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
-        let (create_percent, read_percent, write_percent, delete_percent) = {
-            let mut remaining = 100.0;
-            let read_percent = rng.gen_range(0.0..=remaining);
-            remaining -= read_percent;
-            let write_percent = rng.gen_range(0.0..=remaining);
-            remaining -= write_percent;
-            let delete_percent = remaining;
+        let (create_percent, read_percent, write_percent, delete_percent, drop_percent) = {
+            let total = 100.0;
+            
+            let read_percent = rng.gen_range(0.0..=total);
+            let write_percent = total - read_percent;
 
-            let create_percent = write_percent / 10.0;
-            let write_percent = write_percent - create_percent;
+            // Create percent should be 5-15% of the write percent
+            let create_percent = rng.gen_range(0.05..=0.15) * write_percent;
+            // Drop percent should be 2-5% of the write percent
+            let drop_percent = rng.gen_range(0.02..=0.05) * write_percent;
+            // Delete percent should be 10-20% of the write percent
+            let delete_percent = rng.gen_range(0.1..=0.2) * write_percent;
 
-            (create_percent, read_percent, write_percent, delete_percent)
+            let write_percent = write_percent - create_percent - delete_percent - drop_percent;
+
+            (
+                create_percent,
+                read_percent,
+                write_percent,
+                delete_percent,
+                drop_percent,
+            )
         };
 
         let opts = SimulatorOpts {
@@ -49,6 +59,7 @@ impl SimulatorEnv {
             read_percent,
             write_percent,
             delete_percent,
+            drop_percent,
             page_size: 4096, // TODO: randomize this too
             max_interactions: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
             max_time_simulation: cli_opts.maximum_time,
@@ -98,6 +109,7 @@ pub(crate) struct SimulatorOpts {
     pub(crate) read_percent: f64,
     pub(crate) write_percent: f64,
     pub(crate) delete_percent: f64,
+    pub(crate) drop_percent: f64,
     pub(crate) max_interactions: usize,
     pub(crate) page_size: usize,
     pub(crate) max_time_simulation: usize,
