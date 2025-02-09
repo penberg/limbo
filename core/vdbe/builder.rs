@@ -110,10 +110,8 @@ impl ProgramBuilder {
 
     pub fn emit_insn(&mut self, insn: Insn) {
         if let Some(label) = self.next_insn_label {
-            self.label_to_resolved_offset.insert(
-                label.to_label_value() as usize,
-                Some(self.insns.len() as InsnReference),
-            );
+            self.label_to_resolved_offset[label.to_label_value() as usize] =
+                Some(self.insns.len() as InsnReference);
             self.next_insn_label = None;
         }
         self.insns.push(insn);
