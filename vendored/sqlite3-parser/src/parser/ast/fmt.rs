@@ -119,7 +119,8 @@ impl Display for Cmd {
 impl ToTokens for Stmt {
     fn to_tokens<S: TokenStream>(&self, s: &mut S) -> Result<(), S::Error> {
         match self {
-            Self::AlterTable(tbl_name, body) => {
+            Self::AlterTable(alter_table) => {
+                let (tbl_name, body) = &**alter_table;
                 s.append(TK_ALTER, None)?;
                 s.append(TK_TABLE, None)?;
                 tbl_name.to_tokens(s)?;

@@ -103,22 +103,28 @@ impl Stmt {
     /// check for extra rules
     pub fn check(&self) -> Result<(), ParserError> {
         match self {
-            Self::AlterTable(old_name, AlterTableBody::RenameTo(new_name)) => {
-                if *new_name == old_name.name {
-                    return Err(custom_err!(
-                        "there is already another table or index with this name: {}",
-                        new_name
-                    ));
-                }
-                Ok(())
-            }
-            Self::AlterTable(.., AlterTableBody::AddColumn(cd)) => {
-                for c in cd {
-                    if let ColumnConstraint::PrimaryKey { .. } = c {
-                        return Err(custom_err!("Cannot add a PRIMARY KEY column"));
-                    } else if let ColumnConstraint::Unique(..) = c {
-                        return Err(custom_err!("Cannot add a UNIQUE column"));
+            Self::AlterTable(alter_table) => {
+                let (old_name, body) = &**alter_table;
+                match body {
+                    AlterTableBody::RenameTo(new_name) => {
+                        if *new_name == old_name.name {
+                            return Err(custom_err!(
+                                "there is already another table or index with this name: {}",
+                                new_name
+                            ));
+                        }
                     }
+                    AlterTableBody::AddColumn(cd) => {
+                        for c in cd {
+                            if let ColumnConstraint::PrimaryKey { .. } = c {
+                                return Err(custom_err!("Cannot add a PRIMARY KEY column"));
+                            }
+                            if let ColumnConstraint::Unique(..) = c {
+                                return Err(custom_err!("Cannot add a UNIQUE column"));
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 Ok(())
             }

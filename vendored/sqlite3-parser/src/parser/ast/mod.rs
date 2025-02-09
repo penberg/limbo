@@ -71,7 +71,7 @@ pub(crate) enum ExplainKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stmt {
     /// `ALTER TABLE`: table name, body
-    AlterTable(QualifiedName, AlterTableBody),
+    AlterTable(Box<(QualifiedName, AlterTableBody)>),
     /// `ANALYSE`: object name
     Analyze(Option<QualifiedName>),
     /// `ATTACH DATABASE`

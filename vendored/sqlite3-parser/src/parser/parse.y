@@ -1305,19 +1305,19 @@ cmd ::= ANALYZE fullname(X).  {self.ctx.stmt = Some(Stmt::Analyze(Some(X)));}
 //////////////////////// ALTER TABLE table ... ////////////////////////////////
 %ifndef SQLITE_OMIT_ALTERTABLE
 cmd ::= ALTER TABLE fullname(X) RENAME TO nm(Z). {
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::RenameTo(Z)));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::RenameTo(Z)))));
 }
 cmd ::= ALTER TABLE fullname(X)
         ADD kwcolumn_opt columnname(Y) carglist(C). {
   let (col_name, col_type) = Y;
   let cd = ColumnDefinition{ col_name, col_type, constraints: C };
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::AddColumn(cd)));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::AddColumn(cd)))));
 }
 cmd ::= ALTER TABLE fullname(X) RENAME kwcolumn_opt nm(Y) TO nm(Z). {
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::RenameColumn{ old: Y, new: Z }));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::RenameColumn{ old: Y, new: Z }))));
 }
 cmd ::= ALTER TABLE fullname(X) DROP kwcolumn_opt nm(Y). {
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::DropColumn(Y)));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::DropColumn(Y)))));
 }
 
 kwcolumn_opt ::= .

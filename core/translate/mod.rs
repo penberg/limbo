@@ -52,7 +52,7 @@ pub fn translate(
     let mut change_cnt_on = false;
 
     let program = match stmt {
-        ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
+        ast::Stmt::AlterTable(_) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
         ast::Stmt::Attach { .. } => bail_parse_error!("ATTACH not supported yet"),
         ast::Stmt::Begin(_, _) => bail_parse_error!("BEGIN not supported yet"),
