@@ -1,5 +1,7 @@
 package org.github.tursodatabase.jdbc4;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
@@ -7,29 +9,53 @@ import java.sql.ResultSet;
 import java.sql.RowIdLifetime;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.util.Properties;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
+import org.github.tursodatabase.utils.Logger;
+import org.github.tursodatabase.utils.LoggerFactory;
 
 public class JDBC4DatabaseMetaData implements DatabaseMetaData {
 
+  private static final Logger logger = LoggerFactory.getLogger(JDBC4DatabaseMetaData.class);
+
+  private static String driverName = "";
+  private static String driverVersion = "";
+
   private final JDBC4Connection connection;
-  private PreparedStatement getTables = null,
-      getTableTypes = null,
-      getTypeInfo = null,
-      getCatalogs = null,
-      getSchemas = null,
-      getUDTs = null,
-      getColumnsTblName = null,
-      getSuperTypes = null,
-      getSuperTables = null,
-      getTablePrivileges = null,
-      getIndexInfo = null,
-      getProcedures = null,
-      getProcedureColumns = null,
-      getAttributes = null,
-      getBestRowIdentifier = null,
-      getVersionColumns = null,
-      getColumnPrivileges = null;
+  @Nullable private PreparedStatement getTables = null;
+  @Nullable private PreparedStatement getTableTypes = null;
+  @Nullable private PreparedStatement getTypeInfo = null;
+  @Nullable private PreparedStatement getCatalogs = null;
+  @Nullable private PreparedStatement getSchemas = null;
+  @Nullable private PreparedStatement getUDTs = null;
+  @Nullable private PreparedStatement getColumnsTblName = null;
+  @Nullable private PreparedStatement getSuperTypes = null;
+  @Nullable private PreparedStatement getSuperTables = null;
+  @Nullable private PreparedStatement getTablePrivileges = null;
+  @Nullable private PreparedStatement getIndexInfo = null;
+  @Nullable private PreparedStatement getProcedures = null;
+  @Nullable private PreparedStatement getProcedureColumns = null;
+  @Nullable private PreparedStatement getAttributes = null;
+  @Nullable private PreparedStatement getBestRowIdentifier = null;
+  @Nullable private PreparedStatement getVersionColumns = null;
+  @Nullable private PreparedStatement getColumnPrivileges = null;
+
+  static {
+    try (InputStream limboJdbcPropStream =
+        JDBC4DatabaseMetaData.class.getClassLoader().getResourceAsStream("limbo-jdbc.properties")) {
+      if (limboJdbcPropStream == null) {
+        throw new IOException("Cannot load limbo-jdbc.properties from jar");
+      }
+
+      final Properties properties = new Properties();
+      properties.load(limboJdbcPropStream);
+      driverName = properties.getProperty("driverName");
+      driverVersion = properties.getProperty("driverVersion");
+    } catch (IOException e) {
+      logger.error("Failed to load driverName and driverVersion");
+    }
+  }
 
   public JDBC4DatabaseMetaData(JDBC4Connection connection) {
     this.connection = connection;
@@ -94,24 +120,22 @@ public class JDBC4DatabaseMetaData implements DatabaseMetaData {
 
   @Override
   public String getDriverName() {
-    // TODO - important
-    return "";
+    return driverName;
   }
 
   @Override
   public String getDriverVersion() {
-    // TODO - important
-    return "";
+    return driverVersion;
   }
 
   @Override
   public int getDriverMajorVersion() {
-    return 0;
+    return Integer.parseInt(driverVersion.split("\\.")[0]);
   }
 
   @Override
   public int getDriverMinorVersion() {
-    return 0;
+    return Integer.parseInt(driverVersion.split("\\.")[1]);
   }
 
   @Override

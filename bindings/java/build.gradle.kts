@@ -14,8 +14,8 @@ plugins {
     id("com.diffplug.spotless") version "6.13.0"
 }
 
-group = "org.github.tursodatabase"
-version = "0.0.1-SNAPSHOT"
+group = properties["projectGroup"]!!
+version = properties["projectVersion"]!!
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
@@ -60,6 +60,14 @@ application {
 tasks.jar {
     from("libs") {
         into("libs")
+    }
+}
+
+sourceSets {
+    test {
+        resources {
+            file("src/main/resource/limbo-jdbc.properties")
+        }
     }
 }
 
