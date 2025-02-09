@@ -236,31 +236,24 @@ public class JDBC4Connection extends LimboConnection {
   }
 
   @Override
-  @SkipNullableCheck
   public Clob createClob() throws SQLException {
-    // TODO
-    return null;
+    throw new SQLFeatureNotSupportedException("createClob not supported");
   }
 
   @Override
-  @SkipNullableCheck
   public Blob createBlob() throws SQLException {
-    // TODO
-    return null;
+    throw new SQLFeatureNotSupportedException("createBlob not supported");
   }
 
   @Override
-  @SkipNullableCheck
   public NClob createNClob() throws SQLException {
-    // TODO
-    return null;
+    throw new SQLFeatureNotSupportedException("createNClob not supported");
   }
 
   @Override
   @SkipNullableCheck
   public SQLXML createSQLXML() throws SQLException {
-    // TODO
-    return null;
+    throw new SQLFeatureNotSupportedException("createSQLXML not supported");
   }
 
   @Override
