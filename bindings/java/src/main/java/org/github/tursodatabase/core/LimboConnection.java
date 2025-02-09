@@ -15,7 +15,7 @@ public abstract class LimboConnection implements Connection {
   private static final Logger logger = LoggerFactory.getLogger(LimboConnection.class);
 
   private final long connectionPtr;
-  private final AbstractDB database;
+  private final LimboDB database;
   private boolean closed;
 
   public LimboConnection(String url, String filePath) throws SQLException {
@@ -33,7 +33,7 @@ public abstract class LimboConnection implements Connection {
     this.connectionPtr = this.database.connect();
   }
 
-  private static AbstractDB open(String url, String filePath, Properties properties)
+  private static LimboDB open(String url, String filePath, Properties properties)
       throws SQLException {
     return LimboDBFactory.open(url, filePath, properties);
   }
@@ -58,7 +58,7 @@ public abstract class LimboConnection implements Connection {
     return closed;
   }
 
-  public AbstractDB getDatabase() {
+  public LimboDB getDatabase() {
     return database;
   }
 
