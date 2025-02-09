@@ -1651,13 +1651,14 @@ impl ToTokens for TriggerEvent {
 impl ToTokens for TriggerCmd {
     fn to_tokens<S: TokenStream>(&self, s: &mut S) -> Result<(), S::Error> {
         match self {
-            Self::Update {
-                or_conflict,
-                tbl_name,
-                sets,
-                from,
-                where_clause,
-            } => {
+            Self::Update(update) => {
+                let TriggerCmdUpdate {
+                    or_conflict,
+                    tbl_name,
+                    sets,
+                    from,
+                    where_clause,
+                } = &**update;
                 s.append(TK_UPDATE, None)?;
                 if let Some(or_conflict) = or_conflict {
                     s.append(TK_OR, None)?;
@@ -1676,14 +1677,15 @@ impl ToTokens for TriggerCmd {
                 }
                 Ok(())
             }
-            Self::Insert {
-                or_conflict,
-                tbl_name,
-                col_names,
-                select,
-                upsert,
-                returning,
-            } => {
+            Self::Insert(insert) => {
+                let TriggerCmdInsert {
+                    or_conflict,
+                    tbl_name,
+                    col_names,
+                    select,
+                    upsert,
+                    returning,
+                } = &**insert;
                 if let Some(ResolveType::Replace) = or_conflict {
                     s.append(TK_REPLACE, None)?;
                 } else {
@@ -1710,14 +1712,11 @@ impl ToTokens for TriggerCmd {
                 }
                 Ok(())
             }
-            Self::Delete {
-                tbl_name,
-                where_clause,
-            } => {
+            Self::Delete(delete) => {
                 s.append(TK_DELETE, None)?;
                 s.append(TK_FROM, None)?;
-                tbl_name.to_tokens(s)?;
-                if let Some(where_clause) = where_clause {
+                delete.tbl_name.to_tokens(s)?;
+                if let Some(where_clause) = &delete.where_clause {
                     s.append(TK_WHERE, None)?;
                     where_clause.to_tokens(s)?;
                 }

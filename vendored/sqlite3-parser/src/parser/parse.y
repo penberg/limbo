@@ -1235,17 +1235,17 @@ tridxby ::= NOT INDEXED. {
 // UPDATE
 trigger_cmd(A) ::=
    UPDATE orconf(R) trnm(X) tridxby SET setlist(Y) from(F) where_opt(Z).
-   {A = TriggerCmd::Update{ or_conflict: R, tbl_name: X, sets: Y, from: F, where_clause: Z };}
+   {A = TriggerCmd::Update(Box::new(TriggerCmdUpdate{ or_conflict: R, tbl_name: X, sets: Y, from: F, where_clause: Z }));}
 
 // INSERT
 trigger_cmd(A) ::= insert_cmd(R) INTO
                       trnm(X) idlist_opt(F) select(S) upsert(U). {
   let (upsert, returning) = U;
-   A = TriggerCmd::Insert{ or_conflict: R, tbl_name: X, col_names: F, select: Box::new(S), upsert, returning };/*A-overwrites-R*/
+   A = TriggerCmd::Insert(Box::new(TriggerCmdInsert{ or_conflict: R, tbl_name: X, col_names: F, select: Box::new(S), upsert, returning }));/*A-overwrites-R*/
 }
 // DELETE
 trigger_cmd(A) ::= DELETE FROM trnm(X) tridxby where_opt(Y).
-   {A = TriggerCmd::Delete{ tbl_name: X, where_clause: Y };}
+   {A = TriggerCmd::Delete(Box::new(TriggerCmdDelete{ tbl_name: X, where_clause: Y }));}
 
 // SELECT
 trigger_cmd(A) ::= select(X).

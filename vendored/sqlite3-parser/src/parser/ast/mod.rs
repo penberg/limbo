@@ -1640,42 +1640,54 @@ pub enum TriggerEvent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TriggerCmd {
     /// `UPDATE`
-    Update {
-        /// `OR`
-        or_conflict: Option<ResolveType>,
-        /// table name
-        tbl_name: Name,
-        /// `SET` assignments
-        sets: Vec<Set>,
-        /// `FROM`
-        from: Option<FromClause>,
-        /// `WHERE` clause
-        where_clause: Option<Expr>,
-    },
+    Update(Box<TriggerCmdUpdate>),
     /// `INSERT`
-    Insert {
-        /// `OR`
-        or_conflict: Option<ResolveType>,
-        /// table name
-        tbl_name: Name,
-        /// `COLUMNS`
-        col_names: Option<DistinctNames>,
-        /// `SELECT` or `VALUES`
-        select: Box<Select>,
-        /// `ON CONLICT` clause
-        upsert: Option<Upsert>,
-        /// `RETURNING`
-        returning: Option<Vec<ResultColumn>>,
-    },
+    Insert(Box<TriggerCmdInsert>),
     /// `DELETE`
-    Delete {
-        /// table name
-        tbl_name: Name,
-        /// `WHERE` clause
-        where_clause: Option<Expr>,
-    },
+    Delete(Box<TriggerCmdDelete>),
     /// `SELECT`
     Select(Box<Select>),
+}
+
+/// `UPDATE` trigger command
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TriggerCmdUpdate {
+    /// `OR`
+    pub or_conflict: Option<ResolveType>,
+    /// table name
+    pub tbl_name: Name,
+    /// `SET` assignments
+    pub sets: Vec<Set>,
+    /// `FROM`
+    pub from: Option<FromClause>,
+    /// `WHERE` clause
+    pub where_clause: Option<Expr>,
+}
+
+/// `INSERT` trigger command
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TriggerCmdInsert {
+    /// `OR`
+    pub or_conflict: Option<ResolveType>,
+    /// table name
+    pub tbl_name: Name,
+    /// `COLUMNS`
+    pub col_names: Option<DistinctNames>,
+    /// `SELECT` or `VALUES`
+    pub select: Box<Select>,
+    /// `ON CONLICT` clause
+    pub upsert: Option<Upsert>,
+    /// `RETURNING`
+    pub returning: Option<Vec<ResultColumn>>,
+}
+
+/// `DELETE` trigger command
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TriggerCmdDelete {
+    /// table name
+    pub tbl_name: Name,
+    /// `WHERE` clause
+    pub where_clause: Option<Expr>,
 }
 
 /// Conflict resolution types
