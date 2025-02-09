@@ -1306,7 +1306,7 @@ impl BTreeCursor {
                     for page in split_pages.iter_mut().take(split_pages_len - 1) {
                         let contents = page.get().contents.as_mut().unwrap();
 
-                        assert_eq!(contents.cell_count(), 1);
+                        assert!(contents.cell_count() >= 1);
                         let last_cell = contents.cell_get(
                             contents.cell_count() - 1,
                             self.pager.clone(),
