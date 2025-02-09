@@ -368,4 +368,8 @@ public class JDBC4Connection implements Connection {
     // TODO: add support for busyTimeout
     return 0;
   }
+
+  public String getUrl() {
+    return this.connection.getUrl();
+  }
 }

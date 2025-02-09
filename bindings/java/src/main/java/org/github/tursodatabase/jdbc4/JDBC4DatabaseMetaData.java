@@ -28,7 +28,7 @@ public class JDBC4DatabaseMetaData implements DatabaseMetaData {
 
     @Override
     public String getURL() throws SQLException {
-        return "";
+        return connection.getUrl();
     }
 
     @Override
@@ -786,6 +786,7 @@ public class JDBC4DatabaseMetaData implements DatabaseMetaData {
     }
 
     @Override
+    @SkipNullableCheck
     public Connection getConnection() throws SQLException {
         return null;
     }
