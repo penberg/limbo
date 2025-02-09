@@ -1,8 +1,0 @@
-negative_index_indicator = ${ "#-" }
-array_offset = ${ ASCII_DIGIT+ }
-array_locator = ${ "[" ~ negative_index_indicator? ~ array_offset ~ "]" }
-relaxed_array_locator = ${ negative_index_indicator? ~ array_offset }
-
-root = ${ "$" }
-json_path_key = ${ identifier | string | ASCII_DIGIT+ }
-path = ${ SOI ~ root ~ (array_locator | "." ~ json_path_key)* ~ EOI }
