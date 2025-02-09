@@ -109,7 +109,7 @@ cmd ::= ROLLBACK trans_opt(Y) TO savepoint_opt nm(X). {
 ///////////////////// The CREATE TABLE statement ////////////////////////////
 //
 cmd ::= createkw temp(T) TABLE ifnotexists(E) fullname(Y) create_table_args(X). {
-  self.ctx.stmt = Some(Stmt::CreateTable{ temporary: T, if_not_exists: E, tbl_name: Y, body: X });
+  self.ctx.stmt = Some(Stmt::CreateTable{ temporary: T, if_not_exists: E, tbl_name: Y, body: Box::new(X) });
 }
 createkw(A) ::= CREATE(A).
 

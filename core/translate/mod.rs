@@ -67,7 +67,7 @@ pub fn translate(
                 bail_parse_error!("TEMPORARY table not supported yet");
             }
 
-            translate_create_table(query_mode, tbl_name, body, if_not_exists, schema)?
+            translate_create_table(query_mode, tbl_name, *body, if_not_exists, schema)?
         }
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
         ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),

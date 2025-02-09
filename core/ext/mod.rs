@@ -127,7 +127,7 @@ impl Database {
         let Stmt::CreateTable { body, .. } = stmt else {
             return ResultCode::Error;
         };
-        let Ok(columns) = columns_from_create_table_body(body) else {
+        let Ok(columns) = columns_from_create_table_body(*body) else {
             return ResultCode::Error;
         };
         let vtab_module = self.vtab_modules.get(name).unwrap().clone();

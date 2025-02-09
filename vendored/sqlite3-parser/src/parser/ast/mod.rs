@@ -112,7 +112,7 @@ pub enum Stmt {
         /// table name
         tbl_name: QualifiedName,
         /// table body
-        body: CreateTableBody,
+        body: Box<CreateTableBody>,
     },
     /// `CREATE TRIGGER`
     CreateTrigger {
