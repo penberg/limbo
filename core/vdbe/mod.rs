@@ -3838,7 +3838,7 @@ mod tests {
         assert_eq!(exec_quote(&input), expected);
 
         let input = OwnedValue::build_text(Rc::new(String::from("hello''world")));
-        let expected = OwnedValue::build_text(Rc::new(String::from("'hello''world'")));
+        let expected = OwnedValue::build_text(Rc::new(String::from("'hello''''world'")));
         assert_eq!(exec_quote(&input), expected);
     }
 
