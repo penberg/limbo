@@ -1166,10 +1166,10 @@ minus_num(A) ::= MINUS number(X).     {A = Expr::unary(UnaryOperator::Negative, 
 
 cmd ::= createkw temp(T) TRIGGER ifnotexists(NOERR) fullname(B) trigger_time(C) trigger_event(D)
         ON fullname(E) foreach_clause(X) when_clause(G) BEGIN trigger_cmd_list(S) END. {
-  self.ctx.stmt = Some(Stmt::CreateTrigger{
-    temporary: T, if_not_exists: NOERR, trigger_name: B, time: C, event: Box::new(D), tbl_name: E,
-    for_each_row: X, when_clause: G.map(Box::new), commands: S
-  });
+  self.ctx.stmt = Some(Stmt::CreateTrigger(Box::new(CreateTrigger{
+    temporary: T, if_not_exists: NOERR, trigger_name: B, time: C, event: D, tbl_name: E,
+    for_each_row: X, when_clause: G, commands: S
+  })));
 }
 
 %type trigger_time {Option<TriggerTime>}

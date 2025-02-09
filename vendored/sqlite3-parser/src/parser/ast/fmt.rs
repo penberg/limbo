@@ -211,17 +211,18 @@ impl ToTokens for Stmt {
                 tbl_name.to_tokens(s)?;
                 body.to_tokens(s)
             }
-            Self::CreateTrigger {
-                temporary,
-                if_not_exists,
-                trigger_name,
-                time,
-                event,
-                tbl_name,
-                for_each_row,
-                when_clause,
-                commands,
-            } => {
+            Self::CreateTrigger(trigger) => {
+                let CreateTrigger {
+                    temporary,
+                    if_not_exists,
+                    trigger_name,
+                    time,
+                    event,
+                    tbl_name,
+                    for_each_row,
+                    when_clause,
+                    commands,
+                } = &**trigger;
                 s.append(TK_CREATE, None)?;
                 if *temporary {
                     s.append(TK_TEMP, None)?;

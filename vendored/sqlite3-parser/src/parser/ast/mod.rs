@@ -115,26 +115,7 @@ pub enum Stmt {
         body: Box<CreateTableBody>,
     },
     /// `CREATE TRIGGER`
-    CreateTrigger {
-        /// `TEMPORARY`
-        temporary: bool,
-        /// `IF NOT EXISTS`
-        if_not_exists: bool,
-        /// trigger name
-        trigger_name: QualifiedName,
-        /// `BEFORE`/`AFTER`/`INSTEAD OF`
-        time: Option<TriggerTime>,
-        /// `DELETE`/`INSERT`/`UPDATE`
-        event: Box<TriggerEvent>,
-        /// table name
-        tbl_name: QualifiedName,
-        /// `FOR EACH ROW`
-        for_each_row: bool,
-        /// `WHEN`
-        when_clause: Option<Box<Expr>>,
-        /// statements
-        commands: Vec<TriggerCmd>,
-    },
+    CreateTrigger(Box<CreateTrigger>),
     /// `CREATE VIEW`
     CreateView {
         /// `TEMPORARY`
@@ -242,30 +223,28 @@ pub enum Stmt {
     /// `SELECT`
     Select(Box<Select>),
     /// `UPDATE`
-    Update {
-        /// CTE
-        with: Option<With>,
-        /// `OR`
-        or_conflict: Option<ResolveType>,
-        /// table name
-        tbl_name: QualifiedName,
-        /// `INDEXED`
-        indexed: Option<Indexed>,
-        /// `SET` assignments
-        sets: Vec<Set>,
-        /// `FROM`
-        from: Option<FromClause>,
-        /// `WHERE` clause
-        where_clause: Option<Box<Expr>>,
-        /// `RETURNING`
-        returning: Option<Vec<ResultColumn>>,
-        /// `ORDER BY`
-        order_by: Option<Vec<SortedColumn>>,
-        /// `LIMIT`
-        limit: Option<Box<Limit>>,
-    },
-    /// `VACUUM`: database name, into expr
-    Vacuum(Option<Name>, Option<Expr>),
+/// `CREATE TRIGGER
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateTrigger {
+    /// `TEMPORARY`
+    pub temporary: bool,
+    /// `IF NOT EXISTS`
+    pub if_not_exists: bool,
+    /// trigger name
+    pub trigger_name: QualifiedName,
+    /// `BEFORE`/`AFTER`/`INSTEAD OF`
+    pub time: Option<TriggerTime>,
+    /// `DELETE`/`INSERT`/`UPDATE`
+    pub event: TriggerEvent,
+    /// table name
+    pub tbl_name: QualifiedName,
+    /// `FOR EACH ROW`
+    pub for_each_row: bool,
+    /// `WHEN`
+    pub when_clause: Option<Expr>,
+    /// statements
+    pub commands: Vec<TriggerCmd>,
+}
 }
 
 /// SQL expression
