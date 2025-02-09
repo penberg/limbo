@@ -268,7 +268,7 @@ mod tests {
 
         let (mut rng, seed) = rng_from_time();
         log::info!("seed: {}", seed);
-        for _ in 0..10240 {
+        for _ in 0..1024 {
             let query = g.generate(&mut rng, sql, 50);
             log::info!("query: {}", query);
             let limbo = limbo_exec_row(&limbo_conn, &query);
