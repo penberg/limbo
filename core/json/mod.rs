@@ -4,8 +4,6 @@ mod json_operations;
 mod json_path;
 mod ser;
 
-use std::rc::Rc;
-
 pub use crate::json::de::from_str;
 use crate::json::de::ordered_object;
 use crate::json::error::Error as JsonError;
@@ -47,13 +45,13 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
                 None => to_string(&json_val)?,
             };
 
-            Ok(OwnedValue::Text(Text::json(Rc::new(json))))
+            Ok(OwnedValue::Text(Text::json(&json)))
         }
         OwnedValue::Blob(b) => {
             // TODO: use get_json_value after we implement a single Struct
             //   to represent both JSON and JSONB
             if let Ok(json) = jsonb::from_slice(b) {
-                Ok(OwnedValue::Text(Text::json(Rc::new(json.to_string()))))
+                Ok(OwnedValue::Text(Text::json(&json.to_string())))
             } else {
                 crate::bail_parse_error!("malformed JSON");
             }
@@ -66,7 +64,7 @@ pub fn get_json(json_value: &OwnedValue, indent: Option<&str>) -> crate::Result<
                 None => to_string(&json_val)?,
             };
 
-            Ok(OwnedValue::Text(Text::json(Rc::new(json))))
+            Ok(OwnedValue::Text(Text::json(&json)))
         }
     }
 }
@@ -130,7 +128,7 @@ pub fn json_array(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
     }
 
     s.push(']');
-    Ok(OwnedValue::Text(Text::json(Rc::new(s))))
+    Ok(OwnedValue::Text(Text::json(&s)))
 }
 
 pub fn json_array_length(
@@ -209,7 +207,7 @@ pub fn json_arrow_extract(value: &OwnedValue, path: &OwnedValue) -> crate::Resul
     if let Some(val) = extracted {
         let json = to_string(val)?;
 
-        Ok(OwnedValue::Text(Text::json(Rc::new(json))))
+        Ok(OwnedValue::Text(Text::json(&json)))
     } else {
         Ok(OwnedValue::Null)
     }
@@ -273,7 +271,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
     result.pop(); // remove the final comma
     result.push(']');
 
-    Ok(OwnedValue::Text(Text::json(Rc::new(result))))
+    Ok(OwnedValue::Text(Text::json(&result)))
 }
 
 /// Returns a value with type defined by SQLite documentation:
@@ -304,9 +302,9 @@ fn convert_json_to_db_type(extracted: &Val, all_as_db: bool) -> crate::Result<Ow
         _ => {
             let json = to_string(&extracted)?;
             if all_as_db {
-                Ok(OwnedValue::Text(Text::new(Rc::new(json))))
+                Ok(OwnedValue::build_text(&json))
             } else {
-                Ok(OwnedValue::Text(Text::json(Rc::new(json))))
+                Ok(OwnedValue::Text(Text::json(&json)))
             }
         }
     }
@@ -368,7 +366,7 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
         Val::Removed => unreachable!(),
     };
 
-    Ok(OwnedValue::Text(Text::json(Rc::new(val.to_string()))))
+    Ok(OwnedValue::Text(Text::json(&val.to_string())))
 }
 
 /// Returns the value at the given JSON path. If the path does not exist, it returns None.
@@ -656,7 +654,7 @@ pub fn json_object(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
         .collect::<Result<IndexMap<String, Val>, _>>()?;
 
     let result = crate::json::to_string(&value_map)?;
-    Ok(OwnedValue::Text(Text::json(Rc::new(result))))
+    Ok(OwnedValue::Text(Text::json(&result)))
 }
 
 pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
@@ -698,13 +696,13 @@ pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
             }
             escaped_value.push('"');
 
-            Ok(OwnedValue::Text(Text::new(Rc::new(escaped_value))))
+            Ok(OwnedValue::build_text(&escaped_value))
         }
         // Numbers are unquoted in json
         OwnedValue::Integer(ref int) => Ok(OwnedValue::Integer(int.to_owned())),
         OwnedValue::Float(ref float) => Ok(OwnedValue::Float(float.to_owned())),
         OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
-        OwnedValue::Null => Ok(OwnedValue::Text(Text::new(Rc::new("null".to_string())))),
+        OwnedValue::Null => Ok(OwnedValue::build_text("null")),
         _ => {
             unreachable!()
         }
@@ -713,12 +711,14 @@ pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use super::*;
     use crate::types::OwnedValue;
 
     #[test]
     fn test_get_json_valid_json5() {
-        let input = OwnedValue::build_text(Rc::new("{ key: 'value' }".to_string()));
+        let input = OwnedValue::build_text("{ key: 'value' }");
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.as_str().contains("\"key\":\"value\""));
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_get_json_valid_json5_double_single_quotes() {
-        let input = OwnedValue::build_text(Rc::new("{ key: ''value'' }".to_string()));
+        let input = OwnedValue::build_text("{ key: ''value'' }");
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.as_str().contains("\"key\":\"value\""));
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn test_get_json_valid_json5_infinity() {
-        let input = OwnedValue::build_text(Rc::new("{ \"key\": Infinity }".to_string()));
+        let input = OwnedValue::build_text("{ \"key\": Infinity }");
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.as_str().contains("{\"key\":9e999}"));
@@ -754,7 +754,7 @@ mod tests {
 
     #[test]
     fn test_get_json_valid_json5_negative_infinity() {
-        let input = OwnedValue::build_text(Rc::new("{ \"key\": -Infinity }".to_string()));
+        let input = OwnedValue::build_text("{ \"key\": -Infinity }");
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.as_str().contains("{\"key\":-9e999}"));
@@ -766,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_get_json_valid_json5_nan() {
-        let input = OwnedValue::build_text(Rc::new("{ \"key\": NaN }".to_string()));
+        let input = OwnedValue::build_text("{ \"key\": NaN }");
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.as_str().contains("{\"key\":null}"));
@@ -778,7 +778,7 @@ mod tests {
 
     #[test]
     fn test_get_json_invalid_json5() {
-        let input = OwnedValue::build_text(Rc::new("{ key: value }".to_string()));
+        let input = OwnedValue::build_text("{ key: value }");
         let result = get_json(&input, None);
         match result {
             Ok(_) => panic!("Expected error for malformed JSON"),
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_get_json_valid_jsonb() {
-        let input = OwnedValue::build_text(Rc::new("{\"key\":\"value\"}".to_string()));
+        let input = OwnedValue::build_text("{\"key\":\"value\"}");
         let result = get_json(&input, None).unwrap();
         if let OwnedValue::Text(result_str) = result {
             assert!(result_str.as_str().contains("\"key\":\"value\""));
@@ -800,7 +800,7 @@ mod tests {
 
     #[test]
     fn test_get_json_invalid_jsonb() {
-        let input = OwnedValue::build_text(Rc::new("{key:\"value\"".to_string()));
+        let input = OwnedValue::build_text("{key:\"value\"");
         let result = get_json(&input, None);
         match result {
             Ok(_) => panic!("Expected error for malformed JSON"),
@@ -845,8 +845,8 @@ mod tests {
 
     #[test]
     fn test_json_array_simple() {
-        let text = OwnedValue::build_text(Rc::new("value1".to_string()));
-        let json = OwnedValue::Text(Text::json(Rc::new("\"value2\"".to_string())));
+        let text = OwnedValue::build_text("value1");
+        let json = OwnedValue::Text(Text::json("\"value2\""));
         let input = vec![text, json, OwnedValue::Integer(1), OwnedValue::Float(1.1)];
 
         let result = json_array(&input).unwrap();
@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn test_json_array_length() {
-        let input = OwnedValue::build_text(Rc::new("[1,2,3,4]".to_string()));
+        let input = OwnedValue::build_text("[1,2,3,4]");
         let result = json_array_length(&input, None).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 4);
@@ -898,7 +898,7 @@ mod tests {
 
     #[test]
     fn test_json_array_length_empty() {
-        let input = OwnedValue::build_text(Rc::new("[]".to_string()));
+        let input = OwnedValue::build_text("[]");
         let result = json_array_length(&input, None).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 0);
@@ -909,12 +909,8 @@ mod tests {
 
     #[test]
     fn test_json_array_length_root() {
-        let input = OwnedValue::build_text(Rc::new("[1,2,3,4]".to_string()));
-        let result = json_array_length(
-            &input,
-            Some(&OwnedValue::build_text(Rc::new("$".to_string()))),
-        )
-        .unwrap();
+        let input = OwnedValue::build_text("[1,2,3,4]");
+        let result = json_array_length(&input, Some(&OwnedValue::build_text("$"))).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 4);
         } else {
@@ -924,7 +920,7 @@ mod tests {
 
     #[test]
     fn test_json_array_length_not_array() {
-        let input = OwnedValue::build_text(Rc::new("{one: [1,2,3,4]}".to_string()));
+        let input = OwnedValue::build_text("{one: [1,2,3,4]}");
         let result = json_array_length(&input, None).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 0);
@@ -935,12 +931,8 @@ mod tests {
 
     #[test]
     fn test_json_array_length_via_prop() {
-        let input = OwnedValue::build_text(Rc::new("{one: [1,2,3,4]}".to_string()));
-        let result = json_array_length(
-            &input,
-            Some(&OwnedValue::build_text(Rc::new("$.one".to_string()))),
-        )
-        .unwrap();
+        let input = OwnedValue::build_text("{one: [1,2,3,4]}");
+        let result = json_array_length(&input, Some(&OwnedValue::build_text("$.one"))).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 4);
         } else {
@@ -950,12 +942,8 @@ mod tests {
 
     #[test]
     fn test_json_array_length_via_index() {
-        let input = OwnedValue::build_text(Rc::new("[[1,2,3,4]]".to_string()));
-        let result = json_array_length(
-            &input,
-            Some(&OwnedValue::build_text(Rc::new("$[0]".to_string()))),
-        )
-        .unwrap();
+        let input = OwnedValue::build_text("[[1,2,3,4]]");
+        let result = json_array_length(&input, Some(&OwnedValue::build_text("$[0]"))).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 4);
         } else {
@@ -965,12 +953,8 @@ mod tests {
 
     #[test]
     fn test_json_array_length_via_index_not_array() {
-        let input = OwnedValue::build_text(Rc::new("[1,2,3,4]".to_string()));
-        let result = json_array_length(
-            &input,
-            Some(&OwnedValue::build_text(Rc::new("$[2]".to_string()))),
-        )
-        .unwrap();
+        let input = OwnedValue::build_text("[1,2,3,4]");
+        let result = json_array_length(&input, Some(&OwnedValue::build_text("$[2]"))).unwrap();
         if let OwnedValue::Integer(res) = result {
             assert_eq!(res, 0);
         } else {
@@ -980,18 +964,14 @@ mod tests {
 
     #[test]
     fn test_json_array_length_via_index_bad_prop() {
-        let input = OwnedValue::build_text(Rc::new("{one: [1,2,3,4]}".to_string()));
-        let result = json_array_length(
-            &input,
-            Some(&OwnedValue::build_text(Rc::new("$.two".to_string()))),
-        )
-        .unwrap();
+        let input = OwnedValue::build_text("{one: [1,2,3,4]}");
+        let result = json_array_length(&input, Some(&OwnedValue::build_text("$.two"))).unwrap();
         assert_eq!(OwnedValue::Null, result);
     }
 
     #[test]
     fn test_json_array_length_simple_json_subtype() {
-        let input = OwnedValue::build_text(Rc::new("[1,2,3]".to_string()));
+        let input = OwnedValue::build_text("[1,2,3]");
         let wrapped = get_json(&input, None).unwrap();
         let result = json_array_length(&wrapped, None).unwrap();
 
@@ -1005,8 +985,8 @@ mod tests {
     #[test]
     fn test_json_extract_missing_path() {
         let result = json_extract(
-            &OwnedValue::build_text(Rc::new("{\"a\":2}".to_string())),
-            &[OwnedValue::build_text(Rc::new("$.x".to_string()))],
+            &OwnedValue::build_text("{\"a\":2}"),
+            &[OwnedValue::build_text("$.x")],
         );
 
         match result {
@@ -1016,10 +996,7 @@ mod tests {
     }
     #[test]
     fn test_json_extract_null_path() {
-        let result = json_extract(
-            &OwnedValue::build_text(Rc::new("{\"a\":2}".to_string())),
-            &[OwnedValue::Null],
-        );
+        let result = json_extract(&OwnedValue::build_text("{\"a\":2}"), &[OwnedValue::Null]);
 
         match result {
             Ok(OwnedValue::Null) => (),
@@ -1030,7 +1007,7 @@ mod tests {
     #[test]
     fn test_json_path_invalid() {
         let result = json_extract(
-            &OwnedValue::build_text(Rc::new("{\"a\":2}".to_string())),
+            &OwnedValue::build_text("{\"a\":2}"),
             &[OwnedValue::Float(1.1)],
         );
 
@@ -1042,28 +1019,28 @@ mod tests {
 
     #[test]
     fn test_json_error_position_no_error() {
-        let input = OwnedValue::build_text(Rc::new("[1,2,3]".to_string()));
+        let input = OwnedValue::build_text("[1,2,3]");
         let result = json_error_position(&input).unwrap();
         assert_eq!(result, OwnedValue::Integer(0));
     }
 
     #[test]
     fn test_json_error_position_no_error_more() {
-        let input = OwnedValue::build_text(Rc::new(r#"{"a":55,"b":72 , }"#.to_string()));
+        let input = OwnedValue::build_text(r#"{"a":55,"b":72 , }"#);
         let result = json_error_position(&input).unwrap();
         assert_eq!(result, OwnedValue::Integer(0));
     }
 
     #[test]
     fn test_json_error_position_object() {
-        let input = OwnedValue::build_text(Rc::new(r#"{"a":55,"b":72,,}"#.to_string()));
+        let input = OwnedValue::build_text(r#"{"a":55,"b":72,,}"#);
         let result = json_error_position(&input).unwrap();
         assert_eq!(result, OwnedValue::Integer(16));
     }
 
     #[test]
     fn test_json_error_position_array() {
-        let input = OwnedValue::build_text(Rc::new(r#"["a",55,"b",72,,]"#.to_string()));
+        let input = OwnedValue::build_text(r#"["a",55,"b",72,,]"#);
         let result = json_error_position(&input).unwrap();
         assert_eq!(result, OwnedValue::Integer(16));
     }
@@ -1098,8 +1075,8 @@ mod tests {
 
     #[test]
     fn test_json_object_simple() {
-        let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let key = OwnedValue::build_text("key");
+        let value = OwnedValue::build_text("value");
         let input = vec![key, value];
 
         let result = json_object(&input).unwrap();
@@ -1111,17 +1088,15 @@ mod tests {
 
     #[test]
     fn test_json_object_multiple_values() {
-        let text_key = OwnedValue::build_text(Rc::new("text_key".to_string()));
-        let text_value = OwnedValue::build_text(Rc::new("text_value".to_string()));
-        let json_key = OwnedValue::build_text(Rc::new("json_key".to_string()));
-        let json_value = OwnedValue::Text(Text::json(Rc::new(
-            r#"{"json":"value","number":1}"#.to_string(),
-        )));
-        let integer_key = OwnedValue::build_text(Rc::new("integer_key".to_string()));
+        let text_key = OwnedValue::build_text("text_key");
+        let text_value = OwnedValue::build_text("text_value");
+        let json_key = OwnedValue::build_text("json_key");
+        let json_value = OwnedValue::Text(Text::json(r#"{"json":"value","number":1}"#));
+        let integer_key = OwnedValue::build_text("integer_key");
         let integer_value = OwnedValue::Integer(1);
-        let float_key = OwnedValue::build_text(Rc::new("float_key".to_string()));
+        let float_key = OwnedValue::build_text("float_key");
         let float_value = OwnedValue::Float(1.1);
-        let null_key = OwnedValue::build_text(Rc::new("null_key".to_string()));
+        let null_key = OwnedValue::build_text("null_key");
         let null_value = OwnedValue::Null;
 
         let input = vec![
@@ -1149,8 +1124,8 @@ mod tests {
 
     #[test]
     fn test_json_object_json_value_is_rendered_as_json() {
-        let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::Text(Text::json(Rc::new(r#"{"json":"value"}"#.to_string())));
+        let key = OwnedValue::build_text("key");
+        let value = OwnedValue::Text(Text::json(r#"{"json":"value"}"#));
         let input = vec![key, value];
 
         let result = json_object(&input).unwrap();
@@ -1162,8 +1137,8 @@ mod tests {
 
     #[test]
     fn test_json_object_json_text_value_is_rendered_as_regular_text() {
-        let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::Text(Text::new(Rc::new(r#"{"json":"value"}"#.to_string())));
+        let key = OwnedValue::build_text("key");
+        let value = OwnedValue::Text(Text::new(r#"{"json":"value"}"#));
         let input = vec![key, value];
 
         let result = json_object(&input).unwrap();
@@ -1175,11 +1150,11 @@ mod tests {
 
     #[test]
     fn test_json_object_nested() {
-        let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let key = OwnedValue::build_text("key");
+        let value = OwnedValue::build_text("value");
         let input = vec![key, value];
 
-        let parent_key = OwnedValue::build_text(Rc::new("parent_key".to_string()));
+        let parent_key = OwnedValue::build_text("parent_key");
         let parent_value = json_object(&input).unwrap();
         let parent_input = vec![parent_key, parent_value];
 
@@ -1193,8 +1168,8 @@ mod tests {
 
     #[test]
     fn test_json_object_duplicated_keys() {
-        let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let key = OwnedValue::build_text("key");
+        let value = OwnedValue::build_text("value");
         let input = vec![key.clone(), value.clone(), key, value];
 
         let result = json_object(&input).unwrap();
@@ -1218,7 +1193,7 @@ mod tests {
     #[test]
     fn test_json_object_non_text_key() {
         let key = OwnedValue::Integer(1);
-        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let value = OwnedValue::build_text("value");
         let input = vec![key, value];
 
         match json_object(&input) {
@@ -1229,8 +1204,8 @@ mod tests {
 
     #[test]
     fn test_json_odd_number_of_values() {
-        let key = OwnedValue::build_text(Rc::new("key".to_string()));
-        let value = OwnedValue::build_text(Rc::new("value".to_string()));
+        let key = OwnedValue::build_text("key");
+        let value = OwnedValue::build_text("value");
         let input = vec![key.clone(), value, key];
 
         match json_object(&input) {
@@ -1337,7 +1312,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_root_strict() {
-        let path = OwnedValue::Text(Text::new(Rc::new("$".to_string())));
+        let path = OwnedValue::Text(Text::new("$"));
 
         let result = json_path_from_owned_value(&path, true);
         assert!(result.is_ok());
@@ -1354,7 +1329,7 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_root_non_strict() {
-        let path = OwnedValue::Text(Text::new(Rc::new("$".to_string())));
+        let path = OwnedValue::Text(Text::new("$"));
 
         let result = json_path_from_owned_value(&path, false);
         assert!(result.is_ok());
@@ -1371,14 +1346,14 @@ mod tests {
 
     #[test]
     fn test_json_path_from_owned_value_named_strict() {
-        let path = OwnedValue::Text(Text::new(Rc::new("field".to_string())));
+        let path = OwnedValue::Text(Text::new("field"));
 
         assert!(json_path_from_owned_value(&path, true).is_err());
     }
 
     #[test]
     fn test_json_path_from_owned_value_named_non_strict() {
-        let path = OwnedValue::Text(Text::new(Rc::new("field".to_string())));
+        let path = OwnedValue::Text(Text::new("field"));
 
         let result = json_path_from_owned_value(&path, false);
         assert!(result.is_ok());
@@ -1465,10 +1440,10 @@ mod tests {
     #[test]
     fn test_json_set_field_empty_object() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[
-                OwnedValue::build_text(Rc::new("$.field".to_string())),
-                OwnedValue::build_text(Rc::new("value".to_string())),
+                OwnedValue::build_text("$.field"),
+                OwnedValue::build_text("value"),
             ],
         );
 
@@ -1476,17 +1451,17 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"{"field":"value"}"#.to_string()))
+            OwnedValue::build_text(r#"{"field":"value"}"#)
         );
     }
 
     #[test]
     fn test_json_set_replace_field() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new(r#"{"field":"old_value"}"#.to_string())),
+            &OwnedValue::build_text(r#"{"field":"old_value"}"#),
             &[
-                OwnedValue::build_text(Rc::new("$.field".to_string())),
-                OwnedValue::build_text(Rc::new("new_value".to_string())),
+                OwnedValue::build_text("$.field"),
+                OwnedValue::build_text("new_value"),
             ],
         );
 
@@ -1494,17 +1469,17 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"{"field":"new_value"}"#.to_string()))
+            OwnedValue::build_text(r#"{"field":"new_value"}"#)
         );
     }
 
     #[test]
     fn test_json_set_set_deeply_nested_key() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[
-                OwnedValue::build_text(Rc::new("$.object.doesnt.exist".to_string())),
-                OwnedValue::build_text(Rc::new("value".to_string())),
+                OwnedValue::build_text("$.object.doesnt.exist"),
+                OwnedValue::build_text("value"),
             ],
         );
 
@@ -1512,36 +1487,31 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(
-                r#"{"object":{"doesnt":{"exist":"value"}}}"#.to_string()
-            ))
+            OwnedValue::build_text(r#"{"object":{"doesnt":{"exist":"value"}}}"#)
         );
     }
 
     #[test]
     fn test_json_set_add_value_to_empty_array() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("[]".to_string())),
+            &OwnedValue::build_text("[]"),
             &[
-                OwnedValue::build_text(Rc::new("$[0]".to_string())),
-                OwnedValue::build_text(Rc::new("value".to_string())),
+                OwnedValue::build_text("$[0]"),
+                OwnedValue::build_text("value"),
             ],
         );
 
         assert!(result.is_ok());
 
-        assert_eq!(
-            result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"["value"]"#.to_string()))
-        );
+        assert_eq!(result.unwrap(), OwnedValue::build_text(r#"["value"]"#));
     }
 
     #[test]
     fn test_json_set_add_value_to_nonexistent_array() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[
-                OwnedValue::build_text(Rc::new("$.some_array[0]".to_string())),
+                OwnedValue::build_text("$.some_array[0]"),
                 OwnedValue::Integer(123),
             ],
         );
@@ -1550,104 +1520,80 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"{"some_array":[123]}"#.to_string()))
+            OwnedValue::build_text(r#"{"some_array":[123]}"#)
         );
     }
 
     #[test]
     fn test_json_set_add_value_to_array() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("[123]".to_string())),
-            &[
-                OwnedValue::build_text(Rc::new("$[1]".to_string())),
-                OwnedValue::Integer(456),
-            ],
+            &OwnedValue::build_text("[123]"),
+            &[OwnedValue::build_text("$[1]"), OwnedValue::Integer(456)],
         );
 
         assert!(result.is_ok());
 
-        assert_eq!(
-            result.unwrap(),
-            OwnedValue::build_text(Rc::new("[123,456]".to_string()))
-        );
+        assert_eq!(result.unwrap(), OwnedValue::build_text("[123,456]"));
     }
 
     #[test]
     fn test_json_set_add_value_to_array_out_of_bounds() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("[123]".to_string())),
-            &[
-                OwnedValue::build_text(Rc::new("$[200]".to_string())),
-                OwnedValue::Integer(456),
-            ],
+            &OwnedValue::build_text("[123]"),
+            &[OwnedValue::build_text("$[200]"), OwnedValue::Integer(456)],
         );
 
         assert!(result.is_ok());
 
-        assert_eq!(
-            result.unwrap(),
-            OwnedValue::build_text(Rc::new("[123]".to_string()))
-        );
+        assert_eq!(result.unwrap(), OwnedValue::build_text("[123]"));
     }
 
     #[test]
     fn test_json_set_replace_value_in_array() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("[123]".to_string())),
-            &[
-                OwnedValue::build_text(Rc::new("$[0]".to_string())),
-                OwnedValue::Integer(456),
-            ],
+            &OwnedValue::build_text("[123]"),
+            &[OwnedValue::build_text("$[0]"), OwnedValue::Integer(456)],
         );
 
         assert!(result.is_ok());
 
-        assert_eq!(
-            result.unwrap(),
-            OwnedValue::build_text(Rc::new("[456]".to_string()))
-        );
+        assert_eq!(result.unwrap(), OwnedValue::build_text("[456]"));
     }
 
     #[test]
     fn test_json_set_null_path() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[OwnedValue::Null, OwnedValue::Integer(456)],
         );
 
         assert!(result.is_ok());
 
-        assert_eq!(
-            result.unwrap(),
-            OwnedValue::build_text(Rc::new("{}".to_string()))
-        );
+        assert_eq!(result.unwrap(), OwnedValue::build_text("{}"));
     }
 
     #[test]
     fn test_json_set_multiple_keys() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("[123]".to_string())),
+            &OwnedValue::build_text("[123]"),
             &[
-                OwnedValue::build_text(Rc::new("$[0]".to_string())),
+                OwnedValue::build_text("$[0]"),
                 OwnedValue::Integer(456),
-                OwnedValue::build_text(Rc::new("$[1]".to_string())),
+                OwnedValue::build_text("$[1]"),
                 OwnedValue::Integer(789),
             ],
         );
 
         assert!(result.is_ok());
 
-        assert_eq!(
-            result.unwrap(),
-            OwnedValue::build_text(Rc::new("[456,789]".to_string()))
-        );
+        assert_eq!(result.unwrap(), OwnedValue::build_text("[456,789]"));
     }
 
     #[test]
     fn test_json_set_missing_value() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("[123]".to_string())),
-            &[OwnedValue::build_text(Rc::new("$[0]".to_string()))],
+            &OwnedValue::build_text("[123]"),
+            &[OwnedValue::build_text("$[0]")],
         );
 
         assert!(result.is_err());
@@ -1656,9 +1602,9 @@ mod tests {
     #[test]
     fn test_json_set_add_array_in_nested_object() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[
-                OwnedValue::build_text(Rc::new("$.object[0].field".to_string())),
+                OwnedValue::build_text("$.object[0].field"),
                 OwnedValue::Integer(123),
             ],
         );
@@ -1667,16 +1613,16 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"{"object":[{"field":123}]}"#.to_string()))
+            OwnedValue::build_text(r#"{"object":[{"field":123}]}"#)
         );
     }
 
     #[test]
     fn test_json_set_add_array_in_array_in_nested_object() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[
-                OwnedValue::build_text(Rc::new("$.object[0][0]".to_string())),
+                OwnedValue::build_text("$.object[0][0]"),
                 OwnedValue::Integer(123),
             ],
         );
@@ -1685,19 +1631,19 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"{"object":[[123]]}"#.to_string()))
+            OwnedValue::build_text(r#"{"object":[[123]]}"#)
         );
     }
 
     #[test]
     fn test_json_set_add_array_in_array_in_nested_object_out_of_bounds() {
         let result = json_set(
-            &OwnedValue::build_text(Rc::new("{}".to_string())),
+            &OwnedValue::build_text("{}"),
             &[
-                OwnedValue::build_text(Rc::new("$.object[123].another".to_string())),
-                OwnedValue::build_text(Rc::new("value".to_string())),
-                OwnedValue::build_text(Rc::new("$.field".to_string())),
-                OwnedValue::build_text(Rc::new("value".to_string())),
+                OwnedValue::build_text("$.object[123].another"),
+                OwnedValue::build_text("value"),
+                OwnedValue::build_text("$.field"),
+                OwnedValue::build_text("value"),
             ],
         );
 
@@ -1705,7 +1651,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap(),
-            OwnedValue::build_text(Rc::new(r#"{"field":"value"}"#.to_string()))
+            OwnedValue::build_text(r#"{"field":"value"}"#)
         );
     }
 }
