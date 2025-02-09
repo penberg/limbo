@@ -372,4 +372,8 @@ public class JDBC4Connection implements Connection {
   public String getUrl() {
     return this.connection.getUrl();
   }
+
+  public void checkOpen() throws SQLException {
+    connection.checkOpen();
+  }
 }
