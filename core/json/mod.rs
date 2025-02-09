@@ -394,7 +394,7 @@ fn json_extract_single<'a>(
             PathElement::Root() => {
                 current_element = json;
             }
-            PathElement::Key(key) => match current_element {
+            PathElement::Key(key, _) => match current_element {
                 Val::Object(map) => {
                     if let Some((_, value)) = map.iter().find(|(k, _)| k == key) {
                         current_element = value;
@@ -442,7 +442,7 @@ fn json_path_from_owned_value(path: &OwnedValue, strict: bool) -> crate::Result<
                     JsonPath {
                         elements: vec![
                             PathElement::Root(),
-                            PathElement::Key(Cow::Borrowed(t.as_str())),
+                            PathElement::Key(Cow::Borrowed(t.as_str()), false),
                         ],
                     }
                 }
@@ -454,7 +454,7 @@ fn json_path_from_owned_value(path: &OwnedValue, strict: bool) -> crate::Result<
             OwnedValue::Float(f) => JsonPath {
                 elements: vec![
                     PathElement::Root(),
-                    PathElement::Key(Cow::Owned(f.to_string())),
+                    PathElement::Key(Cow::Owned(f.to_string()), false),
                 ],
             },
             _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
@@ -501,7 +501,7 @@ fn find_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Target<'a>> {
                     return None;
                 }
             },
-            PathElement::Key(key) => match current {
+            PathElement::Key(key, _) => match current {
                 Val::Object(obj) => {
                     if let Some(pos) = &obj
                         .iter()
@@ -577,7 +577,7 @@ fn find_or_create_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Targe
                     *current = Val::Array(vec![]);
                 }
             },
-            PathElement::Key(key) => match current {
+            PathElement::Key(key, _) => match current {
                 Val::Object(obj) => {
                     if let Some(pos) = &obj
                         .iter()
@@ -1253,7 +1253,7 @@ mod tests {
     fn test_find_target_object() {
         let mut val = Val::Object(vec![("key".to_string(), Val::String("value".to_string()))]);
         let path = JsonPath {
-            elements: vec![PathElement::Key(Cow::Borrowed("key"))],
+            elements: vec![PathElement::Key(Cow::Borrowed("key"), false)],
         };
 
         match find_target(&mut val, &path) {
@@ -1269,7 +1269,7 @@ mod tests {
             ("key".to_string(), Val::String("value".to_string())),
         ]);
         let path = JsonPath {
-            elements: vec![PathElement::Key(Cow::Borrowed("key"))],
+            elements: vec![PathElement::Key(Cow::Borrowed("key"), false)],
         };
 
         match find_target(&mut val, &path) {
@@ -1364,7 +1364,7 @@ mod tests {
 
         let result = result.unwrap();
         match &result.elements[..] {
-            [PathElement::Root(), PathElement::Key(field)] if *field == "field" => {}
+            [PathElement::Root(), PathElement::Key(field, false)] if *field == "field" => {}
             _ => panic!("Expected root and field"),
         }
     }
@@ -1433,7 +1433,7 @@ mod tests {
 
         let result = result.unwrap();
         match &result.elements[..] {
-            [PathElement::Root(), PathElement::Key(field)] if *field == "1.23" => {}
+            [PathElement::Root(), PathElement::Key(field, false)] if *field == "1.23" => {}
             _ => panic!("Expected root and field"),
         }
     }
