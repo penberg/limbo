@@ -480,8 +480,6 @@ version = "0.0.14"
 dependencies = [
  "anyhow",
  "assert_cmd",
- "clap",
- "dirs",
  "env_logger 0.10.2",
  "limbo_core",
  "log",
@@ -489,7 +487,6 @@ dependencies = [
  "rand_chacha 0.9.0",
  "rexpect",
  "rusqlite",
- "rustyline",
  "tempfile",
 ]
 
@@ -722,12 +719,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
-name = "downcast"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
-
-[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -900,12 +891,6 @@ checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
 ]
-
-[[package]]
-name = "fragile"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c2141d6d6c8512188a7891b4b01590a45f6dac67afb4f255c4124dbb86d4eaa"
 
 [[package]]
 name = "fsevent-sys"
@@ -1617,7 +1602,6 @@ name = "limbo_core"
 version = "0.0.14"
 dependencies = [
  "built",
- "bumpalo",
  "cfg_block",
  "chrono",
  "criterion",
@@ -1642,7 +1626,6 @@ dependencies = [
  "log",
  "miette",
  "mimalloc",
- "mockall",
  "parking_lot",
  "pest",
  "pest_derive",
@@ -1657,7 +1640,6 @@ dependencies = [
  "rusqlite",
  "rustix",
  "serde",
- "sieve-cache",
  "sqlite3-parser",
  "strum",
  "tempfile",
@@ -1683,7 +1665,6 @@ name = "limbo_ext"
 version = "0.0.14"
 dependencies = [
  "limbo_macros",
- "log",
 ]
 
 [[package]]
@@ -1717,7 +1698,6 @@ name = "limbo_regexp"
 version = "0.0.14"
 dependencies = [
  "limbo_ext",
- "log",
  "mimalloc",
  "regex",
 ]
@@ -1727,7 +1707,6 @@ name = "limbo_series"
 version = "0.0.14"
 dependencies = [
  "limbo_ext",
- "log",
  "mimalloc",
  "quickcheck",
  "quickcheck_macros",
@@ -1906,32 +1885,6 @@ dependencies = [
  "log",
  "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "mockall"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39a6bfcc6c8c7eed5ee98b9c3e33adc726054389233e201c95dab2d41a3839d2"
-dependencies = [
- "cfg-if",
- "downcast",
- "fragile",
- "mockall_derive",
- "predicates",
- "predicates-tree",
-]
-
-[[package]]
-name = "mockall_derive"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25ca3004c2efe9011bd4e461bd8256445052b9615405b4f7ea43fc8ca5c20898"
-dependencies = [
- "cfg-if",
- "proc-macro2",
- "quote",
- "syn 2.0.96",
 ]
 
 [[package]]
@@ -2795,12 +2748,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "sieve-cache"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51bf3a9dccf2c079bf1465d449a485c85b36443caf765f2f127bfec28b180f75"
 
 [[package]]
 name = "signal-hook-registry"
