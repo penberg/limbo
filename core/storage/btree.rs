@@ -1411,7 +1411,6 @@ impl BTreeCursor {
             let current_root = self.stack.top();
             let current_root_contents = current_root.get().contents.as_ref().unwrap();
 
-            let new_root_page_id = new_root_page.get().id;
             let new_root_page_contents = new_root_page.get().contents.as_mut().unwrap();
             if is_page_1 {
                 // Copy header
@@ -1421,8 +1420,10 @@ impl BTreeCursor {
                     .copy_from_slice(&current_root_buf[0..DATABASE_HEADER_SIZE]);
             }
             // point new root right child to previous root
-            new_root_page_contents
-                .write_u32(PAGE_HEADER_OFFSET_RIGHTMOST_PTR, new_root_page_id as u32);
+            new_root_page_contents.write_u32(
+                PAGE_HEADER_OFFSET_RIGHTMOST_PTR,
+                current_root.get().id as u32,
+            );
             new_root_page_contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
         }
 
