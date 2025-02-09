@@ -731,7 +731,7 @@ nulls(A) ::= .                  {A = None;}
 
 %type groupby_opt {Option<GroupBy>}
 groupby_opt(A) ::= .                      {A = None;}
-groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs: X, having: Y });}
+groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs: X, having: Y.map(Box::new) });}
 
 %type having_opt {Option<Expr>}
 having_opt(A) ::= .                {A = None;}
@@ -761,13 +761,13 @@ limit_opt(A) ::= LIMIT expr(X) COMMA expr(Y).
 cmd ::= with(C) DELETE FROM xfullname(X) indexed_opt(I) where_opt_ret(W)
         orderby_opt(O) limit_opt(L). {
   let (where_clause, returning) = W;
-  self.ctx.stmt = Some(Stmt::Delete{ with: C, tbl_name: X, indexed: I, where_clause, returning,
+  self.ctx.stmt = Some(Stmt::Delete{ with: C, tbl_name: X, indexed: I, where_clause: where_clause.map(Box::new), returning,
                                      order_by: O, limit: L });
 }
 %else
 cmd ::= with(C) DELETE FROM xfullname(X) indexed_opt(I) where_opt_ret(W). {
   let (where_clause, returning) = W;
-  self.ctx.stmt = Some(Stmt::Delete{ with: C, tbl_name: X, indexed: I, where_clause, returning,
+  self.ctx.stmt = Some(Stmt::Delete{ with: C, tbl_name: X, indexed: I, where_clause: where_clause.map(Box::new), returning,
                                      order_by: None, limit: None });
 }
 %endif
@@ -791,14 +791,14 @@ cmd ::= with(C) UPDATE orconf(R) xfullname(X) indexed_opt(I) SET setlist(Y) from
         where_opt_ret(W) orderby_opt(O) limit_opt(L).  {
   let (where_clause, returning) = W;
   self.ctx.stmt = Some(Stmt::Update { with: C, or_conflict: R, tbl_name: X, indexed: I, sets: Y, from: F,
-                                      where_clause, returning, order_by: O, limit: L });
+                                      where_clause: where_clause.map(Box::new), returning, order_by: O, limit: L });
 }
 %else
 cmd ::= with(C) UPDATE orconf(R) xfullname(X) indexed_opt(I) SET setlist(Y) from(F)
         where_opt_ret(W). {
   let (where_clause, returning) = W;
   self.ctx.stmt = Some(Stmt::Update { with: C, or_conflict: R, tbl_name: X, indexed: I, sets: Y, from: F,
-                                      where_clause, returning, order_by: None, limit: None });
+                                      where_clause: where_clause.map(Box::new), returning, order_by: None, limit: None });
 }
 %endif
 
@@ -828,13 +828,13 @@ cmd ::= with(W) insert_cmd(R) INTO xfullname(X) idlist_opt(F) select(S)
   let (upsert, returning) = U;
   let body = InsertBody::Select(Box::new(S), upsert);
   self.ctx.stmt = Some(Stmt::Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
-                                     body, returning });
+                                     body: Box::new(body), returning });
 }
 cmd ::= with(W) insert_cmd(R) INTO xfullname(X) idlist_opt(F) DEFAULT VALUES returning(Y).
 {
   let body = InsertBody::DefaultValues;
   self.ctx.stmt = Some(Stmt::Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
-                                     body, returning: Y });
+                                     body: Box::new(body), returning: Y });
 }
 
 %type upsert {(Option<Upsert>, Option<Vec<ResultColumn>>)}
@@ -851,16 +851,16 @@ upsert(A) ::= ON CONFLICT LP sortlist(T) RP where_opt(TW)
               { let index = UpsertIndex{ targets: T, where_clause: TW };
                 let do_clause = UpsertDo::Set{ sets: Z, where_clause: W };
                 let (next, returning) = N;
-                A = (Some(Upsert{ index: Some(index), do_clause, next: next.map(Box::new) }), returning);}
+                A = (Some(Upsert{ index: Some(Box::new(index)), do_clause: Box::new(do_clause), next: next.map(Box::new) }), returning);}
 upsert(A) ::= ON CONFLICT LP sortlist(T) RP where_opt(TW) DO NOTHING upsert(N).
               { let index = UpsertIndex{ targets: T, where_clause: TW };
                 let (next, returning) = N;
-                A = (Some(Upsert{ index: Some(index), do_clause: UpsertDo::Nothing, next: next.map(Box::new) }), returning); }
+                A = (Some(Upsert{ index: Some(Box::new(index)), do_clause: Box::new(UpsertDo::Nothing), next: next.map(Box::new) }), returning); }
 upsert(A) ::= ON CONFLICT DO NOTHING returning(R).
-              { A = (Some(Upsert{ index: None, do_clause: UpsertDo::Nothing, next: None }), R); }
+              { A = (Some(Upsert{ index: None, do_clause: Box::new(UpsertDo::Nothing), next: None }), R); }
 upsert(A) ::= ON CONFLICT DO UPDATE SET setlist(Z) where_opt(W) returning(R).
               { let do_clause = UpsertDo::Set{ sets: Z, where_clause: W };
-                A = (Some(Upsert{ index: None, do_clause, next: None }), R);}
+                A = (Some(Upsert{ index: None, do_clause: Box::new(do_clause), next: None }), R);}
 
 %type returning {Option<Vec<ResultColumn>>}
 returning(A) ::= RETURNING selcollist(X).  {A = Some(X);}
@@ -1167,8 +1167,8 @@ minus_num(A) ::= MINUS number(X).     {A = Expr::unary(UnaryOperator::Negative, 
 cmd ::= createkw temp(T) TRIGGER ifnotexists(NOERR) fullname(B) trigger_time(C) trigger_event(D)
         ON fullname(E) foreach_clause(X) when_clause(G) BEGIN trigger_cmd_list(S) END. {
   self.ctx.stmt = Some(Stmt::CreateTrigger{
-    temporary: T, if_not_exists: NOERR, trigger_name: B, time: C, event: D, tbl_name: E,
-    for_each_row: X, when_clause: G, commands: S
+    temporary: T, if_not_exists: NOERR, trigger_name: B, time: C, event: Box::new(D), tbl_name: E,
+    for_each_row: X, when_clause: G.map(Box::new), commands: S
   });
 }
 
@@ -1276,7 +1276,7 @@ cmd ::= DROP TRIGGER ifexists(NOERR) fullname(X). {
 //////////////////////// ATTACH DATABASE file AS name /////////////////////////
 %ifndef SQLITE_OMIT_ATTACH
 cmd ::= ATTACH database_kw_opt expr(F) AS expr(D) key_opt(K). {
-  self.ctx.stmt = Some(Stmt::Attach{ expr: F, db_name: D, key: K });
+  self.ctx.stmt = Some(Stmt::Attach{ expr: Box::new(F), db_name: Box::new(D), key: K.map(Box::new) });
 }
 cmd ::= DETACH database_kw_opt expr(D). {
   self.ctx.stmt = Some(Stmt::Detach(D));
@@ -1454,9 +1454,9 @@ frame_bound_s(A) ::= UNBOUNDED PRECEDING. {A = FrameBound::UnboundedPreceding;}
 frame_bound_e(A) ::= frame_bound(X).      {A = X;}
 frame_bound_e(A) ::= UNBOUNDED FOLLOWING. {A = FrameBound::UnboundedFollowing;}
 
-frame_bound(A) ::= expr(X) PRECEDING.   { A = FrameBound::Preceding(X); }
+frame_bound(A) ::= expr(X) PRECEDING.   { A = FrameBound::Preceding(Box::new(X)); }
 frame_bound(A) ::= CURRENT ROW.         { A = FrameBound::CurrentRow; }
-frame_bound(A) ::= expr(X) FOLLOWING.   { A = FrameBound::Following(X); }
+frame_bound(A) ::= expr(X) FOLLOWING.   { A = FrameBound::Following(Box::new(X)); }
 
 %type frame_exclude_opt {Option<FrameExclude>}
 frame_exclude_opt(A) ::= . {A = None;}

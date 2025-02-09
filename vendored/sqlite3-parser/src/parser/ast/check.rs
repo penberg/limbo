@@ -160,19 +160,19 @@ impl Stmt {
             } => Err(custom_err!("ORDER BY without LIMIT on DELETE")),
             Self::Insert {
                 columns: Some(columns),
-                body: InsertBody::Select(select, ..),
+                body,
                 ..
-            } => match select.body.select.column_count() {
-                ColumnCount::Fixed(n) if n != columns.len() => {
-                    Err(custom_err!("{} values for {} columns", n, columns.len()))
+            } => match &**body {
+                InsertBody::Select(select, ..) => match select.body.select.column_count() {
+                    ColumnCount::Fixed(n) if n != columns.len() => {
+                        Err(custom_err!("{} values for {} columns", n, columns.len()))
+                    }
+                    _ => Ok(()),
+                },
+                InsertBody::DefaultValues => {
+                    Err(custom_err!("0 values for {} columns", columns.len()))
                 }
-                _ => Ok(()),
             },
-            Self::Insert {
-                columns: Some(columns),
-                body: InsertBody::DefaultValues,
-                ..
-            } => Err(custom_err!("0 values for {} columns", columns.len())),
             Self::Update {
                 order_by: Some(_),
                 limit: None,

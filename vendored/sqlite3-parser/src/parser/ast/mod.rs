@@ -78,11 +78,11 @@ pub enum Stmt {
     Attach {
         /// filename
         // TODO distinction between ATTACH and ATTACH DATABASE
-        expr: Expr,
+        expr: Box<Expr>,
         /// schema name
-        db_name: Expr,
+        db_name: Box<Expr>,
         /// password
-        key: Option<Expr>,
+        key: Option<Box<Expr>>,
     },
     /// `BEGIN`: tx type, tx name
     Begin(Option<TransactionType>, Option<Name>),
@@ -125,13 +125,13 @@ pub enum Stmt {
         /// `BEFORE`/`AFTER`/`INSTEAD OF`
         time: Option<TriggerTime>,
         /// `DELETE`/`INSERT`/`UPDATE`
-        event: TriggerEvent,
+        event: Box<TriggerEvent>,
         /// table name
         tbl_name: QualifiedName,
         /// `FOR EACH ROW`
         for_each_row: bool,
         /// `WHEN`
-        when_clause: Option<Expr>,
+        when_clause: Option<Box<Expr>>,
         /// statements
         commands: Vec<TriggerCmd>,
     },
@@ -168,7 +168,7 @@ pub enum Stmt {
         /// `INDEXED`
         indexed: Option<Indexed>,
         /// `WHERE` clause
-        where_clause: Option<Expr>,
+        where_clause: Option<Box<Expr>>,
         /// `RETURNING`
         returning: Option<Vec<ResultColumn>>,
         /// `ORDER BY`
@@ -217,7 +217,7 @@ pub enum Stmt {
         /// `COLUMNS`
         columns: Option<DistinctNames>,
         /// `VALUES` or `SELECT`
-        body: InsertBody,
+        body: Box<InsertBody>,
         /// `RETURNING`
         returning: Option<Vec<ResultColumn>>,
     },
@@ -256,7 +256,7 @@ pub enum Stmt {
         /// `FROM`
         from: Option<FromClause>,
         /// `WHERE` clause
-        where_clause: Option<Expr>,
+        where_clause: Option<Box<Expr>>,
         /// `RETURNING`
         returning: Option<Vec<ResultColumn>>,
         /// `ORDER BY`
@@ -1005,7 +1005,7 @@ pub struct GroupBy {
     /// expressions
     pub exprs: Vec<Expr>,
     /// `HAVING`
-    pub having: Option<Expr>, // HAVING clause on a non-aggregate query
+    pub having: Option<Box<Expr>>, // HAVING clause on a non-aggregate query
 }
 
 /// identifier or one of several keywords or `INDEXED`
@@ -1769,9 +1769,9 @@ pub enum TransactionType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Upsert {
     /// conflict targets
-    pub index: Option<UpsertIndex>,
+    pub index: Option<Box<UpsertIndex>>,
     /// `DO` clause
-    pub do_clause: UpsertDo,
+    pub do_clause: Box<UpsertDo>,
     /// next upsert
     pub next: Option<Box<Upsert>>,
 }
@@ -1872,9 +1872,9 @@ pub enum FrameBound {
     /// `CURRENT ROW`
     CurrentRow,
     /// `FOLLOWING`
-    Following(Expr),
+    Following(Box<Expr>),
     /// `PRECEDING`
-    Preceding(Expr),
+    Preceding(Box<Expr>),
     /// `UNBOUNDED FOLLOWING`
     UnboundedFollowing,
     /// `UNBOUNDED PRECEDING`

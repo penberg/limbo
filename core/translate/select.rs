@@ -305,7 +305,7 @@ pub fn prepare_select_plan(
                     exprs: group_by.exprs,
                     having: if let Some(having) = group_by.having {
                         let mut predicates = vec![];
-                        break_predicate_at_and_boundaries(having, &mut predicates);
+                        break_predicate_at_and_boundaries(*having, &mut predicates);
                         for expr in predicates.iter_mut() {
                             bind_column_references(
                                 expr,
