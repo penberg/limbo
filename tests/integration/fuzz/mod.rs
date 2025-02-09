@@ -165,6 +165,7 @@ mod tests {
             "SELECT like('a%', 'a') = 1",
             "SELECT CASE ( NULL < NULL ) WHEN ( 0 ) THEN ( NULL ) ELSE ( 2.0 ) END;",
             "SELECT (COALESCE(0, COALESCE(0, 0)));",
+            "SELECT CAST((1 > 0) AS INTEGER);",
         ] {
             let limbo = limbo_exec_row(&limbo_conn, query);
             let sqlite = sqlite_exec_row(&sqlite_conn, query);
@@ -235,6 +236,21 @@ mod tests {
             .concat("")
             .push_str("COALESCE(")
             .push(g.create().concat("").push(expr).repeat(2..5, ",").build())
+            .push_str(")")
+            .build();
+
+        let (cast_expr, cast_expr_builder) = g.create_handle();
+        cast_expr_builder
+            .concat(" ")
+            .push_str("CAST ( (")
+            .push(expr)
+            .push_str(") AS ")
+            .push(
+                g.create()
+                    .choice()
+                    .options_str(["NUMERIC", "REAL", "INTEGER"])
+                    .build(),
+            )
             .push_str(")")
             .build();
 
@@ -309,6 +325,7 @@ mod tests {
 
         expr_builder
             .choice()
+            .option_w(cast_expr, 1.0)
             .option_w(case_expr, 1.0)
             .option_w(unary_infix_op, 2.0)
             .option_w(bin_op, 3.0)
