@@ -173,20 +173,7 @@ pub enum Stmt {
         view_name: QualifiedName,
     },
     /// `INSERT`
-    Insert {
-        /// CTE
-        with: Option<With>,
-        /// `OR`
-        or_conflict: Option<ResolveType>, // TODO distinction between REPLACE and INSERT OR REPLACE
-        /// table name
-        tbl_name: QualifiedName,
-        /// `COLUMNS`
-        columns: Option<DistinctNames>,
-        /// `VALUES` or `SELECT`
-        body: Box<InsertBody>,
-        /// `RETURNING`
-        returning: Option<Vec<ResultColumn>>,
-    },
+    Insert(Box<Insert>),
     /// `PRAGMA`: pragma name, body
     Pragma(QualifiedName, Option<PragmaBody>),
     /// `REINDEX`
@@ -234,6 +221,23 @@ pub struct CreateTrigger {
     pub when_clause: Option<Expr>,
     /// statements
     pub commands: Vec<TriggerCmd>,
+}
+
+/// `INSERT`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Insert {
+    /// CTE
+    pub with: Option<With>,
+    /// `OR`
+    pub or_conflict: Option<ResolveType>, // TODO distinction between REPLACE and INSERT OR REPLACE
+    /// table name
+    pub tbl_name: QualifiedName,
+    /// `COLUMNS`
+    pub columns: Option<DistinctNames>,
+    /// `VALUES` or `SELECT`
+    pub body: InsertBody,
+    /// `RETURNING`
+    pub returning: Option<Vec<ResultColumn>>,
 }
 
 /// `UPDATE` clause

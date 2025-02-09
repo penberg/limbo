@@ -63,10 +63,13 @@ impl Stmt {
                     None => ColumnCount::None,
                 }
             }
-            Self::Insert {
-                returning: Some(returning),
-                ..
-            } => column_count(returning),
+            Self::Insert(insert) => {
+                let Insert { returning, .. } = &**insert;
+                match returning {
+                    Some(returning) => column_count(returning),
+                    None => ColumnCount::None,
+                }
+            }
             Self::Pragma(..) => ColumnCount::Dynamic,
             Self::Select(s) => s.column_count(),
             Self::Update(update) => {
@@ -170,21 +173,24 @@ impl Stmt {
                 }
                 Ok(())
             }
-            Self::Insert {
-                columns: Some(columns),
-                body,
-                ..
-            } => match &**body {
-                InsertBody::Select(select, ..) => match select.body.select.column_count() {
-                    ColumnCount::Fixed(n) if n != columns.len() => {
-                        Err(custom_err!("{} values for {} columns", n, columns.len()))
-                    }
-                    _ => Ok(()),
-                },
-                InsertBody::DefaultValues => {
-                    Err(custom_err!("0 values for {} columns", columns.len()))
+            Self::Insert(insert) => {
+                let Insert { columns, body, .. } = &**insert;
+                if columns.is_none() {
+                    return Ok(());
                 }
-            },
+                let columns = columns.as_ref().unwrap();
+                match &*body {
+                    InsertBody::Select(select, ..) => match select.body.select.column_count() {
+                        ColumnCount::Fixed(n) if n != columns.len() => {
+                            Err(custom_err!("{} values for {} columns", n, columns.len()))
+                        }
+                        _ => Ok(()),
+                    },
+                    InsertBody::DefaultValues => {
+                        Err(custom_err!("0 values for {} columns", columns.len()))
+                    }
+                }
+            }
             Self::Update(update) => {
                 let Update {
                     order_by, limit, ..

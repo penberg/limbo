@@ -34,6 +34,7 @@ use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast::{self, fmt::ToTokens};
+use sqlite3_parser::ast::{Delete, Insert};
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
@@ -104,14 +105,15 @@ pub fn translate(
         ast::Stmt::Select(select) => translate_select(query_mode, schema, *select, syms)?,
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
-        ast::Stmt::Insert {
-            with,
-            or_conflict,
-            tbl_name,
-            columns,
-            body,
-            returning,
-        } => {
+        ast::Stmt::Insert(insert) => {
+            let Insert {
+                with,
+                or_conflict,
+                tbl_name,
+                columns,
+                body,
+                returning,
+            } = *insert;
             change_cnt_on = true;
             translate_insert(
                 query_mode,

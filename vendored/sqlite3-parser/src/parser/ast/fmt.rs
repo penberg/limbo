@@ -394,14 +394,15 @@ impl ToTokens for Stmt {
                 }
                 view_name.to_tokens(s)
             }
-            Self::Insert {
-                with,
-                or_conflict,
-                tbl_name,
-                columns,
-                body,
-                returning,
-            } => {
+            Self::Insert(insert) => {
+                let Insert {
+                    with,
+                    or_conflict,
+                    tbl_name,
+                    columns,
+                    body,
+                    returning,
+                } = &**insert;
                 if let Some(with) = with {
                     with.to_tokens(s)?;
                 }
