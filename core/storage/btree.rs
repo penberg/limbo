@@ -2469,7 +2469,6 @@ mod tests {
 
     #[test]
     pub fn btree_insert_fuzz_ex() {
-        let _ = env_logger::init();
         for sequence in [
             &[
                 (777548915, 3364),
@@ -2540,42 +2539,82 @@ mod tests {
         }
     }
 
-    #[test]
-    pub fn btree_insert_fuzz_run() {
-        let _ = env_logger::init();
-        let mut rng = ChaCha8Rng::seed_from_u64(0);
-        for _ in 0..128 {
+    fn rng_from_time() -> (ChaCha8Rng, u64) {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let rng = ChaCha8Rng::seed_from_u64(seed);
+        (rng, seed)
+    }
+
+    fn btree_insert_fuzz_run(
+        attempts: usize,
+        inserts: usize,
+        size: impl Fn(&mut ChaCha8Rng) -> usize,
+    ) {
+        let (mut rng, seed) = rng_from_time();
+        log::info!("super seed: {}", seed);
+        for _ in 0..attempts {
             let (pager, root_page) = empty_btree();
             let mut cursor = BTreeCursor::new(pager.clone(), root_page);
             let mut keys = Vec::new();
             let seed = rng.next_u64();
             log::info!("seed: {}", seed);
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            for _ in 0..16 {
-                let size = (rng.next_u64() % 4096) as usize;
+            for _ in 0..inserts {
+                let size = size(&mut rng);
                 let key = (rng.next_u64() % (1 << 30)) as i64;
                 keys.push(key);
                 log::info!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
                 let key = OwnedValue::Integer(key);
                 let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
                 cursor.insert(&key, &value, false).unwrap();
-                log::info!(
-                    "=========== btree ===========\n{}\n\n",
-                    format_btree(pager.clone(), root_page, 0)
+            }
+            log::info!(
+                "=========== btree ===========\n{}\n\n",
+                format_btree(pager.clone(), root_page, 0)
+            );
+            for key in keys.iter() {
+                let seek_key = SeekKey::TableRowId(*key as u64);
+                assert!(
+                    matches!(
+                        cursor.seek(seek_key, SeekOp::EQ).unwrap(),
+                        CursorResult::Ok(true)
+                    ),
+                    "key {} is not found",
+                    key
                 );
-                for key in keys.iter() {
-                    let seek_key = SeekKey::TableRowId(*key as u64);
-                    assert!(
-                        matches!(
-                            cursor.seek(seek_key, SeekOp::EQ).unwrap(),
-                            CursorResult::Ok(true)
-                        ),
-                        "key {} is not found",
-                        key
-                    );
-                }
             }
         }
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz_run_equal_size() {
+        for size in 1..8 {
+            log::info!("======= size:{} =======", size);
+            btree_insert_fuzz_run(2, 1024, |_| size);
+        }
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz_run_random() {
+        btree_insert_fuzz_run(128, 16, |rng| (rng.next_u32() % 4096) as usize);
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz_run_small() {
+        btree_insert_fuzz_run(1, 1024, |rng| (rng.next_u32() % 128) as usize);
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz_run_big() {
+        btree_insert_fuzz_run(64, 32, |rng| 3 * 1024 + (rng.next_u32() % 1024) as usize);
+    }
+
+    #[test]
+    pub fn btree_insert_fuzz_run_overflow() {
+        btree_insert_fuzz_run(64, 32, |rng| (rng.next_u32() % 32 * 1024) as usize);
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
