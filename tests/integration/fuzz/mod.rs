@@ -245,12 +245,8 @@ mod tests {
             .push_str("CAST ( (")
             .push(expr)
             .push_str(") AS ")
-            .push(
-                g.create()
-                    .choice()
-                    .options_str(["NUMERIC", "INTEGER"])
-                    .build(),
-            )
+            // cast to INTEGER/REAL/TEXT types can be added when Limbo will use proper equality semantic between values (e.g. 1 = 1.0)
+            .push(g.create().choice().options_str(["NUMERIC"]).build())
             .push_str(")")
             .build();
 
