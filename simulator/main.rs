@@ -429,7 +429,7 @@ fn setup_simulation(
     let mut env = SimulatorEnv::new(seed, cli_opts, db_path);
 
     // todo: the loading works correctly because of a hacky decision
-    // Rigth now, the plan generation is the only point we use the rng, so the environment doesn't
+    // Right now, the plan generation is the only point we use the rng, so the environment doesn't
     // even need it. In the future, especially with multi-connections and multi-threading, we might
     // use the RNG for more things such as scheduling, so this assumption will fail.  When that happens,
     // we'll need to reachitect this logic by saving and loading RNG state.

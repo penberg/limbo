@@ -496,7 +496,7 @@ fn translate_create_table(
     program.resolve_label(parse_schema_label, program.offset());
     // TODO: SetCookie
     //
-    // TODO: remove format, it sucks for performance but is convinient
+    // TODO: remove format, it sucks for performance but is convenient
     let parse_schema_where_clause = format!("tbl_name = '{}' AND type != 'trigger'", tbl_name);
     program.emit_insn(Insn::ParseSchema {
         db: sqlite_schema_cursor_id,

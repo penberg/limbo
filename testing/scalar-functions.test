@@ -407,7 +407,7 @@ do_execsql_test length-text {
   SELECT length('limbo');
 } {5}
 
-do_execsql_test lenght-text-utf8-chars {
+do_execsql_test length-text-utf8-chars {
   SELECT length('ąłóżźć');
 } {6}
 
@@ -431,7 +431,7 @@ do_execsql_test octet-length-text {
   SELECT length('limbo');
 } {5}
 
-do_execsql_test octet-lenght-text-utf8-chars {
+do_execsql_test octet-length-text-utf8-chars {
   SELECT octet_length('ąłóżźć');
 } {12}
 

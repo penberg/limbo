@@ -499,7 +499,7 @@ pub mod tests {
     }
 
     #[test]
-    fn test_expressions_equivalent_multiplicaiton() {
+    fn test_expressions_equivalent_multiplication() {
         let expr1 = Expr::Binary(
             Box::new(Expr::Literal(Literal::Numeric("42.0".to_string()))),
             Multiply,
