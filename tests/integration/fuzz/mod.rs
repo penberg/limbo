@@ -163,6 +163,7 @@ mod tests {
             "SELECT ((NULL) IS NOT TRUE <= ((NOT (FALSE))))",
             "SELECT ifnull(0, NOT 0)",
             "SELECT like('a%', 'a') = 1",
+            "SELECT CASE ( NULL < NULL ) WHEN ( 0 ) THEN ( NULL ) ELSE ( 2.0 ) END;",
         ] {
             let limbo = limbo_exec_row(&limbo_conn, query);
             let sqlite = sqlite_exec_row(&sqlite_conn, query);
@@ -209,15 +210,66 @@ mod tests {
             .push(expr)
             .build();
 
+        let (like_pattern, like_pattern_builder) = g.create_handle();
+        like_pattern_builder
+            .choice()
+            .option_str("%")
+            .option_str("_")
+            .option_symbol(rand_str("", 1))
+            .repeat(1..10, "")
+            .build();
+
+        let (glob_pattern, glob_pattern_builder) = g.create_handle();
+        glob_pattern_builder
+            .choice()
+            .option_str("*")
+            .option_str("**")
+            .option_str("A")
+            .option_str("B")
+            .repeat(1..10, "")
+            .build();
+
+        let (case_expr, case_expr_builder) = g.create_handle();
+        case_expr_builder
+            .concat(" ")
+            .push_str("CASE (")
+            .push(expr)
+            .push_str(")")
+            .push(
+                g.create()
+                    .concat(" ")
+                    .push_str("WHEN (")
+                    .push(expr)
+                    .push_str(") THEN (")
+                    .push(expr)
+                    .push_str(")")
+                    .repeat(1..5, " ")
+                    .build(),
+            )
+            .push_str("ELSE (")
+            .push(expr)
+            .push_str(") END")
+            .build();
+
         scalar_builder
             .choice()
             .option(
                 g.create()
                     .concat("")
                     .push_str("like('")
-                    .push_symbol(rand_str("", 2))
+                    .push(like_pattern)
                     .push_str("', '")
-                    .push_symbol(rand_str("", 2))
+                    .push(like_pattern)
+                    .push_str("')")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("glob('")
+                    .push(glob_pattern)
+                    .push_str("', '")
+                    .push(glob_pattern)
                     .push_str("')")
                     .build(),
             )
@@ -247,10 +299,11 @@ mod tests {
 
         expr_builder
             .choice()
-            .option_w(unary_infix_op, 1.0)
-            .option_w(bin_op, 1.0)
-            .option_w(paren, 1.0)
-            .option_w(scalar, 1.0)
+            .option_w(case_expr, 1.0)
+            .option_w(unary_infix_op, 2.0)
+            .option_w(bin_op, 3.0)
+            .option_w(paren, 2.0)
+            .option_w(scalar, 4.0)
             // unfortunatelly, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
             // e.g. 8 IS TRUE == 1 (although 8 = TRUE == 0)
             // so, we do not use TRUE/FALSE constants as they will produce diff with sqlite results
