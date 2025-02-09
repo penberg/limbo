@@ -792,7 +792,8 @@ pub fn translate_expr(
                         lhs: base_reg,
                         rhs: expr_reg,
                         target_pc: next_case_label,
-                        flags: CmpInsFlags::default(),
+                        // A NULL result is considered untrue when evaluating WHEN terms.
+                        flags: CmpInsFlags::default().jump_if_null(),
                     }),
                     // CASE WHEN 0 THEN 0 ELSE 1 becomes ifnot 0 branch to next clause
                     None => program.emit_insn(Insn::IfNot {
