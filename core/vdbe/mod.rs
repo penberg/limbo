@@ -3484,7 +3484,7 @@ fn exec_cast(value: &OwnedValue, datatype: &str) -> OwnedValue {
             // then the result is the greatest possible signed integer and if the REAL is less than the least possible signed integer (-9223372036854775808)
             // then the result is the least possible signed integer.
             OwnedValue::Float(f) => {
-                let i = f.floor() as i128;
+                let i = f.trunc().floor() as i128;
                 if i > i64::MAX as i128 {
                     OwnedValue::Integer(i64::MAX)
                 } else if i < i64::MIN as i128 {
