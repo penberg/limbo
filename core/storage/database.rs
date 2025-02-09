@@ -1,4 +1,6 @@
-use crate::{error::LimboError, io::Completion, Buffer, Result};
+#[cfg(feature = "fs")]
+use crate::error::LimboError;
+use crate::{io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
 
 /// DatabaseStorage is an interface a database file that consists of pages.

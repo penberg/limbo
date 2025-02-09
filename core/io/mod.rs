@@ -166,14 +166,17 @@ impl Buffer {
 cfg_block! {
     #[cfg(all(target_os = "linux", feature = "io_uring"))] {
         mod io_uring;
+        #[cfg(feature = "fs")]
         pub use io_uring::UringIO;
         mod unix;
+        #[cfg(feature = "fs")]
         pub use unix::UnixIO;
         pub use io_uring::UringIO as PlatformIO;
     }
 
     #[cfg(any(all(target_os = "linux",not(feature = "io_uring")), target_os = "macos"))] {
         mod unix;
+        #[cfg(feature = "fs")]
         pub use unix::UnixIO;
         pub use unix::UnixIO as PlatformIO;
     }

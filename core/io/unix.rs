@@ -22,6 +22,7 @@ pub struct UnixIO {
 }
 
 impl UnixIO {
+    #[cfg(feature = "fs")]
     pub fn new() -> Result<Self> {
         debug!("Using IO backend 'syscall'");
         Ok(Self {
