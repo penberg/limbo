@@ -15,6 +15,8 @@ use indexmap::IndexMap;
 use jsonb::Error as JsonbError;
 use ser::to_string_pretty;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::rc::Rc;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(untagged)]
@@ -392,20 +394,16 @@ fn json_extract_single<'a>(
             PathElement::Root() => {
                 current_element = json;
             }
-            PathElement::Key(key) => {
-                let key = key.as_str();
-
-                match current_element {
-                    Val::Object(map) => {
-                        if let Some((_, value)) = map.iter().find(|(k, _)| k == key) {
-                            current_element = value;
-                        } else {
-                            return Ok(None);
-                        }
+            PathElement::Key(key) => match current_element {
+                Val::Object(map) => {
+                    if let Some((_, value)) = map.iter().find(|(k, _)| k == key) {
+                        current_element = value;
+                    } else {
+                        return Ok(None);
                     }
-                    _ => return Ok(None),
                 }
-            }
+                _ => return Ok(None),
+            },
             PathElement::ArrayLocator(idx) => match current_element {
                 Val::Array(array) => {
                     let mut idx = *idx;
@@ -444,7 +442,7 @@ fn json_path_from_owned_value(path: &OwnedValue, strict: bool) -> crate::Result<
                     JsonPath {
                         elements: vec![
                             PathElement::Root(),
-                            PathElement::Key(t.as_str().to_string()),
+                            PathElement::Key(Cow::Borrowed(t.as_str())),
                         ],
                     }
                 }
@@ -454,7 +452,10 @@ fn json_path_from_owned_value(path: &OwnedValue, strict: bool) -> crate::Result<
                 elements: vec![PathElement::Root(), PathElement::ArrayLocator(*i as i32)],
             },
             OwnedValue::Float(f) => JsonPath {
-                elements: vec![PathElement::Root(), PathElement::Key(f.to_string())],
+                elements: vec![
+                    PathElement::Root(),
+                    PathElement::Key(Cow::Owned(f.to_string())),
+                ],
             },
             _ => crate::bail_constraint_error!("JSON path error near: {:?}", path.to_string()),
         }
@@ -593,7 +594,7 @@ fn find_or_create_target<'a>(json: &'a mut Val, path: &JsonPath) -> Option<Targe
                             Val::Object(vec![])
                         };
 
-                        obj.push((key.clone(), element));
+                        obj.push((key.to_string(), element));
                         let index = obj.len() - 1;
                         current = &mut obj[index].1;
                     }
@@ -1252,7 +1253,7 @@ mod tests {
     fn test_find_target_object() {
         let mut val = Val::Object(vec![("key".to_string(), Val::String("value".to_string()))]);
         let path = JsonPath {
-            elements: vec![PathElement::Key("key".to_string())],
+            elements: vec![PathElement::Key(Cow::Borrowed("key"))],
         };
 
         match find_target(&mut val, &path) {
@@ -1268,7 +1269,7 @@ mod tests {
             ("key".to_string(), Val::String("value".to_string())),
         ]);
         let path = JsonPath {
-            elements: vec![PathElement::Key("key".to_string())],
+            elements: vec![PathElement::Key(Cow::Borrowed("key"))],
         };
 
         match find_target(&mut val, &path) {
