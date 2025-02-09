@@ -94,7 +94,7 @@ pub fn translate(
             query_mode,
             &schema,
             &name,
-            body,
+            body.map(|b| *b),
             database_header.clone(),
             pager,
         )?,

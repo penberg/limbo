@@ -175,7 +175,7 @@ pub enum Stmt {
     /// `INSERT`
     Insert(Box<Insert>),
     /// `PRAGMA`: pragma name, body
-    Pragma(QualifiedName, Option<PragmaBody>),
+    Pragma(Box<QualifiedName>, Option<Box<PragmaBody>>),
     /// `REINDEX`
     Reindex {
         /// collation or index or table name

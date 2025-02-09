@@ -1139,13 +1139,13 @@ vinto(A) ::= .                          {A = None;}
 ///////////////////////////// The PRAGMA command /////////////////////////////
 //
 %ifndef SQLITE_OMIT_PRAGMA
-cmd ::= PRAGMA fullname(X).                {self.ctx.stmt = Some(Stmt::Pragma(X, None));}
-cmd ::= PRAGMA fullname(X) EQ nmnum(Y).    {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Equals(Y))));}
-cmd ::= PRAGMA fullname(X) LP nmnum(Y) RP. {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Call(Y))));}
+cmd ::= PRAGMA fullname(X).                {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), None));}
+cmd ::= PRAGMA fullname(X) EQ nmnum(Y).    {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Equals(Y)))));}
+cmd ::= PRAGMA fullname(X) LP nmnum(Y) RP. {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Call(Y)))));}
 cmd ::= PRAGMA fullname(X) EQ minus_num(Y).
-                                             {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Equals(Y))));}
+                                             {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Equals(Y)))));}
 cmd ::= PRAGMA fullname(X) LP minus_num(Y) RP.
-                                             {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Call(Y))));}
+                                             {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Call(Y)))));}
 
 %type nmnum {Expr}
 nmnum(A) ::= plus_num(A).
