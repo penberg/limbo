@@ -164,6 +164,7 @@ mod tests {
             "SELECT ifnull(0, NOT 0)",
             "SELECT like('a%', 'a') = 1",
             "SELECT CASE ( NULL < NULL ) WHEN ( 0 ) THEN ( NULL ) ELSE ( 2.0 ) END;",
+            "SELECT (COALESCE(0, COALESCE(0, 0)));",
         ] {
             let limbo = limbo_exec_row(&limbo_conn, query);
             let sqlite = sqlite_exec_row(&sqlite_conn, query);
@@ -229,6 +230,14 @@ mod tests {
             .repeat(1..10, "")
             .build();
 
+        let (coalesce_expr, coalesce_expr_builder) = g.create_handle();
+        coalesce_expr_builder
+            .concat("")
+            .push_str("COALESCE(")
+            .push(g.create().concat("").push(expr).repeat(2..5, ",").build())
+            .push_str(")")
+            .build();
+
         let (case_expr, case_expr_builder) = g.create_handle();
         case_expr_builder
             .concat(" ")
@@ -253,6 +262,7 @@ mod tests {
 
         scalar_builder
             .choice()
+            .option(coalesce_expr)
             .option(
                 g.create()
                     .concat("")
