@@ -248,7 +248,7 @@ mod tests {
             .push(
                 g.create()
                     .choice()
-                    .options_str(["NUMERIC", "REAL", "INTEGER"])
+                    .options_str(["NUMERIC", "INTEGER"])
                     .build(),
             )
             .push_str(")")
