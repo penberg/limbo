@@ -3103,6 +3103,9 @@ fn exec_quote(value: &OwnedValue) -> OwnedValue {
             for c in s.as_str().chars() {
                 if c == '\0' {
                     break;
+                } else if c == '\'' {
+                    quoted.push('\'');
+                    quoted.push(c);
                 } else {
                     quoted.push(c);
                 }
