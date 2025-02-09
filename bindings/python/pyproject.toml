@@ -40,8 +40,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/penberg/limbo"
-Source = "https://github.com/penberg/limbo"
+Homepage = "https://github.com/tursodatabase/limbo"
+Source = "https://github.com/tursodatabase/limbo"
 
 [tool.maturin]
 bindings = 'pyo3'

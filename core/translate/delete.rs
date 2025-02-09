@@ -13,7 +13,7 @@ pub fn translate_delete(
     query_mode: QueryMode,
     schema: &Schema,
     tbl_name: &QualifiedName,
-    where_clause: Option<Expr>,
+    where_clause: Option<Box<Expr>>,
     limit: Option<Box<Limit>>,
     syms: &SymbolTable,
 ) -> Result<ProgramBuilder> {
@@ -35,7 +35,7 @@ pub fn translate_delete(
 pub fn prepare_delete_plan(
     schema: &Schema,
     tbl_name: &QualifiedName,
-    where_clause: Option<Expr>,
+    where_clause: Option<Box<Expr>>,
     limit: Option<Box<Limit>>,
 ) -> Result<Plan> {
     let table = match schema.get_table(tbl_name.name.0.as_str()) {
@@ -53,7 +53,12 @@ pub fn prepare_delete_plan(
     let mut where_predicates = vec![];
 
     // Parse the WHERE clause
-    parse_where(where_clause, &table_references, None, &mut where_predicates)?;
+    parse_where(
+        where_clause.map(|e| *e),
+        &table_references,
+        None,
+        &mut where_predicates,
+    )?;
 
     // Parse the LIMIT/OFFSET clause
     let (resolved_limit, resolved_offset) = limit.map_or(Ok((None, None)), |l| parse_limit(*l))?;

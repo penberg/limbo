@@ -3,7 +3,7 @@ use fallible_iterator::FallibleIterator;
 use super::{Error, Parser};
 use crate::parser::ast::fmt::ToTokens;
 use crate::parser::{
-    ast::{Cmd, Name, ParameterInfo, QualifiedName, Stmt},
+    ast::{Cmd, ParameterInfo, Stmt},
     ParserError,
 };
 
@@ -73,20 +73,12 @@ fn vtab_args() -> Result<(), Error> {
   body TEXT CHECK(length(body)<10240)
 );";
     let r = parse_cmd(sql);
-    let Cmd::Stmt(Stmt::CreateVirtualTable {
-        tbl_name: QualifiedName {
-            name: Name(tbl_name),
-            ..
-        },
-        module_name: Name(module_name),
-        args: Some(args),
-        ..
-    }) = r
-    else {
+    let Cmd::Stmt(Stmt::CreateVirtualTable(create_virtual_table)) = r else {
         panic!("unexpected AST")
     };
-    assert_eq!(tbl_name, "mail");
-    assert_eq!(module_name, "fts3");
+    assert_eq!(create_virtual_table.tbl_name.name, "mail");
+    assert_eq!(create_virtual_table.module_name.0, "fts3");
+    let args = create_virtual_table.args.as_ref().unwrap();
     assert_eq!(args.len(), 2);
     assert_eq!(args[0], "subject VARCHAR(256) NOT NULL");
     assert_eq!(args[1], "body TEXT CHECK(length(body)<10240)");

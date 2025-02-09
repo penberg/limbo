@@ -233,6 +233,10 @@ fn run_simulator(
                         })
                         .collect::<Vec<_>>();
 
+                    // Write the shrunk plan to a file
+                    let mut f = std::fs::File::create(&paths.shrunk_plan).unwrap();
+                    f.write_all(shrunk_plans[0].to_string().as_bytes()).unwrap();
+
                     let last_execution = Arc::new(Mutex::new(*last_execution));
 
                     let shrunk = SandboxedResult::from(
@@ -270,11 +274,6 @@ fn run_simulator(
                             log::error!("shrinking failed, the error was not properly reproduced");
                         }
                     }
-
-                    // Write the shrunk plan to a file
-                    let shrunk_plan = std::fs::read(&paths.shrunk_plan).unwrap();
-                    let mut f = std::fs::File::create(&paths.shrunk_plan).unwrap();
-                    f.write_all(&shrunk_plan).unwrap();
                 }
             }
         }

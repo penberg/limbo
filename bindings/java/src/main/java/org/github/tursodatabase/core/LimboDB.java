@@ -7,7 +7,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.SQLException;
-import java.util.concurrent.locks.ReentrantLock;
 import org.github.tursodatabase.LimboErrorCode;
 import org.github.tursodatabase.annotations.NativeInvocation;
 import org.github.tursodatabase.annotations.VisibleForTesting;
@@ -16,14 +15,15 @@ import org.github.tursodatabase.utils.Logger;
 import org.github.tursodatabase.utils.LoggerFactory;
 
 /** This class provides a thin JNI layer over the SQLite3 C API. */
-public final class LimboDB extends AbstractDB {
+public final class LimboDB implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(LimboDB.class);
   // Pointer to database instance
   private long dbPointer;
   private boolean isOpen;
 
+  private final String url;
+  private final String filePath;
   private static boolean isLoaded;
-  private ReentrantLock dbLock = new ReentrantLock();
 
   static {
     if ("The Android Project".equals(System.getProperty("java.vm.vendor"))) {
@@ -176,23 +176,26 @@ public final class LimboDB extends AbstractDB {
 
   // TODO: receive config as argument
   private LimboDB(String url, String filePath) {
-    super(url, filePath);
+    this.url = url;
+    this.filePath = filePath;
   }
 
   // TODO: add support for JNI
-  @Override
-  protected native long openUtf8(byte[] file, int openFlags) throws SQLException;
-
-  // TODO: add support for JNI
-  @Override
-  protected native void close0() throws SQLException;
-
-  // TODO: add support for JNI
-  @Override
   public native void interrupt();
 
-  @Override
-  protected void open0(String filePath, int openFlags) throws SQLException {
+  public boolean isClosed() {
+    return !this.isOpen;
+  }
+
+  public boolean isOpen() {
+    return this.isOpen;
+  }
+
+  public void open(int openFlags) throws SQLException {
+    open0(filePath, openFlags);
+  }
+
+  private void open0(String filePath, int openFlags) throws SQLException {
     if (isOpen) {
       throw LimboExceptionUtils.buildLimboException(
           LimboErrorCode.LIMBO_ETC.code, "Already opened");
@@ -209,12 +212,23 @@ public final class LimboDB extends AbstractDB {
     isOpen = true;
   }
 
-  @Override
+  private native long openUtf8(byte[] file, int openFlags) throws SQLException;
+
   public long connect() throws SQLException {
     return connect0(dbPointer);
   }
 
   private native long connect0(long databasePtr) throws SQLException;
+
+  @Override
+  public void close() throws Exception {
+    if (!isOpen) return;
+
+    close0(dbPointer);
+    isOpen = false;
+  }
+
+  private native void close0(long databasePtr) throws SQLException;
 
   @VisibleForTesting
   native void throwJavaException(int errorCode) throws SQLException;

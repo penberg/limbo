@@ -17,7 +17,7 @@ io_uring = ["limbo_core/io_uring"]
 
 
 [dependencies]
-limbo_core = { path = "../../core/" }
+limbo_core = { path = "../../core" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-limbo_core = { path = "../../core/", features = ["io_uring"] }
+limbo_core = { path = "../../core", features = ["io_uring"] }

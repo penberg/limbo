@@ -303,7 +303,7 @@
 
 - `ORDER BY` support for nullable sorting columns and qualified identifiers (Jussi Saurio)
 
-- Fix `.schema` command crash in the CLI ([#212](https://github.com/penberg/limbo/issues/212) (Jussi Saurio)
+- Fix `.schema` command crash in the CLI ([#212](https://github.com/tursodatabase/limbo/issues/212) (Jussi Saurio)
 
 ## 0.0.2 - 2024-07-24
 

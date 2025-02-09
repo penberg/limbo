@@ -109,7 +109,7 @@ cmd ::= ROLLBACK trans_opt(Y) TO savepoint_opt nm(X). {
 ///////////////////// The CREATE TABLE statement ////////////////////////////
 //
 cmd ::= createkw temp(T) TABLE ifnotexists(E) fullname(Y) create_table_args(X). {
-  self.ctx.stmt = Some(Stmt::CreateTable{ temporary: T, if_not_exists: E, tbl_name: Y, body: X });
+  self.ctx.stmt = Some(Stmt::CreateTable{ temporary: T, if_not_exists: E, tbl_name: Y, body: Box::new(X) });
 }
 createkw(A) ::= CREATE(A).
 
@@ -525,14 +525,14 @@ multiselect_op(A) ::= INTERSECT.         {A = CompoundOperator::Intersect;}
 
 oneselect(A) ::= SELECT distinct(D) selcollist(W) from(X) where_opt(Y)
                  groupby_opt(P). {
-  A = OneSelect::Select{ distinctness: D, columns: W, from: X, where_clause: Y,
-                         group_by: P, window_clause: None };
+  A = OneSelect::Select(Box::new(SelectInner{ distinctness: D, columns: W, from: X, where_clause: Y,
+                         group_by: P, window_clause: None }));
     }
 %ifndef SQLITE_OMIT_WINDOWFUNC
 oneselect(A) ::= SELECT distinct(D) selcollist(W) from(X) where_opt(Y)
                  groupby_opt(P) window_clause(R). {
-  A = OneSelect::Select{ distinctness: D, columns: W, from: X, where_clause: Y,
-                         group_by: P, window_clause: Some(R) };
+  A = OneSelect::Select(Box::new(SelectInner{ distinctness: D, columns: W, from: X, where_clause: Y,
+                         group_by: P, window_clause: Some(R) }));
 }
 %endif
 
@@ -731,7 +731,7 @@ nulls(A) ::= .                  {A = None;}
 
 %type groupby_opt {Option<GroupBy>}
 groupby_opt(A) ::= .                      {A = None;}
-groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs: X, having: Y });}
+groupby_opt(A) ::= GROUP BY nexprlist(X) having_opt(Y). {A = Some(GroupBy{ exprs: X, having: Y.map(Box::new) });}
 
 %type having_opt {Option<Expr>}
 having_opt(A) ::= .                {A = None;}
@@ -761,14 +761,14 @@ limit_opt(A) ::= LIMIT expr(X) COMMA expr(Y).
 cmd ::= with(C) DELETE FROM xfullname(X) indexed_opt(I) where_opt_ret(W)
         orderby_opt(O) limit_opt(L). {
   let (where_clause, returning) = W;
-  self.ctx.stmt = Some(Stmt::Delete{ with: C, tbl_name: X, indexed: I, where_clause, returning,
-                                     order_by: O, limit: L });
+  self.ctx.stmt = Some(Stmt::Delete(Box::new(Delete{ with: C, tbl_name: X, indexed: I, where_clause: where_clause.map(Box::new), returning,
+                                     order_by: O, limit: L })));
 }
 %else
 cmd ::= with(C) DELETE FROM xfullname(X) indexed_opt(I) where_opt_ret(W). {
   let (where_clause, returning) = W;
-  self.ctx.stmt = Some(Stmt::Delete{ with: C, tbl_name: X, indexed: I, where_clause, returning,
-                                     order_by: None, limit: None });
+  self.ctx.stmt = Some(Stmt::Delete(Box::new(Delete{ with: C, tbl_name: X, indexed: I, where_clause: where_clause.map(Box::new), returning,
+                                     order_by: None, limit: None })));
 }
 %endif
 
@@ -790,15 +790,15 @@ where_opt_ret(A) ::= WHERE expr(X) RETURNING selcollist(Y).
 cmd ::= with(C) UPDATE orconf(R) xfullname(X) indexed_opt(I) SET setlist(Y) from(F)
         where_opt_ret(W) orderby_opt(O) limit_opt(L).  {
   let (where_clause, returning) = W;
-  self.ctx.stmt = Some(Stmt::Update { with: C, or_conflict: R, tbl_name: X, indexed: I, sets: Y, from: F,
-                                      where_clause, returning, order_by: O, limit: L });
+  self.ctx.stmt = Some(Stmt::Update(Box::new(Update{ with: C, or_conflict: R, tbl_name: X, indexed: I, sets: Y, from: F,
+                                      where_clause: where_clause.map(Box::new), returning, order_by: O, limit: L })));
 }
 %else
 cmd ::= with(C) UPDATE orconf(R) xfullname(X) indexed_opt(I) SET setlist(Y) from(F)
         where_opt_ret(W). {
   let (where_clause, returning) = W;
-  self.ctx.stmt = Some(Stmt::Update { with: C, or_conflict: R, tbl_name: X, indexed: I, sets: Y, from: F,
-                                      where_clause, returning, order_by: None, limit: None });
+  self.ctx.stmt = Some(Stmt::Update(Box::new(Update{ with: C, or_conflict: R, tbl_name: X, indexed: I, sets: Y, from: F,
+                                      where_clause: where_clause.map(Box::new), returning, order_by: None, limit: None })));
 }
 %endif
 
@@ -827,14 +827,14 @@ cmd ::= with(W) insert_cmd(R) INTO xfullname(X) idlist_opt(F) select(S)
         upsert(U). {
   let (upsert, returning) = U;
   let body = InsertBody::Select(Box::new(S), upsert);
-  self.ctx.stmt = Some(Stmt::Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
-                                     body, returning });
+  self.ctx.stmt = Some(Stmt::Insert(Box::new(Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
+                                     body, returning })));
 }
 cmd ::= with(W) insert_cmd(R) INTO xfullname(X) idlist_opt(F) DEFAULT VALUES returning(Y).
 {
   let body = InsertBody::DefaultValues;
-  self.ctx.stmt = Some(Stmt::Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
-                                     body, returning: Y });
+  self.ctx.stmt = Some(Stmt::Insert(Box::new(Insert{ with: W, or_conflict: R, tbl_name: X, columns: F,
+                                     body, returning: Y })));
 }
 
 %type upsert {(Option<Upsert>, Option<Vec<ResultColumn>>)}
@@ -851,16 +851,16 @@ upsert(A) ::= ON CONFLICT LP sortlist(T) RP where_opt(TW)
               { let index = UpsertIndex{ targets: T, where_clause: TW };
                 let do_clause = UpsertDo::Set{ sets: Z, where_clause: W };
                 let (next, returning) = N;
-                A = (Some(Upsert{ index: Some(index), do_clause, next: next.map(Box::new) }), returning);}
+                A = (Some(Upsert{ index: Some(Box::new(index)), do_clause: Box::new(do_clause), next: next.map(Box::new) }), returning);}
 upsert(A) ::= ON CONFLICT LP sortlist(T) RP where_opt(TW) DO NOTHING upsert(N).
               { let index = UpsertIndex{ targets: T, where_clause: TW };
                 let (next, returning) = N;
-                A = (Some(Upsert{ index: Some(index), do_clause: UpsertDo::Nothing, next: next.map(Box::new) }), returning); }
+                A = (Some(Upsert{ index: Some(Box::new(index)), do_clause: Box::new(UpsertDo::Nothing), next: next.map(Box::new) }), returning); }
 upsert(A) ::= ON CONFLICT DO NOTHING returning(R).
-              { A = (Some(Upsert{ index: None, do_clause: UpsertDo::Nothing, next: None }), R); }
+              { A = (Some(Upsert{ index: None, do_clause: Box::new(UpsertDo::Nothing), next: None }), R); }
 upsert(A) ::= ON CONFLICT DO UPDATE SET setlist(Z) where_opt(W) returning(R).
               { let do_clause = UpsertDo::Set{ sets: Z, where_clause: W };
-                A = (Some(Upsert{ index: None, do_clause, next: None }), R);}
+                A = (Some(Upsert{ index: None, do_clause: Box::new(do_clause), next: None }), R);}
 
 %type returning {Option<Vec<ResultColumn>>}
 returning(A) ::= RETURNING selcollist(X).  {A = Some(X);}
@@ -1077,8 +1077,8 @@ paren_exprlist(A) ::= LP exprlist(X) RP.  {A = X;}
 //
 cmd ::= createkw uniqueflag(U) INDEX ifnotexists(NE) fullname(X)
         ON nm(Y) LP sortlist(Z) RP where_opt(W). {
-  self.ctx.stmt = Some(Stmt::CreateIndex { unique: U, if_not_exists: NE, idx_name: X,
-                                            tbl_name: Y, columns: Z, where_clause: W });
+  self.ctx.stmt = Some(Stmt::CreateIndex { unique: U, if_not_exists: NE, idx_name: Box::new(X),
+                                            tbl_name: Y, columns: Z, where_clause: W.map(Box::new) });
 }
 
 %type uniqueflag {bool}
@@ -1130,8 +1130,8 @@ cmd ::= DROP INDEX ifexists(E) fullname(X).   {self.ctx.stmt = Some(Stmt::DropIn
 //
 %if !SQLITE_OMIT_VACUUM && !SQLITE_OMIT_ATTACH
 %type vinto {Option<Expr>}
-cmd ::= VACUUM vinto(Y).                {self.ctx.stmt = Some(Stmt::Vacuum(None, Y));}
-cmd ::= VACUUM nm(X) vinto(Y).          {self.ctx.stmt = Some(Stmt::Vacuum(Some(X), Y));}
+cmd ::= VACUUM vinto(Y).                {self.ctx.stmt = Some(Stmt::Vacuum(None, Y.map(Box::new)));}
+cmd ::= VACUUM nm(X) vinto(Y).          {self.ctx.stmt = Some(Stmt::Vacuum(Some(X), Y.map(Box::new)));}
 vinto(A) ::= INTO expr(X).              {A = Some(X);}
 vinto(A) ::= .                          {A = None;}
 %endif
@@ -1139,13 +1139,13 @@ vinto(A) ::= .                          {A = None;}
 ///////////////////////////// The PRAGMA command /////////////////////////////
 //
 %ifndef SQLITE_OMIT_PRAGMA
-cmd ::= PRAGMA fullname(X).                {self.ctx.stmt = Some(Stmt::Pragma(X, None));}
-cmd ::= PRAGMA fullname(X) EQ nmnum(Y).    {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Equals(Y))));}
-cmd ::= PRAGMA fullname(X) LP nmnum(Y) RP. {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Call(Y))));}
+cmd ::= PRAGMA fullname(X).                {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), None));}
+cmd ::= PRAGMA fullname(X) EQ nmnum(Y).    {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Equals(Y)))));}
+cmd ::= PRAGMA fullname(X) LP nmnum(Y) RP. {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Call(Y)))));}
 cmd ::= PRAGMA fullname(X) EQ minus_num(Y).
-                                             {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Equals(Y))));}
+                                             {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Equals(Y)))));}
 cmd ::= PRAGMA fullname(X) LP minus_num(Y) RP.
-                                             {self.ctx.stmt = Some(Stmt::Pragma(X, Some(PragmaBody::Call(Y))));}
+                                             {self.ctx.stmt = Some(Stmt::Pragma(Box::new(X), Some(Box::new(PragmaBody::Call(Y)))));}
 
 %type nmnum {Expr}
 nmnum(A) ::= plus_num(A).
@@ -1166,10 +1166,10 @@ minus_num(A) ::= MINUS number(X).     {A = Expr::unary(UnaryOperator::Negative, 
 
 cmd ::= createkw temp(T) TRIGGER ifnotexists(NOERR) fullname(B) trigger_time(C) trigger_event(D)
         ON fullname(E) foreach_clause(X) when_clause(G) BEGIN trigger_cmd_list(S) END. {
-  self.ctx.stmt = Some(Stmt::CreateTrigger{
+  self.ctx.stmt = Some(Stmt::CreateTrigger(Box::new(CreateTrigger{
     temporary: T, if_not_exists: NOERR, trigger_name: B, time: C, event: D, tbl_name: E,
     for_each_row: X, when_clause: G, commands: S
-  });
+  })));
 }
 
 %type trigger_time {Option<TriggerTime>}
@@ -1235,17 +1235,17 @@ tridxby ::= NOT INDEXED. {
 // UPDATE
 trigger_cmd(A) ::=
    UPDATE orconf(R) trnm(X) tridxby SET setlist(Y) from(F) where_opt(Z).
-   {A = TriggerCmd::Update{ or_conflict: R, tbl_name: X, sets: Y, from: F, where_clause: Z };}
+   {A = TriggerCmd::Update(Box::new(TriggerCmdUpdate{ or_conflict: R, tbl_name: X, sets: Y, from: F, where_clause: Z }));}
 
 // INSERT
 trigger_cmd(A) ::= insert_cmd(R) INTO
                       trnm(X) idlist_opt(F) select(S) upsert(U). {
   let (upsert, returning) = U;
-   A = TriggerCmd::Insert{ or_conflict: R, tbl_name: X, col_names: F, select: Box::new(S), upsert, returning };/*A-overwrites-R*/
+   A = TriggerCmd::Insert(Box::new(TriggerCmdInsert{ or_conflict: R, tbl_name: X, col_names: F, select: Box::new(S), upsert, returning }));/*A-overwrites-R*/
 }
 // DELETE
 trigger_cmd(A) ::= DELETE FROM trnm(X) tridxby where_opt(Y).
-   {A = TriggerCmd::Delete{ tbl_name: X, where_clause: Y };}
+   {A = TriggerCmd::Delete(Box::new(TriggerCmdDelete{ tbl_name: X, where_clause: Y }));}
 
 // SELECT
 trigger_cmd(A) ::= select(X).
@@ -1276,10 +1276,10 @@ cmd ::= DROP TRIGGER ifexists(NOERR) fullname(X). {
 //////////////////////// ATTACH DATABASE file AS name /////////////////////////
 %ifndef SQLITE_OMIT_ATTACH
 cmd ::= ATTACH database_kw_opt expr(F) AS expr(D) key_opt(K). {
-  self.ctx.stmt = Some(Stmt::Attach{ expr: F, db_name: D, key: K });
+  self.ctx.stmt = Some(Stmt::Attach{ expr: Box::new(F), db_name: Box::new(D), key: K.map(Box::new) });
 }
 cmd ::= DETACH database_kw_opt expr(D). {
-  self.ctx.stmt = Some(Stmt::Detach(D));
+  self.ctx.stmt = Some(Stmt::Detach(Box::new(D)));
 }
 
 %type key_opt {Option<Expr>}
@@ -1305,19 +1305,19 @@ cmd ::= ANALYZE fullname(X).  {self.ctx.stmt = Some(Stmt::Analyze(Some(X)));}
 //////////////////////// ALTER TABLE table ... ////////////////////////////////
 %ifndef SQLITE_OMIT_ALTERTABLE
 cmd ::= ALTER TABLE fullname(X) RENAME TO nm(Z). {
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::RenameTo(Z)));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::RenameTo(Z)))));
 }
 cmd ::= ALTER TABLE fullname(X)
         ADD kwcolumn_opt columnname(Y) carglist(C). {
   let (col_name, col_type) = Y;
   let cd = ColumnDefinition{ col_name, col_type, constraints: C };
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::AddColumn(cd)));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::AddColumn(cd)))));
 }
 cmd ::= ALTER TABLE fullname(X) RENAME kwcolumn_opt nm(Y) TO nm(Z). {
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::RenameColumn{ old: Y, new: Z }));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::RenameColumn{ old: Y, new: Z }))));
 }
 cmd ::= ALTER TABLE fullname(X) DROP kwcolumn_opt nm(Y). {
-  self.ctx.stmt = Some(Stmt::AlterTable(X, AlterTableBody::DropColumn(Y)));
+  self.ctx.stmt = Some(Stmt::AlterTable(Box::new((X, AlterTableBody::DropColumn(Y)))));
 }
 
 kwcolumn_opt ::= .
@@ -1329,15 +1329,15 @@ kwcolumn_opt ::= COLUMNKW.
 cmd ::= create_vtab(X).                       {self.ctx.stmt = Some(X);}
 cmd ::= create_vtab(X) LP vtabarglist RP.  {
   let mut stmt = X;
-  if let Stmt::CreateVirtualTable{ ref mut args, .. } = stmt {
-    *args = self.ctx.module_args();
+  if let Stmt::CreateVirtualTable(ref mut create_virtual_table) = stmt {
+    create_virtual_table.args = self.ctx.module_args();
   }
   self.ctx.stmt = Some(stmt);
 }
 %type create_vtab {Stmt}
 create_vtab(A) ::= createkw VIRTUAL TABLE ifnotexists(E)
                 fullname(X) USING nm(Z). {
-    A = Stmt::CreateVirtualTable{ if_not_exists: E, tbl_name: X, module_name: Z, args: None };
+    A = Stmt::CreateVirtualTable(Box::new(CreateVirtualTable{ if_not_exists: E, tbl_name: X, module_name: Z, args: None }));
 }
 vtabarglist ::= vtabarg.
 vtabarglist ::= vtabarglist COMMA vtabarg.
@@ -1454,9 +1454,9 @@ frame_bound_s(A) ::= UNBOUNDED PRECEDING. {A = FrameBound::UnboundedPreceding;}
 frame_bound_e(A) ::= frame_bound(X).      {A = X;}
 frame_bound_e(A) ::= UNBOUNDED FOLLOWING. {A = FrameBound::UnboundedFollowing;}
 
-frame_bound(A) ::= expr(X) PRECEDING.   { A = FrameBound::Preceding(X); }
+frame_bound(A) ::= expr(X) PRECEDING.   { A = FrameBound::Preceding(Box::new(X)); }
 frame_bound(A) ::= CURRENT ROW.         { A = FrameBound::CurrentRow; }
-frame_bound(A) ::= expr(X) FOLLOWING.   { A = FrameBound::Following(X); }
+frame_bound(A) ::= expr(X) FOLLOWING.   { A = FrameBound::Following(Box::new(X)); }
 
 %type frame_exclude_opt {Option<FrameExclude>}
 frame_exclude_opt(A) ::= . {A = None;}
