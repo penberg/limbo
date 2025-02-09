@@ -1148,16 +1148,17 @@ impl BTreeCursor {
                 split_pages_cells_count.clear();
                 let mut last_page_cells_count = 0;
                 let mut last_page_cells_size = 0;
+                let content_usable_space = usable_space - page_copy.header_size();
                 for scratch_cell in scratch_cells.iter() {
                     let cell_size = scratch_cell.len() + 2; // + cell pointer size (u16)
-                    if last_page_cells_size + cell_size > usable_space {
+                    if last_page_cells_size + cell_size > content_usable_space {
                         split_pages_cells_count.push(last_page_cells_count);
                         last_page_cells_count = 0;
                         last_page_cells_size = 0;
                     }
                     last_page_cells_count += 1;
                     last_page_cells_size += cell_size;
-                    assert!(last_page_cells_size <= usable_space);
+                    assert!(last_page_cells_size <= content_usable_space);
                 }
                 split_pages_cells_count.push(last_page_cells_count);
                 let new_pages_count = split_pages_cells_count.len();
