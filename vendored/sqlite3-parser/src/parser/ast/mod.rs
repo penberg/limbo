@@ -779,22 +779,26 @@ pub enum CompoundOperator {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OneSelect {
     /// `SELECT`
-    Select {
-        /// `DISTINCT`
-        distinctness: Option<Distinctness>,
-        /// columns
-        columns: Vec<ResultColumn>,
-        /// `FROM` clause
-        from: Option<FromClause>,
-        /// `WHERE` clause
-        where_clause: Option<Expr>,
-        /// `GROUP BY`
-        group_by: Option<GroupBy>,
-        /// `WINDOW` definition
-        window_clause: Option<Vec<WindowDef>>,
-    },
+    Select(Box<SelectInner>),
     /// `VALUES`
     Values(Vec<Vec<Expr>>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// `SELECT` core
+pub struct SelectInner {
+    /// `DISTINCT`
+    pub distinctness: Option<Distinctness>,
+    /// columns
+    pub columns: Vec<ResultColumn>,
+    /// `FROM` clause
+    pub from: Option<FromClause>,
+    /// `WHERE` clause
+    pub where_clause: Option<Expr>,
+    /// `GROUP BY`
+    pub group_by: Option<GroupBy>,
+    /// `WINDOW` definition
+    pub window_clause: Option<Vec<WindowDef>>,
 }
 
 /// `SELECT` ... `FROM` clause

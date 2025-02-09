@@ -305,7 +305,10 @@ impl OneSelect {
     /// Like `sqlite3_column_count` but more limited
     pub fn column_count(&self) -> ColumnCount {
         match self {
-            Self::Select { columns, .. } => column_count(columns),
+            Self::Select(select) => {
+                let SelectInner { columns, .. } = &**select;
+                column_count(columns)
+            }
             Self::Values(values) => {
                 assert!(!values.is_empty()); // TODO Validate
                 ColumnCount::Fixed(values[0].len())

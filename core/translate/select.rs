@@ -11,8 +11,8 @@ use crate::util::normalize_ident;
 use crate::vdbe::builder::{ProgramBuilderOpts, QueryMode};
 use crate::SymbolTable;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
-use sqlite3_parser::ast::ResultColumn;
 use sqlite3_parser::ast::{self};
+use sqlite3_parser::ast::{ResultColumn, SelectInner};
 
 pub fn translate_select(
     query_mode: QueryMode,
@@ -42,13 +42,14 @@ pub fn prepare_select_plan(
     syms: &SymbolTable,
 ) -> Result<Plan> {
     match *select.body.select {
-        ast::OneSelect::Select {
-            mut columns,
-            from,
-            where_clause,
-            group_by,
-            ..
-        } => {
+        ast::OneSelect::Select(select_inner) => {
+            let SelectInner {
+                mut columns,
+                from,
+                where_clause,
+                group_by,
+                ..
+            } = *select_inner;
             let col_count = columns.len();
             if col_count == 0 {
                 crate::bail_parse_error!("SELECT without columns is not allowed");

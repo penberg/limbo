@@ -893,14 +893,15 @@ impl Display for CompoundOperator {
 impl ToTokens for OneSelect {
     fn to_tokens<S: TokenStream>(&self, s: &mut S) -> Result<(), S::Error> {
         match self {
-            Self::Select {
-                distinctness,
-                columns,
-                from,
-                where_clause,
-                group_by,
-                window_clause,
-            } => {
+            Self::Select(select) => {
+                let SelectInner {
+                    distinctness,
+                    columns,
+                    from,
+                    where_clause,
+                    group_by,
+                    window_clause,
+                } = &**select;
                 s.append(TK_SELECT, None)?;
                 if let Some(ref distinctness) = distinctness {
                     distinctness.to_tokens(s)?;

@@ -525,14 +525,14 @@ multiselect_op(A) ::= INTERSECT.         {A = CompoundOperator::Intersect;}
 
 oneselect(A) ::= SELECT distinct(D) selcollist(W) from(X) where_opt(Y)
                  groupby_opt(P). {
-  A = OneSelect::Select{ distinctness: D, columns: W, from: X, where_clause: Y,
-                         group_by: P, window_clause: None };
+  A = OneSelect::Select(Box::new(SelectInner{ distinctness: D, columns: W, from: X, where_clause: Y,
+                         group_by: P, window_clause: None }));
     }
 %ifndef SQLITE_OMIT_WINDOWFUNC
 oneselect(A) ::= SELECT distinct(D) selcollist(W) from(X) where_opt(Y)
                  groupby_opt(P) window_clause(R). {
-  A = OneSelect::Select{ distinctness: D, columns: W, from: X, where_clause: Y,
-                         group_by: P, window_clause: Some(R) };
+  A = OneSelect::Select(Box::new(SelectInner{ distinctness: D, columns: W, from: X, where_clause: Y,
+                         group_by: P, window_clause: Some(R) }));
 }
 %endif
 
