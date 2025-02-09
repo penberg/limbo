@@ -47,7 +47,6 @@ fallible-iterator = "0.3.0"
 hex = "0.4.3"
 libc = "0.2.155"
 log = "0.4.20"
-sieve-cache = "0.1.4"
 sqlite3-parser = { path = "../vendored/sqlite3-parser" }
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15", features = ["js"] }
@@ -61,7 +60,6 @@ serde = { version = "1.0", features = ["derive"] }
 pest = { version = "2.0", optional = true }
 pest_derive = { version = "2.0", optional = true }
 rand = "0.8.5"
-bumpalo = { version = "3.16.0", features = ["collections", "boxed"] }
 limbo_macros = { path = "../macros" }
 limbo_uuid = { path = "../extensions/uuid", optional = true, features = ["static"] }
 limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["static"] }
@@ -88,7 +86,6 @@ criterion = { version = "0.5", features = [
     "async",
     "async_futures",
 ] }
-mockall = "0.13.0"
 rstest = "0.18.2"
 rusqlite = "0.29.0"
 tempfile = "3.8.0"

@@ -12,5 +12,4 @@ default = []
 static = []
 
 [dependencies]
-log = "0.4.20"
 limbo_macros = { path = "../../macros" }
