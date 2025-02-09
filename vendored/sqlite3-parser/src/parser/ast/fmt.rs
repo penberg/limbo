@@ -283,12 +283,13 @@ impl ToTokens for Stmt {
                 s.append(TK_AS, None)?;
                 select.to_tokens(s)
             }
-            Self::CreateVirtualTable {
-                if_not_exists,
-                tbl_name,
-                module_name,
-                args,
-            } => {
+            Self::CreateVirtualTable(create_virtual_table) => {
+                let CreateVirtualTable {
+                    if_not_exists,
+                    tbl_name,
+                    module_name,
+                    args,
+                } = &**create_virtual_table;
                 s.append(TK_CREATE, None)?;
                 s.append(TK_VIRTUAL, None)?;
                 s.append(TK_TABLE, None)?;

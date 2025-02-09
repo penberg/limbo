@@ -130,16 +130,7 @@ pub enum Stmt {
         select: Box<Select>,
     },
     /// `CREATE VIRTUAL TABLE`
-    CreateVirtualTable {
-        /// `IF NOT EXISTS`
-        if_not_exists: bool,
-        /// table name
-        tbl_name: QualifiedName,
-        /// module
-        module_name: Name,
-        /// args
-        args: Option<Vec<String>>, // TODO smol str
-    },
+    CreateVirtualTable(Box<CreateVirtualTable>),
     /// `DELETE`
     Delete(Box<Delete>),
     /// `DETACH DATABASE`: db name
@@ -197,7 +188,17 @@ pub enum Stmt {
     /// `UPDATE`
     Update(Box<Update>),
     /// `VACUUM`: database name, into expr
-    Vacuum(Option<Name>, Option<Expr>),
+/// `CREATE VIRTUAL TABLE`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateVirtualTable {
+    /// `IF NOT EXISTS`
+    pub if_not_exists: bool,
+    /// table name
+    pub tbl_name: QualifiedName,
+    /// module name
+    pub module_name: Name,
+    /// args
+    pub args: Option<Vec<String>>, // TODO smol str
 }
 
 /// `CREATE TRIGGER

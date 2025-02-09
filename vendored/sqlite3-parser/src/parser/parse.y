@@ -1329,15 +1329,15 @@ kwcolumn_opt ::= COLUMNKW.
 cmd ::= create_vtab(X).                       {self.ctx.stmt = Some(X);}
 cmd ::= create_vtab(X) LP vtabarglist RP.  {
   let mut stmt = X;
-  if let Stmt::CreateVirtualTable{ ref mut args, .. } = stmt {
-    *args = self.ctx.module_args();
+  if let Stmt::CreateVirtualTable(ref mut create_virtual_table) = stmt {
+    create_virtual_table.args = self.ctx.module_args();
   }
   self.ctx.stmt = Some(stmt);
 }
 %type create_vtab {Stmt}
 create_vtab(A) ::= createkw VIRTUAL TABLE ifnotexists(E)
                 fullname(X) USING nm(Z). {
-    A = Stmt::CreateVirtualTable{ if_not_exists: E, tbl_name: X, module_name: Z, args: None };
+    A = Stmt::CreateVirtualTable(Box::new(CreateVirtualTable{ if_not_exists: E, tbl_name: X, module_name: Z, args: None }));
 }
 vtabarglist ::= vtabarg.
 vtabarglist ::= vtabarglist COMMA vtabarg.
