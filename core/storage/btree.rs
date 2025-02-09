@@ -1371,7 +1371,7 @@ impl BTreeCursor {
                             BTreeCell::TableInteriorCell(interior) => interior._rowid,
                             _ => unreachable!(),
                         };
-                        let parent_cell_idx = self.find_cell(contents, key);
+                        let parent_cell_idx = self.find_cell(&parent_contents, key);
                         self.insert_into_cell(parent_contents, cell_payload, parent_cell_idx);
                         // self.drop_cell(*page, 0);
                     }
