@@ -76,7 +76,7 @@ macro_rules! return_if_locked {
 
 /// State machine of a write operation.
 /// May involve balancing due to overflow.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum WriteState {
     Start,
     BalanceStart,
@@ -89,8 +89,10 @@ enum WriteState {
 struct WriteInfo {
     /// State of the write operation state machine.
     state: WriteState,
-    /// Pages allocated during the write operation due to balancing.
-    new_pages: RefCell<Vec<PageRef>>,
+    /// Pages involved in the split of the page due to balancing (splits_pages[0] is the balancing page, while other - fresh allocated pages)
+    split_pages: RefCell<Vec<PageRef>>,
+    /// Amount of cells from balancing page for every split page
+    split_pages_cells_count: RefCell<Vec<usize>>,
     /// Scratch space used during balancing.
     scratch_cells: RefCell<Vec<&'static [u8]>>,
     /// Bookkeeping of the rightmost pointer so the PAGE_HEADER_OFFSET_RIGHTMOST_PTR can be updated.
@@ -103,7 +105,8 @@ impl WriteInfo {
     fn new() -> WriteInfo {
         WriteInfo {
             state: WriteState::Start,
-            new_pages: RefCell::new(Vec::with_capacity(4)),
+            split_pages: RefCell::new(Vec::with_capacity(4)),
+            split_pages_cells_count: RefCell::new(Vec::with_capacity(4)),
             scratch_cells: RefCell::new(Vec::new()),
             rightmost_pointer: RefCell::new(None),
             page_copy: RefCell::new(None),
@@ -1091,12 +1094,7 @@ impl BTreeCursor {
             matches!(self.state, CursorState::Write(_)),
             "Cursor must be in balancing state"
         );
-        let state = self
-            .state
-            .write_info()
-            .expect("must be balancing")
-            .state
-            .clone();
+        let state = self.state.write_info().expect("must be balancing").state;
         let (next_write_state, result) = match state {
             WriteState::Start => todo!(),
             WriteState::BalanceStart => todo!(),
@@ -1124,47 +1122,69 @@ impl BTreeCursor {
                 let mut scratch_cells = write_info.scratch_cells.borrow_mut();
                 scratch_cells.clear();
 
+                let usable_space = self.usable_space();
                 for cell_idx in 0..page_copy.cell_count() {
                     let (start, len) = page_copy.cell_get_raw_region(
                         cell_idx,
                         self.payload_overflow_threshold_max(page_copy.page_type()),
                         self.payload_overflow_threshold_min(page_copy.page_type()),
-                        self.usable_space(),
+                        usable_space,
                     );
-                    let buf = page_copy.as_ptr();
-                    scratch_cells.push(to_static_buf(&buf[start..start + len]));
+                    let cell_buffer = to_static_buf(&page_copy.as_ptr()[start..start + len]);
+                    scratch_cells.push(cell_buffer);
                 }
-                for overflow_cell in &page_copy.overflow_cells {
-                    scratch_cells
-                        .insert(overflow_cell.index, to_static_buf(&overflow_cell.payload));
+                // overflow_cells are stored in order - so we need to insert them in reverse order
+                for cell in page_copy.overflow_cells.iter().rev() {
+                    scratch_cells.insert(cell.index, to_static_buf(&cell.payload));
                 }
+
+                // amount of cells for pages involved in split (distributed with naive greedy approach)
+                // if we have single overflow cell in a table leaf node - we still can have 3 split pages
+                //
+                // for example, if current page has 4 entries with size ~1/4 page size, and new cell has size ~page size
+                // then we will need 3 pages to distribute cells between them
+                let split_pages_cells_count = &mut write_info.split_pages_cells_count.borrow_mut();
+                split_pages_cells_count.clear();
+                let mut last_page_cells_count = 0;
+                let mut last_page_cells_size = 0;
+                for scratch_cell in scratch_cells.iter() {
+                    let cell_size = scratch_cell.len() + 2; // + cell pointer size (u16)
+                    if last_page_cells_size + cell_size > usable_space {
+                        split_pages_cells_count.push(last_page_cells_count);
+                        last_page_cells_count = 0;
+                        last_page_cells_size = 0;
+                    }
+                    last_page_cells_count += 1;
+                    last_page_cells_size += cell_size;
+                    assert!(last_page_cells_size <= usable_space);
+                }
+                split_pages_cells_count.push(last_page_cells_count);
+                let new_pages_count = split_pages_cells_count.len();
+
+                debug!(
+                    "splitting left={} new_pages={}, cells_count={:?}",
+                    current_page.get().id,
+                    new_pages_count - 1,
+                    split_pages_cells_count
+                );
 
                 *write_info.rightmost_pointer.borrow_mut() = page_copy.rightmost_pointer();
                 write_info.page_copy.replace(Some(page_copy));
 
-                // allocate new pages and move cells to those new pages
-                // split procedure
                 let page = current_page.get().contents.as_mut().unwrap();
+                let page_type = page.page_type();
                 assert!(
-                    matches!(
-                        page.page_type(),
-                        PageType::TableLeaf | PageType::TableInterior
-                    ),
-                    "indexes still not supported "
+                    matches!(page_type, PageType::TableLeaf | PageType::TableInterior),
+                    "indexes still not supported"
                 );
 
-                let right_page = self.allocate_page(page.page_type(), 0);
-                let right_page_id = right_page.get().id;
-
-                write_info.new_pages.borrow_mut().clear();
-                write_info.new_pages.borrow_mut().push(current_page.clone());
-                write_info.new_pages.borrow_mut().push(right_page.clone());
-
-                debug!(
-                    "splitting left={} right={}",
-                    current_page.get().id,
-                    right_page_id
-                );
+                write_info.split_pages.borrow_mut().clear();
+                write_info.split_pages.borrow_mut().push(current_page);
+                // allocate new pages
+                for _ in 1..new_pages_count {
+                    let new_page = self.allocate_page(page_type, 0);
+                    write_info.split_pages.borrow_mut().push(new_page);
+                }
 
                 (WriteState::BalanceGetParentPage, Ok(CursorResult::Ok(())))
             }
@@ -1225,23 +1245,21 @@ impl BTreeCursor {
                 }
 
                 let write_info = self.state.write_info().unwrap();
-                let mut new_pages = write_info.new_pages.borrow_mut();
+                let mut split_pages = write_info.split_pages.borrow_mut();
+                let split_pages_len = split_pages.len();
                 let scratch_cells = write_info.scratch_cells.borrow();
 
                 // reset pages
-                for page in new_pages.iter() {
+                for page in split_pages.iter() {
                     assert!(page.is_dirty());
                     let contents = page.get().contents.as_mut().unwrap();
 
                     contents.write_u16(PAGE_HEADER_OFFSET_FIRST_FREEBLOCK, 0);
                     contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
 
-                    let db_header = RefCell::borrow(&self.pager.db_header);
-                    let cell_content_area_start =
-                        db_header.page_size - db_header.reserved_space as u16;
                     contents.write_u16(
                         PAGE_HEADER_OFFSET_CELL_CONTENT_AREA,
-                        cell_content_area_start,
+                        self.usable_space() as u16,
                     );
 
                     contents.write_u8(PAGE_HEADER_OFFSET_FRAGMENTED_BYTES_COUNT, 0);
@@ -1250,29 +1268,17 @@ impl BTreeCursor {
                     }
                 }
 
-                // distribute cells
-                let new_pages_len = new_pages.len();
-                let cells_per_page = scratch_cells.len() / new_pages.len();
                 let mut current_cell_index = 0_usize;
-                let mut divider_cells_index = Vec::new(); /* index to scratch cells that will be used as dividers in order */
+                /* index to scratch cells that will be used as dividers in order */
+                let mut divider_cells_index = Vec::with_capacity(split_pages.len());
 
-                debug!(
-                    "balance_leaf::distribute(cells={}, cells_per_page={})",
-                    scratch_cells.len(),
-                    cells_per_page
-                );
+                debug!("balance_leaf::distribute(cells={})", scratch_cells.len());
 
-                for (i, page) in new_pages.iter_mut().enumerate() {
+                for (i, page) in split_pages.iter_mut().enumerate() {
                     let page_id = page.get().id;
                     let contents = page.get().contents.as_mut().unwrap();
 
-                    let last_page = i == new_pages_len - 1;
-                    let cells_to_copy = if last_page {
-                        // last cells is remaining pages if division was odd
-                        scratch_cells.len() - current_cell_index
-                    } else {
-                        cells_per_page
-                    };
+                    let cells_to_copy = write_info.split_pages_cells_count.borrow()[i];
                     debug!(
                         "balance_leaf::distribute(page={}, cells_to_copy={})",
                         page_id, cells_to_copy
@@ -1288,6 +1294,7 @@ impl BTreeCursor {
                     divider_cells_index.push(current_cell_index + cells_to_copy - 1);
                     current_cell_index += cells_to_copy;
                 }
+
                 let is_leaf = {
                     let page = self.stack.top();
                     let page = page.get().contents.as_ref().unwrap();
@@ -1296,7 +1303,7 @@ impl BTreeCursor {
 
                 // update rightmost pointer for each page if we are in interior page
                 if !is_leaf {
-                    for page in new_pages.iter_mut().take(new_pages_len - 1) {
+                    for page in split_pages.iter_mut().take(split_pages_len - 1) {
                         let contents = page.get().contents.as_mut().unwrap();
 
                         assert_eq!(contents.cell_count(), 1);
@@ -1315,7 +1322,7 @@ impl BTreeCursor {
                         contents.write_u32(PAGE_HEADER_OFFSET_RIGHTMOST_PTR, last_cell_pointer);
                     }
                     // last page right most pointer points to previous right most pointer before splitting
-                    let last_page = new_pages.last().unwrap();
+                    let last_page = split_pages.last().unwrap();
                     let last_page_contents = last_page.get().contents.as_mut().unwrap();
                     last_page_contents.write_u32(
                         PAGE_HEADER_OFFSET_RIGHTMOST_PTR,
@@ -1326,7 +1333,7 @@ impl BTreeCursor {
                 // insert dividers in parent
                 // we can consider dividers the first cell of each page starting from the second page
                 for (page_id_index, page) in
-                    new_pages.iter_mut().take(new_pages_len - 1).enumerate()
+                    split_pages.iter_mut().take(split_pages_len - 1).enumerate()
                 {
                     let contents = page.get().contents.as_mut().unwrap();
                     let divider_cell_index = divider_cells_index[page_id_index];
@@ -1372,7 +1379,7 @@ impl BTreeCursor {
 
                 {
                     // copy last page id to right pointer
-                    let last_pointer = new_pages.last().unwrap().get().id as u32;
+                    let last_pointer = split_pages.last().unwrap().get().id as u32;
                     parent_contents.write_u32(right_pointer, last_pointer);
                 }
                 self.stack.pop();
