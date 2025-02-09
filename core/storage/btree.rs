@@ -2369,6 +2369,70 @@ mod tests {
     use std::cell::RefCell;
     use std::sync::Arc;
 
+    fn validate_btree(pager: Rc<Pager>, page_idx: usize) -> (usize, bool) {
+        let cursor = BTreeCursor::new(pager.clone(), page_idx);
+        let page = pager.read_page(page_idx).unwrap();
+        let page = page.get();
+        let contents = page.contents.as_ref().unwrap();
+        let page_type = contents.page_type();
+        let mut previous_key = None;
+        let mut valid = true;
+        let mut depth = None;
+        for cell_idx in 0..contents.cell_count() {
+            let cell = contents
+                .cell_get(
+                    cell_idx,
+                    pager.clone(),
+                    cursor.payload_overflow_threshold_max(page_type),
+                    cursor.payload_overflow_threshold_min(page_type),
+                    cursor.usable_space(),
+                )
+                .unwrap();
+            let current_depth = match cell {
+                BTreeCell::TableLeafCell(..) => 1,
+                BTreeCell::TableInteriorCell(TableInteriorCell {
+                    _left_child_page, ..
+                }) => {
+                    let (child_depth, child_valid) =
+                        validate_btree(pager.clone(), _left_child_page as usize);
+                    valid &= child_valid;
+                    child_depth
+                }
+                _ => panic!("unsupported btree cell: {:?}", cell),
+            };
+            depth = Some(depth.unwrap_or(current_depth + 1));
+            if depth != Some(current_depth + 1) {
+                log::error!("depth is different for child of page {}", page_idx);
+                valid = false;
+            }
+            match cell {
+                BTreeCell::TableInteriorCell(TableInteriorCell { _rowid, .. })
+                | BTreeCell::TableLeafCell(TableLeafCell { _rowid, .. }) => {
+                    if previous_key.is_some() && previous_key.unwrap() >= _rowid {
+                        log::error!(
+                            "keys are in bad order: prev={:?}, current={}",
+                            previous_key,
+                            _rowid
+                        );
+                        valid = false;
+                    }
+                    previous_key = Some(_rowid);
+                }
+                _ => panic!("unsupported btree cell: {:?}", cell),
+            }
+        }
+        if let Some(right) = contents.rightmost_pointer() {
+            let (right_depth, right_valid) = validate_btree(pager.clone(), right as usize);
+            valid &= right_valid;
+            depth = Some(depth.unwrap_or(right_depth + 1));
+            if depth != Some(right_depth + 1) {
+                log::error!("depth is different for child of page {}", page_idx);
+                valid = false;
+            }
+        }
+        (depth.unwrap(), valid)
+    }
+
     fn format_btree(pager: Rc<Pager>, page_idx: usize, depth: usize) -> String {
         let cursor = BTreeCursor::new(pager.clone(), page_idx);
         let page = pager.read_page(page_idx).unwrap();
@@ -2560,6 +2624,9 @@ mod tests {
                 "=========== btree ===========\n{}\n\n",
                 format_btree(pager.clone(), root_page, 0)
             );
+            if matches!(validate_btree(pager.clone(), root_page), (_, false)) {
+                panic!("invalid btree");
+            }
             for key in keys.iter() {
                 let seek_key = SeekKey::TableRowId(*key as u64);
                 assert!(
