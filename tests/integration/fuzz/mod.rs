@@ -175,6 +175,113 @@ mod tests {
     }
 
     #[test]
+    pub fn string_expression_fuzz_run() {
+        let _ = env_logger::try_init();
+        let g = GrammarGenerator::new();
+        let (expr, expr_builder) = g.create_handle();
+        let (bin_op, bin_op_builder) = g.create_handle();
+        let (scalar, scalar_builder) = g.create_handle();
+        let (paren, paren_builder) = g.create_handle();
+
+        paren_builder
+            .concat("")
+            .push_str("(")
+            .push(expr)
+            .push_str(")")
+            .build();
+
+        bin_op_builder
+            .concat(" ")
+            .push(expr)
+            .push(g.create().choice().options_str(["||"]).build())
+            .push(expr)
+            .build();
+
+        scalar_builder
+            .choice()
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("char(")
+                    .push(
+                        g.create()
+                            .concat("")
+                            .push_symbol(rand_int(65..91))
+                            .repeat(1..8, ", ")
+                            .build(),
+                    )
+                    .push_str(")")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push(
+                        g.create()
+                            .choice()
+                            .options_str(["ltrim", "rtrim", "trim"])
+                            .build(),
+                    )
+                    .push_str("(")
+                    .push(g.create().concat("").push(expr).repeat(2..3, ", ").build())
+                    .push_str(")")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push(
+                        g.create()
+                            .choice()
+                            .options_str([
+                                "ltrim", "rtrim", "lower", "upper", "quote", "hex", "trim",
+                            ])
+                            .build(),
+                    )
+                    .push_str("(")
+                    .push(expr)
+                    .push_str(")")
+                    .build(),
+            )
+            .build();
+
+        expr_builder
+            .choice()
+            .option_w(bin_op, 1.0)
+            .option_w(paren, 1.0)
+            .option_w(scalar, 1.0)
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("'")
+                    .push_symbol(rand_str("", 2))
+                    .push_str("'")
+                    .build(),
+            )
+            .build();
+
+        let sql = g.create().concat(" ").push_str("SELECT").push(expr).build();
+
+        let db = TempDatabase::new_empty();
+        let limbo_conn = db.connect_limbo();
+        let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        let (mut rng, seed) = rng_from_time();
+        log::info!("seed: {}", seed);
+        for _ in 0..10240 {
+            let query = g.generate(&mut rng, sql, 50);
+            log::info!("query: {}", query);
+            let limbo = limbo_exec_row(&limbo_conn, &query);
+            let sqlite = sqlite_exec_row(&sqlite_conn, &query);
+            assert_eq!(
+                limbo, sqlite,
+                "query: {}, limbo: {:?}, sqlite: {:?}",
+                query, limbo, sqlite
+            );
+        }
+    }
+
+    #[test]
     pub fn logical_expression_fuzz_run() {
         let _ = env_logger::try_init();
         let g = GrammarGenerator::new();
