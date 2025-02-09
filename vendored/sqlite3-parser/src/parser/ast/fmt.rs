@@ -119,7 +119,8 @@ impl Display for Cmd {
 impl ToTokens for Stmt {
     fn to_tokens<S: TokenStream>(&self, s: &mut S) -> Result<(), S::Error> {
         match self {
-            Self::AlterTable(tbl_name, body) => {
+            Self::AlterTable(alter_table) => {
+                let (tbl_name, body) = &**alter_table;
                 s.append(TK_ALTER, None)?;
                 s.append(TK_TABLE, None)?;
                 tbl_name.to_tokens(s)?;
@@ -211,17 +212,18 @@ impl ToTokens for Stmt {
                 tbl_name.to_tokens(s)?;
                 body.to_tokens(s)
             }
-            Self::CreateTrigger {
-                temporary,
-                if_not_exists,
-                trigger_name,
-                time,
-                event,
-                tbl_name,
-                for_each_row,
-                when_clause,
-                commands,
-            } => {
+            Self::CreateTrigger(trigger) => {
+                let CreateTrigger {
+                    temporary,
+                    if_not_exists,
+                    trigger_name,
+                    time,
+                    event,
+                    tbl_name,
+                    for_each_row,
+                    when_clause,
+                    commands,
+                } = &**trigger;
                 s.append(TK_CREATE, None)?;
                 if *temporary {
                     s.append(TK_TEMP, None)?;
@@ -281,12 +283,13 @@ impl ToTokens for Stmt {
                 s.append(TK_AS, None)?;
                 select.to_tokens(s)
             }
-            Self::CreateVirtualTable {
-                if_not_exists,
-                tbl_name,
-                module_name,
-                args,
-            } => {
+            Self::CreateVirtualTable(create_virtual_table) => {
+                let CreateVirtualTable {
+                    if_not_exists,
+                    tbl_name,
+                    module_name,
+                    args,
+                } = &**create_virtual_table;
                 s.append(TK_CREATE, None)?;
                 s.append(TK_VIRTUAL, None)?;
                 s.append(TK_TABLE, None)?;
@@ -304,15 +307,16 @@ impl ToTokens for Stmt {
                 }
                 s.append(TK_RP, None)
             }
-            Self::Delete {
-                with,
-                tbl_name,
-                indexed,
-                where_clause,
-                returning,
-                order_by,
-                limit,
-            } => {
+            Self::Delete(delete) => {
+                let Delete {
+                    with,
+                    tbl_name,
+                    indexed,
+                    where_clause,
+                    returning,
+                    order_by,
+                    limit,
+                } = &**delete;
                 if let Some(with) = with {
                     with.to_tokens(s)?;
                 }
@@ -392,14 +396,15 @@ impl ToTokens for Stmt {
                 }
                 view_name.to_tokens(s)
             }
-            Self::Insert {
-                with,
-                or_conflict,
-                tbl_name,
-                columns,
-                body,
-                returning,
-            } => {
+            Self::Insert(insert) => {
+                let Insert {
+                    with,
+                    or_conflict,
+                    tbl_name,
+                    columns,
+                    body,
+                    returning,
+                } = &**insert;
                 if let Some(with) = with {
                     with.to_tokens(s)?;
                 }
@@ -465,18 +470,19 @@ impl ToTokens for Stmt {
                 name.to_tokens(s)
             }
             Self::Select(select) => select.to_tokens(s),
-            Self::Update {
-                with,
-                or_conflict,
-                tbl_name,
-                indexed,
-                sets,
-                from,
-                where_clause,
-                returning,
-                order_by,
-                limit,
-            } => {
+            Self::Update(update) => {
+                let Update {
+                    with,
+                    or_conflict,
+                    tbl_name,
+                    indexed,
+                    sets,
+                    from,
+                    where_clause,
+                    returning,
+                    order_by,
+                    limit,
+                } = &**update;
                 if let Some(with) = with {
                     with.to_tokens(s)?;
                 }
@@ -891,14 +897,15 @@ impl Display for CompoundOperator {
 impl ToTokens for OneSelect {
     fn to_tokens<S: TokenStream>(&self, s: &mut S) -> Result<(), S::Error> {
         match self {
-            Self::Select {
-                distinctness,
-                columns,
-                from,
-                where_clause,
-                group_by,
-                window_clause,
-            } => {
+            Self::Select(select) => {
+                let SelectInner {
+                    distinctness,
+                    columns,
+                    from,
+                    where_clause,
+                    group_by,
+                    window_clause,
+                } = &**select;
                 s.append(TK_SELECT, None)?;
                 if let Some(ref distinctness) = distinctness {
                     distinctness.to_tokens(s)?;
@@ -1649,13 +1656,14 @@ impl ToTokens for TriggerEvent {
 impl ToTokens for TriggerCmd {
     fn to_tokens<S: TokenStream>(&self, s: &mut S) -> Result<(), S::Error> {
         match self {
-            Self::Update {
-                or_conflict,
-                tbl_name,
-                sets,
-                from,
-                where_clause,
-            } => {
+            Self::Update(update) => {
+                let TriggerCmdUpdate {
+                    or_conflict,
+                    tbl_name,
+                    sets,
+                    from,
+                    where_clause,
+                } = &**update;
                 s.append(TK_UPDATE, None)?;
                 if let Some(or_conflict) = or_conflict {
                     s.append(TK_OR, None)?;
@@ -1674,14 +1682,15 @@ impl ToTokens for TriggerCmd {
                 }
                 Ok(())
             }
-            Self::Insert {
-                or_conflict,
-                tbl_name,
-                col_names,
-                select,
-                upsert,
-                returning,
-            } => {
+            Self::Insert(insert) => {
+                let TriggerCmdInsert {
+                    or_conflict,
+                    tbl_name,
+                    col_names,
+                    select,
+                    upsert,
+                    returning,
+                } = &**insert;
                 if let Some(ResolveType::Replace) = or_conflict {
                     s.append(TK_REPLACE, None)?;
                 } else {
@@ -1708,14 +1717,11 @@ impl ToTokens for TriggerCmd {
                 }
                 Ok(())
             }
-            Self::Delete {
-                tbl_name,
-                where_clause,
-            } => {
+            Self::Delete(delete) => {
                 s.append(TK_DELETE, None)?;
                 s.append(TK_FROM, None)?;
-                tbl_name.to_tokens(s)?;
-                if let Some(where_clause) = where_clause {
+                delete.tbl_name.to_tokens(s)?;
+                if let Some(where_clause) = &delete.where_clause {
                     s.append(TK_WHERE, None)?;
                     where_clause.to_tokens(s)?;
                 }
