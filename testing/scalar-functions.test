@@ -631,6 +631,10 @@ do_execsql_test quote-string {
   SELECT quote('limbo')
 } {'limbo'}
 
+do_execsql_test quote-escape {
+  SELECT quote('''quote''')
+} {'''quote'''}
+
 do_execsql_test quote-null {
   SELECT quote(null)
 } {NULL}
