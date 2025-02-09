@@ -108,6 +108,14 @@ do_execsql_test select_base_case_else {
   select case 1 when 0 then 'zero' when 1 then 'one' else 'two' end;
 } {one}
 
+do_execsql_test select_base_case_null_result {
+  select case NULL when 0 then 'first' else 'second' end;
+  select case NULL when NULL then 'first' else 'second' end;
+  select case 0 when 0 then 'first' else 'second' end;
+} {second
+second
+first}
+
 do_execsql_test select_base_case_noelse_null {
   select case 'null else' when 0 then 0 when 1 then 1 end;
 } {}
