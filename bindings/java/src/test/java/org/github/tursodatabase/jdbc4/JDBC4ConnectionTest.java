@@ -84,4 +84,15 @@ class JDBC4ConnectionTest {
             connection.createStatement(
                 ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY, -1));
   }
+
+  @Test
+  void isValid_should_return_true_on_open_connection() throws SQLException {
+    assertTrue(connection.isValid(10));
+  }
+
+  @Test
+  void isValid_should_return_false_on_closed_connection() throws SQLException {
+    connection.close();
+    assertFalse(connection.isValid(10));
+  }
 }

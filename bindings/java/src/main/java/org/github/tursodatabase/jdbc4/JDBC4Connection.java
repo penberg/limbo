@@ -205,14 +205,15 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public PreparedStatement prepareStatement(String sql, int resultSetType, int resultSetConcurrency)
-          throws SQLException {
-    return prepareStatement(sql, resultSetType, resultSetConcurrency, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+      throws SQLException {
+    return prepareStatement(
+        sql, resultSetType, resultSetConcurrency, ResultSet.CLOSE_CURSORS_AT_COMMIT);
   }
 
   @Override
   public PreparedStatement prepareStatement(
-          String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
-          throws SQLException {
+      String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
+      throws SQLException {
     checkOpen();
     checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
     return new JDBC4PreparedStatement(this, sql);
@@ -258,8 +259,13 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public boolean isValid(int timeout) throws SQLException {
-    // TODO
-    return false;
+    if (isClosed()) {
+      return false;
+    }
+
+    try (Statement statement = createStatement()) {
+      return statement.execute("select 1;");
+    }
   }
 
   @Override
