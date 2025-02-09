@@ -319,7 +319,11 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public void abort(Executor executor) throws SQLException {
-    // TODO
+    if (isClosed()) {
+      return;
+    }
+
+    close();
   }
 
   @Override
