@@ -74,12 +74,13 @@ pub fn translate(
         ast::Stmt::CreateVirtualTable { .. } => {
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
-        ast::Stmt::Delete {
-            tbl_name,
-            where_clause,
-            limit,
-            ..
-        } => {
+        ast::Stmt::Delete(delete) => {
+            let Delete {
+                tbl_name,
+                where_clause,
+                limit,
+                ..
+            } = *delete;
             change_cnt_on = true;
             translate_delete(query_mode, schema, &tbl_name, where_clause, limit, syms)?
         }

@@ -141,22 +141,7 @@ pub enum Stmt {
         args: Option<Vec<String>>, // TODO smol str
     },
     /// `DELETE`
-    Delete {
-        /// CTE
-        with: Option<With>,
-        /// `FROM` table name
-        tbl_name: QualifiedName,
-        /// `INDEXED`
-        indexed: Option<Indexed>,
-        /// `WHERE` clause
-        where_clause: Option<Box<Expr>>,
-        /// `RETURNING`
-        returning: Option<Vec<ResultColumn>>,
-        /// `ORDER BY`
-        order_by: Option<Vec<SortedColumn>>,
-        /// `LIMIT`
-        limit: Option<Box<Limit>>,
-    },
+    Delete(Box<Delete>),
     /// `DETACH DATABASE`: db name
     Detach(Expr), // TODO distinction between DETACH and DETACH DATABASE
     /// `DROP INDEX`
@@ -266,6 +251,25 @@ pub struct Update {
     pub sets: Vec<Set>,
     /// `FROM`
     pub from: Option<FromClause>,
+    /// `WHERE` clause
+    pub where_clause: Option<Box<Expr>>,
+    /// `RETURNING`
+    pub returning: Option<Vec<ResultColumn>>,
+    /// `ORDER BY`
+    pub order_by: Option<Vec<SortedColumn>>,
+    /// `LIMIT`
+    pub limit: Option<Box<Limit>>,
+}
+
+/// `DELETE`
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Delete {
+    /// CTE
+    pub with: Option<With>,
+    /// `FROM` table name
+    pub tbl_name: QualifiedName,
+    /// `INDEXED`
+    pub indexed: Option<Indexed>,
     /// `WHERE` clause
     pub where_clause: Option<Box<Expr>>,
     /// `RETURNING`

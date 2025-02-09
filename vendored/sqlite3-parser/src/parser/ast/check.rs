@@ -56,10 +56,13 @@ impl Stmt {
     /// Like `sqlite3_column_count` but more limited
     pub fn column_count(&self) -> ColumnCount {
         match self {
-            Self::Delete {
-                returning: Some(returning),
-                ..
-            } => column_count(returning),
+            Self::Delete(delete) => {
+                let Delete { returning, .. } = &**delete;
+                match returning {
+                    Some(returning) => column_count(returning),
+                    None => ColumnCount::None,
+                }
+            }
             Self::Insert {
                 returning: Some(returning),
                 ..
@@ -156,11 +159,17 @@ impl Stmt {
                     _ => Ok(()),
                 }
             }
-            Self::Delete {
-                order_by: Some(_),
-                limit: None,
-                ..
-            } => Err(custom_err!("ORDER BY without LIMIT on DELETE")),
+            Self::Delete(delete) => {
+                let Delete {
+                    order_by, limit, ..
+                } = &**delete;
+                if let Some(_) = order_by {
+                    if limit.is_none() {
+                        return Err(custom_err!("ORDER BY without LIMIT on DELETE"));
+                    }
+                }
+                Ok(())
+            }
             Self::Insert {
                 columns: Some(columns),
                 body,

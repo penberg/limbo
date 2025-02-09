@@ -305,15 +305,16 @@ impl ToTokens for Stmt {
                 }
                 s.append(TK_RP, None)
             }
-            Self::Delete {
-                with,
-                tbl_name,
-                indexed,
-                where_clause,
-                returning,
-                order_by,
-                limit,
-            } => {
+            Self::Delete(delete) => {
+                let Delete {
+                    with,
+                    tbl_name,
+                    indexed,
+                    where_clause,
+                    returning,
+                    order_by,
+                    limit,
+                } = &**delete;
                 if let Some(with) = with {
                     with.to_tokens(s)?;
                 }
