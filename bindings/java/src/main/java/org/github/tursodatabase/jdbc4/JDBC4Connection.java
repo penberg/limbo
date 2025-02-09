@@ -147,13 +147,13 @@ public class JDBC4Connection implements Connection {
 
   @Override
   public int getHoldability() throws SQLException {
-    checkOpen();
+    connection.checkOpen();
     return ResultSet.CLOSE_CURSORS_AT_COMMIT;
   }
 
   @Override
   public void setHoldability(int holdability) throws SQLException {
-    checkOpen();
+    connection.checkOpen();
     if (holdability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
       throw new SQLException("Limbo only supports CLOSE_CURSORS_AT_COMMIT");
     }
@@ -221,8 +221,8 @@ public class JDBC4Connection implements Connection {
   public PreparedStatement prepareStatement(
       String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
       throws SQLException {
-    checkOpen();
-    checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
+    connection.checkOpen();
+    connection.checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
     return new JDBC4PreparedStatement(this, sql);
   }
 
