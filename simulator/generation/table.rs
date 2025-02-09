@@ -3,6 +3,8 @@ use rand::Rng;
 use crate::generation::{gen_random_text, pick, readable_name_custom, Arbitrary, ArbitraryFrom};
 use crate::model::table::{Column, ColumnType, Name, Table, Value};
 
+use super::ArbitraryFromMaybe;
+
 impl Arbitrary for Name {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
         let name = readable_name_custom("_", rng);
@@ -191,6 +193,37 @@ impl ArbitraryFrom<&Value> for GTValue {
                 }
             }
             _ => unreachable!(),
+        }
+    }
+}
+
+pub(crate) struct LikeValue(pub(crate) String);
+
+impl ArbitraryFromMaybe<&Value> for LikeValue {
+    fn arbitrary_from_maybe<R: Rng>(rng: &mut R, value: &Value) -> Option<Self> {
+        match value {
+            Value::Text(t) => {
+                let mut t = t.chars().collect::<Vec<_>>();
+                // Remove a number of characters, either insert `_` for each character removed, or
+                // insert one `%` for the whole substring
+                let mut i = 0;
+                while i < t.len() {
+                    if rng.gen_bool(0.1) {
+                        t[i] = '_';
+                    } else if rng.gen_bool(0.05) {
+                        t[i] = '%';
+                        // skip a list of characters
+                        for _ in 0..rng.gen_range(0..=3.min(t.len() - i - 1)) {
+                            t.remove(i + 1);
+                        }
+                    }
+                    i += 1;
+                }
+                let index = rng.gen_range(0..t.len());
+                t.insert(index, '%');
+                Some(Self(t.into_iter().collect()))
+            }
+            _ => None,
         }
     }
 }

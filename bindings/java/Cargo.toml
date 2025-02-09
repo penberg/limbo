@@ -1,5 +1,5 @@
 [package]
-name = "java-limbo"
+name = "limbo-java"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

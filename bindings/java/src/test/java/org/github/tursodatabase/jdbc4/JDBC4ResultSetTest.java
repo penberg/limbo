@@ -16,7 +16,6 @@ import java.util.Properties;
 import java.util.stream.Stream;
 import org.github.tursodatabase.TestUtils;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -241,7 +240,6 @@ class JDBC4ResultSetTest {
   }
 
   @Test
-  @Disabled("limbo has a bug which sees -9223372036854775808 as double")
   void test_getLong() throws Exception {
     stmt.executeUpdate("CREATE TABLE test_long (long_col BIGINT);");
     stmt.executeUpdate("INSERT INTO test_long (long_col) VALUES (1234567890);");
@@ -253,6 +251,7 @@ class JDBC4ResultSetTest {
     ResultSet resultSet = stmt.executeQuery("SELECT * FROM test_long");
 
     // Test typical long value
+    assertTrue(resultSet.next());
     assertEquals(1234567890L, resultSet.getLong(1));
 
     // Test maximum long value

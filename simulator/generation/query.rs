@@ -1,13 +1,15 @@
 use crate::generation::table::{GTValue, LTValue};
 use crate::generation::{one_of, Arbitrary, ArbitraryFrom};
 
-use crate::model::query::{Create, Delete, Insert, Predicate, Query, Select};
+use crate::model::query::{Create, Delete, Distinctness, Insert, Predicate, Query, Select};
 use crate::model::table::{Table, Value};
+use crate::SimulatorEnv;
 use rand::seq::SliceRandom as _;
 use rand::Rng;
 
 use super::property::Remaining;
-use super::{frequency, pick};
+use super::table::LikeValue;
+use super::{backtrack, frequency, pick, ArbitraryFromMaybe};
 
 impl Arbitrary for Create {
     fn arbitrary<R: Rng>(rng: &mut R) -> Self {
@@ -17,79 +19,85 @@ impl Arbitrary for Create {
     }
 }
 
-impl ArbitraryFrom<&Vec<Table>> for Select {
-    fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<Table>) -> Self {
-        let table = pick(tables, rng);
+impl ArbitraryFrom<&SimulatorEnv> for Select {
+    fn arbitrary_from<R: Rng>(rng: &mut R, env: &SimulatorEnv) -> Self {
+        let table = pick(&env.tables, rng);
         Self {
             table: table.name.clone(),
             predicate: Predicate::arbitrary_from(rng, table),
+            limit: Some(rng.gen_range(0..=1000)),
+            distinct: Distinctness::All,
         }
     }
 }
 
-impl ArbitraryFrom<&Vec<&Table>> for Select {
-    fn arbitrary_from<R: Rng>(rng: &mut R, tables: &Vec<&Table>) -> Self {
-        let table = pick(tables, rng);
-        Self {
-            table: table.name.clone(),
-            predicate: Predicate::arbitrary_from(rng, *table),
-        }
-    }
-}
-
-impl ArbitraryFrom<&Table> for Insert {
-    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        let num_rows = rng.gen_range(1..10);
-        let values: Vec<Vec<Value>> = (0..num_rows)
-            .map(|_| {
-                table
-                    .columns
-                    .iter()
-                    .map(|c| Value::arbitrary_from(rng, &c.column_type))
-                    .collect()
+impl ArbitraryFrom<&SimulatorEnv> for Insert {
+    fn arbitrary_from<R: Rng>(rng: &mut R, env: &SimulatorEnv) -> Self {
+        let gen_values = |rng: &mut R| {
+            let table = pick(&env.tables, rng);
+            let num_rows = rng.gen_range(1..10);
+            let values: Vec<Vec<Value>> = (0..num_rows)
+                .map(|_| {
+                    table
+                        .columns
+                        .iter()
+                        .map(|c| Value::arbitrary_from(rng, &c.column_type))
+                        .collect()
+                })
+                .collect();
+            Some(Insert::Values {
+                table: table.name.clone(),
+                values,
             })
-            .collect();
-        Self {
-            table: table.name.clone(),
-            values,
-        }
-    }
-}
+        };
 
-impl ArbitraryFrom<&Table> for Delete {
-    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        Self {
-            table: table.name.clone(),
-            predicate: Predicate::arbitrary_from(rng, table),
-        }
-    }
-}
+        let _gen_select = |rng: &mut R| {
+            // Find a non-empty table
+            let table = env.tables.iter().find(|t| !t.rows.is_empty());
+            if table.is_none() {
+                return None;
+            }
 
-impl ArbitraryFrom<&Table> for Query {
-    fn arbitrary_from<R: Rng>(rng: &mut R, table: &Table) -> Self {
-        frequency(
+            let select_table = table.unwrap();
+            let row = pick(&select_table.rows, rng);
+            let predicate = Predicate::arbitrary_from(rng, (select_table, row));
+            // Pick another table to insert into
+            let select = Select {
+                table: select_table.name.clone(),
+                predicate,
+                limit: None,
+                distinct: Distinctness::All,
+            };
+            let table = pick(&env.tables, rng);
+            Some(Insert::Select {
+                table: table.name.clone(),
+                select: Box::new(select),
+            })
+        };
+
+        backtrack(
             vec![
-                (1, Box::new(|rng| Self::Create(Create::arbitrary(rng)))),
-                (
-                    100,
-                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, &vec![table]))),
-                ),
-                (
-                    100,
-                    Box::new(|rng| Self::Insert(Insert::arbitrary_from(rng, table))),
-                ),
-                (
-                    0,
-                    Box::new(|rng| Self::Delete(Delete::arbitrary_from(rng, table))),
-                ),
+                (1, Box::new(|rng| gen_values(rng))),
+                // todo: test and enable this once `INSERT INTO <table> SELECT * FROM <table>` is supported
+                // (1, Box::new(|rng| gen_select(rng))),
             ],
             rng,
         )
     }
 }
 
-impl ArbitraryFrom<(&Table, &Remaining)> for Query {
-    fn arbitrary_from<R: Rng>(rng: &mut R, (table, remaining): (&Table, &Remaining)) -> Self {
+impl ArbitraryFrom<&SimulatorEnv> for Delete {
+    fn arbitrary_from<R: Rng>(rng: &mut R, env: &SimulatorEnv) -> Self {
+        let table = pick(&env.tables, rng);
+        Self {
+            table: table.name.clone(),
+            predicate: Predicate::arbitrary_from(rng, table),
+        }
+    }
+}
+
+impl ArbitraryFrom<(&SimulatorEnv, &Remaining)> for Query {
+    fn arbitrary_from<R: Rng>(rng: &mut R, (env, remaining): (&SimulatorEnv, &Remaining)) -> Self {
         frequency(
             vec![
                 (
@@ -98,15 +106,15 @@ impl ArbitraryFrom<(&Table, &Remaining)> for Query {
                 ),
                 (
                     remaining.read,
-                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, &vec![table]))),
+                    Box::new(|rng| Self::Select(Select::arbitrary_from(rng, env))),
                 ),
                 (
                     remaining.write,
-                    Box::new(|rng| Self::Insert(Insert::arbitrary_from(rng, table))),
+                    Box::new(|rng| Self::Insert(Insert::arbitrary_from(rng, env))),
                 ),
                 (
-                    0.0,
-                    Box::new(|rng| Self::Delete(Delete::arbitrary_from(rng, table))),
+                    remaining.write,
+                    Box::new(|rng| Self::Delete(Delete::arbitrary_from(rng, env))),
                 ),
             ],
             rng,
@@ -280,24 +288,48 @@ fn produce_true_predicate<R: Rng>(rng: &mut R, (t, row): (&Table, &Vec<Value>)) 
     let column_index = rng.gen_range(0..t.columns.len());
     let column = &t.columns[column_index];
     let value = &row[column_index];
-    one_of(
+    backtrack(
         vec![
-            Box::new(|_| Predicate::Eq(column.name.clone(), value.clone())),
-            Box::new(|rng| {
-                let v = loop {
+            (
+                1,
+                Box::new(|_| Some(Predicate::Eq(column.name.clone(), value.clone()))),
+            ),
+            (
+                1,
+                Box::new(|rng| {
                     let v = Value::arbitrary_from(rng, &column.column_type);
-                    if &v != value {
-                        break v;
+                    if &v == value {
+                        None
+                    } else {
+                        Some(Predicate::Neq(column.name.clone(), v))
                     }
-                };
-                Predicate::Neq(column.name.clone(), v)
-            }),
-            Box::new(|rng| {
-                Predicate::Gt(column.name.clone(), LTValue::arbitrary_from(rng, value).0)
-            }),
-            Box::new(|rng| {
-                Predicate::Lt(column.name.clone(), GTValue::arbitrary_from(rng, value).0)
-            }),
+                }),
+            ),
+            (
+                1,
+                Box::new(|rng| {
+                    Some(Predicate::Gt(
+                        column.name.clone(),
+                        LTValue::arbitrary_from(rng, value).0,
+                    ))
+                }),
+            ),
+            (
+                1,
+                Box::new(|rng| {
+                    Some(Predicate::Lt(
+                        column.name.clone(),
+                        GTValue::arbitrary_from(rng, value).0,
+                    ))
+                }),
+            ),
+            (
+                1,
+                Box::new(|rng| {
+                    LikeValue::arbitrary_from_maybe(rng, value)
+                        .map(|like| Predicate::Like(column.name.clone(), like.0))
+                }),
+            ),
         ],
         rng,
     )

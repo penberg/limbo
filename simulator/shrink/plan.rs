@@ -1,5 +1,8 @@
 use crate::{
-    generation::plan::{InteractionPlan, Interactions},
+    generation::{
+        plan::{InteractionPlan, Interactions},
+        property::Property,
+    },
     model::query::Query,
     runner::execution::Execution,
 };
@@ -27,12 +30,12 @@ impl InteractionPlan {
         for interaction in plan.plan.iter_mut() {
             if let Interactions::Property(p) = interaction {
                 match p {
-                    crate::generation::property::Property::InsertSelect { queries, .. }
-                    | crate::generation::property::Property::DoubleCreateFailure {
-                        queries, ..
-                    } => {
+                    Property::InsertValuesSelect { queries, .. }
+                    | Property::DoubleCreateFailure { queries, .. }
+                    | Property::DeleteSelect { queries, .. } => {
                         queries.clear();
                     }
+                    Property::SelectLimit { .. } => {}
                 }
             }
         }

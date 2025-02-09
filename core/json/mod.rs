@@ -674,6 +674,43 @@ pub fn is_json_valid(json_value: &OwnedValue) -> crate::Result<OwnedValue> {
     }
 }
 
+pub fn json_quote(value: &OwnedValue) -> crate::Result<OwnedValue> {
+    match value {
+        OwnedValue::Text(ref t) => {
+            // If X is a JSON value returned by another JSON function,
+            // then this function is a no-op
+            if t.subtype == TextSubtype::Json {
+                // Should just return the json value with no quotes
+                return Ok(value.to_owned());
+            }
+
+            let mut escaped_value = String::with_capacity(t.value.len() + 4);
+            escaped_value.push('"');
+
+            for c in t.as_str().chars() {
+                match c {
+                    '"' | '\\' | '\n' | '\r' | '\t' | '\u{0008}' | '\u{000c}' => {
+                        escaped_value.push('\\');
+                        escaped_value.push(c);
+                    }
+                    c => escaped_value.push(c),
+                }
+            }
+            escaped_value.push('"');
+
+            Ok(OwnedValue::Text(Text::new(Rc::new(escaped_value))))
+        }
+        // Numbers are unquoted in json
+        OwnedValue::Integer(ref int) => Ok(OwnedValue::Integer(int.to_owned())),
+        OwnedValue::Float(ref float) => Ok(OwnedValue::Float(float.to_owned())),
+        OwnedValue::Blob(_) => crate::bail_constraint_error!("JSON cannot hold BLOB values"),
+        OwnedValue::Null => Ok(OwnedValue::Text(Text::new(Rc::new("null".to_string())))),
+        _ => {
+            unreachable!()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

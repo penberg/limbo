@@ -89,3 +89,7 @@ test-time:
 test-sqlite3: limbo-c
 	LIBS="$(SQLITE_LIB)" HEADERS="$(SQLITE_LIB_HEADERS)" make -C sqlite3/tests test
 .PHONY: test-sqlite3
+
+test-json:
+	SQLITE_EXEC=$(SQLITE_EXEC) ./testing/json.test
+.PHONY: test-json
