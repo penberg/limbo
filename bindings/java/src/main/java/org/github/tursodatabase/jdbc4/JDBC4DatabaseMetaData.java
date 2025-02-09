@@ -711,11 +711,12 @@ public class JDBC4DatabaseMetaData implements DatabaseMetaData {
   @Override
   @SkipNullableCheck
   public ResultSet getTables(
-      String catalog, String schemaPattern, String tableNamePattern, String[] types)
+      @Nullable String catalog,
+      @Nullable String schemaPattern,
+      String tableNamePattern,
+      @Nullable String[] types)
       throws SQLException {
-
-    // TODO - important
-
+    // TODO: after union is supported
     return null;
   }
 
