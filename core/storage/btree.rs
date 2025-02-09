@@ -2,7 +2,7 @@ use log::debug;
 
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{
-    read_btree_cell, read_varint, write_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
+    read_btree_cell, read_varint, BTreeCell, DatabaseHeader, PageContent, PageType,
     TableInteriorCell, TableLeafCell,
 };
 
@@ -1348,33 +1348,18 @@ impl BTreeCursor {
                         self.usable_space(),
                     )?;
 
-                    if is_leaf {
-                        // create a new divider cell and push
-                        let key = match cell {
-                            BTreeCell::TableLeafCell(leaf) => leaf._rowid,
-                            _ => unreachable!(),
-                        };
-                        let mut divider_cell = Vec::new();
-                        divider_cell.extend_from_slice(&(page.get().id as u32).to_be_bytes());
-                        divider_cell.extend(std::iter::repeat(0).take(9));
-                        let n = write_varint(&mut divider_cell.as_mut_slice()[4..], key);
-                        divider_cell.truncate(4 + n);
-                        let parent_cell_idx = self.find_cell(parent_contents, key);
-                        self.insert_into_cell(
-                            parent_contents,
-                            divider_cell.as_slice(),
-                            parent_cell_idx,
-                        );
-                    } else {
-                        // move cell
-                        let key = match cell {
-                            BTreeCell::TableInteriorCell(interior) => interior._rowid,
-                            _ => unreachable!(),
-                        };
-                        let parent_cell_idx = self.find_cell(&parent_contents, key);
-                        self.insert_into_cell(parent_contents, cell_payload, parent_cell_idx);
-                        // self.drop_cell(*page, 0);
-                    }
+                    let key = match cell {
+                        BTreeCell::TableLeafCell(TableLeafCell { _rowid, .. })
+                        | BTreeCell::TableInteriorCell(TableInteriorCell { _rowid, .. }) => _rowid,
+                        _ => unreachable!(),
+                    };
+
+                    let mut divider_cell = Vec::with_capacity(4 + 9); // 4 - page id, 9 - max length of varint
+                    divider_cell.extend_from_slice(&(page.get().id as u32).to_be_bytes());
+                    write_varint_to_vec(key, &mut divider_cell);
+
+                    let parent_cell_idx = self.find_cell(parent_contents, key);
+                    self.insert_into_cell(parent_contents, &divider_cell, parent_cell_idx);
                 }
 
                 {
