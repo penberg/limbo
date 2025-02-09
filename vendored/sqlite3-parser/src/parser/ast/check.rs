@@ -66,10 +66,13 @@ impl Stmt {
             } => column_count(returning),
             Self::Pragma(..) => ColumnCount::Dynamic,
             Self::Select(s) => s.column_count(),
-            Self::Update {
-                returning: Some(returning),
-                ..
-            } => column_count(returning),
+            Self::Update(update) => {
+                let Update { returning, .. } = &**update;
+                match returning {
+                    Some(returning) => column_count(returning),
+                    None => ColumnCount::None,
+                }
+            }
             _ => ColumnCount::None,
         }
     }
@@ -173,11 +176,18 @@ impl Stmt {
                     Err(custom_err!("0 values for {} columns", columns.len()))
                 }
             },
-            Self::Update {
-                order_by: Some(_),
-                limit: None,
-                ..
-            } => Err(custom_err!("ORDER BY without LIMIT on UPDATE")),
+            Self::Update(update) => {
+                let Update {
+                    order_by, limit, ..
+                } = &**update;
+                if let Some(_) = order_by {
+                    if limit.is_none() {
+                        return Err(custom_err!("ORDER BY without LIMIT on UPDATE"));
+                    }
+                }
+
+                Ok(())
+            }
             _ => Ok(()),
         }
     }

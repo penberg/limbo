@@ -223,6 +223,11 @@ pub enum Stmt {
     /// `SELECT`
     Select(Box<Select>),
     /// `UPDATE`
+    Update(Box<Update>),
+    /// `VACUUM`: database name, into expr
+    Vacuum(Option<Name>, Option<Expr>),
+}
+
 /// `CREATE TRIGGER
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateTrigger {
@@ -245,6 +250,30 @@ pub struct CreateTrigger {
     /// statements
     pub commands: Vec<TriggerCmd>,
 }
+
+/// `UPDATE` clause
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Update {
+    /// CTE
+    pub with: Option<With>,
+    /// `OR`
+    pub or_conflict: Option<ResolveType>,
+    /// table name
+    pub tbl_name: QualifiedName,
+    /// `INDEXED`
+    pub indexed: Option<Indexed>,
+    /// `SET` assignments
+    pub sets: Vec<Set>,
+    /// `FROM`
+    pub from: Option<FromClause>,
+    /// `WHERE` clause
+    pub where_clause: Option<Box<Expr>>,
+    /// `RETURNING`
+    pub returning: Option<Vec<ResultColumn>>,
+    /// `ORDER BY`
+    pub order_by: Option<Vec<SortedColumn>>,
+    /// `LIMIT`
+    pub limit: Option<Box<Limit>>,
 }
 
 /// SQL expression

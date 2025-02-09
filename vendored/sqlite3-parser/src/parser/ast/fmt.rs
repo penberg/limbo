@@ -466,18 +466,19 @@ impl ToTokens for Stmt {
                 name.to_tokens(s)
             }
             Self::Select(select) => select.to_tokens(s),
-            Self::Update {
-                with,
-                or_conflict,
-                tbl_name,
-                indexed,
-                sets,
-                from,
-                where_clause,
-                returning,
-                order_by,
-                limit,
-            } => {
+            Self::Update(update) => {
+                let Update {
+                    with,
+                    or_conflict,
+                    tbl_name,
+                    indexed,
+                    sets,
+                    from,
+                    where_clause,
+                    returning,
+                    order_by,
+                    limit,
+                } = &**update;
                 if let Some(with) = with {
                     with.to_tokens(s)?;
                 }
