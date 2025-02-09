@@ -1137,7 +1137,12 @@ impl BTreeCursor {
                     scratch_cells.insert(cell.index, to_static_buf(&cell.payload));
                 }
 
-                // amount of cells for pages involved in split (distributed with naive greedy approach)
+                // amount of cells for pages involved in split
+                // the algorithm accumulate cells in greedy manner with 2 conditions for split:
+                // 1. new cell will overflow single cell (accumulated + new > usable_space - header_size)
+                // 2. accumulated size already reach >50% of content_usable_size
+                // second condition is necessary, otherwise in case of small cells we will create a lot of almost empty pages
+                //
                 // if we have single overflow cell in a table leaf node - we still can have 3 split pages
                 //
                 // for example, if current page has 4 entries with size ~1/4 page size, and new cell has size ~page size
@@ -1149,7 +1154,9 @@ impl BTreeCursor {
                 let content_usable_space = usable_space - page_copy.header_size();
                 for scratch_cell in scratch_cells.iter() {
                     let cell_size = scratch_cell.len() + 2; // + cell pointer size (u16)
-                    if last_page_cells_size + cell_size > content_usable_space {
+                    if last_page_cells_size + cell_size > content_usable_space
+                        || 2 * last_page_cells_size > content_usable_space
+                    {
                         split_pages_cells_count.push(last_page_cells_count);
                         last_page_cells_count = 0;
                         last_page_cells_size = 0;
