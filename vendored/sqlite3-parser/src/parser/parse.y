@@ -1279,7 +1279,7 @@ cmd ::= ATTACH database_kw_opt expr(F) AS expr(D) key_opt(K). {
   self.ctx.stmt = Some(Stmt::Attach{ expr: Box::new(F), db_name: Box::new(D), key: K.map(Box::new) });
 }
 cmd ::= DETACH database_kw_opt expr(D). {
-  self.ctx.stmt = Some(Stmt::Detach(D));
+  self.ctx.stmt = Some(Stmt::Detach(Box::new(D)));
 }
 
 %type key_opt {Option<Expr>}

@@ -143,7 +143,7 @@ pub enum Stmt {
     /// `DELETE`
     Delete(Box<Delete>),
     /// `DETACH DATABASE`: db name
-    Detach(Expr), // TODO distinction between DETACH and DETACH DATABASE
+    Detach(Box<Expr>), // TODO distinction between DETACH and DETACH DATABASE
     /// `DROP INDEX`
     DropIndex {
         /// `IF EXISTS`
