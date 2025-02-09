@@ -2146,19 +2146,31 @@ impl Program {
                             }
                             ScalarFunc::Trim => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let pattern_value = if func.arg_count == 2 {
+                                    state.registers.get(*start_reg + 1).cloned()
+                                } else {
+                                    None
+                                };
                                 let result = exec_trim(&reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::LTrim => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let pattern_value = if func.arg_count == 2 {
+                                    state.registers.get(*start_reg + 1).cloned()
+                                } else {
+                                    None
+                                };
                                 let result = exec_ltrim(&reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::RTrim => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let pattern_value = if func.arg_count == 2 {
+                                    state.registers.get(*start_reg + 1).cloned()
+                                } else {
+                                    None
+                                };
                                 let result = exec_rtrim(&reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
