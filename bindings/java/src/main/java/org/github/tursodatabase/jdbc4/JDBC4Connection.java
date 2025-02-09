@@ -10,6 +10,8 @@ import org.github.tursodatabase.core.LimboConnection;
 
 public class JDBC4Connection extends LimboConnection {
 
+  private Map<String, Class<?>> typeMap = new HashMap<>();
+
   public JDBC4Connection(String url, String filePath) throws SQLException {
     super(url, filePath);
   }
@@ -45,17 +47,8 @@ public class JDBC4Connection extends LimboConnection {
   }
 
   @Override
-  @SkipNullableCheck
-  public CallableStatement prepareCall(String sql) throws SQLException {
-    // TODO
-    return null;
-  }
-
-  @Override
-  @SkipNullableCheck
   public String nativeSQL(String sql) throws SQLException {
-    // TODO
-    return "";
+    return sql;
   }
 
   @Override
@@ -108,13 +101,10 @@ public class JDBC4Connection extends LimboConnection {
   }
 
   @Override
-  public void setCatalog(String catalog) throws SQLException {
-    // TODO
-  }
+  public void setCatalog(String catalog) throws SQLException {}
 
   @Override
   public String getCatalog() throws SQLException {
-    // TODO
     return "";
   }
 
@@ -150,32 +140,29 @@ public class JDBC4Connection extends LimboConnection {
   }
 
   @Override
-  @SkipNullableCheck
-  public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency)
-      throws SQLException {
-    // TODO
-    return null;
-  }
-
-  @Override
   public Map<String, Class<?>> getTypeMap() throws SQLException {
-    // TODO
-    return new HashMap<>();
+    return this.typeMap;
   }
 
   @Override
   public void setTypeMap(Map<String, Class<?>> map) throws SQLException {
-    // TODO
-  }
-
-  @Override
-  public void setHoldability(int holdability) throws SQLException {
-    // TODO
+    synchronized (this) {
+      this.typeMap = map;
+    }
   }
 
   @Override
   public int getHoldability() throws SQLException {
-    return 0;
+    checkOpen();
+    return ResultSet.CLOSE_CURSORS_AT_COMMIT;
+  }
+
+  @Override
+  public void setHoldability(int holdability) throws SQLException {
+    checkOpen();
+    if (holdability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
+      throw new SQLException("Limbo only supports CLOSE_CURSORS_AT_COMMIT");
+    }
   }
 
   @Override
@@ -212,12 +199,25 @@ public class JDBC4Connection extends LimboConnection {
   }
 
   @Override
-  @SkipNullableCheck
+  public CallableStatement prepareCall(String sql) throws SQLException {
+    return prepareCall(
+        sql,
+        ResultSet.TYPE_FORWARD_ONLY,
+        ResultSet.CONCUR_READ_ONLY,
+        ResultSet.CLOSE_CURSORS_AT_COMMIT);
+  }
+
+  @Override
+  public CallableStatement prepareCall(String sql, int resultSetType, int resultSetConcurrency)
+      throws SQLException {
+    return prepareCall(sql, resultSetType, resultSetConcurrency, ResultSet.CLOSE_CURSORS_AT_COMMIT);
+  }
+
+  @Override
   public CallableStatement prepareCall(
       String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
       throws SQLException {
-    // TODO
-    return null;
+    throw new SQLException("Limbo does not support stored procedures");
   }
 
   @Override
