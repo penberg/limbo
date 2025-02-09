@@ -153,6 +153,7 @@ impl Database {
     }
 
     pub fn register_builtins(&self) -> Result<(), String> {
+        #[allow(unused_variables)]
         let ext_api = self.build_limbo_ext();
         #[cfg(feature = "uuid")]
         if unsafe { !limbo_uuid::register_extension_static(&ext_api).is_ok() } {

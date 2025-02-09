@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-limbo_core = { path = "../../core" }
+limbo_core = { path = "../../core", features = ["io_uring"] }
 thiserror = "2.0.9"
 
 [dev-dependencies]

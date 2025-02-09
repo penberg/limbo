@@ -14,7 +14,7 @@ name = "limbo_core"
 path = "lib.rs"
 
 [features]
-default = ["fs", "json", "uuid", "io_uring", "time"]
+default = ["fs", "json", "uuid", "time"]
 fs = []
 json = [
     "dep:jsonb",

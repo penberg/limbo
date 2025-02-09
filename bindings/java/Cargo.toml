@@ -12,6 +12,6 @@ crate-type = ["cdylib"]
 path = "rs_src/lib.rs"
 
 [dependencies]
-limbo_core = { path = "../../core" }
+limbo_core = { path = "../../core", features = ["io_uring"] }
 jni = "0.21.1"
 thiserror = "2.0.9"

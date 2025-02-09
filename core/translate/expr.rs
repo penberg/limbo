@@ -159,6 +159,7 @@ macro_rules! expect_arguments_min {
     }};
 }
 
+#[allow(unused_macros)]
 macro_rules! expect_arguments_even {
     (
         $args:expr,
