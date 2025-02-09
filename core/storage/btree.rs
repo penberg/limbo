@@ -2611,11 +2611,16 @@ mod tests {
             let seed = rng.next_u64();
             log::info!("seed: {}", seed);
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
-            for _ in 0..inserts {
+            for insert_id in 0..inserts {
                 let size = size(&mut rng);
                 let key = (rng.next_u64() % (1 << 30)) as i64;
                 keys.push(key);
-                log::info!("INSERT INTO t VALUES ({}, randomblob({}));", key, size);
+                log::info!(
+                    "INSERT INTO t VALUES ({}, randomblob({})); -- {}",
+                    key,
+                    size,
+                    insert_id
+                );
                 let key = OwnedValue::Integer(key);
                 let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
                 cursor.insert(&key, &value, false).unwrap();
