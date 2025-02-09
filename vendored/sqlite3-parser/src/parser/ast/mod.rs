@@ -188,6 +188,9 @@ pub enum Stmt {
     /// `UPDATE`
     Update(Box<Update>),
     /// `VACUUM`: database name, into expr
+    Vacuum(Option<Name>, Option<Box<Expr>>),
+}
+
 /// `CREATE VIRTUAL TABLE`
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateVirtualTable {

@@ -1130,8 +1130,8 @@ cmd ::= DROP INDEX ifexists(E) fullname(X).   {self.ctx.stmt = Some(Stmt::DropIn
 //
 %if !SQLITE_OMIT_VACUUM && !SQLITE_OMIT_ATTACH
 %type vinto {Option<Expr>}
-cmd ::= VACUUM vinto(Y).                {self.ctx.stmt = Some(Stmt::Vacuum(None, Y));}
-cmd ::= VACUUM nm(X) vinto(Y).          {self.ctx.stmt = Some(Stmt::Vacuum(Some(X), Y));}
+cmd ::= VACUUM vinto(Y).                {self.ctx.stmt = Some(Stmt::Vacuum(None, Y.map(Box::new)));}
+cmd ::= VACUUM nm(X) vinto(Y).          {self.ctx.stmt = Some(Stmt::Vacuum(Some(X), Y.map(Box::new)));}
 vinto(A) ::= INTO expr(X).              {A = Some(X);}
 vinto(A) ::= .                          {A = None;}
 %endif
