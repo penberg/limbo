@@ -1077,8 +1077,8 @@ paren_exprlist(A) ::= LP exprlist(X) RP.  {A = X;}
 //
 cmd ::= createkw uniqueflag(U) INDEX ifnotexists(NE) fullname(X)
         ON nm(Y) LP sortlist(Z) RP where_opt(W). {
-  self.ctx.stmt = Some(Stmt::CreateIndex { unique: U, if_not_exists: NE, idx_name: X,
-                                            tbl_name: Y, columns: Z, where_clause: W });
+  self.ctx.stmt = Some(Stmt::CreateIndex { unique: U, if_not_exists: NE, idx_name: Box::new(X),
+                                            tbl_name: Y, columns: Z, where_clause: W.map(Box::new) });
 }
 
 %type uniqueflag {bool}

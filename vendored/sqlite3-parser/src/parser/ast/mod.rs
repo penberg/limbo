@@ -95,13 +95,13 @@ pub enum Stmt {
         /// `IF NOT EXISTS`
         if_not_exists: bool,
         /// index name
-        idx_name: QualifiedName,
+        idx_name: Box<QualifiedName>,
         /// table name
         tbl_name: Name,
         /// indexed columns or expressions
         columns: Vec<SortedColumn>,
         /// partial index
-        where_clause: Option<Expr>,
+        where_clause: Option<Box<Expr>>,
     },
     /// `CREATE TABLE`
     CreateTable {
