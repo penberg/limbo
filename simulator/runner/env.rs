@@ -28,7 +28,7 @@ impl SimulatorEnv {
 
         let (create_percent, read_percent, write_percent, delete_percent, drop_percent) = {
             let total = 100.0;
-            
+
             let read_percent = rng.gen_range(0.0..=total);
             let write_percent = total - read_percent;
 

@@ -312,15 +312,21 @@ impl Interactions {
                         }
                         select.shadow(env);
                     }
-                    Property::DropSelect { table, queries, select } => {
-                        let drop = Query::Drop(Drop { table: table.clone() });
+                    Property::DropSelect {
+                        table,
+                        queries,
+                        select,
+                    } => {
+                        let drop = Query::Drop(Drop {
+                            table: table.clone(),
+                        });
 
                         drop.shadow(env);
                         for query in queries {
                             query.shadow(env);
                         }
                         select.shadow(env);
-                    },
+                    }
                 }
                 for interaction in property.interactions() {
                     match interaction {
