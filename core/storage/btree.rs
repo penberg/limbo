@@ -745,13 +745,14 @@ impl BTreeCursor {
                     // insert
                     let overflow = {
                         let contents = page.get().contents.as_mut().unwrap();
-                        debug!(
-                            "insert_into_page(overflow, cell_count={})",
-                            contents.cell_count()
-                        );
-
                         self.insert_into_cell(contents, cell_payload.as_slice(), cell_idx);
-                        contents.overflow_cells.len()
+                        let overflow_cells = contents.overflow_cells.len();
+                        debug!(
+                            "insert_into_page(overflow, cell_count={}, overflow_cells={})",
+                            contents.cell_count(),
+                            overflow_cells
+                        );
+                        overflow_cells
                     };
                     let write_info = self
                         .state
