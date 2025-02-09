@@ -24,6 +24,7 @@ import java.sql.Timestamp;
 import java.util.Calendar;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
+import org.github.tursodatabase.core.LimboResultSet;
 
 public class JDBC4PreparedStatement extends JDBC4Statement implements PreparedStatement {
 
@@ -46,7 +47,11 @@ public class JDBC4PreparedStatement extends JDBC4Statement implements PreparedSt
 
   @Override
   public int executeUpdate() throws SQLException {
-    // TODO
+    requireNonNull(this.statement);
+    final LimboResultSet resultSet = statement.getResultSet();
+    resultSet.consumeAll();
+
+    // TODO: return updated count
     return 0;
   }
 
