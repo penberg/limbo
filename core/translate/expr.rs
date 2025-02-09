@@ -421,14 +421,15 @@ pub fn translate_condition_expr(
                 ast::LikeOperator::Like | ast::LikeOperator::Glob => {
                     let start_reg = program.alloc_registers(2);
                     let mut constant_mask = 0;
-                    translate_and_mark(program, Some(referenced_tables), lhs, start_reg, resolver)?;
-                    let _ = translate_expr(
+                    translate_and_mark(
                         program,
                         Some(referenced_tables),
-                        rhs,
+                        lhs,
                         start_reg + 1,
                         resolver,
                     )?;
+                    let _ =
+                        translate_expr(program, Some(referenced_tables), rhs, start_reg, resolver)?;
                     if matches!(rhs.as_ref(), ast::Expr::Literal(_)) {
                         program.mark_last_insn_constant();
                         constant_mask = 1;
