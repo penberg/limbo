@@ -21,7 +21,6 @@ impl LimboDB {
         Box::into_raw(Box::new(self)) as jlong
     }
 
-    #[allow(dead_code)]
     pub fn drop(ptr: jlong) {
         let _boxed = unsafe { Box::from_raw(ptr as *mut LimboDB) };
     }
@@ -95,6 +94,15 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
 
     let conn = LimboConnection::new(db.db.connect(), db.io.clone());
     conn.to_ptr()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_close0<'local>(
+    _env: JNIEnv<'local>,
+    _obj: JObject<'local>,
+    db_pointer: jlong,
+) {
+    LimboDB::drop(db_pointer);
 }
 
 #[no_mangle]
