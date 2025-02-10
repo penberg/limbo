@@ -71,8 +71,17 @@ program terminates with the `Halt` instruction.
 
 ### Parser
 
+The parser is the module in the front end that processes SQLite query language input data, transforming it into an abstract syntax tree (AST) for further processing. The parser is an in-tree fork of [lemon-rs](https://github.com/gwenn/lemon-rs), which in turn is a port of SQLite parser into Rust. The emitted AST is handed over to the code generation steps to turn the AST into virtual machine programs.
+
 ### Code generator
 
+The code generator module takes AST as input and produces virtual machine programs representing executable SQL statements. At high-level, code generation works as follows:
+
+1. `JOIN` clauses are transformed into equivalent `WHERE` clauses, which simplifies code generation.
+2. `WHERE` clauses are mapped into bytecode loops
+3. `ORDER BY` causes the bytecode program to pass result rows to a sorter before returned to the application.
+4. `GROUP BY` also causes the bytecode programs to pass result rows to an aggregation function before results are returned to the application.
+  
 ### Query optimizer
 
 ## Virtual Machine
