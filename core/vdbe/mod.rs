@@ -1020,7 +1020,7 @@ impl Program {
                                 state.registers[*dest] = if cursor.get_null_flag() {
                                     OwnedValue::Null
                                 } else {
-                                    record.values[*column].clone()
+                                    record.get_value(*column).clone()
                                 };
                             } else {
                                 state.registers[*dest] = OwnedValue::Null;
@@ -1029,7 +1029,7 @@ impl Program {
                         CursorType::Sorter => {
                             let cursor = get_cursor_as_sorter_mut(&mut cursors, *cursor_id);
                             if let Some(record) = cursor.record() {
-                                state.registers[*dest] = record.values[*column].clone();
+                                state.registers[*dest] = record.get_value(*column).clone();
                             } else {
                                 state.registers[*dest] = OwnedValue::Null;
                             }
@@ -1037,7 +1037,7 @@ impl Program {
                         CursorType::Pseudo(_) => {
                             let cursor = get_cursor_as_pseudo_mut(&mut cursors, *cursor_id);
                             if let Some(record) = cursor.record() {
-                                state.registers[*dest] = record.values[*column].clone();
+                                state.registers[*dest] = record.get_value(*column).clone();
                             } else {
                                 state.registers[*dest] = OwnedValue::Null;
                             }
@@ -1403,8 +1403,8 @@ impl Program {
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
                         // omit the rowid from the idx_record, which is the last value
-                        if idx_record.values[..idx_record.values.len() - 1]
-                            >= *record_from_regs.values
+                        if idx_record.get_values()[..idx_record.len() - 1]
+                            >= record_from_regs.get_values()[..]
                         {
                             state.pc = target_pc.to_offset_int();
                         } else {
@@ -1427,8 +1427,8 @@ impl Program {
                         make_owned_record(&state.registers, start_reg, num_regs);
                     if let Some(ref idx_record) = *cursor.record()? {
                         // omit the rowid from the idx_record, which is the last value
-                        if idx_record.values[..idx_record.values.len() - 1]
-                            > *record_from_regs.values
+                        if idx_record.get_values()[..idx_record.len() - 1]
+                            > record_from_regs.get_values()[..]
                         {
                             state.pc = target_pc.to_offset_int();
                         } else {
@@ -1744,7 +1744,7 @@ impl Program {
                     order,
                 } => {
                     let order = order
-                        .values
+                        .get_values()
                         .iter()
                         .map(|v| match v {
                             OwnedValue::Integer(i) => *i == 0,
