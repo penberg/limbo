@@ -53,7 +53,7 @@ The current status of Limbo is:
 | CREATE TRIGGER            | No      |                                                                                   |
 | CREATE VIEW               | No      |                                                                                   |
 | CREATE VIRTUAL TABLE      | No      |                                                                                   |
-| DELETE                    | No      |                                                                                   |
+| DELETE                    | Yes     |                                                                                   |
 | DETACH DATABASE           | No      |                                                                                   |
 | DROP INDEX                | No      |                                                                                   |
 | DROP TABLE                | No      |                                                                                   |
