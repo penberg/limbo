@@ -128,7 +128,7 @@ pub struct DatabaseHeader {
     text_encoding: u32,
 
     /// The "user version" as read and set by the user_version pragma.
-    user_version: u32,
+    pub user_version: u32,
 
     /// True (non-zero) for incremental-vacuum mode. False (zero) otherwise.
     incremental_vacuum_enabled: u32,
@@ -232,7 +232,7 @@ impl Default for DatabaseHeader {
             default_page_cache_size: 500, // pages
             vacuum_mode_largest_root_page: 0,
             text_encoding: 1, // utf-8
-            user_version: 1,
+            user_version: 0,
             incremental_vacuum_enabled: 0,
             application_id: 0,
             reserved_for_expansion: [0; 20],

@@ -1229,6 +1229,15 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::ReadCookie { db, dest, cookie } => (
+                "ReadCookie",
+                *db as i32,
+                *dest as i32,
+                *cookie as i32,
+                OwnedValue::build_text(Rc::new("".to_string())),
+                0,
+                "".to_string(),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

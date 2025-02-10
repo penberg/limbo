@@ -55,7 +55,7 @@ use crate::{resolve_ext_path, Connection, Result, TransactionState, DATABASE_VER
 use insn::{
     exec_add, exec_and, exec_bit_and, exec_bit_not, exec_bit_or, exec_boolean_not, exec_concat,
     exec_divide, exec_multiply, exec_or, exec_remainder, exec_shift_left, exec_shift_right,
-    exec_subtract,
+    exec_subtract, Cookie,
 };
 use likeop::{construct_like_escape_arg, exec_glob, exec_like_with_escape};
 use rand::distributions::{Distribution, Uniform};
@@ -2677,6 +2677,18 @@ impl Program {
                     let mut schema = RefCell::borrow_mut(&conn.schema);
                     // TODO: This function below is synchronous, make it not async
                     parse_schema_rows(Some(stmt), &mut schema, conn.pager.io.clone())?;
+                    state.pc += 1;
+                }
+                Insn::ReadCookie { db, dest, cookie } => {
+                    if *db > 0 {
+                        // TODO: implement temp databases
+                        todo!("temp databases not implemented yet");
+                    }
+                    let cookie_value = match cookie {
+                        Cookie::UserVersion => pager.db_header.borrow().user_version.into(),
+                        cookie => todo!("{cookie:?} is not yet implement for ReadCookie"),
+                    };
+                    state.registers[*dest] = OwnedValue::Integer(cookie_value);
                     state.pc += 1;
                 }
                 Insn::ShiftRight { lhs, rhs, dest } => {
