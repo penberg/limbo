@@ -240,7 +240,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 let completion = Completion::Write(WriteCompletion::new(Box::new(move |_| {
                     *flag_complete.borrow_mut() = true;
                 })));
-                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))?;
+                file.pwrite(0, contents.buffer.clone(), completion)?;
             }
             let mut limit = 100;
             loop {

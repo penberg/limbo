@@ -12,9 +12,9 @@ use std::{
 pub trait File {
     fn lock_file(&self, exclusive: bool) -> Result<()>;
     fn unlock_file(&self) -> Result<()>;
-    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
-    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
-    fn sync(&self, c: Rc<Completion>) -> Result<()>;
+    fn pread(&self, pos: usize, c: Completion) -> Result<()>;
+    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Completion) -> Result<()>;
+    fn sync(&self, c: Completion) -> Result<()>;
     fn size(&self) -> Result<u64>;
 }
 
