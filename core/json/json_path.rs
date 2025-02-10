@@ -61,148 +61,274 @@ fn estimate_path_capacity(input: &str) -> usize {
 }
 
 /// Parses path into a Vec of Strings, where each string is a key or an array locator.
-pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
+pub fn json_path(path: &str) -> crate::Result<JsonPath<'_>> {
     if path.is_empty() {
         bail_parse_error!("Bad json path: {}", path)
     }
     let mut parser_state = PPState::Start;
     let mut index_state = ArrayIndexState::Start;
-
     let mut key_start = 0;
     let mut index_buffer: i128 = 0;
-
     let mut path_components = Vec::with_capacity(estimate_path_capacity(path));
     let mut path_iter = path.char_indices();
 
     while let Some(ch) = path_iter.next() {
-        let ch_len = ch.1.len_utf8();
         match parser_state {
-            PPState::Start => match ch {
-                (_, '$') => {
-                    path_components.push(PathElement::Root());
-                    parser_state = PPState::AfterRoot
-                }
-                (_, _) => bail_parse_error!("Bad json path: {}", path),
-            },
-            PPState::AfterRoot => match ch {
-                (idx, '.') => {
-                    parser_state = PPState::InKey;
-                    key_start = idx + ch_len;
-                }
-                (_, '[') => {
-                    index_state = ArrayIndexState::Start;
-                    parser_state = PPState::InArrayIndex;
-                    index_buffer = 0;
-                }
-                (_, _) => bail_parse_error!("Bad json path: {}", path),
-            },
-            PPState::InKey => match ch {
-                (idx, '.' | '[') => {
-                    let key_end = idx;
-
-                    if key_end > key_start {
-                        let key = &path[key_start..key_end];
-                        if ch.1 == '[' {
-                            index_state = ArrayIndexState::Start;
-                            parser_state = PPState::InArrayIndex;
-                            index_buffer = 0;
-                        } else {
-                            key_start = idx + ch_len;
-                        }
-                        path_components.push(PathElement::Key(Cow::Borrowed(key), false));
-                    } else {
-                        bail_parse_error!("Bad json path: {}", path)
-                    }
-                }
-                (_, ch) => {
-                    match ch {
-                        '"' => {
-                            while let Some((idx, ch)) = path_iter.next() {
-                                match ch {
-                                    '\\' => {
-                                        path_iter.next();
-                                    }
-                                    '"' => {
-                                        if key_start < idx {
-                                            let key = &path[key_start + 1..idx];
-                                            path_components
-                                                .push(PathElement::Key(Cow::Borrowed(key), true));
-                                            parser_state = PPState::ExpectDotOrBracket;
-                                            break;
-                                        }
-                                    }
-                                    _ => continue,
-                                }
-                            }
-                        }
-                        _ => continue,
-                    };
-                }
-            },
-            PPState::InArrayIndex => {
-                let (_, c) = ch;
-
-                match (&index_state, c) {
-                    (ArrayIndexState::Start, '#') => index_state = ArrayIndexState::AfterHash,
-                    (ArrayIndexState::Start, '0'..='9') => {
-                        index_buffer = c.to_digit(10).unwrap() as i128;
-                        index_state = ArrayIndexState::CollectingNumbers;
-                    }
-                    (ArrayIndexState::AfterHash, '-') => {
-                        if let Some((_, next_c)) = path_iter.next() {
-                            if next_c.is_ascii_digit() {
-                                index_buffer = -(next_c.to_digit(10).unwrap() as i128);
-                                index_state = ArrayIndexState::CollectingNumbers;
-                            } else {
-                                bail_parse_error!("Bad json path: {}", path);
-                            }
-                        } else {
-                            bail_parse_error!("Bad json path: {}", path);
-                        }
-                    }
-                    (ArrayIndexState::AfterHash, ']') => {
-                        parser_state = PPState::ExpectDotOrBracket;
-                        path_components.push(PathElement::ArrayLocator(None))
-                    }
-                    (ArrayIndexState::CollectingNumbers, '0'..='9') => {
-                        let (new_num, is_max) = collect_num(
-                            index_buffer,
-                            c.to_digit(10).unwrap() as i128,
-                            index_buffer < 0,
-                        );
-                        if is_max {
-                            index_state = ArrayIndexState::IsMax;
-                        }
-                        index_buffer = new_num;
-                    }
-                    (ArrayIndexState::IsMax, '0'..='9') => continue,
-                    (ArrayIndexState::CollectingNumbers | ArrayIndexState::IsMax, ']') => {
-                        parser_state = PPState::ExpectDotOrBracket;
-                        path_components.push(PathElement::ArrayLocator(Some(index_buffer as i32)))
-                    }
-                    (_, _) => bail_parse_error!("Bad json path: {}", path),
-                }
+            PPState::Start => {
+                handle_start(ch, &mut parser_state, &mut path_components, path)?;
             }
-            PPState::ExpectDotOrBracket => match ch {
-                (idx, '.') => {
-                    key_start = idx + ch_len;
-                    parser_state = PPState::InKey;
-                }
-                (_, '[') => {
-                    index_state = ArrayIndexState::Start;
-                    parser_state = PPState::InArrayIndex;
-                    index_buffer = 0;
-                }
-                (_, _) => bail_parse_error!("Bad json path: {}", path),
-            },
+            PPState::AfterRoot => {
+                handle_after_root(
+                    ch,
+                    &mut parser_state,
+                    &mut index_state,
+                    &mut key_start,
+                    &mut index_buffer,
+                    path,
+                )?;
+            }
+            PPState::InKey => {
+                handle_in_key(
+                    ch,
+                    &mut parser_state,
+                    &mut index_state,
+                    &mut key_start,
+                    &mut index_buffer,
+                    &mut path_components,
+                    &mut path_iter,
+                    path,
+                )?;
+            }
+            PPState::InArrayIndex => {
+                handle_array_index(
+                    ch,
+                    &mut parser_state,
+                    &mut index_state,
+                    &mut index_buffer,
+                    &mut path_components,
+                    &mut path_iter,
+                    path,
+                )?;
+            }
+            PPState::ExpectDotOrBracket => {
+                handle_expect_dot_or_bracket(
+                    ch,
+                    &mut parser_state,
+                    &mut index_state,
+                    &mut key_start,
+                    &mut index_buffer,
+                    path,
+                )?;
+            }
         }
     }
+
+    finalize_path(parser_state, key_start, path, &mut path_components)?;
+    Ok(JsonPath {
+        elements: path_components,
+    })
+}
+
+fn handle_start(
+    ch: (usize, char),
+    parser_state: &mut PPState,
+    path_components: &mut Vec<PathElement>,
+    path: &str,
+) -> crate::Result<()> {
+    match ch {
+        (_, '$') => {
+            path_components.push(PathElement::Root());
+            *parser_state = PPState::AfterRoot;
+            Ok(())
+        }
+        (_, _) => bail_parse_error!("Bad json path: {}", path),
+    }
+}
+
+fn handle_after_root(
+    ch: (usize, char),
+    parser_state: &mut PPState,
+    index_state: &mut ArrayIndexState,
+    key_start: &mut usize,
+    index_buffer: &mut i128,
+    path: &str,
+) -> crate::Result<()> {
+    match ch {
+        (idx, '.') => {
+            *parser_state = PPState::InKey;
+            *key_start = idx + ch.1.len_utf8();
+            Ok(())
+        }
+        (_, '[') => {
+            *index_state = ArrayIndexState::Start;
+            *parser_state = PPState::InArrayIndex;
+            *index_buffer = 0;
+            Ok(())
+        }
+        (_, _) => bail_parse_error!("Bad json path: {}", path),
+    }
+}
+
+fn handle_in_key<'a>(
+    ch: (usize, char),
+    parser_state: &mut PPState,
+    index_state: &mut ArrayIndexState,
+    key_start: &mut usize,
+    index_buffer: &mut i128,
+    path_components: &mut Vec<PathElement<'a>>,
+    path_iter: &mut std::str::CharIndices,
+    path: &'a str,
+) -> crate::Result<()> {
+    match ch {
+        (idx, '.' | '[') => {
+            let key_end = idx;
+            if key_end > *key_start {
+                let key = &path[*key_start..key_end];
+                if ch.1 == '[' {
+                    *index_state = ArrayIndexState::Start;
+                    *parser_state = PPState::InArrayIndex;
+                    *index_buffer = 0;
+                } else {
+                    *key_start = idx + ch.1.len_utf8();
+                }
+                path_components.push(PathElement::Key(Cow::Borrowed(key), false));
+            } else {
+                bail_parse_error!("Bad json path: {}", path)
+            }
+        }
+        (_, '"') => {
+            handle_quoted_key(parser_state, key_start, path_components, path_iter, path)?;
+        }
+        (_, _) => (),
+    }
+    Ok(())
+}
+
+fn handle_quoted_key<'a>(
+    parser_state: &mut PPState,
+    key_start: &mut usize,
+    path_components: &mut Vec<PathElement<'a>>,
+    path_iter: &mut std::str::CharIndices,
+    path: &'a str,
+) -> crate::Result<()> {
+    while let Some((idx, ch)) = path_iter.next() {
+        match ch {
+            '\\' => {
+                path_iter.next();
+            }
+            '"' => {
+                if *key_start < idx {
+                    let key = &path[*key_start + 1..idx];
+                    path_components.push(PathElement::Key(Cow::Borrowed(key), true));
+                    *parser_state = PPState::ExpectDotOrBracket;
+                    return Ok(());
+                }
+            }
+            _ => continue,
+        }
+    }
+    Ok(())
+}
+
+fn handle_array_index<'a>(
+    ch: (usize, char),
+    parser_state: &mut PPState,
+    index_state: &mut ArrayIndexState,
+    index_buffer: &mut i128,
+    path_components: &mut Vec<PathElement<'a>>,
+    path_iter: &mut std::str::CharIndices,
+    path: &str,
+) -> crate::Result<()> {
+    match (&index_state, ch.1) {
+        (ArrayIndexState::Start, '#') => {
+            *index_state = ArrayIndexState::AfterHash;
+        }
+        (ArrayIndexState::Start, '0'..='9') => {
+            *index_buffer = ch.1.to_digit(10).unwrap() as i128;
+            *index_state = ArrayIndexState::CollectingNumbers;
+        }
+        (ArrayIndexState::AfterHash, '-') => {
+            handle_negative_index(index_state, index_buffer, path_iter, path)?;
+        }
+        (ArrayIndexState::AfterHash, ']') => {
+            *parser_state = PPState::ExpectDotOrBracket;
+            path_components.push(PathElement::ArrayLocator(None));
+        }
+        (ArrayIndexState::CollectingNumbers, '0'..='9') => {
+            let (new_num, is_max) = collect_num(
+                *index_buffer,
+                ch.1.to_digit(10).unwrap() as i128,
+                *index_buffer < 0,
+            );
+            if is_max {
+                *index_state = ArrayIndexState::IsMax;
+            }
+            *index_buffer = new_num;
+        }
+        (ArrayIndexState::IsMax, '0'..='9') => (),
+        (ArrayIndexState::CollectingNumbers | ArrayIndexState::IsMax, ']') => {
+            *parser_state = PPState::ExpectDotOrBracket;
+            path_components.push(PathElement::ArrayLocator(Some(*index_buffer as i32)));
+        }
+        (_, _) => bail_parse_error!("Bad json path: {}", path),
+    }
+    Ok(())
+}
+
+fn handle_negative_index(
+    index_state: &mut ArrayIndexState,
+    index_buffer: &mut i128,
+    path_iter: &mut std::str::CharIndices,
+    path: &str,
+) -> crate::Result<()> {
+    if let Some((_, next_c)) = path_iter.next() {
+        if next_c.is_ascii_digit() {
+            *index_buffer = -(next_c.to_digit(10).unwrap() as i128);
+            *index_state = ArrayIndexState::CollectingNumbers;
+            Ok(())
+        } else {
+            bail_parse_error!("Bad json path: {}", path)
+        }
+    } else {
+        bail_parse_error!("Bad json path: {}", path)
+    }
+}
+
+fn handle_expect_dot_or_bracket(
+    ch: (usize, char),
+    parser_state: &mut PPState,
+    index_state: &mut ArrayIndexState,
+    key_start: &mut usize,
+    index_buffer: &mut i128,
+    path: &str,
+) -> crate::Result<()> {
+    match ch {
+        (idx, '.') => {
+            *key_start = idx + ch.1.len_utf8();
+            *parser_state = PPState::InKey;
+            Ok(())
+        }
+        (_, '[') => {
+            *index_state = ArrayIndexState::Start;
+            *parser_state = PPState::InArrayIndex;
+            *index_buffer = 0;
+            Ok(())
+        }
+        (_, _) => bail_parse_error!("Bad json path: {}", path),
+    }
+}
+
+fn finalize_path<'a>(
+    parser_state: PPState,
+    key_start: usize,
+    path: &'a str,
+    path_components: &mut Vec<PathElement<'a>>,
+) -> crate::Result<()> {
     match parser_state {
         PPState::InArrayIndex => bail_parse_error!("Bad json path: {}", path),
         PPState::InKey => {
             if key_start < path.len() {
                 let key = &path[key_start..];
-
                 if key.starts_with('"') & !key.ends_with('"') {
                     bail_parse_error!("Bad json path: {}", path)
                 }
@@ -213,9 +339,7 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
         }
         _ => (),
     }
-    Ok(JsonPath {
-        elements: path_components,
-    })
+    Ok(())
 }
 
 #[cfg(test)]
