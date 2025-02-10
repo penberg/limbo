@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     model::{
-        query::{select::Distinctness, Create, Delete, Drop, Insert, Query, Select},
+        query::{
+            select::{Distinctness, Predicate, ResultColumn},
+            Create, Delete, Drop, Insert, Query, Select,
+        },
         table::Value,
     },
     runner::env::SimConnection,
@@ -301,6 +304,7 @@ impl Interactions {
 
                         let select = Query::Select(Select {
                             table: table.clone(),
+                            result_columns: vec![ResultColumn::Star],
                             predicate: predicate.clone(),
                             distinct: Distinctness::All,
                             limit: None,
@@ -326,6 +330,26 @@ impl Interactions {
                             query.shadow(env);
                         }
                         select.shadow(env);
+                    }
+                    Property::SelectSelectOptimizer { table, predicate } => {
+                        let select1 = Query::Select(Select {
+                            table: table.clone(),
+                            result_columns: vec![ResultColumn::Expr(predicate.clone())],
+                            predicate: Predicate::true_(),
+                            distinct: Distinctness::All,
+                            limit: None,
+                        });
+
+                        let select2 = Query::Select(Select {
+                            table: table.clone(),
+                            result_columns: vec![ResultColumn::Star],
+                            predicate: predicate.clone(),
+                            distinct: Distinctness::All,
+                            limit: None,
+                        });
+
+                        select1.shadow(env);
+                        select2.shadow(env);
                     }
                 }
                 for interaction in property.interactions() {
