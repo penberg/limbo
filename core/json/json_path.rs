@@ -41,7 +41,6 @@ type IsMaxNumber = bool;
 
 fn collect_num(current: i128, adding: i128, negative: bool) -> (i128, IsMaxNumber) {
     let ten = 10i128;
-    let adding = adding as i128;
 
     let result = if negative {
         current.saturating_mul(ten).saturating_sub(adding)
@@ -230,12 +229,12 @@ fn handle_quoted_key<'a>(
     Ok(())
 }
 
-fn handle_array_index<'a>(
+fn handle_array_index(
     ch: (usize, char),
     parser_state: &mut PPState,
     index_state: &mut ArrayIndexState,
     index_buffer: &mut i128,
-    path_components: &mut Vec<PathElement<'a>>,
+    path_components: &mut Vec<PathElement<'_>>,
     path_iter: &mut std::str::CharIndices,
     path: &str,
 ) -> crate::Result<()> {

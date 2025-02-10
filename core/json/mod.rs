@@ -225,7 +225,7 @@ pub fn json_arrow_shift_extract(
     }
 
     let json = get_json_value(value)?;
-    let extracted = json_extract_single(&json, path, false)?.unwrap_or_else(|| &Val::Null);
+    let extracted = json_extract_single(&json, path, false)?.unwrap_or(&Val::Null);
 
     convert_json_to_db_type(extracted, true)
 }
@@ -242,7 +242,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
         return Ok(OwnedValue::Null);
     } else if paths.len() == 1 {
         let json = get_json_value(value)?;
-        let extracted = json_extract_single(&json, &paths[0], true)?.unwrap_or_else(|| &Val::Null);
+        let extracted = json_extract_single(&json, &paths[0], true)?.unwrap_or(&Val::Null);
 
         return convert_json_to_db_type(extracted, false);
     }
@@ -256,8 +256,7 @@ pub fn json_extract(value: &OwnedValue, paths: &[OwnedValue]) -> crate::Result<O
                 return Ok(OwnedValue::Null);
             }
             _ => {
-                let extracted =
-                    json_extract_single(&json, path, true)?.unwrap_or_else(|| &Val::Null);
+                let extracted = json_extract_single(&json, path, true)?.unwrap_or(&Val::Null);
 
                 if paths.len() == 1 && extracted == &Val::Null {
                     return Ok(OwnedValue::Null);
