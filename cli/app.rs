@@ -627,7 +627,7 @@ impl Limbo {
                     match rows.step() {
                         Ok(StepResult::Row) => {
                             let row = rows.row().unwrap();
-                            for (i, value) in row.values.iter().enumerate() {
+                            for (i, value) in row.get_values().iter().enumerate() {
                                 let value = value.to_value();
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
@@ -689,7 +689,7 @@ impl Limbo {
                                 let record = rows.row().unwrap();
                                 let mut row = Row::new();
                                 row.max_height(1);
-                                for value in &record.values {
+                                for value in record.get_values() {
                                     let (content, alignment) = match value.to_value() {
                                         Value::Null => {
                                             (self.opts.null_value.clone(), CellAlignment::Left)
@@ -762,7 +762,7 @@ impl Limbo {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
                             if let Some(Value::Text(schema)) =
-                                row.values.first().map(|v| v.to_value())
+                                row.get_values().first().map(|v| v.to_value())
                             {
                                 let _ = self.write_fmt(format_args!("{};", schema));
                                 found = true;
@@ -822,7 +822,7 @@ impl Limbo {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
                             if let Some(Value::Text(table)) =
-                                row.values.first().map(|v| v.to_value())
+                                row.get_values().first().map(|v| v.to_value())
                             {
                                 tables.push_str(table);
                                 tables.push(' ');
