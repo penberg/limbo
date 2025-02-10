@@ -366,7 +366,7 @@ pub fn json_type(value: &OwnedValue, path: Option<&OwnedValue>) -> crate::Result
         Val::Removed => unreachable!(),
     };
 
-    Ok(OwnedValue::Text(Text::json(&val.to_string())))
+    Ok(OwnedValue::Text(Text::json(val)))
 }
 
 /// Returns the value at the given JSON path. If the path does not exist, it returns None.
