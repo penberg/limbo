@@ -76,7 +76,7 @@ impl RowIterator {
             Ok(limbo_core::StepResult::Row) => {
                 let row = stmt.row().unwrap();
                 let row_array = Array::new();
-                for value in &row.values {
+                for value in row.get_values() {
                     let value = value.to_value();
                     let value = to_js_value(value);
                     row_array.push(&value);
@@ -117,7 +117,7 @@ impl Statement {
             Ok(limbo_core::StepResult::Row) => {
                 let row = stmt.row().unwrap();
                 let row_array = js_sys::Array::new();
-                for value in &row.values {
+                for value in row.get_values() {
                     let value = value.to_value();
                     let value = to_js_value(value);
                     row_array.push(&value);
@@ -140,7 +140,7 @@ impl Statement {
                 Ok(limbo_core::StepResult::Row) => {
                     let row = stmt.row().unwrap();
                     let row_array = js_sys::Array::new();
-                    for value in &row.values {
+                    for value in row.get_values() {
                         let value = value.to_value();
                         let value = to_js_value(value);
                         row_array.push(&value);

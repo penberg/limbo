@@ -798,7 +798,7 @@ pub fn insn_to_str(
             } => {
                 let _p4 = String::new();
                 let to_print: Vec<String> = order
-                    .values
+                    .get_values()
                     .iter()
                     .map(|v| match v {
                         OwnedValue::Integer(i) => {
@@ -816,9 +816,7 @@ pub fn insn_to_str(
                     *cursor_id as i32,
                     *columns as i32,
                     0,
-                    OwnedValue::build_text(
-                        &(format!("k({},{})", order.values.len(), to_print.join(","))),
-                    ),
+                    OwnedValue::build_text(&(format!("k({},{})", order.len(), to_print.join(",")))),
                     0,
                     format!("cursor={}", cursor_id),
                 )

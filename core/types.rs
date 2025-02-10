@@ -522,7 +522,7 @@ impl<'a> FromValue<'a> for &'a str {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Record {
-    pub values: Vec<OwnedValue>,
+    values: Vec<OwnedValue>,
 }
 
 impl Record {
@@ -532,6 +532,22 @@ impl Record {
     }
 
     pub fn count(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn last_value(&self) -> Option<&OwnedValue> {
+        self.values.last()
+    }
+
+    pub fn get_values(&self) -> &Vec<OwnedValue> {
+        &self.values
+    }
+
+    pub fn get_value(&self, idx: usize) -> &OwnedValue {
+        &self.values[idx]
+    }
+
+    pub fn len(&self) -> usize {
         self.values.len()
     }
 }

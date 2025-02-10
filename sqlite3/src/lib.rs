@@ -442,7 +442,7 @@ pub unsafe extern "C" fn sqlite3_expanded_sql(_stmt: *mut sqlite3_stmt) -> *mut 
 pub unsafe extern "C" fn sqlite3_data_count(stmt: *mut sqlite3_stmt) -> ffi::c_int {
     let stmt = &*stmt;
     let row = stmt.stmt.row().unwrap();
-    row.values.len() as ffi::c_int
+    row.len() as ffi::c_int
 }
 
 #[no_mangle]
@@ -635,7 +635,7 @@ pub unsafe extern "C" fn sqlite3_column_text(
         Some(row) => row,
         None => return std::ptr::null(),
     };
-    match row.values.get(idx as usize).map(|v| v.to_value()) {
+    match row.get_values().get(idx as usize).map(|v| v.to_value()) {
         Some(limbo_core::Value::Text(text)) => text.as_bytes().as_ptr(),
         _ => std::ptr::null(),
     }

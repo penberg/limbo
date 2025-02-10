@@ -102,10 +102,9 @@ fn row_to_obj_array<'local>(
     env: &mut JNIEnv<'local>,
     row: &limbo_core::Row,
 ) -> Result<JObject<'local>> {
-    let obj_array =
-        env.new_object_array(row.values.len() as i32, "java/lang/Object", JObject::null())?;
+    let obj_array = env.new_object_array(row.len() as i32, "java/lang/Object", JObject::null())?;
 
-    for (i, value) in row.values.iter().enumerate() {
+    for (i, value) in row.get_values().iter().enumerate() {
         let value = value.to_value();
         let obj = match value {
             limbo_core::Value::Null => JObject::null(),
