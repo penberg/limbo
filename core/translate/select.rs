@@ -1,5 +1,6 @@
 use super::emitter::emit_program;
 use super::plan::{select_star, Operation, Search, SelectQueryType};
+use super::planner::Scope;
 use crate::function::{AggFunc, ExtFunc, Func};
 use crate::translate::optimizer::optimize_plan;
 use crate::translate::plan::{Aggregate, Direction, GroupBy, Plan, ResultSetColumn, SelectPlan};
@@ -20,7 +21,7 @@ pub fn translate_select(
     select: ast::Select,
     syms: &SymbolTable,
 ) -> Result<ProgramBuilder> {
-    let mut select_plan = prepare_select_plan(schema, select, syms)?;
+    let mut select_plan = prepare_select_plan(schema, select, syms, None)?;
     optimize_plan(&mut select_plan, schema)?;
     let Plan::Select(ref select) = select_plan else {
         panic!("select_plan is not a SelectPlan");
@@ -36,10 +37,11 @@ pub fn translate_select(
     Ok(program)
 }
 
-pub fn prepare_select_plan(
+pub fn prepare_select_plan<'a>(
     schema: &Schema,
     select: ast::Select,
     syms: &SymbolTable,
+    outer_scope: Option<&'a Scope<'a>>,
 ) -> Result<Plan> {
     match *select.body.select {
         ast::OneSelect::Select(select_inner) => {
@@ -57,8 +59,11 @@ pub fn prepare_select_plan(
 
             let mut where_predicates = vec![];
 
+            let with = select.with;
+
             // Parse the FROM clause into a vec of TableReferences. Fold all the join conditions expressions into the WHERE clause.
-            let table_references = parse_from(schema, from, syms, &mut where_predicates)?;
+            let table_references =
+                parse_from(schema, from, syms, with, &mut where_predicates, outer_scope)?;
 
             // Preallocate space for the result columns
             let result_columns = Vec::with_capacity(

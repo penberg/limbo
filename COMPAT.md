@@ -86,7 +86,7 @@ The current status of Limbo is:
 | UPDATE                    | No      |                                                                                   |
 | UPSERT                    | No      |                                                                                   |
 | VACUUM                    | No      |                                                                                   |
-| WITH clause               | No      |                                                                                   |
+| WITH clause               | Partial | No RECURSIVE, no MATERIALIZED, only SELECT supported in CTEs                      |
 
 #### [PRAGMA](https://www.sqlite.org/pragma.html)
 
