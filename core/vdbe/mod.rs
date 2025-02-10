@@ -2146,19 +2146,31 @@ impl Program {
                             }
                             ScalarFunc::Trim => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let pattern_value = if func.arg_count == 2 {
+                                    state.registers.get(*start_reg + 1).cloned()
+                                } else {
+                                    None
+                                };
                                 let result = exec_trim(&reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::LTrim => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let pattern_value = if func.arg_count == 2 {
+                                    state.registers.get(*start_reg + 1).cloned()
+                                } else {
+                                    None
+                                };
                                 let result = exec_ltrim(&reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
                             ScalarFunc::RTrim => {
                                 let reg_value = state.registers[*start_reg].clone();
-                                let pattern_value = state.registers.get(*start_reg + 1).cloned();
+                                let pattern_value = if func.arg_count == 2 {
+                                    state.registers.get(*start_reg + 1).cloned()
+                                } else {
+                                    None
+                                };
                                 let result = exec_rtrim(&reg_value, pattern_value);
                                 state.registers[*dest] = result;
                             }
@@ -3091,6 +3103,9 @@ fn exec_quote(value: &OwnedValue) -> OwnedValue {
             for c in s.as_str().chars() {
                 if c == '\0' {
                     break;
+                } else if c == '\'' {
+                    quoted.push('\'');
+                    quoted.push(c);
                 } else {
                     quoted.push(c);
                 }
@@ -3823,7 +3838,7 @@ mod tests {
         assert_eq!(exec_quote(&input), expected);
 
         let input = OwnedValue::build_text(Rc::new(String::from("hello''world")));
-        let expected = OwnedValue::build_text(Rc::new(String::from("'hello''world'")));
+        let expected = OwnedValue::build_text(Rc::new(String::from("'hello''''world'")));
         assert_eq!(exec_quote(&input), expected);
     }
 

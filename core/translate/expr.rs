@@ -237,8 +237,10 @@ pub fn translate_condition_expr(
             )?;
         }
         ast::Expr::Binary(lhs, op, rhs) => {
-            let lhs_reg = translate_and_mark(program, Some(referenced_tables), lhs, resolver)?;
-            let rhs_reg = translate_and_mark(program, Some(referenced_tables), rhs, resolver)?;
+            let lhs_reg = program.alloc_register();
+            let rhs_reg = program.alloc_register();
+            translate_and_mark(program, Some(referenced_tables), lhs, lhs_reg, resolver)?;
+            translate_and_mark(program, Some(referenced_tables), rhs, rhs_reg, resolver)?;
             match op {
                 ast::Operator::Greater => {
                     emit_cmp_insn!(program, condition_metadata, Gt, Le, lhs_reg, rhs_reg)
@@ -417,16 +419,17 @@ pub fn translate_condition_expr(
             let cur_reg = program.alloc_register();
             match op {
                 ast::LikeOperator::Like | ast::LikeOperator::Glob => {
-                    let pattern_reg = program.alloc_register();
+                    let start_reg = program.alloc_registers(2);
                     let mut constant_mask = 0;
-                    let _ = translate_and_mark(program, Some(referenced_tables), lhs, resolver);
-                    let _ = translate_expr(
+                    translate_and_mark(
                         program,
                         Some(referenced_tables),
-                        rhs,
-                        pattern_reg,
+                        lhs,
+                        start_reg + 1,
                         resolver,
                     )?;
+                    let _ =
+                        translate_expr(program, Some(referenced_tables), rhs, start_reg, resolver)?;
                     if matches!(rhs.as_ref(), ast::Expr::Literal(_)) {
                         program.mark_last_insn_constant();
                         constant_mask = 1;
@@ -438,7 +441,7 @@ pub fn translate_condition_expr(
                     };
                     program.emit_insn(Insn::Function {
                         constant_mask,
-                        start_reg: pattern_reg,
+                        start_reg,
                         dest: cur_reg,
                         func: FuncCtx {
                             func: Func::Scalar(func),
@@ -1003,16 +1006,23 @@ pub fn translate_expr(
                         )
                     }
                     JsonFunc::JsonRemove => {
+                        let start_reg =
+                            program.alloc_registers(args.as_ref().map(|x| x.len()).unwrap_or(1));
                         if let Some(args) = args {
-                            for arg in args.iter() {
+                            for (i, arg) in args.iter().enumerate() {
                                 // register containing result of each argument expression
-                                let _ =
-                                    translate_and_mark(program, referenced_tables, arg, resolver)?;
+                                translate_and_mark(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    start_reg + i,
+                                    resolver,
+                                )?;
                             }
                         }
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
-                            start_reg: target_register + 1,
+                            start_reg,
                             dest: target_register,
                             func: func_ctx,
                         });
@@ -1337,11 +1347,17 @@ pub fn translate_expr(
                         | ScalarFunc::Soundex
                         | ScalarFunc::ZeroBlob => {
                             let args = expect_arguments_exact!(args, 1, srf);
-                            let reg =
-                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
+                            let start_reg = program.alloc_register();
+                            translate_and_mark(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                start_reg,
+                                resolver,
+                            )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: reg,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1350,11 +1366,17 @@ pub fn translate_expr(
                         #[cfg(not(target_family = "wasm"))]
                         ScalarFunc::LoadExtension => {
                             let args = expect_arguments_exact!(args, 1, srf);
-                            let reg =
-                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
+                            let start_reg = program.alloc_register();
+                            translate_and_mark(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                start_reg,
+                                resolver,
+                            )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: reg,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1377,20 +1399,23 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::Date | ScalarFunc::DateTime => {
+                            let start_reg = program
+                                .alloc_registers(args.as_ref().map(|x| x.len()).unwrap_or(1));
                             if let Some(args) = args {
-                                for arg in args.iter() {
+                                for (i, arg) in args.iter().enumerate() {
                                     // register containing result of each argument expression
-                                    let _ = translate_and_mark(
+                                    translate_and_mark(
                                         program,
                                         referenced_tables,
                                         arg,
+                                        start_reg + i,
                                         resolver,
                                     )?;
                                 }
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1457,11 +1482,17 @@ pub fn translate_expr(
                             } else {
                                 crate::bail_parse_error!("hex function with no arguments",);
                             };
-                            let regs =
-                                translate_and_mark(program, referenced_tables, &args[0], resolver)?;
+                            let start_reg = program.alloc_register();
+                            translate_and_mark(
+                                program,
+                                referenced_tables,
+                                &args[0],
+                                start_reg,
+                                resolver,
+                            )?;
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: regs,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1495,20 +1526,23 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::Time => {
+                            let start_reg = program
+                                .alloc_registers(args.as_ref().map(|x| x.len()).unwrap_or(1));
                             if let Some(args) = args {
-                                for arg in args.iter() {
+                                for (i, arg) in args.iter().enumerate() {
                                     // register containing result of each argument expression
-                                    let _ = translate_and_mark(
+                                    translate_and_mark(
                                         program,
                                         referenced_tables,
                                         arg,
+                                        start_reg + i,
                                         resolver,
                                     )?;
                                 }
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1537,12 +1571,19 @@ pub fn translate_expr(
                         | ScalarFunc::Unhex => {
                             let args = expect_arguments_max!(args, 2, srf);
 
-                            for arg in args.iter() {
-                                translate_and_mark(program, referenced_tables, arg, resolver)?;
+                            let start_reg = program.alloc_registers(args.len());
+                            for (i, arg) in args.iter().enumerate() {
+                                translate_and_mark(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    start_reg + i,
+                                    resolver,
+                                )?;
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1559,13 +1600,20 @@ pub fn translate_expr(
                             } else {
                                 crate::bail_parse_error!("min function with no arguments");
                             };
-                            for arg in args {
-                                translate_and_mark(program, referenced_tables, arg, resolver)?;
+                            let start_reg = program.alloc_registers(args.len());
+                            for (i, arg) in args.iter().enumerate() {
+                                translate_and_mark(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    start_reg + i,
+                                    resolver,
+                                )?;
                             }
 
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1582,13 +1630,20 @@ pub fn translate_expr(
                             } else {
                                 crate::bail_parse_error!("max function with no arguments");
                             };
-                            for arg in args {
-                                translate_and_mark(program, referenced_tables, arg, resolver)?;
+                            let start_reg = program.alloc_registers(args.len());
+                            for (i, arg) in args.iter().enumerate() {
+                                translate_and_mark(
+                                    program,
+                                    referenced_tables,
+                                    arg,
+                                    start_reg + i,
+                                    resolver,
+                                )?;
                             }
 
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1725,20 +1780,23 @@ pub fn translate_expr(
                             Ok(target_register)
                         }
                         ScalarFunc::StrfTime => {
+                            let start_reg = program
+                                .alloc_registers(args.as_ref().map(|x| x.len()).unwrap_or(1));
                             if let Some(args) = args {
-                                for arg in args.iter() {
+                                for (i, arg) in args.iter().enumerate() {
                                     // register containing result of each argument expression
-                                    let _ = translate_and_mark(
+                                    translate_and_mark(
                                         program,
                                         referenced_tables,
                                         arg,
+                                        start_reg + i,
                                         resolver,
                                     )?;
                                 }
                             }
                             program.emit_insn(Insn::Function {
                                 constant_mask: 0,
-                                start_reg: target_register + 1,
+                                start_reg,
                                 dest: target_register,
                                 func: func_ctx,
                             });
@@ -1771,11 +1829,17 @@ pub fn translate_expr(
 
                     MathFuncArity::Unary => {
                         let args = expect_arguments_exact!(args, 1, math_func);
-                        let reg =
-                            translate_and_mark(program, referenced_tables, &args[0], resolver)?;
+                        let start_reg = program.alloc_register();
+                        translate_and_mark(
+                            program,
+                            referenced_tables,
+                            &args[0],
+                            start_reg,
+                            resolver,
+                        )?;
                         program.emit_insn(Insn::Function {
                             constant_mask: 0,
-                            start_reg: reg,
+                            start_reg,
                             dest: target_register,
                             func: func_ctx,
                         });
@@ -2165,14 +2229,14 @@ pub fn translate_and_mark(
     program: &mut ProgramBuilder,
     referenced_tables: Option<&[TableReference]>,
     expr: &ast::Expr,
+    target_register: usize,
     resolver: &Resolver,
-) -> Result<usize> {
-    let target_register = program.alloc_register();
+) -> Result<()> {
     translate_expr(program, referenced_tables, expr, target_register, resolver)?;
     if matches!(expr, ast::Expr::Literal(_)) {
         program.mark_last_insn_constant();
     }
-    Ok(target_register)
+    Ok(())
 }
 
 /// Sanitaizes a string literal by removing single quote at front and back
