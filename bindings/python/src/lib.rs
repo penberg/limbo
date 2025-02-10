@@ -300,7 +300,7 @@ pub fn connect(path: &str) -> Result<Connection> {
 
 fn row_to_py(py: Python, row: &limbo_core::Row) -> PyObject {
     let py_values: Vec<PyObject> = row
-        .values
+        .get_values()
         .iter()
         .map(|value| match value.to_value() {
             limbo_core::Value::Null => py.None(),
