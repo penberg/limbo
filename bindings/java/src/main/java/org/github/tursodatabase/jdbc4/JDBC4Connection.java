@@ -7,17 +7,24 @@ import java.util.Properties;
 import java.util.concurrent.Executor;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
 import org.github.tursodatabase.core.LimboConnection;
+import org.github.tursodatabase.core.LimboStatement;
 
-public class JDBC4Connection extends LimboConnection {
+public class JDBC4Connection implements Connection {
+
+  private final LimboConnection connection;
 
   private Map<String, Class<?>> typeMap = new HashMap<>();
 
   public JDBC4Connection(String url, String filePath) throws SQLException {
-    super(url, filePath);
+    this.connection = new LimboConnection(url, filePath);
   }
 
   public JDBC4Connection(String url, String filePath, Properties properties) throws SQLException {
-    super(url, filePath, properties);
+    this.connection = new LimboConnection(url, filePath, properties);
+  }
+
+  public LimboStatement prepare(String sql) throws SQLException {
+    return connection.prepare(sql);
   }
 
   @Override
@@ -35,8 +42,8 @@ public class JDBC4Connection extends LimboConnection {
   @Override
   public Statement createStatement(
       int resultSetType, int resultSetConcurrency, int resultSetHoldability) throws SQLException {
-    checkOpen();
-    checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
+    connection.checkOpen();
+    connection.checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
 
     return new JDBC4Statement(this);
   }
@@ -69,12 +76,12 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public void close() throws SQLException {
-    super.close();
+    connection.close();
   }
 
   @Override
   public boolean isClosed() throws SQLException {
-    return super.isClosed();
+    return connection.isClosed();
   }
 
   @Override
@@ -140,13 +147,13 @@ public class JDBC4Connection extends LimboConnection {
 
   @Override
   public int getHoldability() throws SQLException {
-    checkOpen();
+    connection.checkOpen();
     return ResultSet.CLOSE_CURSORS_AT_COMMIT;
   }
 
   @Override
   public void setHoldability(int holdability) throws SQLException {
-    checkOpen();
+    connection.checkOpen();
     if (holdability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
       throw new SQLException("Limbo only supports CLOSE_CURSORS_AT_COMMIT");
     }
@@ -214,8 +221,8 @@ public class JDBC4Connection extends LimboConnection {
   public PreparedStatement prepareStatement(
       String sql, int resultSetType, int resultSetConcurrency, int resultSetHoldability)
       throws SQLException {
-    checkOpen();
-    checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
+    connection.checkOpen();
+    connection.checkCursor(resultSetType, resultSetConcurrency, resultSetHoldability);
     return new JDBC4PreparedStatement(this, sql);
   }
 
@@ -347,5 +354,15 @@ public class JDBC4Connection extends LimboConnection {
   public boolean isWrapperFor(Class<?> iface) throws SQLException {
     // TODO
     return false;
+  }
+
+  public void setBusyTimeout(int busyTimeout) {
+    // TODO: add support for busy timeout
+  }
+
+  /** @return busy timeout in milliseconds. */
+  public int getBusyTimeout() {
+    // TODO: add support for busyTimeout
+    return 0;
   }
 }

@@ -2,7 +2,6 @@ package org.github.tursodatabase.core;
 
 import static org.github.tursodatabase.utils.ByteArrayUtils.stringToUtf8ByteArray;
 
-import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Properties;
@@ -11,7 +10,7 @@ import org.github.tursodatabase.utils.LimboExceptionUtils;
 import org.github.tursodatabase.utils.Logger;
 import org.github.tursodatabase.utils.LoggerFactory;
 
-public abstract class LimboConnection implements Connection {
+public class LimboConnection {
   private static final Logger logger = LoggerFactory.getLogger(LimboConnection.class);
 
   private final long connectionPtr;
@@ -38,11 +37,10 @@ public abstract class LimboConnection implements Connection {
     return LimboDBFactory.open(url, filePath, properties);
   }
 
-  protected void checkOpen() throws SQLException {
+  public void checkOpen() throws SQLException {
     if (isClosed()) throw new SQLException("database connection closed");
   }
 
-  @Override
   public void close() throws SQLException {
     if (isClosed()) {
       return;
@@ -53,7 +51,6 @@ public abstract class LimboConnection implements Connection {
 
   private native void _close(long connectionPtr);
 
-  @Override
   public boolean isClosed() throws SQLException {
     return closed;
   }
@@ -80,14 +77,7 @@ public abstract class LimboConnection implements Connection {
 
   private native long prepareUtf8(long connectionPtr, byte[] sqlUtf8) throws SQLException;
 
-  /** @return busy timeout in milliseconds. */
-  public int getBusyTimeout() {
-    // TODO: add support for busyTimeout
-    return 0;
-  }
-
   // TODO: check whether this is still valid for limbo
-
   /**
    * Checks whether the type, concurrency, and holdability settings for a {@link ResultSet} are
    * supported by the SQLite interface. Supported settings are:
@@ -102,7 +92,7 @@ public abstract class LimboConnection implements Connection {
    * @param resultSetConcurrency the concurrency setting.
    * @param resultSetHoldability the holdability setting.
    */
-  protected void checkCursor(int resultSetType, int resultSetConcurrency, int resultSetHoldability)
+  public void checkCursor(int resultSetType, int resultSetConcurrency, int resultSetHoldability)
       throws SQLException {
     if (resultSetType != ResultSet.TYPE_FORWARD_ONLY) {
       throw new SQLException("SQLite only supports TYPE_FORWARD_ONLY cursors");
@@ -113,10 +103,6 @@ public abstract class LimboConnection implements Connection {
     if (resultSetHoldability != ResultSet.CLOSE_CURSORS_AT_COMMIT) {
       throw new SQLException("SQLite only supports closing cursors at commit");
     }
-  }
-
-  public void setBusyTimeout(int busyTimeout) {
-    // TODO: add support for busy timeout
   }
 
   /**

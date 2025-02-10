@@ -5,7 +5,6 @@ import java.util.Locale;
 import java.util.Properties;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.jdbc4.JDBC4Connection;
 import org.github.tursodatabase.utils.Logger;
 import org.github.tursodatabase.utils.LoggerFactory;
@@ -24,7 +23,7 @@ public class JDBC implements Driver {
   }
 
   @Nullable
-  public static LimboConnection createConnection(String url, Properties properties)
+  public static JDBC4Connection createConnection(String url, Properties properties)
       throws SQLException {
     if (!isValidURL(url)) return null;
 

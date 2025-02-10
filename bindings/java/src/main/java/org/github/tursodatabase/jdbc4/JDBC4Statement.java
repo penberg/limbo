@@ -10,13 +10,12 @@ import java.sql.Statement;
 import java.util.concurrent.locks.ReentrantLock;
 import org.github.tursodatabase.annotations.Nullable;
 import org.github.tursodatabase.annotations.SkipNullableCheck;
-import org.github.tursodatabase.core.LimboConnection;
 import org.github.tursodatabase.core.LimboResultSet;
 import org.github.tursodatabase.core.LimboStatement;
 
 public class JDBC4Statement implements Statement {
 
-  private final LimboConnection connection;
+  private final JDBC4Connection connection;
   @Nullable protected LimboStatement statement = null;
 
   // Because JDBC4Statement has different life cycle in compared to LimboStatement, let's use this
@@ -34,7 +33,7 @@ public class JDBC4Statement implements Statement {
 
   private ReentrantLock connectionLock = new ReentrantLock();
 
-  public JDBC4Statement(LimboConnection connection) {
+  public JDBC4Statement(JDBC4Connection connection) {
     this(
         connection,
         ResultSet.TYPE_FORWARD_ONLY,
@@ -43,7 +42,7 @@ public class JDBC4Statement implements Statement {
   }
 
   public JDBC4Statement(
-      LimboConnection connection,
+      JDBC4Connection connection,
       int resultSetType,
       int resultSetConcurrency,
       int resultSetHoldability) {
