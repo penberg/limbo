@@ -18,7 +18,7 @@ use sealed::Sealed;
 ///
 /// Many functions in this library let you pass parameters to libsql. Doing this
 /// lets you avoid any risk of SQL injection, and is simpler than escaping
-/// things manually. These functions generally contain some paramter that generically
+/// things manually. These functions generally contain some parameter that generically
 /// accepts some implementation this trait.
 ///
 /// # Positional parameters
@@ -29,7 +29,7 @@ use sealed::Sealed;
 ///     by doing `(1, "foo")`.
 /// - For hetergeneous parameter lists of 16 or greater, the [`limbo_libsql::params!`] is supported
 ///     by doing `limbo_libsql::params![1, "foo"]`.
-/// - For homogeneous paramter types (where they are all the same type), const arrays are
+/// - For homogeneous parameter types (where they are all the same type), const arrays are
 ///     supported by doing `[1, 2, 3]`.
 ///
 /// # Example (positional)
@@ -58,13 +58,13 @@ use sealed::Sealed;
 /// # }
 /// ```
 ///
-/// # Named paramters
+/// # Named parameters
 ///
 /// - For heterogeneous parameter lists of 16 or less items a tuple syntax is supported
 ///     by doing `(("key1", 1), ("key2", "foo"))`.
 /// - For hetergeneous parameter lists of 16 or greater, the [`limbo_libsql::params!`] is supported
 ///     by doing `limbo_libsql::named_params!["key1": 1, "key2": "foo"]`.
-/// - For homogeneous paramter types (where they are all the same type), const arrays are
+/// - For homogeneous parameter types (where they are all the same type), const arrays are
 ///     supported by doing `[("key1", 1), ("key2, 2), ("key3", 3)]`.
 ///
 /// # Example (named)

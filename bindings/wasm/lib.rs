@@ -76,7 +76,7 @@ impl RowIterator {
             Ok(limbo_core::StepResult::Row) => {
                 let row = stmt.row().unwrap();
                 let row_array = Array::new();
-                for value in &row.values {
+                for value in row.get_values() {
                     let value = value.to_value();
                     let value = to_js_value(value);
                     row_array.push(&value);
@@ -117,7 +117,7 @@ impl Statement {
             Ok(limbo_core::StepResult::Row) => {
                 let row = stmt.row().unwrap();
                 let row_array = js_sys::Array::new();
-                for value in &row.values {
+                for value in row.get_values() {
                     let value = value.to_value();
                     let value = to_js_value(value);
                     row_array.push(&value);
@@ -140,7 +140,7 @@ impl Statement {
                 Ok(limbo_core::StepResult::Row) => {
                     let row = stmt.row().unwrap();
                     let row_array = js_sys::Array::new();
-                    for value in &row.values {
+                    for value in row.get_values() {
                         let value = value.to_value();
                         let value = to_js_value(value);
                         row_array.push(&value);
@@ -228,9 +228,9 @@ impl limbo_core::File for File {
         Ok(())
     }
 
-    fn pread(&self, pos: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        let r = match &*c {
-            limbo_core::Completion::Read(r) => r,
+    fn pread(&self, pos: usize, c: limbo_core::Completion) -> Result<()> {
+        let r = match &c {
+            limbo_core::Completion::Read(ref r) => r,
             _ => unreachable!(),
         };
         {
@@ -247,10 +247,10 @@ impl limbo_core::File for File {
         &self,
         pos: usize,
         buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        c: Rc<limbo_core::Completion>,
+        c: limbo_core::Completion,
     ) -> Result<()> {
-        let w = match &*c {
-            limbo_core::Completion::Write(w) => w,
+        let w = match &c {
+            limbo_core::Completion::Write(ref w) => w,
             _ => unreachable!(),
         };
         let buf = buffer.borrow();
@@ -260,7 +260,7 @@ impl limbo_core::File for File {
         Ok(())
     }
 
-    fn sync(&self, c: Rc<limbo_core::Completion>) -> Result<()> {
+    fn sync(&self, c: limbo_core::Completion) -> Result<()> {
         self.vfs.sync(self.fd);
         c.complete(0);
         Ok(())
@@ -331,9 +331,9 @@ impl DatabaseStorage {
 }
 
 impl limbo_core::DatabaseStorage for DatabaseStorage {
-    fn read_page(&self, page_idx: usize, c: Rc<limbo_core::Completion>) -> Result<()> {
-        let r = match c.as_ref() {
-            limbo_core::Completion::Read(r) => r,
+    fn read_page(&self, page_idx: usize, c: limbo_core::Completion) -> Result<()> {
+        let r = match c {
+            limbo_core::Completion::Read(ref r) => r,
             _ => unreachable!(),
         };
         let size = r.buf().len();
@@ -350,7 +350,7 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
         &self,
         page_idx: usize,
         buffer: Rc<std::cell::RefCell<limbo_core::Buffer>>,
-        c: Rc<limbo_core::Completion>,
+        c: limbo_core::Completion,
     ) -> Result<()> {
         let size = buffer.borrow().len();
         let pos = (page_idx - 1) * size;
@@ -358,7 +358,7 @@ impl limbo_core::DatabaseStorage for DatabaseStorage {
         Ok(())
     }
 
-    fn sync(&self, _c: Rc<limbo_core::Completion>) -> Result<()> {
+    fn sync(&self, _c: limbo_core::Completion) -> Result<()> {
         todo!()
     }
 }

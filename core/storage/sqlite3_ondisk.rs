@@ -128,7 +128,7 @@ pub struct DatabaseHeader {
     text_encoding: u32,
 
     /// The "user version" as read and set by the user_version pragma.
-    user_version: u32,
+    pub user_version: u32,
 
     /// True (non-zero) for incremental-vacuum mode. False (zero) otherwise.
     incremental_vacuum_enabled: u32,
@@ -232,7 +232,7 @@ impl Default for DatabaseHeader {
             default_page_cache_size: 500, // pages
             vacuum_mode_largest_root_page: 0,
             text_encoding: 1, // utf-8
-            user_version: 1,
+            user_version: 0,
             incremental_vacuum_enabled: 0,
             application_id: 0,
             reserved_for_expansion: [0; 20],
@@ -253,8 +253,8 @@ pub fn begin_read_database_header(
         let header = header.clone();
         finish_read_database_header(buf, header).unwrap();
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_io.read_page(1, c.clone())?;
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
+    page_io.read_page(1, c)?;
     Ok(result)
 }
 
@@ -313,7 +313,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
 
     let drop_fn = Rc::new(|_buf| {});
     let buf = Rc::new(RefCell::new(Buffer::allocate(512, drop_fn)));
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, read_complete)));
+    let c = Completion::Read(ReadCompletion::new(buf, read_complete));
     page_source.read_page(1, c)?;
     // run get header block
     pager.io.run_once()?;
@@ -327,7 +327,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
         // finish_read_database_header(buf, header).unwrap();
     });
 
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     page_source.write_page(0, buffer_to_copy, c)?;
 
     Ok(())
@@ -362,7 +362,7 @@ pub fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PageType {
     IndexInterior = 2,
     TableInterior = 5,
@@ -675,8 +675,8 @@ pub fn begin_read_page(
             page.set_error();
         }
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
-    page_io.read_page(page_idx, c.clone())?;
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
+    page_io.read_page(page_idx, c)?;
     Ok(())
 }
 
@@ -733,7 +733,7 @@ pub fn begin_write_btree_page(
             }
         })
     };
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     page_source.write_page(page_id, buffer.clone(), c)?;
     Ok(())
 }
@@ -746,7 +746,7 @@ pub fn begin_sync(page_io: Rc<dyn DatabaseStorage>, syncing: Rc<RefCell<bool>>) 
             *syncing.borrow_mut() = false;
         }),
     });
-    page_io.sync(Rc::new(completion))?;
+    page_io.sync(completion)?;
     Ok(())
 }
 
@@ -1129,11 +1129,9 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
 }
 
 pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
-    let mut varint: Vec<u8> = vec![0; 9];
-    let n = write_varint(&mut varint.as_mut_slice()[0..9], value);
-    write_varint(&mut varint, value);
-    varint.truncate(n);
-    payload.extend_from_slice(&varint);
+    let mut varint = [0u8; 9];
+    let n = write_varint(&mut varint, value);
+    payload.extend_from_slice(&varint[0..n]);
 }
 
 pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Arc<RwLock<WalHeader>>> {
@@ -1145,7 +1143,7 @@ pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Arc<RwLock<WalHeader>>
         let header = header.clone();
         finish_read_wal_header(buf, header).unwrap();
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
     io.pread(0, c)?;
     Ok(result)
 }
@@ -1187,7 +1185,7 @@ pub fn begin_read_wal_frame(
         let frame = frame.clone();
         finish_read_page(2, buf, frame).unwrap();
     });
-    let c = Rc::new(Completion::Read(ReadCompletion::new(buf, complete)));
+    let c = Completion::Read(ReadCompletion::new(buf, complete));
     io.pread(offset, c)?;
     Ok(())
 }
@@ -1262,7 +1260,7 @@ pub fn begin_write_wal_frame(
             }
         })
     };
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     io.pwrite(offset, buffer.clone(), c)?;
     Ok(checksums)
 }
@@ -1295,7 +1293,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
             }
         })
     };
-    let c = Rc::new(Completion::Write(WriteCompletion::new(write_complete)));
+    let c = Completion::Write(WriteCompletion::new(write_complete));
     io.pwrite(0, buffer.clone(), c)?;
     Ok(())
 }
@@ -1420,7 +1418,7 @@ mod tests {
     #[case(&[], SerialType::ConstInt0, OwnedValue::Integer(0))]
     #[case(&[], SerialType::ConstInt1, OwnedValue::Integer(1))]
     #[case(&[1, 2, 3], SerialType::Blob(3), OwnedValue::Blob(vec![1, 2, 3].into()))]
-    #[case(&[65, 66, 67], SerialType::String(3), OwnedValue::build_text("ABC".to_string().into()))]
+    #[case(&[65, 66, 67], SerialType::String(3), OwnedValue::build_text("ABC"))]
     fn test_read_value(
         #[case] buf: &[u8],
         #[case] serial_type: SerialType,

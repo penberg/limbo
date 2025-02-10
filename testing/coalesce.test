@@ -11,6 +11,18 @@ do_execsql_test coalesce-2 {
     select coalesce(NULL, NULL, 1);
 } {1}
 
+do_execsql_test coalesce-nested {
+    select coalesce(NULL, coalesce(NULL, NULL));
+} {}
+
+do_execsql_test coalesce-nested-2 {
+    select coalesce(NULL, coalesce(NULL, 2));
+    select coalesce(NULL, coalesce(1, 2));
+    select coalesce(0, coalesce(1, 2));
+} {2
+1
+0}
+
 do_execsql_test coalesce-null {
     select coalesce(NULL, NULL, NULL);
 } {}

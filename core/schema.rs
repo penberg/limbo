@@ -150,7 +150,7 @@ impl BTreeTable {
         let cmd = parser.next()?;
         match cmd {
             Some(Cmd::Stmt(Stmt::CreateTable { tbl_name, body, .. })) => {
-                create_table(tbl_name, body, root_page)
+                create_table(tbl_name, *body, root_page)
             }
             _ => todo!("Expected CREATE TABLE statement"),
         }

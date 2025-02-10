@@ -116,12 +116,12 @@ pub extern "C" fn stmt_query(
         let val = arg.to_value(&mut pool);
         statement.bind_at(NonZero::new(i + 1).unwrap(), val);
     }
-    // ownership of the statement is transfered to the LimboRows object.
+    // ownership of the statement is transferred to the LimboRows object.
     LimboRows::new(statement, stmt.conn).to_ptr()
 }
 
 pub struct LimboStatement<'conn> {
-    /// If 'query' is ran on the statement, ownership is transfered to the LimboRows object
+    /// If 'query' is ran on the statement, ownership is transferred to the LimboRows object
     pub statement: Option<Statement>,
     pub conn: &'conn mut LimboConn,
     pub err: Option<LimboError>,

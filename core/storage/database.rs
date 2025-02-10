@@ -1,4 +1,6 @@
-use crate::{error::LimboError, io::Completion, Buffer, Result};
+#[cfg(feature = "fs")]
+use crate::error::LimboError;
+use crate::{io::Completion, Buffer, Result};
 use std::{cell::RefCell, rc::Rc};
 
 /// DatabaseStorage is an interface a database file that consists of pages.
@@ -7,14 +9,10 @@ use std::{cell::RefCell, rc::Rc};
 /// the storage medium. A database can either be a file on disk, like in SQLite,
 /// or something like a remote page server service.
 pub trait DatabaseStorage {
-    fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()>;
-    fn write_page(
-        &self,
-        page_idx: usize,
-        buffer: Rc<RefCell<Buffer>>,
-        c: Rc<Completion>,
-    ) -> Result<()>;
-    fn sync(&self, c: Rc<Completion>) -> Result<()>;
+    fn read_page(&self, page_idx: usize, c: Completion) -> Result<()>;
+    fn write_page(&self, page_idx: usize, buffer: Rc<RefCell<Buffer>>, c: Completion)
+        -> Result<()>;
+    fn sync(&self, c: Completion) -> Result<()>;
 }
 
 #[cfg(feature = "fs")]
@@ -24,9 +22,9 @@ pub struct FileStorage {
 
 #[cfg(feature = "fs")]
 impl DatabaseStorage for FileStorage {
-    fn read_page(&self, page_idx: usize, c: Rc<Completion>) -> Result<()> {
-        let r = match c.as_ref() {
-            Completion::Read(r) => r,
+    fn read_page(&self, page_idx: usize, c: Completion) -> Result<()> {
+        let r = match c {
+            Completion::Read(ref r) => r,
             _ => unreachable!(),
         };
         let size = r.buf().len();
@@ -43,7 +41,7 @@ impl DatabaseStorage for FileStorage {
         &self,
         page_idx: usize,
         buffer: Rc<RefCell<Buffer>>,
-        c: Rc<Completion>,
+        c: Completion,
     ) -> Result<()> {
         let buffer_size = buffer.borrow().len();
         assert!(buffer_size >= 512);
@@ -54,7 +52,7 @@ impl DatabaseStorage for FileStorage {
         Ok(())
     }
 
-    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+    fn sync(&self, c: Completion) -> Result<()> {
         self.file.sync(c)
     }
 }

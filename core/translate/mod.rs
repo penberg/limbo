@@ -34,6 +34,7 @@ use crate::{bail_parse_error, Connection, LimboError, Result, SymbolTable};
 use insert::translate_insert;
 use select::translate_select;
 use sqlite3_parser::ast::{self, fmt::ToTokens};
+use sqlite3_parser::ast::{Delete, Insert};
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
@@ -51,7 +52,7 @@ pub fn translate(
     let mut change_cnt_on = false;
 
     let program = match stmt {
-        ast::Stmt::AlterTable(_, _) => bail_parse_error!("ALTER TABLE not supported yet"),
+        ast::Stmt::AlterTable(_) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
         ast::Stmt::Attach { .. } => bail_parse_error!("ATTACH not supported yet"),
         ast::Stmt::Begin(_, _) => bail_parse_error!("BEGIN not supported yet"),
@@ -67,19 +68,20 @@ pub fn translate(
                 bail_parse_error!("TEMPORARY table not supported yet");
             }
 
-            translate_create_table(query_mode, tbl_name, body, if_not_exists, schema)?
+            translate_create_table(query_mode, tbl_name, *body, if_not_exists, schema)?
         }
         ast::Stmt::CreateTrigger { .. } => bail_parse_error!("CREATE TRIGGER not supported yet"),
         ast::Stmt::CreateView { .. } => bail_parse_error!("CREATE VIEW not supported yet"),
         ast::Stmt::CreateVirtualTable { .. } => {
             bail_parse_error!("CREATE VIRTUAL TABLE not supported yet")
         }
-        ast::Stmt::Delete {
-            tbl_name,
-            where_clause,
-            limit,
-            ..
-        } => {
+        ast::Stmt::Delete(delete) => {
+            let Delete {
+                tbl_name,
+                where_clause,
+                limit,
+                ..
+            } = *delete;
             change_cnt_on = true;
             translate_delete(query_mode, schema, &tbl_name, where_clause, limit, syms)?
         }
@@ -92,7 +94,7 @@ pub fn translate(
             query_mode,
             &schema,
             &name,
-            body,
+            body.map(|b| *b),
             database_header.clone(),
             pager,
         )?,
@@ -103,14 +105,15 @@ pub fn translate(
         ast::Stmt::Select(select) => translate_select(query_mode, schema, *select, syms)?,
         ast::Stmt::Update { .. } => bail_parse_error!("UPDATE not supported yet"),
         ast::Stmt::Vacuum(_, _) => bail_parse_error!("VACUUM not supported yet"),
-        ast::Stmt::Insert {
-            with,
-            or_conflict,
-            tbl_name,
-            columns,
-            body,
-            returning,
-        } => {
+        ast::Stmt::Insert(insert) => {
+            let Insert {
+                with,
+                or_conflict,
+                tbl_name,
+                columns,
+                body,
+                returning,
+            } = *insert;
             change_cnt_on = true;
             translate_insert(
                 query_mode,
@@ -493,7 +496,7 @@ fn translate_create_table(
     program.resolve_label(parse_schema_label, program.offset());
     // TODO: SetCookie
     //
-    // TODO: remove format, it sucks for performance but is convinient
+    // TODO: remove format, it sucks for performance but is convenient
     let parse_schema_where_clause = format!("tbl_name = '{}' AND type != 'trigger'", tbl_name);
     program.emit_insn(Insn::ParseSchema {
         db: sqlite_schema_cursor_id,

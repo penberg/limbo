@@ -63,7 +63,7 @@ cargo bench --bench benchmark -- --profile-time=5
 
 ## Finding things to work on
 
-The issue tracker has issues tagged with [good first issue](https://github.com/penberg/limbo/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
+The issue tracker has issues tagged with [good first issue](https://github.com/tursodatabase/limbo/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22),
 which are considered to be things to work on to get going. If you're interested in working on one of them, comment on the issue tracker, and we're happy to help you get going.
 
 ## Submitting your work

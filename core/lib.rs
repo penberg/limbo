@@ -9,7 +9,7 @@ mod json;
 pub mod mvcc;
 mod parameters;
 mod pseudo;
-mod result;
+pub mod result;
 mod schema;
 mod storage;
 mod translate;
@@ -42,7 +42,9 @@ use storage::btree::btree_init_page;
 use storage::database::FileStorage;
 use storage::page_cache::DumbLruPageCache;
 use storage::pager::allocate_page;
+pub use storage::pager::PageRef;
 use storage::sqlite3_ondisk::{DatabaseHeader, DATABASE_HEADER_SIZE};
+pub use storage::wal::CheckpointMode;
 pub use storage::wal::WalFile;
 pub use storage::wal::WalFileShared;
 use types::OwnedValue;
@@ -238,7 +240,7 @@ pub fn maybe_init_database_file(file: &Rc<dyn File>, io: &Arc<dyn IO>) -> Result
                 let completion = Completion::Write(WriteCompletion::new(Box::new(move |_| {
                     *flag_complete.borrow_mut() = true;
                 })));
-                file.pwrite(0, contents.buffer.clone(), Rc::new(completion))?;
+                file.pwrite(0, contents.buffer.clone(), completion)?;
             }
             let mut limit = 100;
             loop {
@@ -345,6 +347,7 @@ impl Connection {
                             &self.schema.borrow(),
                             *select,
                             &self.db.syms.borrow(),
+                            None,
                         )?;
                         optimize_plan(&mut plan, &self.schema.borrow())?;
                         println!("{}", plan);

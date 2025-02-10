@@ -20,7 +20,8 @@ pub struct ProgramBuilder {
     insns: Vec<Insn>,
     // for temporarily storing instructions that will be put after Transaction opcode
     constant_insns: Vec<Insn>,
-    next_insn_label: Option<BranchOffset>,
+    // Vector of labels which must be assigned to next emitted instruction
+    next_insn_labels: Vec<BranchOffset>,
     // Cursors that are referenced by the program. Indexed by CursorID.
     pub cursor_ref: Vec<(Option<String>, CursorType)>,
     /// A vector where index=label number, value=resolved offset. Resolved in build().
@@ -68,7 +69,7 @@ impl ProgramBuilder {
             next_free_register: 1,
             next_free_cursor_id: 0,
             insns: Vec::with_capacity(opts.approx_num_insns),
-            next_insn_label: None,
+            next_insn_labels: Vec::with_capacity(2),
             cursor_ref: Vec::with_capacity(opts.num_cursors),
             constant_insns: Vec::new(),
             label_to_resolved_offset: Vec::with_capacity(opts.approx_num_labels),
@@ -109,12 +110,9 @@ impl ProgramBuilder {
     }
 
     pub fn emit_insn(&mut self, insn: Insn) {
-        if let Some(label) = self.next_insn_label {
-            self.label_to_resolved_offset.insert(
-                label.to_label_value() as usize,
-                Some(self.insns.len() as InsnReference),
-            );
-            self.next_insn_label = None;
+        for label in self.next_insn_labels.drain(..) {
+            self.label_to_resolved_offset[label.to_label_value() as usize] =
+                Some(self.insns.len() as InsnReference);
         }
         self.insns.push(insn);
     }
@@ -215,7 +213,7 @@ impl ProgramBuilder {
     // Useful when you know you need to jump to "the next part", but the exact offset is unknowable
     // at the time of emitting the instruction.
     pub fn preassign_label_to_next_insn(&mut self, label: BranchOffset) {
-        self.next_insn_label = Some(label);
+        self.next_insn_labels.push(label);
     }
 
     pub fn resolve_label(&mut self, label: BranchOffset, to_offset: BranchOffset) {

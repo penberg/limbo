@@ -401,10 +401,10 @@ pub fn open_loop(
 
                     program.resolve_label(loop_start, program.offset());
                     // TODO: We are currently only handling ascending indexes.
-                    // For conditions like index_key > 10, we have already seeked to the first key greater than 10, and can just scan forward.
+                    // For conditions like index_key > 10, we have already sought to the first key greater than 10, and can just scan forward.
                     // For conditions like index_key < 10, we are at the beginning of the index, and will scan forward and emit IdxGE(10) with a conditional jump to the end.
-                    // For conditions like index_key = 10, we have already seeked to the first key greater than or equal to 10, and can just scan forward and emit IdxGT(10) with a conditional jump to the end.
-                    // For conditions like index_key >= 10, we have already seeked to the first key greater than or equal to 10, and can just scan forward.
+                    // For conditions like index_key = 10, we have already sought to the first key greater than or equal to 10, and can just scan forward and emit IdxGT(10) with a conditional jump to the end.
+                    // For conditions like index_key >= 10, we have already sought to the first key greater than or equal to 10, and can just scan forward.
                     // For conditions like index_key <= 10, we are at the beginning of the index, and will scan forward and emit IdxGT(10) with a conditional jump to the end.
                     // For conditions like index_key != 10, TODO. probably the optimal way is not to use an index at all.
                     //

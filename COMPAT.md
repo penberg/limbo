@@ -53,7 +53,7 @@ The current status of Limbo is:
 | CREATE TRIGGER            | No      |                                                                                   |
 | CREATE VIEW               | No      |                                                                                   |
 | CREATE VIRTUAL TABLE      | No      |                                                                                   |
-| DELETE                    | No      |                                                                                   |
+| DELETE                    | Yes     |                                                                                   |
 | DETACH DATABASE           | No      |                                                                                   |
 | DROP INDEX                | No      |                                                                                   |
 | DROP TABLE                | No      |                                                                                   |
@@ -86,7 +86,7 @@ The current status of Limbo is:
 | UPDATE                    | No      |                                                                                   |
 | UPSERT                    | No      |                                                                                   |
 | VACUUM                    | No      |                                                                                   |
-| WITH clause               | No      |                                                                                   |
+| WITH clause               | Partial | No RECURSIVE, no MATERIALIZED, only SELECT supported in CTEs                      |
 
 #### [PRAGMA](https://www.sqlite.org/pragma.html)
 
@@ -160,7 +160,7 @@ The current status of Limbo is:
 | PRAGMA temp_store_directory      | Not Needed | deprecated in SQLite                         |
 | PRAGMA threads                   | No         |                                              |
 | PRAGMA trusted_schema            | No         |                                              |
-| PRAGMA user_version              | No         |                                              |
+| PRAGMA user_version              | Partial    | Only read implemented                        |
 | PRAGMA vdbe_addoptrace           | No         |                                              |
 | PRAGMA vdbe_debug                | No         |                                              |
 | PRAGMA vdbe_listing              | No         |                                              |
@@ -514,7 +514,7 @@ Modifiers:
 | PrevAsync      | Yes    |         |
 | PrevAwait      | Yes    |         |
 | Program        | No     |         |
-| ReadCookie     | No     |         |
+| ReadCookie     | Partial| no temp databases, only user_version supported |
 | Real           | Yes    |         |
 | RealAffinity   | Yes    |         |
 | Remainder      | Yes    |         |

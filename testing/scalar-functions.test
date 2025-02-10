@@ -407,7 +407,7 @@ do_execsql_test length-text {
   SELECT length('limbo');
 } {5}
 
-do_execsql_test lenght-text-utf8-chars {
+do_execsql_test length-text-utf8-chars {
   SELECT length('ąłóżźć');
 } {6}
 
@@ -431,7 +431,7 @@ do_execsql_test octet-length-text {
   SELECT length('limbo');
 } {5}
 
-do_execsql_test octet-lenght-text-utf8-chars {
+do_execsql_test octet-length-text-utf8-chars {
   SELECT octet_length('ąłóżźć');
 } {12}
 
@@ -631,6 +631,10 @@ do_execsql_test quote-string {
   SELECT quote('limbo')
 } {'limbo'}
 
+do_execsql_test quote-escape {
+  SELECT quote('''quote''')
+} {'''quote'''}
+
 do_execsql_test quote-null {
   SELECT quote(null)
 } {NULL}
@@ -739,6 +743,21 @@ do_execsql_test cast-text-prefix-to-integer {
 do_execsql_test cast-float-to-integer {
   SELECT CAST(123.45 AS INTEGER);
 } {123}
+
+do_execsql_test cast-float-to-integer-rounding {
+  SELECT CAST(0.6 AS INTEGER);
+  SELECT CAST(1.0 AS INTEGER);
+  SELECT CAST(1.6 AS INTEGER);
+  SELECT CAST(-0.6 AS INTEGER);
+  SELECT CAST(-1.0 AS INTEGER);
+  SELECT CAST(-1.6 AS INTEGER);
+} {0
+1
+1
+0
+-1
+-1
+}
 
 do_execsql_test cast-large-float-to-integer {
   SELECT CAST(9223372036854775808.0 AS INTEGER);

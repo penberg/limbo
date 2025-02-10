@@ -56,17 +56,17 @@ pub struct Text {
 
 impl Text {
     pub fn from_str<S: Into<String>>(value: S) -> Self {
-        Self::new(Rc::new(value.into()))
+        Self::new(&value.into())
     }
 
-    pub fn new(value: Rc<String>) -> Self {
+    pub fn new(value: &str) -> Self {
         Self {
             value: Rc::new(value.as_bytes().to_vec()),
             subtype: TextSubtype::Text,
         }
     }
 
-    pub fn json(value: Rc<String>) -> Self {
+    pub fn json(value: &str) -> Self {
         Self {
             value: Rc::new(value.as_bytes().to_vec()),
             subtype: TextSubtype::Json,
@@ -91,7 +91,7 @@ pub enum OwnedValue {
 
 impl OwnedValue {
     // A helper function that makes building a text OwnedValue easier.
-    pub fn build_text(text: Rc<String>) -> Self {
+    pub fn build_text(text: &str) -> Self {
         Self::Text(Text::new(text))
     }
 
@@ -114,7 +114,7 @@ impl OwnedValue {
     }
 
     pub fn from_text(text: &str) -> Self {
-        OwnedValue::Text(Text::new(Rc::new(text.to_string())))
+        OwnedValue::Text(Text::new(text))
     }
 
     pub fn value_type(&self) -> OwnedValueType {
@@ -242,7 +242,7 @@ impl OwnedValue {
                 let Some(text) = v.to_text() else {
                     return Ok(OwnedValue::Null);
                 };
-                Ok(OwnedValue::build_text(Rc::new(text.to_string())))
+                Ok(OwnedValue::build_text(text))
             }
             ExtValueType::Blob => {
                 let Some(blob) = v.to_blob() else {
@@ -381,22 +381,22 @@ impl std::ops::Add<OwnedValue> for OwnedValue {
             (Self::Float(float_left), Self::Float(float_right)) => {
                 Self::Float(float_left + float_right)
             }
-            (Self::Text(string_left), Self::Text(string_right)) => Self::build_text(Rc::new(
-                string_left.as_str().to_string() + &string_right.as_str(),
-            )),
-            (Self::Text(string_left), Self::Integer(int_right)) => Self::build_text(Rc::new(
-                string_left.as_str().to_string() + &int_right.to_string(),
-            )),
+            (Self::Text(string_left), Self::Text(string_right)) => {
+                Self::build_text(&(string_left.as_str().to_string() + string_right.as_str()))
+            }
+            (Self::Text(string_left), Self::Integer(int_right)) => {
+                Self::build_text(&(string_left.as_str().to_string() + &int_right.to_string()))
+            }
             (Self::Integer(int_left), Self::Text(string_right)) => {
-                Self::build_text(Rc::new(int_left.to_string() + &string_right.as_str()))
+                Self::build_text(&(int_left.to_string() + string_right.as_str()))
             }
             (Self::Text(string_left), Self::Float(float_right)) => {
                 let string_right = Self::Float(float_right).to_string();
-                Self::build_text(Rc::new(string_left.as_str().to_string() + &string_right))
+                Self::build_text(&(string_left.as_str().to_string() + &string_right))
             }
             (Self::Float(float_left), Self::Text(string_right)) => {
                 let string_left = Self::Float(float_left).to_string();
-                Self::build_text(Rc::new(string_left + &string_right.as_str()))
+                Self::build_text(&(string_left + string_right.as_str()))
             }
             (lhs, Self::Null) => lhs,
             (Self::Null, rhs) => rhs,
@@ -522,7 +522,7 @@ impl<'a> FromValue<'a> for &'a str {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Record {
-    pub values: Vec<OwnedValue>,
+    values: Vec<OwnedValue>,
 }
 
 impl Record {
@@ -532,6 +532,22 @@ impl Record {
     }
 
     pub fn count(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn last_value(&self) -> Option<&OwnedValue> {
+        self.values.last()
+    }
+
+    pub fn get_values(&self) -> &Vec<OwnedValue> {
+        &self.values
+    }
+
+    pub fn get_value(&self, idx: usize) -> &OwnedValue {
+        &self.values[idx]
+    }
+
+    pub fn len(&self) -> usize {
         self.values.len()
     }
 }
@@ -727,6 +743,7 @@ impl Cursor {
     }
 }
 
+#[derive(Debug)]
 pub enum CursorResult<T> {
     Ok(T),
     IO,
@@ -864,8 +881,8 @@ mod tests {
 
     #[test]
     fn test_serialize_text() {
-        let text = Rc::new("hello".to_string());
-        let record = Record::new(vec![OwnedValue::Text(Text::new(text.clone()))]);
+        let text = "hello";
+        let record = Record::new(vec![OwnedValue::Text(Text::new(text))]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);
 
@@ -902,12 +919,12 @@ mod tests {
 
     #[test]
     fn test_serialize_mixed_types() {
-        let text = Rc::new("test".to_string());
+        let text = "test";
         let record = Record::new(vec![
             OwnedValue::Null,
             OwnedValue::Integer(42),
             OwnedValue::Float(3.15),
-            OwnedValue::Text(Text::new(text.clone())),
+            OwnedValue::Text(Text::new(text)),
         ]);
         let mut buf = Vec::new();
         record.serialize(&mut buf);

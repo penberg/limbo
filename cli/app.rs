@@ -2,8 +2,7 @@ use crate::{
     import::{ImportFile, IMPORT_HELP},
     opcodes_dictionary::OPCODE_DESCRIPTIONS,
 };
-use cli_table::format::{Border, HorizontalLine, Separator, VerticalLine};
-use cli_table::{Cell, Style, Table};
+use comfy_table::{Attribute, Cell, CellAlignment, ContentArrangement, Row, Table};
 use limbo_core::{Database, LimboError, Statement, StepResult, Value};
 
 use clap::{Parser, ValueEnum};
@@ -628,7 +627,7 @@ impl Limbo {
                     match rows.step() {
                         Ok(StepResult::Row) => {
                             let row = rows.row().unwrap();
-                            for (i, value) in row.values.iter().enumerate() {
+                            for (i, value) in row.get_values().iter().enumerate() {
                                 let value = value.to_value();
                                 if i > 0 {
                                     let _ = self.writer.write(b"|");
@@ -670,35 +669,42 @@ impl Limbo {
                         println!("Query interrupted.");
                         return Ok(());
                     }
-                    let mut table_rows: Vec<Vec<_>> = vec![];
+                    let mut table = Table::new();
+                    table
+                        .set_content_arrangement(ContentArrangement::Dynamic)
+                        .set_truncation_indicator("…")
+                        .apply_modifier("││──├─┼┤│─┼├┤┬┴┌┐└┘");
                     if rows.num_columns() > 0 {
-                        let columns = (0..rows.num_columns())
+                        let header = (0..rows.num_columns())
                             .map(|i| {
-                                rows.get_column_name(i)
-                                    .map(|name| name.cell().bold(true))
-                                    .unwrap_or_else(|| " ".cell())
+                                let name = rows.get_column_name(i).cloned().unwrap_or_default();
+                                Cell::new(name).add_attribute(Attribute::Bold)
                             })
                             .collect::<Vec<_>>();
-                        table_rows.push(columns);
+                        table.set_header(header);
                     }
                     loop {
                         match rows.step() {
                             Ok(StepResult::Row) => {
-                                let row = rows.row().unwrap();
-                                table_rows.push(
-                                    row.values
-                                        .iter()
-                                        .map(|value| match value.to_value() {
-                                            Value::Null => self.opts.null_value.clone().cell(),
-                                            Value::Integer(i) => i.to_string().cell(),
-                                            Value::Float(f) => f.to_string().cell(),
-                                            Value::Text(s) => s.cell(),
-                                            Value::Blob(b) => {
-                                                format!("{}", String::from_utf8_lossy(b)).cell()
-                                            }
-                                        })
-                                        .collect(),
-                                );
+                                let record = rows.row().unwrap();
+                                let mut row = Row::new();
+                                row.max_height(1);
+                                for value in record.get_values() {
+                                    let (content, alignment) = match value.to_value() {
+                                        Value::Null => {
+                                            (self.opts.null_value.clone(), CellAlignment::Left)
+                                        }
+                                        Value::Integer(i) => (i.to_string(), CellAlignment::Right),
+                                        Value::Float(f) => (f.to_string(), CellAlignment::Right),
+                                        Value::Text(s) => (s.to_string(), CellAlignment::Left),
+                                        Value::Blob(b) => (
+                                            String::from_utf8_lossy(b).to_string(),
+                                            CellAlignment::Left,
+                                        ),
+                                    };
+                                    row.add_cell(Cell::new(content).set_alignment(alignment));
+                                }
+                                table.add_row(row);
                             }
                             Ok(StepResult::IO) => {
                                 self.io.run_once()?;
@@ -718,7 +724,10 @@ impl Limbo {
                             }
                         }
                     }
-                    self.print_table(table_rows);
+
+                    if table.header().is_some() {
+                        let _ = self.write_fmt(format_args!("{}", table));
+                    }
                 }
             },
             Ok(None) => {}
@@ -732,40 +741,6 @@ impl Limbo {
         // for now let's cache flush always
         self.conn.cacheflush()?;
         Ok(())
-    }
-
-    fn print_table(&mut self, table_rows: Vec<Vec<cli_table::CellStruct>>) {
-        if table_rows.is_empty() {
-            return;
-        }
-
-        let horizontal_line = HorizontalLine::new('┌', '┐', '┬', '─');
-        let horizontal_line_mid = HorizontalLine::new('├', '┤', '┼', '─');
-        let horizontal_line_bottom = HorizontalLine::new('└', '┘', '┴', '─');
-        let vertical_line = VerticalLine::new('│');
-
-        let border = Border::builder()
-            .top(horizontal_line)
-            .bottom(horizontal_line_bottom)
-            .left(vertical_line.clone())
-            .right(vertical_line.clone())
-            .build();
-
-        let separator = Separator::builder()
-            .column(Some(vertical_line))
-            .row(Some(horizontal_line_mid))
-            .build();
-
-        if let Ok(table) = table_rows
-            .table()
-            .border(border)
-            .separator(separator)
-            .display()
-        {
-            let _ = self.write_fmt(format_args!("{}", table));
-        } else {
-            let _ = self.writeln("Error displaying table.");
-        }
     }
 
     fn display_schema(&mut self, table: Option<&str>) -> anyhow::Result<()> {
@@ -787,7 +762,7 @@ impl Limbo {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
                             if let Some(Value::Text(schema)) =
-                                row.values.first().map(|v| v.to_value())
+                                row.get_values().first().map(|v| v.to_value())
                             {
                                 let _ = self.write_fmt(format_args!("{};", schema));
                                 found = true;
@@ -847,7 +822,7 @@ impl Limbo {
                         StepResult::Row => {
                             let row = rows.row().unwrap();
                             if let Some(Value::Text(table)) =
-                                row.values.first().map(|v| v.to_value())
+                                row.get_values().first().map(|v| v.to_value())
                             {
                                 tables.push_str(table);
                                 tables.push(' ');

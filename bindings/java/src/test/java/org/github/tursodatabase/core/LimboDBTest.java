@@ -2,6 +2,7 @@ package org.github.tursodatabase.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import java.sql.SQLException;
 import org.github.tursodatabase.LimboErrorCode;
@@ -13,16 +14,27 @@ public class LimboDBTest {
 
   @Test
   void db_should_open_normally() throws Exception {
-    String dbPath = TestUtils.createTempFile();
     LimboDB.load();
+    String dbPath = TestUtils.createTempFile();
     LimboDB db = LimboDB.create("jdbc:sqlite" + dbPath, dbPath);
     db.open(0);
   }
 
   @Test
-  void should_throw_exception_when_opened_twice() throws Exception {
-    String dbPath = TestUtils.createTempFile();
+  void db_should_close_normally() throws Exception {
     LimboDB.load();
+    String dbPath = TestUtils.createTempFile();
+    LimboDB db = LimboDB.create("jdbc:sqlite" + dbPath, dbPath);
+    db.open(0);
+    db.close();
+
+    assertFalse(db.isOpen());
+  }
+
+  @Test
+  void should_throw_exception_when_opened_twice() throws Exception {
+    LimboDB.load();
+    String dbPath = TestUtils.createTempFile();
     LimboDB db = LimboDB.create("jdbc:sqlite:" + dbPath, dbPath);
     db.open(0);
 
@@ -31,8 +43,8 @@ public class LimboDBTest {
 
   @Test
   void throwJavaException_should_throw_appropriate_java_exception() throws Exception {
-    String dbPath = TestUtils.createTempFile();
     LimboDB.load();
+    String dbPath = TestUtils.createTempFile();
     LimboDB db = LimboDB.create("jdbc:sqlite:" + dbPath, dbPath);
 
     final int limboExceptionCode = LimboErrorCode.LIMBO_ETC.code;

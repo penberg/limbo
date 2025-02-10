@@ -30,7 +30,7 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
             match rows.step()? {
                 StepResult::Row => {
                     let row = rows.row().unwrap();
-                    if let Value::Integer(id) = row.values[0].to_value() {
+                    if let Value::Integer(id) = row.get_value(0).to_value() {
                         assert_eq!(id, 1, "First insert should have rowid 1");
                     }
                 }
@@ -66,7 +66,7 @@ fn test_last_insert_rowid_basic() -> anyhow::Result<()> {
             match rows.step()? {
                 StepResult::Row => {
                     let row = rows.row().unwrap();
-                    if let Value::Integer(id) = row.values[0].to_value() {
+                    if let Value::Integer(id) = row.get_value(0).to_value() {
                         last_id = id;
                     }
                 }
@@ -112,7 +112,7 @@ fn test_integer_primary_key() -> anyhow::Result<()> {
         match select_query.step()? {
             StepResult::Row => {
                 let row = select_query.row().unwrap();
-                if let Value::Integer(id) = row.values[0].to_value() {
+                if let Value::Integer(id) = row.get_value(0).to_value() {
                     rowids.push(id);
                 }
             }

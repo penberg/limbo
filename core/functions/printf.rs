@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::types::OwnedValue;
 use crate::LimboError;
 
@@ -73,16 +71,15 @@ pub fn exec_printf(values: &[OwnedValue]) -> crate::Result<OwnedValue> {
             }
         }
     }
-    Ok(OwnedValue::build_text(Rc::new(result)))
+    Ok(OwnedValue::build_text(&result))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::rc::Rc;
 
     fn text(value: &str) -> OwnedValue {
-        OwnedValue::build_text(Rc::new(value.to_string()))
+        OwnedValue::build_text(value)
     }
 
     fn integer(value: i64) -> OwnedValue {

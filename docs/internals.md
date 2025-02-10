@@ -39,9 +39,48 @@ interface to parse the statement and generate a bytecode program, a step
 called preparing a statement. When a statement is prepared, it can be executed
 using the `sqlite3_step()` function.
 
-To inspect the bytecode program for a SQL statement, you can use the
-`EXPLAIN` command in the shell. For our example SQL statement, the bytecode
-looks as follows:
+To illustrate the different components of Limbo, we can look at the sequence
+diagram of a query from the CLI to the bytecode virtual machine (VDBE):
+
+```mermaid
+sequenceDiagram
+
+participant main as cli/main
+participant Database as core/lib/Database
+participant Connection as core/lib/Connection
+participant Parser as sql/mod/Parser
+participant translate as translate/mod
+participant Statement as core/lib/Statement
+participant Program as vdbe/mod/Program
+
+main->>Database: open_file
+Database->>main: Connection
+main->>Connection: query(sql)
+Note left of Parser: Parser uses vendored sqlite3-parser
+Connection->>Parser: next()
+Note left of Parser: Passes the SQL query to Parser
+
+Parser->>Connection: Cmd::Stmt (ast/mod.rs)
+
+Note right of translate: Translates SQL statement into bytecode
+Connection->>translate:translate(stmt)
+
+translate->>Connection: Program 
+
+Connection->>main: Ok(Some(Rows { Statement }))
+
+note right of main: a Statement with <br />a reference to Program is returned
+
+main->>Statement: step()
+Statement->>Program: step()
+Note left of Program: Program executes bytecode instructions<br />See https://www.sqlite.org/opcode.html
+Program->>Statement: StepResult
+Statement->>main: StepResult
+```
+
+To drill down into more specifics, we inspect the bytecode program for a SQL
+statement using the `EXPLAIN` command in the shell. For our example SQL
+statement, the bytecode looks as follows:
 
 ```
 limbo> EXPLAIN SELECT 'hello, world';
@@ -67,12 +106,22 @@ constant `'hello, world'` to register `r[1]`. The `ResultRow` instruction
 produces a SQL query result using contents of `r[1]`. Finally, the
 program terminates with the `Halt` instruction.
 
+
 ## Frontend
 
 ### Parser
 
+The parser is the module in the front end that processes SQLite query language input data, transforming it into an abstract syntax tree (AST) for further processing. The parser is an in-tree fork of [lemon-rs](https://github.com/gwenn/lemon-rs), which in turn is a port of SQLite parser into Rust. The emitted AST is handed over to the code generation steps to turn the AST into virtual machine programs.
+
 ### Code generator
 
+The code generator module takes AST as input and produces virtual machine programs representing executable SQL statements. At high-level, code generation works as follows:
+
+1. `JOIN` clauses are transformed into equivalent `WHERE` clauses, which simplifies code generation.
+2. `WHERE` clauses are mapped into bytecode loops
+3. `ORDER BY` causes the bytecode program to pass result rows to a sorter before returned to the application.
+4. `GROUP BY` also causes the bytecode programs to pass result rows to an aggregation function before results are returned to the application.
+  
 ### Query optimizer
 
 ## Virtual Machine

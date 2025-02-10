@@ -816,7 +816,7 @@ fn time_until(args: &[Value]) -> Value {
     time_sub_internal(t, now)
 }
 
-// Rouding
+// Rounding
 
 #[scalar(name = "time_trunc", alias = "date_trunc")]
 fn time_trunc(args: &[Value]) -> Value {

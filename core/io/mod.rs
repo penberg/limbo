@@ -12,9 +12,9 @@ use std::{
 pub trait File {
     fn lock_file(&self, exclusive: bool) -> Result<()>;
     fn unlock_file(&self) -> Result<()>;
-    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()>;
-    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Rc<Completion>) -> Result<()>;
-    fn sync(&self, c: Rc<Completion>) -> Result<()>;
+    fn pread(&self, pos: usize, c: Completion) -> Result<()>;
+    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<Buffer>>, c: Completion) -> Result<()>;
+    fn sync(&self, c: Completion) -> Result<()>;
     fn size(&self) -> Result<u64>;
 }
 
@@ -166,14 +166,17 @@ impl Buffer {
 cfg_block! {
     #[cfg(all(target_os = "linux", feature = "io_uring"))] {
         mod io_uring;
+        #[cfg(feature = "fs")]
         pub use io_uring::UringIO;
         mod unix;
+        #[cfg(feature = "fs")]
         pub use unix::UnixIO;
         pub use io_uring::UringIO as PlatformIO;
     }
 
     #[cfg(any(all(target_os = "linux",not(feature = "io_uring")), target_os = "macos"))] {
         mod unix;
+        #[cfg(feature = "fs")]
         pub use unix::UnixIO;
         pub use unix::UnixIO as PlatformIO;
     }

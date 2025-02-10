@@ -56,16 +56,12 @@ pub fn vector_extract(args: &[OwnedValue]) -> Result<OwnedValue> {
     };
 
     if blob.is_empty() {
-        return Ok(OwnedValue::Text(crate::types::Text::new(std::rc::Rc::new(
-            "[]".to_string(),
-        ))));
+        return Ok(OwnedValue::build_text("[]"));
     }
 
     let vector_type = vector_type(blob)?;
     let vector = vector_deserialize(vector_type, blob)?;
-    Ok(OwnedValue::Text(crate::types::Text::new(std::rc::Rc::new(
-        vector_to_text(&vector),
-    ))))
+    Ok(OwnedValue::build_text(&vector_to_text(&vector)))
 }
 
 pub fn vector_distance_cos(args: &[OwnedValue]) -> Result<OwnedValue> {

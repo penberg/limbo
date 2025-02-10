@@ -15,7 +15,7 @@ fn test_statement_reset_bind() -> anyhow::Result<()> {
         match stmt.step()? {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                assert_eq!(row.values[0].to_value(), Value::Integer(1));
+                assert_eq!(row.get_value(0).to_value(), Value::Integer(1));
             }
             StepResult::IO => tmp_db.io.run_once()?,
             _ => break,
@@ -30,7 +30,7 @@ fn test_statement_reset_bind() -> anyhow::Result<()> {
         match stmt.step()? {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                assert_eq!(row.values[0].to_value(), Value::Integer(2));
+                assert_eq!(row.get_value(0).to_value(), Value::Integer(2));
             }
             StepResult::IO => tmp_db.io.run_once()?,
             _ => break,
@@ -63,23 +63,23 @@ fn test_statement_bind() -> anyhow::Result<()> {
         match stmt.step()? {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                if let Value::Text(s) = row.values[0].to_value() {
+                if let Value::Text(s) = row.get_value(0).to_value() {
                     assert_eq!(s, "hello")
                 }
 
-                if let Value::Text(s) = row.values[1].to_value() {
+                if let Value::Text(s) = row.get_value(1).to_value() {
                     assert_eq!(s, "hello")
                 }
 
-                if let Value::Integer(i) = row.values[2].to_value() {
+                if let Value::Integer(i) = row.get_value(2).to_value() {
                     assert_eq!(i, 42)
                 }
 
-                if let Value::Blob(v) = row.values[3].to_value() {
+                if let Value::Blob(v) = row.get_value(3).to_value() {
                     assert_eq!(v, &vec![0x1 as u8, 0x2, 0x3])
                 }
 
-                if let Value::Float(f) = row.values[4].to_value() {
+                if let Value::Float(f) = row.get_value(4).to_value() {
                     assert_eq!(f, 0.5)
                 }
             }

@@ -56,7 +56,7 @@ mod tests {
                 r => panic!("unexpected result {:?}: expecting single row", r),
             }
         };
-        row.values
+        row.get_values()
             .iter()
             .map(|x| match x.to_value() {
                 limbo_core::Value::Null => rusqlite::types::Value::Null,
@@ -163,9 +163,119 @@ mod tests {
             "SELECT ((NULL) IS NOT TRUE <= ((NOT (FALSE))))",
             "SELECT ifnull(0, NOT 0)",
             "SELECT like('a%', 'a') = 1",
+            "SELECT CASE ( NULL < NULL ) WHEN ( 0 ) THEN ( NULL ) ELSE ( 2.0 ) END;",
+            "SELECT (COALESCE(0, COALESCE(0, 0)));",
+            "SELECT CAST((1 > 0) AS INTEGER);",
         ] {
             let limbo = limbo_exec_row(&limbo_conn, query);
             let sqlite = sqlite_exec_row(&sqlite_conn, query);
+            assert_eq!(
+                limbo, sqlite,
+                "query: {}, limbo: {:?}, sqlite: {:?}",
+                query, limbo, sqlite
+            );
+        }
+    }
+
+    #[test]
+    pub fn string_expression_fuzz_run() {
+        let _ = env_logger::try_init();
+        let g = GrammarGenerator::new();
+        let (expr, expr_builder) = g.create_handle();
+        let (bin_op, bin_op_builder) = g.create_handle();
+        let (scalar, scalar_builder) = g.create_handle();
+        let (paren, paren_builder) = g.create_handle();
+
+        paren_builder
+            .concat("")
+            .push_str("(")
+            .push(expr)
+            .push_str(")")
+            .build();
+
+        bin_op_builder
+            .concat(" ")
+            .push(expr)
+            .push(g.create().choice().options_str(["||"]).build())
+            .push(expr)
+            .build();
+
+        scalar_builder
+            .choice()
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("char(")
+                    .push(
+                        g.create()
+                            .concat("")
+                            .push_symbol(rand_int(65..91))
+                            .repeat(1..8, ", ")
+                            .build(),
+                    )
+                    .push_str(")")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push(
+                        g.create()
+                            .choice()
+                            .options_str(["ltrim", "rtrim", "trim"])
+                            .build(),
+                    )
+                    .push_str("(")
+                    .push(g.create().concat("").push(expr).repeat(2..3, ", ").build())
+                    .push_str(")")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push(
+                        g.create()
+                            .choice()
+                            .options_str([
+                                "ltrim", "rtrim", "lower", "upper", "quote", "hex", "trim",
+                            ])
+                            .build(),
+                    )
+                    .push_str("(")
+                    .push(expr)
+                    .push_str(")")
+                    .build(),
+            )
+            .build();
+
+        expr_builder
+            .choice()
+            .option_w(bin_op, 1.0)
+            .option_w(paren, 1.0)
+            .option_w(scalar, 1.0)
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("'")
+                    .push_symbol(rand_str("", 2))
+                    .push_str("'")
+                    .build(),
+            )
+            .build();
+
+        let sql = g.create().concat(" ").push_str("SELECT").push(expr).build();
+
+        let db = TempDatabase::new_empty();
+        let limbo_conn = db.connect_limbo();
+        let sqlite_conn = rusqlite::Connection::open_in_memory().unwrap();
+
+        let (mut rng, seed) = rng_from_time();
+        log::info!("seed: {}", seed);
+        for _ in 0..1024 {
+            let query = g.generate(&mut rng, sql, 50);
+            log::info!("query: {}", query);
+            let limbo = limbo_exec_row(&limbo_conn, &query);
+            let sqlite = sqlite_exec_row(&sqlite_conn, &query);
             assert_eq!(
                 limbo, sqlite,
                 "query: {}, limbo: {:?}, sqlite: {:?}",
@@ -209,15 +319,86 @@ mod tests {
             .push(expr)
             .build();
 
+        let (like_pattern, like_pattern_builder) = g.create_handle();
+        like_pattern_builder
+            .choice()
+            .option_str("%")
+            .option_str("_")
+            .option_symbol(rand_str("", 1))
+            .repeat(1..10, "")
+            .build();
+
+        let (glob_pattern, glob_pattern_builder) = g.create_handle();
+        glob_pattern_builder
+            .choice()
+            .option_str("*")
+            .option_str("**")
+            .option_str("A")
+            .option_str("B")
+            .repeat(1..10, "")
+            .build();
+
+        let (coalesce_expr, coalesce_expr_builder) = g.create_handle();
+        coalesce_expr_builder
+            .concat("")
+            .push_str("COALESCE(")
+            .push(g.create().concat("").push(expr).repeat(2..5, ",").build())
+            .push_str(")")
+            .build();
+
+        let (cast_expr, cast_expr_builder) = g.create_handle();
+        cast_expr_builder
+            .concat(" ")
+            .push_str("CAST ( (")
+            .push(expr)
+            .push_str(") AS ")
+            // cast to INTEGER/REAL/TEXT types can be added when Limbo will use proper equality semantic between values (e.g. 1 = 1.0)
+            .push(g.create().choice().options_str(["NUMERIC"]).build())
+            .push_str(")")
+            .build();
+
+        let (case_expr, case_expr_builder) = g.create_handle();
+        case_expr_builder
+            .concat(" ")
+            .push_str("CASE (")
+            .push(expr)
+            .push_str(")")
+            .push(
+                g.create()
+                    .concat(" ")
+                    .push_str("WHEN (")
+                    .push(expr)
+                    .push_str(") THEN (")
+                    .push(expr)
+                    .push_str(")")
+                    .repeat(1..5, " ")
+                    .build(),
+            )
+            .push_str("ELSE (")
+            .push(expr)
+            .push_str(") END")
+            .build();
+
         scalar_builder
             .choice()
+            .option(coalesce_expr)
             .option(
                 g.create()
                     .concat("")
                     .push_str("like('")
-                    .push_symbol(rand_str("", 2))
+                    .push(like_pattern)
                     .push_str("', '")
-                    .push_symbol(rand_str("", 2))
+                    .push(like_pattern)
+                    .push_str("')")
+                    .build(),
+            )
+            .option(
+                g.create()
+                    .concat("")
+                    .push_str("glob('")
+                    .push(glob_pattern)
+                    .push_str("', '")
+                    .push(glob_pattern)
                     .push_str("')")
                     .build(),
             )
@@ -247,11 +428,13 @@ mod tests {
 
         expr_builder
             .choice()
-            .option_w(unary_infix_op, 1.0)
-            .option_w(bin_op, 1.0)
-            .option_w(paren, 1.0)
-            .option_w(scalar, 1.0)
-            // unfortunatelly, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
+            .option_w(cast_expr, 1.0)
+            .option_w(case_expr, 1.0)
+            .option_w(unary_infix_op, 2.0)
+            .option_w(bin_op, 3.0)
+            .option_w(paren, 2.0)
+            .option_w(scalar, 4.0)
+            // unfortunately, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
             // e.g. 8 IS TRUE == 1 (although 8 = TRUE == 0)
             // so, we do not use TRUE/FALSE constants as they will produce diff with sqlite results
             .options_str(["1", "0", "NULL", "2.0", "1.5", "-0.5", "-2.0", "(1 / 0)"])

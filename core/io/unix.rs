@@ -22,6 +22,7 @@ pub struct UnixIO {
 }
 
 impl UnixIO {
+    #[cfg(feature = "fs")]
     pub fn new() -> Result<Self> {
         debug!("Using IO backend 'syscall'");
         Ok(Self {
@@ -118,10 +119,10 @@ impl IO for UnixIO {
 }
 
 enum CompletionCallback {
-    Read(Rc<RefCell<std::fs::File>>, Rc<Completion>, usize),
+    Read(Rc<RefCell<std::fs::File>>, Completion, usize),
     Write(
         Rc<RefCell<std::fs::File>>,
-        Rc<Completion>,
+        Completion,
         Rc<RefCell<crate::Buffer>>,
         usize,
     ),
@@ -173,11 +174,11 @@ impl File for UnixFile {
         Ok(())
     }
 
-    fn pread(&self, pos: usize, c: Rc<Completion>) -> Result<()> {
+    fn pread(&self, pos: usize, c: Completion) -> Result<()> {
         let file = self.file.borrow();
         let result = {
-            let r = match c.as_ref() {
-                Completion::Read(r) => r,
+            let r = match c {
+                Completion::Read(ref r) => r,
                 _ => unreachable!(),
             };
             let mut buf = r.buf_mut();
@@ -201,7 +202,7 @@ impl File for UnixFile {
                 }
                 self.callbacks.borrow_mut().insert(
                     fd as usize,
-                    CompletionCallback::Read(self.file.clone(), c.clone(), pos),
+                    CompletionCallback::Read(self.file.clone(), c, pos),
                 );
                 Ok(())
             }
@@ -209,12 +210,7 @@ impl File for UnixFile {
         }
     }
 
-    fn pwrite(
-        &self,
-        pos: usize,
-        buffer: Rc<RefCell<crate::Buffer>>,
-        c: Rc<Completion>,
-    ) -> Result<()> {
+    fn pwrite(&self, pos: usize, buffer: Rc<RefCell<crate::Buffer>>, c: Completion) -> Result<()> {
         let file = self.file.borrow();
         let result = {
             let buf = buffer.borrow();
@@ -238,7 +234,7 @@ impl File for UnixFile {
                 }
                 self.callbacks.borrow_mut().insert(
                     fd as usize,
-                    CompletionCallback::Write(self.file.clone(), c.clone(), buffer.clone(), pos),
+                    CompletionCallback::Write(self.file.clone(), c, buffer.clone(), pos),
                 );
                 Ok(())
             }
@@ -246,7 +242,7 @@ impl File for UnixFile {
         }
     }
 
-    fn sync(&self, c: Rc<Completion>) -> Result<()> {
+    fn sync(&self, c: Completion) -> Result<()> {
         let file = self.file.borrow();
         let result = fs::fsync(file.as_fd());
         match result {
