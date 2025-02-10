@@ -1234,7 +1234,7 @@ pub fn insn_to_str(
                 *db as i32,
                 *dest as i32,
                 *cookie as i32,
-                OwnedValue::build_text(Rc::new("".to_string())),
+                OwnedValue::build_text(""),
                 0,
                 "".to_string(),
             ),
