@@ -13,6 +13,7 @@ import org.github.tursodatabase.utils.LoggerFactory;
 public class LimboConnection {
   private static final Logger logger = LoggerFactory.getLogger(LimboConnection.class);
 
+  private final String url;
   private final long connectionPtr;
   private final LimboDB database;
   private boolean closed;
@@ -28,6 +29,7 @@ public class LimboConnection {
    * @param filePath path to file
    */
   public LimboConnection(String url, String filePath, Properties properties) throws SQLException {
+    this.url = url;
     this.database = open(url, filePath, properties);
     this.connectionPtr = this.database.connect();
   }
@@ -39,6 +41,10 @@ public class LimboConnection {
 
   public void checkOpen() throws SQLException {
     if (isClosed()) throw new SQLException("database connection closed");
+  }
+
+  public String getUrl() {
+    return url;
   }
 
   public void close() throws SQLException {
