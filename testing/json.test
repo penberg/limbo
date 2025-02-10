@@ -637,6 +637,10 @@ do_execsql_test json_object_simple {
   SELECT json_object('key', 'value');
 } {{{"key":"value"}}}
 
+do_execsql_test json_object_f64 {
+  SELECT json_object('key', 40.7128);
+} {{{"key":40.7128}}}
+
 do_execsql_test json_object_nested {
   SELECT json_object('grandparent',json_object('parent', json_object('child', 'value')));
 } {{{"grandparent":{"parent":{"child":"value"}}}}}
