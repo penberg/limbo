@@ -381,7 +381,7 @@ impl BTreeCursor {
 
                     let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                     if predicate.is_none() {
-                        let rowid = match record.values.last() {
+                        let rowid = match record.last_value() {
                             Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                             _ => unreachable!("index cells should have an integer rowid"),
                         };
@@ -398,7 +398,7 @@ impl BTreeCursor {
                         SeekOp::EQ => &record == *index_key,
                     };
                     if found {
-                        let rowid = match record.values.last() {
+                        let rowid = match record.last_value() {
                             Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                             _ => unreachable!("index cells should have an integer rowid"),
                         };
@@ -411,7 +411,7 @@ impl BTreeCursor {
                     self.stack.advance();
                     let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                     if predicate.is_none() {
-                        let rowid = match record.values.last() {
+                        let rowid = match record.last_value() {
                             Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                             _ => unreachable!("index cells should have an integer rowid"),
                         };
@@ -427,7 +427,7 @@ impl BTreeCursor {
                         SeekOp::EQ => &record == *index_key,
                     };
                     if found {
-                        let rowid = match record.values.last() {
+                        let rowid = match record.last_value() {
                             Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                             _ => unreachable!("index cells should have an integer rowid"),
                         };
@@ -492,18 +492,20 @@ impl BTreeCursor {
                         let record = crate::storage::sqlite3_ondisk::read_record(payload)?;
                         let found = match op {
                             SeekOp::GT => {
-                                &record.values[..record.values.len() - 1] > &index_key.values
+                                record.get_values()[..record.len() - 1] > index_key.get_values()[..]
                             }
                             SeekOp::GE => {
-                                &record.values[..record.values.len() - 1] >= &index_key.values
+                                record.get_values()[..record.len() - 1]
+                                    >= index_key.get_values()[..]
                             }
                             SeekOp::EQ => {
-                                record.values[..record.values.len() - 1] == index_key.values
+                                record.get_values()[..record.len() - 1]
+                                    == index_key.get_values()[..]
                             }
                         };
                         self.stack.advance();
                         if found {
-                            let rowid = match record.values.last() {
+                            let rowid = match record.last_value() {
                                 Some(OwnedValue::Integer(rowid)) => *rowid as u64,
                                 _ => unreachable!("index cells should have an integer rowid"),
                             };
