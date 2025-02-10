@@ -39,8 +39,9 @@ In the future, we will be also working on:
 
 ## Getting Started
 
-### 💻 Command Line
-
+<details>
+<summary>💻 Command Line</summary>
+<br>
 You can install the latest `limbo` release with:
 
 ```shell 
@@ -68,11 +69,11 @@ You can also build and run the latest development version with:
 ```shell
 cargo run
 ```
+</details>
 
-### ✨ [JavaScript](https://www.npmjs.com/package/limbo-wasm) (wip)
-
-Installation:
-
+<details>
+<summary>✨ JavaScript</summary>
+<br>
 ```console
 npm i limbo-wasm
 ```
@@ -87,8 +88,11 @@ const stmt = db.prepare('SELECT * FROM users');
 const users = stmt.all();
 console.log(users);
 ```
+</details>
 
-### 🐍 [Python](https://pypi.org/project/pylimbo/) (wip)
+<details>
+<summary>🐍 Python</summary>
+<br>
 
 ```console
 pip install pylimbo
@@ -104,8 +108,11 @@ cur = con.cursor()
 res = cur.execute("SELECT * FROM users")
 print(res.fetchone())
 ```
+</details>
 
-### 🐹 Go (wip)
+<details>
+<summary>🐹 Go</summary>
+<br>
 
 1. Clone the repository
 2. Build the library and set your LD_LIBRARY_PATH to include limbo's target directory
@@ -141,11 +148,16 @@ for rows.Next() {
     fmt.Printf("User: ID: %d, Username: %s\n", id, username)
 }
 ```
+</details>
 
-### ☕️ Java (wip)
+<details>
+  
+<summary>☕️ Java</summary>
+<br>
 
 We integrated Limbo into JDBC. For detailed instructions on how to use Limbo with java, please refer to
 the [README.md under bindings/java](bindings/java/README.md).
+</details>
 
 ## Contributing
 
