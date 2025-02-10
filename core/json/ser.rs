@@ -785,13 +785,8 @@ pub trait Formatter {
                 writer.write_all(infinity.as_bytes())?;
             }
             _ => {
-                // let mut buffer = ryu::Buffer::new();
-                // let s = buffer.format_finite(value);
-
-                // This the previous implementation present in the package
-                // However, serde_json does it differently above.
-                // Not sure if there if its done like this because of the precision
-                let s = &format!("{:.1}", value);
+                let mut buffer = ryu::Buffer::new();
+                let s = buffer.format_finite(value);
                 writer.write_all(s.as_bytes())?;
             }
         }
