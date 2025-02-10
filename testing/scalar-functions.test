@@ -740,6 +740,21 @@ do_execsql_test cast-float-to-integer {
   SELECT CAST(123.45 AS INTEGER);
 } {123}
 
+do_execsql_test cast-float-to-integer-rounding {
+  SELECT CAST(0.6 AS INTEGER);
+  SELECT CAST(1.0 AS INTEGER);
+  SELECT CAST(1.6 AS INTEGER);
+  SELECT CAST(-0.6 AS INTEGER);
+  SELECT CAST(-1.0 AS INTEGER);
+  SELECT CAST(-1.6 AS INTEGER);
+} {0
+1
+1
+0
+-1
+-1
+}
+
 do_execsql_test cast-large-float-to-integer {
   SELECT CAST(9223372036854775808.0 AS INTEGER);
 } {9223372036854775807}
