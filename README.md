@@ -69,7 +69,7 @@ You can also build and run the latest development version with:
 cargo run
 ```
 
-### ✨ JavaScript (wip)
+### ✨ [JavaScript](https://www.npmjs.com/package/limbo-wasm) (wip)
 
 Installation:
 
@@ -88,7 +88,7 @@ const users = stmt.all();
 console.log(users);
 ```
 
-### 🐍 Python (wip)
+### 🐍 [Python](https://pypi.org/project/pylimbo/) (wip)
 
 ```console
 pip install pylimbo
