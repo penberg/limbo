@@ -56,7 +56,7 @@ mod tests {
                 r => panic!("unexpected result {:?}: expecting single row", r),
             }
         };
-        row.values
+        row.get_values()
             .iter()
             .map(|x| match x.to_value() {
                 limbo_core::Value::Null => rusqlite::types::Value::Null,

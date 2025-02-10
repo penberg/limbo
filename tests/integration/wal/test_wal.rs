@@ -44,7 +44,7 @@ pub(crate) fn execute_and_get_strings(
         match step_result {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                for el in &row.values {
+                for el in row.get_values() {
                     result.push(format!("{el}"));
                 }
             }
@@ -72,7 +72,7 @@ pub(crate) fn execute_and_get_ints(
         match step_result {
             StepResult::Row => {
                 let row = stmt.row().unwrap();
-                for value in &row.values {
+                for value in row.get_values() {
                     let value = value.to_value();
                     let out = match value {
                         Value::Integer(i) => i,
