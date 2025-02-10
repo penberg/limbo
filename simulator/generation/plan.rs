@@ -456,7 +456,7 @@ impl Interaction {
                     StepResult::Row => {
                         let row = rows.row().unwrap();
                         let mut r = Vec::new();
-                        for el in &row.values {
+                        for el in row.get_values() {
                             let v = el.to_value();
                             let v = match v {
                                 limbo_core::Value::Null => Value::Null,
