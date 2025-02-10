@@ -89,7 +89,7 @@ func TestFunctions(t *testing.T) {
 	}
 	_, err = stmt.Exec(60, "TestFunction", 400)
 	if err != nil {
-		t.Fatalf("Error executing statment with arguments: %v", err)
+		t.Fatalf("Error executing statement with arguments: %v", err)
 	}
 	stmt.Close()
 	stmt, err = conn.Prepare("SELECT baz FROM test where foo = ?")

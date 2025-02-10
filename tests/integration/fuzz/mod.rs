@@ -251,7 +251,7 @@ mod tests {
             .option_w(bin_op, 1.0)
             .option_w(paren, 1.0)
             .option_w(scalar, 1.0)
-            // unfortunatelly, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
+            // unfortunately, sqlite behaves weirdly when IS operator is used with TRUE/FALSE constants
             // e.g. 8 IS TRUE == 1 (although 8 = TRUE == 0)
             // so, we do not use TRUE/FALSE constants as they will produce diff with sqlite results
             .options_str(["1", "0", "NULL", "2.0", "1.5", "-0.5", "-2.0", "(1 / 0)"])

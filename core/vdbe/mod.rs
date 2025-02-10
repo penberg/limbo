@@ -2425,7 +2425,7 @@ impl Program {
                         let pc: u32 = pc
                             .try_into()
                             .unwrap_or_else(|_| panic!("EndCoroutine: pc overflow: {}", pc));
-                        state.pc = pc - 1; // yield jump is always next to yield. Here we substract 1 to go back to yield instruction
+                        state.pc = pc - 1; // yield jump is always next to yield. Here we subtract 1 to go back to yield instruction
                     } else {
                         unreachable!();
                     }
@@ -2652,7 +2652,7 @@ impl Program {
                         todo!("temp databases not implemented yet");
                     }
                     // SQLite returns "0" on an empty database, and 2 on the first insertion,
-                    // so we'll mimick that behavior.
+                    // so we'll mimic that behavior.
                     let mut pages = pager.db_header.borrow().database_size.into();
                     if pages == 1 {
                         pages = 0;

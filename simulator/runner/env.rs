@@ -43,7 +43,7 @@ impl SimulatorEnv {
         let opts = SimulatorOpts {
             ticks: rng.gen_range(cli_opts.minimum_size..=cli_opts.maximum_size),
             max_connections: 1, // TODO: for now let's use one connection as we didn't implement
-            // correct transactions procesing
+            // correct transactions processing
             max_tables: rng.gen_range(0..128),
             create_percent,
             read_percent,

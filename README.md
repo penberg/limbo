@@ -31,7 +31,7 @@ Limbo is a _work-in-progress_, in-process OLTP database engine library written i
 * **Language bindings** for JavaScript/WebAssembly, Rust, Go, Python, and [Java](bindings/java)
 * **OS support** for Linux, macOS, and Windows
 
-In the future, we will be also workin on:
+In the future, we will be also working on:
 
 * **Integrated vector search** for embeddings and vector similarity.
 * **`BEGIN CONCURRENT`** for improved write throughput.

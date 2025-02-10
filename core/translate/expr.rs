@@ -173,7 +173,7 @@ macro_rules! expect_arguments_even {
             );
         };
         // The only function right now that requires an even number is `json_object` and it allows
-        // to have no arguments, so thats why in this macro we do not bail with teh `function with no arguments` error
+        // to have no arguments, so thats why in this macro we do not bail with the `function with no arguments` error
         args
     }};
 }
@@ -476,7 +476,7 @@ pub fn translate_condition_expr(
                 );
             } else {
                 crate::bail_parse_error!(
-                    "parenthesized condtional should have exactly one expression"
+                    "parenthesized conditional should have exactly one expression"
                 );
             }
         }
@@ -1517,7 +1517,7 @@ pub fn translate_expr(
                         ScalarFunc::TotalChanges => {
                             if args.is_some() {
                                 crate::bail_parse_error!(
-                                    "{} fucntion with more than 0 arguments",
+                                    "{} function with more than 0 arguments",
                                     srf.to_string()
                                 );
                             }

@@ -64,7 +64,7 @@ impl SimulatorCLI {
             return Err("Minimum size cannot be greater than maximum size".to_string());
         }
 
-        // Make sure uncompatible options are not set
+        // Make sure incompatible options are not set
         if self.shrink && self.doublecheck {
             return Err("Cannot use shrink and doublecheck at the same time".to_string());
         }

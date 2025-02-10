@@ -1691,7 +1691,7 @@ pub struct TriggerCmdInsert {
     pub col_names: Option<DistinctNames>,
     /// `SELECT` or `VALUES`
     pub select: Box<Select>,
-    /// `ON CONLICT` clause
+    /// `ON CONFLICT` clause
     pub upsert: Option<Upsert>,
     /// `RETURNING`
     pub returning: Option<Vec<ResultColumn>>,

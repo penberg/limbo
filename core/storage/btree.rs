@@ -159,7 +159,7 @@ pub struct BTreeCursor {
 /// current_page represents the current page being used in the tree and current_page - 1 would be
 /// the parent. Using current_page + 1 or higher is undefined behaviour.
 struct PageStack {
-    /// Pointer to the currenet page being consumed
+    /// Pointer to the current page being consumed
     current_page: RefCell<i32>,
     /// List of pages in the stack. Root page will be in index 0
     stack: RefCell<[Option<PageRef>; BTCURSOR_MAX_DEPTH + 1]>,
@@ -987,7 +987,7 @@ impl BTreeCursor {
         db_header: Ref<DatabaseHeader>,
     ) -> Result<usize> {
         // NOTE: freelist is in ascending order of keys and pc
-        // unused_space is reserved bytes at the end of page, therefore we must substract from maxpc
+        // unused_space is reserved bytes at the end of page, therefore we must subtract from maxpc
         let mut free_list_pointer_addr = 1;
         let mut pc = page_ref.first_freeblock() as usize;
 
@@ -1419,7 +1419,7 @@ impl BTreeCursor {
             new_root_page_contents.write_u16(PAGE_HEADER_OFFSET_CELL_COUNT, 0);
         }
 
-        /* swap splitted page buffer with new root buffer so we don't have to update page idx */
+        /* swap split page buffer with new root buffer so we don't have to update page idx */
         {
             let (root_id, child_id, child) = {
                 let page_ref = self.stack.top();
@@ -2138,7 +2138,7 @@ impl BTreeCursor {
             1 => PageType::TableLeaf,
             2 => PageType::IndexLeaf,
             _ => unreachable!(
-                "wrong create table falgs, should be 1 for table and 2 for index, got {}",
+                "wrong create table flags, should be 1 for table and 2 for index, got {}",
                 flags,
             ),
         };

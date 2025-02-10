@@ -33,11 +33,11 @@ pub trait ArbitraryFromMaybe<T> {
 }
 
 /// Frequency is a helper function for composing different generators with different frequency
-/// of occurences.
+/// of occurrences.
 /// The type signature for the `N` parameter is a bit complex, but it
 /// roughly corresponds to a type that can be summed, compared, subtracted and sampled, which are
 /// the operations we require for the implementation.
-// todo: switch to a simpler type signature that can accomodate all integer and float types, which
+// todo: switch to a simpler type signature that can accommodate all integer and float types, which
 //       should be enough for our purposes.
 pub(crate) fn frequency<
     'a,
@@ -61,7 +61,7 @@ pub(crate) fn frequency<
     unreachable!()
 }
 
-/// one_of is a helper function for composing different generators with equal probability of occurence.
+/// one_of is a helper function for composing different generators with equal probability of occurrence.
 pub(crate) fn one_of<'a, T, R: Rng>(choices: Vec<Box<dyn Fn(&mut R) -> T + 'a>>, rng: &mut R) -> T {
     let index = rng.gen_range(0..choices.len());
     choices[index](rng)
