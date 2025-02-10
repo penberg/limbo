@@ -74,6 +74,7 @@ cargo run
 <details>
 <summary>✨ JavaScript</summary>
 <br>
+
 ```console
 npm i limbo-wasm
 ```
