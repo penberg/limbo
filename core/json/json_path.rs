@@ -24,7 +24,7 @@ pub struct JsonPath<'a> {
     pub elements: Vec<PathElement<'a>>,
 }
 
-type IsQuoted = bool;
+type RawString = bool;
 
 /// PathElement describes a single element of a JSON path.
 #[derive(Clone, Debug, PartialEq)]
@@ -32,33 +32,25 @@ pub enum PathElement<'a> {
     /// Root element: '$'
     Root(),
     /// JSON key
-    Key(Cow<'a, str>, IsQuoted),
+    Key(Cow<'a, str>, RawString),
     /// Array locator, eg. [2], [#-5]
-    ArrayLocator(i32),
+    ArrayLocator(Option<i32>),
 }
 
 type IsMaxNumber = bool;
 
 fn collect_num(current: i128, adding: i128, negative: bool) -> (i128, IsMaxNumber) {
-    let mut is_max = false;
-    let cur = if negative {
-        current
-            .checked_mul(10)
-            .and_then(|x| x.checked_sub(adding))
-            .unwrap_or_else(|| {
-                is_max = true;
-                i128::MIN
-            })
+    let ten = 10i128;
+    let adding = adding as i128;
+
+    let result = if negative {
+        current.saturating_mul(ten).saturating_sub(adding)
     } else {
-        current
-            .checked_mul(10)
-            .and_then(|x| x.checked_add(adding))
-            .unwrap_or_else(|| {
-                is_max = true;
-                i128::MAX
-            })
+        current.saturating_mul(ten).saturating_add(adding)
     };
-    (cur, is_max)
+
+    let is_max = result == i128::MAX || result == i128::MIN;
+    (result, is_max)
 }
 
 fn estimate_path_capacity(input: &str) -> usize {
@@ -75,7 +67,6 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
     }
     let mut parser_state = PPState::Start;
     let mut index_state = ArrayIndexState::Start;
-    let mut is_quoted = false;
 
     let mut key_start = 0;
     let mut index_buffer: i128 = 0;
@@ -107,17 +98,10 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
             },
             PPState::InKey => match ch {
                 (idx, '.' | '[') => {
-                    if is_quoted {
-                        continue;
-                    }
                     let key_end = idx;
 
                     if key_end > key_start {
-                        let mut key = &path[key_start..key_end];
-                        println!("{}, {}", &key[0..2], &key[key.len() - 2..]);
-                        if key[0..2].contains("\"") && key[key.len() - 2..].contains("\"") {
-                            key = &key[2..key.len() - 2];
-                        }
+                        let key = &path[key_start..key_end];
                         if ch.1 == '[' {
                             index_state = ArrayIndexState::Start;
                             parser_state = PPState::InArrayIndex;
@@ -125,44 +109,34 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
                         } else {
                             key_start = idx + ch_len;
                         }
-                        path_components.push(PathElement::Key(Cow::Borrowed(key), is_quoted));
-                        is_quoted = false;
+                        path_components.push(PathElement::Key(Cow::Borrowed(key), false));
                     } else {
                         bail_parse_error!("Bad json path: {}", path)
                     }
                 }
-                (idx, ch) => {
-                    if ch != '"' {
-                        continue;
-                    };
-
-                    if key_start == idx {
-                        is_quoted = true
-                    } else {
-                        if let Some(next_char) = path_iter.next() {
-                            let c = next_char.1;
-                            match next_char {
-                                (idx, '.' | '[') => {
-                                    let key_end = idx;
-
-                                    if key_end > key_start {
-                                        let key = &path[key_start + 1..key_end - 1];
-                                        if c == '[' {
-                                            index_state = ArrayIndexState::Start;
-                                            parser_state = PPState::InArrayIndex;
-                                            index_buffer = 0;
-                                        } else {
-                                            key_start = idx + c.len_utf8();
-                                        }
-                                        path_components
-                                            .push(PathElement::Key(Cow::Borrowed(key), is_quoted));
+                (_, ch) => {
+                    match ch {
+                        '"' => {
+                            while let Some((idx, ch)) = path_iter.next() {
+                                match ch {
+                                    '\\' => {
+                                        path_iter.next();
                                     }
-                                    is_quoted = false;
+                                    '"' => {
+                                        if key_start < idx {
+                                            let key = &path[key_start + 1..idx];
+                                            path_components
+                                                .push(PathElement::Key(Cow::Borrowed(key), true));
+                                            parser_state = PPState::ExpectDotOrBracket;
+                                            break;
+                                        }
+                                    }
+                                    _ => continue,
                                 }
-                                _ => bail_parse_error!("Bad json path: {}", path),
                             }
                         }
-                    }
+                        _ => continue,
+                    };
                 }
             },
             PPState::InArrayIndex => {
@@ -186,6 +160,10 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
                             bail_parse_error!("Bad json path: {}", path);
                         }
                     }
+                    (ArrayIndexState::AfterHash, ']') => {
+                        parser_state = PPState::ExpectDotOrBracket;
+                        path_components.push(PathElement::ArrayLocator(None))
+                    }
                     (ArrayIndexState::CollectingNumbers, '0'..='9') => {
                         let (new_num, is_max) = collect_num(
                             index_buffer,
@@ -200,7 +178,7 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
                     (ArrayIndexState::IsMax, '0'..='9') => continue,
                     (ArrayIndexState::CollectingNumbers | ArrayIndexState::IsMax, ']') => {
                         parser_state = PPState::ExpectDotOrBracket;
-                        path_components.push(PathElement::ArrayLocator(index_buffer as i32))
+                        path_components.push(PathElement::ArrayLocator(Some(index_buffer as i32)))
                     }
                     (_, _) => bail_parse_error!("Bad json path: {}", path),
                 }
@@ -223,19 +201,18 @@ pub fn json_path<'a>(path: &'a str) -> crate::Result<JsonPath<'a>> {
         PPState::InArrayIndex => bail_parse_error!("Bad json path: {}", path),
         PPState::InKey => {
             if key_start < path.len() {
-                let mut key = &path[key_start..];
+                let key = &path[key_start..];
 
-                if key[0..=1].contains("\"") && key[key.len() - 1..].contains("\"") {
-                    key = &key[1..key.len() - 1];
+                if key.starts_with('"') & !key.ends_with('"') {
+                    bail_parse_error!("Bad json path: {}", path)
                 }
-                path_components.push(PathElement::Key(Cow::Borrowed(key), is_quoted));
+                path_components.push(PathElement::Key(Cow::Borrowed(key), false));
             } else {
                 bail_parse_error!("Bad json path: {}", path)
             }
         }
         _ => (),
     }
-    println!("{:?}", path_components);
     Ok(JsonPath {
         elements: path_components,
     })
@@ -268,7 +245,7 @@ mod tests {
         let path = json_path("$[0]").unwrap();
         assert_eq!(path.elements.len(), 2);
         assert_eq!(path.elements[0], PathElement::Root());
-        assert_eq!(path.elements[1], PathElement::ArrayLocator(0));
+        assert_eq!(path.elements[1], PathElement::ArrayLocator(Some(0)));
     }
 
     #[test]
@@ -276,7 +253,7 @@ mod tests {
         let path = json_path("$[#-2]").unwrap();
         assert_eq!(path.elements.len(), 2);
         assert_eq!(path.elements[0], PathElement::Root());
-        assert_eq!(path.elements[1], PathElement::ArrayLocator(-2));
+        assert_eq!(path.elements[1], PathElement::ArrayLocator(Some(-2)));
     }
 
     #[test]
@@ -310,7 +287,7 @@ mod tests {
             path.elements[2],
             PathElement::Key(Cow::Borrowed("book"), false)
         );
-        assert_eq!(path.elements[3], PathElement::ArrayLocator(0));
+        assert_eq!(path.elements[3], PathElement::ArrayLocator(Some(0)));
         assert_eq!(
             path.elements[4],
             PathElement::Key(Cow::Borrowed("title"), false)
@@ -320,10 +297,10 @@ mod tests {
     #[test]
     fn test_large_index_wrapping() {
         let path = json_path("$[4294967296]").unwrap();
-        assert_eq!(path.elements[1], PathElement::ArrayLocator(0));
+        assert_eq!(path.elements[1], PathElement::ArrayLocator(Some(0)));
 
         let path = json_path("$[4294967297]").unwrap();
-        assert_eq!(path.elements[1], PathElement::ArrayLocator(1));
+        assert_eq!(path.elements[1], PathElement::ArrayLocator(Some(1)));
     }
 
     #[test]
@@ -331,14 +308,14 @@ mod tests {
         let path = json_path("$[0][1][2].key[3].other").unwrap();
         assert_eq!(path.elements.len(), 7);
         assert_eq!(path.elements[0], PathElement::Root());
-        assert_eq!(path.elements[1], PathElement::ArrayLocator(0));
-        assert_eq!(path.elements[2], PathElement::ArrayLocator(1));
-        assert_eq!(path.elements[3], PathElement::ArrayLocator(2));
+        assert_eq!(path.elements[1], PathElement::ArrayLocator(Some(0)));
+        assert_eq!(path.elements[2], PathElement::ArrayLocator(Some(1)));
+        assert_eq!(path.elements[3], PathElement::ArrayLocator(Some(2)));
         assert_eq!(
             path.elements[4],
             PathElement::Key(Cow::Borrowed("key"), false)
         );
-        assert_eq!(path.elements[5], PathElement::ArrayLocator(3));
+        assert_eq!(path.elements[5], PathElement::ArrayLocator(Some(3)));
     }
 
     #[test]
@@ -365,5 +342,31 @@ mod tests {
 
         let long_path = "$.a.b.c.d.e.f.g[0][1][2]";
         assert!(estimate_path_capacity(long_path) >= 11);
+    }
+
+    #[test]
+    fn test_quoted_keys() {
+        let path = json_path(r#"$."key""#).unwrap();
+        assert_eq!(
+            path.elements[1],
+            PathElement::Key(Cow::Borrowed("key"), true)
+        );
+
+        let path = json_path(r#"$."key.with.dots""#).unwrap();
+        assert_eq!(
+            path.elements[1],
+            PathElement::Key(Cow::Borrowed("key.with.dots"), true)
+        );
+
+        let path = json_path(r#"$."key[0]""#).unwrap();
+        assert_eq!(
+            path.elements[1],
+            PathElement::Key(Cow::Borrowed("key[0]"), true)
+        );
+    }
+
+    #[test]
+    fn test_empty_quoted_key() {
+        assert!(json_path(r#"$."""#).is_ok());
     }
 }
