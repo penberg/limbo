@@ -737,6 +737,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
 dependencies = [
  "log",
+ "regex",
 ]
 
 [[package]]
@@ -768,7 +769,10 @@ version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcaee3d8e3cfc3fd92428d477bc97fc29ec8716d180c0d74c643bb26166660e0"
 dependencies = [
+ "anstream",
+ "anstyle",
  "env_filter",
+ "humantime",
  "log",
 ]
 
@@ -1606,6 +1610,7 @@ dependencies = [
  "chrono",
  "criterion",
  "crossbeam-skiplist",
+ "env_logger 0.11.6",
  "fallible-iterator 0.3.0",
  "getrandom 0.2.15",
  "hex",
@@ -1634,6 +1639,7 @@ dependencies = [
  "quickcheck",
  "quickcheck_macros",
  "rand 0.8.5",
+ "rand_chacha 0.9.0",
  "regex",
  "regex-syntax",
  "rstest",

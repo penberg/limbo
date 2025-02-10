@@ -362,7 +362,7 @@ pub fn write_header_to_buf(buf: &mut [u8], header: &DatabaseHeader) {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PageType {
     IndexInterior = 2,
     TableInterior = 5,
@@ -1129,11 +1129,9 @@ pub fn write_varint(buf: &mut [u8], value: u64) -> usize {
 }
 
 pub fn write_varint_to_vec(value: u64, payload: &mut Vec<u8>) {
-    let mut varint: Vec<u8> = vec![0; 9];
-    let n = write_varint(&mut varint.as_mut_slice()[0..9], value);
-    write_varint(&mut varint, value);
-    varint.truncate(n);
-    payload.extend_from_slice(&varint);
+    let mut varint = [0u8; 9];
+    let n = write_varint(&mut varint, value);
+    payload.extend_from_slice(&varint[0..n]);
 }
 
 pub fn begin_read_wal_header(io: &Rc<dyn File>) -> Result<Arc<RwLock<WalHeader>>> {
