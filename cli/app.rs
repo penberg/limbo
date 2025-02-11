@@ -103,6 +103,8 @@ impl std::fmt::Display for OutputMode {
 
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// Exit this program with return-code CODE
+    Exit,
     /// Quit the shell
     Quit,
     /// Open a database file
@@ -136,7 +138,8 @@ pub enum Command {
 impl Command {
     fn min_args(&self) -> usize {
         1 + match self {
-            Self::Quit
+            Self::Exit
+            | Self::Quit
             | Self::Schema
             | Self::Help
             | Self::Opcodes
@@ -155,6 +158,7 @@ impl Command {
 
     fn usage(&self) -> &str {
         match self {
+            Self::Exit => ".exit ?<CODE>",
             Self::Quit => ".quit",
             Self::Open => ".open <file>",
             Self::Help => ".help",
@@ -177,6 +181,7 @@ impl FromStr for Command {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            ".exit" => Ok(Self::Exit),
             ".quit" => Ok(Self::Quit),
             ".open" => Ok(Self::Open),
             ".help" => Ok(Self::Help),
@@ -519,6 +524,10 @@ impl Limbo {
                 return;
             }
             match cmd {
+                Command::Exit => {
+                    let code = args.get(1).and_then(|c| c.parse::<i32>().ok()).unwrap_or(0);
+                    std::process::exit(code);
+                }
                 Command::Quit => {
                     let _ = self.writeln("Exiting Limbo SQL Shell.");
                     let _ = self.close_conn();
@@ -913,6 +922,7 @@ In addition to standard SQL commands, the following special commands are availab
 
 Special Commands:
 -----------------
+.exit ?<CODE>              Exit this program with return-code CODE
 .quit                      Stop interpreting input stream and exit.
 .show                      Display current settings.
 .open <database_file>      Open and connect to a database file.
