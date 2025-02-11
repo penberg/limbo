@@ -173,7 +173,14 @@ pub(crate) fn execute_plans(
         last_execution.interaction_index = state.interaction_pointer;
         last_execution.secondary_index = state.secondary_pointer;
         // Execute the interaction for the selected connection
-        match execute_plan(&mut env, &mut rusqlite_env, connection_index, plans, states, rusqlite_states) {
+        match execute_plan(
+            &mut env,
+            &mut rusqlite_env,
+            connection_index,
+            plans,
+            states,
+            rusqlite_states,
+        ) {
             Ok(_) => {}
             Err(err) => {
                 return ExecutionResult::new(history, Some(err));
