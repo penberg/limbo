@@ -36,7 +36,7 @@ impl InteractionPlan {
                     | Property::DropSelect { queries, .. } => {
                         queries.clear();
                     }
-                    Property::SelectLimit { .. } => {}
+                    Property::SelectLimit { .. } | Property::SelectSelectOptimizer { .. } => {}
                 }
             }
         }

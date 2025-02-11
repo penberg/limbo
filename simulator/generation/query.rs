@@ -1,7 +1,7 @@
 use crate::generation::table::{GTValue, LTValue};
 use crate::generation::{one_of, Arbitrary, ArbitraryFrom};
 
-use crate::model::query::select::{Distinctness, Predicate};
+use crate::model::query::select::{Distinctness, Predicate, ResultColumn};
 use crate::model::query::{Create, Delete, Drop, Insert, Query, Select};
 use crate::model::table::{Table, Value};
 use crate::SimulatorEnv;
@@ -25,6 +25,7 @@ impl ArbitraryFrom<&SimulatorEnv> for Select {
         let table = pick(&env.tables, rng);
         Self {
             table: table.name.clone(),
+            result_columns: vec![ResultColumn::Star],
             predicate: Predicate::arbitrary_from(rng, table),
             limit: Some(rng.gen_range(0..=1000)),
             distinct: Distinctness::All,
@@ -65,6 +66,7 @@ impl ArbitraryFrom<&SimulatorEnv> for Insert {
             // Pick another table to insert into
             let select = Select {
                 table: select_table.name.clone(),
+                result_columns: vec![ResultColumn::Star],
                 predicate,
                 limit: None,
                 distinct: Distinctness::All,

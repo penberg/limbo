@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     model::{
         query::{
-            select::{Distinctness, Predicate},
+            select::{Distinctness, Predicate, ResultColumn},
             Create, Delete, Drop, Insert, Query, Select,
         },
         table::Value,
@@ -114,6 +114,17 @@ pub(crate) enum Property {
         queries: Vec<Query>,
         select: Select,
     },
+    // Select-Select-Optimizer is a property in which we test the optimizer by
+    // running two equivalent select queries, one with `SELECT <predicate> from <t>`
+    // and the other with `SELECT * from <t> WHERE <predicate>`. As highlighted by
+    // Rigger et al. in Non-Optimizing Reference Engine Construction(NoREC), SQLite
+    // tends to optimize `where` statements while keeping the result column expressions
+    // unoptimized. This property is used to test the optimizer. The property is successful
+    // if the two queries return the same number of rows.
+    SelectSelectOptimizer {
+        table: String,
+        predicate: Predicate,
+    },
 }
 
 impl Property {
@@ -124,6 +135,7 @@ impl Property {
             Property::SelectLimit { .. } => "Select-Limit".to_string(),
             Property::DeleteSelect { .. } => "Delete-Select".to_string(),
             Property::DropSelect { .. } => "Drop-Select".to_string(),
+            Property::SelectSelectOptimizer { .. } => "Select-Select-Optimizer".to_string(),
         }
     }
     /// interactions construct a list of interactions, which is an executable representation of the property.
@@ -296,6 +308,7 @@ impl Property {
 
                 let select = Interaction::Query(Query::Select(Select {
                     table: table.clone(),
+                    result_columns: vec![ResultColumn::Star],
                     predicate: predicate.clone(),
                     limit: None,
                     distinct: Distinctness::All,
@@ -358,6 +371,68 @@ impl Property {
                 interactions.push(assertion);
 
                 interactions
+            }
+            Property::SelectSelectOptimizer { table, predicate } => {
+                let assumption = Interaction::Assumption(Assertion {
+                    message: format!("table {} exists", table),
+                    func: Box::new({
+                        let table = table.clone();
+                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
+                            Ok(env.tables.iter().any(|t| t.name == table))
+                        }
+                    }),
+                });
+
+                let select1 = Interaction::Query(Query::Select(Select {
+                    table: table.clone(),
+                    result_columns: vec![ResultColumn::Expr(predicate.clone())],
+                    predicate: Predicate::true_(),
+                    limit: None,
+                    distinct: Distinctness::All,
+                }));
+
+                let select2 = Interaction::Query(Query::Select(Select {
+                    table: table.clone(),
+                    result_columns: vec![ResultColumn::Star],
+                    predicate: predicate.clone(),
+                    limit: None,
+                    distinct: Distinctness::All,
+                }));
+
+                let assertion = Interaction::Assertion(Assertion {
+                    message: "select queries should return the same amount of results".to_string(),
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                        let select_star = stack.last().unwrap();
+                        let select_predicate = stack.get(stack.len() - 2).unwrap();
+                        match (select_predicate, select_star) {
+                            (Ok(rows1), Ok(rows2)) => {
+                                // If rows1 results have more than 1 column, there is a problem
+                                if rows1.iter().find(|vs| vs.len() > 1).is_some() {
+                                    return Err(LimboError::InternalError(
+                                        "Select query without the star should return only one column".to_string(),
+                                    ));
+                                }
+                                // Count the 1s in the select query without the star
+                                let rows1 = rows1
+                                    .iter()
+                                    .filter(|vs| {
+                                        let v = vs.first().unwrap();
+                                        if let Value::Integer(i) = v {
+                                            *i == 1
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                    .count();
+
+                                Ok(rows1 == rows2.len())
+                            }
+                            _ => Ok(false),
+                        }
+                    }),
+                });
+
+                vec![assumption, select1, select2, assertion]
             }
         }
     }
@@ -453,6 +528,7 @@ fn property_insert_values_select<R: rand::Rng>(
     // Select the row
     let select_query = Select {
         table: table.name.clone(),
+        result_columns: vec![ResultColumn::Star],
         predicate: Predicate::arbitrary_from(rng, (table, &row)),
         limit: None,
         distinct: Distinctness::All,
@@ -472,6 +548,7 @@ fn property_select_limit<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Prope
     // Select the table
     let select = Select {
         table: table.name.clone(),
+        result_columns: vec![ResultColumn::Star],
         predicate: Predicate::arbitrary_from(rng, table),
         limit: Some(rng.gen_range(1..=5)),
         distinct: Distinctness::All,
@@ -588,6 +665,7 @@ fn property_drop_select<R: rand::Rng>(
 
     let select = Select {
         table: table.name.clone(),
+        result_columns: vec![ResultColumn::Star],
         predicate: Predicate::arbitrary_from(rng, table),
         limit: None,
         distinct: Distinctness::All,
@@ -597,6 +675,18 @@ fn property_drop_select<R: rand::Rng>(
         table: table.name.clone(),
         queries,
         select,
+    }
+}
+
+fn property_select_select_optimizer<R: rand::Rng>(rng: &mut R, env: &SimulatorEnv) -> Property {
+    // Get a random table
+    let table = pick(&env.tables, rng);
+    // Generate a random predicate
+    let predicate = Predicate::arbitrary_from(rng, table);
+
+    Property::SelectSelectOptimizer {
+        table: table.name.clone(),
+        predicate,
     }
 }
 
@@ -628,6 +718,10 @@ impl ArbitraryFrom<(&SimulatorEnv, &InteractionStats)> for Property {
                     // remaining_.drop,
                     0.0,
                     Box::new(|rng: &mut R| property_drop_select(rng, env, &remaining_)),
+                ),
+                (
+                    remaining_.read / 2.0,
+                    Box::new(|rng: &mut R| property_select_select_optimizer(rng, env)),
                 ),
             ],
             rng,
