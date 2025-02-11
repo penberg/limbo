@@ -32,7 +32,8 @@ impl InteractionPlan {
                 match p {
                     Property::InsertValuesSelect { queries, .. }
                     | Property::DoubleCreateFailure { queries, .. }
-                    | Property::DeleteSelect { queries, .. } => {
+                    | Property::DeleteSelect { queries, .. }
+                    | Property::DropSelect { queries, .. } => {
                         queries.clear();
                     }
                     Property::SelectLimit { .. } => {}
