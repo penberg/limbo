@@ -2,7 +2,6 @@ use crate::VirtualTable;
 use crate::{util::normalize_ident, Result};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
-use log::trace;
 use sqlite3_parser::ast::{Expr, Literal, TableOptions};
 use sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, ResultColumn, Stmt},
@@ -10,6 +9,7 @@ use sqlite3_parser::{
 };
 use std::collections::HashMap;
 use std::rc::Rc;
+use tracing::trace;
 
 pub struct Schema {
     pub tables: HashMap<String, Rc<BTreeTable>>,

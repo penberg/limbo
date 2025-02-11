@@ -3,7 +3,6 @@ use crate::io::common;
 use crate::Result;
 
 use super::{Completion, File, OpenFlags, IO};
-use log::{debug, trace};
 use polling::{Event, Events, Poller};
 use rustix::{
     fd::{AsFd, AsRawFd},
@@ -14,6 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::rc::Rc;
+use tracing::{debug, trace};
 
 pub struct UnixIO {
     poller: Rc<RefCell<Poller>>,

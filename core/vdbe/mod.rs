@@ -1131,7 +1131,7 @@ impl Program {
                             )));
                         }
                     }
-                    log::trace!("Halt auto_commit {}", self.auto_commit);
+                    tracing::trace!("Halt auto_commit {}", self.auto_commit);
                     let connection = self
                         .connection
                         .upgrade()
@@ -1177,14 +1177,14 @@ impl Program {
 
                     if updated && matches!(current_state, TransactionState::None) {
                         if let LimboResult::Busy = pager.begin_read_tx()? {
-                            log::trace!("begin_read_tx busy");
+                            tracing::trace!("begin_read_tx busy");
                             return Ok(StepResult::Busy);
                         }
                     }
 
                     if updated && matches!(new_transaction_state, TransactionState::Write) {
                         if let LimboResult::Busy = pager.begin_write_tx()? {
-                            log::trace!("begin_write_tx busy");
+                            tracing::trace!("begin_write_tx busy");
                             return Ok(StepResult::Busy);
                         }
                     }
@@ -2789,10 +2789,10 @@ fn make_owned_record(registers: &[OwnedValue], start_reg: &usize, count: &usize)
 }
 
 fn trace_insn(program: &Program, addr: InsnReference, insn: &Insn) {
-    if !log::log_enabled!(log::Level::Trace) {
+    if !tracing::enabled!(tracing::Level::TRACE) {
         return;
     }
-    log::trace!(
+    tracing::trace!(
         "{}",
         explain::insn_to_str(
             program,
