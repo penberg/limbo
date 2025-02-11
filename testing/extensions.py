@@ -168,7 +168,7 @@ def test_uuid(pipe):
 
 
 def test_regexp(pipe):
-    extension_path = "./target/debug/liblimbo_regexp.so"
+    extension_path = "./target/debug/liblimbo_regexp"
 
     # before extension loads, assert no function
     run_test(pipe, "SELECT regexp('a.c', 'abc');", returns_error_no_func)
@@ -213,7 +213,7 @@ def validate_percentile_disc(res):
 
 
 def test_aggregates(pipe):
-    extension_path = "./target/debug/liblimbo_percentile.so"
+    extension_path = "./target/debug/liblimbo_percentile"
     # assert no function before extension loads
     run_test(
         pipe,
@@ -302,7 +302,7 @@ def validate_base64_decode(a):
 
 
 def test_crypto(pipe):
-    extension_path = "./target/debug/liblimbo_crypto.so"
+    extension_path = "./target/debug/liblimbo_crypto"
     # assert no function before extension loads
     run_test(
         pipe,
