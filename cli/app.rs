@@ -865,6 +865,26 @@ impl Limbo {
 
         Ok(())
     }
+
+    pub fn handle_remaining_input(&mut self) {
+        if self.input_buff.is_empty() {
+            return;
+        }
+
+        let buff = self.input_buff.clone();
+        let echo = self.opts.echo;
+        if echo {
+            let _ = self.writeln(&buff);
+        }
+        let conn = self.conn.clone();
+        let runner = conn.query_runner(buff.as_bytes());
+        for output in runner {
+            if let Err(e) = self.print_query_result(&buff, output) {
+                let _ = self.writeln(e.to_string());
+            }
+        }
+        self.reset_input();
+    }
 }
 
 fn get_writer(output: &str) -> Box<dyn Write> {

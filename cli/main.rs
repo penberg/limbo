@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
             Err(ReadlineError::Eof) => {
+                app.handle_remaining_input();
                 let _ = app.close_conn();
                 break;
             }
