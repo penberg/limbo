@@ -138,11 +138,10 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboStatement_columns
         .unwrap();
 
     for i in 0..num_columns {
-        if let Some(column_name) = stmt.stmt.get_column_name(i) {
-            let str = env.new_string(column_name).unwrap();
-            env.set_object_array_element(&obj_arr, i as i32, str)
-                .unwrap();
-        }
+        let column_name = stmt.stmt.get_column_name(i);
+        let str = env.new_string(column_name.as_str()).unwrap();
+        env.set_object_array_element(&obj_arr, i as i32, str)
+            .unwrap();
     }
 
     obj_arr.into()

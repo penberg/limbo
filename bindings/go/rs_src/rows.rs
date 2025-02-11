@@ -115,12 +115,7 @@ pub extern "C" fn rows_get_column_name(rows_ptr: *mut c_void, idx: i32) -> *cons
         return std::ptr::null_mut();
     }
     let name = rows.stmt.get_column_name(idx as usize);
-    let cstr = std::ffi::CString::new(
-        name.as_ref()
-            .unwrap_or(&&format!("column_{}", idx))
-            .as_bytes(),
-    )
-    .expect("Failed to create CString");
+    let cstr = std::ffi::CString::new(name.as_bytes()).expect("Failed to create CString");
     cstr.into_raw() as *const c_char
 }
 
