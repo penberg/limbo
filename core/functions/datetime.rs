@@ -1536,11 +1536,13 @@ mod tests {
     #[allow(deprecated)]
     #[test]
     fn test_apply_modifier_julianday() {
+        use julian_day_converter::*;
+
         let dt = create_datetime(2000, 1, 1, 12, 0, 0);
-        let julian_day = julian_day_converter::datetime_to_julian_day(&dt.to_string()).unwrap();
+        let julian_day = &dt.to_jd();
         let mut dt_result = NaiveDateTime::default();
-        if let Ok(result) = julian_day_converter::julian_day_to_datetime(julian_day) {
-            dt_result = result;
+        if let Some(ndt) = JulianDay::from_jd(*julian_day) {
+            dt_result = ndt;
         }
         assert_eq!(dt_result, dt);
     }
