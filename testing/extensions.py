@@ -190,6 +190,21 @@ def test_regexp(pipe):
     run_test(
         pipe, "SELECT regexp_substr('the year is unknow', '[0-9]+');", returns_null
     )
+    run_test(
+        pipe,
+        "select regexp_replace('the year is 2021', '[0-9]+', '2050') = 'the year is 2050';",
+        validate_true,
+    )
+    run_test(
+        pipe,
+        "select regexp_replace('the year is 2021', '2k21', '2050') = 'the year is 2021';",
+        validate_true,
+    )
+    run_test(
+        pipe,
+        "select regexp_replace('the year is 2021', '([0-9]+)', '$1 or 2050') = 'the year is 2021 or 2050';",
+        validate_true,
+    )
 
 
 def validate_median(res):
