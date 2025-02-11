@@ -686,7 +686,7 @@ impl Limbo {
                     if rows.num_columns() > 0 {
                         let header = (0..rows.num_columns())
                             .map(|i| {
-                                let name = rows.get_column_name(i).cloned().unwrap_or_default();
+                                let name = rows.get_column_name(i);
                                 Cell::new(name).add_attribute(Attribute::Bold)
                             })
                             .collect::<Vec<_>>();

@@ -32,6 +32,7 @@ use log::trace;
 use parking_lot::RwLock;
 use schema::{Column, Schema};
 use sqlite3_parser::{ast, ast::Cmd, lexer::sql::Parser};
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::num::NonZero;
@@ -485,8 +486,12 @@ impl Statement {
         self.program.result_columns.len()
     }
 
-    pub fn get_column_name(&self, idx: usize) -> Option<&String> {
-        self.program.result_columns[idx].name(&self.program.table_references)
+    pub fn get_column_name(&self, idx: usize) -> Cow<String> {
+        let column = &self.program.result_columns[idx];
+        match column.name(&self.program.table_references) {
+            Some(name) => Cow::Borrowed(name),
+            None => Cow::Owned(column.expr.to_string()),
+        }
     }
 
     pub fn parameters(&self) -> &parameters::Parameters {
