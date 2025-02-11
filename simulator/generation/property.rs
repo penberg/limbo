@@ -9,7 +9,7 @@ use crate::{
         },
         table::Value,
     },
-    runner::env::SimulatorEnv,
+    runner::env::{SimulatorEnv, SimulatorEnvTrait},
 };
 
 use super::{
@@ -170,8 +170,8 @@ impl Property {
                     message: format!("table {} exists", insert.table()),
                     func: Box::new({
                         let table_name = table.clone();
-                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                            Ok(env.tables.iter().any(|t| t.name == table_name))
+                        move |_: &Vec<ResultSet>, env: &dyn SimulatorEnvTrait| {
+                            Ok(env.tables().iter().any(|t| t.name == table_name))
                         }
                     }),
                 });
@@ -182,7 +182,7 @@ impl Property {
                         row.iter().map(|v| v.to_string()).collect::<Vec<String>>(),
                         insert.table(),
                     ),
-                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &dyn SimulatorEnvTrait| {
                         let rows = stack.last().unwrap();
                         match rows {
                             Ok(rows) => Ok(rows.iter().any(|r| r == &row)),
@@ -206,8 +206,8 @@ impl Property {
                 let assumption = Interaction::Assumption(Assertion {
                     message: "Double-Create-Failure should not be called on an existing table"
                         .to_string(),
-                    func: Box::new(move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                        Ok(!env.tables.iter().any(|t| t.name == table_name))
+                    func: Box::new(move |_: &Vec<ResultSet>, env: &dyn SimulatorEnvTrait| {
+                        Ok(!env.tables().iter().any(|t| t.name == table_name))
                     }),
                 });
 
@@ -220,7 +220,7 @@ impl Property {
                     message:
                         "creating two tables with the name should result in a failure for the second query"
                             .to_string(),
-                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &dyn SimulatorEnvTrait| {
                         let last = stack.last().unwrap();
                         match last {
                             Ok(_) => Ok(false),
@@ -245,8 +245,8 @@ impl Property {
                     message: format!("table {} exists", table_name),
                     func: Box::new({
                         let table_name = table_name.clone();
-                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                            Ok(env.tables.iter().any(|t| t.name == table_name))
+                        move |_: &Vec<ResultSet>, env: &dyn SimulatorEnvTrait| {
+                            Ok(env.tables().iter().any(|t| t.name == table_name))
                         }
                     }),
                 });
@@ -257,7 +257,7 @@ impl Property {
 
                 let assertion = Interaction::Assertion(Assertion {
                     message: "select query should respect the limit clause".to_string(),
-                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &dyn SimulatorEnvTrait| {
                         let last = stack.last().unwrap();
                         match last {
                             Ok(rows) => Ok(limit >= rows.len()),
@@ -281,8 +281,8 @@ impl Property {
                     message: format!("table {} exists", table),
                     func: Box::new({
                         let table = table.clone();
-                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                            Ok(env.tables.iter().any(|t| t.name == table))
+                        move |_: &Vec<ResultSet>, env: &dyn SimulatorEnvTrait| {
+                            Ok(env.tables().iter().any(|t| t.name == table))
                         }
                     }),
                 });
@@ -292,7 +292,7 @@ impl Property {
                         "select '{}' should return no values for table '{}'",
                         predicate, table,
                     ),
-                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &dyn SimulatorEnvTrait| {
                         let rows = stack.last().unwrap();
                         match rows {
                             Ok(rows) => Ok(rows.is_empty()),
@@ -332,8 +332,8 @@ impl Property {
                     message: format!("table {} exists", table),
                     func: Box::new({
                         let table = table.clone();
-                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                            Ok(env.tables.iter().any(|t| t.name == table))
+                        move |_: &Vec<ResultSet>, env: &dyn SimulatorEnvTrait| {
+                            Ok(env.tables().iter().any(|t| t.name == table))
                         }
                     }),
                 });
@@ -345,7 +345,7 @@ impl Property {
                         "select query should result in an error for table '{}'",
                         table
                     ),
-                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &dyn SimulatorEnvTrait| {
                         let last = stack.last().unwrap();
                         match last {
                             Ok(_) => Ok(false),
@@ -377,8 +377,8 @@ impl Property {
                     message: format!("table {} exists", table),
                     func: Box::new({
                         let table = table.clone();
-                        move |_: &Vec<ResultSet>, env: &SimulatorEnv| {
-                            Ok(env.tables.iter().any(|t| t.name == table))
+                        move |_: &Vec<ResultSet>, env: &dyn SimulatorEnvTrait| {
+                            Ok(env.tables().iter().any(|t| t.name == table))
                         }
                     }),
                 });
@@ -401,7 +401,7 @@ impl Property {
 
                 let assertion = Interaction::Assertion(Assertion {
                     message: "select queries should return the same amount of results".to_string(),
-                    func: Box::new(move |stack: &Vec<ResultSet>, _: &SimulatorEnv| {
+                    func: Box::new(move |stack: &Vec<ResultSet>, _: &dyn SimulatorEnvTrait| {
                         let select_star = stack.last().unwrap();
                         let select_predicate = stack.get(stack.len() - 2).unwrap();
                         match (select_predicate, select_star) {
