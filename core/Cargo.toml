@@ -18,7 +18,7 @@ default = ["fs", "json", "uuid", "time"]
 fs = []
 json = ["dep:jsonb", "dep:pest", "dep:pest_derive", "dep:serde", "dep:indexmap"]
 uuid = ["limbo_uuid/static"]
-io_uring = ["dep:io-uring", "rustix/io_uring"]
+io_uring = ["dep:io-uring", "rustix/io_uring", "dep:libc"]
 percentile = ["limbo_percentile/static"]
 regexp = ["limbo_regexp/static"]
 time = ["limbo_time/static"]
@@ -41,7 +41,7 @@ limbo_ext = { path = "../extensions/core" }
 cfg_block = "0.1.1"
 fallible-iterator = "0.3.0"
 hex = "0.4.3"
-libc = "0.2.155"
+libc = { version = "0.2.155", optional = true }
 sqlite3-parser = { path = "../vendored/sqlite3-parser" }
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15" }
