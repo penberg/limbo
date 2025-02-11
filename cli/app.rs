@@ -502,7 +502,7 @@ impl Limbo {
             }
             self.reset_input();
         } else {
-            self.buffer_input(line);
+            self.buffer_input(format!("{}\n", line).as_str());
             self.set_multiline_prompt();
         }
         rl.add_history_entry(line.to_owned())?;
