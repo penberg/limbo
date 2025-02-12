@@ -17,7 +17,7 @@ mimalloc = { version = "*", default-features = false }
 
 [dependencies]
 chrono = "0.4.39"
-limbo_ext = { path = "../core", features = ["static"] }
+limbo_ext = { workspace = true, features = ["static"] }
 strum = "0.26.3"
 strum_macros = "0.26.3"
 thiserror = "2.0.11"

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 
-use sqlite3_parser::ast;
+use limbo_sqlite3_parser::ast;
 
 use crate::{
     schema::{Index, Schema},

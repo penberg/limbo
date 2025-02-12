@@ -13,7 +13,7 @@ use crate::{
     vdbe::BranchOffset,
     Result, VirtualTable,
 };
-use sqlite3_parser::ast::{
+use limbo_sqlite3_parser::ast::{
     self, Expr, FromClause, JoinType, Limit, Materialized, UnaryOperator, With,
 };
 

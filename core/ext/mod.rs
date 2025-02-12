@@ -2,7 +2,7 @@ use crate::{function::ExternalFunc, util::columns_from_create_table_body, Databa
 use fallible_iterator::FallibleIterator;
 use limbo_ext::{ExtensionApi, InitAggFunction, ResultCode, ScalarFunction, VTabModuleImpl};
 pub use limbo_ext::{FinalizeFunction, StepFunction, Value as ExtValue, ValueType as ExtValueType};
-use sqlite3_parser::{
+use limbo_sqlite3_parser::{
     ast::{Cmd, Stmt},
     lexer::sql::Parser,
 };

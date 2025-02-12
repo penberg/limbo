@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use sqlite3_parser::ast::{
+use limbo_sqlite3_parser::ast::{
     DistinctNames, Expr, InsertBody, QualifiedName, ResolveType, ResultColumn, With,
 };
 
@@ -71,7 +71,7 @@ pub fn translate_insert(
     let root_page = table.root_page;
     let values = match body {
         InsertBody::Select(select, None) => match &select.body.select.deref() {
-            sqlite3_parser::ast::OneSelect::Values(values) => values,
+            limbo_sqlite3_parser::ast::OneSelect::Values(values) => values,
             _ => todo!(),
         },
         _ => todo!(),

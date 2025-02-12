@@ -4,8 +4,8 @@ use std::fs::read;
 use std::panic;
 
 #[cfg(not(feature = "YYNOERRORRECOVERY"))]
-use sqlite3_parser::lexer::sql::Error;
-use sqlite3_parser::lexer::sql::Parser;
+use limbo_sqlite3_parser::lexer::sql::Error;
+use limbo_sqlite3_parser::lexer::sql::Parser;
 
 /// Parse specified files and print all commands.
 fn main() {

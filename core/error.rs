@@ -14,7 +14,7 @@ pub enum LimboError {
     ParseError(String),
     #[error(transparent)]
     #[diagnostic(transparent)]
-    LexerError(#[from] sqlite3_parser::lexer::sql::Error),
+    LexerError(#[from] limbo_sqlite3_parser::lexer::sql::Error),
     #[error("Conversion error: {0}")]
     ConversionError(String),
     #[error("Env variable error: {0}")]

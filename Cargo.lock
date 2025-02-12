@@ -1636,6 +1636,7 @@ dependencies = [
  "limbo_percentile",
  "limbo_regexp",
  "limbo_series",
+ "limbo_sqlite3_parser",
  "limbo_time",
  "limbo_uuid",
  "miette",
@@ -1656,7 +1657,6 @@ dependencies = [
  "rustix",
  "ryu",
  "serde",
- "sqlite3-parser",
  "strum",
  "tempfile",
  "thiserror 1.0.69",
@@ -1747,6 +1747,26 @@ dependencies = [
  "libc",
  "limbo_core",
  "log",
+]
+
+[[package]]
+name = "limbo_sqlite3_parser"
+version = "0.0.14"
+dependencies = [
+ "bitflags 2.8.0",
+ "cc",
+ "env_logger 0.11.6",
+ "fallible-iterator 0.3.0",
+ "indexmap",
+ "log",
+ "memchr",
+ "miette",
+ "phf",
+ "phf_codegen",
+ "phf_shared",
+ "strum",
+ "strum_macros",
+ "uncased",
 ]
 
 [[package]]
@@ -2802,26 +2822,6 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-
-[[package]]
-name = "sqlite3-parser"
-version = "0.13.0"
-dependencies = [
- "bitflags 2.8.0",
- "cc",
- "env_logger 0.11.6",
- "fallible-iterator 0.3.0",
- "indexmap",
- "log",
- "memchr",
- "miette",
- "phf",
- "phf_codegen",
- "phf_shared",
- "strum",
- "strum_macros",
- "uncased",
-]
 
 [[package]]
 name = "stable_deref_trait"

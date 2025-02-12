@@ -3,7 +3,7 @@ use std::env;
 use std::fs::read;
 use std::panic;
 
-use sqlite3_parser::lexer::sql::Parser;
+use limbo_sqlite3_parser::lexer::sql::Parser;
 
 /// Parse specified files and check all commands.
 fn main() {

@@ -2,8 +2,8 @@ use crate::VirtualTable;
 use crate::{util::normalize_ident, Result};
 use core::fmt;
 use fallible_iterator::FallibleIterator;
-use sqlite3_parser::ast::{Expr, Literal, TableOptions};
-use sqlite3_parser::{
+use limbo_sqlite3_parser::ast::{Expr, Literal, TableOptions};
+use limbo_sqlite3_parser::{
     ast::{Cmd, CreateTableBody, QualifiedName, ResultColumn, Stmt},
     lexer::sql::Parser,
 };
@@ -233,8 +233,9 @@ fn create_table(
         } => {
             if let Some(constraints) = constraints {
                 for c in constraints {
-                    if let sqlite3_parser::ast::TableConstraint::PrimaryKey { columns, .. } =
-                        c.constraint
+                    if let limbo_sqlite3_parser::ast::TableConstraint::PrimaryKey {
+                        columns, ..
+                    } = c.constraint
                     {
                         for column in columns {
                             primary_key_column_names.push(match column.expr {
@@ -304,13 +305,13 @@ fn create_table(
                 let mut notnull = false;
                 for c_def in &col_def.constraints {
                     match &c_def.constraint {
-                        sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. } => {
+                        limbo_sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. } => {
                             primary_key = true;
                         }
-                        sqlite3_parser::ast::ColumnConstraint::NotNull { .. } => {
+                        limbo_sqlite3_parser::ast::ColumnConstraint::NotNull { .. } => {
                             notnull = true;
                         }
-                        sqlite3_parser::ast::ColumnConstraint::Default(expr) => {
+                        limbo_sqlite3_parser::ast::ColumnConstraint::Default(expr) => {
                             default = Some(expr.clone())
                         }
                         _ => {}
@@ -506,8 +507,8 @@ impl Index {
                     .map(|col| IndexColumn {
                         name: normalize_ident(&col.expr.to_string()),
                         order: match col.order {
-                            Some(sqlite3_parser::ast::SortOrder::Asc) => Order::Ascending,
-                            Some(sqlite3_parser::ast::SortOrder::Desc) => Order::Descending,
+                            Some(limbo_sqlite3_parser::ast::SortOrder::Asc) => Order::Ascending,
+                            Some(limbo_sqlite3_parser::ast::SortOrder::Desc) => Order::Descending,
                             None => Order::Ascending,
                         },
                     })

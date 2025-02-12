@@ -304,8 +304,8 @@ impl Tokenizer {
 }
 
 /// ```rust
-/// use sqlite3_parser::lexer::sql::Tokenizer;
-/// use sqlite3_parser::lexer::Scanner;
+/// use limbo_sqlite3_parser::lexer::sql::Tokenizer;
+/// use limbo_sqlite3_parser::lexer::Scanner;
 ///
 /// let tokenizer = Tokenizer::new();
 /// let input = b"PRAGMA parser_trace=ON;";

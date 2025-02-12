@@ -1,7 +1,7 @@
 [package]
-name = "sqlite3-parser"
-version = "0.13.0"
-edition = "2021"
+name = "limbo_sqlite3_parser"
+version.workspace = true
+edition.workspace = true
 authors = ["gwenn"]
 description = "SQL parser (as understood by SQLite)"
 documentation = "http://docs.rs/sqlite3-parser"

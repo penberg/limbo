@@ -28,9 +28,9 @@ use libloading::{Library, Symbol};
 #[cfg(not(target_family = "wasm"))]
 use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use limbo_ext::{ResultCode, VTabModuleImpl, Value as ExtValue};
+use limbo_sqlite3_parser::{ast, ast::Cmd, lexer::sql::Parser};
 use parking_lot::RwLock;
 use schema::{Column, Schema};
-use sqlite3_parser::{ast, ast::Cmd, lexer::sql::Parser};
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashMap;

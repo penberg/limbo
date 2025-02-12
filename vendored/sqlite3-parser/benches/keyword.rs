@@ -2,7 +2,7 @@
 #![feature(test)]
 extern crate test;
 
-use sqlite3_parser::dialect::keyword_token;
+use limbo_sqlite3_parser::dialect::keyword_token;
 use test::Bencher;
 
 static VALUES: [&[u8]; 136] = [

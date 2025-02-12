@@ -12,8 +12,8 @@ use crate::util::normalize_ident;
 use crate::vdbe::builder::{ProgramBuilderOpts, QueryMode};
 use crate::SymbolTable;
 use crate::{schema::Schema, vdbe::builder::ProgramBuilder, Result};
-use sqlite3_parser::ast::{self};
-use sqlite3_parser::ast::{ResultColumn, SelectInner};
+use limbo_sqlite3_parser::ast::{self};
+use limbo_sqlite3_parser::ast::{ResultColumn, SelectInner};
 
 pub fn translate_select(
     query_mode: QueryMode,

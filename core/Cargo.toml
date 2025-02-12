@@ -37,12 +37,12 @@ mimalloc = { version = "*", default-features = false }
 libloading = "0.8.6"
 
 [dependencies]
-limbo_ext = { path = "../extensions/core" }
+limbo_ext = { workspace = true }
 cfg_block = "0.1.1"
 fallible-iterator = "0.3.0"
 hex = "0.4.3"
 libc = { version = "0.2.155", optional = true }
-sqlite3-parser = { path = "../vendored/sqlite3-parser" }
+limbo_sqlite3_parser = { workspace = true }
 thiserror = "1.0.61"
 getrandom = { version = "0.2.15" }
 regex = "1.11.1"
@@ -55,13 +55,13 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 pest = { version = "2.0", optional = true }
 pest_derive = { version = "2.0", optional = true }
 rand = "0.8.5"
-limbo_macros = { path = "../macros" }
-limbo_uuid = { path = "../extensions/uuid", optional = true, features = ["static"] }
-limbo_regexp = { path = "../extensions/regexp", optional = true, features = ["static"] }
-limbo_percentile = { path = "../extensions/percentile", optional = true, features = ["static"] }
-limbo_time = { path = "../extensions/time", optional = true, features = ["static"] }
-limbo_crypto = { path = "../extensions/crypto", optional = true, features = ["static"] }
-limbo_series = { path = "../extensions/series", optional = true, features = ["static"] }
+limbo_macros = { workspace = true }
+limbo_uuid = { workspace = true, optional = true, features = ["static"] }
+limbo_regexp = { workspace = true, optional = true, features = ["static"] }
+limbo_percentile = { workspace = true, optional = true, features = ["static"] }
+limbo_time = { workspace = true, optional = true, features = ["static"] }
+limbo_crypto = { workspace = true, optional = true, features = ["static"] }
+limbo_series = { workspace = true, optional = true, features = ["static"] }
 miette = "7.4.0"
 strum = "0.26"
 parking_lot = "0.12.3"
