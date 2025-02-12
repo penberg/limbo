@@ -56,6 +56,15 @@ impl Completion {
             Self::Sync(s) => s.complete(result), // fix
         }
     }
+
+    /// only call this method if you are sure that the completion is
+    /// a ReadCompletion, panics otherwise
+    pub fn as_read(&self) -> &ReadCompletion {
+        match self {
+            Self::Read(ref r) => r,
+            _ => unreachable!(),
+        }
+    }
 }
 
 pub struct WriteCompletion {

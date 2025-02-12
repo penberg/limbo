@@ -79,10 +79,7 @@ impl File for MemoryFile {
     }
 
     fn pread(&self, pos: usize, c: Completion) -> Result<()> {
-        let r = match &c {
-            Completion::Read(ref r) => r,
-            _ => unreachable!(),
-        };
+        let r = c.as_read();
         let buf_len = r.buf().len();
         if buf_len == 0 {
             c.complete(0);
