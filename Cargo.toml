@@ -31,6 +31,9 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/tursodatabase/limbo"
 
+[workspace.dependencies]
+limbo_core = { path = "core", version = "0.0.14" }
+
 # Config for 'cargo dist'
 [workspace.metadata.dist]
 # The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
