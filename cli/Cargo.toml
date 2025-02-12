@@ -1,7 +1,7 @@
 # Copyright 2023 the Limbo authors. All rights reserved. MIT license.
 
 [package]
-name = "limbo"
+name = "limbo_cli"
 version.workspace = true
 authors.workspace = true
 default-run = "limbo"
