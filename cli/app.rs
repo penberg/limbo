@@ -310,13 +310,7 @@ impl Limbo {
         if cmd.trim().starts_with('.') {
             self.handle_dot_command(cmd);
         } else {
-            let conn = self.conn.clone();
-            let runner = conn.query_runner(cmd.as_bytes());
-            for output in runner {
-                if let Err(e) = self.print_query_result(cmd, output) {
-                    let _ = self.writeln(e.to_string());
-                }
-            }
+            self.run_query(cmd);
         }
         std::process::exit(0);
     }
@@ -876,17 +870,7 @@ impl Limbo {
         }
 
         let buff = self.input_buff.clone();
-        let echo = self.opts.echo;
-        if echo {
-            let _ = self.writeln(&buff);
-        }
-        let conn = self.conn.clone();
-        let runner = conn.query_runner(buff.as_bytes());
-        for output in runner {
-            if let Err(e) = self.print_query_result(&buff, output) {
-                let _ = self.writeln(e.to_string());
-            }
-        }
+        self.run_query(buff.as_str());
         self.reset_input();
     }
 }

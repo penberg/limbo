@@ -4,7 +4,7 @@ mod import;
 mod opcodes_dictionary;
 
 use rustyline::{error::ReadlineError, DefaultEditor};
-use std::sync::atomic::Ordering;
+use std::{io::IsTerminal, sync::atomic::Ordering};
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -15,6 +15,7 @@ fn main() -> anyhow::Result<()> {
     if history_file.exists() {
         rl.load_history(history_file.as_path())?;
     }
+    let is_terminal = std::io::stdin().is_terminal();
     loop {
         let readline = rl.readline(&app.prompt);
         match readline {
