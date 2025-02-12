@@ -299,11 +299,7 @@ fn to_limbo_step_result<'local>(
             &ctor_args,
         )
     } else {
-        env.new_object(
-            "tech/turso/core/LimboStepResult",
-            "(I)V",
-            &ctor_args,
-        )
+        env.new_object("tech/turso/core/LimboStepResult", "(I)V", &ctor_args)
     }
     .unwrap_or_else(|_| JObject::null())
 }
