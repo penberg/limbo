@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap, ptr::NonNull};
 
-use log::debug;
+use tracing::debug;
 
 use super::pager::PageRef;
 

@@ -1,6 +1,5 @@
 use super::{common, Completion, File, OpenFlags, IO};
 use crate::{LimboError, Result};
-use log::{debug, trace};
 use rustix::fs::{self, FlockOperation, OFlags};
 use rustix::io_uring::iovec;
 use std::cell::RefCell;
@@ -10,6 +9,7 @@ use std::os::fd::AsFd;
 use std::os::unix::io::AsRawFd;
 use std::rc::Rc;
 use thiserror::Error;
+use tracing::{debug, trace};
 
 const MAX_IOVECS: u32 = 128;
 const SQPOLL_IDLE: u32 = 1000;

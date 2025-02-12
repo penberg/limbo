@@ -1,4 +1,4 @@
-use log::debug;
+use tracing::debug;
 
 use crate::storage::pager::Pager;
 use crate::storage::sqlite3_ondisk::{
@@ -2411,14 +2411,14 @@ mod tests {
             };
             depth = Some(depth.unwrap_or(current_depth + 1));
             if depth != Some(current_depth + 1) {
-                log::error!("depth is different for child of page {}", page_idx);
+                tracing::error!("depth is different for child of page {}", page_idx);
                 valid = false;
             }
             match cell {
                 BTreeCell::TableInteriorCell(TableInteriorCell { _rowid, .. })
                 | BTreeCell::TableLeafCell(TableLeafCell { _rowid, .. }) => {
                     if previous_key.is_some() && previous_key.unwrap() >= _rowid {
-                        log::error!(
+                        tracing::error!(
                             "keys are in bad order: prev={:?}, current={}",
                             previous_key,
                             _rowid
@@ -2435,7 +2435,7 @@ mod tests {
             valid &= right_valid;
             depth = Some(depth.unwrap_or(right_depth + 1));
             if depth != Some(right_depth + 1) {
-                log::error!("depth is different for child of page {}", page_idx);
+                tracing::error!("depth is different for child of page {}", page_idx);
                 valid = false;
             }
         }
@@ -2577,9 +2577,9 @@ mod tests {
             for (key, size) in sequence.iter() {
                 let key = OwnedValue::Integer(*key);
                 let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; *size]))]);
-                log::info!("insert key:{}", key);
+                tracing::info!("insert key:{}", key);
                 cursor.insert(&key, &value, false).unwrap();
-                log::info!(
+                tracing::info!(
                     "=========== btree ===========\n{}\n\n",
                     format_btree(pager.clone(), root_page, 0)
                 );
@@ -2613,19 +2613,19 @@ mod tests {
         size: impl Fn(&mut ChaCha8Rng) -> usize,
     ) {
         let (mut rng, seed) = rng_from_time();
-        log::info!("super seed: {}", seed);
+        tracing::info!("super seed: {}", seed);
         for _ in 0..attempts {
             let (pager, root_page) = empty_btree();
             let mut cursor = BTreeCursor::new(pager.clone(), root_page);
             let mut keys = Vec::new();
             let seed = rng.next_u64();
-            log::info!("seed: {}", seed);
+            tracing::info!("seed: {}", seed);
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
             for insert_id in 0..inserts {
                 let size = size(&mut rng);
                 let key = (rng.next_u64() % (1 << 30)) as i64;
                 keys.push(key);
-                log::info!(
+                tracing::info!(
                     "INSERT INTO t VALUES ({}, randomblob({})); -- {}",
                     key,
                     size,
@@ -2635,7 +2635,7 @@ mod tests {
                 let value = Record::new(vec![OwnedValue::Blob(Rc::new(vec![0; size]))]);
                 cursor.insert(&key, &value, false).unwrap();
             }
-            log::info!(
+            tracing::info!(
                 "=========== btree ===========\n{}\n\n",
                 format_btree(pager.clone(), root_page, 0)
             );
@@ -2659,7 +2659,7 @@ mod tests {
     #[test]
     pub fn btree_insert_fuzz_run_equal_size() {
         for size in 1..8 {
-            log::info!("======= size:{} =======", size);
+            tracing::info!("======= size:{} =======", size);
             btree_insert_fuzz_run(2, 1024, |_| size);
         }
     }

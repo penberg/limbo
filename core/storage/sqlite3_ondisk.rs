@@ -48,12 +48,12 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::pager::Pager;
 use crate::types::{OwnedValue, Record, Text, TextSubtype};
 use crate::{File, Result};
-use log::trace;
 use parking_lot::RwLock;
 use std::cell::RefCell;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use tracing::trace;
 
 use super::pager::PageRef;
 
@@ -322,7 +322,7 @@ pub fn begin_write_database_header(header: &DatabaseHeader, pager: &Pager) -> Re
     let write_complete = Box::new(move |bytes_written: i32| {
         let buf_len = buffer_to_copy_in_cb.borrow().len();
         if bytes_written < buf_len as i32 {
-            log::error!("wrote({bytes_written}) less than expected({buf_len})");
+            tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
         }
         // finish_read_database_header(buf, header).unwrap();
     });
@@ -450,19 +450,19 @@ impl PageContent {
     }
 
     pub fn write_u8(&self, pos: usize, value: u8) {
-        log::debug!("write_u8(pos={}, value={})", pos, value);
+        tracing::debug!("write_u8(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos] = value;
     }
 
     pub fn write_u16(&self, pos: usize, value: u16) {
-        log::debug!("write_u16(pos={}, value={})", pos, value);
+        tracing::debug!("write_u16(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos..self.offset + pos + 2].copy_from_slice(&value.to_be_bytes());
     }
 
     pub fn write_u32(&self, pos: usize, value: u32) {
-        log::debug!("write_u32(pos={}, value={})", pos, value);
+        tracing::debug!("write_u32(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
         buf[self.offset + pos..self.offset + pos + 4].copy_from_slice(&value.to_be_bytes());
     }
@@ -542,7 +542,7 @@ impl PageContent {
         payload_overflow_threshold_min: usize,
         usable_size: usize,
     ) -> Result<BTreeCell> {
-        log::debug!("cell_get(idx={})", idx);
+        tracing::debug!("cell_get(idx={})", idx);
         let buf = self.as_ptr();
 
         let ncells = self.cell_count();
@@ -729,7 +729,7 @@ pub fn begin_write_btree_page(
 
             page_finish.clear_dirty();
             if bytes_written < buf_len as i32 {
-                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+                tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
         })
     };
@@ -1256,7 +1256,7 @@ pub fn begin_write_wal_frame(
 
             page_finish.clear_dirty();
             if bytes_written < buf_len as i32 {
-                log::error!("wrote({bytes_written}) less than expected({buf_len})");
+                tracing::error!("wrote({bytes_written}) less than expected({buf_len})");
             }
         })
     };
@@ -1287,7 +1287,7 @@ pub fn begin_write_wal_header(io: &Rc<dyn File>, header: &WalHeader) -> Result<(
     let write_complete = {
         Box::new(move |bytes_written: i32| {
             if bytes_written < WAL_HEADER_SIZE as i32 {
-                log::error!(
+                tracing::error!(
                     "wal header wrote({bytes_written}) less than expected({WAL_HEADER_SIZE})"
                 );
             }

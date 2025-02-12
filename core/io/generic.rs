@@ -1,8 +1,8 @@
 use crate::{Completion, File, LimboError, OpenFlags, Result, IO};
-use log::{debug, trace};
 use std::cell::RefCell;
 use std::io::{Read, Seek, Write};
 use std::rc::Rc;
+use tracing::{debug, trace};
 
 pub struct GenericIO {}
 

@@ -28,7 +28,6 @@ use libloading::{Library, Symbol};
 #[cfg(not(target_family = "wasm"))]
 use limbo_ext::{ExtensionApi, ExtensionEntryPoint};
 use limbo_ext::{ResultCode, VTabModuleImpl, Value as ExtValue};
-use log::trace;
 use parking_lot::RwLock;
 use schema::{Column, Schema};
 use sqlite3_parser::{ast, ast::Cmd, lexer::sql::Parser};
@@ -273,7 +272,7 @@ pub struct Connection {
 impl Connection {
     pub fn prepare(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Statement> {
         let sql = sql.as_ref();
-        trace!("Preparing: {}", sql);
+        tracing::trace!("Preparing: {}", sql);
         let db = &self.db;
         let mut parser = Parser::new(sql.as_bytes());
         let syms = &db.syms.borrow();
@@ -302,7 +301,7 @@ impl Connection {
 
     pub fn query(self: &Rc<Connection>, sql: impl AsRef<str>) -> Result<Option<Statement>> {
         let sql = sql.as_ref();
-        trace!("Querying: {}", sql);
+        tracing::trace!("Querying: {}", sql);
         let mut parser = Parser::new(sql.as_bytes());
         let cmd = parser.next()?;
         match cmd {

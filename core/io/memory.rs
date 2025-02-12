@@ -1,13 +1,13 @@
 use super::{Buffer, Completion, File, OpenFlags, IO};
 use crate::Result;
 
-use log::debug;
 use std::{
     cell::{Cell, RefCell, UnsafeCell},
     collections::BTreeMap,
     rc::Rc,
     sync::Arc,
 };
+use tracing::debug;
 
 pub struct MemoryIO {
     pages: UnsafeCell<BTreeMap<usize, MemPage>>,

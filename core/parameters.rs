@@ -79,7 +79,7 @@ impl Parameters {
             "" => {
                 let index = self.next_index();
                 self.list.push(Parameter::Anonymous(index));
-                log::trace!("anonymous parameter at {index}");
+                tracing::trace!("anonymous parameter at {index}");
                 index
             }
             name if name.starts_with(['$', ':', '@', '#']) => {
@@ -91,13 +91,13 @@ impl Parameters {
                     Some(t) => {
                         let index = t.index();
                         self.list.push(t.clone());
-                        log::trace!("named parameter at {index} as {name}");
+                        tracing::trace!("named parameter at {index} as {name}");
                         index
                     }
                     None => {
                         let index = self.next_index();
                         self.list.push(Parameter::Named(name.to_owned(), index));
-                        log::trace!("named parameter at {index} as {name}");
+                        tracing::trace!("named parameter at {index} as {name}");
                         index
                     }
                 }
@@ -109,7 +109,7 @@ impl Parameters {
                     self.index = index.checked_add(1).unwrap();
                 }
                 self.list.push(Parameter::Indexed(index));
-                log::trace!("indexed parameter at {index}");
+                tracing::trace!("indexed parameter at {index}");
                 index
             }
         }

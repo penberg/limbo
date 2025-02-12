@@ -4,13 +4,13 @@ use crate::storage::database::DatabaseStorage;
 use crate::storage::sqlite3_ondisk::{self, DatabaseHeader, PageContent};
 use crate::storage::wal::{CheckpointResult, Wal};
 use crate::{Buffer, LimboError, Result};
-use log::trace;
 use parking_lot::RwLock;
 use std::cell::{RefCell, UnsafeCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use tracing::trace;
 
 use super::page_cache::{DumbLruPageCache, PageCacheKey};
 use super::wal::{CheckpointMode, CheckpointStatus};
@@ -113,7 +113,7 @@ impl Page {
     }
 
     pub fn clear_loaded(&self) {
-        log::debug!("clear loaded {}", self.get().id);
+        tracing::debug!("clear loaded {}", self.get().id);
         self.get().flags.fetch_and(!PAGE_LOADED, Ordering::SeqCst);
     }
 }
