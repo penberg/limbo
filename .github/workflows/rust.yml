@@ -83,6 +83,7 @@ jobs:
       - uses: "./.github/shared/install_sqlite"
       - name: Test
         run: make test
+        timeout-minutes: 10
 
   test-sqlite:
     runs-on: ubuntu-latest
