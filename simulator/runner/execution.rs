@@ -157,6 +157,7 @@ fn execute_plan(
 /// `execute_interaction` uses this type in conjunction with a result, where
 /// the `Err` case indicates a full-stop due to a bug, and the `Ok` case
 /// indicates the next step in the plan.
+#[derive(PartialEq)]
 pub(crate) enum ExecutionContinuation {
     /// Default continuation, execute the next interaction.
     NextInteraction,

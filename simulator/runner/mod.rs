@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod differential;
 pub mod env;
 pub mod execution;
 #[allow(dead_code)]

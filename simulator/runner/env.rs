@@ -12,6 +12,11 @@ use crate::runner::io::SimulatorIO;
 
 use super::cli::SimulatorCLI;
 
+pub trait SimulatorEnvTrait {
+    fn tables(&self) -> &Vec<Table>;
+    fn tables_mut(&mut self) -> &mut Vec<Table>;
+}
+
 #[derive(Clone)]
 pub(crate) struct SimulatorEnv {
     pub(crate) opts: SimulatorOpts,
@@ -20,6 +25,16 @@ pub(crate) struct SimulatorEnv {
     pub(crate) io: Arc<SimulatorIO>,
     pub(crate) db: Arc<Database>,
     pub(crate) rng: ChaCha8Rng,
+}
+
+impl SimulatorEnvTrait for SimulatorEnv {
+    fn tables(&self) -> &Vec<Table> {
+        &self.tables
+    }
+
+    fn tables_mut(&mut self) -> &mut Vec<Table> {
+        &mut self.tables
+    }
 }
 
 impl SimulatorEnv {
@@ -92,10 +107,28 @@ impl SimulatorEnv {
     }
 }
 
+pub trait ConnectionTrait {
+    fn is_connected(&self) -> bool;
+    fn disconnect(&mut self);
+}
+
 #[derive(Clone)]
 pub(crate) enum SimConnection {
     Connected(Rc<Connection>),
     Disconnected,
+}
+
+impl ConnectionTrait for SimConnection {
+    fn is_connected(&self) -> bool {
+        match self {
+            SimConnection::Connected(_) => true,
+            SimConnection::Disconnected => false,
+        }
+    }
+
+    fn disconnect(&mut self) {
+        *self = SimConnection::Disconnected;
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -49,6 +49,8 @@ pub struct SimulatorCLI {
         help = "enable watch mode that reruns the simulation on file changes"
     )]
     pub watch: bool,
+    #[clap(long, help = "run differential testing between sqlite and Limbo")]
+    pub differential: bool,
 }
 
 impl SimulatorCLI {

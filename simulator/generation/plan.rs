@@ -11,7 +11,7 @@ use crate::{
         },
         table::Value,
     },
-    runner::env::SimConnection,
+    runner::env::{SimConnection, SimulatorEnvTrait},
     SimulatorEnv,
 };
 
@@ -239,7 +239,7 @@ impl Display for Interaction {
     }
 }
 
-type AssertionFunc = dyn Fn(&Vec<ResultSet>, &SimulatorEnv) -> Result<bool>;
+type AssertionFunc = dyn Fn(&Vec<ResultSet>, &dyn SimulatorEnvTrait) -> Result<bool>;
 
 enum AssertionAST {
     Pick(),
@@ -523,7 +523,7 @@ impl Interaction {
     pub(crate) fn execute_assertion(
         &self,
         stack: &Vec<ResultSet>,
-        env: &SimulatorEnv,
+        env: &impl SimulatorEnvTrait,
     ) -> Result<()> {
         match self {
             Self::Query(_) => {
@@ -554,7 +554,7 @@ impl Interaction {
     pub(crate) fn execute_assumption(
         &self,
         stack: &Vec<ResultSet>,
-        env: &SimulatorEnv,
+        env: &dyn SimulatorEnvTrait,
     ) -> Result<()> {
         match self {
             Self::Query(_) => {
