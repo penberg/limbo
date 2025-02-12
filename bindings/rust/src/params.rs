@@ -27,22 +27,22 @@ use sealed::Sealed;
 ///
 /// - For heterogeneous parameter lists of 16 or less items a tuple syntax is supported
 ///     by doing `(1, "foo")`.
-/// - For hetergeneous parameter lists of 16 or greater, the [`limbo_libsql::params!`] is supported
-///     by doing `limbo_libsql::params![1, "foo"]`.
+/// - For hetergeneous parameter lists of 16 or greater, the [`limbo::params!`] is supported
+///     by doing `limbo::params![1, "foo"]`.
 /// - For homogeneous parameter types (where they are all the same type), const arrays are
 ///     supported by doing `[1, 2, 3]`.
 ///
 /// # Example (positional)
 ///
 /// ```rust,no_run
-/// # use limbo_libsql::{Connection, params};
-/// # async fn run(conn: Connection) -> limbo_libsql::Result<()> {
+/// # use limbo::{Connection, params};
+/// # async fn run(conn: Connection) -> limbo::Result<()> {
 /// let mut stmt = conn.prepare("INSERT INTO test (a, b) VALUES (?1, ?2)").await?;
 ///
 /// // Using a tuple:
 /// stmt.execute((0, "foobar")).await?;
 ///
-/// // Using `limbo_libsql::params!`:
+/// // Using `limbo::params!`:
 /// stmt.execute(params![1i32, "blah"]).await?;
 ///
 /// // array literal — non-references
@@ -62,22 +62,22 @@ use sealed::Sealed;
 ///
 /// - For heterogeneous parameter lists of 16 or less items a tuple syntax is supported
 ///     by doing `(("key1", 1), ("key2", "foo"))`.
-/// - For hetergeneous parameter lists of 16 or greater, the [`limbo_libsql::params!`] is supported
-///     by doing `limbo_libsql::named_params!["key1": 1, "key2": "foo"]`.
+/// - For hetergeneous parameter lists of 16 or greater, the [`limbo::params!`] is supported
+///     by doing `limbo::named_params!["key1": 1, "key2": "foo"]`.
 /// - For homogeneous parameter types (where they are all the same type), const arrays are
 ///     supported by doing `[("key1", 1), ("key2, 2), ("key3", 3)]`.
 ///
 /// # Example (named)
 ///
 /// ```rust,no_run
-/// # use limbo_libsql::{Connection, named_params};
-/// # async fn run(conn: Connection) -> limbo_libsql::Result<()> {
+/// # use limbo::{Connection, named_params};
+/// # async fn run(conn: Connection) -> limbo::Result<()> {
 /// let mut stmt = conn.prepare("INSERT INTO test (a, b) VALUES (:key1, :key2)").await?;
 ///
 /// // Using a tuple:
 /// stmt.execute(((":key1", 0), (":key2", "foobar"))).await?;
 ///
-/// // Using `limbo_libsql::named_params!`:
+/// // Using `limbo::named_params!`:
 /// stmt.execute(named_params! {":key1": 1i32, ":key2": "blah" }).await?;
 ///
 /// // const array:
@@ -106,7 +106,7 @@ pub enum Params {
 /// # Example
 ///
 /// ```rust
-/// # use limbo_libsql::{Connection, params_from_iter, Rows};
+/// # use limbo::{Connection, params_from_iter, Rows};
 /// # async fn run(conn: &Connection) {
 ///
 /// let iter = vec![1, 2, 3];
