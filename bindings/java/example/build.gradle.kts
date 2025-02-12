@@ -2,7 +2,7 @@ plugins {
     id("java")
 }
 
-group = "org.github.tursodatabase"
+group = "tech.turso"
 version = "1.0-SNAPSHOT"
 
 repositories {
@@ -11,7 +11,7 @@ repositories {
 }
 
 dependencies {
-    implementation("org.github.tursodatabase:limbo:0.0.1-SNAPSHOT")
+    implementation("tech.turso:limbo:0.0.1-SNAPSHOT")
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
 }
@@ -23,5 +23,5 @@ tasks.test {
 tasks.register<JavaExec>("run") {
     group = "application"
     classpath = sourceSets["main"].runtimeClasspath
-    mainClass.set("org.github.tursodatabase.Main")
+    mainClass.set("tech.turso.Main")
 }

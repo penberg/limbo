@@ -29,7 +29,7 @@ Now you can use the dependency as follows:
 
 ```kotlin
 dependencies {
-    implementation("org.github.tursodatabase:limbo:0.0.1-SNAPSHOT")
+    implementation("tech.turso:limbo:0.0.1-SNAPSHOT")
 }
 ```
 

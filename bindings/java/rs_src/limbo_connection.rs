@@ -42,7 +42,7 @@ pub fn to_limbo_connection(ptr: jlong) -> Result<&'static mut LimboConnection> {
 }
 
 #[no_mangle]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection__1close<'local>(
+pub extern "system" fn Java_tech_turso_core_LimboConnection__1close<'local>(
     _env: JNIEnv<'local>,
     _obj: JObject<'local>,
     connection_ptr: jlong,
@@ -51,7 +51,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection__1clos
 }
 
 #[no_mangle]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboConnection_prepareUtf8<'local>(
+pub extern "system" fn Java_tech_turso_core_LimboConnection_prepareUtf8<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
     connection_ptr: jlong,
