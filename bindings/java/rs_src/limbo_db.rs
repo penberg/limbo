@@ -36,7 +36,7 @@ fn to_limbo_db(ptr: jlong) -> Result<&'static mut LimboDB> {
 
 #[no_mangle]
 #[allow(clippy::arc_with_non_send_sync)]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'local>(
+pub extern "system" fn Java_tech_turso_core_LimboDB_openUtf8<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
     file_path_byte_arr: JByteArray<'local>,
@@ -79,7 +79,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_openUtf8<'loca
 }
 
 #[no_mangle]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'local>(
+pub extern "system" fn Java_tech_turso_core_LimboDB_connect0<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
     db_pointer: jlong,
@@ -97,7 +97,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_connect0<'loca
 }
 
 #[no_mangle]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_close0<'local>(
+pub extern "system" fn Java_tech_turso_core_LimboDB_close0<'local>(
     _env: JNIEnv<'local>,
     _obj: JObject<'local>,
     db_pointer: jlong,
@@ -106,7 +106,7 @@ pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_close0<'local>
 }
 
 #[no_mangle]
-pub extern "system" fn Java_org_github_tursodatabase_core_LimboDB_throwJavaException<'local>(
+pub extern "system" fn Java_tech_turso_core_LimboDB_throwJavaException<'local>(
     mut env: JNIEnv<'local>,
     obj: JObject<'local>,
     error_code: jint,

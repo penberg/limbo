@@ -23,7 +23,7 @@ pub(crate) fn utf8_byte_arr_to_str(
 /// # Parameters
 /// - `env`: The JNI environment.
 /// - `obj`: The Java object on which the exception will be thrown.
-/// - `err_code`: The error code corresponding to the exception. Refer to `org.github.tursodatabase.core.Codes` for the list of error codes.
+/// - `err_code`: The error code corresponding to the exception. Refer to `tech.turso.core.Codes` for the list of error codes.
 /// - `err_msg`: The error message to be included in the exception.
 ///
 /// # Example

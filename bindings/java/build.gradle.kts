@@ -26,7 +26,7 @@ publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
-            groupId = "org.github.tursodatabase"
+            groupId = "tech.turso"
             artifactId = "limbo"
             version = "0.0.1-SNAPSHOT"
         }
@@ -126,10 +126,10 @@ tasks.withType<JavaCompile> {
         disableAllChecks = true
         check("NullAway", CheckSeverity.ERROR)
 
-        option("NullAway:AnnotatedPackages", "org.github.tursodatabase")
+        option("NullAway:AnnotatedPackages", "tech.turso")
         option(
             "NullAway:CustomNullableAnnotations",
-            "org.github.tursodatabase.annotations.Nullable,org.github.tursodatabase.annotations.SkipNullableCheck"
+            "tech.turso.annotations.Nullable,tech.turso.annotations.SkipNullableCheck"
         )
     }
     if (name.lowercase().contains("test")) {
