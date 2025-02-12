@@ -34,32 +34,6 @@ repository = "https://github.com/tursodatabase/limbo"
 [workspace.dependencies]
 limbo_core = { path = "core", version = "0.0.14" }
 
-# Config for 'cargo dist'
-[workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.21.0"
-# CI backends to support
-ci = "github"
-# The installers to generate for each app
-installers = ["shell", "powershell"]
-# Target platforms to build apps for (Rust target-triple syntax)
-targets = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-    "x86_64-pc-windows-msvc",
-]
-# Which actions to run on pull requests
-pr-run-mode = "plan"
-# Path that installers should place binaries in
-install-path = "~/.limbo"
-# Whether to install an updater program
-install-updater = true
-# Whether to consider the binaries in a package for distribution (defaults true)
-dist = false
-# Whether to enable GitHub Attestations
-github-attestations = true
-
 [profile.release]
 debug = "line-tables-only"
 codegen-units = 1
