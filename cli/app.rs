@@ -123,7 +123,7 @@ pub enum Command {
     Cwd,
     /// Display information about settings
     ShowInfo,
-    /// Set the value of NULL to be printedin 'raw' mode
+    /// Set the value of NULL to be printed in 'raw' mode
     NullValue,
     /// Toggle 'echo' mode to repeat commands before execution
     Echo,

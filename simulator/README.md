@@ -2,13 +2,13 @@
 
 Limbo simulator uses randomized deterministic simulations to test the Limbo database behaviors.
 
-Each simulations begins with a random configurations;
+Each simulation begins with a random configurations:
 
 - the database workload distribution(percentages of reads, writes, deletes...),
 - database parameters(page size),
 - number of reader or writers, etc.
 
-Based on these parameters, we randomly generate **interaction plans**. Interaction plans consist of statements/queries, and assertions that will be executed in order. The building blocks of interaction plans are;
+Based on these parameters, we randomly generate **interaction plans**. Interaction plans consist of statements/queries, and assertions that will be executed in order. The building blocks of interaction plans are:
 
 - Randomly generated SQL queries satisfying the workload distribution,
 - Properties, which contain multiple matching queries with assertions indicating the expected result.
@@ -20,7 +20,7 @@ An example of a property is the following:
   "name": "Read your own writes",
   "queries": [
     "INSERT INTO t1 (id) VALUES (1)",
-    "SELECT * FROM t1 WHERE id = 1",
+    "SELECT * FROM t1 WHERE id = 1"
   ],
   "assertions": [
     "result.rows.length == 1",

@@ -343,7 +343,7 @@ impl Value {
         }
     }
 
-    /// Creates a new float Value from an f64
+    /// Creates a new float Value from a f64
     pub fn from_float(value: f64) -> Self {
         Self {
             value_type: ValueType::Float,
