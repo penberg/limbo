@@ -1190,7 +1190,7 @@ impl Program {
                             ));
                         }
                     }
-                    state.pc += 1;
+                    return self.halt(pager);
                 }
                 Insn::Goto { target_pc } => {
                     assert!(target_pc.is_offset());
