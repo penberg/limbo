@@ -1,7 +1,7 @@
 // This module contains code for emitting bytecode instructions for SQL query execution.
 // It handles translating high-level SQL operations into low-level bytecode that can be executed by the virtual machine.
 
-use sqlite3_parser::ast::{self};
+use limbo_sqlite3_parser::ast::{self};
 
 use crate::function::Func;
 use crate::translate::plan::{DeletePlan, Plan, Search};

@@ -1,4 +1,4 @@
-use sqlite3_parser::ast::{self, CreateTableBody, Expr, FunctionTail, Literal};
+use limbo_sqlite3_parser::ast::{self, CreateTableBody, Expr, FunctionTail, Literal};
 use std::{rc::Rc, sync::Arc};
 
 use crate::{
@@ -351,13 +351,15 @@ pub fn columns_from_create_table_body(body: ast::CreateTableBody) -> Result<Vec<
                     .constraints
                     .iter()
                     .find_map(|c| match &c.constraint {
-                        sqlite3_parser::ast::ColumnConstraint::Default(val) => Some(val.clone()),
+                        limbo_sqlite3_parser::ast::ColumnConstraint::Default(val) => {
+                            Some(val.clone())
+                        }
                         _ => None,
                     }),
                 notnull: column_def.constraints.iter().any(|c| {
                     matches!(
                         c.constraint,
-                        sqlite3_parser::ast::ColumnConstraint::NotNull { .. }
+                        limbo_sqlite3_parser::ast::ColumnConstraint::NotNull { .. }
                     )
                 }),
                 ty_str: column_def
@@ -368,7 +370,7 @@ pub fn columns_from_create_table_body(body: ast::CreateTableBody) -> Result<Vec<
                 primary_key: column_def.constraints.iter().any(|c| {
                     matches!(
                         c.constraint,
-                        sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
+                        limbo_sqlite3_parser::ast::ColumnConstraint::PrimaryKey { .. }
                     )
                 }),
                 is_rowid_alias: false,
@@ -381,7 +383,7 @@ pub fn columns_from_create_table_body(body: ast::CreateTableBody) -> Result<Vec<
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use sqlite3_parser::ast::{self, Expr, Id, Literal, Operator::*, Type};
+    use limbo_sqlite3_parser::ast::{self, Expr, Id, Literal, Operator::*, Type};
 
     #[test]
     fn test_normalize_ident() {

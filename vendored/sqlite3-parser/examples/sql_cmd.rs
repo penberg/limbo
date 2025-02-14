@@ -1,7 +1,7 @@
 use std::env;
 
 use fallible_iterator::FallibleIterator;
-use sqlite3_parser::lexer::sql::Parser;
+use limbo_sqlite3_parser::lexer::sql::Parser;
 
 /// Parse args.
 // RUST_LOG=sqlite3Parser=debug

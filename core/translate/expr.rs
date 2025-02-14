@@ -1,4 +1,4 @@
-use sqlite3_parser::ast::{self, UnaryOperator};
+use limbo_sqlite3_parser::ast::{self, UnaryOperator};
 
 #[cfg(feature = "json")]
 use crate::function::JsonFunc;

@@ -1,8 +1,8 @@
 //! VDBE bytecode generation for pragma statements.
 //! More info: https://www.sqlite.org/pragma.html.
 
-use sqlite3_parser::ast;
-use sqlite3_parser::ast::PragmaName;
+use limbo_sqlite3_parser::ast;
+use limbo_sqlite3_parser::ast::PragmaName;
 use std::cell::RefCell;
 use std::rc::Rc;
 

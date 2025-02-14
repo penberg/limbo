@@ -12,7 +12,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use fallible_iterator::FallibleIterator;
-use sqlite3_parser::lexer::sql::Parser;
+use limbo_sqlite3_parser::lexer::sql::Parser;
 
 fn basic_queries(c: &mut Criterion) {
     let mut group = c.benchmark_group("sqlparser-rs parsing benchmark");

@@ -15,7 +15,7 @@ crate-type = ["cdylib", "lib"]
 
 
 [dependencies]
-limbo_ext = { path = "../core", features = ["static"] }
+limbo_ext = { workspace = true, features = ["static"] }
 regex = "1.11.1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

@@ -15,7 +15,7 @@ static= [ "limbo_ext/static" ]
 [dependencies]
 blake3 = "1.5.5"
 data-encoding = "2.7.0"
-limbo_ext = { path = "../core", features = ["static"] }
+limbo_ext = { workspace = true, features = ["static"] }
 md5 = "0.7.0"
 ring = "0.17.8"
 urlencoding = "2.1.3"
