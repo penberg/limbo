@@ -24,7 +24,7 @@ Examples of contributing
 To build and run `limbo` cli: 
 
 ```shell 
-cargo run --package limbo --bin limbo database.db
+cargo run --package limbo_cli --bin limbo database.db
 ```
 
 Run tests:
