@@ -25,3 +25,4 @@ source $testdir/changes.test
 source $testdir/total-changes.test
 source $testdir/offset.test
 source $testdir/scalar-functions-printf.test
+source $testdir/transactions.test
