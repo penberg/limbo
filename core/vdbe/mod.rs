@@ -2750,12 +2750,12 @@ impl Program {
             .expect("only weak ref to connection?");
         let auto_commit = *connection.auto_commit.borrow();
         tracing::trace!("Halt auto_commit {}", auto_commit);
-        let current_state = connection.transaction_state.borrow().clone();
-        if current_state == TransactionState::Read {
-            pager.end_read_tx()?;
-            return Ok(StepResult::Done);
-        }
         return if auto_commit {
+            let current_state = connection.transaction_state.borrow().clone();
+            if current_state == TransactionState::Read {
+                pager.end_read_tx()?;
+                return Ok(StepResult::Done);
+            }
             match pager.end_tx() {
                 Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
                 Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
