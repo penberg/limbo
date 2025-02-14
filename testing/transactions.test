@@ -6,3 +6,7 @@ source $testdir/tester.tcl
 do_execsql_test basic-tx-1 {
   BEGIN IMMEDIATE; END
 } {}
+
+do_execsql_test basic-tx-2 {
+  BEGIN EXCLUSIVE; END
+} {}

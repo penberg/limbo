@@ -46,7 +46,7 @@ The current status of Limbo is:
 | ALTER TABLE               | No      |                                                                                   |
 | ANALYZE                   | No      |                                                                                   |
 | ATTACH DATABASE           | No      |                                                                                   |
-| BEGIN TRANSACTION         | Partial | `BEGIN IMMEDIATE` is only supported mode, transaction names are not supported.    |
+| BEGIN TRANSACTION         | Partial | `BEGIN DEFERRED` is not supported, transaction names are not supported.           |
 | COMMIT TRANSACTION        | Partial | Transaction names are not supported.                                              |
 | CREATE INDEX              | No      |                                                                                   |
 | CREATE TABLE              | Partial |                                                                                   |

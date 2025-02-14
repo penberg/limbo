@@ -20,10 +20,7 @@ pub fn translate_tx_begin(
         TransactionType::Deferred => {
             bail_parse_error!("BEGIN DEFERRED not supported yet");
         }
-        TransactionType::Exclusive => {
-            bail_parse_error!("BEGIN EXCLUSIVE not supported yet");
-        }
-        TransactionType::Immediate => {
+        TransactionType::Immediate | TransactionType::Exclusive => {
             program.emit_insn(Insn::Transaction { write: true });
             // TODO: Emit transaction instruction on temporary tables when we support them.
             program.emit_insn(Insn::AutoCommit {
