@@ -46,7 +46,7 @@ The current status of Limbo is:
 | ALTER TABLE               | No      |                                                                                   |
 | ANALYZE                   | No      |                                                                                   |
 | ATTACH DATABASE           | No      |                                                                                   |
-| BEGIN TRANSACTION         | No      |                                                                                   |
+| BEGIN TRANSACTION         | Partial | `BEGIN IMMEDIATE` is supported                                                    |
 | COMMIT TRANSACTION        | No      |                                                                                   |
 | CREATE INDEX              | No      |                                                                                   |
 | CREATE TABLE              | Partial |                                                                                   |

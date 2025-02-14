@@ -22,6 +22,7 @@ pub(crate) mod pragma;
 pub(crate) mod result_row;
 pub(crate) mod select;
 pub(crate) mod subquery;
+pub(crate) mod transaction;
 
 use crate::schema::Schema;
 use crate::storage::pager::Pager;
@@ -38,6 +39,7 @@ use sqlite3_parser::ast::{Delete, Insert};
 use std::cell::RefCell;
 use std::fmt::Display;
 use std::rc::{Rc, Weak};
+use transaction::translate_tx_begin;
 
 /// Translate SQL statement into bytecode program.
 pub fn translate(
@@ -55,7 +57,7 @@ pub fn translate(
         ast::Stmt::AlterTable(_) => bail_parse_error!("ALTER TABLE not supported yet"),
         ast::Stmt::Analyze(_) => bail_parse_error!("ANALYZE not supported yet"),
         ast::Stmt::Attach { .. } => bail_parse_error!("ATTACH not supported yet"),
-        ast::Stmt::Begin(_, _) => bail_parse_error!("BEGIN not supported yet"),
+        ast::Stmt::Begin(tx_type, tx_name) => translate_tx_begin(tx_type, tx_name)?,
         ast::Stmt::Commit(_) => bail_parse_error!("COMMIT not supported yet"),
         ast::Stmt::CreateIndex { .. } => bail_parse_error!("CREATE INDEX not supported yet"),
         ast::Stmt::CreateTable {
