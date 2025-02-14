@@ -37,3 +37,22 @@ pub fn translate_tx_begin(
     program.emit_goto(start_offset);
     Ok(program)
 }
+
+pub fn translate_tx_commit(_tx_name: Option<Name>) -> Result<ProgramBuilder> {
+    let mut program = ProgramBuilder::new(ProgramBuilderOpts {
+        query_mode: QueryMode::Normal,
+        num_cursors: 0,
+        approx_num_insns: 0,
+        approx_num_labels: 0,
+    });
+    let init_label = program.emit_init();
+    let start_offset = program.offset();
+    program.emit_insn(Insn::AutoCommit {
+        auto_commit: true,
+        rollback: false,
+    });
+    program.emit_halt();
+    program.resolve_label(init_label, program.offset());
+    program.emit_goto(start_offset);
+    Ok(program)
+}
