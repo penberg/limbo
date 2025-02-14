@@ -1130,38 +1130,7 @@ impl Program {
                             )));
                         }
                     }
-                    let connection = self
-                        .connection
-                        .upgrade()
-                        .expect("only weak ref to connection?");
-                    let auto_commit = *connection.auto_commit.borrow();
-                    tracing::trace!("Halt auto_commit {}", auto_commit);
-                    let current_state = connection.transaction_state.borrow().clone();
-                    if current_state == TransactionState::Read {
-                        pager.end_read_tx()?;
-                        return Ok(StepResult::Done);
-                    }
-                    return if auto_commit {
-                        match pager.end_tx() {
-                            Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
-                            Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
-                                if self.change_cnt_on {
-                                    if let Some(conn) = self.connection.upgrade() {
-                                        conn.set_changes(self.n_change.get());
-                                    }
-                                }
-                                Ok(StepResult::Done)
-                            }
-                            Err(e) => Err(e),
-                        }
-                    } else {
-                        if self.change_cnt_on {
-                            if let Some(conn) = self.connection.upgrade() {
-                                conn.set_changes(self.n_change.get());
-                            }
-                        }
-                        return Ok(StepResult::Done);
-                    };
+                    return self.halt(pager);
                 }
                 Insn::Transaction { write } => {
                     let connection = self.connection.upgrade().unwrap();
@@ -2772,6 +2741,41 @@ impl Program {
                 }
             }
         }
+    }
+
+    fn halt(&self, pager: Rc<Pager>) -> Result<StepResult> {
+        let connection = self
+            .connection
+            .upgrade()
+            .expect("only weak ref to connection?");
+        let auto_commit = *connection.auto_commit.borrow();
+        tracing::trace!("Halt auto_commit {}", auto_commit);
+        let current_state = connection.transaction_state.borrow().clone();
+        if current_state == TransactionState::Read {
+            pager.end_read_tx()?;
+            return Ok(StepResult::Done);
+        }
+        return if auto_commit {
+            match pager.end_tx() {
+                Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
+                Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
+                    if self.change_cnt_on {
+                        if let Some(conn) = self.connection.upgrade() {
+                            conn.set_changes(self.n_change.get());
+                        }
+                    }
+                    Ok(StepResult::Done)
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            if self.change_cnt_on {
+                if let Some(conn) = self.connection.upgrade() {
+                    conn.set_changes(self.n_change.get());
+                }
+            }
+            return Ok(StepResult::Done);
+        };
     }
 }
 
