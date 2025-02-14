@@ -3,24 +3,24 @@
 [workspace]
 resolver = "2"
 members = [
+    "bindings/go",
     "bindings/java",
     "bindings/python",
     "bindings/rust",
     "bindings/wasm",
-	"bindings/go",
     "cli",
     "core",
     "extensions/core",
-    "extensions/uuid",
+    "extensions/crypto",
+    "extensions/percentile",
     "extensions/regexp",
+    "extensions/series",
+    "extensions/time",
+    "extensions/uuid",
     "macros",
     "simulator",
     "sqlite3",
     "tests",
-    "extensions/percentile",
-    "extensions/time",
-    "extensions/crypto",
-    "extensions/series",
 ]
 exclude = ["perf/latency/limbo"]
 
