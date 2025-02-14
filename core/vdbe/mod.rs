@@ -411,7 +411,6 @@ pub struct Program {
     pub comments: Option<HashMap<InsnReference, &'static str>>,
     pub parameters: crate::parameters::Parameters,
     pub connection: Weak<Connection>,
-    pub auto_commit: bool,
     pub n_change: Cell<i64>,
     pub change_cnt_on: bool,
     pub result_columns: Vec<ResultSetColumn>,
@@ -1131,17 +1130,18 @@ impl Program {
                             )));
                         }
                     }
-                    tracing::trace!("Halt auto_commit {}", self.auto_commit);
                     let connection = self
                         .connection
                         .upgrade()
                         .expect("only weak ref to connection?");
+                    let auto_commit = *connection.auto_commit.borrow();
+                    tracing::trace!("Halt auto_commit {}", auto_commit);
                     let current_state = connection.transaction_state.borrow().clone();
                     if current_state == TransactionState::Read {
                         pager.end_read_tx()?;
                         return Ok(StepResult::Done);
                     }
-                    return if self.auto_commit {
+                    return if auto_commit {
                         match pager.end_tx() {
                             Ok(crate::storage::wal::CheckpointStatus::IO) => Ok(StepResult::IO),
                             Ok(crate::storage::wal::CheckpointStatus::Done(_)) => {
@@ -1192,6 +1192,34 @@ impl Program {
                         connection
                             .transaction_state
                             .replace(new_transaction_state.clone());
+                    }
+                    state.pc += 1;
+                }
+                Insn::AutoCommit {
+                    auto_commit,
+                    rollback,
+                } => {
+                    let conn = self.connection.upgrade().unwrap();
+                    if *auto_commit != *conn.auto_commit.borrow() {
+                        if *rollback {
+                            todo!("Rollback is not implemented");
+                        } else {
+                            conn.auto_commit.replace(*auto_commit);
+                        }
+                    } else {
+                        if !*auto_commit {
+                            return Err(LimboError::TxError(
+                                "cannot start a transaction within a transaction".to_string(),
+                            ));
+                        } else if *rollback {
+                            return Err(LimboError::TxError(
+                                "cannot rollback - no transaction is active".to_string(),
+                            ));
+                        } else {
+                            return Err(LimboError::TxError(
+                                "cannot commit - no transaction is active".to_string(),
+                            ));
+                        }
                     }
                     state.pc += 1;
                 }

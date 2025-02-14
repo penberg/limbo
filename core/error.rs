@@ -19,6 +19,8 @@ pub enum LimboError {
     ConversionError(String),
     #[error("Env variable error: {0}")]
     EnvVarError(#[from] std::env::VarError),
+    #[error("Transaction error: {0}")]
+    TxError(String),
     #[error("I/O error: {0}")]
     IOError(#[from] std::io::Error),
     #[cfg(all(target_os = "linux", feature = "io_uring"))]

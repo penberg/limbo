@@ -412,7 +412,7 @@ Modifiers:
 | AggStep        | Yes    |         |
 | AggStep        | Yes    |         |
 | And            | Yes    |         |
-| AutoCommit     | No     |         |
+| AutoCommit     | Yes    |         |
 | BitAnd         | Yes    |         |
 | BitNot         | Yes    |         |
 | BitOr          | Yes    |         |
