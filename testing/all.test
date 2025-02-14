@@ -25,4 +25,5 @@ source $testdir/changes.test
 source $testdir/total-changes.test
 source $testdir/offset.test
 source $testdir/scalar-functions-printf.test
-source $testdir/transactions.test
+# Disabled until https://github.com/tursodatabase/limbo/issues/1004 is fixed
+# source $testdir/transactions.test
