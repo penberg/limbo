@@ -1,7 +1,7 @@
 use crate::translate::{ProgramBuilder, ProgramBuilderOpts};
 use crate::vdbe::insn::Insn;
 use crate::{bail_parse_error, QueryMode, Result};
-use sqlite3_parser::ast::{Name, TransactionType};
+use limbo_sqlite3_parser::ast::{Name, TransactionType};
 
 pub fn translate_tx_begin(
     tx_type: Option<TransactionType>,
