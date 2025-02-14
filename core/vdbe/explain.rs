@@ -1238,6 +1238,18 @@ pub fn insn_to_str(
                 0,
                 "".to_string(),
             ),
+            Insn::AutoCommit {
+                auto_commit,
+                rollback,
+            } => (
+                "AutoCommit",
+                *auto_commit as i32,
+                *rollback as i32,
+                0,
+                OwnedValue::build_text(""),
+                0,
+                format!("auto_commit={}, rollback={}", auto_commit, rollback),
+            ),
         };
     format!(
         "{:<4}  {:<17}  {:<4}  {:<4}  {:<4}  {:<13}  {:<2}  {}",

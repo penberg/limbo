@@ -46,8 +46,8 @@ The current status of Limbo is:
 | ALTER TABLE               | No      |                                                                                   |
 | ANALYZE                   | No      |                                                                                   |
 | ATTACH DATABASE           | No      |                                                                                   |
-| BEGIN TRANSACTION         | No      |                                                                                   |
-| COMMIT TRANSACTION        | No      |                                                                                   |
+| BEGIN TRANSACTION         | Partial | `BEGIN IMMEDIATE` is only supported mode, transaction names are not supported.    |
+| COMMIT TRANSACTION        | Partial | Transaction names are not supported.                                              |
 | CREATE INDEX              | No      |                                                                                   |
 | CREATE TABLE              | Partial |                                                                                   |
 | CREATE TRIGGER            | No      |                                                                                   |
@@ -59,7 +59,7 @@ The current status of Limbo is:
 | DROP TABLE                | No      |                                                                                   |
 | DROP TRIGGER              | No      |                                                                                   |
 | DROP VIEW                 | No      |                                                                                   |
-| END TRANSACTION           | No      |                                                                                   |
+| END TRANSACTION           | Partial | Alias for `COMMIT TRANSACTION`                                                    |
 | EXPLAIN                   | Yes     |                                                                                   |
 | INDEXED BY                | No      |                                                                                   |
 | INSERT                    | Partial |                                                                                   |
@@ -412,7 +412,7 @@ Modifiers:
 | AggStep        | Yes    |         |
 | AggStep        | Yes    |         |
 | And            | Yes    |         |
-| AutoCommit     | No     |         |
+| AutoCommit     | Yes    |         |
 | BitAnd         | Yes    |         |
 | BitNot         | Yes    |         |
 | BitOr          | Yes    |         |

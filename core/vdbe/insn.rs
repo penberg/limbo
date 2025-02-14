@@ -320,6 +320,12 @@ pub enum Insn {
         write: bool,
     },
 
+    // Set database auto-commit mode and potentially rollback.
+    AutoCommit {
+        auto_commit: bool,
+        rollback: bool,
+    },
+
     // Branch to the given PC.
     Goto {
         target_pc: BranchOffset,

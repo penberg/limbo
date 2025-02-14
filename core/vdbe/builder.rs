@@ -448,7 +448,6 @@ impl ProgramBuilder {
             database_header,
             comments: self.comments,
             connection,
-            auto_commit: true,
             parameters: self.parameters,
             n_change: Cell::new(0),
             change_cnt_on,
