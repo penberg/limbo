@@ -2,10 +2,13 @@ use crate::{
     vector::vector_types::{Vector, VectorSparse, VectorType},
     LimboError, Result,
 };
-#[cfg(not(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-)))]
+#[cfg(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+))]
 use simsimd::SpatialSimilarity;
 
 pub fn vector_distance_cos(v1: &Vector, v2: &Vector) -> Result<f64> {
@@ -78,10 +81,13 @@ fn vector_f8_distance_cos(v1: &Vector, v2: &Vector) -> f64 {
 }
 
 #[allow(dead_code)]
-#[cfg(not(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-)))]
+#[cfg(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+))]
 fn vector_f32_distance_cos_simsimd(v1: &[f32], v2: &[f32]) -> f64 {
     f32::cosine(v1, v2).unwrap_or(f64::NAN)
 }
@@ -102,19 +108,25 @@ fn vector_f32_distance_cos_rust(v1: &[f32], v2: &[f32]) -> f64 {
 }
 
 #[allow(dead_code)]
-#[cfg(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-))]
+#[cfg(not(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+)))]
 fn vector_f32_distance_cos_simsimd(v1: &[f32], v2: &[f32]) -> f64 {
     vector_f32_distance_cos_rust(v1, v2)
 }
 
 #[allow(dead_code)]
-#[cfg(not(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-)))]
+#[cfg(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+))]
 fn vector_f64_distance_cos_simsimd(v1: &[f64], v2: &[f64]) -> f64 {
     f64::cosine(v1, v2).unwrap_or(f64::NAN)
 }
@@ -135,10 +147,13 @@ fn vector_f64_distance_cos_rust(v1: &[f64], v2: &[f64]) -> f64 {
 }
 
 #[allow(dead_code)]
-#[cfg(any(
-    target_family = "wasm",
-    all(target_os = "windows", target_arch = "aarch64")
-))]
+#[cfg(not(all(
+    feature = "simd",
+    not(any(
+        target_family = "wasm",
+        all(target_os = "windows", target_arch = "aarch64")
+    ))
+)))]
 fn vector_f64_distance_cos_simsimd(v1: &[f64], v2: &[f64]) -> f64 {
     vector_f64_distance_cos_rust(v1, v2)
 }
