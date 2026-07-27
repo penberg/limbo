@@ -169,21 +169,23 @@ impl TursoSyncServer {
         info!("Request: {} {}", method, path);
 
         let db = self.single_handle();
-        let response = match (method.as_str(), path.as_str()) {
-            ("OPTIONS", _) => Ok(HttpResponse {
+        let response = match parse_route(&method, &path) {
+            Route::Options => Ok(HttpResponse {
                 status: 204,
                 content_type: "text/plain".to_string(),
                 body: Vec::new(),
             }),
-            ("POST", "/v2/pipeline") => {
+            Route::Pipeline { db: None } => {
                 debug!("Handling /v2/pipeline request");
                 self.handle_pipeline(&db, &body)
             }
-            ("POST", "/pull-updates") => {
+            Route::PullUpdates { db: None } => {
                 debug!("Handling /pull-updates request");
                 self.handle_pull_updates(&db, &body)
             }
-            _ => {
+            Route::Pipeline { db: Some(_) }
+            | Route::PullUpdates { db: Some(_) }
+            | Route::NotFound => {
                 info!("Unknown endpoint: {} {}", method, path);
                 Ok(HttpResponse {
                     status: 404,
@@ -1245,6 +1247,39 @@ fn format_http_response(resp: &HttpResponse) -> Vec<u8> {
     result
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Route<'a> {
+    Pipeline { db: Option<&'a str> },
+    PullUpdates { db: Option<&'a str> },
+    Options,
+    NotFound,
+}
+
+fn parse_route<'a>(method: &str, path: &'a str) -> Route<'a> {
+    if method == "OPTIONS" {
+        return Route::Options;
+    }
+    if method != "POST" {
+        return Route::NotFound;
+    }
+    match path {
+        "/v2/pipeline" => return Route::Pipeline { db: None },
+        "/pull-updates" => return Route::PullUpdates { db: None },
+        _ => {}
+    }
+    let Some(rest) = path.strip_prefix("/db/") else {
+        return Route::NotFound;
+    };
+    let Some((name, tail)) = rest.split_once('/') else {
+        return Route::NotFound;
+    };
+    match tail {
+        "v2/pipeline" => Route::Pipeline { db: Some(name) },
+        "pull-updates" => Route::PullUpdates { db: Some(name) },
+        _ => Route::NotFound,
+    }
+}
+
 fn encode_length_delimited(output: &mut Vec<u8>, data: &[u8]) {
     let mut len = data.len();
     while len >= 0x80 {
@@ -1314,5 +1349,33 @@ mod tests {
     fn rejects_content_length_that_overflows() {
         assert!(request_end(0, usize::MAX).is_err());
         assert_eq!(request_end(10, 5).unwrap(), 19);
+    }
+
+    #[test]
+    fn parses_single_and_multi_routes() {
+        assert_eq!(
+            parse_route("POST", "/v2/pipeline"),
+            Route::Pipeline { db: None }
+        );
+        assert_eq!(
+            parse_route("POST", "/pull-updates"),
+            Route::PullUpdates { db: None }
+        );
+        assert_eq!(
+            parse_route("POST", "/db/db1/v2/pipeline"),
+            Route::Pipeline { db: Some("db1") }
+        );
+        assert_eq!(
+            parse_route("POST", "/db/db1/pull-updates"),
+            Route::PullUpdates { db: Some("db1") }
+        );
+        assert_eq!(parse_route("OPTIONS", "/anything"), Route::Options);
+        assert_eq!(parse_route("GET", "/v2/pipeline"), Route::NotFound);
+        assert_eq!(parse_route("POST", "/nope"), Route::NotFound);
+        assert_eq!(parse_route("POST", "/db/a/b/v2/pipeline"), Route::NotFound);
+        assert_eq!(
+            parse_route("POST", "/db//v2/pipeline"),
+            Route::Pipeline { db: Some("") }
+        );
     }
 }
