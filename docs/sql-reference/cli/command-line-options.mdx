@@ -131,6 +131,31 @@ Start a sync server for database replication, listening at the given address.
 tursodb --sync-server 0.0.0.0:8080 mydata.db
 ```
 
+### `--sync-dir <PATH>`
+
+Serve every database file under `PATH` over the sync server, instead of a single database. `PATH` must already exist as a directory. Requires `--sync-server`, and cannot be combined with a positional `DATABASE` argument.
+
+```bash
+tursodb --sync-server 127.0.0.1:8080 --sync-dir ./dbs
+```
+
+Each database is addressed by name in the URL, beneath `/db/{name}`:
+
+```
+http://localhost:8080/db/{name}/v2/pipeline
+http://localhost:8080/db/{name}/pull-updates
+```
+
+A request to `/db/db1` reads and writes `./dbs/db1/data`: each database gets its own directory, so its WAL and logical log stay grouped with it as `data-wal`, `data-shm`, and so on — the same layout `sqld` uses. Databases are created on first request, except under `--readonly`: a read-only server cannot create a file, so a request for a database that does not already exist fails with `404 Not Found`. Opened handles are cached for the process lifetime and never revalidated against the filesystem, so removing a database's directory is safe only while the server is stopped; deleting it while the server is running leaves that handle reading and writing the deleted files, and the server must be restarted before the name can be served correctly again.
+
+Names must match `^[A-Za-z0-9_-]+$` and are capped at 128 characters — no dots, slashes, or percent-encoding — and anything else is rejected with `400 Bad Request`. The Windows reserved device names `con`, `prn`, `aux`, `nul`, `com1`–`com9`, and `lpt1`–`lpt9` also match that pattern but are rejected too, in any letter case and on every platform: Windows resolves them as devices from any directory and whatever the extension, so `nul` would address the NUL device rather than a directory of that name. Names that merely begin with one, such as `console` or `com10`, are valid.
+
+`--readonly`, `--vfs`, and the `--experimental-*` flags apply to every database served this way, the same as they would for a single database.
+
+<Warning>
+Directory mode handles one request at a time across all databases, so distinct databases do not progress independently. WAL retention follows the same behavior as the single-database sync server. Opened database handles stay cached for the life of the process without eviction, and at most `--sync-max-databases` may be open at once (default 256); beyond that, a request for a database that is not already open is refused with `503 Service Unavailable` until the server restarts. Raise it if your host has the headroom — each open database costs two file descriptors (three under MVCC) and roughly 80 KB of resident memory before page cache. Any client that can reach the port can create a database simply by requesting a new valid name, so disk space and inodes still accumulate without bound. With `--experimental-attach`, a client can `ATTACH DATABASE` an arbitrary filesystem path, so the name restrictions above do not confine it to the served directory. There is no authentication or multi-tenancy; directory mode is intended for local and development use.
+</Warning>
+
 ## Experimental Feature Flags
 
 These flags enable features that are still under development. They may change or be removed in future releases.

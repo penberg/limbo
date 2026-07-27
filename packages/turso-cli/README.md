@@ -37,7 +37,7 @@ Turso is a drop-in replacement for SQLite, but adds features that SQLite doesn't
 - **Native Vector Search** — `vector32`/`vector64` types with distance functions (`vector_distance_cos`, `vector_distance_l2`)
 - **Change Data Capture** — track row-level changes per connection with `PRAGMA capture_data_changes_conn`
 - **MCP Server** — run as a [Model Context Protocol](https://modelcontextprotocol.io/) server for AI assistants (`--mcp`)
-- **Local Sync Server** — serve a database over HTTP for client SDKs to sync against (`--sync-server`)
+- **Local Sync Server** — serve a database over HTTP for client SDKs to sync against (`--sync-server`), or serve a whole directory of databases at once (`--sync-dir`)
 - **Array Types** — array columns in STRICT tables with operators like `@>`, `<@`, `||`
 - **Built-in Extensions** — crypto, regexp, fuzzy matching, IP address functions, CSV, percentile
 
@@ -112,6 +112,16 @@ Start a local HTTP server that implements the Turso sync protocol. The `@tursoda
 ```bash
 npx turso myapp.db --sync-server "0.0.0.0:8080"
 ```
+
+Serve a whole directory of databases instead of a single file with `--sync-dir`. `PATH` must already exist, and each database is addressed by name beneath `/db/{name}`:
+
+```bash
+npx turso --sync-server "127.0.0.1:8080" --sync-dir ./dbs
+```
+
+A client syncing against `http://localhost:8080/db/db1` reads and writes `./dbs/db1/data` (with its WAL alongside as `data-wal`, matching `sqld`'s layout), created on first request — except under `--readonly`, where a database that doesn't already exist can't be created and the request fails with `404 Not Found`. Names must match `^[A-Za-z0-9_-]+$` and are capped at 128 characters; anything else gets `400 Bad Request`, as do the Windows reserved device names (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`, in any case), which Windows resolves as devices from any directory whatever the extension. `--sync-dir` requires `--sync-server` and can't be combined with a positional database argument. `--readonly`, `--vfs`, and `--experimental-*` flags apply to every database served this way; with `--experimental-attach`, a client can `ATTACH DATABASE` an arbitrary filesystem path and reach files outside the served directory, so the name restrictions above don't confine it.
+
+Requests are handled one at a time across all databases in a directory, so distinct databases don't progress independently, and opened database handles are cached for the life of the process without eviction, up to `--sync-max-databases` at once (default 256) — past that, a request for a database that isn't already open gets `503 Service Unavailable`. Any client that can reach the port can create a database by requesting a new valid name, so disk space and inodes still accumulate without a cap. This mode has no authentication or multi-tenancy and is intended for local and development use.
 
 ### MCP Server
 

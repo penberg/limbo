@@ -142,3 +142,13 @@ Start a sync server for database replication:
 tursodb --sync-server 0.0.0.0:8080 mydata.db
 ```
 
+### Sync Server for a Directory of Databases
+
+Serve every database under a directory instead of a single file, with each database addressed by name at `/db/{name}`:
+
+```bash
+tursodb --sync-server 127.0.0.1:8080 --sync-dir ./dbs
+```
+
+A client syncing against `http://localhost:8080/db/db1` reads and writes `./dbs/db1/data`, which is created on first request unless the server was started with `--readonly`. Database names must match `^[A-Za-z0-9_-]+$` and be at most 128 characters, excluding the Windows reserved device names. See [Command-Line Options](./command-line-options.mdx) for the full details and limitations.
+
