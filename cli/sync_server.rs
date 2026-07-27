@@ -39,10 +39,18 @@ const MVCC_TX_TRAILER_SIZE: usize = 8;
 const MVCC_TX_FRAME_FLAG_HAS_EXTENSION_BLOCK: u32 = 1 << 0;
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 
+struct DbHandle {
+    conn: Mutex<Arc<Connection>>,
+    path: String,
+}
+
+enum DbSource {
+    Single(Arc<DbHandle>),
+}
+
 pub struct TursoSyncServer {
     address: String,
-    db_path: String,
-    conn: Arc<Mutex<Arc<Connection>>>,
+    source: DbSource,
     interrupt_count: Arc<AtomicUsize>,
 }
 
@@ -57,10 +65,18 @@ impl TursoSyncServer {
 
         Ok(Self {
             address,
-            db_path,
-            conn: Arc::new(Mutex::new(conn)),
+            source: DbSource::Single(Arc::new(DbHandle {
+                conn: Mutex::new(conn),
+                path: db_path,
+            })),
             interrupt_count,
         })
+    }
+
+    fn single_handle(&self) -> Arc<DbHandle> {
+        match &self.source {
+            DbSource::Single(h) => h.clone(),
+        }
     }
 
     pub fn run(&self) -> Result<()> {
@@ -152,6 +168,7 @@ impl TursoSyncServer {
         let (method, path, body) = parse_http_request(&request_data)?;
         info!("Request: {} {}", method, path);
 
+        let db = self.single_handle();
         let response = match (method.as_str(), path.as_str()) {
             ("OPTIONS", _) => Ok(HttpResponse {
                 status: 204,
@@ -160,11 +177,11 @@ impl TursoSyncServer {
             }),
             ("POST", "/v2/pipeline") => {
                 debug!("Handling /v2/pipeline request");
-                self.handle_pipeline(&body)
+                self.handle_pipeline(&db, &body)
             }
             ("POST", "/pull-updates") => {
                 debug!("Handling /pull-updates request");
-                self.handle_pull_updates(&body)
+                self.handle_pull_updates(&db, &body)
             }
             _ => {
                 info!("Unknown endpoint: {} {}", method, path);
@@ -195,13 +212,13 @@ impl TursoSyncServer {
         Ok(())
     }
 
-    fn handle_pipeline(&self, body: &[u8]) -> Result<HttpResponse> {
+    fn handle_pipeline(&self, db: &DbHandle, body: &[u8]) -> Result<HttpResponse> {
         let req: PipelineReqBody = serde_json::from_slice(body)
             .map_err(|e| anyhow!("Failed to parse pipeline request: {}", e))?;
 
         debug!("Pipeline request: {:?}", req);
 
-        let conn = self.conn.lock().unwrap();
+        let conn = db.conn.lock().unwrap();
 
         let mut results = Vec::new();
 
@@ -483,7 +500,7 @@ impl TursoSyncServer {
         }
     }
 
-    fn handle_pull_updates(&self, body: &[u8]) -> Result<HttpResponse> {
+    fn handle_pull_updates(&self, db: &DbHandle, body: &[u8]) -> Result<HttpResponse> {
         let req = <PullUpdatesReqProtoBody as Message>::decode(body)
             .map_err(|e| anyhow!("Failed to decode PullUpdatesRequest: {}", e))?;
 
@@ -502,18 +519,19 @@ impl TursoSyncServer {
         if PullUpdatesStreamKind::try_from(req.stream_kind).unwrap_or(PullUpdatesStreamKind::Pages)
             == PullUpdatesStreamKind::MvccLogicalLog
         {
-            return self.handle_logical_pull_updates(&req);
+            return self.handle_logical_pull_updates(db, &req);
         }
 
-        self.handle_page_pull_updates(&req, PullUpdatesApplyMode::Incremental)
+        self.handle_page_pull_updates(db, &req, PullUpdatesApplyMode::Incremental)
     }
 
     fn handle_page_pull_updates(
         &self,
+        db: &DbHandle,
         req: &PullUpdatesReqProtoBody,
         apply_mode: PullUpdatesApplyMode,
     ) -> Result<HttpResponse> {
-        let conn = self.conn.lock().unwrap();
+        let conn = db.conn.lock().unwrap();
 
         let wal_state = conn.wal_state()?;
         debug!("WAL state: max_frame={}", wal_state.max_frame);
@@ -643,9 +661,13 @@ impl TursoSyncServer {
         })
     }
 
-    fn handle_logical_pull_updates(&self, req: &PullUpdatesReqProtoBody) -> Result<HttpResponse> {
+    fn handle_logical_pull_updates(
+        &self,
+        db: &DbHandle,
+        req: &PullUpdatesReqProtoBody,
+    ) -> Result<HttpResponse> {
         let (db_size, fallback_revision, legacy_current_revision) = {
-            let conn = self.conn.lock().unwrap();
+            let conn = db.conn.lock().unwrap();
             let wal_state = conn.wal_state()?;
             (
                 current_db_size_pages(&conn, wal_state.max_frame)?,
@@ -653,13 +675,13 @@ impl TursoSyncServer {
                 wal_state.max_frame.to_string(),
             )
         };
-        let log_path = match logical_log_path(&self.db_path) {
+        let log_path = match logical_log_path(&db.path) {
             Ok(path) => path,
-            Err(_) if is_in_memory_db_path(&self.db_path) => {
+            Err(_) if is_in_memory_db_path(&db.path) => {
                 info!(
                     "logical pull requested for in-memory sync server database; returning incremental pages"
                 );
-                return self.handle_page_pull_updates(req, PullUpdatesApplyMode::Incremental);
+                return self.handle_page_pull_updates(db, req, PullUpdatesApplyMode::Incremental);
             }
             Err(err) => return Err(err),
         };
@@ -671,6 +693,7 @@ impl TursoSyncServer {
                     log_path.display()
                 );
                 return self.handle_logical_fallback(
+                    db,
                     req,
                     fallback_revision,
                     &legacy_current_revision,
@@ -686,6 +709,7 @@ impl TursoSyncServer {
                     "logical pull requested but MVCC log is not portable; returning replace-base pages: {err}"
                 );
                 return self.handle_logical_fallback(
+                    db,
                     req,
                     fallback_revision,
                     &legacy_current_revision,
@@ -765,6 +789,7 @@ impl TursoSyncServer {
 
     fn handle_logical_fallback(
         &self,
+        db: &DbHandle,
         req: &PullUpdatesReqProtoBody,
         server_revision: String,
         legacy_current_revision: &str,
@@ -777,7 +802,7 @@ impl TursoSyncServer {
             return self.handle_empty_logical_pull(req.client_revision.clone(), db_size);
         }
 
-        self.handle_replace_base_pages(server_revision)
+        self.handle_replace_base_pages(db, server_revision)
     }
 
     fn handle_empty_logical_pull(
@@ -807,8 +832,12 @@ impl TursoSyncServer {
         })
     }
 
-    fn handle_replace_base_pages(&self, server_revision: String) -> Result<HttpResponse> {
-        let (db_size, pages) = self.read_replace_base_pages()?;
+    fn handle_replace_base_pages(
+        &self,
+        db: &DbHandle,
+        server_revision: String,
+    ) -> Result<HttpResponse> {
+        let (db_size, pages) = self.read_replace_base_pages(db)?;
 
         let header = PullUpdatesRespProtoBody {
             server_revision,
@@ -843,8 +872,8 @@ impl TursoSyncServer {
     }
 
     #[allow(clippy::type_complexity)]
-    fn read_replace_base_pages(&self) -> Result<(u64, Vec<(u64, Vec<u8>)>)> {
-        let conn = self.conn.lock().unwrap();
+    fn read_replace_base_pages(&self, db: &DbHandle) -> Result<(u64, Vec<(u64, Vec<u8>)>)> {
+        let conn = db.conn.lock().unwrap();
         let wal_state = conn.wal_state()?;
         let frame_watermark = Some(wal_state.max_frame);
         let db_size = current_snapshot_db_size_pages(&conn, wal_state.max_frame)?;
