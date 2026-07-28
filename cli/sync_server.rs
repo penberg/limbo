@@ -351,7 +351,7 @@ impl TursoSyncServer {
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
-                error!("Failed to prepare statement: {}", e);
+                debug!("Failed to prepare statement: {}", e);
                 return StreamResult::Error {
                     error: Error {
                         message: e.to_string(),
@@ -364,7 +364,7 @@ impl TursoSyncServer {
         for (i, arg) in req.stmt.args.iter().enumerate() {
             let core_value = convert_value_to_core(arg);
             if let Err(err) = stmt.bind_at(std::num::NonZero::new(i + 1).unwrap(), core_value) {
-                error!("Failed to bind statement argument: {}", err);
+                debug!("Failed to bind statement argument: {}", err);
                 return StreamResult::Error {
                     error: Error {
                         message: err.to_string(),
@@ -409,7 +409,7 @@ impl TursoSyncServer {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to execute statement: {}", e);
+                    debug!("Failed to execute statement: {}", e);
                     StreamResult::Error {
                         error: Error {
                             message: e.to_string(),
@@ -435,7 +435,7 @@ impl TursoSyncServer {
                     }),
                 },
                 Err(e) => {
-                    error!("Failed to execute statement: {}", e);
+                    debug!("Failed to execute statement: {}", e);
                     StreamResult::Error {
                         error: Error {
                             message: e.to_string(),
@@ -466,7 +466,7 @@ impl TursoSyncServer {
                         step_errors.push(None);
                     }
                     Err(e) => {
-                        error!("Batch step {} failed: {}", step_idx, e);
+                        debug!("Batch step {} failed: {}", step_idx, e);
                         step_results.push(None);
                         step_errors.push(Some(Error {
                             message: e.to_string(),
