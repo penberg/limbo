@@ -61,6 +61,7 @@ fn run_sync_server(app: app::Limbo) -> anyhow::Result<()> {
                 vfs: app.opts.vfs.clone(),
                 flags: app.opts.flags,
                 db_opts: app.db_opts,
+                max_open: app.opts.sync_max_databases,
             },
         )?,
         None => TursoSyncServer::new(

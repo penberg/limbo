@@ -46,6 +46,7 @@ pub struct OpenConfig {
     pub vfs: Option<String>,
     pub flags: OpenFlags,
     pub db_opts: DatabaseOpts,
+    pub max_open: usize,
 }
 
 struct DbHandle {
@@ -123,8 +124,16 @@ impl TursoSyncServer {
                     return Err(text_response(400, "Invalid database name"));
                 }
                 let mut open = open.lock().unwrap();
+                let at_capacity = open.len() >= config.max_open;
                 let entry = match open.entry(name.to_string()) {
                     Entry::Occupied(entry) => return Ok(entry.get().clone()),
+                    Entry::Vacant(_) if at_capacity => {
+                        error!(
+                            "refusing to open {name}: {} databases are open",
+                            config.max_open
+                        );
+                        return Err(text_response(503, "Too many open databases"));
+                    }
                     Entry::Vacant(entry) => entry,
                 };
                 let path = db_path_for(base, name);
@@ -1303,6 +1312,7 @@ fn format_http_response(resp: &HttpResponse) -> Vec<u8> {
         400 => "Bad Request",
         404 => "Not Found",
         500 => "Internal Server Error",
+        503 => "Service Unavailable",
         _ => "Unknown",
     };
 
@@ -1559,6 +1569,8 @@ mod tests {
         assert_eq!(log1, Path::new("/tmp/dbs/db1/data.db-log"));
     }
 
+    const TEST_MAX_OPEN: usize = 4;
+
     fn dir_server(base: &Path) -> TursoSyncServer {
         TursoSyncServer::new_dir(
             "127.0.0.1:0".to_string(),
@@ -1568,9 +1580,47 @@ mod tests {
                 vfs: None,
                 flags: OpenFlags::default(),
                 db_opts: DatabaseOpts::new(),
+                max_open: TEST_MAX_OPEN,
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn refuses_new_databases_once_the_open_map_is_full() {
+        let base = std::env::temp_dir().join(format!("turso-sync-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let server = dir_server(&base);
+
+        let handle = match server.resolve_db(Some("db0")) {
+            Ok(handle) => handle,
+            Err(resp) => panic!("first open must succeed, got {}", resp.status),
+        };
+        let DbSource::Dir { open, .. } = &server.source else {
+            unreachable!("dir_server builds a directory source");
+        };
+        {
+            let mut open = open.lock().unwrap();
+            for i in 1..TEST_MAX_OPEN {
+                open.insert(format!("db{i}"), handle.clone());
+            }
+        }
+
+        assert!(
+            server.resolve_db(Some("db0")).is_ok(),
+            "an already open database stays reachable at capacity"
+        );
+        let Err(refused) = server.resolve_db(Some("overflow")) else {
+            panic!("a full open map must refuse an unknown database");
+        };
+        assert_eq!(refused.status, 503);
+        assert!(
+            !base.join("overflow").exists(),
+            "a refused database must not reach the filesystem"
+        );
+
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

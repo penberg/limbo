@@ -92,6 +92,13 @@ pub struct Opts {
         help = "Serve every database under PATH over the sync server, addressed as /db/{name}"
     )]
     pub sync_dir: Option<PathBuf>,
+    #[clap(
+        long,
+        requires = "sync_dir",
+        default_value_t = 256,
+        help = "Maximum databases kept open at once under --sync-dir"
+    )]
+    pub sync_max_databases: usize,
     #[clap(long, help = "Enable experimental encryption feature")]
     pub experimental_encryption: bool,
     #[clap(long, help = "Enable experimental index method feature")]

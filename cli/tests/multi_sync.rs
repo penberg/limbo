@@ -239,6 +239,38 @@ fn single_database_mode_rejects_db_routes() {
 }
 
 #[test]
+fn sync_max_databases_caps_open_handles() {
+    let dir = tmpdir("cap");
+    let srv = start(
+        &[
+            "--sync-dir",
+            dir.to_str().unwrap(),
+            "--sync-max-databases",
+            "2",
+        ],
+        &dir,
+    );
+
+    assert_eq!(
+        post(srv.port, "/db/a/v2/pipeline", &sql("CREATE TABLE t(x)")).0,
+        200
+    );
+    assert_eq!(
+        post(srv.port, "/db/b/v2/pipeline", &sql("CREATE TABLE t(x)")).0,
+        200
+    );
+    assert_eq!(
+        post(srv.port, "/db/c/v2/pipeline", &sql("CREATE TABLE t(x)")).0,
+        503
+    );
+    assert_eq!(post(srv.port, "/db/a/v2/pipeline", &sql("SELECT 1")).0, 200);
+    assert!(
+        !dir.join("c").exists(),
+        "a refused database must not reach the filesystem"
+    );
+}
+
+#[test]
 fn pull_updates_are_scoped_to_one_database() {
     let dir = tmpdir("pull");
     let srv = start(&["--sync-dir", dir.to_str().unwrap()], &dir);
