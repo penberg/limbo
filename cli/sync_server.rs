@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -12,7 +13,9 @@ use prost::Message;
 use roaring::RoaringBitmap;
 use tracing::{debug, error, info};
 
-use turso_core::{Connection, Value as CoreValue};
+use turso_core::{
+    Connection, Database, DatabaseOpts, OpenFlags, SqliteDialect, Value as CoreValue,
+};
 use turso_sync_engine::server_proto::{
     BatchCond, BatchResult, BatchStep, BatchStreamReq, BatchStreamResp, Col, Error,
     ExecuteStreamReq, ExecuteStreamResp, MvccLogicalLogMetadataProto, MvccLogicalLogRangeProto,
@@ -39,6 +42,12 @@ const MVCC_TX_TRAILER_SIZE: usize = 8;
 const MVCC_TX_FRAME_FLAG_HAS_EXTENSION_BLOCK: u32 = 1 << 0;
 const MAX_HEADER_BYTES: usize = 32 * 1024;
 
+pub struct OpenConfig {
+    pub vfs: Option<String>,
+    pub flags: OpenFlags,
+    pub db_opts: DatabaseOpts,
+}
+
 struct DbHandle {
     conn: Mutex<Arc<Connection>>,
     path: String,
@@ -46,6 +55,11 @@ struct DbHandle {
 
 enum DbSource {
     Single(Arc<DbHandle>),
+    Dir {
+        base: PathBuf,
+        config: OpenConfig,
+        open: Mutex<HashMap<String, Arc<DbHandle>>>,
+    },
 }
 
 pub struct TursoSyncServer {
@@ -73,9 +87,71 @@ impl TursoSyncServer {
         })
     }
 
-    fn single_handle(&self) -> Arc<DbHandle> {
-        match &self.source {
-            DbSource::Single(h) => h.clone(),
+    pub fn new_dir(
+        address: String,
+        base: PathBuf,
+        interrupt_count: Arc<AtomicUsize>,
+        config: OpenConfig,
+    ) -> Result<Self> {
+        if !base.is_dir() {
+            return Err(anyhow!(
+                "--sync-dir path does not exist or is not a directory: {}",
+                base.display()
+            ));
+        }
+        Ok(Self {
+            address,
+            source: DbSource::Dir {
+                base: base.canonicalize()?,
+                config,
+                open: Mutex::new(HashMap::new()),
+            },
+            interrupt_count,
+        })
+    }
+
+    fn resolve_db(
+        &self,
+        requested: Option<&str>,
+    ) -> std::result::Result<Arc<DbHandle>, HttpResponse> {
+        match (&self.source, requested) {
+            (DbSource::Single(h), None) => Ok(h.clone()),
+            (DbSource::Single(_), Some(_)) => Err(text_response(404, "Not Found")),
+            (DbSource::Dir { .. }, None) => Err(text_response(404, "Not Found")),
+            (DbSource::Dir { base, config, open }, Some(name)) => {
+                if !validate_db_name(name) {
+                    return Err(text_response(400, "Invalid database name"));
+                }
+                let mut open = open.lock().unwrap();
+                let entry = match open.entry(name.to_string()) {
+                    Entry::Occupied(entry) => return Ok(entry.get().clone()),
+                    Entry::Vacant(entry) => entry,
+                };
+                let path = db_path_for(base, name);
+                let dir = path.parent().expect("database path has a parent directory");
+                if !config.flags.contains(OpenFlags::ReadOnly) {
+                    if let Err(err) = std::fs::create_dir_all(dir) {
+                        error!("failed to create directory for database {name}: {err}");
+                        return Err(text_response(500, &format!("Internal Server Error: {err}")));
+                    }
+                }
+                if !dir.canonicalize().is_ok_and(|dir| dir.starts_with(base)) {
+                    return Err(text_response(404, "Not Found"));
+                }
+                let handle = match open_db_handle(&path, config) {
+                    Ok(handle) => handle,
+                    // Sync clients retry a 500 forever but can act on a 404.
+                    Err(err) if path.exists() => {
+                        error!("failed to open database {name}: {err}");
+                        return Err(text_response(500, &format!("Internal Server Error: {err}")));
+                    }
+                    Err(err) => {
+                        debug!("no database named {name}: {err}");
+                        return Err(text_response(404, "Not Found"));
+                    }
+                };
+                Ok(entry.insert(handle).clone())
+            }
         }
     }
 
@@ -168,30 +244,25 @@ impl TursoSyncServer {
         let (method, path, body) = parse_http_request(&request_data)?;
         info!("Request: {} {}", method, path);
 
-        let db = self.single_handle();
         let response = match parse_route(&method, &path) {
-            Route::Options => Ok(HttpResponse {
-                status: 204,
-                content_type: "text/plain".to_string(),
-                body: Vec::new(),
-            }),
-            Route::Pipeline { db: None } => {
-                debug!("Handling /v2/pipeline request");
-                self.handle_pipeline(&db, &body)
-            }
-            Route::PullUpdates { db: None } => {
-                debug!("Handling /pull-updates request");
-                self.handle_pull_updates(&db, &body)
-            }
-            Route::Pipeline { db: Some(_) }
-            | Route::PullUpdates { db: Some(_) }
-            | Route::NotFound => {
+            Route::Options => Ok(text_response(204, "")),
+            Route::Pipeline { db } => match self.resolve_db(db) {
+                Ok(handle) => {
+                    debug!("Handling /v2/pipeline request");
+                    self.handle_pipeline(&handle, &body)
+                }
+                Err(resp) => Ok(resp),
+            },
+            Route::PullUpdates { db } => match self.resolve_db(db) {
+                Ok(handle) => {
+                    debug!("Handling /pull-updates request");
+                    self.handle_pull_updates(&handle, &body)
+                }
+                Err(resp) => Ok(resp),
+            },
+            Route::NotFound => {
                 info!("Unknown endpoint: {} {}", method, path);
-                Ok(HttpResponse {
-                    status: 404,
-                    content_type: "text/plain".to_string(),
-                    body: b"Not Found".to_vec(),
-                })
+                Ok(text_response(404, "Not Found"))
             }
         };
 
@@ -1217,10 +1288,19 @@ fn parse_http_request(data: &[u8]) -> Result<(String, String, Vec<u8>)> {
     Ok((method, path, body))
 }
 
+fn text_response(status: u16, body: &str) -> HttpResponse {
+    HttpResponse {
+        status,
+        content_type: "text/plain".to_string(),
+        body: body.as_bytes().to_vec(),
+    }
+}
+
 fn format_http_response(resp: &HttpResponse) -> Vec<u8> {
     let status_text = match resp.status {
         200 => "OK",
         204 => "No Content",
+        400 => "Bad Request",
         404 => "Not Found",
         500 => "Internal Server Error",
         _ => "Unknown",
@@ -1280,6 +1360,50 @@ fn parse_route<'a>(method: &str, path: &'a str) -> Route<'a> {
     }
 }
 
+const WINDOWS_RESERVED_DEVICE_NAMES: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
+    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
+];
+
+fn validate_db_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && !is_windows_reserved_device_name(name)
+}
+
+fn is_windows_reserved_device_name(name: &str) -> bool {
+    WINDOWS_RESERVED_DEVICE_NAMES
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved))
+}
+
+fn db_path_for(base: &Path, name: &str) -> PathBuf {
+    // Extensionless like sqld's layout: the files appear as data, data-wal,
+    // data-shm (and data.db-log under MVCC) inside the database's directory.
+    base.join(name).join("data")
+}
+
+fn open_db_handle(path: &Path, config: &OpenConfig) -> Result<Arc<DbHandle>> {
+    let path_str = path.to_string_lossy().to_string();
+    let (_io, db) = Database::open_new(
+        &path_str,
+        config.vfs.as_deref(),
+        config.flags,
+        config.db_opts.turso_cli(),
+        None,
+        Arc::new(SqliteDialect),
+    )?;
+    let conn = db.connect()?;
+    conn.wal_auto_actions_disable();
+    Ok(Arc::new(DbHandle {
+        conn: Mutex::new(conn),
+        path: path_str,
+    }))
+}
+
 fn encode_length_delimited(output: &mut Vec<u8>, data: &[u8]) {
     let mut len = data.len();
     while len >= 0x80 {
@@ -1322,6 +1446,47 @@ fn convert_core_to_value(value: CoreValue) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn validates_database_names() {
+        for ok in [
+            "db1",
+            "a-b_c",
+            "A1",
+            "x",
+            "console",
+            "common",
+            "com",
+            "com10",
+            "lpt",
+            "nullable",
+            &"n".repeat(128),
+        ] {
+            assert!(validate_db_name(ok), "expected {ok:?} to be valid");
+        }
+        for bad in [
+            "",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            ".hidden",
+            "a.b",
+            "a%2fb",
+            "a b",
+            "nul",
+            "NUL",
+            "Con",
+            "aux",
+            "prn",
+            "com1",
+            "lpt9",
+            &"n".repeat(129),
+        ] {
+            assert!(!validate_db_name(bad), "expected {bad:?} to be rejected");
+        }
+    }
 
     /// Mirrors the read loop: the terminator must be found whatever the chunk
     /// boundaries, including when it straddles two reads.
@@ -1377,5 +1542,62 @@ mod tests {
             parse_route("POST", "/db//v2/pipeline"),
             Route::Pipeline { db: Some("") }
         );
+    }
+
+    #[test]
+    fn each_database_resolves_its_own_files() {
+        let base = Path::new("/tmp/dbs");
+        let db1 = db_path_for(base, "db1");
+        let db2 = db_path_for(base, "db2");
+
+        assert_eq!(db1, Path::new("/tmp/dbs/db1/data"));
+        assert_ne!(db1, db2);
+
+        let log1 = logical_log_path(&db1.to_string_lossy()).unwrap();
+        let log2 = logical_log_path(&db2.to_string_lossy()).unwrap();
+        assert_ne!(log1, log2, "databases must not share a logical log");
+        assert_eq!(log1, Path::new("/tmp/dbs/db1/data.db-log"));
+    }
+
+    fn dir_server(base: &Path) -> TursoSyncServer {
+        TursoSyncServer::new_dir(
+            "127.0.0.1:0".to_string(),
+            base.to_path_buf(),
+            Arc::new(AtomicUsize::new(0)),
+            OpenConfig {
+                vfs: None,
+                flags: OpenFlags::default(),
+                db_opts: DatabaseOpts::new(),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn refuses_a_database_directory_that_escapes_the_served_tree() {
+        let base = std::env::temp_dir().join(format!("turso-sync-escape-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("turso-sync-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, base.join("escaped")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&outside, base.join("escaped")).unwrap();
+
+        let server = dir_server(&base);
+        let Err(refused) = server.resolve_db(Some("escaped")) else {
+            panic!("a symlinked database directory must be refused");
+        };
+        assert_eq!(refused.status, 404);
+        assert!(
+            !outside.join("data").exists(),
+            "a refused name must not create files outside the served tree"
+        );
+
+        std::fs::remove_dir_all(&base).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
     }
 }
