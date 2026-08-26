@@ -26,5 +26,8 @@ pub trait SimIO: turso_core::IO {
 
     fn close_files(&self);
 
+    /// Discard writes not covered by a completed successful file sync.
+    fn power_loss(&self) -> turso_core::Result<()>;
+
     fn persist_files(&self) -> anyhow::Result<()>;
 }

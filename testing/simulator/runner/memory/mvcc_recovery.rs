@@ -102,7 +102,12 @@ fn mutate_file_by_suffix(io: &MemorySimIO, suffix: &str, mutator: impl FnOnce(&m
     let file = files
         .get(&path)
         .unwrap_or_else(|| panic!("missing file for path {path}"));
-    mutator(&mut file.buffer.borrow_mut());
+    let mut state = file.state.borrow_mut();
+    let mut bytes = vec![0; state.buffer.len];
+    state.buffer.read(0, &mut bytes);
+    mutator(&mut bytes);
+    state.resize(bytes.len());
+    state.write(0, &bytes);
 }
 
 fn remove_file_by_suffix(io: &MemorySimIO, suffix: &str) -> Result<()> {
