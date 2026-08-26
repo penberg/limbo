@@ -59,15 +59,16 @@ impl InteractionPlan {
         }
 
         let num_interactions = env.opts.max_interactions as usize;
-        // If last interaction needs to check all db tables, generate the Property to do so.
-        // But only generate the interaction if we actually have any tables to check
-        // This can happen if we created a table, and then deleted the table, and there are no more tables to check
+        // After a fault or injected query, an empty expected schema still matters:
+        // it proves that the last table stayed dropped. Ordinary DML checks name
+        // one table, so those still require a non-empty schema.
         if let Some(i) = self.last_interactions()
             && i.check_tables()
-            && !env
+            && (!env
                 .connection_context(i.connection_index)
                 .tables()
                 .is_empty()
+                || !matches!(&i.interactions, InteractionsType::Query(_)))
         {
             let interactions = if let InteractionsType::Query(query) = &i.interactions {
                 assert!(query.is_dml());
