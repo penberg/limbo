@@ -6,13 +6,14 @@
 //! Lines ending with "-- <number>" indicate which connection should execute that statement.
 //! Lines beginning with "--" are comments and are ignored (except FAULT commands).
 
+use anyhow::{Result, bail};
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::Path;
 
-fn main() {
+fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         eprintln!(
@@ -28,8 +29,9 @@ fn main() {
         std::process::exit(1);
     });
 
-    let test_code = generate_test(&content, sql_path);
+    let test_code = generate_test(&content, sql_path)?;
     println!("{test_code}");
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -45,7 +47,7 @@ enum PlanAction {
     Disconnect { connection: u32 },
 }
 
-fn parse_plan(content: &str) -> (Vec<PlanAction>, BTreeSet<u32>) {
+fn parse_plan(content: &str) -> Result<(Vec<PlanAction>, BTreeSet<u32>)> {
     let mut actions = Vec::new();
     let mut connections = BTreeSet::new();
 
@@ -77,11 +79,18 @@ fn parse_plan(content: &str) -> (Vec<PlanAction>, BTreeSet<u32>) {
                         connection: conn_num,
                     });
                 }
-                _ => {
-                    // Unknown fault type, skip
-                }
+                "POWER_LOSS" => bail!(
+                    "POWER_LOSS cannot be converted to a TempDatabase test; reproduce it with MemorySimIO or UnreliableIo"
+                ),
+                _ => bail!("unsupported simulator fault: {fault_type}"),
             }
             continue;
+        }
+
+        if trimmed.starts_with("-- FSYNC QUERY") {
+            bail!(
+                "FSYNC QUERY cannot be converted to a TempDatabase test; reproduce it with MemorySimIO or UnreliableIo"
+            );
         }
 
         // Skip lines that begin with "--" (pure comments)
@@ -110,7 +119,7 @@ fn parse_plan(content: &str) -> (Vec<PlanAction>, BTreeSet<u32>) {
         }
     }
 
-    (actions, connections)
+    Ok((actions, connections))
 }
 
 fn escape_sql_string(s: &str) -> String {
@@ -119,8 +128,8 @@ fn escape_sql_string(s: &str) -> String {
         .replace('\n', "\\n")
 }
 
-fn generate_test(content: &str, sql_path: &str) -> String {
-    let (actions, connections) = parse_plan(content);
+fn generate_test(content: &str, sql_path: &str) -> Result<String> {
+    let (actions, connections) = parse_plan(content)?;
 
     let path = Path::new(sql_path);
     let test_name = path
@@ -194,5 +203,5 @@ fn generate_test(content: &str, sql_path: &str) -> String {
 
     code.push_str("}\n");
 
-    code
+    Ok(code)
 }

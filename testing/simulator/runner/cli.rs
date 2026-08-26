@@ -151,7 +151,7 @@ pub struct SimulatorCLI {
         default_value_t = false
     )]
     pub disable_savepoint_rollback: bool,
-    #[clap(long, help = "disable FsyncNoWait Property", default_value_t = true)]
+    #[clap(long, help = "disable FsyncNoWait Property", default_value_t = false)]
     pub disable_fsync_no_wait: bool,
     #[clap(long, help = "disable FaultyQuery Property")]
     pub disable_faulty_query: bool,

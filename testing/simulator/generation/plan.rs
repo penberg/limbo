@@ -345,11 +345,13 @@ fn random_fault<R: rand::Rng + ?Sized>(
     env: &SimulatorEnv,
     conn_index: usize,
 ) -> Interactions {
-    let faults = if env.opts.disable_reopen_database {
-        vec![Fault::Disconnect]
-    } else {
-        vec![Fault::Disconnect, Fault::ReopenDatabase]
-    };
+    let mut faults = vec![Fault::Disconnect];
+    if !env.opts.disable_reopen_database {
+        faults.push(Fault::ReopenDatabase);
+        if env.can_simulate_power_loss() {
+            faults.push(Fault::PowerLoss);
+        }
+    }
     let fault = faults[rng.random_range(0..faults.len())];
     Interactions::new(conn_index, InteractionsType::Fault(fault))
 }

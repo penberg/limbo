@@ -95,8 +95,10 @@ pub(crate) fn execute_plans(
     env.clear_tables();
     doublecheck_env.clear_tables();
 
+    // Generate from the comparison environment so mode-gated interactions,
+    // such as simulated power loss, cannot leak in through the Default clone.
     let mut interaction = plan
-        .next(&mut env)
+        .next(&mut doublecheck_env)
         .expect("we should always have at least 1 interaction to start");
 
     let now = std::time::Instant::now();
@@ -142,7 +144,7 @@ pub(crate) fn execute_plans(
                 let current_property_id = interaction.id();
                 loop {
                     state.interaction_pointer += 1;
-                    let Some(new_interaction) = plan.next(&mut env) else {
+                    let Some(new_interaction) = plan.next(&mut doublecheck_env) else {
                         // No more interactions, we're done
                         return ExecutionResult::new(history, None);
                     };
@@ -154,7 +156,7 @@ pub(crate) fn execute_plans(
             }
             ExecutionContinuation::NextInteraction => {
                 state.interaction_pointer += 1;
-                let Some(new_interaction) = plan.next(&mut env) else {
+                let Some(new_interaction) = plan.next(&mut doublecheck_env) else {
                     break;
                 };
                 interaction = new_interaction;

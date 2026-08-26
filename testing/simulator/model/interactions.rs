@@ -309,7 +309,9 @@ impl Interactions {
             // `AllTableHaveExpectedContent` check. DISCONNECT only affects a
             // single in-memory connection and doesn't touch persistence, so
             // we don't follow it with a check.
-            InteractionsType::Fault(fault) => matches!(fault, Fault::ReopenDatabase),
+            InteractionsType::Fault(fault) => {
+                matches!(fault, Fault::ReopenDatabase | Fault::PowerLoss)
+            }
         }
     }
 
@@ -436,6 +438,7 @@ impl Assertion {
 pub enum Fault {
     Disconnect,
     ReopenDatabase,
+    PowerLoss,
 }
 
 impl Display for Fault {
@@ -443,6 +446,7 @@ impl Display for Fault {
         match self {
             Fault::Disconnect => write!(f, "DISCONNECT"),
             Fault::ReopenDatabase => write!(f, "REOPEN_DATABASE"),
+            Fault::PowerLoss => write!(f, "POWER_LOSS"),
         }
     }
 }
@@ -540,9 +544,14 @@ pub enum InteractionType {
     Assertion(Assertion),
     Fault(Fault),
     /// Will attempt to run any random query. However, when the connection tries to sync it will
-    /// close all connections and reopen the database and assert that no data was lost
+    /// simulate power loss on the memory WAL backend, then reopen and retry the query.
     FsyncQuery(Query),
     FaultyQuery(Query),
+}
+
+pub(crate) struct FsyncQueryOutcome {
+    pub(crate) result: ResultSet,
+    pub(crate) power_lost: bool,
 }
 
 // FIXME: add the connection index here later
@@ -562,8 +571,7 @@ impl Display for InteractionType {
             }
             Self::Fault(fault) => write!(f, "-- FAULT '{fault}'"),
             Self::FsyncQuery(query) => {
-                writeln!(f, "-- FSYNC QUERY")?;
-                writeln!(f, "{query};")?;
+                writeln!(f, "-- FSYNC QUERY: retry only after injected power loss")?;
                 write!(f, "{query};")
             }
             Self::FaultyQuery(query) => write!(f, "{query}; -- FAULTY QUERY"),
@@ -706,7 +714,16 @@ impl InteractionType {
                         }
                     }
                     Fault::ReopenDatabase => {
-                        reopen_database(env);
+                        reopen_database(env, false)?;
+                    }
+                    Fault::PowerLoss => {
+                        if !env.can_simulate_power_loss() {
+                            return Err(turso_core::LimboError::InvalidArgument(
+                                "POWER_LOSS requires a non-MVCC default simulation using memory I/O"
+                                    .into(),
+                            ));
+                        }
+                        reopen_database(env, true)?;
                     }
                 }
                 Ok(())
@@ -721,52 +738,67 @@ impl InteractionType {
         &self,
         conn: Arc<Connection>,
         env: &mut SimulatorEnv,
-    ) -> ResultSet {
+    ) -> FsyncQueryOutcome {
         if let Self::FsyncQuery(query) = self {
-            let query_str = query.to_string();
-            let rows = conn.query(&query_str);
-            if rows.is_err() {
-                let err = rows.err();
-                tracing::debug!(
-                    "Error running query '{}': {:?}",
-                    &query_str[0..query_str.len().min(4096)],
-                    err
-                );
-                return Err(err.unwrap());
-            }
-            let mut rows = rows.unwrap().unwrap();
-            let mut out = Vec::new();
+            assert!(
+                env.can_simulate_power_loss(),
+                "FsyncNoWait requires a non-MVCC default simulation using memory I/O"
+            );
 
-            loop {
-                match rows.step()? {
-                    StepResult::Row => {
-                        let row = rows.row().unwrap();
-                        let mut r = Vec::new();
-                        for v in row.get_values() {
-                            let v = v.into();
-                            r.push(v);
-                        }
-                        out.push(r);
-                    }
-                    StepResult::IO | StepResult::Yield | StepResult::Sleep { .. } => {
-                        let syncing = env.io.syncing();
-                        if syncing {
-                            reopen_database(env);
-                        } else {
-                            rows._io().step()?;
-                        }
-                    }
-                    StepResult::Done => {
-                        break;
-                    }
-                    StepResult::Busy => {
-                        return Err(turso_core::LimboError::Busy);
-                    }
-                    StepResult::Interrupt => {}
+            let mut power_lost = false;
+            let result = (|| {
+                let query_str = query.to_string();
+                let rows = conn.query(&query_str);
+                if rows.is_err() {
+                    let err = rows.err();
+                    tracing::debug!(
+                        "Error running query '{}': {:?}",
+                        &query_str[0..query_str.len().min(4096)],
+                        err
+                    );
+                    return Err(err.unwrap());
                 }
-            }
+                let mut rows = rows.unwrap().unwrap();
+                let mut out = Vec::new();
 
-            Ok(out)
+                loop {
+                    match rows.step()? {
+                        StepResult::Row => {
+                            let row = rows.row().unwrap();
+                            let mut r = Vec::new();
+                            for v in row.get_values() {
+                                let v = v.into();
+                                r.push(v);
+                            }
+                            out.push(r);
+                        }
+                        StepResult::IO | StepResult::Yield | StepResult::Sleep { .. } => {
+                            let syncing = env.io.syncing();
+                            if syncing {
+                                assert!(
+                                    !power_lost,
+                                    "an interrupted fsync query must stop after power loss"
+                                );
+                                reopen_database(env, true)?;
+                                power_lost = true;
+                            } else {
+                                rows._io().step()?;
+                            }
+                        }
+                        StepResult::Done => {
+                            break;
+                        }
+                        StepResult::Busy => {
+                            return Err(turso_core::LimboError::Busy);
+                        }
+                        StepResult::Interrupt => {}
+                    }
+                }
+
+                Ok(out)
+            })();
+
+            FsyncQueryOutcome { result, power_lost }
         } else {
             unreachable!("unexpected: this function should only be called on queries")
         }
@@ -884,7 +916,7 @@ impl InteractionType {
     }
 }
 
-fn reopen_database(env: &mut SimulatorEnv) {
+fn reopen_database(env: &mut SimulatorEnv, power_loss: bool) -> Result<()> {
     // 1. Close all connections without default checkpoint-on-close behavior
     // to expose bugs related to how we handle WAL
     let mvcc = env.profile.mvcc;
@@ -898,30 +930,31 @@ fn reopen_database(env: &mut SimulatorEnv) {
         }
     }
 
+    if power_loss {
+        // Reject cleanup I/O from the old database objects after the crash boundary.
+        env.io.power_loss()?;
+    }
+
     env.connections.clear();
+    env.db = None;
 
-    // Clear all open files
-    // TODO: for correct reporting of faults we should get all the recorded numbers and transfer to the new file
-    env.io.close_files();
+    if power_loss {
+        // The interrupted statement still owns its old connection while this
+        // function opens the replacement database. A real process restart has
+        // no process-wide database registry, so the simulator must discard it
+        // or the new open can return the old Database and its stale handles.
+        turso_core::clear_database_registry();
+    } else {
+        // TODO: for correct reporting of faults we should get all the recorded numbers and transfer to the new file
+        env.io.close_files();
+    }
 
-    // 2. Re-open database
+    // 2. Re-open the shared database object. Connections are recreated below
+    // through SimulatorEnv::connect so their normal cache and ATTACH setup is
+    // applied after a restart too.
     match env.type_ {
-        SimulationType::Differential => {
-            for i in 0..num_conns {
-                let conn = rusqlite::Connection::open(env.get_db_path())
-                    .expect("Failed to open SQLite connection");
-                for name in &env.attached_dbs {
-                    let aux_path = env.get_aux_db_path(name);
-                    conn.execute(&format!("ATTACH '{}' AS {name}", aux_path.display()), [])
-                        .unwrap_or_else(|e| {
-                            panic!("Failed to ATTACH {name} on SQLite reopen (conn {i}): {e}")
-                        });
-                }
-                env.connections.push(SimConnection::SQLiteConnection(conn));
-            }
-        }
+        SimulationType::Differential => {}
         SimulationType::Default | SimulationType::Doublecheck => {
-            env.db = None;
             let db = match turso_core::Database::open_file_with_flags(
                 env.io.clone(),
                 env.get_db_path().to_str().expect("path should be 'to_str'"),
@@ -952,18 +985,14 @@ fn reopen_database(env: &mut SimulatorEnv) {
                 conn.pragma_update("journal_mode", "'mvcc'")
                     .expect("enable mvcc");
             }
-
-            for i in 0..num_conns {
-                let conn = env.db.as_ref().expect("db to be Some").connect().unwrap();
-                for name in &env.attached_dbs {
-                    let aux_path = env.get_aux_db_path(name);
-                    conn.execute(format!("ATTACH '{}' AS {name}", aux_path.display()))
-                        .unwrap_or_else(|e| {
-                            panic!("Failed to ATTACH {name} on reopen (conn {i}): {e}")
-                        });
-                }
-                env.connections.push(SimConnection::LimboConnection(conn));
-            }
         }
     };
+
+    env.connections
+        .extend((0..num_conns).map(|_| SimConnection::Disconnected));
+    for connection_index in 0..num_conns {
+        env.connect(connection_index);
+    }
+
+    Ok(())
 }

@@ -2227,8 +2227,9 @@ fn property_fsync_no_wait<R: rand::Rng + ?Sized>(
     rng: &mut R,
     query_distr: &QueryDistribution,
     ctx: &impl GenerationContext,
-    _mvcc: bool,
+    mvcc: bool,
 ) -> Property {
+    assert!(!mvcc, "FsyncNoWait must not be generated in MVCC mode");
     Property::FsyncNoWait {
         query: Query::arbitrary_from(rng, ctx, query_distr),
     }
@@ -2434,7 +2435,10 @@ impl PropertyDiscriminants {
                 }
             }
             PropertyDiscriminants::FsyncNoWait => {
-                if env.profile.io.enable && !env.opts.disable_fsync_no_wait {
+                if env.profile.io.enable
+                    && !env.opts.disable_fsync_no_wait
+                    && env.can_simulate_power_loss()
+                {
                     50 // Freestyle number
                 } else {
                     0

@@ -72,8 +72,10 @@ pub(crate) fn execute_interactions(
     env.clear_tables();
     rusqlite_env.clear_tables();
 
+    // Generate from the comparison environment so mode-gated interactions,
+    // such as simulated power loss, cannot leak in through the Default clone.
     let mut interaction = plan
-        .next(&mut env)
+        .next(&mut rusqlite_env)
         .expect("we should always have at least 1 interaction to start");
 
     let now = std::time::Instant::now();
@@ -116,7 +118,7 @@ pub(crate) fn execute_interactions(
                 let current_property_id = interaction.id();
                 loop {
                     state.interaction_pointer += 1;
-                    let Some(new_interaction) = plan.next(&mut env) else {
+                    let Some(new_interaction) = plan.next(&mut rusqlite_env) else {
                         // No more interactions, we're done
                         return ExecutionResult::new(history, None);
                     };
@@ -128,7 +130,7 @@ pub(crate) fn execute_interactions(
             }
             ExecutionContinuation::NextInteraction => {
                 state.interaction_pointer += 1;
-                let Some(new_interaction) = plan.next(&mut env) else {
+                let Some(new_interaction) = plan.next(&mut rusqlite_env) else {
                     break;
                 };
                 interaction = new_interaction;

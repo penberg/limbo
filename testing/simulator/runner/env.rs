@@ -1370,6 +1370,12 @@ impl SimulatorEnv {
         rng.random_range(0..self.connections.len())
     }
 
+    pub(crate) fn can_simulate_power_loss(&self) -> bool {
+        !self.profile.mvcc
+            && self.io_backend == IoBackend::Memory
+            && matches!(self.type_, SimulationType::Default)
+    }
+
     /// Rng only used for generating interactions. By having a separate Rng we can guarantee that a particular seed
     /// will always create the same interactions plan, regardless of the changes that happen in the Database code
     pub fn gen_rng(&self) -> ChaCha8Rng {
