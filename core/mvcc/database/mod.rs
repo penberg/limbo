@@ -3773,7 +3773,17 @@ impl StateTransition for WriteRowStateMachine {
                 // ordering invariant, making the row invisible to point lookups
                 // ("Rowid N out of order" under sqlite3 integrity_check). Fall back
                 // to a real seek, which resolves the divider comparison correctly.
-                if self.requires_seek || !self.cursor.read().is_positioned_past_page_start() {
+                //
+                // The other sound position is the end of the rightmost leaf: when
+                // the previous row was the last row of the table, next() ran off
+                // the end and left the cursor one past it, with no divider to the
+                // right. Every append-only workload sits here for every row, so
+                // without this case each row would seek from the root.
+                let positioned_for_next_key = {
+                    let cursor = self.cursor.read();
+                    cursor.is_positioned_past_page_start() || cursor.is_at_end_of_rightmost_leaf()
+                };
+                if self.requires_seek || !positioned_for_next_key {
                     self.state = WriteRowState::Seek;
                 } else {
                     self.state = WriteRowState::Insert;

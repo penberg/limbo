@@ -6058,6 +6058,29 @@ impl BTreeCursor {
         self.has_record() && self.stack.current_cell_index() > 0
     }
 
+    /// True iff the cursor has run off the last cell of the table's rightmost
+    /// leaf: `next()` left it on that leaf with the cell index one past the
+    /// last cell and no record, and no ancestor has a child to the right.
+    ///
+    /// That is the append slot. A key larger than every key in the table
+    /// belongs there, and there is no right-hand divider that could put it
+    /// anywhere else, so the MVCC checkpoint's sequential-write optimization
+    /// can insert here without re-seeking from the root. Without this check
+    /// every append pays a full root-to-leaf seek: `next()` after inserting
+    /// the last cell always runs off the end.
+    pub fn is_at_end_of_rightmost_leaf(&self) -> bool {
+        if self.has_record()
+            || self.valid_state != CursorValidState::Valid
+            || self.stack.current_page < 0
+        {
+            return false;
+        }
+        let contents = self.stack.top_ref().get_contents();
+        contents.is_leaf()
+            && self.stack.current_cell_index() == contents.cell_count() as i32
+            && !self.ancestor_pages_have_more_children()
+    }
+
     /// Rowid of the table-leaf cell the cursor currently sits on, or `None` when the
     /// cursor is not cleanly positioned on a table leaf (index cursors, sentinel
     /// stacks, mid-operation states). Callers that use `None` must treat it as
