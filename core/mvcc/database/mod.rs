@@ -10265,18 +10265,21 @@ impl<Clock: LogicalClock, A: ConcurrentAllocator> MvStore<Clock, A> {
     }
 
     pub fn get_rowid_allocator(&self, table_id: &MVTableId) -> Arc<RowidAllocator> {
-        let mut map = self.table_id_to_last_rowid.write();
-        if map.contains_key(table_id) {
-            map.get(table_id).unwrap().clone()
-        } else {
-            let allocator = Arc::new(RowidAllocator {
-                lock: TursoRwLock::new(),
-                max_rowid: AtomicI64::new(0),
-                initialized: AtomicBool::new(false),
-            });
-            map.insert(*table_id, allocator.clone());
-            allocator
+        // Every insert comes through here, so the common case, an allocator
+        // that exists, must not take the map's write lock.
+        if let Some(allocator) = self.table_id_to_last_rowid.read().get(table_id) {
+            return allocator.clone();
         }
+        let mut map = self.table_id_to_last_rowid.write();
+        map.entry(*table_id)
+            .or_insert_with(|| {
+                Arc::new(RowidAllocator {
+                    lock: TursoRwLock::new(),
+                    max_rowid: AtomicI64::new(0),
+                    initialized: AtomicBool::new(false),
+                })
+            })
+            .clone()
     }
 
     /// Whether `table_id` has a *currently live* checkpointed B-tree. Snapshot-agnostic; for
