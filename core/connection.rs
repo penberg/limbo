@@ -2020,16 +2020,22 @@ impl Connection {
         if self.schema_reparse_in_progress() {
             return;
         }
+        // Inside a transaction the schema cannot change under the
+        // connection, so there is nothing to adopt. This runs on every step
+        // of every statement in MVCC mode, and the check below takes the
+        // database's shared schema lock, which every connection contends
+        // for: decide without it whenever possible.
+        if !self.has_no_open_transaction_state() {
+            return;
+        }
         let current_schema = self.schema.read().clone();
         let schema = self.db.schema.lock();
         // MVCC checkpoint can publish physical btree roots into the shared
         // schema without changing SQLite's schema cookie. If this connection
         // still has the older schema snapshot, prepared statements must be
         // invalidated and recompiled with the published roots.
-        if self.has_no_open_transaction_state()
-            && (current_schema.schema_version != schema.schema_version
-                || self
-                    .has_mvcc_schema_snapshot_changed_with_same_version(&current_schema, &schema))
+        if current_schema.schema_version != schema.schema_version
+            || self.has_mvcc_schema_snapshot_changed_with_same_version(&current_schema, &schema)
         {
             let mut adopted = schema.clone();
             // Resolve placeholder (negative) roots to the real pages a checkpoint has
