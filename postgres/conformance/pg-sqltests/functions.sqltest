@@ -210,3 +210,21 @@ test pg-get-expr-check-constraint {
 expect {
     val > 0
 }
+
+test percentile-cont-within-group {
+    CREATE TABLE demo (value int);
+    INSERT INTO demo (value) VALUES (1), (2);
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY value) FROM demo;
+}
+expect {
+    1.5
+}
+
+test mode-within-group {
+    CREATE TABLE demo (value int);
+    INSERT INTO demo VALUES (2), (2), (1), (1);
+    SELECT mode() WITHIN GROUP (ORDER BY value) FROM demo;
+}
+expect {
+    1
+}
