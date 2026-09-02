@@ -3,6 +3,7 @@ use crate::sync::Arc;
 use turso_ext::{
     Connection, ConstraintInfo, ConstraintOp, ConstraintUsage, ExtensionApi, IndexInfo,
     OrderByInfo, ResultCode, VTabCursor, VTabKind, VTabModule, VTabModuleDerive, VTable, Value,
+    ValueType,
 };
 
 pub fn register_extension(ext_api: &mut ExtensionApi) {
@@ -164,6 +165,10 @@ impl VTabCursor for GenerateSeriesCursor {
     type Error = ResultCode;
 
     fn filter(&mut self, args: &[Value], idx_info: Option<(&str, i32)>) -> ResultCode {
+        // SQLite returns no rows when any selected constraint has a NULL value.
+        if args.iter().any(|arg| arg.value_type() == ValueType::Null) {
+            return ResultCode::EOF;
+        }
         let mut start: Option<i64> = None;
         let mut stop: Option<i64> = None;
         let mut step = 1;
@@ -266,19 +271,9 @@ impl VTabCursor for GenerateSeriesCursor {
     }
 
     fn rowid(&self) -> i64 {
-        let sub = self.current.saturating_sub(self.start);
-
-        // Handle overflow in rowid calculation by capping at MAX/MIN
-        match sub.checked_div(self.step) {
-            Some(val) => val.saturating_add(1),
-            None => {
-                if self.step > 0 {
-                    i64::MAX
-                } else {
-                    i64::MIN
-                }
-            }
-        }
+        // SQLite uses each generated value as its rowid. Thus, a value keeps
+        // the same identity across scans that use different arguments.
+        self.current
     }
 }
 
@@ -601,8 +596,8 @@ mod tests {
     }
 
     #[quickcheck]
-    /// Test that rowid is always monotonically increasing regardless of step direction
-    fn prop_series_rowid_monotonic(series: Series) {
+    /// Test that each rowid is the generated value.
+    fn prop_series_rowid_is_value(series: Series) {
         let start = series.start;
         let stop = series.stop;
         let step = series.step;
@@ -618,22 +613,20 @@ mod tests {
         // Initialize cursor through filter
         cursor.filter(&args, Some(("idx", 1 | 2 | 4)));
 
-        let mut rowids = vec![];
         while !cursor.eof() {
-            let cur_rowid = cursor.rowid();
+            assert_eq!(
+                cursor.rowid(),
+                cursor.current,
+                "rowid differs from value for start={start}, stop={stop}, step={step}"
+            );
             match cursor.next() {
-                ResultCode::OK => rowids.push(cur_rowid),
+                ResultCode::OK => {}
                 ResultCode::EOF => break,
                 err => {
                     panic!("Unexpected error {err:?} for start={start}, stop={stop}, step={step}")
                 }
             }
         }
-
-        assert!(
-            rowids.windows(2).all(|w| w[1] == w[0] + 1),
-            "Rowids not monotonically increasing: {rowids:?} (start={start}, stop={stop}, step={step})"
-        );
     }
 
     #[quickcheck]
