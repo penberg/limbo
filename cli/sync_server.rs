@@ -59,7 +59,7 @@ enum DbSource {
     Dir {
         base: PathBuf,
         config: OpenConfig,
-        open: Mutex<HashMap<String, Arc<DbHandle>>>,
+        open_handles: Mutex<HashMap<String, Arc<DbHandle>>>,
     },
 }
 
@@ -105,7 +105,7 @@ impl TursoSyncServer {
             source: DbSource::Dir {
                 base: base.canonicalize()?,
                 config,
-                open: Mutex::new(HashMap::new()),
+                open_handles: Mutex::new(HashMap::new()),
             },
             interrupt_count,
         })
@@ -119,11 +119,18 @@ impl TursoSyncServer {
             (DbSource::Single(h), None) => Ok(h.clone()),
             (DbSource::Single(_), Some(_)) => Err(text_response(404, "Not Found")),
             (DbSource::Dir { .. }, None) => Err(text_response(404, "Not Found")),
-            (DbSource::Dir { base, config, open }, Some(name)) => {
+            (
+                DbSource::Dir {
+                    base,
+                    config,
+                    open_handles,
+                },
+                Some(name),
+            ) => {
                 if !validate_db_name(name) {
                     return Err(text_response(400, "Invalid database name"));
                 }
-                let mut open = open.lock().unwrap();
+                let mut open = open_handles.lock().unwrap();
                 let at_capacity = open.len() >= config.max_open;
                 let entry = match open.entry(name.to_string()) {
                     Entry::Occupied(entry) => return Ok(entry.get().clone()),
@@ -351,7 +358,7 @@ impl TursoSyncServer {
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
             Err(e) => {
-                debug!("Failed to prepare statement: {}", e);
+                error!("Failed to prepare statement: {}", e);
                 return StreamResult::Error {
                     error: Error {
                         message: e.to_string(),
@@ -364,7 +371,7 @@ impl TursoSyncServer {
         for (i, arg) in req.stmt.args.iter().enumerate() {
             let core_value = convert_value_to_core(arg);
             if let Err(err) = stmt.bind_at(std::num::NonZero::new(i + 1).unwrap(), core_value) {
-                debug!("Failed to bind statement argument: {}", err);
+                error!("Failed to bind statement argument: {}", err);
                 return StreamResult::Error {
                     error: Error {
                         message: err.to_string(),
@@ -409,7 +416,7 @@ impl TursoSyncServer {
                     }
                 }
                 Err(e) => {
-                    debug!("Failed to execute statement: {}", e);
+                    error!("Failed to execute statement: {}", e);
                     StreamResult::Error {
                         error: Error {
                             message: e.to_string(),
@@ -435,7 +442,7 @@ impl TursoSyncServer {
                     }),
                 },
                 Err(e) => {
-                    debug!("Failed to execute statement: {}", e);
+                    error!("Failed to execute statement: {}", e);
                     StreamResult::Error {
                         error: Error {
                             message: e.to_string(),
@@ -466,7 +473,7 @@ impl TursoSyncServer {
                         step_errors.push(None);
                     }
                     Err(e) => {
-                        debug!("Batch step {} failed: {}", step_idx, e);
+                        error!("Batch step {} failed: {}", step_idx, e);
                         step_results.push(None);
                         step_errors.push(Some(Error {
                             message: e.to_string(),
@@ -1597,7 +1604,10 @@ mod tests {
             Ok(handle) => handle,
             Err(resp) => panic!("first open must succeed, got {}", resp.status),
         };
-        let DbSource::Dir { open, .. } = &server.source else {
+        let DbSource::Dir {
+            open_handles: open, ..
+        } = &server.source
+        else {
             unreachable!("dir_server builds a directory source");
         };
         {
