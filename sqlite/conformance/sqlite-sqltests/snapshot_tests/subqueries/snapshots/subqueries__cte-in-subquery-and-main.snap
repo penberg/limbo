@@ -32,7 +32,7 @@ QUERY PLAN
 
 BYTECODE
 addr  opcode                             p1   p2   p3  p4              p5  comment
-   0                    Init              0  125    0                   0  Start at 125
+   0                    Init              0  126    0                   0  Start at 126
    1                    Once             54    0    0                   0  goto 54
    2                    BeginSubrtn       2    0    0                   0  r[2]=NULL
    3                    Null              0    1    0                   0  r[1]=NULL
@@ -86,77 +86,78 @@ addr  opcode                             p1   p2   p3  p4              p5  comme
   51            Copy                     17   16    0                   0  r[16]=r[17]
   52            Copy                     16    1    0                   0  r[1]=r[16]
   53          Return                      2    0    1                   0
-  54          OpenEphemeral               2    1    0                   0  cursor=2 is_table=true
-  55          Null                        0   29    0                   0  r[29]=NULL
-  56          Integer                     0   26    0                   0  r[26]=0; clear group by abort flag
-  57          Null                        0   27    0                   0  r[27]=NULL; initialize group by comparison registers to NULL
-  58          Gosub                      33   90    0                   0  ; go to clear accumulator subroutine
-  59          OpenRead                    3    2    0  k(5,B,B,B,B,B)   0  table=products, root=2, iDb=0
-  60          OpenRead                    4    8    0  k(2,B)           0  index=idx_products_category, root=8, iDb=0
-  61          Rewind                      4   77    0                   0  Rewind index idx_products_category
-  62            DeferredSeek              4    3    0                   0
-  63            Column                    4    0   31                   0  r[31]=idx_products_category.category_id
-  64            Column                    3    3   32                   0  r[32]=products.price
-  65            RealAffinity             32    0    0                   0
-  66            Compare                  27   31    1  k(1, Binary)     0  r[27..27]==r[31..31]
-  67            Jump                     68   72   68                   0  ; start new group if comparison is not equal
-  68            Gosub                    24   81    0                   0  ; check if ended group had data, and output if so
-  69            Move                     31   27    1                   0  r[27..27]=r[31..31]
-  70            IfPos                    26   93    0                   0  r[26]>0 -> r[26]-=0, goto 93; check abort flag
-  71            Gosub                    33   90    0                   0  ; goto clear accumulator subroutine
-  72            AggStep                   0   32   29  avg              0  accum=r[29] step(r[32])
-  73            If                       25   75    0                   0  if r[25] goto 75; don't emit group columns if continuing existing group
-  74            Column                    4    0   28                   0  r[28]=idx_products_category.category_id
-  75            Integer                   1   25    0                   0  r[25]=1; indicate data in accumulator
-  76          Next                        4   62    0                   1
-  77          Gosub                      24   81    0                   0  ; emit row for final group
-  78          Goto                        0   93    0                   0  ; group by finished
-  79          Integer                     1   26    0                   0  r[26]=1
-  80        Return                       24    0    0                   0
-  81        IfPos                        25   83    0                   0  r[25]>0 -> r[25]-=0, goto 83; output group by row subroutine start
-  82      Return                         24    0    0                   0
-  83      AggFinal                        0   29    0  avg              0  accum=r[29]
-  84      Copy                           28   22    0                   0  r[22]=r[28]
-  85      Copy                           29   23    0                   0  r[23]=r[29]
-  86      MakeRecord                     22    2   34                   0  r[34]=mkrec(r[22..23]); for
-  87      NewRowid                        2   35    0                   0  r[35]=rowid
-  88      Insert                          2   34   35                   4  intkey=r[35] data=r[34]
-  89    Return                           24    0    0                   0
-  90    Null                              0   28   29                   0  r[28..29]=NULL; clear accumulator subroutine start
-  91    Integer                           0   25    0                   0  r[25]=0
-  92  Return                             33    0    0                   0
-  93  OpenRead                            5    2    0  k(5,B,B,B,B,B)   0  table=products, root=2, iDb=0
-  94  Rewind                              5  124    0                   0  Rewind table products
-  95    Column                            5    3   40                   0  r[40]=products.price
-  96    RealAffinity                     40    0    0                   0
-  97    Copy                              1   42    0                   0  r[42]=r[1]
-  98    Multiply                         42   43   41                   0  r[41]=r[42]*r[43]
-  99    Le                               40   41  123  Binary           0  if r[40]<=r[41] goto 123
- 100    Once                            109    0    0                   0  goto 109
- 101    OpenAutoindex                     6    0    0                   0  cursor=6
- 102    Rewind                            2  103    0                   0  Rewind  ephemeral()
- 103      ColumnRange                     2    0   44  2                0  r[44..45]=ephemeral().category_id..avg_price
- 104      RowId                           2   46    0                   0  r[46]=ephemeral().rowid
- 105      MakeRecord                     44    3   47                   0  r[47]=mkrec(r[44..46]); for ephemeral_subquery_t5
- 106      FilterAdd                       6   44    1                   0  bloom_filter_add(r[44..45])
- 107      IdxInsert                       6   47   44                   0  key=r[47]
- 108    Next                              2  103    0                   0
- 109    Column                            5    2   48                   0  r[48]=products.category_id
- 110    IsNull                           48  123    0                   0  if (r[48]==NULL) goto 123
- 111    Affinity                         48    1    0                   0  r[48..49] = C
- 112    Filter                            6  123   48                   1  if !bloom_filter(r[48..49]) goto 123
- 113    SeekGE                            6  123   48                   0  key=[48..48]
- 114      IdxGT                           6  123   48                   0  key=[48..48]
- 115      DeferredSeek                    6    2    0                   0
- 116      ColumnRange                     2    0   20  2                0  r[20..21]=ephemeral().category_id..avg_price
- 117      Column                          5    1   36                   0  r[36]=products.name
- 118      Column                          5    3   37                   0  r[37]=products.price
- 119      RealAffinity                   37    0    0                   0
- 120      Column                          6    1   38                   0  r[38]=ephemeral(ephemeral_subquery_t5).avg_price
- 121      ResultRow                      36    3    0                   0  output=r[36..38]
- 122    Next                              6  114    0                   0
- 123  Next                                5   95    0                   1
- 124  Halt                                0    0    0                   0
- 125  Transaction                         0    1   11                   0  iDb=0 tx_mode=Read
- 126  Real                                0   43    0  0.8              0  r[43]=0.8
- 127  Goto                                0    1    0                   0
+  54          Once                       94    0    0                   0  goto 94
+  55          OpenEphemeral               2    1    0                   0  cursor=2 is_table=true
+  56          Null                        0   29    0                   0  r[29]=NULL
+  57          Integer                     0   26    0                   0  r[26]=0; clear group by abort flag
+  58          Null                        0   27    0                   0  r[27]=NULL; initialize group by comparison registers to NULL
+  59          Gosub                      33   91    0                   0  ; go to clear accumulator subroutine
+  60          OpenRead                    3    2    0  k(5,B,B,B,B,B)   0  table=products, root=2, iDb=0
+  61          OpenRead                    4    8    0  k(2,B)           0  index=idx_products_category, root=8, iDb=0
+  62          Rewind                      4   78    0                   0  Rewind index idx_products_category
+  63            DeferredSeek              4    3    0                   0
+  64            Column                    4    0   31                   0  r[31]=idx_products_category.category_id
+  65            Column                    3    3   32                   0  r[32]=products.price
+  66            RealAffinity             32    0    0                   0
+  67            Compare                  27   31    1  k(1, Binary)     0  r[27..27]==r[31..31]
+  68            Jump                     69   73   69                   0  ; start new group if comparison is not equal
+  69            Gosub                    24   82    0                   0  ; check if ended group had data, and output if so
+  70            Move                     31   27    1                   0  r[27..27]=r[31..31]
+  71            IfPos                    26   94    0                   0  r[26]>0 -> r[26]-=0, goto 94; check abort flag
+  72            Gosub                    33   91    0                   0  ; goto clear accumulator subroutine
+  73            AggStep                   0   32   29  avg              0  accum=r[29] step(r[32])
+  74            If                       25   76    0                   0  if r[25] goto 76; don't emit group columns if continuing existing group
+  75            Column                    4    0   28                   0  r[28]=idx_products_category.category_id
+  76            Integer                   1   25    0                   0  r[25]=1; indicate data in accumulator
+  77          Next                        4   63    0                   1
+  78          Gosub                      24   82    0                   0  ; emit row for final group
+  79          Goto                        0   94    0                   0  ; group by finished
+  80          Integer                     1   26    0                   0  r[26]=1
+  81        Return                       24    0    0                   0
+  82        IfPos                        25   84    0                   0  r[25]>0 -> r[25]-=0, goto 84; output group by row subroutine start
+  83      Return                         24    0    0                   0
+  84      AggFinal                        0   29    0  avg              0  accum=r[29]
+  85      Copy                           28   22    0                   0  r[22]=r[28]
+  86      Copy                           29   23    0                   0  r[23]=r[29]
+  87      MakeRecord                     22    2   34                   0  r[34]=mkrec(r[22..23]); for
+  88      NewRowid                        2   35    0                   0  r[35]=rowid
+  89      Insert                          2   34   35                   4  intkey=r[35] data=r[34]
+  90    Return                           24    0    0                   0
+  91    Null                              0   28   29                   0  r[28..29]=NULL; clear accumulator subroutine start
+  92    Integer                           0   25    0                   0  r[25]=0
+  93  Return                             33    0    0                   0
+  94  OpenRead                            5    2    0  k(5,B,B,B,B,B)   0  table=products, root=2, iDb=0
+  95  Rewind                              5  125    0                   0  Rewind table products
+  96    Column                            5    3   40                   0  r[40]=products.price
+  97    RealAffinity                     40    0    0                   0
+  98    Copy                              1   42    0                   0  r[42]=r[1]
+  99    Multiply                         42   43   41                   0  r[41]=r[42]*r[43]
+ 100    Le                               40   41  124  Binary           0  if r[40]<=r[41] goto 124
+ 101    Once                            110    0    0                   0  goto 110
+ 102    OpenAutoindex                     6    0    0                   0  cursor=6
+ 103    Rewind                            2  104    0                   0  Rewind  ephemeral()
+ 104      ColumnRange                     2    0   44  2                0  r[44..45]=ephemeral().category_id..avg_price
+ 105      RowId                           2   46    0                   0  r[46]=ephemeral().rowid
+ 106      MakeRecord                     44    3   47                   0  r[47]=mkrec(r[44..46]); for ephemeral_subquery_t5
+ 107      FilterAdd                       6   44    1                   0  bloom_filter_add(r[44..45])
+ 108      IdxInsert                       6   47   44                   0  key=r[47]
+ 109    Next                              2  104    0                   0
+ 110    Column                            5    2   48                   0  r[48]=products.category_id
+ 111    IsNull                           48  124    0                   0  if (r[48]==NULL) goto 124
+ 112    Affinity                         48    1    0                   0  r[48..49] = C
+ 113    Filter                            6  124   48                   1  if !bloom_filter(r[48..49]) goto 124
+ 114    SeekGE                            6  124   48                   0  key=[48..48]
+ 115      IdxGT                           6  124   48                   0  key=[48..48]
+ 116      DeferredSeek                    6    2    0                   0
+ 117      ColumnRange                     2    0   20  2                0  r[20..21]=ephemeral().category_id..avg_price
+ 118      Column                          5    1   36                   0  r[36]=products.name
+ 119      Column                          5    3   37                   0  r[37]=products.price
+ 120      RealAffinity                   37    0    0                   0
+ 121      Column                          6    1   38                   0  r[38]=ephemeral(ephemeral_subquery_t5).avg_price
+ 122      ResultRow                      36    3    0                   0  output=r[36..38]
+ 123    Next                              6  115    0                   0
+ 124  Next                                5   96    0                   1
+ 125  Halt                                0    0    0                   0
+ 126  Transaction                         0    1   11                   0  iDb=0 tx_mode=Read
+ 127  Real                                0   43    0  0.8              0  r[43]=0.8
+ 128  Goto                                0    1    0                   0
