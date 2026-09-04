@@ -14666,4 +14666,62 @@ mod tests {
             }
         }
     }
+
+    /// `next()` past the last row must leave the cursor exactly on the
+    /// append slot the MVCC checkpoint's sequential-write optimization
+    /// inserts into: end of the rightmost leaf, one past the last cell,
+    /// with no ancestor holding a child to the right. The tree is grown
+    /// past one leaf so the predicate has ancestors to check.
+    #[test]
+    fn next_past_the_last_row_lands_on_the_rightmost_leaf_append_slot() {
+        let (pager, root_page, _db, _conn) = empty_btree();
+        let mut cursor = BTreeCursor::new_table(pager.clone(), root_page, 1);
+        let cursor = &mut cursor;
+
+        let payload = crate::alloc::vec![b'X'; 512];
+        let regs = &[Register::Value(Value::Blob(payload))];
+        let record = ImmutableRecord::from_registers(regs, regs.len()).unwrap();
+
+        for rowid in 1..=64 {
+            run_until_done(
+                || cursor.seek(SeekKey::TableRowId(rowid), SeekOp::GE { eq_only: true }),
+                pager.deref(),
+            )
+            .unwrap();
+            let key = BTreeKey::new_table_rowid(rowid, Some(&record));
+            run_until_done(|| cursor.insert(&key), pager.deref()).unwrap();
+        }
+
+        run_until_done(|| cursor.rewind(), pager.deref()).unwrap();
+        assert!(
+            !cursor.is_at_end_of_rightmost_leaf(),
+            "a cursor on the first row is not at the append slot"
+        );
+
+        let mut rows = 0;
+        while cursor.has_record {
+            rows += 1;
+            run_until_done(|| cursor.next(), pager.deref()).unwrap();
+        }
+        assert_eq!(rows, 64);
+        assert!(
+            cursor.is_at_end_of_rightmost_leaf(),
+            "next() past the last row must land on the append slot"
+        );
+
+        // Inserting the next consecutive rowid at that position must append.
+        let key = BTreeKey::new_table_rowid(65, Some(&record));
+        run_until_done(|| cursor.insert(&key), pager.deref()).unwrap();
+
+        run_until_done(|| cursor.rewind(), pager.deref()).unwrap();
+        let mut rowids = crate::alloc::vec![];
+        while cursor.has_record {
+            let rowid = run_until_done(|| cursor.rowid(), pager.deref())
+                .unwrap()
+                .unwrap();
+            rowids.push(rowid);
+            run_until_done(|| cursor.next(), pager.deref()).unwrap();
+        }
+        assert_eq!(rowids, (1..=65).collect::<Vec<i64>>());
+    }
 }
