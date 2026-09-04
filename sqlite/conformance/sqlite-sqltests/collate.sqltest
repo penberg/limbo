@@ -274,6 +274,18 @@ expect {
     Apple|0
 }
 
+@cross-check-integrity
+test collate_does_not_inherit_previous_column {
+    CREATE TABLE t(a TEXT COLLATE NOCASE, b TEXT, id INTEGER);
+    INSERT INTO t VALUES('A', 'B', 1);
+    SELECT 'b' = b FROM t WHERE a IS NOT NULL;
+    SELECT id, 'a' = a FROM t;
+}
+expect {
+    0
+    1|1
+}
+
 # =====================================================================
 # --- Hash join with NOCASE on build-side column, comparison in SELECT ---
 # The NOCASE column ends up in the hash payload; the cached register must

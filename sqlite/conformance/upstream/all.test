@@ -604,7 +604,7 @@ set test_files {
   tkt-9d68c883         fail
   tkt-9f2eb3abac       fail
   tkt-a7b7803e         fail
-  tkt-a7debbe0         fail
+  tkt-a7debbe0         pass
   tkt-a8a0d2996a       pass
   tkt-b1d3a2e531       fail
   tkt-b351d95f9        fail
