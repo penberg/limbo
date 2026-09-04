@@ -299,7 +299,9 @@ impl Display for EqpDetail {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::ConstantRow => write!(f, "SCAN CONSTANT ROW"),
-            Self::Scan { table, index, .. } => {
+            Self::Scan {
+                table, index, join, ..
+            } => {
                 write!(f, "SCAN {}", table.name_with_alias())?;
                 if let Some(index) = index {
                     if index.covering {
@@ -307,6 +309,9 @@ impl Display for EqpDetail {
                     } else {
                         write!(f, " USING INDEX {}", index.name)?;
                     }
+                }
+                if join.is_some_and(|join| join.shows_left_join_suffix()) {
+                    write!(f, " LEFT-JOIN")?;
                 }
                 Ok(())
             }

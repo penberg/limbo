@@ -16,4 +16,4 @@ info:
 ---
 QUERY PLAN
 |--SCAN left_items
-`--SCAN right_items
+`--SCAN right_items LEFT-JOIN
