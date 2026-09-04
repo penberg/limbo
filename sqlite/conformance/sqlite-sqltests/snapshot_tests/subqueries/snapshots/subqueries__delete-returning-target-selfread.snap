@@ -19,13 +19,13 @@ QUERY PLAN
 
 BYTECODE
 addr  opcode           p1  p2  p3  p4          p5  comment
-   0    Init            0  42   0               0  Start at 42
+   0    Init            0  40   0               0  Start at 40
    1    OpenEphemeral   0   1   0               0  cursor=0 is_table=true
    2    OpenWrite       1   2   0               0  root=2; iDb=0
-   3    Rewind          1  36   0               0  Rewind table t
+   3    Rewind          1  34   0               0  Rewind table t
    4    Integer         3   2   0               0  r[2]=3
    5      RowId         1   3   0               0  r[3]=t.rowid
-   6      Ge            3   2  36               0  if r[3]>=r[2] goto 36
+   6      Ge            3   2  34               0  if r[3]>=r[2] goto 34
    7      RowId         1   4   0               0  r[4]=t.rowid
    8      RowId         1   5   0               0  r[5]=t.rowid
    9      ColumnRange   1   1   6  2            0  r[6..7]=t.grp..val
@@ -37,30 +37,27 @@ addr  opcode           p1  p2  p3  p4          p5  comment
   15      Null          0   1   0               0  r[1]=NULL
   16      Null          0  13   0               0  r[13]=NULL
   17      Integer       1  14   0               0  r[14]=1; LIMIT counter
-  18      IfNot        14  23   0               0  if !r[14] goto 23
+  18      IfNot        14  24   0               0  if !r[14] goto 24
   19      OpenRead      2   2   0  k(3,B,B,B)   0  table=t, root=2, iDb=0
-  20      Rewind        2  23   0               0  Rewind table t
-  21        AggStep     0  15  13  count        0  accum=r[13] step(r[15])
-  22      Next          2  21   0               1
-  23      AggFinal      0  13   0  count        0  accum=r[13]
-  24      Copy         13  12   0               0  r[12]=r[13]
-  25      Copy         12   1   0               0  r[1]=r[12]
-  26    Return         11   0   1               0
-  27    Copy            4  16   0               0  r[16]=r[4]
-  28    Copy            6  17   0               0  r[17]=r[6]
-  29    Copy            7  18   0               0  r[18]=r[7]
-  30    Copy           16  19   0               0  r[19]=r[16]
-  31    Copy            1  20   0               0  r[20]=r[1]
-  32    MakeRecord     19   2  21               0  r[21]=mkrec(r[19..20])
-  33    NewRowid        0  22   0               0  r[22]=rowid
-  34    Insert          0  21  22               4  intkey=r[22] data=r[21]
-  35  Next              1   5   0               0
-  36  FkCheck           0   0   0               0
-  37  Rewind            0  41   0               0  Rewind  ephemeral(t)
-  38    ColumnRange     0   0  23  2            0  r[23..24]=ephemeral(t).id..grp
-  39    ResultRow      23   2   0               0  output=r[23..24]
-  40  Next              0  38   0               0
-  41  Halt              0   0   0               0
-  42  Transaction       0   2   1               0  iDb=0 tx_mode=Write
-  43  Integer           1  15   0               0  r[15]=1
-  44  Goto              0   1   0               0
+  20      Count         2  15   0               0
+  21      Close         2   0   0               0
+  22      Copy         15  12   0               0  r[12]=r[15]
+  23      Copy         12   1   0               0  r[1]=r[12]
+  24    Return         11   0   1               0
+  25    Copy            4  16   0               0  r[16]=r[4]
+  26    Copy            6  17   0               0  r[17]=r[6]
+  27    Copy            7  18   0               0  r[18]=r[7]
+  28    Copy           16  19   0               0  r[19]=r[16]
+  29    Copy            1  20   0               0  r[20]=r[1]
+  30    MakeRecord     19   2  21               0  r[21]=mkrec(r[19..20])
+  31    NewRowid        0  22   0               0  r[22]=rowid
+  32    Insert          0  21  22               4  intkey=r[22] data=r[21]
+  33  Next              1   5   0               0
+  34  FkCheck           0   0   0               0
+  35  Rewind            0  39   0               0  Rewind  ephemeral(t)
+  36    ColumnRange     0   0  23  2            0  r[23..24]=ephemeral(t).id..grp
+  37    ResultRow      23   2   0               0  output=r[23..24]
+  38  Next              0  36   0               0
+  39  Halt              0   0   0               0
+  40  Transaction       0   2   1               0  iDb=0 tx_mode=Write
+  41  Goto              0   1   0               0
