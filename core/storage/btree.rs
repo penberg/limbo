@@ -1761,6 +1761,14 @@ impl BTreeCursor {
         self.seek_state = CursorSeekState::Start;
         self.going_upwards = false;
         tracing::trace!(root_page = self.root_page);
+        // The stack still holds the pinned root page from the last descent
+        // unless the cursor was invalidated, which clears the stack. Keep it
+        // and drop the pages below it, like SQLite's moveToRoot, instead of
+        // going through the page cache again.
+        if self.stack.holds_root(self.root_page) {
+            self.stack.pop_to_root();
+            return Ok(IOResult::Done(None));
+        }
         let (mem_page, c) = return_if_io!(self.read_page(self.root_page));
         self.stack.clear();
         self.stack.push(mem_page);
@@ -8559,6 +8567,33 @@ impl PageStack {
     fn clear(&mut self) {
         self.unpin_all_and_clear_slots();
         self.current_page = -1;
+    }
+
+    /// Whether slot 0 holds the loaded root page of the btree.
+    fn holds_root(&self, root_page: i64) -> bool {
+        self.current_page >= 0
+            && self.stack[0]
+                .as_ref()
+                .is_some_and(|page| page.get().id as i64 == root_page && page.is_loaded())
+    }
+
+    /// Drop every page below the root and leave the stack on the root as a
+    /// fresh push of it would.
+    fn pop_to_root(&mut self) {
+        let used = (self.current_page + 1) as usize;
+        for slot in self.stack[1..used].iter_mut() {
+            if let Some(page) = slot.take() {
+                let _ = page.try_unpin();
+            }
+        }
+        for state in self.node_states[1..used].iter_mut() {
+            *state = BTreeNodeState::default();
+        }
+        self.node_states[0] = BTreeNodeState {
+            cell_idx: -1,
+            cell_count: None,
+        };
+        self.current_page = 0;
     }
 }
 
