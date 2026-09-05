@@ -479,6 +479,8 @@ impl TryClone for Value {
                 dst.clear();
                 dst.try_extend(src.iter().copied())?;
             }
+            (dst, Self::Null) => *dst = Self::Null,
+            (dst, Self::Numeric(n)) => *dst = Self::Numeric(*n),
             (dst, src) => {
                 *dst = src.try_clone()?;
             }
