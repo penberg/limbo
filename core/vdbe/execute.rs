@@ -1983,6 +1983,18 @@ fn op_column_impl(
         }
         return Ok(result);
     }
+    op_column_deferred(program, state, cursor_id, fetch)
+}
+
+/// Column when a deferred seek is pending or the fetch was suspended for
+/// IO inside the seek: drives the op-state machine to completion.
+#[inline(never)]
+fn op_column_deferred(
+    program: &Program,
+    state: &mut ProgramState,
+    cursor_id: usize,
+    fetch: ColumnFetch<'_>,
+) -> InsnResult {
     'outer: loop {
         match *state.active_op_state.column() {
             OpColumnState::Start => {
@@ -5952,10 +5964,17 @@ pub fn op_row_id(
         }
         return Ok(result);
     }
+    op_row_id_deferred(state, *cursor_id, *dest)
+}
+
+/// RowId when a deferred seek is pending or the read was suspended for IO
+/// inside the seek: drives the op-state machine to completion.
+#[inline(never)]
+fn op_row_id_deferred(state: &mut ProgramState, cursor_id: usize, dest: usize) -> InsnResult {
     loop {
         match *state.active_op_state.row_id() {
             OpRowIdState::Start => {
-                if let Some(deferred) = state.deferred_seeks[*cursor_id].take() {
+                if let Some(deferred) = state.deferred_seeks[cursor_id].take() {
                     *state.active_op_state.row_id() = OpRowIdState::Record {
                         index_cursor_id: deferred.index_cursor_id,
                         table_cursor_id: deferred.table_cursor_id,
@@ -6009,7 +6028,7 @@ pub fn op_row_id(
                 *state.active_op_state.row_id() = OpRowIdState::GetRowid;
             }
             OpRowIdState::GetRowid => {
-                let result = op_row_id_read(state, *cursor_id, *dest)?;
+                let result = op_row_id_read(state, cursor_id, dest)?;
                 if !matches!(result, InsnFunctionStepResult::Step) {
                     // IO yield: the slot stays at GetRowid so the resume
                     // re-enters this arm.
