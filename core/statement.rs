@@ -645,11 +645,9 @@ impl Statement {
 
         // Aggregate metrics when statement completes
         if matches!(res, Ok(StepResult::Done)) {
-            self.program
-                .connection
-                .metrics
-                .write()
-                .record_statement(&self.metrics());
+            let connection = &self.program.connection;
+            self.state
+                .with_metrics(|metrics| connection.metrics.write().record_statement(metrics));
             self.busy = false;
             self.busy_handler_state = None; // Reset busy state on completion
             self.state.query_deadline = None;

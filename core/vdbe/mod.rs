@@ -1227,6 +1227,20 @@ impl ProgramState {
         self.metrics.rows_written = self.metrics.rows_written.saturating_add(count);
     }
 
+    /// Runs `f` on the metrics of this statement including its active and
+    /// cached subprograms, without copying them when there is no subprogram.
+    pub(crate) fn with_metrics<R>(&self, f: impl FnOnce(&StatementMetrics) -> R) -> R {
+        let has_subprograms = matches!(
+            self.active_op_state.program_ref(),
+            Some(OpProgramState::Step { .. })
+        ) || !self.subprogram_stmt_cache.is_empty();
+        if has_subprograms {
+            f(&self.metrics())
+        } else {
+            f(&self.metrics)
+        }
+    }
+
     pub(crate) fn metrics(&self) -> StatementMetrics {
         let mut metrics = self.metrics.clone();
         if let Some(OpProgramState::Step { statement, .. }) = self.active_op_state.program_ref() {
