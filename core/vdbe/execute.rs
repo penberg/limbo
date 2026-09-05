@@ -770,18 +770,18 @@ pub fn op_null(
 ) -> InsnResult {
     match insn {
         Insn::Null { dest, dest_end } | Insn::BeginSubrtn { dest, dest_end } => {
-            if let Some(dest_end) = dest_end {
-                for i in *dest..=*dest_end {
-                    state.registers[i].set_null();
-                    // Clear any associated RowSet so it can be reused in a fresh
-                    // state.  In SQLite the RowSet lives inside the register and
-                    // is destroyed by OP_Null; we keep RowSets in a side map, so
-                    // we must remove them explicitly.
+            let dest_end = dest_end.unwrap_or(*dest);
+            for i in *dest..=dest_end {
+                state.registers[i].set_null();
+            }
+            // Clear any associated RowSet so it can be reused in a fresh
+            // state. In SQLite the RowSet lives inside the register and is
+            // destroyed by OP_Null; we keep RowSets in a side map, so we must
+            // remove them explicitly.
+            if !state.rowsets.is_empty() {
+                for i in *dest..=dest_end {
                     state.rowsets.remove(&i);
                 }
-            } else {
-                state.registers[*dest].set_null();
-                state.rowsets.remove(dest);
             }
         }
         _ => {
