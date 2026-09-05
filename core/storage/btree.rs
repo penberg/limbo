@@ -9906,7 +9906,7 @@ fn insert_into_cell(
 /// Free blocks can be zero, meaning the "real free space" that can be used to allocate is expected
 /// to be between first cell byte and end of cell pointer area.
 #[allow(unused_assignments)]
-#[inline]
+#[inline(always)]
 fn compute_free_space(page: &PageContent, usable_space: usize) -> Result<usize> {
     // TODO(pere): maybe free space is not calculated correctly with offset
 
