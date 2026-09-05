@@ -1254,7 +1254,7 @@ pub fn op_open_read(
     invalidate_deferred_seeks_for_cursor(state, *cursor_id);
 
     let pager = program.get_pager_from_database_index(db)?;
-    let mv_store = program.connection.mv_store_for_db(*db);
+    let mv_store = mv_store_for_db(program, state, *db);
 
     if let (_, CursorType::IndexMethod(module)) = &program.cursor_ref[*cursor_id] {
         if mv_store.is_some() {
@@ -3570,7 +3570,7 @@ pub fn halt(
     on_error: Option<ResolveType>,
 ) -> InsnResult {
     state.halt_in_progress = true;
-    let mv_store = program.connection.mv_store();
+    let mv_store = state.mv_store(&program.connection).cloned();
     let auto_commit = program.connection.auto_commit.load(Ordering::SeqCst);
     // halt() runs while the statement is still stepping, so it is always
     // counted in n_active_root_statements here.
@@ -4436,7 +4436,7 @@ pub fn op_transaction_inner(
     }
     let pager = program.get_pager_from_database_index(db)?;
     // Get the MvStore for the specific database (main or attached).
-    let mv_store = program.connection.mv_store_for_db(*db);
+    let mv_store = mv_store_for_db(program, state, *db);
     let is_main_db = *db == crate::MAIN_DB_ID;
     let is_secondary_db = !is_main_db;
     let write = matches!(
@@ -5020,6 +5020,17 @@ pub fn op_transaction_inner(
                 return Ok(InsnFunctionStepResult::Step);
             }
         }
+    }
+}
+
+/// The MvStore of database `db` for this statement, like
+/// `Connection::mv_store_for_db`, through the statement's cached handle for
+/// the main database.
+fn mv_store_for_db(program: &Program, state: &mut ProgramState, db: usize) -> Option<Arc<MvStore>> {
+    if db == crate::MAIN_DB_ID {
+        state.mv_store(&program.connection).cloned()
+    } else {
+        program.connection.mv_store_for_db(db)
     }
 }
 

@@ -914,6 +914,20 @@ pub struct ProgramState {
     has_stmt_transaction: bool,
     pub n_change: AtomicI64,
     pub n_total_change: AtomicI64,
+    /// The connection's MvStore handle, revalidated with one pointer compare
+    /// per use instead of a full ArcSwap load (see `ProgramState::mv_store`).
+    mv_store_cache: Option<arc_swap::Cache<MvStoreHandle, Option<Arc<MvStore>>>>,
+}
+
+/// Lets an `arc_swap::Cache` follow the MvStore slot of a database.
+pub(crate) struct MvStoreHandle(Arc<crate::Database>);
+
+impl std::ops::Deref for MvStoreHandle {
+    type Target = arc_swap::ArcSwapOption<MvStore>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.mv_store
+    }
 }
 
 impl std::fmt::Debug for Program {
@@ -990,6 +1004,7 @@ impl ProgramState {
             halt_in_progress: false,
             pending_cdc_info: None,
             subprogram_stmt_cache: HashMap::default(),
+            mv_store_cache: None,
         }
     }
 
@@ -1161,7 +1176,11 @@ impl ProgramState {
     /// treating the count as "just me" would make teardown finish or roll
     /// back a transaction a suspended sibling is still using (e.g. a COMMIT
     /// parked inside its post-commit auto-checkpoint).
-    pub(crate) fn can_autocommit_now(&self, connection: &Connection, self_counted: bool) -> bool {
+    pub(crate) fn can_autocommit_now(
+        &mut self,
+        connection: &Connection,
+        self_counted: bool,
+    ) -> bool {
         let is_already_committing = !matches!(self.commit_state, CommitState::Ready);
         if is_already_committing {
             return true;
@@ -1177,7 +1196,7 @@ impl ProgramState {
                 "active writer state without an active writer count"
             );
         }
-        if connection.mv_store().is_some() {
+        if self.mv_store(connection).is_some() {
             // MVCC keeps one tx id on the connection. A writer waits for
             // sibling readers, and a reader waits for sibling readers/writers.
             return self.auto_txn_cleanup == TxnCleanup::RollbackTxn
@@ -1220,6 +1239,30 @@ impl ProgramState {
         }
         self.auto_txn_cleanup == TxnCleanup::RollbackTxn
             || (connection.get_auto_commit() && attached_txn_open())
+    }
+
+    /// The MvStore this statement runs against: the same answer as
+    /// `Connection::mv_store`, but a full ArcSwap load (thread-local debt
+    /// slot, ~50 instructions) only when the slot changed since the last
+    /// call. The MVCC bootstrap connection never uses the store.
+    pub(crate) fn mv_store(&mut self, connection: &Connection) -> Option<&Arc<MvStore>> {
+        if connection.is_mvcc_bootstrap_connection() {
+            return None;
+        }
+        self.db_mv_store(connection).as_ref()
+    }
+
+    /// The MvStore of the database, whether or not this connection is the
+    /// MVCC bootstrap connection: the same answer as `Database::get_mv_store`.
+    pub(crate) fn db_mv_store(&mut self, connection: &Connection) -> &Option<Arc<MvStore>> {
+        let cache = self
+            .mv_store_cache
+            .get_or_insert_with(|| arc_swap::Cache::new(MvStoreHandle(connection.db.clone())));
+        debug_assert!(
+            std::ptr::eq(cache.arc_swap(), &connection.db.mv_store),
+            "statement state used with a connection on another database"
+        );
+        cache.load()
     }
 
     #[inline]
@@ -2989,7 +3032,7 @@ impl Program {
             }
 
             let can_autocommit_now = state.can_autocommit_now(&self.connection, self_counted);
-            let is_mvcc = self.connection.mv_store().is_some();
+            let is_mvcc = state.mv_store(&self.connection).is_some();
             let changed_shared_mvcc_auto_txn = !can_autocommit_now
                 && state.auto_txn_cleanup == TxnCleanup::RollbackTxn
                 && state.n_change.load(Ordering::SeqCst) > 0;
