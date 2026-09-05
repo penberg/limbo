@@ -218,6 +218,23 @@ macro_rules! check_arg_count {
 pub type InsnResult = Result<InsnFunctionStepResult, Box<LimboError>>;
 pub type InsnFunction = fn(&Program, &mut ProgramState, &Insn, &Arc<Pager>) -> InsnResult;
 
+/// This is an optimization over `checked_add(n).ok_or(LimboError::Overflow)`. With `ok_or`, the
+/// compiler generates [LimboError] drop glue even though [LimboError::Overflow] owns nothing.
+/// But with [OkOverflow], it's able to skip the drop glue.
+trait OrOverflow<T> {
+    fn or_overflow(self) -> Result<T>;
+}
+
+impl<T> OrOverflow<T> for Option<T> {
+    #[inline(always)]
+    fn or_overflow(self) -> Result<T> {
+        match self {
+            Some(value) => Ok(value),
+            None => Err(LimboError::IntegerOverflow),
+        }
+    }
+}
+
 /// Parse a Value (text, int, float, or blob) into a BigDecimal.
 fn value_to_bigdecimal(val: &Value) -> Result<bigdecimal::BigDecimal> {
     use bigdecimal::BigDecimal;
@@ -7234,7 +7251,7 @@ fn update_agg_payload(
                         "Count: payload is not an integer".to_string(),
                     ));
                 };
-                *i = i.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+                *i = i.checked_add(1).or_overflow()?;
             }
         }
         AggFunc::Count0 => {
@@ -7245,7 +7262,7 @@ fn update_agg_payload(
                     "Count0: payload is not an integer".to_string(),
                 ));
             };
-            *i = i.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            *i = i.checked_add(1).or_overflow()?;
         }
         AggFunc::Avg => {
             if matches!(arg, Value::Null) {
@@ -7278,7 +7295,7 @@ fn update_agg_payload(
                 NumericArg::Null => unreachable!("NULL early-returned above"),
             }
             *r_err_val = Value::from_f64(sum_state.r_err);
-            *count = count.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            *count = count.checked_add(1).or_overflow()?;
         }
         AggFunc::Sum | AggFunc::Total => {
             // invariant as per init_agg_payload: payload[0] is acc (Null/Integer/Float),
@@ -7315,7 +7332,7 @@ fn update_agg_payload(
                 ovrfl: *ovrfl_i != 0,
             };
             if !matches!(arg, Value::Null) {
-                *count = count.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+                *count = count.checked_add(1).or_overflow()?;
             }
             if matches!(*acc, Value::Null) && sum_state.approx {
                 return Ok(());
@@ -7471,7 +7488,7 @@ fn update_agg_payload(
                         separator_lengths.try_reserve(
                             count
                                 .checked_mul(std::mem::size_of::<i64>())
-                                .ok_or(LimboError::IntegerOverflow)?,
+                                .or_overflow()?,
                         )?;
                         let bytes = first_separator_len.to_be_bytes();
                         for _ in 0..prior_separator_count {
@@ -7484,7 +7501,7 @@ fn update_agg_payload(
                 }
             }
             acc.exec_group_concat(arg)?;
-            *count = count.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            *count = count.checked_add(1).or_overflow()?;
         }
         AggFunc::External(_) => {
             mark_unlikely();
@@ -7995,7 +8012,7 @@ fn op_window_step(
             let Value::Numeric(Numeric::Integer(step)) = &payload[1] else {
                 unreachable!("nth_value step count must be Integer");
             };
-            let step = step.checked_add(1).ok_or(LimboError::IntegerOverflow)?;
+            let step = step.checked_add(1).or_overflow()?;
             payload[1] = Value::from_i64(step);
             if step == n {
                 payload[0].try_clone_from(arg_slot.get_value())?;
@@ -8620,7 +8637,7 @@ fn inverse_agg_payload(func: &AggFunc, arg: Value, payload: &mut [Value]) -> Res
             let expected_separator_bytes = old_count
                 .saturating_sub(1)
                 .checked_mul(std::mem::size_of::<i64>())
-                .ok_or(LimboError::IntegerOverflow)?;
+                .or_overflow()?;
             if !separator_lengths.is_empty() && separator_lengths.len() != expected_separator_bytes
             {
                 return Err(LimboError::InternalError(format!(
@@ -8652,9 +8669,7 @@ fn inverse_agg_payload(func: &AggFunc, arg: Value, payload: &mut [Value]) -> Res
             } else {
                 0
             };
-            let remove_len = value_len
-                .checked_add(separator_len)
-                .ok_or(LimboError::IntegerOverflow)?;
+            let remove_len = value_len.checked_add(separator_len).or_overflow()?;
             let Value::Text(text) = acc else {
                 unreachable!("GroupConcat accumulator is Text after a non-NULL xStep");
             };
@@ -8708,7 +8723,7 @@ fn inverse_agg_payload(func: &AggFunc, arg: Value, payload: &mut [Value]) -> Res
             for _ in 0..element_count {
                 end = end
                     .checked_add(raw_jsonb_element_len(data, end)?)
-                    .ok_or(LimboError::IntegerOverflow)?;
+                    .or_overflow()?;
             }
             data.drain(1..end);
         }
