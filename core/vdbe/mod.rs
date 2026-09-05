@@ -1245,6 +1245,7 @@ impl ProgramState {
     /// `Connection::mv_store`, but a full ArcSwap load (thread-local debt
     /// slot, ~50 instructions) only when the slot changed since the last
     /// call. The MVCC bootstrap connection never uses the store.
+    #[inline(always)]
     pub(crate) fn mv_store(&mut self, connection: &Connection) -> Option<&Arc<MvStore>> {
         if connection.is_mvcc_bootstrap_connection() {
             return None;
@@ -1254,6 +1255,7 @@ impl ProgramState {
 
     /// The MvStore of the database, whether or not this connection is the
     /// MVCC bootstrap connection: the same answer as `Database::get_mv_store`.
+    #[inline(always)]
     pub(crate) fn db_mv_store(&mut self, connection: &Connection) -> &Option<Arc<MvStore>> {
         let cache = self
             .mv_store_cache
