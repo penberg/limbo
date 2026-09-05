@@ -8507,12 +8507,19 @@ impl PageStack {
     /// unpinned again on the next reset, decrementing the pin count of a
     /// page another cursor's stack still relies on.
     fn unpin_all_and_clear_slots(&mut self) {
-        for slot in self.stack.iter_mut() {
+        // Only the slots up to the current page hold pages and states: push
+        // fills the slot above the top and pop clears the top slot.
+        let used = (self.current_page + 1).max(0) as usize;
+        debug_assert!(
+            self.stack[used..].iter().all(|slot| slot.is_none()),
+            "page stack holds a page above its top"
+        );
+        for slot in self.stack[..used].iter_mut() {
             if let Some(page) = slot.take() {
                 let _ = page.try_unpin();
             }
         }
-        for state in self.node_states.iter_mut() {
+        for state in self.node_states[..used].iter_mut() {
             *state = BTreeNodeState::default();
         }
     }
