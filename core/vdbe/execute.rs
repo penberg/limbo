@@ -13653,13 +13653,32 @@ pub fn op_copy(
         if src == dst {
             continue;
         }
-        // try_clone_from reuses the destination register's allocation.
         let [src, dst] = state
             .registers
             .get_disjoint_mut([src, dst])
             .expect("Copy source and destination registers are distinct");
-        dst.try_clone_from(src)?;
+        if !try_copy_heapless_value(dst, src) {
+            dst.try_clone_from(src)?;
+        }
     }
+
+    #[inline]
+    fn try_copy_heapless_value(dst: &mut Register, src: &Register) -> bool {
+        match (dst, src) {
+            (
+                Register::Value(dst @ (Value::Null | Value::Numeric(_))),
+                Register::Value(src @ (Value::Null | Value::Numeric(_))),
+            ) => {
+                *dst = match src {
+                    Value::Numeric(n) => Value::Numeric(*n),
+                    _ => Value::Null,
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
