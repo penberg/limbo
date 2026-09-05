@@ -135,6 +135,12 @@ pub struct PageInner {
     pub overflow_cells: crate::alloc::Vec<OverflowCell>,
 }
 
+// SAFETY: data_ptr and data_len only cache the address and length of the
+// bytes owned by `buffer`, an `Arc<Buffer>` that is itself Send and Sync, so
+// PageInner can cross threads exactly as it could before the cache existed.
+unsafe impl Send for PageInner {}
+unsafe impl Sync for PageInner {}
+
 // Methods moved from PageContent - these provide btree page access
 impl PageInner {
     /// Creates a new PageInner from an Arc<Buffer>.
