@@ -159,7 +159,14 @@ impl From<SeekOp> for ComparisonOp {
 
 #[inline]
 fn sqlite_text_prefix(s: &str) -> &str {
-    match s.find('\0') {
+    // A short value is scanned byte by byte: the character searcher of
+    // `find` costs more to set up than the scan.
+    let nul = if s.len() <= 32 {
+        s.bytes().position(|b| b == 0)
+    } else {
+        s.find('\0')
+    };
+    match nul {
         Some(idx) => &s[..idx],
         None => s,
     }
@@ -1275,6 +1282,16 @@ impl Value {
         let pattern = sqlite_text_prefix(pattern);
         let text = sqlite_text_prefix(text);
 
+        // ASCII pattern and text without an escape character, the usual
+        // case: match the bytes directly. This comes before the wildcard
+        // scans below, which cost more per row than the match itself.
+        if escape.is_none()
+            && crate::types::is_ascii(pattern.as_bytes())
+            && crate::types::is_ascii(text.as_bytes())
+        {
+            return Ok(like_ascii(pattern.as_bytes(), text.as_bytes()));
+        }
+
         let has_escape = escape.is_some_and(|e| pattern.contains(e));
 
         // 1. Exact match (no wildcards)
@@ -1521,6 +1538,38 @@ const LIKE_INFO: PatternInfo = PatternInfo {
     match_set: None,
     no_case: true,
 };
+
+/// LIKE without an escape character over ASCII bytes: `_` matches one byte,
+/// `%` any run of bytes, letters compare without case. The last `%` seen is
+/// the only backtrack point, as in the classic wildcard match: when the
+/// bytes after it stop matching, the run it covers grows by one and the
+/// match resumes after it. Same answers as `pattern_compare` with
+/// `LIKE_INFO` for every ASCII input (see the tests).
+fn like_ascii(pattern: &[u8], text: &[u8]) -> bool {
+    let (mut p, mut t) = (0, 0);
+    let mut backtrack: Option<(usize, usize)> = None;
+    while t < text.len() {
+        match pattern.get(p) {
+            Some(b'%') => {
+                backtrack = Some((p, t));
+                p += 1;
+            }
+            Some(&c) if c == b'_' || c.eq_ignore_ascii_case(&text[t]) => {
+                p += 1;
+                t += 1;
+            }
+            _ => match backtrack {
+                Some((star_p, star_t)) => {
+                    p = star_p + 1;
+                    t = star_t + 1;
+                    backtrack = Some((star_p, t));
+                }
+                None => return false,
+            },
+        }
+    }
+    pattern[p..].iter().all(|&c| c == b'%')
+}
 
 const GLOB_INFO: PatternInfo = PatternInfo {
     match_all: '*',
@@ -2794,6 +2843,46 @@ mod tests {
     fn test_like_with_escape_or_regexmeta_chars() {
         assert!(Value::exec_like(r#"\%A"#, r#"\A"#, None).unwrap());
         assert!(Value::exec_like("%a%a", "aaaa", None).unwrap());
+    }
+
+    #[test]
+    fn like_ascii_agrees_with_pattern_compare() {
+        fn words(alphabet: &[u8], max_len: usize) -> Vec<Vec<u8>> {
+            let mut all = vec![Vec::new()];
+            let mut last = vec![Vec::new()];
+            for _ in 0..max_len {
+                let mut next = Vec::new();
+                for word in &last {
+                    for &c in alphabet {
+                        let mut longer = word.clone();
+                        longer.push(c);
+                        next.push(longer);
+                    }
+                }
+                all.extend(next.iter().cloned());
+                last = next;
+            }
+            all
+        }
+        for pattern in words(b"ab%_", 4) {
+            for text in words(b"abA", 4) {
+                let pattern_str = std::str::from_utf8(&pattern).unwrap();
+                let text_str = std::str::from_utf8(&text).unwrap();
+                let expected =
+                    super::pattern_compare(pattern_str, text_str, &super::LIKE_INFO, None)
+                        == super::CompareResult::Match;
+                assert_eq!(
+                    super::like_ascii(&pattern, &text),
+                    expected,
+                    "pattern {pattern_str:?}, text {text_str:?}"
+                );
+                assert_eq!(
+                    Value::exec_like(pattern_str, text_str, None).unwrap(),
+                    expected,
+                    "exec_like: pattern {pattern_str:?}, text {text_str:?}"
+                );
+            }
+        }
     }
 
     #[test]
