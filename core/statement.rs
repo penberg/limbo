@@ -655,8 +655,7 @@ impl Statement {
             self.state.query_deadline = None;
 
             // After ANALYZE completes, refresh in-memory stats so planners can use them.
-            let sql = self.program.sql.trim_start().as_bytes();
-            if sql.len() >= 7 && sql[..7].eq_ignore_ascii_case(b"ANALYZE") {
+            if self.program.refreshes_analyze_stats {
                 // The stats refresh runs a SELECT on this same connection. At
                 // this point ANALYZE is already Done, so it must not count as a
                 // sibling root statement for that internal SELECT.
