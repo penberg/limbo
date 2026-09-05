@@ -1751,16 +1751,15 @@ impl Program {
         waker: Option<&Waker>,
     ) -> Result<StepResult, Box<LimboError>> {
         state.execution_state = ProgramExecutionState::Running;
-        let result = match query_mode {
-            QueryMode::Normal => self.normal_step(state, pager, waker),
-            QueryMode::Explain => self.explain_step(state, pager),
-            QueryMode::ExplainQueryPlan {
-                format: EqpFormat::Text,
-            } => self.explain_query_plan_step(state, pager),
-            QueryMode::ExplainQueryPlan {
-                format: EqpFormat::Json,
-            } => self.explain_query_plan_json_step(state, pager),
+        let result = if let QueryMode::Normal = query_mode {
+            self.normal_step(state, pager, waker)
+        } else {
+            self.explain_step_for_mode(state, pager, query_mode)
         };
+        // Rows are the common result and leave the execution state untouched.
+        if let Ok(StepResult::Row) = &result {
+            return result;
+        }
         match &result {
             Ok(StepResult::Done) => {
                 state.execution_state = ProgramExecutionState::Done;
@@ -1774,6 +1773,25 @@ impl Program {
             _ => {}
         }
         result
+    }
+
+    #[inline(never)]
+    fn explain_step_for_mode(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+        query_mode: QueryMode,
+    ) -> Result<StepResult, Box<LimboError>> {
+        match query_mode {
+            QueryMode::Normal => unreachable!("normal queries do not step through explain"),
+            QueryMode::Explain => self.explain_step(state, pager),
+            QueryMode::ExplainQueryPlan {
+                format: EqpFormat::Text,
+            } => self.explain_query_plan_step(state, pager),
+            QueryMode::ExplainQueryPlan {
+                format: EqpFormat::Json,
+            } => self.explain_query_plan_json_step(state, pager),
+        }
     }
 
     fn explain_step(
@@ -1965,6 +1983,47 @@ impl Program {
     // inline(always): called once per returned row from step(); outlined it
     // costs a call plus a 40-byte memory-returned Result per row.
     #[inline(always)]
+    /// `PRAGMA vdbe_trace`: prints the registers the previous opcode changed
+    /// and the opcode about to run.
+    #[inline(never)]
+    fn trace_registers(&self, state: &mut ProgramState, insn: &Insn, vdbe_trace: bool) {
+        if !vdbe_trace {
+            return;
+        }
+        // Diff registers from PREVIOUS opcode
+        // The last opcode (Halt) won't have its diff printed, but Halt
+        // doesn't write to any registers
+        if let Some(ref old) = state.pre_op_registers {
+            for (i, (old_reg, new_reg)) in old.iter().zip(state.registers.iter()).enumerate() {
+                if old_reg != new_reg {
+                    match new_reg {
+                        Register::Value(v) => eprintln!("R[{i}] = {v}"),
+                        Register::Aggregate(_) => eprintln!("R[{i}] = <aggregate>"),
+                        Register::Record(_) => eprintln!("R[{i}] = <record>"),
+                    }
+                }
+            }
+            state.pre_op_registers = None;
+        }
+
+        // Print CURRENT opcode
+        if matches!(insn, Insn::Init { .. }) {
+            eprintln!("VDBE Trace:");
+        }
+        eprintln!(
+            "{}",
+            explain::insn_to_str(
+                self,
+                state.pc,
+                insn,
+                String::new(),
+                self.explain.comment_at(state.pc)
+            )
+        );
+        // Snapshot for next iteration
+        state.pre_op_registers = Some(state.registers.clone());
+    }
+
     fn normal_step(
         &self,
         state: &mut ProgramState,
@@ -1973,6 +2032,9 @@ impl Program {
     ) -> Result<StepResult, Box<LimboError>> {
         let enable_tracing = tracing::enabled!(tracing::Level::TRACE);
         let vdbe_trace = self.connection.get_vdbe_trace();
+        // One flag for the per-instruction test; the two kinds of tracing are
+        // told apart only once it is set.
+        let trace_insns = enable_tracing || vdbe_trace;
         // Reborrow the instruction list once: reloading it through `self`
         // every iteration defeats LLVM's hoisting because the opcode call
         // below is opaque to it.
@@ -2112,46 +2174,14 @@ impl Program {
                     }
                 }
                 let (insn, _) = &insns[state.pc as usize];
-                if enable_tracing {
-                    trace_insn(self, state.pc as InsnReference, insn);
-                    crate::stack::trace_remaining("program_step:opcode");
-                }
-                if vdbe_trace {
-                    // Diff registers from PREVIOUS opcode
-                    // The last opcode (Halt) won't have its diff printed, but Halt
-                    // doesn't write to any registers
-                    if let Some(ref old) = state.pre_op_registers {
-                        for (i, (old_reg, new_reg)) in
-                            old.iter().zip(state.registers.iter()).enumerate()
-                        {
-                            if old_reg != new_reg {
-                                match new_reg {
-                                    Register::Value(v) => eprintln!("R[{i}] = {v}"),
-                                    Register::Aggregate(_) => eprintln!("R[{i}] = <aggregate>"),
-                                    Register::Record(_) => eprintln!("R[{i}] = <record>"),
-                                }
-                            }
-                        }
-                        state.pre_op_registers = None;
+                if trace_insns {
+                    if enable_tracing {
+                        trace_insn(self, state.pc as InsnReference, insn);
+                        crate::stack::trace_remaining("program_step:opcode");
                     }
+                    self.trace_registers(state, insn, vdbe_trace);
+                }
 
-                    // Print CURRENT opcode
-                    if matches!(insn, Insn::Init { .. }) {
-                        eprintln!("VDBE Trace:");
-                    }
-                    eprintln!(
-                        "{}",
-                        explain::insn_to_str(
-                            self,
-                            state.pc,
-                            insn,
-                            String::new(),
-                            self.explain.comment_at(state.pc)
-                        )
-                    );
-                    // Snapshot for next iteration
-                    state.pre_op_registers = Some(state.registers.clone());
-                }
                 // Always increment VM steps for every loop iteration
                 state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
