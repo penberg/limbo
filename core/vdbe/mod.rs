@@ -1979,10 +1979,6 @@ impl Program {
         Ok(StepResult::Row)
     }
 
-    #[instrument(skip_all, level = Level::DEBUG)]
-    // inline(always): called once per returned row from step(); outlined it
-    // costs a call plus a 40-byte memory-returned Result per row.
-    #[inline(always)]
     /// `PRAGMA vdbe_trace`: prints the registers the previous opcode changed
     /// and the opcode about to run.
     #[inline(never)]
