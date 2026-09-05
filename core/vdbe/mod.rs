@@ -3681,7 +3681,7 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
                 }
                 self.set_data_section(&data[content_size..]);
                 let text_data = &data[..content_size];
-                let Some(text_str) = validate_utf8(text_data) else {
+                let Some(text_str) = crate::types::validate_utf8(text_data) else {
                     mark_unlikely();
                     return Some(Err(LimboError::Corrupt(
                         "TEXT value contains invalid UTF-8".into(),
@@ -3729,61 +3729,6 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
     }
 }
 
-/// UTF-8 validation tuned for record decoding. TEXT values are usually short
-/// ASCII read at arbitrary offsets inside a b-tree page: simdutf8 only uses
-/// SIMD from 64 bytes up, and core's `from_utf8` word-at-a-time path is
-/// alignment-sensitive, so both are slow here. OR-ing every byte together is
-/// alignment-independent and branch-light; if no byte had the high bit set
-/// the value is pure ASCII and needs no further validation. Non-ASCII and
-/// values longer than the cutoff fall back to full simdutf8 validation —
-/// above the cutoff the scalar OR loop loses to real SIMD.
-///
-/// Measured by `core/benches/text_validate_benchmark.rs` (varying slice
-/// alignment, ASCII content) on an Apple M2, macOS 15.7, vs
-/// `simdutf8::basic::from_utf8` alone:
-///
-///   1-128 B:  1.4-4x faster (peak 4.1x at 16 B)
-///   256-512 B: 1.1-1.2x faster
-///   1-2 KB:   parity
-///   4 KB:     ~25% slower without the cutoff; equal with it
-///   multibyte fallback: pays the wasted OR scan (~15% at 64 B)
-///   length branch: ~+0.1ns/call, visible only on 1-2 B values
-#[inline]
-fn validate_utf8(data: &[u8]) -> Option<&str> {
-    const ASCII_SCAN_CUTOFF: usize = 512;
-    if data.len() <= ASCII_SCAN_CUTOFF && is_ascii(data) {
-        // SAFETY: all bytes are ASCII, which is valid UTF-8.
-        return Some(unsafe { core::str::from_utf8_unchecked(data) });
-    }
-    simdutf8::basic::from_utf8(data).ok()
-}
-
-/// ORs the bytes together a word at a time: eight, then four, two and one
-/// for the rest, so a value of any length takes at most `len / 8 + 3`
-/// loads. The loads are unaligned, so the slice's position on the page
-/// does not matter.
-#[inline]
-fn is_ascii(data: &[u8]) -> bool {
-    let mut acc = 0u64;
-    let mut rest = data;
-    while let Some((word, tail)) = rest.split_first_chunk::<8>() {
-        acc |= u64::from_ne_bytes(*word);
-        rest = tail;
-    }
-    if let Some((word, tail)) = rest.split_first_chunk::<4>() {
-        acc |= u64::from(u32::from_ne_bytes(*word));
-        rest = tail;
-    }
-    if let Some((word, tail)) = rest.split_first_chunk::<2>() {
-        acc |= u64::from(u16::from_ne_bytes(*word));
-        rest = tail;
-    }
-    if let Some(&byte) = rest.first() {
-        acc |= u64::from(byte);
-    }
-    acc & 0x8080_8080_8080_8080 == 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3800,24 +3745,6 @@ mod tests {
         ));
         state.active_op_state.clear();
         assert!(state.active_op_state.parse_schema().is_none());
-    }
-
-    #[test]
-    fn is_ascii_checks_every_byte_of_every_length() {
-        for len in 0..40 {
-            let ascii: Vec<u8> = (0..len).map(|i| b'a' + (i % 26) as u8).collect();
-            assert!(is_ascii(&ascii), "length {len}");
-            assert_eq!(validate_utf8(&ascii), std::str::from_utf8(&ascii).ok());
-            for position in 0..len {
-                let mut bytes = ascii.clone();
-                bytes[position] = 0xc3;
-                assert!(!is_ascii(&bytes), "length {len}, byte {position}");
-                assert_eq!(validate_utf8(&bytes), std::str::from_utf8(&bytes).ok());
-            }
-        }
-        let text = "héllo wörld, ünïcödé";
-        assert!(!is_ascii(text.as_bytes()));
-        assert_eq!(validate_utf8(text.as_bytes()), Some(text));
     }
 
     #[test]
