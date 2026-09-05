@@ -435,6 +435,11 @@ pub fn op_add(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(Add { lhs, rhs, dest }, insn);
+    if let Some(result) = integer_operands(state, *lhs, *rhs).and_then(|(l, r)| l.checked_add(r)) {
+        state.registers[*dest].set_int(result);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
     state.registers[*dest].set_value(
         state.registers[*lhs]
             .get_value()
@@ -451,6 +456,11 @@ pub fn op_subtract(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(Subtract { lhs, rhs, dest }, insn);
+    if let Some(result) = integer_operands(state, *lhs, *rhs).and_then(|(l, r)| l.checked_sub(r)) {
+        state.registers[*dest].set_int(result);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
     state.registers[*dest].set_value(
         state.registers[*lhs]
             .get_value()
@@ -467,6 +477,11 @@ pub fn op_multiply(
     _pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(Multiply { lhs, rhs, dest }, insn);
+    if let Some(result) = integer_operands(state, *lhs, *rhs).and_then(|(l, r)| l.checked_mul(r)) {
+        state.registers[*dest].set_int(result);
+        state.pc += 1;
+        return Ok(InsnFunctionStepResult::Step);
+    }
     state.registers[*dest].set_value(
         state.registers[*lhs]
             .get_value()
@@ -474,6 +489,19 @@ pub fn op_multiply(
     );
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
+}
+
+/// The two operands of an arithmetic opcode when both are integers, the
+/// case that needs no affinity conversion.
+#[inline(always)]
+fn integer_operands(state: &ProgramState, lhs: usize, rhs: usize) -> Option<(i64, i64)> {
+    match (&state.registers[lhs], &state.registers[rhs]) {
+        (
+            Register::Value(Value::Numeric(Numeric::Integer(l))),
+            Register::Value(Value::Numeric(Numeric::Integer(r))),
+        ) => Some((*l, *r)),
+        _ => None,
+    }
 }
 
 pub fn op_divide(
@@ -1066,14 +1094,17 @@ pub fn op_comparison(
             };
             take_jump_if!(should_jump);
         }
-        (Value::Numeric(Numeric::Integer(_)), Value::Numeric(Numeric::Integer(_))) => {
-            // Fast path for integer comparison
-            if op.compare(lhs_value, rhs_value, collation) {
-                state.pc = target_pc.as_offset_int();
-            } else {
-                state.pc += 1;
-            }
-            return Ok(InsnFunctionStepResult::Step);
+        (Value::Numeric(Numeric::Integer(l)), Value::Numeric(Numeric::Integer(r))) => {
+            // Two integers compare directly: no affinity, no collation.
+            let should_jump = match op {
+                ComparisonOp::Eq => l == r,
+                ComparisonOp::Ne => l != r,
+                ComparisonOp::Lt => l < r,
+                ComparisonOp::Le => l <= r,
+                ComparisonOp::Gt => l > r,
+                ComparisonOp::Ge => l >= r,
+            };
+            take_jump_if!(should_jump);
         }
         (Value::Blob(lb), Value::Blob(rb)) if flags.has_array_cmp() => {
             // Element-wise array comparison
