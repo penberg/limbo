@@ -45,7 +45,7 @@ use super::btree::offset::{
     BTREE_PAGE_TYPE, BTREE_RIGHTMOST_PTR,
 };
 use super::btree::{
-    btree_init_page, payload_overflow_threshold_max, payload_overflow_threshold_min,
+    btree_init_page, payload_overflow_threshold_max, payload_overflow_threshold_min, PayloadLimits,
 };
 use super::page_cache::{CacheError, CacheResizeResult, PageCache, PageCacheKey, SpillResult};
 use super::sqlite3_ondisk::read_varint;
@@ -535,10 +535,9 @@ impl PageInner {
     pub fn cell_read_payload_ptr(
         &self,
         idx: usize,
-        usable_size: usize,
+        limits: PayloadLimits,
     ) -> crate::Result<(&'static [u8], u64, Option<u32>)> {
-        let (payload, _, payload_size, first_overflow) =
-            self.cell_read_payload_at(idx, usable_size)?;
+        let (payload, _, payload_size, first_overflow) = self.cell_read_payload_at(idx, limits)?;
         Ok((payload, payload_size, first_overflow))
     }
 
@@ -548,7 +547,7 @@ impl PageInner {
     pub fn cell_read_payload_at(
         &self,
         idx: usize,
-        usable_size: usize,
+        limits: PayloadLimits,
     ) -> crate::Result<(&'static [u8], usize, u64, Option<u32>)> {
         let buf = self.as_ptr();
         let cell_pointer_array_start = self.header_size();
@@ -580,13 +579,11 @@ impl PageInner {
             }
         };
 
-        let max_local = payload_overflow_threshold_max(page_type, usable_size);
-        let min_local = payload_overflow_threshold_min(page_type, usable_size);
         let (overflows, local_size) = sqlite3_ondisk::payload_overflows(
             payload_size as usize,
-            max_local,
-            min_local,
-            usable_size,
+            limits.max_local(page_type),
+            limits.min_local,
+            limits.usable_size,
         );
 
         let (payload_slice, first_overflow) = if overflows {

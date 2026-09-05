@@ -818,6 +818,8 @@ pub struct BTreeCursor {
     /// 1. an uninitialized database,
     /// 2. an initialized database when the command is immediately followed by VACUUM.
     usable_space_cached: usize,
+    /// The overflow limits for the usable space above
+    payload_limits: PayloadLimits,
     /// Page id of the root page used to go back up fast.
     root_page: i64,
     /// Rowid and record are stored before being consumed.
@@ -1144,6 +1146,7 @@ impl BTreeCursor {
             pager,
             root_page,
             usable_space_cached: usable_space,
+            payload_limits: PayloadLimits::new(usable_space),
             has_record: false,
             null_flag: false,
             going_upwards: false,
@@ -2207,7 +2210,7 @@ impl BTreeCursor {
                 .stack
                 .get_page_contents_at_level(old_top_idx)
                 .unwrap()
-                .cell_read_payload_ptr(cur_cell_idx as usize, self.usable_space())?;
+                .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
 
             if let Some(next_page) = first_overflow_page {
                 let res = self.process_overflow_read(payload, next_page, payload_size)?;
@@ -2727,7 +2730,7 @@ impl BTreeCursor {
             .stack
             .get_page_contents_at_level(old_top_idx)
             .unwrap()
-            .cell_read_payload_ptr(cur_cell_idx as usize, self.usable_space())?;
+            .cell_read_payload_ptr(cur_cell_idx as usize, self.payload_limits)?;
 
         if let Some(next_page) = first_overflow_page {
             let res = self.process_overflow_read(payload, next_page, payload_size)?;
@@ -6643,7 +6646,7 @@ impl CursorTrait for BTreeCursor {
         let contents = page.get_contents();
         let cell_idx = self.stack.current_cell_index();
         let (payload, payload_size, first_overflow_page) =
-            contents.cell_read_payload_ptr(cell_idx as usize, self.usable_space())?;
+            contents.cell_read_payload_ptr(cell_idx as usize, self.payload_limits)?;
         if let Some(next_page) = first_overflow_page {
             return_if_io!(self.process_overflow_read(payload, next_page, payload_size))
         } else {
@@ -6667,10 +6670,9 @@ impl CursorTrait for BTreeCursor {
         let noted = self.noted_payload;
         if noted.size != 0 {
             let size = noted.size as usize;
-            let usable_space = self.usable_space();
             // A cell that keeps its whole payload on the page: the rowid
             // read already found where it starts.
-            if size <= payload_overflow_threshold_max(PageType::TableLeaf, usable_space) {
+            if size <= self.payload_limits.max_local_table {
                 let start = noted.start as usize;
                 let contents = self.stack.top_ref().get_contents();
                 if let Some(payload) = contents.payload_on_page(start, size) {
@@ -6687,7 +6689,7 @@ impl CursorTrait for BTreeCursor {
             let contents = page.get_contents();
             let cell_idx = self.stack.current_cell_index();
             let (payload, payload_start, _payload_size, first_overflow_page) =
-                contents.cell_read_payload_at(cell_idx as usize, self.usable_space())?;
+                contents.cell_read_payload_at(cell_idx as usize, self.payload_limits)?;
             if first_overflow_page.is_none() {
                 // The whole record sits on the pinned page: decode it there
                 // instead of copying it into the reusable record first, and
@@ -10224,6 +10226,35 @@ fn fill_cell_payload(
     };
     result
 }
+
+/// The payload sizes at which a cell spills to overflow pages
+#[derive(Clone, Copy, Debug)]
+pub struct PayloadLimits {
+    pub usable_size: usize,
+    pub max_local_table: usize,
+    pub max_local_index: usize,
+    pub min_local: usize,
+}
+
+impl PayloadLimits {
+    pub fn new(usable_size: usize) -> Self {
+        Self {
+            usable_size,
+            max_local_table: payload_overflow_threshold_max(PageType::TableLeaf, usable_size),
+            max_local_index: payload_overflow_threshold_max(PageType::IndexLeaf, usable_size),
+            min_local: payload_overflow_threshold_min(PageType::TableLeaf, usable_size),
+        }
+    }
+
+    #[inline(always)]
+    pub fn max_local(&self, page_type: PageType) -> usize {
+        match page_type {
+            PageType::IndexInterior | PageType::IndexLeaf => self.max_local_index,
+            PageType::TableInterior | PageType::TableLeaf => self.max_local_table,
+        }
+    }
+}
+
 /// Returns the maximum payload size (X) that can be stored directly on a b-tree page without spilling to overflow pages.
 ///
 /// For table leaf pages: X = usable_size - 35
