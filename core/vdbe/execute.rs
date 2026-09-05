@@ -1038,7 +1038,7 @@ macro_rules! comparison_opcode {
                 insn
             );
             let crate::vdbe::BranchOffset::Offset(target_pc) = *target_pc else {
-                crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
+                return Err(unresolved_branch_target(*target_pc));
             };
 
             // Two integers compare directly: no NULL handling, affinity or collation.
