@@ -109,6 +109,16 @@ impl HeaderRefMut {
     }
 }
 
+/// The header of a table leaf cell: its rowid and where its payload starts.
+#[derive(Clone, Copy, Debug)]
+pub struct TableLeafCellHeader {
+    pub rowid: i64,
+    /// Offset of the first payload byte on the page.
+    pub payload_start: usize,
+    /// Size of the whole payload, overflow pages included.
+    pub payload_size: u64,
+}
+
 pub struct PageInner {
     pub flags: AtomicUsize,
     pub id: usize,
@@ -469,6 +479,22 @@ impl PageInner {
 
     #[inline(always)]
     pub fn cell_table_leaf_read_rowid(&self, idx: usize) -> crate::Result<i64> {
+        Ok(self.cell_table_leaf_read_header(idx)?.rowid)
+    }
+
+    /// The bytes at `start..start + size` of this page, None when the range
+    /// is not inside it. The slice is valid as long as the page is alive.
+    #[inline(always)]
+    pub fn payload_on_page(&self, start: usize, size: usize) -> Option<&'static [u8]> {
+        let payload = self.as_ptr().get(start..start + size)?;
+        // SAFETY: valid as long as page is alive
+        Some(unsafe { std::mem::transmute::<&[u8], &'static [u8]>(payload) })
+    }
+
+    /// Reads the two varints that start a table leaf cell: the payload size
+    /// and the rowid. The payload starts right after them.
+    #[inline(always)]
+    pub fn cell_table_leaf_read_header(&self, idx: usize) -> crate::Result<TableLeafCellHeader> {
         turso_debug_assert!(matches!(self.page_type(), Ok(PageType::TableLeaf)));
         let buf = self.as_ptr();
         let cell_pointer_array_start = self.header_size();
@@ -482,10 +508,15 @@ impl PageInner {
         );
         let cell_pointer = self.read_u16(cell_pointer) as usize;
         let mut pos = cell_pointer;
-        let (_, nr) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
+        let (payload_size, nr) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
         pos += nr;
-        let (rowid, _) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
-        Ok(rowid as i64)
+        let (rowid, nr) = read_varint(crate::slice_in_bounds_or_corrupt!(buf, pos..))?;
+        pos += nr;
+        Ok(TableLeafCellHeader {
+            rowid: rowid as i64,
+            payload_start: pos,
+            payload_size,
+        })
     }
 
     /// Returns a cell's record payload and overflow info without constructing

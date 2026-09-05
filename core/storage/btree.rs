@@ -835,6 +835,13 @@ pub struct BTreeCursor {
     stack: PageStack,
     /// Reusable immutable record, used to allow better allocation strategy.
     reusable_immutable_record: Option<ImmutableRecord>,
+    /// Where the payload of the table leaf cell under the cursor starts and
+    /// how big it is, noted by the rowid read so that a column read on the
+    /// same row does not parse the cell again (SQLite keeps the same in
+    /// BtCursor.info). Cleared wherever the reusable record is invalidated
+    /// and before every write through the cursor, because it holds an
+    /// offset into the page.
+    noted_payload: NotedPayload,
     /// Information about the index key structure (sort order, collation, etc)
     pub index_info: Option<Arc<IndexInfo>>,
     /// Maintain count of the number of records in the btree. Used for the `Count` opcode
@@ -916,6 +923,18 @@ pub struct BTreeCursor {
     yield_injector: Option<Arc<dyn crate::mvcc::yield_points::YieldInjector>>,
     #[cfg(any(test, injected_yields))]
     yield_instance_id: u64,
+}
+
+/// See [`BTreeCursor::noted_payload`]. A payload is never empty (its header
+/// takes at least one byte), so a size of 0 means nothing is noted.
+#[derive(Clone, Copy)]
+struct NotedPayload {
+    start: u32,
+    size: u32,
+}
+
+impl NotedPayload {
+    const NONE: Self = Self { start: 0, size: 0 };
 }
 
 /// Records the in-flight descent for `iteration_pending_descent`. The direction
@@ -1133,6 +1152,7 @@ impl BTreeCursor {
                 stack: [const { None }; BTCURSOR_MAX_DEPTH + 1],
             },
             reusable_immutable_record: None,
+            noted_payload: NotedPayload::NONE,
             index_info: None,
             count: 0,
             context: None,
@@ -6217,6 +6237,7 @@ impl BTreeCursor {
     pub fn save_context(&mut self, cursor_context: CursorContext) {
         self.valid_state = CursorValidState::RequireSeek;
         self.context = Some(cursor_context);
+        self.noted_payload = NotedPayload::NONE;
         // The tree is about to change under this cursor (that is the only reason a
         // position ever gets saved), so cached payload offsets and overflow page
         // numbers must not survive: blob I/O through them would touch relocated or
@@ -6539,8 +6560,12 @@ impl CursorTrait for BTreeCursor {
             let contents = page.get_contents();
             if contents.is_table() {
                 let cell_idx = self.stack.current_cell_index();
-                let rowid = contents.cell_table_leaf_read_rowid(cell_idx as usize)?;
-                Ok(IOResult::Done(Some(rowid)))
+                let cell = contents.cell_table_leaf_read_header(cell_idx as usize)?;
+                self.noted_payload = NotedPayload {
+                    start: cell.payload_start as u32,
+                    size: u32::try_from(cell.payload_size).unwrap_or(0),
+                };
+                Ok(IOResult::Done(Some(cell.rowid)))
             } else {
                 let _ = return_if_io!(self.record());
                 Ok(IOResult::Done(self.get_index_rowid_from_record()))
@@ -6629,6 +6654,20 @@ impl CursorTrait for BTreeCursor {
         if !self.has_record() {
             return Ok(IOResult::Done(None));
         }
+        let noted = self.noted_payload;
+        if noted.size != 0 {
+            let size = noted.size as usize;
+            let usable_space = self.usable_space();
+            // A cell that keeps its whole payload on the page: the rowid
+            // read already found where it starts.
+            if size <= payload_overflow_threshold_max(PageType::TableLeaf, usable_space) {
+                let start = noted.start as usize;
+                let contents = self.stack.top_ref().get_contents();
+                if let Some(payload) = contents.payload_on_page(start, size) {
+                    return Ok(IOResult::Done(Some(payload)));
+                }
+            }
+        }
         let cached = self
             .reusable_immutable_record
             .as_ref()
@@ -6652,6 +6691,7 @@ impl CursorTrait for BTreeCursor {
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
     fn insert(&mut self, key: &BTreeKey) -> IOResultOr<()> {
         tracing::debug!(valid_state = ?self.valid_state, cursor_state = ?self.state, is_write_in_progress = self.is_write_in_progress());
+        self.noted_payload = NotedPayload::NONE;
         // saveAllCursors at the head of sqlite3BtreeInsert (btree.c:9348).
         return_if_io!(self.drive_pending_peer_save(key.maybe_rowid()));
         return_if_io!(self.insert_into_page(key));
@@ -6676,6 +6716,7 @@ impl CursorTrait for BTreeCursor {
     /// 9. SeekAfterBalancing -> adjust the cursor to a node that is closer to the deleted value. go to Finish
     /// 10. Finish -> Delete operation is done. Return CursorResult(Ok())
     fn delete(&mut self) -> IOResultOr<()> {
+        self.noted_payload = NotedPayload::NONE;
         if let CursorState::None = &self.state {
             // saveAllCursors at the head of sqlite3BtreeDelete (btree.c:9841). The
             // cursor is positioned on the row being deleted, so its rowid tells peer
@@ -7315,6 +7356,7 @@ impl CursorTrait for BTreeCursor {
 
     #[inline]
     fn invalidate_record(&mut self) {
+        self.noted_payload = NotedPayload::NONE;
         if let Some(record) = self.reusable_immutable_record.as_mut() {
             record.invalidate();
         }
@@ -7339,6 +7381,7 @@ impl CursorTrait for BTreeCursor {
     fn invalidate_btree_cache(&mut self) {
         self.stack.clear();
         self.has_record = false;
+        self.noted_payload = NotedPayload::NONE;
         self.move_to_right_state.1 = None;
         self.invalidate_count_cache();
         self.blob_cache.reset();
