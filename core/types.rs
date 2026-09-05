@@ -1345,9 +1345,6 @@ mod immutable_record {
     /// and returns how many it wrote.
     #[inline(always)]
     fn write_value(out: &mut [u8], value: ValueRef<'_>, serial_type: SerialType) -> usize {
-        // Numbers have a size known per serial type, so each arm stores its
-        // bytes with a copy of constant length; a copy of variable length is
-        // a memcpy call for every number of every built record.
         let bytes: &[u8] = match value {
             ValueRef::Null => return 0,
             ValueRef::Numeric(Numeric::Integer(i)) => {
