@@ -246,7 +246,7 @@ impl PageInner {
     }
 
     /// Write a u8 to the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn write_u8(&self, pos: usize, value: u8) {
         tracing::trace!("write_u8(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
@@ -254,7 +254,7 @@ impl PageInner {
     }
 
     /// Write a u16 to the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn write_u16(&self, pos: usize, value: u16) {
         tracing::trace!("write_u16(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
@@ -263,7 +263,7 @@ impl PageInner {
     }
 
     /// Write a u32 to the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn write_u32(&self, pos: usize, value: u32) {
         tracing::trace!("write_u32(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
@@ -291,6 +291,7 @@ impl PageInner {
     }
 
     /// Write a u16 at the given absolute offset (no db header offset).
+    #[inline(always)]
     pub fn write_u16_no_offset(&self, pos: usize, value: u16) {
         tracing::trace!("write_u16_no_offset(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
@@ -298,6 +299,7 @@ impl PageInner {
     }
 
     /// Write a u32 at the given absolute offset (no db header offset).
+    #[inline(always)]
     pub fn write_u32_no_offset(&self, pos: usize, value: u32) {
         tracing::trace!("write_u32_no_offset(pos={}, value={})", pos, value);
         let buf = self.as_ptr();
@@ -336,10 +338,12 @@ impl PageInner {
         )
     }
 
+    #[inline(always)]
     pub fn write_cell_count(&self, value: u16) {
         self.write_u16(BTREE_CELL_COUNT, value);
     }
 
+    #[inline(always)]
     pub fn write_cell_content_area(&self, value: usize) {
         turso_debug_assert!(value <= PageSize::MAX as usize);
         let value = value as u16;
