@@ -1006,95 +1006,62 @@ pub fn op_not_null(
     Ok(InsnFunctionStepResult::Step)
 }
 
-pub fn op_comparison(
-    program: &Program,
-    state: &mut ProgramState,
-    insn: &Insn,
-    _pager: &Arc<Pager>,
-) -> InsnResult {
-    let (lhs, rhs, target_pc, op) = match insn {
-        Insn::Eq {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Eq),
-        Insn::Ne {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Ne),
-        Insn::Lt {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Lt),
-        Insn::Le {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Le),
-        Insn::Gt {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Gt),
-        Insn::Ge {
-            lhs,
-            rhs,
-            target_pc,
-            ..
-        } => (*lhs, *rhs, *target_pc, ComparisonOp::Ge),
-        _ => unreachable!("unexpected Insn {:?}", insn),
-    };
-    let crate::vdbe::BranchOffset::Offset(target_pc) = target_pc else {
-        crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
-    };
+macro_rules! comparison_opcode {
+    ($name:ident, $variant:ident, $op:expr, $jumps:expr) => {
+        pub fn $name(
+            program: &Program,
+            state: &mut ProgramState,
+            insn: &Insn,
+            _pager: &Arc<Pager>,
+        ) -> InsnResult {
+            load_insn!(
+                $variant {
+                    lhs,
+                    rhs,
+                    target_pc,
+                    flags,
+                    collation
+                },
+                insn
+            );
+            let crate::vdbe::BranchOffset::Offset(target_pc) = *target_pc else {
+                crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
+            };
 
-    // Two integers compare directly: no NULL handling, affinity or collation.
-    if let (
-        Register::Value(Value::Numeric(Numeric::Integer(l))),
-        Register::Value(Value::Numeric(Numeric::Integer(r))),
-    ) = (&state.registers[lhs], &state.registers[rhs])
-    {
-        let should_jump = match op {
-            ComparisonOp::Eq => l == r,
-            ComparisonOp::Ne => l != r,
-            ComparisonOp::Lt => l < r,
-            ComparisonOp::Le => l <= r,
-            ComparisonOp::Gt => l > r,
-            ComparisonOp::Ge => l >= r,
-        };
-        state.pc = if should_jump { target_pc } else { state.pc + 1 };
-        return Ok(InsnFunctionStepResult::Step);
-    }
-    let (flags, collation) = match insn {
-        Insn::Eq {
-            flags, collation, ..
+            // Two integers compare directly: no NULL handling, affinity or collation.
+            if let (
+                Register::Value(Value::Numeric(Numeric::Integer(l))),
+                Register::Value(Value::Numeric(Numeric::Integer(r))),
+            ) = (&state.registers[*lhs], &state.registers[*rhs])
+            {
+                let jumps = $jumps;
+                state.pc = if jumps(*l, *r) {
+                    target_pc
+                } else {
+                    state.pc + 1
+                };
+                return Ok(InsnFunctionStepResult::Step);
+            }
+            op_comparison_slow(
+                program,
+                state,
+                *lhs,
+                *rhs,
+                target_pc,
+                *flags,
+                collation.unwrap_or_default(),
+                $op,
+            )
         }
-        | Insn::Ne {
-            flags, collation, ..
-        }
-        | Insn::Lt {
-            flags, collation, ..
-        }
-        | Insn::Le {
-            flags, collation, ..
-        }
-        | Insn::Gt {
-            flags, collation, ..
-        }
-        | Insn::Ge {
-            flags, collation, ..
-        } => (*flags, collation.unwrap_or_default()),
-        _ => unreachable!("unexpected Insn {:?}", insn),
     };
-    op_comparison_slow(program, state, lhs, rhs, target_pc, flags, collation, op)
 }
+
+comparison_opcode!(op_eq, Eq, ComparisonOp::Eq, |l: i64, r: i64| l == r);
+comparison_opcode!(op_ne, Ne, ComparisonOp::Ne, |l: i64, r: i64| l != r);
+comparison_opcode!(op_lt, Lt, ComparisonOp::Lt, |l: i64, r: i64| l < r);
+comparison_opcode!(op_le, Le, ComparisonOp::Le, |l: i64, r: i64| l <= r);
+comparison_opcode!(op_gt, Gt, ComparisonOp::Gt, |l: i64, r: i64| l > r);
+comparison_opcode!(op_ge, Ge, ComparisonOp::Ge, |l: i64, r: i64| l >= r);
 
 /// The comparison opcodes for every operand pair that is not two integers:
 /// NULLs, affinity conversions, text collations and array comparison.

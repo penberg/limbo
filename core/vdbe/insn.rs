@@ -2180,12 +2180,12 @@ impl InsnVariants {
             InsnVariants::Move => execute::op_move,
             InsnVariants::IfPos => execute::op_if_pos,
             InsnVariants::NotNull => execute::op_not_null,
-            InsnVariants::Eq
-            | InsnVariants::Ne
-            | InsnVariants::Lt
-            | InsnVariants::Le
-            | InsnVariants::Gt
-            | InsnVariants::Ge => execute::op_comparison,
+            InsnVariants::Eq => execute::op_eq,
+            InsnVariants::Ne => execute::op_ne,
+            InsnVariants::Lt => execute::op_lt,
+            InsnVariants::Le => execute::op_le,
+            InsnVariants::Gt => execute::op_gt,
+            InsnVariants::Ge => execute::op_ge,
             InsnVariants::If => execute::op_if,
             InsnVariants::IfNot => execute::op_if_not,
             InsnVariants::OpenRead => execute::op_open_read,
