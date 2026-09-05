@@ -1617,9 +1617,21 @@ pub enum EndStatement {
 }
 
 impl Register {
+    #[inline]
     pub fn get_value(&self) -> &Value {
         match self {
             Register::Value(v) => v,
+            _ => self.get_value_of_other(),
+        }
+    }
+
+    /// The value of a register that holds no plain value: a record reads as
+    /// its blob, anything else is a bug. Kept out of line so that
+    /// `get_value` inlines as a tag check.
+    #[cold]
+    #[inline(never)]
+    fn get_value_of_other(&self) -> &Value {
+        match self {
             Register::Record(r) => {
                 turso_assert!(!r.is_invalidated());
                 r.as_blob_value()
