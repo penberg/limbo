@@ -90,6 +90,7 @@ use execute::{
 use turso_parser::ast::{EqpFormat, ResolveType};
 
 use crate::io::TempFile;
+use crate::storage::sqlite3_ondisk::read_varint;
 use crate::vdbe::bloom_filter::BloomFilter;
 use crate::vdbe::rowset::RowSet;
 use explain::{
@@ -3791,232 +3792,240 @@ pub trait ValueIteratorExt {
 impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
     #[inline(always)]
     fn nth_into_register(&mut self, n: usize, dest: &mut Register) -> Option<Result<()>> {
-        use crate::storage::sqlite3_ondisk::read_varint;
-        use crate::types::{get_serial_type_size, Extendable, Text};
-
         let mut header = self.header_section_ref();
         let mut data = self.data_section_ref();
 
-        // Skip n elements
-        let mut data_sum = 0;
-        for _ in 0..n {
-            if header.is_empty() {
-                return None;
-            }
-
-            let (serial_type, bytes_read) = match read_varint(header) {
-                Ok(v) => v,
-                Err(e) => return Some(Err(e)),
-            };
-            header = &header[bytes_read..];
-
-            data_sum += match get_serial_type_size(serial_type) {
-                Ok(size) => size,
-                Err(e) => return Some(Err(e)),
-            };
+        if let Err(e) = skip_serial_types(&mut header, &mut data, n) {
+            return Some(Err(e));
         }
-
-        if data_sum > data.len() {
-            return Some(Err(LimboError::Corrupt(
-                "Data section too small for indicated serial type size".into(),
-            )));
-        }
-        data = &data[data_sum..];
-
-        // Read the serial type for the target element
         if header.is_empty() {
             return None;
         }
 
-        let (serial_type, bytes_read) = match read_varint(header) {
+        let serial_type = match read_serial_type(&mut header) {
             Ok(v) => v,
             Err(e) => return Some(Err(e)),
         };
-
         // Update iterator state
-        self.set_header_section(&header[bytes_read..]);
-
-        // Decode directly into register based on serial type
-        match serial_type {
-            // NULL
-            0 => {
-                self.set_data_section(data);
-                dest.set_null();
-            }
-            // I8
-            1 => {
-                if unlikely(data.is_empty()) {
-                    return Some(Err(LimboError::Corrupt("Invalid 1-byte int".into())));
-                }
-                self.set_data_section(&data[1..]);
-                dest.set_int(data[0] as i8 as i64);
-            }
-            // I16
-            2 => {
-                if unlikely(data.len() < 2) {
-                    return Some(Err(LimboError::Corrupt("Invalid 2-byte int".into())));
-                }
-                self.set_data_section(&data[2..]);
-                dest.set_int(i16::from_be_bytes([data[0], data[1]]) as i64);
-            }
-            // I24
-            3 => {
-                if unlikely(data.len() < 3) {
-                    return Some(Err(LimboError::Corrupt("Invalid 3-byte int".into())));
-                }
-                self.set_data_section(&data[3..]);
-                let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
-                dest.set_int(
-                    i32::from_be_bytes([sign_extension, data[0], data[1], data[2]]) as i64,
-                );
-            }
-            // I32
-            4 => {
-                if unlikely(data.len() < 4) {
-                    return Some(Err(LimboError::Corrupt("Invalid 4-byte int".into())));
-                }
-                self.set_data_section(&data[4..]);
-                dest.set_int(i32::from_be_bytes([data[0], data[1], data[2], data[3]]) as i64);
-            }
-            // I48
-            5 => {
-                if unlikely(data.len() < 6) {
-                    return Some(Err(LimboError::Corrupt("Invalid 6-byte int".into())));
-                }
-                self.set_data_section(&data[6..]);
-                let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
-                dest.set_int(i64::from_be_bytes([
-                    sign_extension,
-                    sign_extension,
-                    data[0],
-                    data[1],
-                    data[2],
-                    data[3],
-                    data[4],
-                    data[5],
-                ]));
-            }
-            // I64
-            6 => {
-                if unlikely(data.len() < 8) {
-                    return Some(Err(LimboError::Corrupt("Invalid 8-byte int".into())));
-                }
-                self.set_data_section(&data[8..]);
-                dest.set_int(i64::from_be_bytes([
-                    data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                ]));
-            }
-            // F64
-            7 => {
-                if unlikely(data.len() < 8) {
-                    return Some(Err(LimboError::Corrupt("Invalid 8-byte float".into())));
-                }
-                self.set_data_section(&data[8..]);
-                let val = f64::from_be_bytes([
-                    data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
-                ]);
-                if let Some(nn) = NonNan::new(val) {
-                    dest.set_float(nn);
-                } else {
-                    dest.set_null();
-                }
-            }
-            // CONST_INT0
-            8 => {
-                self.set_data_section(data);
-                dest.set_int(0);
-            }
-            // CONST_INT1
-            9 => {
-                self.set_data_section(data);
-                dest.set_int(1);
-            }
-            // Reserved
-            10 | 11 => {
-                mark_unlikely();
-                return Some(Err(LimboError::Corrupt(format!(
-                    "Reserved serial type: {serial_type}"
-                ))));
-            }
-            // BLOB (n >= 12 && n & 1 == 0)
-            n if n >= 12 && n & 1 == 0 => crate::with_value_blob_allocation_site!(RecordDecode, {
-                let content_size = ((n - 12) / 2) as usize;
-                if unlikely(data.len() < content_size) {
-                    return Some(Err(LimboError::Corrupt("Invalid Blob value".into())));
-                }
-                self.set_data_section(&data[content_size..]);
-                let blob_data = &data[..content_size];
-                match dest {
-                    Register::Value(Value::Blob(existing_blob)) => {
-                        if let Err(err) = existing_blob.do_extend(&blob_data) {
-                            return Some(Err(err));
-                        }
-                    }
-                    _ => {
-                        let blob = match crate::types::value_blob_from_slice(blob_data) {
-                            Ok(blob) => blob,
-                            Err(err) => return Some(Err(err.into())),
-                        };
-                        if let Err(err) = dest.set_blob(blob) {
-                            return Some(Err(err));
-                        }
-                    }
-                }
-            }),
-            // TEXT (n >= 13 && n & 1 == 1)
-            n if n >= 13 && n & 1 == 1 => {
-                let content_size = ((n - 13) / 2) as usize;
-                if unlikely(data.len() < content_size) {
-                    return Some(Err(LimboError::Corrupt("Invalid Text value".into())));
-                }
-                self.set_data_section(&data[content_size..]);
-                let text_data = &data[..content_size];
-                let Some(text_str) = crate::types::validate_utf8(text_data) else {
-                    mark_unlikely();
-                    return Some(Err(LimboError::Corrupt(
-                        "TEXT value contains invalid UTF-8".into(),
-                    )));
-                };
-                match dest {
-                    Register::Value(Value::Text(existing_text)) => {
-                        if let Err(err) = existing_text.do_extend(&text_str) {
-                            return Some(Err(err));
-                        }
-                    }
-                    _ => {
-                        if let Err(err) = dest.set_text(Text::new(text_str.to_string())) {
-                            return Some(Err(err));
-                        }
-                    }
-                }
-            }
-            _ => {
-                mark_unlikely();
-                return Some(Err(LimboError::Corrupt(format!(
-                    "Invalid serial type: {serial_type}"
-                ))));
-            }
-        }
-
-        Some(Ok(()))
+        self.set_header_section(header);
+        let result = decode_serial_type_into_register(serial_type, &mut data, dest);
+        self.set_data_section(data);
+        Some(result)
     }
 
+    /// The header and data positions live in locals for the whole range and
+    /// go back into the iterator once at the end: written back per column,
+    /// they cost four stores for every value of every row.
     #[inline]
     fn decode_into_registers_after(
         &mut self,
         skip: usize,
         dests: &mut [Register],
     ) -> Result<usize> {
-        for (i, dest) in dests.iter_mut().enumerate() {
-            let n = if i == 0 { skip } else { 0 };
-            match self.nth_into_register(n, dest) {
-                Some(Ok(())) => {}
-                Some(Err(e)) => return Err(e),
-                None => return Ok(i),
+        let mut header = self.header_section_ref();
+        let mut data = self.data_section_ref();
+        skip_serial_types(&mut header, &mut data, skip)?;
+        let mut decoded = 0;
+        for dest in dests.iter_mut() {
+            if header.is_empty() {
+                break;
             }
+            let serial_type = read_serial_type(&mut header)?;
+            decode_serial_type_into_register(serial_type, &mut data, dest)?;
+            decoded += 1;
         }
-        Ok(dests.len())
+        self.set_header_section(header);
+        self.set_data_section(data);
+        Ok(decoded)
     }
+}
+
+/// Advance `header` and `data` past `n` serial types, stopping early if the header is shorter than
+/// expected.
+///
+/// If the header is short, returns `Ok(())` with an empty `header`.
+#[inline(always)]
+fn skip_serial_types(header: &mut &[u8], data: &mut &[u8], n: usize) -> Result<()> {
+    use crate::types::get_serial_type_size;
+    let mut data_sum = 0;
+    for _ in 0..n {
+        if header.is_empty() {
+            break;
+        }
+        let serial_type = read_serial_type(header)?;
+        data_sum += get_serial_type_size(serial_type)?;
+    }
+    if data_sum > data.len() {
+        return Err(LimboError::Corrupt(
+            "Data section too small for indicated serial type size".into(),
+        ));
+    }
+    *data = &data[data_sum..];
+    Ok(())
+}
+
+/// Reads the serial type at the front of `header` and moves past it.
+#[inline(always)]
+fn read_serial_type(header: &mut &[u8]) -> Result<u64> {
+    let (serial_type, bytes_read) = read_varint(header)?;
+    *header = &header[bytes_read..];
+    Ok(serial_type)
+}
+
+/// Decodes the value of `serial_type` at the front of `data` into `dest`
+/// and moves `data` past it.
+#[inline(always)]
+fn decode_serial_type_into_register(
+    serial_type: u64,
+    data: &mut &[u8],
+    dest: &mut Register,
+) -> Result<()> {
+    use crate::types::{Extendable, Text};
+    match serial_type {
+        // NULL
+        0 => {
+            dest.set_null();
+        }
+        // I8
+        1 => {
+            if unlikely(data.is_empty()) {
+                return Err(LimboError::Corrupt("Invalid 1-byte int".into()));
+            }
+            dest.set_int(data[0] as i8 as i64);
+            *data = &data[1..];
+        }
+        // I16
+        2 => {
+            if unlikely(data.len() < 2) {
+                return Err(LimboError::Corrupt("Invalid 2-byte int".into()));
+            }
+            dest.set_int(i16::from_be_bytes([data[0], data[1]]) as i64);
+            *data = &data[2..];
+        }
+        // I24
+        3 => {
+            if unlikely(data.len() < 3) {
+                return Err(LimboError::Corrupt("Invalid 3-byte int".into()));
+            }
+            let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
+            dest.set_int(i32::from_be_bytes([sign_extension, data[0], data[1], data[2]]) as i64);
+            *data = &data[3..];
+        }
+        // I32
+        4 => {
+            if unlikely(data.len() < 4) {
+                return Err(LimboError::Corrupt("Invalid 4-byte int".into()));
+            }
+            dest.set_int(i32::from_be_bytes([data[0], data[1], data[2], data[3]]) as i64);
+            *data = &data[4..];
+        }
+        // I48
+        5 => {
+            if unlikely(data.len() < 6) {
+                return Err(LimboError::Corrupt("Invalid 6-byte int".into()));
+            }
+            let sign_extension = if data[0] <= 0x7F { 0 } else { 0xFF };
+            dest.set_int(i64::from_be_bytes([
+                sign_extension,
+                sign_extension,
+                data[0],
+                data[1],
+                data[2],
+                data[3],
+                data[4],
+                data[5],
+            ]));
+            *data = &data[6..];
+        }
+        // I64
+        6 => {
+            if unlikely(data.len() < 8) {
+                return Err(LimboError::Corrupt("Invalid 8-byte int".into()));
+            }
+            dest.set_int(i64::from_be_bytes([
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ]));
+            *data = &data[8..];
+        }
+        // F64
+        7 => {
+            if unlikely(data.len() < 8) {
+                return Err(LimboError::Corrupt("Invalid 8-byte float".into()));
+            }
+            let val = f64::from_be_bytes([
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            ]);
+            if let Some(nn) = NonNan::new(val) {
+                dest.set_float(nn);
+            } else {
+                dest.set_null();
+            }
+            *data = &data[8..];
+        }
+        // CONST_INT0
+        8 => {
+            dest.set_int(0);
+        }
+        // CONST_INT1
+        9 => {
+            dest.set_int(1);
+        }
+        // Reserved
+        10 | 11 => {
+            mark_unlikely();
+            return Err(LimboError::Corrupt(format!(
+                "Reserved serial type: {serial_type}"
+            )));
+        }
+        // BLOB (n >= 12 && n & 1 == 0)
+        n if n >= 12 && n & 1 == 0 => crate::with_value_blob_allocation_site!(RecordDecode, {
+            let content_size = ((n - 12) / 2) as usize;
+            if unlikely(data.len() < content_size) {
+                return Err(LimboError::Corrupt("Invalid Blob value".into()));
+            }
+            let blob_data = &data[..content_size];
+            match dest {
+                Register::Value(Value::Blob(existing_blob)) => {
+                    existing_blob.do_extend(&blob_data)?;
+                }
+                _ => {
+                    let blob = crate::types::value_blob_from_slice(blob_data)?;
+                    dest.set_blob(blob)?;
+                }
+            }
+            *data = &data[content_size..];
+        }),
+        // TEXT (n >= 13 && n & 1 == 1)
+        n if n >= 13 && n & 1 == 1 => {
+            let content_size = ((n - 13) / 2) as usize;
+            if unlikely(data.len() < content_size) {
+                return Err(LimboError::Corrupt("Invalid Text value".into()));
+            }
+            let text_data = &data[..content_size];
+            let Some(text_str) = crate::types::validate_utf8(text_data) else {
+                mark_unlikely();
+                return Err(LimboError::Corrupt(
+                    "TEXT value contains invalid UTF-8".into(),
+                ));
+            };
+            match dest {
+                Register::Value(Value::Text(existing_text)) => {
+                    existing_text.do_extend(&text_str)?;
+                }
+                _ => {
+                    dest.set_text(Text::new(text_str.to_string()))?;
+                }
+            }
+            *data = &data[content_size..];
+        }
+        _ => {
+            mark_unlikely();
+            return Err(LimboError::Corrupt(format!(
+                "Invalid serial type: {serial_type}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
