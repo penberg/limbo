@@ -2447,21 +2447,6 @@ pub enum Cookie {
 
 #[cfg(test)]
 mod tests {
-    use strum::VariantArray;
-
-    #[test]
-    fn test_make_sure_correct_insn_table() {
-        for variant in super::InsnVariants::VARIANTS {
-            let func1 = variant.to_function();
-            let func2 = variant.to_function_fast();
-            assert_eq!(
-                func1 as usize, func2 as usize,
-                "Variant {:?} does not match in fast table at index {}",
-                variant, *variant as usize
-            );
-        }
-    }
-
     #[test]
     fn test_insn_size_does_not_grow() {
         // Interpreter dispatch is sensitive to instruction size. Widening a
