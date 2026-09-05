@@ -190,7 +190,7 @@ impl PageInner {
     }
 
     /// Get the page buffer as a mutable slice. Panics if buffer not loaded.
-    #[inline]
+    #[inline(always)]
     #[allow(clippy::mut_from_ref)]
     pub fn as_ptr(&self) -> &mut [u8] {
         turso_assert!(!self.data_ptr.is_null(), "buffer not loaded");
@@ -204,7 +204,7 @@ impl PageInner {
 
     /// The position where page content starts. It's 100 for page 1 (database file header is 100 bytes),
     /// 0 for all other pages.
-    #[inline]
+    #[inline(always)]
     pub fn offset(&self) -> usize {
         if self.id == 1 {
             DatabaseHeader::SIZE
@@ -214,18 +214,18 @@ impl PageInner {
     }
 
     /// Read a u8 from the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn read_u8(&self, pos: usize) -> u8 {
         let buf = self.as_ptr();
         buf[self.offset() + pos]
     }
 
     /// Read a u16 from the page content at the given offset, taking account the possible db header on page 1.
-    #[inline]
+    #[inline(always)]
     fn read_u16(&self, pos: usize) -> u16 {
-        let buf = self.as_ptr();
-        let offset = self.offset();
-        u16::from_be_bytes([buf[offset + pos], buf[offset + pos + 1]])
+        let pos = self.offset() + pos;
+        let bytes = &self.as_ptr()[pos..pos + 2];
+        u16::from_be_bytes([bytes[0], bytes[1]])
     }
 
     /// Read a u32 from the page content at the given offset, taking account the possible db header on page 1.
@@ -345,7 +345,7 @@ impl PageInner {
         self.read_u16(BTREE_FIRST_FREEBLOCK)
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn cell_count(&self) -> usize {
         self.read_u16(BTREE_CELL_COUNT) as usize
     }
@@ -712,6 +712,7 @@ impl PageInner {
         Ok((start, len))
     }
 
+    #[inline(always)]
     pub fn is_leaf(&self) -> bool {
         self.read_u8(BTREE_PAGE_TYPE) > PageType::TableInterior as u8
     }

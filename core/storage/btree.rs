@@ -7458,6 +7458,7 @@ impl BTreeCursor {
     /// which owns its handling: `skip_advance` (restore landed on the
     /// iteration target; advancing would skip a row), an abandoned
     /// overflow read, and an in-flight spill descent.
+    #[inline(always)]
     fn can_advance_within_leaf(&self) -> bool {
         if !matches!(self.advance_state, AdvanceState::Start)
             || !matches!(self.valid_state, CursorValidState::Valid)
@@ -8402,6 +8403,7 @@ impl PageStack {
         page
     }
 
+    #[inline(always)]
     fn top_ref(&self) -> &PageRef {
         let current = self.current();
         let page = self.stack[current].as_ref().unwrap();
@@ -8417,6 +8419,7 @@ impl PageStack {
     }
 
     /// Cell index of the current page
+    #[inline(always)]
     fn current_cell_index(&self) -> i32 {
         let current = self.current();
         self.node_states[current].cell_idx
