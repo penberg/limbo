@@ -1115,10 +1115,8 @@ impl ProgramState {
         self.op_vacuum_state = VacuumOpState::None;
         self.view_delta_state = ViewDeltaCommitState::NotStarted;
         self.auto_txn_cleanup = TxnCleanup::None;
-        self.fk_immediate_violations_during_stmt
-            .store(0, Ordering::SeqCst);
-        self.fk_deferred_violations_when_stmt_started
-            .store(0, Ordering::SeqCst);
+        *self.fk_immediate_violations_during_stmt.get_mut() = 0;
+        *self.fk_deferred_violations_when_stmt_started.get_mut() = 0;
         self.rowsets.clear();
         self.bloom_filters.clear();
         self.hash_tables.clear();
@@ -1128,9 +1126,10 @@ impl ProgramState {
         self.has_stmt_transaction = false;
         self.distinct_key_values.clear();
         self.attached_savepoint_pagers.clear();
-        self.n_change.store(0, Ordering::SeqCst);
-        self.n_total_change.store(0, Ordering::SeqCst);
-        *self.explain_state.write() = ExplainState::default();
+        *self.n_change.get_mut() = 0;
+        *self.n_total_change.get_mut() = 0;
+        // reset has exclusive access, so no lock or atomic store is needed.
+        *self.explain_state.get_mut() = ExplainState::default();
         self.pending_fail_error = None;
         self.pending_fail_prepare_error = None;
         self.halt_in_progress = false;
