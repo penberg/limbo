@@ -1889,7 +1889,14 @@ pub fn op_column(
         },
         insn
     );
-    op_column_impl(
+    if state.active_op_state.is_idle() && state.deferred_seeks[*cursor_id].is_none() {
+        let result = op_column_fetch(program, state, *cursor_id, *column, *dest, default)?;
+        if matches!(result, InsnFunctionStepResult::Step) {
+            state.pc += 1;
+        }
+        return Ok(result);
+    }
+    op_column_deferred(
         program,
         state,
         *cursor_id,
@@ -1920,7 +1927,15 @@ pub fn op_column_range(
         },
         insn
     );
-    op_column_impl(
+    if state.active_op_state.is_idle() && state.deferred_seeks[*cursor_id].is_none() {
+        let result =
+            op_column_range_fetch(program, state, *cursor_id, *start_column, *dest, defaults)?;
+        if matches!(result, InsnFunctionStepResult::Step) {
+            state.pc += 1;
+        }
+        return Ok(result);
+    }
+    op_column_deferred(
         program,
         state,
         *cursor_id,
@@ -1977,27 +1992,6 @@ impl ColumnFetch<'_> {
             } => op_column_range_fetch(program, state, cursor_id, start_column, dest, defaults),
         }
     }
-}
-
-#[inline(always)]
-fn op_column_impl(
-    program: &Program,
-    state: &mut ProgramState,
-    cursor_id: usize,
-    fetch: ColumnFetch<'_>,
-) -> InsnResult {
-    // Fast path: no deferred seek pending and no suspended state machine. The
-    // column fetch either completes or yields IO with nothing persisted, so the
-    // op-state slot (enum write + drop on clear) is bypassed entirely. On IO
-    // resume the slot is still idle and this path re-executes.
-    if state.active_op_state.is_idle() && state.deferred_seeks[cursor_id].is_none() {
-        let result = fetch.fetch(program, state, cursor_id)?;
-        if matches!(result, InsnFunctionStepResult::Step) {
-            state.pc += 1;
-        }
-        return Ok(result);
-    }
-    op_column_deferred(program, state, cursor_id, fetch)
 }
 
 /// Column when a deferred seek is pending or the fetch was suspended for
