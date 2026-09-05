@@ -1015,15 +1015,6 @@ impl Page {
         self.get().flags.load(Ordering::Acquire) & PAGE_LOADED != 0
     }
 
-    /// `is_loaded` for a check that needs no ordering: the caller already
-    /// synchronized with the load of the page, so a relaxed read cannot
-    /// see the flag unset. Unlike the acquire read, it lets the compiler
-    /// keep values it read before the check in registers across it.
-    #[inline]
-    pub fn is_loaded_relaxed(&self) -> bool {
-        self.get().flags.load(Ordering::Relaxed) & PAGE_LOADED != 0
-    }
-
     #[inline]
     pub fn set_loaded(&self) {
         self.get().flags.fetch_or(PAGE_LOADED, Ordering::Release);

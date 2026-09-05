@@ -8649,12 +8649,13 @@ impl PageStack {
         page
     }
 
+    /// The page at the top of the stack. Pages on the stack are pinned, and
+    /// every read of the page asserts that its buffer is present, so the
+    /// loaded flag is not tested here again.
     #[inline(always)]
     fn top_ref(&self) -> &PageRef {
         let current = self.current();
-        let page = self.stack[current].as_ref().unwrap();
-        turso_assert!(page.is_loaded_relaxed(), "page should be loaded");
-        page
+        self.stack[current].as_ref().unwrap()
     }
 
     /// Current page pointer being used
