@@ -1948,6 +1948,7 @@ impl ColumnFetch<'_> {
         }
     }
 
+    #[inline(always)]
     fn fetch(&self, program: &Program, state: &mut ProgramState, cursor_id: usize) -> InsnResult {
         match *self {
             ColumnFetch::Single {
@@ -2059,6 +2060,49 @@ fn op_column_impl(
 
 /// Fetches one column of the cursor's current row into a register.
 fn op_column_fetch(
+    program: &Program,
+    state: &mut ProgramState,
+    cursor_id: usize,
+    column: usize,
+    dest: usize,
+    default: &Option<Value>,
+) -> InsnResult {
+    let Some(Cursor::BTree(cursor)) = state
+        .cursors
+        .get_mut(cursor_id)
+        .unwrap_or_else(|| panic!("cursor id {cursor_id} out of bounds"))
+    else {
+        return op_column_fetch_other(program, state, cursor_id, column, dest, default);
+    };
+    if cursor.get_null_flag() {
+        tracing::trace!("op_column(null_flag)");
+        state.registers[dest].set_null();
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    let Some(record) = return_if_io!(cursor.record()) else {
+        // Cursor is not positioned on a valid row (e.g., empty table).
+        // Return NULL, not the column's default value.
+        state.registers[dest].set_null();
+        return Ok(InsnFunctionStepResult::Step);
+    };
+    match record
+        .iter()?
+        .nth_into_register(column, &mut state.registers[dest])
+    {
+        Some(result) => result?,
+        None => {
+            branches::mark_unlikely();
+            // The record has fewer columns than expected.
+            apply_column_default(default, &mut state.registers[dest])?;
+        }
+    }
+    Ok(InsnFunctionStepResult::Step)
+}
+
+/// Column for every cursor that is not a b-tree cursor object: materialized
+/// views, the NullRow placeholder, sorters, pseudo cursors and index methods.
+#[inline(never)]
+fn op_column_fetch_other(
     program: &Program,
     state: &mut ProgramState,
     cursor_id: usize,
@@ -2219,6 +2263,61 @@ fn apply_column_default(default: &Option<Value>, reg: &mut Register) -> Result<(
 }
 
 fn op_column_range_fetch(
+    program: &Program,
+    state: &mut ProgramState,
+    cursor_id: usize,
+    start_column: usize,
+    dest: usize,
+    defaults: &[Option<Value>],
+) -> InsnResult {
+    let count = defaults.len();
+    let Some(Cursor::BTree(cursor)) = state
+        .cursors
+        .get_mut(cursor_id)
+        .unwrap_or_else(|| panic!("cursor id {cursor_id} out of bounds"))
+    else {
+        return op_column_range_fetch_other(
+            program,
+            state,
+            cursor_id,
+            start_column,
+            dest,
+            defaults,
+        );
+    };
+    if cursor.get_null_flag() {
+        tracing::trace!("op_column_range(null_flag)");
+        for reg in &mut state.registers[dest..dest + count] {
+            reg.set_null();
+        }
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    let Some(record) = return_if_io!(cursor.record()) else {
+        for reg in &mut state.registers[dest..dest + count] {
+            reg.set_null();
+        }
+        return Ok(InsnFunctionStepResult::Step);
+    };
+    let filled = record
+        .iter()?
+        .decode_into_registers_after(start_column, &mut state.registers[dest..dest + count])?;
+    if filled < count {
+        branches::mark_unlikely();
+        // The record has fewer columns than expected.
+        for (default, reg) in defaults[filled..]
+            .iter()
+            .zip(&mut state.registers[dest + filled..dest + count])
+        {
+            apply_column_default(default, reg)?;
+        }
+    }
+    Ok(InsnFunctionStepResult::Step)
+}
+
+/// ColumnRange for every cursor that is not a b-tree cursor object: sorters,
+/// pseudo cursors, and the cursors that reject range fusing.
+#[inline(never)]
+fn op_column_range_fetch_other(
     program: &Program,
     state: &mut ProgramState,
     cursor_id: usize,
