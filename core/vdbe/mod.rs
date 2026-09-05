@@ -109,10 +109,7 @@ use std::{
 };
 use tracing::{instrument, Level};
 
-const MAX_CHECK_MASK: u64 = 255;
-// we use the check interval as bitmask so that we can efficiently calculate if the `vm_steps` counter
-// has reached a check interval (if `n` is a power of 2, `x & (n - 1)` checks for multiples of `n`)
-const _: () = assert!((MAX_CHECK_MASK + 1).is_power_of_two());
+const MAX_CHECK_INTERVAL: u64 = 256;
 
 type MvccCommitStateMachine = CommitStateMachine<MvccClock, DynAllocator>;
 
@@ -866,9 +863,12 @@ pub struct SequenceInnerTxState {
 }
 
 pub struct ProgramState {
-    /// Interrupt/progress-check gate mask for normal_step; re-derived from
-    /// the progress handler's interval each time the gate fires.
-    check_mask: u64,
+    /// Instructions left before the next interrupt/progress check of
+    /// normal_step; reloaded with `check_interval` each time it reaches zero.
+    check_countdown: u64,
+    /// The interval the countdown was last reloaded with, re-derived from
+    /// the progress handler's interval each time the check runs.
+    check_interval: u64,
     pub io_completions: Option<IOCompletions>,
     pub pc: InsnReference,
     pub(crate) cursors: Vec<Option<Cursor>>,
@@ -1038,7 +1038,8 @@ impl ProgramState {
         let cursor_seqs = vec![0i64; max_cursors];
         let registers = vec![Register::Value(Value::Null); max_registers].into_boxed_slice();
         Self {
-            check_mask: MAX_CHECK_MASK,
+            check_countdown: 1,
+            check_interval: MAX_CHECK_INTERVAL,
             io_completions: None,
             pc: 0,
             cursors,
@@ -2293,7 +2294,8 @@ impl Program {
                     }
                 }
                 loop {
-                    if state.metrics.vm_steps & state.check_mask == 0 {
+                    state.check_countdown = state.check_countdown.wrapping_sub(1);
+                    if state.check_countdown == 0 {
                         if let Some(result) = program.periodic_checks(state, pager) {
                             return result;
                         }
@@ -2503,11 +2505,12 @@ impl Program {
     #[inline(never)]
     fn periodic_checks(&self, state: &mut ProgramState, pager: &Arc<Pager>) -> Option<ProgramStep> {
         let progress_ops = self.connection.progress_ops();
-        state.check_mask = if progress_ops == 0 || progress_ops >= MAX_CHECK_MASK {
-            MAX_CHECK_MASK
+        state.check_interval = if progress_ops == 0 || progress_ops >= MAX_CHECK_INTERVAL {
+            MAX_CHECK_INTERVAL
         } else {
-            progress_ops.next_power_of_two() - 1
+            progress_ops
         };
+        state.check_countdown = state.check_interval;
         if self.connection.is_closed() {
             return Some(ProgramStep::Error(self.closed_during_step(pager)));
         }
@@ -2530,7 +2533,7 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
     ) -> Option<ProgramStep> {
-        let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_mask + 1);
+        let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_interval);
         if self.maybe_request_interrupt(state, pager.io.as_ref(), prev_steps) {
             return self.interrupted_during_step(state, pager);
         }
