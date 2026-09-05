@@ -1240,7 +1240,7 @@ pub fn op_open_read(
     program: &Program,
     state: &mut ProgramState,
     insn: &Insn,
-    _pager: &Arc<Pager>,
+    pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(
         OpenRead {
@@ -1253,7 +1253,7 @@ pub fn op_open_read(
 
     invalidate_deferred_seeks_for_cursor(state, *cursor_id);
 
-    let pager = program.get_pager_from_database_index(db)?;
+    let pager = pager_for_db(program, pager, *db)?;
     let mv_store = mv_store_for_db(program, state, *db);
 
     if let (_, CursorType::IndexMethod(module)) = &program.cursor_ref[*cursor_id] {
@@ -4435,7 +4435,7 @@ pub fn op_transaction_inner(
     program: &Program,
     state: &mut ProgramState,
     insn: &Insn,
-    _pager: &Arc<Pager>,
+    pager: &Arc<Pager>,
 ) -> InsnResult {
     load_insn!(
         Transaction {
@@ -4453,7 +4453,7 @@ pub fn op_transaction_inner(
     if *db == crate::TEMP_DB_ID {
         program.connection.ensure_temp_database()?;
     }
-    let pager = program.get_pager_from_database_index(db)?;
+    let pager = pager_for_db(program, pager, *db)?;
     // Get the MvStore for the specific database (main or attached).
     let mv_store = mv_store_for_db(program, state, *db);
     let is_main_db = *db == crate::MAIN_DB_ID;
@@ -5050,6 +5050,21 @@ fn mv_store_for_db(program: &Program, state: &mut ProgramState, db: usize) -> Op
         state.mv_store(&program.connection).cloned()
     } else {
         program.connection.mv_store_for_db(db)
+    }
+}
+
+/// The pager of database `db`. Every opcode receives the main pager of the
+/// connection, so only the temp and attached databases go through the
+/// catalog and its locks.
+fn pager_for_db(program: &Program, main_pager: &Arc<Pager>, db: usize) -> Result<Arc<Pager>> {
+    if db == crate::MAIN_DB_ID {
+        debug_assert!(
+            Arc::ptr_eq(main_pager, &program.connection.pager.load()),
+            "opcode pager is not the main pager of the connection"
+        );
+        Ok(main_pager.clone())
+    } else {
+        program.get_pager_from_database_index(&db)
     }
 }
 
