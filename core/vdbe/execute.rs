@@ -200,16 +200,24 @@ macro_rules! return_if_io {
     };
 }
 
-macro_rules! check_arg_count {
-    ($actual:expr, $expected:expr) => {
-        if unlikely($actual != $expected) {
-            return Err(LimboError::InternalError(format!(
-                "expected {} argument(s), got {}",
-                $expected, $actual
-            ))
-            .into());
-        }
-    };
+use arg_count::check_arg_count;
+mod arg_count {
+    use crate::LimboError;
+
+    macro_rules! check_arg_count {
+        ($actual:expr, $expected:expr) => {
+            if unlikely($actual != $expected) {
+                return Err(arg_count::wrong_arg_count($expected, $actual));
+            }
+        };
+    }
+    pub(super) use check_arg_count;
+
+    #[cold]
+    #[inline(never)]
+    pub(super) fn wrong_arg_count(expected: usize, actual: usize) -> Box<LimboError> {
+        LimboError::InternalError(format!("expected {expected} argument(s), got {actual}")).into()
+    }
 }
 
 /// Errors are boxed so an op's whole return value stays small: a LimboError
