@@ -2090,14 +2090,9 @@ fn op_column_fetch(
     else {
         return op_column_fetch_other(program, state, cursor_id, column, dest, default);
     };
-    if cursor.get_null_flag() {
-        tracing::trace!("op_column(null_flag)");
-        state.registers[dest].set_null();
-        return Ok(InsnFunctionStepResult::Step);
-    }
     let Some(payload) = return_if_io!(cursor.record_payload()) else {
-        // Cursor is not positioned on a valid row (e.g., empty table).
-        // Return NULL, not the column's default value.
+        // A null-row cursor, or one that is not positioned on a valid row
+        // (e.g., empty table). Return NULL, not the column's default value.
         state.registers[dest].set_null();
         return Ok(InsnFunctionStepResult::Step);
     };
@@ -2298,13 +2293,6 @@ fn op_column_range_fetch(
             defaults,
         );
     };
-    if cursor.get_null_flag() {
-        tracing::trace!("op_column_range(null_flag)");
-        for reg in &mut state.registers[dest..dest + count] {
-            reg.set_null();
-        }
-        return Ok(InsnFunctionStepResult::Step);
-    }
     let Some(payload) = return_if_io!(cursor.record_payload()) else {
         for reg in &mut state.registers[dest..dest + count] {
             reg.set_null();

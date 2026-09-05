@@ -734,8 +734,12 @@ pub trait CursorTrait: Any + Send + Sync {
     /// The serialized record of the entry the cursor points to, if any, for
     /// decoding in place. A b-tree cursor hands out the bytes of the pinned
     /// page when the cell has no overflow, so the caller must not move the
-    /// cursor while it holds the slice. Default: the bytes of `record`.
+    /// cursor while it holds the slice. None for a cursor in the null-row
+    /// state, like the rowid. Default: the bytes of `record`.
     fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
+        if self.get_null_flag() {
+            return Ok(IOResult::Done(None));
+        }
         Ok(match self.record()? {
             IOResult::Done(record) => IOResult::Done(record.map(ImmutableRecord::get_payload)),
             IOResult::IO(io) => IOResult::IO(io),
@@ -6651,7 +6655,7 @@ impl CursorTrait for BTreeCursor {
         if self.needs_restore() {
             return_if_io!(self.restore_context());
         }
-        if !self.has_record() {
+        if self.null_flag || !self.has_record() {
             return Ok(IOResult::Done(None));
         }
         let noted = self.noted_payload;
