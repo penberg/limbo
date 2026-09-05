@@ -588,7 +588,12 @@ macro_rules! active_state_accessor {
     ($name:ident, $variant:ident, $ty:ty, $init:expr) => {
         fn $name(&mut self) -> &mut $ty {
             if matches!(self.state, ActiveOpState::None) {
-                self.state = ActiveOpState::$variant($init);
+                // None owns nothing, so skip the drop glue of the enum that
+                // a plain assignment would run on the old value.
+                std::mem::forget(std::mem::replace(
+                    &mut self.state,
+                    ActiveOpState::$variant($init),
+                ));
             }
             match &mut self.state {
                 ActiveOpState::$variant(state) => state,
@@ -610,7 +615,9 @@ impl Default for ActiveOpState {
 
 impl ActiveOpStateSlot {
     fn clear(&mut self) {
-        self.state = ActiveOpState::None;
+        if !matches!(self.state, ActiveOpState::None) {
+            self.state = ActiveOpState::None;
+        }
     }
 
     /// True when no multi-step opcode is suspended. Hot opcodes use this to
