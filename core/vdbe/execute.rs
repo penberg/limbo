@@ -863,17 +863,29 @@ pub fn op_compare(
         }
     }
 
-    // (https://github.com/tursodatabase/turso/issues/2304): reusing logic from compare_immutable().
-    // TODO: There are tons of cases like this where we could reuse this in a similar vein
-    let a_range =
-        (start_reg_a..start_reg_a + count + 1).map(|idx| state.registers[idx].get_value());
-    let b_range =
-        (start_reg_b..start_reg_b + count + 1).map(|idx| state.registers[idx].get_value());
-    let cmp = compare_immutable(a_range, b_range, key_info);
+    return op_compare_slow(state, start_reg_a, start_reg_b, count, key_info);
 
-    state.last_compare = Some(cmp);
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    // keep slow path out of line to keep stack frame small
+    #[inline(never)]
+    fn op_compare_slow(
+        state: &mut ProgramState,
+        start_reg_a: usize,
+        start_reg_b: usize,
+        count: usize,
+        key_info: &[crate::types::KeyInfo],
+    ) -> InsnResult {
+        // (https://github.com/tursodatabase/turso/issues/2304): reusing logic from compare_immutable().
+        // TODO: There are tons of cases like this where we could reuse this in a similar vein
+        let a_range =
+            (start_reg_a..start_reg_a + count + 1).map(|idx| state.registers[idx].get_value());
+        let b_range =
+            (start_reg_b..start_reg_b + count + 1).map(|idx| state.registers[idx].get_value());
+        let cmp = compare_immutable(a_range, b_range, key_info);
+
+        state.last_compare = Some(cmp);
+        state.pc += 1;
+        Ok(InsnFunctionStepResult::Step)
+    }
 }
 
 pub fn op_jump(
