@@ -428,6 +428,9 @@ impl Register {
         #[inline(never)]
         fn set_int_over_other(register: &mut Register, val: i64) {
             match register {
+                Register::Value(null @ Value::Null) => {
+                    std::mem::forget(std::mem::replace(null, Value::from_i64(val)));
+                }
                 Register::Value(other_value_kind) => {
                     *other_value_kind = Value::from_i64(val);
                 }
@@ -495,6 +498,9 @@ impl Register {
     pub fn set_null(&mut self) {
         match self {
             Register::Value(Value::Null) => {}
+            Register::Value(number @ Value::Numeric(_)) => {
+                std::mem::forget(std::mem::replace(number, Value::Null));
+            }
             Register::Value(other_value_kind) => {
                 *other_value_kind = Value::Null;
             }
