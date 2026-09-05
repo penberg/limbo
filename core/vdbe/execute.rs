@@ -4125,7 +4125,7 @@ pub fn op_halt_if_null(
         },
         insn
     );
-    if state.registers[*target_reg].get_value() == &Value::Null {
+    if matches!(state.registers[*target_reg].get_value(), Value::Null) {
         halt(program, state, pager, *err_code, description, None)
     } else {
         state.pc += 1;
@@ -9818,7 +9818,7 @@ pub fn op_function(
                 let pattern_value = pattern_reg.get_value();
                 let match_value = match_reg.get_value();
 
-                if pattern_value == &Value::Null || match_value == &Value::Null {
+                if matches!(pattern_value, Value::Null) || matches!(match_value, Value::Null) {
                     state.registers[*dest].set_null();
                 } else {
                     let pattern_cow = match pattern_value {
@@ -9862,7 +9862,7 @@ pub fn op_function(
                 let match_value = match_reg.get_value();
 
                 // 1. Check for NULL inputs
-                if pattern_value == &Value::Null || match_value == &Value::Null {
+                if matches!(pattern_value, Value::Null) || matches!(match_value, Value::Null) {
                     state.registers[*dest].set_null();
                 } else {
                     // 2. Resolve Escape Character (if 3rd arg exists)

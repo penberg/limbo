@@ -565,7 +565,7 @@ impl Value {
     }
 
     pub fn exec_instr(&self, pattern: &Value) -> Value {
-        if self == &Value::Null || pattern == &Value::Null {
+        if matches!(self, Value::Null) || matches!(pattern, Value::Null) {
             return Value::Null;
         }
 
