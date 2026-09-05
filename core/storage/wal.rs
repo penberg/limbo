@@ -861,6 +861,7 @@ impl InProcessWalCoordination {
         Self { shared }
     }
 
+    #[cfg(test)]
     fn try_read_mark_shared(&self, slot: usize) -> bool {
         self.shared.read().runtime.read_locks[slot].read()
     }
@@ -875,6 +876,17 @@ impl InProcessWalCoordination {
 
     fn read_mark_value(&self, slot: usize) -> u32 {
         self.shared.read().runtime.read_locks[slot].get_value()
+    }
+
+    fn snapshot_of(shared: &WalFileShared) -> WalSnapshot {
+        let checkpoint_seq = shared.metadata.wal_header.lock().checkpoint_seq;
+        WalSnapshot {
+            max_frame: shared.metadata.max_frame.load(Ordering::Acquire),
+            nbackfills: shared.metadata.nbackfills.load(Ordering::Acquire),
+            last_checksum: shared.metadata.last_checksum,
+            checkpoint_seq,
+            transaction_count: shared.metadata.transaction_count.load(Ordering::Acquire),
+        }
     }
 
     /// Lowest read-mark frame across slots currently held by a reader (1..5; slot 0 is the
@@ -924,15 +936,7 @@ impl InProcessWalCoordination {
 
 impl WalCoordination for InProcessWalCoordination {
     fn load_snapshot(&self) -> WalSnapshot {
-        let shared = self.shared.read();
-        let checkpoint_seq = shared.metadata.wal_header.lock().checkpoint_seq;
-        WalSnapshot {
-            max_frame: shared.metadata.max_frame.load(Ordering::Acquire),
-            nbackfills: shared.metadata.nbackfills.load(Ordering::Acquire),
-            last_checksum: shared.metadata.last_checksum,
-            checkpoint_seq,
-            transaction_count: shared.metadata.transaction_count.load(Ordering::Acquire),
-        }
+        Self::snapshot_of(&self.shared.read())
     }
 
     fn publish_commit(&self, commit: WalCommitState) {
@@ -1020,12 +1024,18 @@ impl WalCoordination for InProcessWalCoordination {
             snapshot.max_frame <= u32::MAX as u64,
             "max_frame exceeds u32 read mark range"
         );
+        // One read lock on the shared state for the whole slot selection.
+        // The read marks are atomics inside it, so taking the lock once
+        // instead of once per access changes nothing about their ordering,
+        // and it saves about eight lock round trips per read transaction.
+        let shared = self.shared.read();
+        let read_locks = &shared.runtime.read_locks;
         if snapshot.max_frame == snapshot.nbackfills {
-            if !self.try_read_mark_shared(0) {
+            if !read_locks[0].read() {
                 return None;
             }
-            if self.load_snapshot() != snapshot {
-                self.unlock_read_mark(0);
+            if Self::snapshot_of(&shared) != snapshot {
+                read_locks[0].unlock();
                 return None;
             }
             return Some(ReadGuardKind::DbFile);
@@ -1033,8 +1043,8 @@ impl WalCoordination for InProcessWalCoordination {
 
         let mut best_idx: i64 = -1;
         let mut best_mark: u32 = 0;
-        for idx in 1..5 {
-            let mark = self.read_mark_value(idx);
+        for (idx, read_lock) in read_locks.iter().enumerate().skip(1) {
+            let mark = read_lock.get_value();
             if mark != READMARK_NOT_USED && mark <= snapshot.max_frame as u32 && mark > best_mark {
                 best_mark = mark;
                 best_idx = idx as i64;
@@ -1042,26 +1052,26 @@ impl WalCoordination for InProcessWalCoordination {
         }
 
         if best_idx == -1 || (best_mark as u64) < snapshot.max_frame {
-            for idx in 1..5 {
-                if !self.try_read_mark_exclusive(idx) {
+            for (idx, read_lock) in read_locks.iter().enumerate().skip(1) {
+                if !read_lock.write() {
                     continue;
                 }
-                self.set_read_mark_value_exclusive(idx, snapshot.max_frame as u32);
+                read_lock.set_value_exclusive(snapshot.max_frame as u32);
                 best_idx = idx as i64;
                 best_mark = snapshot.max_frame as u32;
-                self.unlock_read_mark(idx);
+                read_lock.unlock();
                 break;
             }
         }
 
-        if best_idx == -1 || !self.try_read_mark_shared(best_idx as usize) {
+        if best_idx == -1 || !read_locks[best_idx as usize].read() {
             return None;
         }
 
-        let snapshot_after_lock = self.load_snapshot();
-        let current_slot_mark = self.read_mark_value(best_idx as usize);
+        let snapshot_after_lock = Self::snapshot_of(&shared);
+        let current_slot_mark = read_locks[best_idx as usize].get_value();
         if current_slot_mark != best_mark || snapshot_after_lock != snapshot {
-            self.unlock_read_mark(best_idx as usize);
+            read_locks[best_idx as usize].unlock();
             return None;
         }
 
