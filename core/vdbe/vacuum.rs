@@ -2057,12 +2057,12 @@ fn vacuum_in_place_step(
                     turso_assert!(
                         page.is_loaded(),
                         "VACUUM read batch page must be loaded before WAL prepare",
-                        { "page_id": page.get().id }
+                        { "page_id": page.get().id() }
                     );
                     turso_assert!(
                         !page.is_locked(),
                         "VACUUM read batch page lock leaked before WAL prepare",
-                        { "page_id": page.get().id }
+                        { "page_id": page.get().id() }
                     );
                 }
                 let all_read = *next_page > *total_pages;
@@ -2593,7 +2593,7 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, 42);
         assert_eq!(runs[0].1.len(), 1);
-        assert_eq!(runs[0].1[0].get().id, 1);
+        assert_eq!(runs[0].1[0].get().id(), 1);
     }
 
     #[test]
@@ -2612,12 +2612,12 @@ mod tests {
         assert_eq!(runs[0].0, 10);
         assert_eq!(runs[0].1.len(), 3);
         assert_eq!(
-            runs[0].1.iter().map(|p| p.get().id).collect::<Vec<_>>(),
+            runs[0].1.iter().map(|p| p.get().id()).collect::<Vec<_>>(),
             vec![1, 2, 3]
         );
         assert_eq!(runs[1].0, 14);
         assert_eq!(runs[1].1.len(), 1);
-        assert_eq!(runs[1].1[0].get().id, 4);
+        assert_eq!(runs[1].1[0].get().id(), 4);
     }
 
     #[test]
@@ -2673,7 +2673,7 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, 10);
         assert_eq!(
-            runs[0].1.iter().map(|p| p.get().id).collect::<Vec<_>>(),
+            runs[0].1.iter().map(|p| p.get().id()).collect::<Vec<_>>(),
             vec![2, 3, 1, 4]
         );
     }

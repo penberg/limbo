@@ -636,11 +636,11 @@ pub fn begin_write_btree_page(
     page: &PageRef,
     group: Option<&mut CompletionGroup>,
 ) -> Result<Completion> {
-    tracing::trace!("begin_write_btree_page(page={})", page.get().id);
+    tracing::trace!("begin_write_btree_page(page={})", page.get().id());
     let page_source = &pager.db_file;
     let page_finish = page.clone();
 
-    let page_id = page.get().id;
+    let page_id = page.get().id();
     tracing::trace!("begin_write_btree_page(page_id={})", page_id);
 
     let buffer = page.get().buffer().cloned().expect("buffer not loaded");

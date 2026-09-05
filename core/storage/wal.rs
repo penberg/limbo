@@ -3593,13 +3593,13 @@ impl Wal for WalFile {
     ) -> Result<Completion> {
         tracing::debug!(
             "read_frame(page_idx = {}, frame_id = {})",
-            page.get().id,
+            page.get().id(),
             frame_id
         );
         let offset = self.frame_offset(frame_id);
         page.set_locked();
         let frame = page.clone();
-        let page_idx = page.get().id;
+        let page_idx = page.get().id();
         let epoch_at_issue = self.coordination.checkpoint_epoch();
         let complete = Box::new(move |res: Result<(Arc<Buffer>, i32), CompletionError>| {
             let Ok((buf, bytes_read)) = res else {
@@ -3622,7 +3622,7 @@ impl Wal for WalFile {
                 });
             }
             let cloned = frame.clone();
-            finish_read_page(page.get().id, buf, cloned);
+            finish_read_page(page.get().id(), buf, cloned);
             frame.set_wal_tag(frame_id, epoch_at_issue);
             None
         });
@@ -3675,16 +3675,16 @@ impl Wal for WalFile {
             {
                 turso_assert!(
                     !page.is_locked(), "read_frames_batch target page must not already be locked",
-                    { "page_id": page.get().id }
+                    { "page_id": page.get().id() }
                 );
                 turso_assert!(
                     !page.is_loaded(), "read_frames_batch target page must be an unloaded scratch page",
-                    { "page_id": page.get().id }
+                    { "page_id": page.get().id() }
                 );
                 turso_assert!(
                     page.get().buffer().is_none(),
                     "read_frames_batch target page must not already retain a buffer",
-                    { "page_id": page.get().id }
+                    { "page_id": page.get().id() }
                 );
             }
             page.set_locked();
@@ -3724,7 +3724,7 @@ impl Wal for WalFile {
                 let frame_start = i * frame_size;
                 let frame = &raw[frame_start..frame_start + frame_size];
                 let (header, page_body) = sqlite3_ondisk::parse_wal_frame_header(frame);
-                let expected_page_id = page.get().id;
+                let expected_page_id = page.get().id();
                 if header.page_number as usize != expected_page_id {
                     mark_unlikely();
                     tracing::error!(
@@ -3783,7 +3783,7 @@ impl Wal for WalFile {
             }
 
             for (i, (page, page_buf)) in slots.iter().enumerate() {
-                let page_id = page.get().id;
+                let page_id = page.get().id();
                 finish_read_page(page_id, page_buf.clone(), page.clone());
                 page.set_wal_tag(start_frame + i as u64, epoch);
             }
@@ -4461,7 +4461,7 @@ impl Wal for WalFile {
         let page_transform = self.io_ctx.read().page_transform().clone();
 
         for (idx, page) in pages.iter().enumerate() {
-            let page_id = page.get().id;
+            let page_id = page.get().id();
             let plain = page.get_contents().as_ptr();
 
             // if DB size is included for commit frame, it will need to be included only in the last frame of the batch.
@@ -4503,7 +4503,7 @@ impl Wal for WalFile {
         for batch in batches {
             for (page, frame_id, checksum) in &batch.metadata {
                 // Update WAL index mapping page -> frame
-                self.complete_append_frame(page.get().id as u64, *frame_id, *checksum);
+                self.complete_append_frame(page.get().id() as u64, *frame_id, *checksum);
             }
             // Update rolling checksum
             self.set_last_checksum(batch.final_checksum);
@@ -4568,8 +4568,8 @@ impl Wal for WalFile {
         };
         // Build every frame in order, updating the rolling checksum
         for page in pages.iter() {
-            tracing::debug!("append_frames_vectored: page_id={}", page.get().id);
-            let page_id = page.get().id;
+            tracing::debug!("append_frames_vectored: page_id={}", page.get().id());
+            let page_id = page.get().id();
             let plain = page.get_contents().as_ptr();
 
             let frame_db_size = 0; // this method is not used for the commit path
@@ -4619,7 +4619,7 @@ impl Wal for WalFile {
 
             for (page, fid, _csum) in &page_frame_for_cb {
                 page.set_wal_tag(*fid, epoch);
-                coordination.cache_frame(page.get().id as u64, *fid);
+                coordination.cache_frame(page.get().id() as u64, *fid);
             }
         };
 
@@ -6677,8 +6677,12 @@ pub mod test {
         io.wait_for_completion(c).unwrap();
 
         for (idx, page) in target_pages.iter().enumerate() {
-            assert!(page.is_loaded(), "page {} should be loaded", page.get().id);
-            assert!(!page.is_locked(), "page {} lock leaked", page.get().id);
+            assert!(
+                page.is_loaded(),
+                "page {} should be loaded",
+                page.get().id()
+            );
+            assert!(!page.is_locked(), "page {} lock leaked", page.get().id());
             assert_eq!(page.wal_tag_pair(), ((idx + 1) as u64, 0));
             assert_eq!(page.get_contents().as_ptr(), expected[idx].as_slice());
         }
@@ -7016,8 +7020,12 @@ pub mod test {
         io.wait_for_completion(c).unwrap();
 
         for (idx, page) in target_pages.iter().enumerate() {
-            assert!(page.is_loaded(), "page {} should be loaded", page.get().id);
-            assert!(!page.is_locked(), "page {} lock leaked", page.get().id);
+            assert!(
+                page.is_loaded(),
+                "page {} should be loaded",
+                page.get().id()
+            );
+            assert!(!page.is_locked(), "page {} lock leaked", page.get().id());
             assert_eq!(page.wal_tag_pair(), ((idx + 2) as u64, 0));
             assert_eq!(page.get_contents().as_ptr(), expected[idx + 1].as_slice());
         }
@@ -7051,7 +7059,7 @@ pub mod test {
                 page.get_contents().as_ptr(),
                 expected[idx].as_slice(),
                 "frame-order read should preserve page {} contents",
-                page.get().id
+                page.get().id()
             );
             assert_eq!(page.wal_tag_pair(), ((idx + 1) as u64, 0));
         }
@@ -7082,16 +7090,16 @@ pub mod test {
             "unexpected error: {err:?}"
         );
         for page in &target_pages {
-            assert!(!page.is_locked(), "page {} lock leaked", page.get().id);
+            assert!(!page.is_locked(), "page {} lock leaked", page.get().id());
             assert!(
                 !page.is_loaded(),
                 "page {} should not be loaded",
-                page.get().id
+                page.get().id()
             );
             assert!(
                 !page.has_wal_tag(),
                 "page {} should not be tagged",
-                page.get().id
+                page.get().id()
             );
         }
     }
@@ -7127,21 +7135,21 @@ pub mod test {
             "unexpected error: {err:?}"
         );
         for page in &target_pages {
-            assert!(!page.is_locked(), "page {} lock leaked", page.get().id);
+            assert!(!page.is_locked(), "page {} lock leaked", page.get().id());
             assert!(
                 !page.is_loaded(),
                 "page {} should not be loaded",
-                page.get().id
+                page.get().id()
             );
             assert!(
                 !page.has_wal_tag(),
                 "page {} should not be tagged",
-                page.get().id
+                page.get().id()
             );
             assert!(
                 page.get().buffer().is_none(),
                 "page {} should not retain a buffer",
-                page.get().id
+                page.get().id()
             );
         }
     }
