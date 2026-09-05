@@ -205,6 +205,36 @@ pub enum StepResult {
     },
 }
 
+/// This is an optimization over `Result<StepResult, Box<LimboError>>`.
+///
+/// See [crate::storage::btree::CursorStep] for the rationale behind this.
+#[repr(u8)]
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum ProgramStep {
+    Done,
+    IO,
+    Row,
+    Interrupt,
+    Busy,
+    Yield,
+    Error(Box<LimboError>),
+}
+
+impl From<ProgramStep> for Result<StepResult, Box<LimboError>> {
+    fn from(step: ProgramStep) -> Self {
+        match step {
+            ProgramStep::Done => Ok(StepResult::Done),
+            ProgramStep::IO => Ok(StepResult::IO),
+            ProgramStep::Row => Ok(StepResult::Row),
+            ProgramStep::Interrupt => Ok(StepResult::Interrupt),
+            ProgramStep::Busy => Ok(StepResult::Busy),
+            ProgramStep::Yield => Ok(StepResult::Yield),
+            ProgramStep::Error(err) => Err(err),
+        }
+    }
+}
+
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 /// The commit state of the program.
@@ -1910,16 +1940,11 @@ impl Program {
         query_mode: QueryMode,
         waker: Option<&Waker>,
     ) -> Result<StepResult, Box<LimboError>> {
-        state.execution_state = ProgramExecutionState::Running;
-        let result = if let QueryMode::Normal = query_mode {
-            self.normal_step(state, pager, waker)
-        } else {
-            self.explain_step_for_mode(state, pager, query_mode)
-        };
-        // Rows are the common result and leave the execution state untouched.
-        if let Ok(StepResult::Row) = &result {
-            return result;
+        if let QueryMode::Normal = query_mode {
+            return self.normal_step(state, pager, waker).into();
         }
+        state.execution_state = ProgramExecutionState::Running;
+        let result = self.explain_step_for_mode(state, pager, query_mode);
         match &result {
             Ok(StepResult::Done) => {
                 state.execution_state = ProgramExecutionState::Done;
@@ -2180,23 +2205,50 @@ impl Program {
         state.pre_op_registers = Some(state.registers.clone());
     }
 
+    /// Step in [QueryMode::Normal]
     #[inline(always)]
-    fn normal_step(
+    pub(crate) fn normal_step(
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         waker: Option<&Waker>,
-    ) -> Result<StepResult, Box<LimboError>> {
+    ) -> ProgramStep {
+        state.execution_state = ProgramExecutionState::Running;
         let enable_tracing = tracing::enabled!(tracing::Level::TRACE);
         let vdbe_trace = self.connection.get_vdbe_trace();
-
-        return if enable_tracing || vdbe_trace {
-            dispatch_loop::<true>(self, state, pager, waker, enable_tracing, vdbe_trace)
+        let result = if enable_tracing || vdbe_trace {
+            dispatch_loop_traced(self, state, pager, waker, enable_tracing, vdbe_trace)
         } else {
             dispatch_loop::<false>(self, state, pager, waker, false, false)
         };
+        match &result {
+            ProgramStep::Row => {}
+            ProgramStep::Done => {
+                state.execution_state = ProgramExecutionState::Done;
+            }
+            ProgramStep::Interrupt => {
+                state.execution_state = ProgramExecutionState::Interrupted;
+            }
+            ProgramStep::Error(_) => {
+                state.execution_state = ProgramExecutionState::Failed;
+            }
+            _ => {}
+        }
+        return result;
 
         #[inline(never)]
+        fn dispatch_loop_traced(
+            program: &Program,
+            state: &mut ProgramState,
+            pager: &Arc<Pager>,
+            waker: Option<&Waker>,
+            enable_tracing: bool,
+            vdbe_trace: bool,
+        ) -> ProgramStep {
+            dispatch_loop::<true>(program, state, pager, waker, enable_tracing, vdbe_trace)
+        }
+
+        #[inline(always)]
         fn dispatch_loop<const TRACE: bool>(
             program: &Program,
             state: &mut ProgramState,
@@ -2204,8 +2256,8 @@ impl Program {
             waker: Option<&Waker>,
             enable_tracing: bool,
             vdbe_trace: bool,
-        ) -> Result<StepResult, Box<LimboError>> {
-            // Reborrow the instruction list once: reloading it through `self`
+        ) -> ProgramStep {
+            // Reborrow the instruction list once: reloading it through `program`
             // every iteration defeats LLVM's hoisting because the opcode call
             // below is opaque to it.
             let insns = program.insns.as_slice();
@@ -2218,20 +2270,20 @@ impl Program {
             // instructions without re-inspecting the completion slot every time.
             'io_check: loop {
                 if state.io_completions.is_some() {
-                    if let Some(result) = program.finish_pending_io(state, pager, waker)? {
-                        return Ok(result);
+                    if let Some(result) = program.finish_pending_io(state, pager, waker) {
+                        return result;
                     }
                 }
                 if state.pending_fail_prepare_error.is_some() {
-                    match program.prepare_pending_fail(state, pager, waker)? {
-                        Some(result) => return Ok(result),
+                    match program.prepare_pending_fail(state, pager, waker) {
+                        Some(result) => return result,
                         None => continue 'io_check,
                     }
                 }
                 loop {
                     if state.metrics.vm_steps & state.check_mask == 0 {
-                        if let Some(result) = program.periodic_checks(state, pager)? {
-                            return Ok(result);
+                        if let Some(result) = program.periodic_checks(state, pager) {
+                            return result;
                         }
                     }
 
@@ -2240,7 +2292,9 @@ impl Program {
                         program.trace_step(state, insn, enable_tracing, vdbe_trace);
                     }
 
+                    // Always increment VM steps for every loop iteration
                     state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
+
                     // The opcodes that run once per row of a scan are matched here
                     // so LLVM inlines them into the loop, and each one tests its
                     // own result right after its body, where the result is a
@@ -2258,7 +2312,7 @@ impl Program {
                                 Ok(InsnFunctionStepResult::Row) => {
                                     state.metrics.insn_executed =
                                         state.metrics.insn_executed.wrapping_add(1);
-                                    return Ok(StepResult::Row);
+                                    return ProgramStep::Row;
                                 }
                                 other => other,
                             }
@@ -2283,33 +2337,33 @@ impl Program {
                     if let Ok(InsnFunctionStepResult::Row) = result {
                         // Instruction completed (ResultRow already incremented PC)
                         state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                        return Ok(StepResult::Row);
+                        return ProgramStep::Row;
                     }
-                    match dispatch(program, state, pager, waker, result)? {
-                        Some(result) => return Ok(result),
+                    match dispatch_cold(program, state, pager, waker, result) {
+                        Some(result) => return result,
                         None => continue 'io_check,
                     }
                 }
             }
 
             #[inline(never)]
-            fn dispatch(
+            fn dispatch_cold(
                 program: &Program,
                 state: &mut ProgramState,
                 pager: &Arc<Pager>,
                 waker: Option<&Waker>,
                 result: execute::InsnResult,
-            ) -> Result<Option<StepResult>, Box<LimboError>> {
+            ) -> Option<ProgramStep> {
                 match result {
                     Ok(InsnFunctionStepResult::Done) => {
                         // Instruction completed execution
                         state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                         state.auto_txn_cleanup = TxnCleanup::None;
-                        Ok(Some(StepResult::Done))
+                        Some(ProgramStep::Done)
                     }
                     Ok(InsnFunctionStepResult::IO) => {
                         let io = state.take_suspended_io();
-                        Ok(program.park_on_io(state, io, waker))
+                        program.park_on_io(state, io, waker)
                     }
                     Err(boxed_err) => program.fail_step(state, pager, *boxed_err),
                     Ok(InsnFunctionStepResult::Step) | Ok(InsnFunctionStepResult::Row) => {
@@ -2329,14 +2383,14 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         waker: Option<&Waker>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         let io = state
             .io_completions
             .as_ref()
             .expect("the caller checked the completion slot");
         if !io.finished() {
             io.set_waker(waker);
-            return Ok(Some(StepResult::IO));
+            return Some(ProgramStep::IO);
         }
         if let Some(err) = io.get_error() {
             if pager.is_checkpointing() {
@@ -2353,16 +2407,16 @@ impl Program {
                     );
                 }
                 pager.cleanup_after_checkpoint_failure();
-                return Err(checkpoint_err.into());
+                return Some(ProgramStep::Error(checkpoint_err.into()));
             }
             let err = err.into();
             if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
                 tracing::error!("Abort failed during error handling: {abort_err}");
             }
-            return Err(err.into());
+            return Some(ProgramStep::Error(err.into()));
         }
         state.io_completions = None;
-        Ok(None)
+        None
     }
 
     /// A trigger returned FAIL before the parent program reached Halt. FAIL
@@ -2377,7 +2431,7 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         waker: Option<&Waker>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         let fail_error = state
             .pending_fail_prepare_error
             .take()
@@ -2387,20 +2441,20 @@ impl Program {
                 if let Err(abort_err) = self.abort(pager, Some(&fail_error), state, true) {
                     tracing::error!("Abort failed after preparing FAIL index methods: {abort_err}");
                 }
-                Err(fail_error.into())
+                Some(ProgramStep::Error(fail_error.into()))
             }
             Ok(IOResult::IO(io)) => {
                 state.pending_fail_prepare_error = Some(fail_error);
                 io.set_waker(waker);
                 if io.is_explicit_yield() {
-                    return Ok(Some(StepResult::Yield));
+                    return Some(ProgramStep::Yield);
                 }
                 let finished = io.finished();
                 state.io_completions = Some(io);
                 if !finished {
-                    return Ok(Some(StepResult::IO));
+                    return Some(ProgramStep::IO);
                 }
-                Ok(None)
+                None
             }
             Err(prepare_error) => {
                 // FAIL may keep earlier base-table rows only when every
@@ -2417,17 +2471,13 @@ impl Program {
                          {abort_err}"
                     );
                 }
-                Err(prepare_error)
+                Some(ProgramStep::Error(prepare_error))
             }
         }
     }
 
     #[inline(never)]
-    fn periodic_checks(
-        &self,
-        state: &mut ProgramState,
-        pager: &Arc<Pager>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    fn periodic_checks(&self, state: &mut ProgramState, pager: &Arc<Pager>) -> Option<ProgramStep> {
         let progress_ops = self.connection.progress_ops();
         state.check_mask = if progress_ops == 0 || progress_ops >= MAX_CHECK_MASK {
             MAX_CHECK_MASK
@@ -2435,7 +2485,7 @@ impl Program {
             progress_ops.next_power_of_two() - 1
         };
         if self.connection.is_closed() {
-            return Err(self.closed_during_step(pager));
+            return Some(ProgramStep::Error(self.closed_during_step(pager)));
         }
         // With no interrupt requested, no deadline and no progress handler
         // there is nothing to look at; the full test stays out of this
@@ -2445,7 +2495,7 @@ impl Program {
             && state.query_deadline.is_none()
             && progress_ops == 0;
         if quiet {
-            return Ok(None);
+            return None;
         }
         self.periodic_interrupt_checks(state, pager)
     }
@@ -2455,12 +2505,12 @@ impl Program {
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_mask + 1);
         if self.maybe_request_interrupt(state, pager.io.as_ref(), prev_steps) {
             return self.interrupted_during_step(state, pager);
         }
-        Ok(None)
+        None
     }
 
     #[cold]
@@ -2479,9 +2529,11 @@ impl Program {
         &self,
         state: &mut ProgramState,
         pager: &Arc<Pager>,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
-        self.abort(pager, None, state, true)?;
-        Ok(Some(StepResult::Interrupt))
+    ) -> Option<ProgramStep> {
+        Some(match self.abort(pager, None, state, true) {
+            Ok(()) => ProgramStep::Interrupt,
+            Err(err) => ProgramStep::Error(err.into()),
+        })
     }
 
     #[inline(never)]
@@ -2509,7 +2561,7 @@ impl Program {
         state: &mut ProgramState,
         io: IOCompletions,
         waker: Option<&Waker>,
-    ) -> Option<StepResult> {
+    ) -> Option<ProgramStep> {
         io.set_waker(waker);
         if io.is_explicit_yield() {
             // Yield: return control to the cooperative scheduler so
@@ -2517,12 +2569,12 @@ impl Program {
             // contended lock). Don't store in io_completions —
             // yields aren't pending I/O, so the instruction will
             // simply re-execute on the next step.
-            return Some(StepResult::Yield);
+            return Some(ProgramStep::Yield);
         }
         let finished = io.finished();
         state.io_completions = Some(io);
         if !finished {
-            return Some(StepResult::IO);
+            return Some(ProgramStep::IO);
         }
         None
     }
@@ -2537,9 +2589,9 @@ impl Program {
         state: &mut ProgramState,
         pager: &Arc<Pager>,
         err: LimboError,
-    ) -> Result<Option<StepResult>, Box<LimboError>> {
+    ) -> Option<ProgramStep> {
         match err {
-            LimboError::Busy => Ok(Some(StepResult::Busy)),
+            LimboError::Busy => Some(ProgramStep::Busy),
             LimboError::BusySnapshot
                 if self.connection.transaction_state.get() == TransactionState::None =>
             {
@@ -2547,20 +2599,20 @@ impl Program {
                 // because the snapshot will continue to be stale no matter how many times we retry.
                 // However, for auto-commits or BEGIN IMMEDIATE, failing to promote to write transaction means it was rolled
                 // back, so auto-retrying can be useful.
-                Ok(Some(StepResult::Busy))
+                Some(ProgramStep::Busy)
             }
             err if (matches!(err, LimboError::Constraint(_))
                 && self.resolve_type == ResolveType::Fail)
                 || matches!(err, LimboError::Raise(ResolveType::Fail, _)) =>
             {
                 state.pending_fail_prepare_error = Some(err);
-                Ok(None)
+                None
             }
             err => {
                 if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
                     tracing::error!("Abort failed during error handling: {abort_err}");
                 }
-                Err(err.into())
+                Some(ProgramStep::Error(err.into()))
             }
         }
     }
@@ -3971,6 +4023,43 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
 mod tests {
     use super::*;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    #[test]
+    fn program_step_conversion_preserves_error_allocation() {
+        let err = Box::new(LimboError::InternalError("test error".into()));
+        let original = std::ptr::from_ref(err.as_ref());
+        let result: Result<StepResult, Box<LimboError>> = ProgramStep::Error(err).into();
+        let returned = result.unwrap_err();
+        assert_eq!(std::ptr::from_ref(returned.as_ref()), original);
+        assert!(matches!(*returned, LimboError::InternalError(ref msg) if msg == "test error"));
+    }
+
+    #[test]
+    fn normal_step_preserves_execution_state_with_and_without_tracing() {
+        for trace in [false, true] {
+            let io = Arc::new(crate::MemoryIO::new());
+            let db =
+                crate::Database::open_file(io, ":memory:", Arc::new(crate::SqliteDialect)).unwrap();
+            let conn = db.connect().unwrap();
+            conn.set_vdbe_trace(trace);
+            let mut stmt = conn.prepare("SELECT 1 UNION ALL SELECT 2").unwrap();
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Init);
+            assert!(matches!(stmt.step().unwrap(), StepResult::Row));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Running);
+            assert!(matches!(stmt.step().unwrap(), StepResult::Row));
+            assert!(matches!(stmt.step().unwrap(), StepResult::Done));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Done);
+
+            let mut stmt = conn.prepare("SELECT abs(-9223372036854775808)").unwrap();
+            assert!(matches!(stmt.step(), Err(LimboError::IntegerOverflow)));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Failed);
+
+            conn.set_progress_handler(1, Some(Box::new(|| true)));
+            let mut stmt = conn.prepare("WITH RECURSIVE t(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM t WHERE x<1000) SELECT sum(x) FROM t").unwrap();
+            assert!(matches!(stmt.step().unwrap(), StepResult::Interrupt));
+            assert_eq!(stmt.execution_state(), ProgramExecutionState::Interrupted);
+        }
+    }
 
     #[test]
     fn active_opcode_helpers_initialize_defaults() {

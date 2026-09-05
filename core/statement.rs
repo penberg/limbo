@@ -24,6 +24,7 @@ use crate::{
             EXPLAIN_COLUMNS_TYPE, EXPLAIN_QUERY_PLAN_COLUMNS_TYPE,
             EXPLAIN_QUERY_PLAN_JSON_COLUMNS_TYPE,
         },
+        ProgramStep,
     },
     Connection, EqpFormat, LimboError, MvStore, Pager, QueryMode, Result, TransactionState, Value,
     EXPLAIN_COLUMNS, EXPLAIN_QUERY_PLAN_COLUMNS, EXPLAIN_QUERY_PLAN_JSON_COLUMNS,
@@ -571,14 +572,24 @@ impl Statement {
                 return Ok(result);
             }
         }
-        let res = self
-            .program
-            .step(&mut self.state, &self.pager, self.query_mode, waker);
-        if let Ok(StepResult::Row) = res {
-            self.busy = true;
-            self.has_returned_row = true;
-            return Ok(StepResult::Row);
-        }
+        let res = match self.query_mode {
+            QueryMode::Normal => {
+                match self
+                    .program
+                    .normal_step(&mut self.state, &self.pager, waker)
+                {
+                    ProgramStep::Row => {
+                        self.busy = true;
+                        self.has_returned_row = true;
+                        return Ok(StepResult::Row);
+                    }
+                    step => step.into(),
+                }
+            }
+            _ => self
+                .program
+                .step(&mut self.state, &self.pager, self.query_mode, waker),
+        };
         self.finish_step(res, waker)
     }
 
