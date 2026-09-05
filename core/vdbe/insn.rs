@@ -386,6 +386,57 @@ pub struct HashDistinctData {
 #[strum_discriminants(derive(VariantArray, EnumCount, FromRepr))]
 #[strum_discriminants(name(InsnVariants))]
 pub enum Insn {
+    /// Advance the cursor to the next row.
+    Next {
+        cursor_id: CursorID,
+        pc_if_next: BranchOffset,
+        /// True when this step is part of a full table scan (a loop over the
+        /// whole table with no index or rowid constraint). Only these steps
+        /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
+        /// which tags the opcode with P5 at codegen time.
+        fullscan: bool,
+        is_index: bool,
+    },
+
+    /// Emit a row of results.
+    ResultRow {
+        start_reg: usize, // P1
+        count: usize,     // P2
+    },
+
+    /// Read a column from the current row of the cursor.
+    Column {
+        cursor_id: CursorID,
+        column: usize,
+        dest: usize,
+        default: Option<Value>,
+    },
+
+    /// Read `defaults.len()` consecutive columns starting at `start_column` from the current row
+    /// of the cursor into consecutive registers starting at `dest`.
+    ColumnRange {
+        cursor_id: CursorID,
+        start_column: usize,
+        dest: usize,
+        // this can't be a SmallVec because it would make the enum too large.
+        defaults: Vec<Option<Value>>,
+    },
+
+    /// Read the rowid of the current row.
+    RowId {
+        cursor_id: CursorID,
+        dest: usize,
+    },
+
+    Prev {
+        cursor_id: CursorID,
+        pc_if_prev: BranchOffset,
+        /// See [Insn::Next::fullscan].
+        fullscan: bool,
+        /// See [Insn::Next::is_index].
+        is_index: bool,
+    },
+
     /// Initialize the program state and jump to the given PC.
     Init {
         target_pc: BranchOffset,
@@ -684,24 +735,6 @@ pub enum Insn {
         pc_if_empty: BranchOffset,
     },
 
-    /// Read a column from the current row of the cursor.
-    Column {
-        cursor_id: CursorID,
-        column: usize,
-        dest: usize,
-        default: Option<Value>,
-    },
-
-    /// Read `defaults.len()` consecutive columns starting at `start_column` from the current row
-    /// of the cursor into consecutive registers starting at `dest`.
-    ColumnRange {
-        cursor_id: CursorID,
-        start_column: usize,
-        dest: usize,
-        // this can't be a SmallVec because it would make the enum too large.
-        defaults: Vec<Option<Value>>,
-    },
-
     /// Jump to `target_pc` if the cursor's current record contains a field at
     /// the given column index.  Falls through when the record has fewer fields
     /// (a "short record" from before ALTER TABLE ADD COLUMN).
@@ -917,33 +950,6 @@ pub enum Insn {
         affinity_str: Option<String>,
     },
 
-    /// Emit a row of results.
-    ResultRow {
-        start_reg: usize, // P1
-        count: usize,     // P2
-    },
-
-    /// Advance the cursor to the next row.
-    Next {
-        cursor_id: CursorID,
-        pc_if_next: BranchOffset,
-        /// True when this step is part of a full table scan (a loop over the
-        /// whole table with no index or rowid constraint). Only these steps
-        /// count toward SQLITE_STMTSTATUS_FULLSCAN_STEP, matching SQLite,
-        /// which tags the opcode with P5 at codegen time.
-        fullscan: bool,
-        is_index: bool,
-    },
-
-    Prev {
-        cursor_id: CursorID,
-        pc_if_prev: BranchOffset,
-        /// See [Insn::Next::fullscan].
-        fullscan: bool,
-        /// See [Insn::Next::is_index].
-        is_index: bool,
-    },
-
     /// Halt the program.
     Halt {
         err_code: usize,
@@ -1065,11 +1071,6 @@ pub enum Insn {
         dest: usize,
     },
 
-    /// Read the rowid of the current row.
-    RowId {
-        cursor_id: CursorID,
-        dest: usize,
-    },
     /// Read the rowid of the current row from an index cursor.
     IdxRowId {
         cursor_id: CursorID,
