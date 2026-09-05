@@ -6036,10 +6036,7 @@ fn op_row_id_read(state: &mut ProgramState, cursor_id: usize, dest: usize) -> In
             state.registers[dest].set_null();
         }
         Some(Cursor::BTree(btree_cursor)) => {
-            if btree_cursor.get_null_flag() {
-                state.registers[dest].set_null();
-                return Ok(InsnFunctionStepResult::Step);
-            }
+            // rowid() answers None for a cursor in the null-row state.
             if let Some(rowid) = return_if_io!(btree_cursor.rowid()) {
                 state.registers[dest].set_int(rowid);
             } else {

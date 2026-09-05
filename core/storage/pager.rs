@@ -717,6 +717,14 @@ impl PageInner {
         self.read_u8(BTREE_PAGE_TYPE) > PageType::TableInterior as u8
     }
 
+    /// True for table pages (interior or leaf). A corrupt page type byte
+    /// answers false; the record reader reports it when it parses the cell.
+    #[inline(always)]
+    pub fn is_table(&self) -> bool {
+        let page_type = self.read_u8(BTREE_PAGE_TYPE);
+        page_type == PageType::TableLeaf as u8 || page_type == PageType::TableInterior as u8
+    }
+
     pub fn write_database_header(&self, header: &DatabaseHeader) {
         let buf = self.as_ptr();
         buf[0..DatabaseHeader::SIZE].copy_from_slice(bytemuck::bytes_of(header));
