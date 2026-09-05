@@ -512,8 +512,11 @@ impl PageInner {
             return None;
         }
         let cell_pointer = header + LEAF_PAGE_HEADER_SIZE_BYTES + cell_index * CELL_PTR_SIZE_BYTES;
-        let cell_offset =
-            u16::from_be_bytes([*buf.get(cell_pointer)?, *buf.get(cell_pointer + 1)?]) as usize;
+        let cell_offset = u16::from_be_bytes(
+            buf.get(cell_pointer..cell_pointer + CELL_PTR_SIZE_BYTES)?
+                .try_into()
+                .ok()?,
+        ) as usize;
         let (size, len) = read_varint(buf.get(cell_offset..)?).ok()?;
         let mut start = cell_offset + len;
         if is_table {
