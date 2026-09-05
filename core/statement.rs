@@ -1540,7 +1540,11 @@ impl Statement {
                             halt_completed = true;
                             break;
                         }
-                        Ok(vdbe::execute::InsnFunctionStepResult::IO(_)) => {
+                        Ok(vdbe::execute::InsnFunctionStepResult::IO) => {
+                            // halt() is re-entered until it finishes; the
+                            // IO loop runs once per attempt, as before the
+                            // completion was parked in the state.
+                            drop(self.state.take_suspended_io());
                             if let Err(e) = self.pager.io.step() {
                                 capture_reset_error(
                                     &mut reset_error,

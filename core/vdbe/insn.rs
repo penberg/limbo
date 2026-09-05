@@ -2130,28 +2130,6 @@ const fn get_insn_virtual_table() -> [InsnFunction; InsnVariants::COUNT] {
 
 const INSN_VTABLE: [InsnFunction; InsnVariants::COUNT] = get_insn_virtual_table();
 
-/// Dispatches one instruction.
-///
-/// The opcodes that are most likely to run in a loop are matched directly so LLVM can inline them
-/// into the dispatch loop.
-#[inline(always)]
-pub(crate) fn dispatch_insn(
-    program: &super::Program,
-    state: &mut super::ProgramState,
-    insn: &Insn,
-    pager: &std::sync::Arc<crate::Pager>,
-) -> execute::InsnResult {
-    match insn {
-        Insn::Next { .. } => execute::op_next(program, state, insn, pager),
-        Insn::ResultRow { .. } => execute::op_result_row(program, state, insn, pager),
-        Insn::Column { .. } => execute::op_column(program, state, insn, pager),
-        Insn::ColumnRange { .. } => execute::op_column_range(program, state, insn, pager),
-        Insn::RowId { .. } => execute::op_row_id(program, state, insn, pager),
-        Insn::Prev { .. } => execute::op_prev(program, state, insn, pager),
-        _ => insn.to_function()(program, state, insn, pager),
-    }
-}
-
 impl InsnVariants {
     // This function is used for testing
     #[allow(dead_code)]
