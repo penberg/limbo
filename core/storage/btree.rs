@@ -2383,87 +2383,85 @@ impl BTreeCursor {
         state: &mut LeafPageBinarySearchState,
     ) -> Result<ControlFlow<IOResult<SeekResult>>> {
         let iter_dir = seek_op.iteration_direction();
-        let min = state.min_cell_idx;
-        let max = state.max_cell_idx;
-        let target_cell_when_not_found = state.target_cell_when_not_found;
-        if min > max {
-            if let Some(nearest_matching_cell) = state.nearest_matching_cell {
-                self.stack.set_cell_index(nearest_matching_cell as i32);
+        // The compares need no I/O, so narrow the range on this leaf in one
+        // go; the caller persists the state once afterwards.
+        while state.min_cell_idx <= state.max_cell_idx {
+            let cur_cell_idx = (state.min_cell_idx + state.max_cell_idx) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
+            let cell_rowid = contents.cell_table_leaf_read_rowid(cur_cell_idx as usize)?;
+
+            let cmp = cell_rowid.cmp(&rowid);
+
+            let found = match seek_op {
+                SeekOp::GT => cmp.is_gt(),
+                SeekOp::GE { eq_only: true } => cmp.is_eq(),
+                SeekOp::GE { eq_only: false } => cmp.is_ge(),
+                SeekOp::LE { eq_only: true } => cmp.is_eq(),
+                SeekOp::LE { eq_only: false } => cmp.is_le(),
+                SeekOp::LT => cmp.is_lt(),
+            };
+
+            // rowids are unique, so we can return the rowid immediately
+            if found && seek_op.eq_only() {
+                self.stack.set_cell_index(cur_cell_idx as i32);
                 self.set_has_record(true);
                 return Ok(ControlFlow::Break(IOResult::Done(SeekResult::Found)));
+            }
+
+            if found {
+                state.nearest_matching_cell = Some(cur_cell_idx as usize);
+                match iter_dir {
+                    IterationDirection::Forwards => {
+                        state.max_cell_idx = cur_cell_idx - 1;
+                    }
+                    IterationDirection::Backwards => {
+                        state.min_cell_idx = cur_cell_idx + 1;
+                    }
+                }
+            } else if cmp.is_gt() {
+                if matches!(seek_op, SeekOp::GE { eq_only: true }) {
+                    state.target_cell_when_not_found =
+                        state.target_cell_when_not_found.min(cur_cell_idx as i32);
+                }
+                state.max_cell_idx = cur_cell_idx - 1;
+            } else if cmp.is_lt() {
+                if matches!(seek_op, SeekOp::LE { eq_only: true }) {
+                    state.target_cell_when_not_found =
+                        state.target_cell_when_not_found.max(cur_cell_idx as i32);
+                }
+                state.min_cell_idx = cur_cell_idx + 1;
             } else {
-                // if !eq_only - matching entry can exist in neighbour leaf page
-                // this can happen if key in the interiour page was deleted - but divider kept untouched
-                // in such case BTree can navigate to the leaf which no longer has matching key for seek_op
-                // in this case, caller must advance cursor if necessary
-                return Ok(ControlFlow::Break(IOResult::Done(if seek_op.eq_only() {
-                    let has_record = target_cell_when_not_found >= 0
-                        && target_cell_when_not_found < contents.cell_count() as i32;
-                    self.has_record = has_record;
-                    self.stack.set_cell_index(target_cell_when_not_found);
-                    SeekResult::NotFound
-                } else {
-                    // set cursor to the position where which would hold the op-boundary if it were present
-                    self.stack.set_cell_index(target_cell_when_not_found);
-                    SeekResult::TryAdvance
-                })));
-            };
+                match iter_dir {
+                    IterationDirection::Forwards => {
+                        state.min_cell_idx = cur_cell_idx + 1;
+                    }
+                    IterationDirection::Backwards => {
+                        state.max_cell_idx = cur_cell_idx - 1;
+                    }
+                }
+            }
         }
 
-        let cur_cell_idx = (min + max) >> 1; // rustc generates extra insns for (min+max)/2 due to them being isize. we know min&max are >=0 here.
-        let cell_rowid = contents.cell_table_leaf_read_rowid(cur_cell_idx as usize)?;
-
-        let cmp = cell_rowid.cmp(&rowid);
-
-        let found = match seek_op {
-            SeekOp::GT => cmp.is_gt(),
-            SeekOp::GE { eq_only: true } => cmp.is_eq(),
-            SeekOp::GE { eq_only: false } => cmp.is_ge(),
-            SeekOp::LE { eq_only: true } => cmp.is_eq(),
-            SeekOp::LE { eq_only: false } => cmp.is_le(),
-            SeekOp::LT => cmp.is_lt(),
-        };
-
-        // rowids are unique, so we can return the rowid immediately
-        if found && seek_op.eq_only() {
-            self.stack.set_cell_index(cur_cell_idx as i32);
+        let target_cell_when_not_found = state.target_cell_when_not_found;
+        if let Some(nearest_matching_cell) = state.nearest_matching_cell {
+            self.stack.set_cell_index(nearest_matching_cell as i32);
             self.set_has_record(true);
             return Ok(ControlFlow::Break(IOResult::Done(SeekResult::Found)));
         }
-
-        if found {
-            state.nearest_matching_cell = Some(cur_cell_idx as usize);
-            match iter_dir {
-                IterationDirection::Forwards => {
-                    state.max_cell_idx = cur_cell_idx - 1;
-                }
-                IterationDirection::Backwards => {
-                    state.min_cell_idx = cur_cell_idx + 1;
-                }
-            }
-        } else if cmp.is_gt() {
-            if matches!(seek_op, SeekOp::GE { eq_only: true }) {
-                state.target_cell_when_not_found =
-                    target_cell_when_not_found.min(cur_cell_idx as i32);
-            }
-            state.max_cell_idx = cur_cell_idx - 1;
-        } else if cmp.is_lt() {
-            if matches!(seek_op, SeekOp::LE { eq_only: true }) {
-                state.target_cell_when_not_found =
-                    target_cell_when_not_found.max(cur_cell_idx as i32);
-            }
-            state.min_cell_idx = cur_cell_idx + 1;
+        // if !eq_only - matching entry can exist in neighbour leaf page
+        // this can happen if key in the interiour page was deleted - but divider kept untouched
+        // in such case BTree can navigate to the leaf which no longer has matching key for seek_op
+        // in this case, caller must advance cursor if necessary
+        Ok(ControlFlow::Break(IOResult::Done(if seek_op.eq_only() {
+            let has_record = target_cell_when_not_found >= 0
+                && target_cell_when_not_found < contents.cell_count() as i32;
+            self.has_record = has_record;
+            self.stack.set_cell_index(target_cell_when_not_found);
+            SeekResult::NotFound
         } else {
-            match iter_dir {
-                IterationDirection::Forwards => {
-                    state.min_cell_idx = cur_cell_idx + 1;
-                }
-                IterationDirection::Backwards => {
-                    state.max_cell_idx = cur_cell_idx - 1;
-                }
-            }
-        }
-        Ok(ControlFlow::Continue(()))
+            // set cursor to the position where which would hold the op-boundary if it were present
+            self.stack.set_cell_index(target_cell_when_not_found);
+            SeekResult::TryAdvance
+        })))
     }
 
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
