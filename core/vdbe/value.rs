@@ -941,10 +941,19 @@ impl Value {
 
     // exec_if returns whether you should jump
     pub fn exec_if(&self, jump_if_null: bool, not: bool) -> bool {
-        Numeric::from_value(self)
-            .map(|v| v.to_bool())
-            .map(|jump| if not { !jump } else { jump })
-            .unwrap_or(jump_if_null)
+        // An integer, the usual operand, needs no numeric conversion.
+        let jump = match self {
+            Value::Numeric(Numeric::Integer(i)) => *i != 0,
+            other => match Numeric::from_value(other) {
+                Some(v) => v.to_bool(),
+                None => return jump_if_null,
+            },
+        };
+        if not {
+            !jump
+        } else {
+            jump
+        }
     }
 
     pub fn exec_cast(
