@@ -2326,6 +2326,18 @@ impl Program {
                         Insn::ColumnRange { .. } => step_inline!(execute::op_column_range),
                         Insn::RowId { .. } => step_inline!(execute::op_row_id),
                         Insn::Prev { .. } => step_inline!(execute::op_prev),
+                        Insn::Eq { .. } => step_inline!(execute::op_eq),
+                        Insn::Ne { .. } => step_inline!(execute::op_ne),
+                        Insn::Lt { .. } => step_inline!(execute::op_lt),
+                        Insn::Le { .. } => step_inline!(execute::op_le),
+                        Insn::Gt { .. } => step_inline!(execute::op_gt),
+                        Insn::Ge { .. } => step_inline!(execute::op_ge),
+                        Insn::If { .. } => step_inline!(execute::op_if),
+                        Insn::IfNot { .. } => step_inline!(execute::op_if_not),
+                        Insn::Goto { .. } => step_inline!(execute::op_goto),
+                        Insn::Gosub { .. } => step_inline!(execute::op_gosub),
+                        Insn::Return { .. } => step_inline!(execute::op_return),
+                        Insn::Integer { .. } => step_inline!(execute::op_integer),
                         _ => insn.to_function()(program, state, insn, pager),
                     };
                     // The two outcomes of every row are tested here, one compare
