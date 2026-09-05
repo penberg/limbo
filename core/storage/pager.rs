@@ -495,6 +495,47 @@ impl PageInner {
         Some(unsafe { std::mem::transmute::<&[u8], &'static [u8]>(payload) })
     }
 
+    /// Optimistic decoder: returns the bytes and index of a cell payload if it is entirely on the page.
+    ///
+    /// Returns `None` for interior pages, cells with overflow pages, and corrupt cells.
+    #[inline(always)]
+    pub fn decode_leaf_cell_without_overflow(
+        &self,
+        cell_index: usize,
+        limits: &PayloadLimits,
+    ) -> Option<(&'static [u8], usize)> {
+        let buf = self.as_ptr();
+        let header = self.offset();
+        let page_type = *buf.get(header + BTREE_PAGE_TYPE)?;
+        let is_table = page_type == PageType::TableLeaf as u8;
+        if !is_table && page_type != PageType::IndexLeaf as u8 {
+            return None;
+        }
+        let cell_pointer = header + LEAF_PAGE_HEADER_SIZE_BYTES + cell_index * CELL_PTR_SIZE_BYTES;
+        let cell_offset =
+            u16::from_be_bytes([*buf.get(cell_pointer)?, *buf.get(cell_pointer + 1)?]) as usize;
+        let (size, len) = read_varint(buf.get(cell_offset..)?).ok()?;
+        let mut start = cell_offset + len;
+        if is_table {
+            let (_, rowid_len) = read_varint(buf.get(start..)?).ok()?;
+            start += rowid_len;
+        }
+        let max_local = if is_table {
+            limits.max_local_table
+        } else {
+            limits.max_local_index
+        };
+        if size > max_local as u64 {
+            return None;
+        }
+        let payload = buf.get(start..start + size as usize)?;
+        // SAFETY: valid as long as page is alive
+        Some((
+            unsafe { std::mem::transmute::<&[u8], &'static [u8]>(payload) },
+            start,
+        ))
+    }
+
     /// Reads the two varints that start a table leaf cell: the payload size
     /// and the rowid. The payload starts right after them.
     #[inline(always)]

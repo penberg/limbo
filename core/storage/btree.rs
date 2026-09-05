@@ -6673,7 +6673,7 @@ impl CursorTrait for BTreeCursor {
 
     fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
         if self.needs_restore() {
-            return_if_io!(self.restore_context());
+            return restore_record_payload(self);
         }
         if self.null_flag || !self.has_record() {
             return Ok(IOResult::Done(None));
@@ -6695,27 +6695,33 @@ impl CursorTrait for BTreeCursor {
             .reusable_immutable_record
             .as_ref()
             .is_some_and(|record| !record.is_invalidated());
-        if !cached {
-            let page = self.stack.top_ref();
-            let contents = page.get_contents();
-            let cell_idx = self.stack.current_cell_index();
-            let (payload, payload_start, _payload_size, first_overflow_page) =
-                contents.cell_read_payload_at(cell_idx as usize, self.payload_limits)?;
-            if first_overflow_page.is_none() {
-                // The whole record sits on the pinned page: decode it there
-                // instead of copying it into the reusable record first, and
-                // note where it is for the next column read on this row.
-                // Both fit in 32 bits: the payload lies inside a page of at
-                // most 64 KiB.
-                self.noted_payload = NotedPayload {
-                    start: payload_start as u32,
-                    size: payload.len() as u32,
-                };
-                return Ok(IOResult::Done(Some(payload)));
-            }
+        if cached {
+            return Ok(IOResult::Done(
+                self.reusable_immutable_record
+                    .as_ref()
+                    .map(ImmutableRecord::get_payload),
+            ));
         }
-        let record = return_if_io!(self.record());
-        Ok(IOResult::Done(record.map(ImmutableRecord::get_payload)))
+        let contents = self.stack.top_ref().get_contents();
+        let cell_idx = self.stack.current_cell_index();
+        // Optimistically use a faster decoder that only handles leaf cells without overflow pages.
+        // If this fails, we'll degrade to the slower path.
+        if let Some((payload, start)) =
+            contents.decode_leaf_cell_without_overflow(cell_idx as usize, &self.payload_limits)
+        {
+            self.noted_payload = NotedPayload {
+                start: start as u32,
+                size: payload.len() as u32,
+            };
+            return Ok(IOResult::Done(Some(payload)));
+        }
+        return self.record_payload_general();
+
+        #[inline(never)]
+        fn restore_record_payload(cursor: &mut BTreeCursor) -> IOResultOr<Option<&[u8]>> {
+            return_if_io!(cursor.restore_context());
+            cursor.record_payload()
+        }
     }
 
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
@@ -7625,6 +7631,24 @@ impl CursorTrait for BTreeCursor {
 }
 
 impl BTreeCursor {
+    #[inline(never)]
+    fn record_payload_general(&mut self) -> IOResultOr<Option<&[u8]>> {
+        let page = self.stack.top_ref();
+        let contents = page.get_contents();
+        let cell_idx = self.stack.current_cell_index();
+        let (payload, payload_start, _payload_size, first_overflow_page) =
+            contents.cell_read_payload_at(cell_idx as usize, self.payload_limits)?;
+        if first_overflow_page.is_none() {
+            self.noted_payload = NotedPayload {
+                start: payload_start as u32,
+                size: payload.len() as u32,
+            };
+            return Ok(IOResult::Done(Some(payload)));
+        }
+        let record = return_if_io!(self.record());
+        Ok(IOResult::Done(record.map(ImmutableRecord::get_payload)))
+    }
+
     /// True when the next cell is on the same leaf page and no resumable
     /// state is pending, so advancing cannot yield and `next()` can skip
     /// its state machine. Every pending flag routes to the full path,
@@ -14291,6 +14315,66 @@ mod tests {
                 Some(6),
                 "next() after peer deletion of our row must land on the next-greater rowid"
             );
+        }
+
+        #[test]
+        fn record_payload_restores_after_peer_insert() {
+            for size in [16, 6000] {
+                let (pager, root_page, _db, _conn) = empty_btree();
+                let mut writer = make_registered_cursor(&pager, root_page, 1);
+                let mut reader = make_registered_cursor(&pager, root_page, 1);
+                let value = Value::Blob(crate::alloc::vec![b'x'; size]);
+                let expected =
+                    ImmutableRecord::from_registers(&[Register::Value(value.clone())], 1).unwrap();
+                insert_record(&mut writer, &pager, 5, value).unwrap();
+                run_until_done(|| reader.rewind(), pager.deref()).unwrap();
+
+                for rowid in [1, 2] {
+                    insert_record(&mut writer, &pager, rowid, Value::from_i64(rowid)).unwrap();
+                    assert!(reader.needs_restore());
+                    // The second read exercises the remembered location or overflow buffer.
+                    for _ in 0..2 {
+                        let payload = run_until_done(
+                            || {
+                                Ok(reader
+                                    .record_payload()?
+                                    .map(|payload| payload.map(<[u8]>::to_vec)))
+                            },
+                            pager.deref(),
+                        )
+                        .unwrap()
+                        .unwrap();
+                        assert_eq!(payload, expected.get_payload());
+                        assert!(!reader.needs_restore());
+                    }
+                }
+
+                insert_record(&mut writer, &pager, 3, Value::from_i64(3)).unwrap();
+                assert!(reader.needs_restore());
+                reader.set_null_flag(true);
+                let restored = run_until_done(
+                    || {
+                        Ok(reader
+                            .record_payload()?
+                            .map(|payload| payload.map(<[u8]>::to_vec)))
+                    },
+                    pager.deref(),
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(restored, expected.get_payload());
+                assert!(!reader.needs_restore());
+                assert!(!reader.get_null_flag());
+
+                reader.set_null_flag(true);
+                let missing = run_until_done(
+                    || Ok(reader.record_payload()?.map(|payload| payload.is_none())),
+                    pager.deref(),
+                )
+                .unwrap();
+                assert!(missing);
+                assert!(!reader.needs_restore());
+            }
         }
 
         #[test]
