@@ -2419,6 +2419,7 @@ impl Database {
             closed: AtomicBool::new(false),
             temp: crate::connection::TempDbContext::new(),
             attached_databases: RwLock::new(DatabaseCatalog::new()),
+            has_non_main_pagers: AtomicBool::new(false),
             query_only: AtomicBool::new(false),
             vdbe_trace: AtomicBool::new(false),
             dml_require_where: AtomicBool::new(false),
