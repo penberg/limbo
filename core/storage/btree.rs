@@ -731,6 +731,16 @@ pub trait CursorTrait: Any + Send + Sync {
     fn note_external_row_write(&mut self, _rowid: Option<i64>) {}
     /// Get the record of the entry the cursor is poiting to if any
     fn record(&mut self) -> IOResultOr<Option<&ImmutableRecord>>;
+    /// The serialized record of the entry the cursor points to, if any, for
+    /// decoding in place. A b-tree cursor hands out the bytes of the pinned
+    /// page when the cell has no overflow, so the caller must not move the
+    /// cursor while it holds the slice. Default: the bytes of `record`.
+    fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
+        Ok(match self.record()? {
+            IOResult::Done(record) => IOResult::Done(record.map(ImmutableRecord::get_payload)),
+            IOResult::IO(io) => IOResult::IO(io),
+        })
+    }
     /// Move the cursor based on the key and the type of operation (op).
     fn seek(&mut self, key: SeekKey<'_>, op: SeekOp) -> IOResultOr<SeekResult>;
     /// Seek using registers directly without serializing them into an ImmutableRecord first.
@@ -6610,6 +6620,33 @@ impl CursorTrait for BTreeCursor {
         };
 
         Ok(IOResult::Done(self.reusable_immutable_record.as_ref()))
+    }
+
+    fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
+        if self.needs_restore() {
+            return_if_io!(self.restore_context());
+        }
+        if !self.has_record() {
+            return Ok(IOResult::Done(None));
+        }
+        let cached = self
+            .reusable_immutable_record
+            .as_ref()
+            .is_some_and(|record| !record.is_invalidated());
+        if !cached {
+            let page = self.stack.top_ref();
+            let contents = page.get_contents();
+            let cell_idx = self.stack.current_cell_index();
+            let (payload, _payload_size, first_overflow_page) =
+                contents.cell_read_payload_ptr(cell_idx as usize, self.usable_space())?;
+            if first_overflow_page.is_none() {
+                // The whole record sits on the pinned page: decode it there
+                // instead of copying it into the reusable record first.
+                return Ok(IOResult::Done(Some(payload)));
+            }
+        }
+        let record = return_if_io!(self.record());
+        Ok(IOResult::Done(record.map(ImmutableRecord::get_payload)))
     }
 
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
