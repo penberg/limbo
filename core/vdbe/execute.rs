@@ -2083,12 +2083,17 @@ fn op_column_fetch(
     dest: usize,
     default: &Option<Value>,
 ) -> InsnResult {
-    let Some(Cursor::BTree(cursor)) = state
+    let cursor = match state
         .cursors
         .get_mut(cursor_id)
         .unwrap_or_else(|| panic!("cursor id {cursor_id} out of bounds"))
-    else {
-        return op_column_fetch_other(program, state, cursor_id, column, dest, default);
+    {
+        Some(Cursor::BTree(cursor)) => cursor,
+        Some(Cursor::Pseudo(pseudo)) => {
+            let content_reg = pseudo.content_reg();
+            return op_column_fetch_pseudo(state, content_reg, column, dest);
+        }
+        _ => return op_column_fetch_other(program, state, cursor_id, column, dest, default),
     };
     let Some(payload) = return_if_io!(cursor.record_payload()) else {
         // A null-row cursor, or one that is not positioned on a valid row
@@ -2103,6 +2108,48 @@ fn op_column_fetch(
             // The record has fewer columns than expected.
             apply_column_default(default, &mut state.registers[dest])?;
         }
+    }
+    Ok(InsnFunctionStepResult::Step)
+}
+
+/// Column for a pseudo cursor: decodes the record in its content register.
+fn op_column_fetch_pseudo(
+    state: &mut ProgramState,
+    content_reg: usize,
+    column: usize,
+    dest: usize,
+) -> InsnResult {
+    // The record is read while decoding into the destination register,
+    // so the two registers must be distinct.
+    let [content, dest_reg] = state
+        .registers
+        .get_disjoint_mut([content_reg, dest])
+        .map_err(|_| {
+            LimboError::InternalError(format!(
+                "Column: pseudo-cursor content register {content_reg} and destination register {dest} must be distinct"
+            ))
+        })?;
+    match content {
+        Register::Record(record) => {
+            // Decode straight into the register; going through an owned
+            // Value would allocate for every TEXT/BLOB column on every row.
+            let mut payload_iterator = record.iter()?;
+            match payload_iterator.nth_into_register(column, dest_reg) {
+                Some(result) => result?,
+                // A pseudo cursor is opened with num_fields matching the
+                // record built for it, so every emitted Column index is in
+                // range. NULL on a missing column matches the b-tree arm.
+                None => {
+                    turso_debug_assert!(
+                        false,
+                        "pseudo-cursor column out of range for record",
+                        { "column": column }
+                    );
+                    dest_reg.set_null();
+                }
+            }
+        }
+        _ => dest_reg.set_null(),
     }
     Ok(InsnFunctionStepResult::Step)
 }
@@ -2203,38 +2250,7 @@ fn op_column_fetch_other(
             let content_reg = crate::get_cursor!(state, cursor_id)
                 .as_pseudo_mut()
                 .content_reg();
-            // The record is read while decoding into the destination register,
-            // so the two registers must be distinct.
-            let [content, dest_reg] = state
-                .registers
-                .get_disjoint_mut([content_reg, dest])
-                .map_err(|_| {
-                    LimboError::InternalError(format!(
-                        "Column: pseudo-cursor content register {content_reg} and destination register {dest} must be distinct"
-                    ))
-                })?;
-            match content {
-                Register::Record(record) => {
-                    // Decode straight into the register; going through an owned
-                    // Value would allocate for every TEXT/BLOB column on every row.
-                    let mut payload_iterator = record.iter()?;
-                    match payload_iterator.nth_into_register(column, dest_reg) {
-                        Some(result) => result?,
-                        // A pseudo cursor is opened with num_fields matching the
-                        // record built for it, so every emitted Column index is in
-                        // range. NULL on a missing column matches the b-tree arm.
-                        None => {
-                            turso_debug_assert!(
-                                false,
-                                "pseudo-cursor column out of range for record",
-                                { "column": column }
-                            );
-                            dest_reg.set_null();
-                        }
-                    }
-                }
-                _ => dest_reg.set_null(),
-            }
+            return op_column_fetch_pseudo(state, content_reg, column, dest);
         }
         CursorType::IndexMethod(..) => {
             let cursor = state.cursors[cursor_id]
