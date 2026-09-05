@@ -1488,7 +1488,7 @@ pub fn op_vfilter(
         cursor.filter(*idx_num as i32, idx_str, *arg_count, args)?
     };
     // Increment filter_operations metric for virtual table filter
-    state.metrics.filter_operations = state.metrics.filter_operations.saturating_add(1);
+    state.metrics.filter_operations = state.metrics.filter_operations.wrapping_add(1);
     if !has_rows {
         state.pc = pc_if_empty.as_offset_int();
     } else {
@@ -2016,8 +2016,8 @@ fn op_column_impl(
                         }
                     }
                 }
-                state.metrics.btree_seeks = state.metrics.btree_seeks.saturating_add(1);
-                state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+                state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
+                state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
                 *state.active_op_state.column() = OpColumnState::GetColumn;
             }
             OpColumnState::GetColumn => {
@@ -3371,16 +3371,16 @@ pub fn op_next(
     if !is_empty {
         // Increment metrics for row read
         state.record_rows_read(1);
-        state.metrics.btree_next = state.metrics.btree_next.saturating_add(1);
-        state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+        state.metrics.btree_next = state.metrics.btree_next.wrapping_add(1);
+        state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         // Only steps codegen marked as part of a full table scan count as
         // fullscan steps, matching SQLITE_STMTSTATUS_FULLSCAN_STEP.
         if *fullscan {
-            state.metrics.fullscan_steps = state.metrics.fullscan_steps.saturating_add(1);
+            state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(1);
         }
         if let Some((_, cursor_type)) = program.cursor_ref.get(*cursor_id) {
             if cursor_type.is_index() {
-                state.metrics.index_steps = state.metrics.index_steps.saturating_add(1);
+                state.metrics.index_steps = state.metrics.index_steps.wrapping_add(1);
             }
         }
         state.pc = pc_if_next.as_offset_int();
@@ -3411,16 +3411,16 @@ pub fn op_prev(
     if !is_empty {
         // Increment metrics for row read
         state.record_rows_read(1);
-        state.metrics.btree_prev = state.metrics.btree_prev.saturating_add(1);
-        state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+        state.metrics.btree_prev = state.metrics.btree_prev.wrapping_add(1);
+        state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         // Only steps codegen marked as part of a full table scan count as
         // fullscan steps, matching SQLITE_STMTSTATUS_FULLSCAN_STEP.
         if *fullscan {
-            state.metrics.fullscan_steps = state.metrics.fullscan_steps.saturating_add(1);
+            state.metrics.fullscan_steps = state.metrics.fullscan_steps.wrapping_add(1);
         }
         if let Some((_, cursor_type)) = program.cursor_ref.get(*cursor_id) {
             if cursor_type.is_index() {
-                state.metrics.index_steps = state.metrics.index_steps.saturating_add(1);
+                state.metrics.index_steps = state.metrics.index_steps.wrapping_add(1);
             }
         }
         state.pc = pc_if_prev.as_offset_int();
@@ -6057,7 +6057,7 @@ pub fn op_seek_rowid(
     };
     // Increment btree_seeks metric for SeekRowid operation after cursor is dropped
     if did_seek {
-        state.metrics.btree_seeks = state.metrics.btree_seeks.saturating_add(1);
+        state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
     }
     state.pc = pc;
     Ok(InsnFunctionStepResult::Step)
@@ -6204,12 +6204,12 @@ pub fn op_seek(
         op,
     ) {
         Ok(SeekInternalResult::Found) => {
-            state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+            state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
             state.pc += 1;
             Ok(InsnFunctionStepResult::Step)
         }
         Ok(SeekInternalResult::NotFound) => {
-            state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+            state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
             state.pc = target_pc.as_offset_int();
             Ok(InsnFunctionStepResult::Step)
         }
@@ -6448,7 +6448,7 @@ pub fn seek_internal(
                         }
                     };
                     // Increment btree_seeks metric after seek operation and cursor is dropped
-                    state.metrics.btree_seeks = state.metrics.btree_seeks.saturating_add(1);
+                    state.metrics.btree_seeks = state.metrics.btree_seeks.wrapping_add(1);
                     let found = match seek_result {
                         SeekResult::Found => true,
                         SeekResult::NotFound => false,
@@ -8951,7 +8951,7 @@ pub fn op_sorter_sort(
     };
     // Increment metrics for sort operation after cursor is dropped
     if did_sort {
-        state.metrics.sort_operations = state.metrics.sort_operations.saturating_add(1);
+        state.metrics.sort_operations = state.metrics.sort_operations.wrapping_add(1);
     }
     state.metrics.search_count = state.metrics.search_count.saturating_sub(1);
     if is_empty {
@@ -8983,7 +8983,7 @@ pub fn op_sorter_next(
         cursor.has_more()
     };
     if has_more {
-        state.metrics.search_count = state.metrics.search_count.saturating_add(1);
+        state.metrics.search_count = state.metrics.search_count.wrapping_add(1);
         state.pc = pc_if_next.as_offset_int();
     } else {
         state.pc += 1;

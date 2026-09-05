@@ -1220,12 +1220,12 @@ impl ProgramState {
 
     #[inline]
     pub fn record_rows_read(&mut self, count: u64) {
-        self.metrics.rows_read = self.metrics.rows_read.saturating_add(count);
+        self.metrics.rows_read = self.metrics.rows_read.wrapping_add(count);
     }
 
     #[inline]
     pub fn record_rows_written(&mut self, count: u64) {
-        self.metrics.rows_written = self.metrics.rows_written.saturating_add(count);
+        self.metrics.rows_written = self.metrics.rows_written.wrapping_add(count);
     }
 
     pub(crate) fn metrics(&self) -> StatementMetrics {
@@ -1798,7 +1798,7 @@ impl Program {
             return Ok(StepResult::Interrupt);
         }
 
-        state.metrics.vm_steps = state.metrics.vm_steps.saturating_add(1);
+        state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
         let mut explain_state = state.explain_state.write();
 
@@ -1898,7 +1898,7 @@ impl Program {
             }
 
             // FIXME: do we need this?
-            state.metrics.vm_steps = state.metrics.vm_steps.saturating_add(1);
+            state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
             if state.pc as usize >= self.insns.len() {
                 return Ok(StepResult::Done);
@@ -2153,16 +2153,16 @@ impl Program {
                     state.pre_op_registers = Some(state.registers.clone());
                 }
                 // Always increment VM steps for every loop iteration
-                state.metrics.vm_steps = state.metrics.vm_steps.saturating_add(1);
+                state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
                 match insn::dispatch_insn(self, state, insn, pager) {
                     Ok(InsnFunctionStepResult::Step) => {
                         // Instruction completed, moving to next
-                        state.metrics.insn_executed = state.metrics.insn_executed.saturating_add(1);
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                     }
                     Ok(InsnFunctionStepResult::Done) => {
                         // Instruction completed execution
-                        state.metrics.insn_executed = state.metrics.insn_executed.saturating_add(1);
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                         state.auto_txn_cleanup = TxnCleanup::None;
                         return Ok(StepResult::Done);
                     }
@@ -2189,7 +2189,7 @@ impl Program {
                     }
                     Ok(InsnFunctionStepResult::Row) => {
                         // Instruction completed (ResultRow already incremented PC)
-                        state.metrics.insn_executed = state.metrics.insn_executed.saturating_add(1);
+                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
                         return Ok(StepResult::Row);
                     }
                     Err(boxed_err) => match *boxed_err {
