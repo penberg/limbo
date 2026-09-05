@@ -376,14 +376,23 @@ impl Register {
             Register::Value(Value::Numeric(float)) => {
                 *float = Numeric::Integer(val);
             }
-            Register::Value(other_value_kind) => {
-                *other_value_kind = Value::from_i64(val);
-            }
-            _ => {
-                *self = Register::Value(Value::from_i64(val));
+            _ => set_int_over_other(self, val),
+        };
+
+        // less frequent cases kept out of line to keep stack frames small
+        #[inline(never)]
+        fn set_int_over_other(register: &mut Register, val: i64) {
+            match register {
+                Register::Value(other_value_kind) => {
+                    *other_value_kind = Value::from_i64(val);
+                }
+                _ => {
+                    *register = Register::Value(Value::from_i64(val));
+                }
             }
         }
     }
+
     /// Set the value of the register to a floating point,
     /// reusing Register::Value(Value::Numeric(Numeric::Float(_))) if possible.
     #[inline(always)]
