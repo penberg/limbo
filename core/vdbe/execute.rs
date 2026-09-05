@@ -440,13 +440,7 @@ pub fn op_add(
         state.pc += 1;
         return Ok(InsnFunctionStepResult::Step);
     }
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_add(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_add)
 }
 
 pub fn op_subtract(
@@ -461,13 +455,7 @@ pub fn op_subtract(
         state.pc += 1;
         return Ok(InsnFunctionStepResult::Step);
     }
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_subtract(state.registers[*rhs].get_value()),
-    );
-    state.pc += 1;
-    Ok(InsnFunctionStepResult::Step)
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_subtract)
 }
 
 pub fn op_multiply(
@@ -482,11 +470,23 @@ pub fn op_multiply(
         state.pc += 1;
         return Ok(InsnFunctionStepResult::Step);
     }
-    state.registers[*dest].set_value(
-        state.registers[*lhs]
-            .get_value()
-            .exec_multiply(state.registers[*rhs].get_value()),
-    );
+    op_arithmetic_slow(state, *lhs, *rhs, *dest, Value::exec_multiply)
+}
+
+/// Add, Subtract and Multiply for every operand pair that is not two
+/// integers without overflow: affinity conversions, floats and NULLs.
+#[inline(never)]
+fn op_arithmetic_slow(
+    state: &mut ProgramState,
+    lhs: usize,
+    rhs: usize,
+    dest: usize,
+    exec: fn(&Value, &Value) -> Value,
+) -> InsnResult {
+    state.registers[dest].set_value(exec(
+        state.registers[lhs].get_value(),
+        state.registers[rhs].get_value(),
+    ));
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
@@ -969,98 +969,104 @@ pub fn op_comparison(
     insn: &Insn,
     _pager: &Arc<Pager>,
 ) -> InsnResult {
-    let (lhs, rhs, target_pc, flags, collation, op) = match insn {
+    let (lhs, rhs, target_pc, op) = match insn {
         Insn::Eq {
             lhs,
             rhs,
             target_pc,
-            flags,
-            collation,
-        } => (
-            *lhs,
-            *rhs,
-            *target_pc,
-            *flags,
-            collation.unwrap_or_default(),
-            ComparisonOp::Eq,
-        ),
+            ..
+        } => (*lhs, *rhs, *target_pc, ComparisonOp::Eq),
         Insn::Ne {
             lhs,
             rhs,
             target_pc,
-            flags,
-            collation,
-        } => (
-            *lhs,
-            *rhs,
-            *target_pc,
-            *flags,
-            collation.unwrap_or_default(),
-            ComparisonOp::Ne,
-        ),
+            ..
+        } => (*lhs, *rhs, *target_pc, ComparisonOp::Ne),
         Insn::Lt {
             lhs,
             rhs,
             target_pc,
-            flags,
-            collation,
-        } => (
-            *lhs,
-            *rhs,
-            *target_pc,
-            *flags,
-            collation.unwrap_or_default(),
-            ComparisonOp::Lt,
-        ),
+            ..
+        } => (*lhs, *rhs, *target_pc, ComparisonOp::Lt),
         Insn::Le {
             lhs,
             rhs,
             target_pc,
-            flags,
-            collation,
-        } => (
-            *lhs,
-            *rhs,
-            *target_pc,
-            *flags,
-            collation.unwrap_or_default(),
-            ComparisonOp::Le,
-        ),
+            ..
+        } => (*lhs, *rhs, *target_pc, ComparisonOp::Le),
         Insn::Gt {
             lhs,
             rhs,
             target_pc,
-            flags,
-            collation,
-        } => (
-            *lhs,
-            *rhs,
-            *target_pc,
-            *flags,
-            collation.unwrap_or_default(),
-            ComparisonOp::Gt,
-        ),
+            ..
+        } => (*lhs, *rhs, *target_pc, ComparisonOp::Gt),
         Insn::Ge {
             lhs,
             rhs,
             target_pc,
-            flags,
-            collation,
-        } => (
-            *lhs,
-            *rhs,
-            *target_pc,
-            *flags,
-            collation.unwrap_or_default(),
-            ComparisonOp::Ge,
-        ),
+            ..
+        } => (*lhs, *rhs, *target_pc, ComparisonOp::Ge),
         _ => unreachable!("unexpected Insn {:?}", insn),
     };
-
-    if !target_pc.is_offset() {
+    let crate::vdbe::BranchOffset::Offset(target_pc) = target_pc else {
         crate::bail_corrupt_error!("Unresolved label: {target_pc:?}");
-    }
+    };
 
+    // Two integers compare directly: no NULL handling, affinity or collation.
+    if let (
+        Register::Value(Value::Numeric(Numeric::Integer(l))),
+        Register::Value(Value::Numeric(Numeric::Integer(r))),
+    ) = (&state.registers[lhs], &state.registers[rhs])
+    {
+        let should_jump = match op {
+            ComparisonOp::Eq => l == r,
+            ComparisonOp::Ne => l != r,
+            ComparisonOp::Lt => l < r,
+            ComparisonOp::Le => l <= r,
+            ComparisonOp::Gt => l > r,
+            ComparisonOp::Ge => l >= r,
+        };
+        state.pc = if should_jump { target_pc } else { state.pc + 1 };
+        return Ok(InsnFunctionStepResult::Step);
+    }
+    let (flags, collation) = match insn {
+        Insn::Eq {
+            flags, collation, ..
+        }
+        | Insn::Ne {
+            flags, collation, ..
+        }
+        | Insn::Lt {
+            flags, collation, ..
+        }
+        | Insn::Le {
+            flags, collation, ..
+        }
+        | Insn::Gt {
+            flags, collation, ..
+        }
+        | Insn::Ge {
+            flags, collation, ..
+        } => (*flags, collation.unwrap_or_default()),
+        _ => unreachable!("unexpected Insn {:?}", insn),
+    };
+    op_comparison_slow(program, state, lhs, rhs, target_pc, flags, collation, op)
+}
+
+/// The comparison opcodes for every operand pair that is not two integers:
+/// NULLs, affinity conversions, text collations and array comparison.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn op_comparison_slow(
+    program: &Program,
+    state: &mut ProgramState,
+    lhs: usize,
+    rhs: usize,
+    target_pc: crate::vdbe::InsnReference,
+    flags: crate::vdbe::insn::CmpInsFlags,
+    collation: CollationSeq,
+    op: ComparisonOp,
+) -> InsnResult {
     let null_eq = flags.has_nulleq();
     let jump_if_null = flags.has_jump_if_null();
     let affinity = flags.get_affinity();
@@ -1071,7 +1077,7 @@ pub fn op_comparison(
     macro_rules! take_jump_if {
         ($should_take_jump:expr) => {
             if $should_take_jump {
-                state.pc = target_pc.as_offset_int();
+                state.pc = target_pc;
             } else {
                 state.pc += 1;
             }
@@ -1094,18 +1100,6 @@ pub fn op_comparison(
             };
             take_jump_if!(should_jump);
         }
-        (Value::Numeric(Numeric::Integer(l)), Value::Numeric(Numeric::Integer(r))) => {
-            // Two integers compare directly: no affinity, no collation.
-            let should_jump = match op {
-                ComparisonOp::Eq => l == r,
-                ComparisonOp::Ne => l != r,
-                ComparisonOp::Lt => l < r,
-                ComparisonOp::Le => l <= r,
-                ComparisonOp::Gt => l > r,
-                ComparisonOp::Ge => l >= r,
-            };
-            take_jump_if!(should_jump);
-        }
         (Value::Blob(lb), Value::Blob(rb)) if flags.has_array_cmp() => {
             // Element-wise array comparison
             if let Ok(ord) = compare_arrays(lb, rb) {
@@ -1117,12 +1111,7 @@ pub fn op_comparison(
                     ComparisonOp::Gt => ord.is_gt(),
                     ComparisonOp::Ge => ord.is_ge(),
                 };
-                if should_jump {
-                    state.pc = target_pc.as_offset_int();
-                } else {
-                    state.pc += 1;
-                }
-                return Ok(InsnFunctionStepResult::Step);
+                take_jump_if!(should_jump);
             }
         }
         (_, _) => {}
