@@ -12134,6 +12134,7 @@ pub fn op_yield(
 
 pub struct OpInsertState {
     pub sub_state: OpInsertSubState,
+    pub has_dependent_views: bool,
     pub old_record: Option<(i64, crate::alloc::Vec<Value>)>,
     /// Set by the NoopCheck sub-state to indicate the row already has the exact
     /// same payload, so the physical write can be skipped.
@@ -12194,6 +12195,7 @@ pub fn op_insert(
                         .get_dependent_materialized_views(table_name)
                         .is_empty()
                 };
+                state.active_op_state.insert().has_dependent_views = has_dependent_views;
                 // If there are no dependent views, we don't need to capture the old record.
                 // We also don't need to do it if the rowid of the UPDATEd row was changed, because
                 // op_delete already captured the deletion for IVM, and this insert only needs to
@@ -12235,12 +12237,7 @@ pub fn op_insert(
                 )? {
                     return Ok(InsnFunctionStepResult::IO(io));
                 }
-                let has_dependent_views = {
-                    let schema = program.connection.schema.read();
-                    !schema
-                        .get_dependent_materialized_views(table_name)
-                        .is_empty()
-                };
+                let has_dependent_views = state.active_op_state.insert().has_dependent_views;
                 let needs_capture =
                     has_dependent_views && !flag.has(InsertFlags::UPDATE_ROWID_CHANGE);
                 if needs_capture {
@@ -12309,19 +12306,14 @@ pub fn op_insert(
                 // The noop check is fundamentally incompatible with the MVCC
                 // Delete+Insert update pattern.
                 state.active_op_state.insert().is_noop_update = false;
-                let is_mvcc = {
-                    let cursor_ref = get_cursor!(state, *cursor_id);
-                    cursor_ref.as_btree_mut().is_mvcc()
-                };
-                let has_rowid = {
-                    let cursor = get_cursor!(state, *cursor_id);
-                    cursor.as_btree_mut().has_rowid()
-                };
-                if !is_mvcc
-                    && has_rowid
-                    && flag.has(InsertFlags::SKIP_LAST_ROWID)
+                let may_be_noop_update = flag.has(InsertFlags::SKIP_LAST_ROWID)
                     && !flag.has(InsertFlags::UPDATE_ROWID_CHANGE)
-                {
+                    && {
+                        let cursor = get_cursor!(state, *cursor_id);
+                        let cursor = cursor.as_btree_mut();
+                        !cursor.is_mvcc() && cursor.has_rowid()
+                    };
+                if may_be_noop_update {
                     let key = match &state.registers[*key_reg].get_value() {
                         Value::Numeric(Numeric::Integer(i)) => *i,
                         _ => unreachable!("expected integer key"),
@@ -12407,21 +12399,18 @@ pub fn op_insert(
                     cursor.has_rowid()
                 };
                 if has_rowid {
-                    let maybe_rowid = {
-                        let cursor = state.get_cursor(*cursor_id);
-                        let cursor = cursor.as_btree_mut();
-                        return_if_io!(cursor.rowid())
-                    };
-                    if let Some(rowid) = maybe_rowid {
-                        if !flag.has(InsertFlags::SKIP_LAST_ROWID) {
-                            program.connection.update_last_rowid(rowid);
-                        }
-                        if !flag.has(InsertFlags::SKIP_ALL_CHANGE_COUNTS) {
-                            if flag.has(InsertFlags::SKIP_STATEMENT_CHANGE_COUNT) {
-                                state.record_total_change();
-                            } else {
-                                state.record_statement_change();
-                            }
+                    if !flag.has(InsertFlags::SKIP_LAST_ROWID) {
+                        let rowid = match &state.registers[*key_reg].get_value() {
+                            Value::Numeric(Numeric::Integer(i)) => *i,
+                            _ => unreachable!("expected integer key"),
+                        };
+                        program.connection.update_last_rowid(rowid);
+                    }
+                    if !flag.has(InsertFlags::SKIP_ALL_CHANGE_COUNTS) {
+                        if flag.has(InsertFlags::SKIP_STATEMENT_CHANGE_COUNT) {
+                            state.record_total_change();
+                        } else {
+                            state.record_statement_change();
                         }
                     }
                 } else if !flag.has(InsertFlags::SKIP_ALL_CHANGE_COUNTS) {
@@ -12431,9 +12420,7 @@ pub fn op_insert(
                         state.record_statement_change();
                     }
                 }
-                let schema = program.connection.schema.read();
-                let dependent_views = schema.get_dependent_materialized_views(table_name);
-                if !dependent_views.is_empty() {
+                if state.active_op_state.insert().has_dependent_views {
                     if !has_rowid {
                         return Err(LimboError::ParseError(
                             "WITHOUT ROWID tables with dependent materialized views are not supported"

@@ -707,6 +707,7 @@ impl ActiveOpStateSlot {
         OpInsertState,
         OpInsertState {
             sub_state: OpInsertSubState::MaybeCaptureRecord,
+            has_dependent_views: false,
             old_record: None,
             is_noop_update: false,
         }
@@ -3813,6 +3814,7 @@ mod tests {
 
         *state.active_op_state.insert() = OpInsertState {
             sub_state: OpInsertSubState::Seek,
+            has_dependent_views: false,
             old_record: None,
             is_noop_update: false,
         };
