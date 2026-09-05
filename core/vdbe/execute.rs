@@ -7665,6 +7665,10 @@ fn update_agg_payload(
     Ok(())
 }
 
+/// Max limit of aggregate Vecs we keep around to reuse their allocations. This is a very naive
+/// strategy, but it works well for now.
+const SPARE_AGG_PAYLOADS: usize = 8;
+
 /// Convert the intermediate aggregate state in `payload` into the final result value.
 ///
 /// This finalization logic is shared between both aggregation strategies:
@@ -8925,7 +8929,10 @@ fn op_agg_step_slow(program: &Program, state: &mut ProgramState, data: &AggStepD
             },
             _ => {
                 // Built-in aggregates use flat payload
-                let mut payload = crate::alloc::vec![];
+                let mut payload = state
+                    .spare_agg_payloads
+                    .pop()
+                    .unwrap_or_else(|| crate::alloc::vec![]);
                 init_agg_payload(func, &mut payload)?;
                 Register::Aggregate(AggContext::Builtin(payload))
             }
@@ -9077,6 +9084,18 @@ pub fn op_agg_final(
                     finalize_agg_payload(func, payload)?
                 }
             };
+            if acc_reg == dest_reg {
+                // The result will replace the allocator, so we hold on to the allocated Vec so that
+                // another group can reuse the allocation.
+                let accumulator =
+                    std::mem::replace(&mut state.registers[acc_reg], Register::Value(Value::Null));
+                if let Register::Aggregate(AggContext::Builtin(mut payload)) = accumulator {
+                    if state.spare_agg_payloads.len() < SPARE_AGG_PAYLOADS {
+                        payload.clear();
+                        state.spare_agg_payloads.push(payload);
+                    }
+                }
+            }
             state.registers[dest_reg].set_value(value);
         }
         Register::Value(Value::Null) => {

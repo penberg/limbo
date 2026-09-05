@@ -976,6 +976,8 @@ pub struct ProgramState {
     pub(crate) subprogram_stmt_cache: HashMap<usize, Box<Statement>>,
     /// RowSet objects stored by register index
     rowsets: HashMap<usize, RowSet>,
+    // Cache of unused allocated Vecs
+    pub(crate) spare_agg_payloads: Vec<crate::alloc::Vec<Value>>,
     /// Bloom filters stored by cursor ID for probabilistic set membership testing
     /// Used to avoid unnecessary seeks on ephemeral indexes and hash tables
     pub(crate) bloom_filters: HashMap<usize, BloomFilter>,
@@ -1068,6 +1070,7 @@ impl ProgramState {
             fk_deferred_violations_when_stmt_started: AtomicIsize::new(0),
             fk_immediate_violations_during_stmt: AtomicIsize::new(0),
             rowsets: HashMap::default(),
+            spare_agg_payloads: Vec::new(),
             bloom_filters: HashMap::default(),
             hash_tables: HashMap::default(),
             ephemeral_temp_files: HashMap::default(),
