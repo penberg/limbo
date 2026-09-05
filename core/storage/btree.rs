@@ -6046,17 +6046,24 @@ impl BTreeCursor {
         Ok(())
     }
 
+    #[inline]
     fn get_immutable_record_or_create(&mut self) -> Result<Option<&mut ImmutableRecord>> {
-        let reusable_immutable_record = &mut self.reusable_immutable_record;
-        if reusable_immutable_record.is_none() {
-            let page_size = self.pager.get_page_size_unchecked().get();
-            let record = crate::with_btree_allocation_site!(
-                RecordPayload,
-                ImmutableRecord::new(page_size as usize)
-            )?;
-            reusable_immutable_record.replace(record);
+        if self.reusable_immutable_record.is_none() {
+            self.allocate_reusable_record()?;
         }
-        Ok(reusable_immutable_record.as_mut())
+        Ok(self.reusable_immutable_record.as_mut())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn allocate_reusable_record(&mut self) -> Result<()> {
+        let page_size = self.pager.get_page_size_unchecked().get();
+        let record = crate::with_btree_allocation_site!(
+            RecordPayload,
+            ImmutableRecord::new(page_size as usize)
+        )?;
+        self.reusable_immutable_record.replace(record);
+        Ok(())
     }
 
     fn get_immutable_record(&self) -> Option<&ImmutableRecord> {
@@ -6570,17 +6577,11 @@ impl CursorTrait for BTreeCursor {
         if let Some(next_page) = first_overflow_page {
             return_if_io!(self.process_overflow_read(payload, next_page, payload_size))
         } else {
-            self.get_immutable_record_or_create()?
-                .as_mut()
-                .unwrap()
-                .invalidate();
-            crate::with_btree_allocation_site!(
-                RecordPayload,
-                self.get_immutable_record_or_create()?
-                    .as_mut()
-                    .unwrap()
-                    .start_serialization(payload)
-            )?;
+            let record = self
+                .get_immutable_record_or_create()?
+                .expect("record was allocated above");
+            record.invalidate();
+            crate::with_btree_allocation_site!(RecordPayload, record.start_serialization(payload))?;
         };
 
         Ok(IOResult::Done(self.reusable_immutable_record.as_ref()))
