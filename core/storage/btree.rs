@@ -839,12 +839,12 @@ pub struct BTreeCursor {
     stack: PageStack,
     /// Reusable immutable record, used to allow better allocation strategy.
     reusable_immutable_record: Option<ImmutableRecord>,
-    /// Where the payload of the table leaf cell under the cursor starts and
-    /// how big it is, noted by the rowid read so that a column read on the
-    /// same row does not parse the cell again (SQLite keeps the same in
-    /// BtCursor.info). Cleared wherever the reusable record is invalidated
-    /// and before every write through the cursor, because it holds an
-    /// offset into the page.
+    /// Where the payload of the cell under the cursor starts and how big it
+    /// is, noted by the rowid read and by a column read of a payload without
+    /// overflow, so that the next column read on the same row does not parse
+    /// the cell again (SQLite keeps the same in BtCursor.info). Cleared
+    /// wherever the reusable record is invalidated and before every write
+    /// through the cursor, because it holds an offset into the page.
     noted_payload: NotedPayload,
     /// Information about the index key structure (sort order, collation, etc)
     pub index_info: Option<Arc<IndexInfo>>,
@@ -6680,11 +6680,18 @@ impl CursorTrait for BTreeCursor {
             let page = self.stack.top_ref();
             let contents = page.get_contents();
             let cell_idx = self.stack.current_cell_index();
-            let (payload, _payload_size, first_overflow_page) =
-                contents.cell_read_payload_ptr(cell_idx as usize, self.usable_space())?;
+            let (payload, payload_start, _payload_size, first_overflow_page) =
+                contents.cell_read_payload_at(cell_idx as usize, self.usable_space())?;
             if first_overflow_page.is_none() {
                 // The whole record sits on the pinned page: decode it there
-                // instead of copying it into the reusable record first.
+                // instead of copying it into the reusable record first, and
+                // note where it is for the next column read on this row.
+                // Both fit in 32 bits: the payload lies inside a page of at
+                // most 64 KiB.
+                self.noted_payload = NotedPayload {
+                    start: payload_start as u32,
+                    size: payload.len() as u32,
+                };
                 return Ok(IOResult::Done(Some(payload)));
             }
         }

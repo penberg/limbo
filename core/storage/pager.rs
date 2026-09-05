@@ -533,6 +533,19 @@ impl PageInner {
         idx: usize,
         usable_size: usize,
     ) -> crate::Result<(&'static [u8], u64, Option<u32>)> {
+        let (payload, _, payload_size, first_overflow) =
+            self.cell_read_payload_at(idx, usable_size)?;
+        Ok((payload, payload_size, first_overflow))
+    }
+
+    /// [`Self::cell_read_payload_ptr`] with the offset of the payload on
+    /// the page in second place.
+    #[inline(always)]
+    pub fn cell_read_payload_at(
+        &self,
+        idx: usize,
+        usable_size: usize,
+    ) -> crate::Result<(&'static [u8], usize, u64, Option<u32>)> {
         let buf = self.as_ptr();
         let cell_pointer_array_start = self.header_size();
         let cell_pointer = cell_pointer_array_start + (idx * CELL_PTR_SIZE_BYTES);
@@ -615,7 +628,7 @@ impl PageInner {
             (slice, None)
         };
 
-        Ok((payload_slice, payload_size, first_overflow))
+        Ok((payload_slice, payload_start, payload_size, first_overflow))
     }
 
     #[inline]
