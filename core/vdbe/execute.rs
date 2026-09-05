@@ -7148,9 +7148,14 @@ fn kbn_init_from_int(acc: &mut Value, i: i64, state: &mut SumAggState) {
 /// - JsonGroupObject/JsonbGroupObject: [Blob([])]
 /// - JsonGroupArray/JsonbGroupArray: [Blob([])]
 fn init_agg_payload(func: &AggFunc, payload: &mut crate::alloc::Vec<Value>) -> Result<()> {
+    // This initializes `payload` at exactly the right size.
     match func {
-        AggFunc::Count | AggFunc::Count0 => payload.push(Value::from_i64(0)),
+        AggFunc::Count | AggFunc::Count0 => {
+            payload.try_reserve_exact(1)?;
+            payload.push(Value::from_i64(0));
+        }
         AggFunc::Sum | AggFunc::Total => {
+            payload.try_reserve_exact(5)?;
             let acc = if matches!(func, AggFunc::Total) {
                 Value::from_f64(0.0)
             } else {
@@ -7163,12 +7168,17 @@ fn init_agg_payload(func: &AggFunc, payload: &mut crate::alloc::Vec<Value>) -> R
             payload.push(Value::from_i64(0));
         }
         AggFunc::Avg => {
+            payload.try_reserve_exact(3)?;
             payload.push(Value::from_f64(0.0));
             payload.push(Value::from_f64(0.0));
             payload.push(Value::from_i64(0));
         }
-        AggFunc::Min | AggFunc::Max => payload.push(Value::Null),
+        AggFunc::Min | AggFunc::Max => {
+            payload.try_reserve_exact(1)?;
+            payload.push(Value::Null);
+        }
         AggFunc::GroupConcat | AggFunc::StringAgg => {
+            payload.try_reserve_exact(4)?;
             // Use Null as sentinel to distinguish "no values yet" from an
             // accumulated empty string. SQLite normally remembers one
             // separator length and only materializes the per-separator queue
@@ -7178,38 +7188,42 @@ fn init_agg_payload(func: &AggFunc, payload: &mut crate::alloc::Vec<Value>) -> R
             payload.push(Value::from_i64(0));
             payload.push(Value::Blob(crate::alloc::vec![]));
         }
-        AggFunc::External(_) => {
-            mark_unlikely();
-            // External aggregates use ExternalAggState, not flat payload
-            return Err(LimboError::InternalError(
-                "External aggregate not supported in init_agg_payload".to_string(),
-            ));
-        }
         AggFunc::ArrayAgg => {
+            payload.try_reserve_exact(1)?;
             // payload[0] = element count (Integer), remaining slots = accumulated values.
             // We serialize to a record blob only in finalize, avoiding O(n²) re-serialization.
             payload.push(Value::from_i64(0));
         }
         AggFunc::Mode => {
+            payload.try_reserve_exact(2)?;
             // [0] = collation bits, [1] = count, [2..] = buffered values.
-            payload.push(Value::from_i64(0)); // collation (recorded at step time)
-            payload.push(Value::from_i64(0)); // count
+            payload.push(Value::from_i64(0));
+            payload.push(Value::from_i64(0));
         }
         AggFunc::PercentileCont | AggFunc::PercentileDisc => {
+            payload.try_reserve_exact(3)?;
             // [0] = collation bits, [1] = count, [2] = fraction, [3..] = buffered values.
-            payload.push(Value::from_i64(0)); // collation (recorded at step time)
-            payload.push(Value::from_i64(0)); // count
-            payload.push(Value::Null); // fraction (set on first step)
+            payload.push(Value::from_i64(0));
+            payload.push(Value::from_i64(0));
+            payload.push(Value::Null);
         }
         #[cfg(feature = "json")]
         AggFunc::JsonGroupObject | AggFunc::JsonbGroupObject => {
+            payload.try_reserve_exact(1)?;
             payload.push(Value::Blob(crate::alloc::vec![]));
         }
         #[cfg(feature = "json")]
         AggFunc::JsonGroupArray | AggFunc::JsonbGroupArray => {
+            payload.try_reserve_exact(1)?;
             payload.push(Value::Blob(crate::alloc::vec![]));
         }
-    };
+        AggFunc::External(_) => {
+            mark_unlikely();
+            return Err(LimboError::InternalError(
+                "External aggregate not supported in init_agg_payload".to_string(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -20085,6 +20099,38 @@ mod tests {
                     panic!("'{input}' should remain text, got {other:?}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_init_agg_payload_reserves_exact_capacity() {
+        let funcs = [
+            AggFunc::Count,
+            AggFunc::Count0,
+            AggFunc::Sum,
+            AggFunc::Total,
+            AggFunc::Avg,
+            AggFunc::Min,
+            AggFunc::Max,
+            AggFunc::GroupConcat,
+            AggFunc::StringAgg,
+            AggFunc::ArrayAgg,
+            AggFunc::Mode,
+            AggFunc::PercentileCont,
+            AggFunc::PercentileDisc,
+            #[cfg(feature = "json")]
+            AggFunc::JsonGroupObject,
+            #[cfg(feature = "json")]
+            AggFunc::JsonbGroupObject,
+            #[cfg(feature = "json")]
+            AggFunc::JsonGroupArray,
+            #[cfg(feature = "json")]
+            AggFunc::JsonbGroupArray,
+        ];
+        for func in funcs {
+            let mut payload = crate::alloc::vec![];
+            init_agg_payload(&func, &mut payload).unwrap();
+            assert_eq!(payload.capacity(), payload.len(), "{func:?}");
         }
     }
 
