@@ -2158,211 +2158,325 @@ impl Program {
         // instruction completed its IO inline; the inner loop dispatches
         // instructions without re-inspecting the completion slot every time.
         'io_check: loop {
-            if let Some(io) = &state.io_completions {
-                if !io.finished() {
-                    io.set_waker(waker);
-                    return Ok(StepResult::IO);
+            if state.io_completions.is_some() {
+                if let Some(result) = self.finish_pending_io(state, pager, waker)? {
+                    return Ok(result);
                 }
-                if let Some(err) = io.get_error() {
-                    if pager.is_checkpointing() {
-                        // Wrap IO errors that occurred during checkpointing in CheckpointFailed error,
-                        // so that abort() knows not to try to rollback the transaction, because the transaction
-                        // is already durable in the WAL and hence committed.
-                        // This also lets the simulator know that it should shadow the results of the query because
-                        // the write itself succeeded.
-                        let checkpoint_err = LimboError::CheckpointFailed(err.to_string());
-                        tracing::error!("Checkpoint failed: {checkpoint_err}");
-                        if let Err(abort_err) =
-                            self.abort(pager, Some(&checkpoint_err), state, true)
-                        {
-                            tracing::error!(
-                                "Abort also failed during checkpoint error handling: {abort_err}"
-                            );
-                        }
-                        pager.cleanup_after_checkpoint_failure();
-                        return Err(checkpoint_err.into());
-                    }
-                    let err = err.into();
-                    if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
-                        tracing::error!("Abort failed during error handling: {abort_err}");
-                    }
-                    return Err(err.into());
-                }
-                state.io_completions = None;
             }
-            // A trigger can return FAIL before the parent program reaches
-            // Halt. FAIL keeps changes made by earlier rows, so their
-            // index-method writes must finish before abort() releases the
-            // statement savepoint and commits those partial changes. The
-            // error is stored by the dispatch loop below, which then comes
-            // back here, and by the IO arm of this block on resume.
             if state.pending_fail_prepare_error.is_some() {
-                let fail_error = state
-                    .pending_fail_prepare_error
-                    .take()
-                    .expect("checked is_some above");
-                match execute::index_method_stage_statement_all(state) {
-                    Ok(IOResult::Done(())) => {
-                        if let Err(abort_err) = self.abort(pager, Some(&fail_error), state, true) {
-                            tracing::error!(
-                                "Abort failed after preparing FAIL index methods: {abort_err}"
-                            );
-                        }
-                        return Err(fail_error.into());
-                    }
-                    Ok(IOResult::IO(io)) => {
-                        state.pending_fail_prepare_error = Some(fail_error);
-                        io.set_waker(waker);
-                        if io.is_explicit_yield() {
-                            return Ok(StepResult::Yield);
-                        }
-                        let finished = io.finished();
-                        state.io_completions = Some(io);
-                        if !finished {
-                            return Ok(StepResult::IO);
-                        }
-                        continue 'io_check;
-                    }
-                    Err(prepare_error) => {
-                        // FAIL may keep earlier base-table rows only when every
-                        // matching index-method write was staged successfully.
-                        // Once preparation fails, committing those rows would
-                        // leave the table and index out of sync, so roll back the
-                        // whole transaction while returning the real preparation
-                        // error to the caller.
-                        let rollback_error =
-                            LimboError::Raise(ResolveType::Rollback, prepare_error.to_string());
-                        if let Err(abort_err) =
-                            self.abort(pager, Some(&rollback_error), state, true)
-                        {
-                            tracing::error!(
-                                "Abort also failed after FAIL index-method preparation: \
-                                 {abort_err}"
-                            );
-                        }
-                        return Err(prepare_error);
-                    }
+                match self.prepare_pending_fail(state, pager, waker)? {
+                    Some(result) => return Ok(result),
+                    None => continue 'io_check,
                 }
             }
             loop {
-                // Closed/interrupt/deadline/progress checks run once every
-                // CHECK_INTERVAL instructions instead of on each one (SQLite
-                // similarly only checks at jump opcodes). vm_steps persists
-                // across step calls, so the cadence spans the whole statement;
-                // callers regain control at every returned row regardless.
-                // The interval must stay a power of two so this gate is a
-                // mask test, never a division, in the interpreter hot loop.
-                // The gate mask lives in ProgramState and is re-derived from the
-                // progress handler's interval only when the gate fires, so the
-                // steady-state cost is one mask test with no atomics. A handler
-                // with interval N < 64 narrows the mask at the next firing (a
-                // one-time lag of at most CHECK_INTERVAL instructions; the
-                // cadence is approximate by contract).
-                const CHECK_INTERVAL: u64 = 64;
-                const _: () = assert!(CHECK_INTERVAL.is_power_of_two());
                 if state.metrics.vm_steps & state.check_mask == 0 {
-                    let progress_ops = self.connection.progress_ops();
-                    state.check_mask = if progress_ops == 0 || progress_ops >= CHECK_INTERVAL {
-                        CHECK_INTERVAL - 1
-                    } else {
-                        progress_ops.next_power_of_two() - 1
-                    };
-                    if self.connection.is_closed() {
-                        // Connection is closed for whatever reason, rollback the transaction.
-                        let state = self.connection.get_tx_state();
-                        if let TransactionState::Write { .. } = state {
-                            pager.rollback_tx(&self.connection);
-                        }
-                        return Err(
-                            LimboError::InternalError("Connection closed".to_string()).into()
-                        );
-                    }
-                    let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_mask + 1);
-                    if self.maybe_request_interrupt(state, pager.io.as_ref(), prev_steps) {
-                        self.abort(pager, None, state, true)?;
-                        return Ok(StepResult::Interrupt);
+                    if let Some(result) = self.periodic_checks(state, pager)? {
+                        return Ok(result);
                     }
                 }
 
                 let (insn, _) = &insns[state.pc as usize];
                 if trace_insns {
-                    if enable_tracing {
-                        trace_insn(self, state.pc as InsnReference, insn);
-                        crate::stack::trace_remaining("program_step:opcode");
-                    }
-                    self.trace_registers(state, insn, vdbe_trace);
+                    self.trace_step(state, insn, enable_tracing, vdbe_trace);
                 }
 
                 // Always increment VM steps for every loop iteration
                 state.metrics.vm_steps = state.metrics.vm_steps.wrapping_add(1);
 
-                match insn::dispatch_insn(self, state, insn, pager) {
-                    Ok(InsnFunctionStepResult::Step) => {
-                        // Instruction completed, moving to next
-                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                    }
-                    Ok(InsnFunctionStepResult::Done) => {
-                        // Instruction completed execution
-                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                        state.auto_txn_cleanup = TxnCleanup::None;
-                        return Ok(StepResult::Done);
-                    }
-                    Ok(InsnFunctionStepResult::IO(io)) => {
-                        // Instruction not complete - waiting for I/O, will resume at same PC
-                        io.set_waker(waker);
-                        let is_yield = io.is_explicit_yield();
-                        if is_yield {
-                            // Yield: return control to the cooperative scheduler so
-                            // other connections can make progress (e.g. release a
-                            // contended lock). Don't store in io_completions —
-                            // yields aren't pending I/O, so the instruction will
-                            // simply re-execute on the next step.
-                            return Ok(StepResult::Yield);
-                        }
-                        let finished = io.finished();
-                        state.io_completions = Some(io);
-                        if !finished {
-                            return Ok(StepResult::IO);
-                        }
-                        // IO already finished: loop back to the completion check so
-                        // errors are observed, then continue execution immediately.
-                        continue 'io_check;
-                    }
-                    Ok(InsnFunctionStepResult::Row) => {
-                        // Instruction completed (ResultRow already incremented PC)
-                        state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
-                        return Ok(StepResult::Row);
-                    }
-                    Err(boxed_err) => match *boxed_err {
-                        LimboError::Busy => {
-                            // Instruction blocked - will retry at same PC
-                            return Ok(StepResult::Busy);
-                        }
-                        LimboError::BusySnapshot
-                            if self.connection.transaction_state.get()
-                                == TransactionState::None =>
-                        {
-                            // For interactive transactions that are already in a read transaction, retrying BusySnapshot is pointless
-                            // because the snapshot will continue to be stale no matter how many times we retry.
-                            // However, for auto-commits or BEGIN IMMEDIATE, failing to promote to write transaction means it was rolled
-                            // back, so auto-retrying can be useful.
-                            return Ok(StepResult::Busy);
-                        }
-                        err if (matches!(err, LimboError::Constraint(_))
-                            && self.resolve_type == ResolveType::Fail)
-                            || matches!(err, LimboError::Raise(ResolveType::Fail, _)) =>
-                        {
-                            state.pending_fail_prepare_error = Some(err);
-                            continue 'io_check;
-                        }
-                        err => {
-                            if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
-                                tracing::error!("Abort failed during error handling: {abort_err}");
-                            }
-                            return Err(err.into());
-                        }
-                    },
+                let result = insn::dispatch_insn(self, state, insn, pager);
+                if let Ok(InsnFunctionStepResult::Step) = result {
+                    // Instruction completed, moving to next
+                    state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
+                    continue;
                 }
+                if let Ok(InsnFunctionStepResult::Row) = result {
+                    // Instruction completed (ResultRow already incremented PC)
+                    state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
+                    return Ok(StepResult::Row);
+                }
+                // Match less frequent results out of line
+                match dispatch(self, state, pager, waker, result)? {
+                    Some(result) => return Ok(result),
+                    None => continue 'io_check,
+                }
+            }
+        }
+
+        #[inline(never)]
+        fn dispatch(
+            program: &Program,
+            state: &mut ProgramState,
+            pager: &Arc<Pager>,
+            waker: Option<&Waker>,
+            result: execute::InsnResult,
+        ) -> Result<Option<StepResult>, Box<LimboError>> {
+            match result {
+                Ok(InsnFunctionStepResult::Done) => {
+                    // Instruction completed execution
+                    state.metrics.insn_executed = state.metrics.insn_executed.wrapping_add(1);
+                    state.auto_txn_cleanup = TxnCleanup::None;
+                    Ok(Some(StepResult::Done))
+                }
+                Ok(InsnFunctionStepResult::IO(io)) => Ok(program.park_on_io(state, io, waker)),
+                Err(boxed_err) => program.fail_step(state, pager, *boxed_err),
+                Ok(InsnFunctionStepResult::Step) | Ok(InsnFunctionStepResult::Row) => {
+                    unreachable!("the dispatch loop settles steps and rows itself")
+                }
+            }
+        }
+    }
+
+    /// The IO an instruction waited for, seen at the top of the dispatch
+    /// loop: still pending, failed, or finished. None means the loop goes
+    /// on with the instruction that waited.
+    #[inline(never)]
+    fn finish_pending_io(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+        waker: Option<&Waker>,
+    ) -> Result<Option<StepResult>, Box<LimboError>> {
+        let io = state
+            .io_completions
+            .as_ref()
+            .expect("the caller checked the completion slot");
+        if !io.finished() {
+            io.set_waker(waker);
+            return Ok(Some(StepResult::IO));
+        }
+        if let Some(err) = io.get_error() {
+            if pager.is_checkpointing() {
+                // Wrap IO errors that occurred during checkpointing in CheckpointFailed error,
+                // so that abort() knows not to try to rollback the transaction, because the transaction
+                // is already durable in the WAL and hence committed.
+                // This also lets the simulator know that it should shadow the results of the query because
+                // the write itself succeeded.
+                let checkpoint_err = LimboError::CheckpointFailed(err.to_string());
+                tracing::error!("Checkpoint failed: {checkpoint_err}");
+                if let Err(abort_err) = self.abort(pager, Some(&checkpoint_err), state, true) {
+                    tracing::error!(
+                        "Abort also failed during checkpoint error handling: {abort_err}"
+                    );
+                }
+                pager.cleanup_after_checkpoint_failure();
+                return Err(checkpoint_err.into());
+            }
+            let err = err.into();
+            if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
+                tracing::error!("Abort failed during error handling: {abort_err}");
+            }
+            return Err(err.into());
+        }
+        state.io_completions = None;
+        Ok(None)
+    }
+
+    /// A trigger returned FAIL before the parent program reached Halt. FAIL
+    /// keeps changes made by earlier rows, so their index-method writes must
+    /// finish before abort() releases the statement savepoint and commits
+    /// those partial changes. None means the staging finished its IO inline
+    /// and the loop starts over.
+    #[cold]
+    #[inline(never)]
+    fn prepare_pending_fail(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+        waker: Option<&Waker>,
+    ) -> Result<Option<StepResult>, Box<LimboError>> {
+        let fail_error = state
+            .pending_fail_prepare_error
+            .take()
+            .expect("the caller checked the pending error");
+        match execute::index_method_stage_statement_all(state) {
+            Ok(IOResult::Done(())) => {
+                if let Err(abort_err) = self.abort(pager, Some(&fail_error), state, true) {
+                    tracing::error!("Abort failed after preparing FAIL index methods: {abort_err}");
+                }
+                Err(fail_error.into())
+            }
+            Ok(IOResult::IO(io)) => {
+                state.pending_fail_prepare_error = Some(fail_error);
+                io.set_waker(waker);
+                if io.is_explicit_yield() {
+                    return Ok(Some(StepResult::Yield));
+                }
+                let finished = io.finished();
+                state.io_completions = Some(io);
+                if !finished {
+                    return Ok(Some(StepResult::IO));
+                }
+                Ok(None)
+            }
+            Err(prepare_error) => {
+                // FAIL may keep earlier base-table rows only when every
+                // matching index-method write was staged successfully.
+                // Once preparation fails, committing those rows would
+                // leave the table and index out of sync, so roll back the
+                // whole transaction while returning the real preparation
+                // error to the caller.
+                let rollback_error =
+                    LimboError::Raise(ResolveType::Rollback, prepare_error.to_string());
+                if let Err(abort_err) = self.abort(pager, Some(&rollback_error), state, true) {
+                    tracing::error!(
+                        "Abort also failed after FAIL index-method preparation: \
+                         {abort_err}"
+                    );
+                }
+                Err(prepare_error)
+            }
+        }
+    }
+
+    /// The checks the dispatch loop runs once every CHECK_INTERVAL
+    /// instructions: a closed connection, an interrupt, the deadline and the
+    /// progress handler. A handler with interval N < 64 narrows the mask at
+    /// the next firing (a one-time lag of at most CHECK_INTERVAL
+    /// instructions; the cadence is approximate by contract).
+    #[inline(never)]
+    fn periodic_checks(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+    ) -> Result<Option<StepResult>, Box<LimboError>> {
+        // The interval must stay a power of two so the gate in the loop is
+        // a mask test, never a division.
+        const CHECK_INTERVAL: u64 = 64;
+        const _: () = assert!(CHECK_INTERVAL.is_power_of_two());
+        let progress_ops = self.connection.progress_ops();
+        state.check_mask = if progress_ops == 0 || progress_ops >= CHECK_INTERVAL {
+            CHECK_INTERVAL - 1
+        } else {
+            progress_ops.next_power_of_two() - 1
+        };
+        if self.connection.is_closed() {
+            return Err(self.closed_during_step(pager));
+        }
+        // With no interrupt requested, no deadline and no progress handler
+        // there is nothing to look at; the full test stays out of this
+        // function so it is a leaf.
+        let quiet = !state.is_interrupted()
+            && !self.connection.is_interrupted()
+            && state.query_deadline.is_none()
+            && progress_ops == 0;
+        if quiet {
+            return Ok(None);
+        }
+        self.periodic_interrupt_checks(state, pager)
+    }
+
+    #[inline(never)]
+    fn periodic_interrupt_checks(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+    ) -> Result<Option<StepResult>, Box<LimboError>> {
+        let prev_steps = state.metrics.vm_steps.saturating_sub(state.check_mask + 1);
+        if self.maybe_request_interrupt(state, pager.io.as_ref(), prev_steps) {
+            return self.interrupted_during_step(state, pager);
+        }
+        Ok(None)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn closed_during_step(&self, pager: &Arc<Pager>) -> Box<LimboError> {
+        // Connection is closed for whatever reason, rollback the transaction.
+        if let TransactionState::Write { .. } = self.connection.get_tx_state() {
+            pager.rollback_tx(&self.connection);
+        }
+        LimboError::InternalError("Connection closed".to_string()).into()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn interrupted_during_step(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+    ) -> Result<Option<StepResult>, Box<LimboError>> {
+        self.abort(pager, None, state, true)?;
+        Ok(Some(StepResult::Interrupt))
+    }
+
+    #[inline(never)]
+    fn trace_step(
+        &self,
+        state: &mut ProgramState,
+        insn: &Insn,
+        enable_tracing: bool,
+        vdbe_trace: bool,
+    ) {
+        if enable_tracing {
+            trace_insn(self, state.pc as InsnReference, insn);
+            crate::stack::trace_remaining("program_step:opcode");
+        }
+        self.trace_registers(state, insn, vdbe_trace);
+    }
+
+    /// An instruction that waits for IO: the statement parks on it and
+    /// resumes at the same PC, unless the IO is an explicit yield. None
+    /// means the IO already finished and the loop starts over to observe
+    /// its outcome.
+    #[inline(never)]
+    fn park_on_io(
+        &self,
+        state: &mut ProgramState,
+        io: IOCompletions,
+        waker: Option<&Waker>,
+    ) -> Option<StepResult> {
+        io.set_waker(waker);
+        if io.is_explicit_yield() {
+            // Yield: return control to the cooperative scheduler so
+            // other connections can make progress (e.g. release a
+            // contended lock). Don't store in io_completions —
+            // yields aren't pending I/O, so the instruction will
+            // simply re-execute on the next step.
+            return Some(StepResult::Yield);
+        }
+        let finished = io.finished();
+        state.io_completions = Some(io);
+        if !finished {
+            return Some(StepResult::IO);
+        }
+        None
+    }
+
+    /// An instruction that failed: a busy error retries at the same PC, a
+    /// trigger's FAIL is staged for the loop to prepare (None), and every
+    /// other error aborts the statement.
+    #[cold]
+    #[inline(never)]
+    fn fail_step(
+        &self,
+        state: &mut ProgramState,
+        pager: &Arc<Pager>,
+        err: LimboError,
+    ) -> Result<Option<StepResult>, Box<LimboError>> {
+        match err {
+            LimboError::Busy => Ok(Some(StepResult::Busy)),
+            LimboError::BusySnapshot
+                if self.connection.transaction_state.get() == TransactionState::None =>
+            {
+                // For interactive transactions that are already in a read transaction, retrying BusySnapshot is pointless
+                // because the snapshot will continue to be stale no matter how many times we retry.
+                // However, for auto-commits or BEGIN IMMEDIATE, failing to promote to write transaction means it was rolled
+                // back, so auto-retrying can be useful.
+                Ok(Some(StepResult::Busy))
+            }
+            err if (matches!(err, LimboError::Constraint(_))
+                && self.resolve_type == ResolveType::Fail)
+                || matches!(err, LimboError::Raise(ResolveType::Fail, _)) =>
+            {
+                state.pending_fail_prepare_error = Some(err);
+                Ok(None)
+            }
+            err => {
+                if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
+                    tracing::error!("Abort failed during error handling: {abort_err}");
+                }
+                Err(err.into())
             }
         }
     }
