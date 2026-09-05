@@ -3352,7 +3352,6 @@ pub fn op_next(
         },
         insn
     );
-    assert!(pc_if_next.is_offset());
     let is_empty = {
         let cursor = state.get_cursor(*cursor_id);
         match cursor {
@@ -3418,7 +3417,6 @@ pub fn op_prev(
         },
         insn
     );
-    assert!(pc_if_prev.is_offset());
     let is_empty = {
         let cursor = must_be_btree_cursor!(*cursor_id, program.cursor_ref, state, "Prev");
         let cursor = cursor.as_btree_mut();
