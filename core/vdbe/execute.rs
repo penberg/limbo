@@ -970,7 +970,9 @@ pub fn op_if_pos(
     match state.registers[reg].get_value() {
         Value::Numeric(Numeric::Integer(n)) if *n > 0 => {
             state.pc = target_pc.as_offset_int();
-            state.registers[reg].set_int(*n - *decrement_by as i64);
+            if *decrement_by != 0 {
+                state.registers[reg].set_int(*n - *decrement_by as i64);
+            }
         }
         Value::Numeric(Numeric::Integer(_)) => {
             state.pc += 1;
