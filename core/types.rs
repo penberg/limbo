@@ -1335,23 +1335,47 @@ mod immutable_record {
     /// and returns how many it wrote.
     #[inline(always)]
     fn write_value(out: &mut [u8], value: ValueRef<'_>, serial_type: SerialType) -> usize {
+        // Numbers have a size known per serial type, so each arm stores its
+        // bytes with a copy of constant length; a copy of variable length is
+        // a memcpy call for every number of every built record.
         let bytes: &[u8] = match value {
             ValueRef::Null => return 0,
-            ValueRef::Numeric(Numeric::Integer(i)) => match serial_type.kind() {
-                SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => return 0,
-                SerialTypeKind::I8 => &(i as i8).to_be_bytes(),
-                SerialTypeKind::I16 => &(i as i16).to_be_bytes(),
-                // Without the most significant byte.
-                SerialTypeKind::I24 => &(i as i32).to_be_bytes()[1..],
-                SerialTypeKind::I32 => &(i as i32).to_be_bytes(),
-                // Without the two most significant bytes.
-                SerialTypeKind::I48 => &i.to_be_bytes()[2..],
-                SerialTypeKind::I64 => &i.to_be_bytes(),
-                other => panic!("Serial type is not an integer: {other:?}"),
-            },
+            ValueRef::Numeric(Numeric::Integer(i)) => {
+                return match serial_type.kind() {
+                    SerialTypeKind::ConstInt0 | SerialTypeKind::ConstInt1 => 0,
+                    SerialTypeKind::I8 => {
+                        out[0] = i as u8;
+                        1
+                    }
+                    SerialTypeKind::I16 => {
+                        out[..2].copy_from_slice(&(i as i16).to_be_bytes());
+                        2
+                    }
+                    // Without the most significant byte.
+                    SerialTypeKind::I24 => {
+                        out[..3].copy_from_slice(&(i as i32).to_be_bytes()[1..]);
+                        3
+                    }
+                    SerialTypeKind::I32 => {
+                        out[..4].copy_from_slice(&(i as i32).to_be_bytes());
+                        4
+                    }
+                    // Without the two most significant bytes.
+                    SerialTypeKind::I48 => {
+                        out[..6].copy_from_slice(&i.to_be_bytes()[2..]);
+                        6
+                    }
+                    SerialTypeKind::I64 => {
+                        out[..8].copy_from_slice(&i.to_be_bytes());
+                        8
+                    }
+                    other => panic!("Serial type is not an integer: {other:?}"),
+                };
+            }
             ValueRef::Numeric(Numeric::Float(f)) => {
                 let fval: f64 = f.into();
-                &fval.to_be_bytes()
+                out[..8].copy_from_slice(&fval.to_be_bytes());
+                return 8;
             }
             ValueRef::Text(t) => t.value.as_bytes(),
             ValueRef::Blob(b) => b,
