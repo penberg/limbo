@@ -1462,7 +1462,14 @@ pub struct Pager {
     /// Counterpart of SQLite's BtShared.pCursor list; bucketing per root
     /// supplies the BTCF_Multiple fast path (btree.c:9348).
     pub(crate) cursor_registry: Mutex<rustc_hash::FxHashMap<i64, Vec<RegisteredCursor>>>,
+    /// Record buffers retired by closed cursors, kept for the next cursor so
+    /// each statement execution does not allocate and free a page-sized
+    /// buffer per cursor.
+    record_pool: Mutex<Vec<crate::types::RecordBuf>>,
 }
+
+/// Retired record buffers kept per pager. Each holds a page-sized allocation.
+const RECORD_POOL_SIZE: usize = 8;
 
 /// Raw fat pointer to a registered cursor.
 ///
@@ -1750,7 +1757,22 @@ impl Pager {
             #[cfg(target_vendor = "apple")]
             sync_type: AtomicFileSyncType::new(FileSyncType::Fsync),
             cursor_registry: Mutex::new(rustc_hash::FxHashMap::default()),
+            record_pool: Mutex::new(Vec::new()),
         })
+    }
+
+    /// A record buffer retired by an earlier cursor on this pager, if any.
+    pub(crate) fn take_record_buf(&self) -> Option<crate::types::RecordBuf> {
+        self.record_pool.lock().pop()
+    }
+
+    /// Keep a retired record buffer for the next cursor on this pager. Extra
+    /// buffers beyond the pool size are freed.
+    pub(crate) fn recycle_record_buf(&self, buf: crate::types::RecordBuf) {
+        let mut pool = self.record_pool.lock();
+        if pool.len() < RECORD_POOL_SIZE {
+            pool.push(buf);
+        }
     }
 
     /// Add a cursor to the registry. Called from Cursor::new_btree once the

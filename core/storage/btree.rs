@@ -6057,11 +6057,16 @@ impl BTreeCursor {
     #[cold]
     #[inline(never)]
     fn allocate_reusable_record(&mut self) -> Result<()> {
-        let page_size = self.pager.get_page_size_unchecked().get();
-        let record = crate::with_btree_allocation_site!(
-            RecordPayload,
-            ImmutableRecord::new(page_size as usize)
-        )?;
+        let record = match self.pager.take_record_buf() {
+            Some(buf) => ImmutableRecord::from_buf(buf),
+            None => {
+                let page_size = self.pager.get_page_size_unchecked().get();
+                crate::with_btree_allocation_site!(
+                    RecordPayload,
+                    ImmutableRecord::new(page_size as usize)
+                )?
+            }
+        };
         self.reusable_immutable_record.replace(record);
         Ok(())
     }
@@ -6362,6 +6367,9 @@ impl BTreeCursor {
 impl Drop for BTreeCursor {
     fn drop(&mut self) {
         self.clear_transient_overflow_cells();
+        if let Some(record) = self.reusable_immutable_record.take() {
+            self.pager.recycle_record_buf(record.retire());
+        }
         if !self
             .did_register
             .load(crate::sync::atomic::Ordering::Relaxed)
