@@ -3355,20 +3355,7 @@ pub fn op_next(
     let is_empty = {
         let cursor = state.get_cursor(*cursor_id);
         match cursor {
-            Cursor::BTree(btree_cursor) => {
-                // If cursor is in NullRow state, don't advance - just return empty.
-                // This matches SQLite's OP_Next behavior: btreeNext() returns
-                // SQLITE_DONE when eState==CURSOR_INVALID (NullRow calls
-                // sqlite3BtreeClearCursor which sets CURSOR_INVALID).
-                let is_null_row = btree_cursor.get_null_flag();
-                btree_cursor.set_null_flag(false);
-                if is_null_row {
-                    true // is_empty = true
-                } else {
-                    return_if_io!(btree_cursor.next());
-                    btree_cursor.is_empty()
-                }
-            }
+            Cursor::BTree(btree_cursor) => !return_if_io!(btree_cursor.next_row()),
             Cursor::MaterializedView(mv_cursor) => {
                 let has_more = return_if_io!(mv_cursor.next());
                 !has_more
@@ -3419,17 +3406,7 @@ pub fn op_prev(
     );
     let is_empty = {
         let cursor = must_be_btree_cursor!(*cursor_id, program.cursor_ref, state, "Prev");
-        let cursor = cursor.as_btree_mut();
-        // If cursor is in NullRow state, don't advance - just return empty.
-        // This matches SQLite's OP_Prev behavior which checks nullRow first.
-        let is_null_row = cursor.get_null_flag();
-        cursor.set_null_flag(false);
-        if is_null_row {
-            true // is_empty = true
-        } else {
-            return_if_io!(cursor.prev());
-            cursor.is_empty()
-        }
+        !return_if_io!(cursor.as_btree_mut().prev_row())
     };
     if !is_empty {
         // Increment metrics for row read

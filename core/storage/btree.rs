@@ -668,6 +668,29 @@ pub trait CursorTrait: Any + Send + Sync {
     fn next(&mut self) -> IOResultOr<()>;
     /// Move cursor to previous entry.
     fn prev(&mut self) -> IOResultOr<()>;
+    /// The `Next` opcode in one virtual call: clears the null-row flag and,
+    /// unless it was set, moves to the next entry. Returns whether the cursor
+    /// points at a row afterwards. A NullRow cursor does not advance, like
+    /// SQLite's OP_Next when btreeNext() sees CURSOR_INVALID.
+    fn next_row(&mut self) -> IOResultOr<bool> {
+        let was_null_row = self.get_null_flag();
+        self.set_null_flag(false);
+        if was_null_row {
+            return Ok(IOResult::Done(false));
+        }
+        return_if_io!(self.next());
+        Ok(IOResult::Done(!self.is_empty()))
+    }
+    /// The `Prev` opcode counterpart of [`CursorTrait::next_row`].
+    fn prev_row(&mut self) -> IOResultOr<bool> {
+        let was_null_row = self.get_null_flag();
+        self.set_null_flag(false);
+        if was_null_row {
+            return Ok(IOResult::Done(false));
+        }
+        return_if_io!(self.prev());
+        Ok(IOResult::Done(!self.is_empty()))
+    }
     /// Get the rowid of the entry the cursor is poiting to if any
     fn rowid(&mut self) -> IOResultOr<Option<i64>>;
 
@@ -6380,6 +6403,29 @@ impl CursorTrait for BTreeCursor {
                 }
             }
         }
+    }
+
+    fn next_row(&mut self) -> IOResultOr<bool> {
+        if self.null_flag {
+            self.null_flag = false;
+            return Ok(IOResult::Done(false));
+        }
+        if self.can_advance_within_leaf() {
+            self.stack.advance();
+            self.invalidate_record();
+            return Ok(IOResult::Done(true));
+        }
+        return_if_io!(self.next());
+        Ok(IOResult::Done(self.has_record))
+    }
+
+    fn prev_row(&mut self) -> IOResultOr<bool> {
+        if self.null_flag {
+            self.null_flag = false;
+            return Ok(IOResult::Done(false));
+        }
+        return_if_io!(self.prev());
+        Ok(IOResult::Done(self.has_record))
     }
 
     #[cfg_attr(debug_assertions, instrument(skip_all, level = Level::DEBUG))]
