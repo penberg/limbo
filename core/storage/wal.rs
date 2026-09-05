@@ -2709,8 +2709,10 @@ pub struct WalFile {
     max_frame: AtomicU64,
     /// Start of range to look for frames range=(minframe..max_frame)
     min_frame: AtomicU64,
-    /// Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL
-    last_checksum: RwLock<(u32, u32)>,
+    /// Check of last frame in WAL, this is a cumulative checksum over all frames in the WAL.
+    /// Both halves packed into one word, high half first, so the connection
+    /// reads and writes it without a lock.
+    last_checksum: AtomicU64,
     checkpoint_seq: AtomicU32,
     transaction_count: AtomicU64,
 
@@ -3086,6 +3088,10 @@ enum TryBeginReadResult {
     Busy,
 }
 
+fn pack_checksum(checksum: (u32, u32)) -> u64 {
+    ((checksum.0 as u64) << 32) | checksum.1 as u64
+}
+
 impl WalFile {
     fn prepare_transformed_frame(
         buffer_pool: &Arc<BufferPool>,
@@ -3152,13 +3158,23 @@ impl WalFile {
         self.coordination.load_snapshot()
     }
 
+    fn last_checksum(&self) -> (u32, u32) {
+        let packed = self.last_checksum.load(Ordering::Acquire);
+        ((packed >> 32) as u32, packed as u32)
+    }
+
+    fn set_last_checksum(&self, checksum: (u32, u32)) {
+        self.last_checksum
+            .store(pack_checksum(checksum), Ordering::Release);
+    }
+
     /// Reconstruct the connection-local WAL state stored on this `WalFile`.
     fn connection_state(&self) -> WalConnectionState {
         WalConnectionState::new(
             WalSnapshot {
                 max_frame: self.max_frame.load(Ordering::Acquire),
                 nbackfills: self.min_frame.load(Ordering::Acquire).saturating_sub(1),
-                last_checksum: *self.last_checksum.read(),
+                last_checksum: self.last_checksum(),
                 checkpoint_seq: self.checkpoint_seq.load(Ordering::Acquire),
                 transaction_count: self.transaction_count.load(Ordering::Acquire),
             },
@@ -3172,7 +3188,7 @@ impl WalFile {
             .store(state.snapshot.max_frame, Ordering::Release);
         self.min_frame
             .store(state.snapshot.min_frame(), Ordering::Release);
-        *self.last_checksum.write() = state.snapshot.last_checksum;
+        self.set_last_checksum(state.snapshot.last_checksum);
         self.checkpoint_seq
             .store(state.snapshot.checkpoint_seq, Ordering::Release);
         self.transaction_count
@@ -3540,7 +3556,7 @@ impl Wal for WalFile {
             WalSnapshot {
                 max_frame,
                 nbackfills: self.min_frame.load(Ordering::Acquire).saturating_sub(1),
-                last_checksum: *self.last_checksum.read(),
+                last_checksum: self.last_checksum(),
                 checkpoint_seq: self.coordination.wal_header().checkpoint_seq,
                 transaction_count: self.transaction_count.load(Ordering::Acquire),
             },
@@ -3948,7 +3964,7 @@ impl Wal for WalFile {
         let offset = self.frame_offset(frame_id);
         let header = self.coordination.wal_header();
         let file = self.coordination.wal_file()?;
-        let previous_checksums = *self.last_checksum.read();
+        let previous_checksums = self.last_checksum();
         let page_number = u32::try_from(page_id).map_err(|_| LimboError::IntegerOverflow)?;
         let db_size = u32::try_from(db_size).map_err(|_| LimboError::IntegerOverflow)?;
         let page_transform = self.io_ctx.read().page_transform().clone();
@@ -4102,7 +4118,7 @@ impl Wal for WalFile {
     }
 
     fn get_last_checksum(&self) -> (u32, u32) {
-        *self.last_checksum.read()
+        self.last_checksum()
     }
     #[instrument(skip_all, level = Level::DEBUG)]
 
@@ -4149,7 +4165,7 @@ impl Wal for WalFile {
             .map(|r| r.checksum)
             .unwrap_or(snapshot.last_checksum);
         self.coordination.rollback_cache(max_frame);
-        *self.last_checksum.write() = last_checksum;
+        self.set_last_checksum(last_checksum);
         self.max_frame.store(max_frame, Ordering::Release);
         if !is_savepoint {
             self.reset_internal_states();
@@ -4245,7 +4261,7 @@ impl Wal for WalFile {
     #[instrument(skip_all, level = Level::DEBUG)]
     fn finish_append_frames_commit(&self) -> Result<()> {
         let max_frame = self.max_frame.load(Ordering::Acquire);
-        let last_checksum = *self.last_checksum.read();
+        let last_checksum = self.last_checksum();
         tracing::trace!(max_frame, ?last_checksum);
         let transaction_count = self.transaction_count.fetch_add(1, Ordering::AcqRel) + 1;
         self.coordination.publish_commit(WalCommitState {
@@ -4289,7 +4305,7 @@ impl Wal for WalFile {
         else {
             return Ok(None);
         };
-        *self.last_checksum.write() = (header.checksum_1, header.checksum_2);
+        self.set_last_checksum((header.checksum_1, header.checksum_2));
 
         self.max_frame.store(0, Ordering::Release);
         let file = self.coordination.wal_file()?;
@@ -4490,7 +4506,7 @@ impl Wal for WalFile {
                 self.complete_append_frame(page.get().id as u64, *frame_id, *checksum);
             }
             // Update rolling checksum
-            *self.last_checksum.write() = batch.final_checksum;
+            self.set_last_checksum(batch.final_checksum);
             // Advance max_frame and make frames visible to readers
             self.max_frame
                 .store(batch.final_max_frame, Ordering::Release);
@@ -4548,7 +4564,7 @@ impl Wal for WalFile {
         let mut rolling_checksum = if next_frame_id == 1 {
             (header.checksum_1, header.checksum_2)
         } else {
-            *self.last_checksum.read()
+            self.last_checksum()
         };
         // Build every frame in order, updating the rolling checksum
         for page in pages.iter() {
@@ -4633,7 +4649,7 @@ impl Wal for WalFile {
         // deadlock a caller that drives I/O from a single-threaded event loop.
         if let Some((_, last_frame_id, last_checksum)) = page_frame_and_checksum.last() {
             self.dirty.store(true, Ordering::Release);
-            *self.last_checksum.write() = *last_checksum;
+            self.set_last_checksum(*last_checksum);
             self.max_frame.store(*last_frame_id, Ordering::Release);
         }
 
@@ -4727,7 +4743,7 @@ impl WalFile {
             min_frame: AtomicU64::new(0),
             transaction_count: AtomicU64::new(0),
             max_frame_read_lock_index: AtomicUsize::new(NO_LOCK_HELD),
-            last_checksum: RwLock::new(last_checksum),
+            last_checksum: AtomicU64::new(pack_checksum(last_checksum)),
             checkpoint_guard: RwLock::new(None),
             io_ctx: RwLock::new(IOContext::default()),
             dirty: Arc::new(AtomicBool::new(false)),
@@ -4775,7 +4791,7 @@ impl WalFile {
 
     fn complete_append_frame(&self, page_id: u64, frame_id: u64, checksums: (u32, u32)) {
         self.dirty.store(true, Ordering::Release);
-        *self.last_checksum.write() = checksums;
+        self.set_last_checksum(checksums);
         self.max_frame.store(frame_id, Ordering::Release);
         self.coordination.cache_frame(page_id, frame_id);
     }
@@ -5251,7 +5267,7 @@ impl WalFile {
     }
 
     fn apply_restart_snapshot(&self, snapshot: WalSnapshot) {
-        *self.last_checksum.write() = snapshot.last_checksum;
+        self.set_last_checksum(snapshot.last_checksum);
         self.max_frame.store(snapshot.max_frame, Ordering::Release);
         self.min_frame.store(0, Ordering::Release);
         self.checkpoint_seq
@@ -7619,7 +7635,7 @@ pub mod test {
         assert_eq!(coordination.find_frame(9, 0, 30, None), Some(26));
         assert_eq!(coordination.find_frame(11, 0, 30, None), None);
         assert_eq!(wal.get_max_frame(), 27);
-        assert_eq!(*wal.last_checksum.read(), (13, 21));
+        assert_eq!(wal.last_checksum(), (13, 21));
 
         // Rolling back to the committed high-water mark discards every
         // spill.
