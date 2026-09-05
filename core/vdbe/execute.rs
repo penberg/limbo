@@ -18,7 +18,8 @@ use crate::schema::{
 };
 use crate::state_machine::StateMachine;
 use crate::storage::btree::{
-    integrity_check, CursorTrait, IntegrityCheckError, IntegrityCheckState, PageCategory,
+    integrity_check, CursorStep, CursorTrait, IntegrityCheckError, IntegrityCheckState,
+    PageCategory,
 };
 use crate::storage::database::DatabaseFile;
 use crate::storage::journal_mode;
@@ -3504,7 +3505,14 @@ pub fn op_next(
     let is_empty = {
         let cursor = state.get_cursor(*cursor_id);
         match cursor {
-            Cursor::BTree(btree_cursor) => !return_if_io!(state, btree_cursor.next_row()),
+            Cursor::BTree(btree_cursor) => match btree_cursor.next_row() {
+                CursorStep::Row => false,
+                CursorStep::Empty => true,
+                CursorStep::Error(err) => return Err(err),
+                CursorStep::IO(io) => {
+                    return Ok(state.suspend_on_io(io));
+                }
+            },
             _ => !return_if_io!(state, next_row_of_other_cursor(cursor)),
         }
     };
@@ -3554,7 +3562,15 @@ pub fn op_prev(
     );
     let is_empty = {
         let cursor = must_be_btree_cursor!(*cursor_id, program.cursor_ref, state, "Prev");
-        !return_if_io!(state, cursor.as_btree_mut().prev_row())
+        let cursor = cursor.as_btree_mut();
+        match cursor.prev_row() {
+            CursorStep::Row => false,
+            CursorStep::Empty => true,
+            CursorStep::Error(err) => return Err(err),
+            CursorStep::IO(io) => {
+                return Ok(state.suspend_on_io(io));
+            }
+        }
     };
     if !is_empty {
         // Increment metrics for row read
