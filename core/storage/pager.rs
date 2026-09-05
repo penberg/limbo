@@ -125,7 +125,12 @@ pub struct PageInner {
     /// This tracks which version of the page we have in memory
     pub wal_tag: AtomicU64,
     /// The actual page data buffer. None if not loaded.
-    pub buffer: Option<Arc<Buffer>>,
+    buffer: Option<Arc<Buffer>>,
+    /// Start and length of the bytes of `buffer`, kept next to it so a page
+    /// read does not go through the `Option`, the `Arc` and the `Buffer`
+    /// variant on every access. Null and 0 while `buffer` is `None`.
+    data_ptr: *mut u8,
+    data_len: usize,
     /// Overflow cells during btree operations
     pub overflow_cells: crate::alloc::Vec<OverflowCell>,
 }
@@ -134,35 +139,61 @@ pub struct PageInner {
 impl PageInner {
     /// Creates a new PageInner from an Arc<Buffer>.
     pub fn new(buffer: Arc<Buffer>) -> Self {
-        Self {
-            flags: AtomicUsize::new(0),
-            id: 0,
-            pin_count: AtomicUsize::new(0),
-            wal_tag: AtomicU64::new(TAG_UNSET),
-            buffer: Some(buffer),
-            overflow_cells: crate::alloc::vec![],
-        }
+        let mut inner = Self::unloaded(0);
+        inner.set_buffer(buffer);
+        inner
     }
 
     /// Creates a new PageInner with an owned buffer.
     pub fn from_buffer(buffer: Buffer) -> Self {
+        Self::new(Arc::new(buffer))
+    }
+
+    /// Creates a PageInner with no buffer loaded.
+    pub fn unloaded(id: usize) -> Self {
         Self {
             flags: AtomicUsize::new(0),
-            id: 0,
+            id,
             pin_count: AtomicUsize::new(0),
             wal_tag: AtomicU64::new(TAG_UNSET),
-            buffer: Some(Arc::new(buffer)),
+            buffer: None,
+            data_ptr: std::ptr::null_mut(),
+            data_len: 0,
             overflow_cells: crate::alloc::vec![],
         }
     }
+
+    /// The page data buffer, if loaded.
+    #[inline]
+    pub fn buffer(&self) -> Option<&Arc<Buffer>> {
+        self.buffer.as_ref()
+    }
+
+    /// Installs the page data buffer.
+    pub fn set_buffer(&mut self, buffer: Arc<Buffer>) {
+        self.data_ptr = buffer.as_mut_ptr();
+        self.data_len = buffer.len();
+        self.buffer = Some(buffer);
+    }
+
+    /// Removes the page data buffer, leaving the page unloaded.
+    pub fn take_buffer(&mut self) -> Option<Arc<Buffer>> {
+        self.data_ptr = std::ptr::null_mut();
+        self.data_len = 0;
+        self.buffer.take()
+    }
+
     /// Get the page buffer as a mutable slice. Panics if buffer not loaded.
     #[inline]
     #[allow(clippy::mut_from_ref)]
     pub fn as_ptr(&self) -> &mut [u8] {
-        self.buffer
-            .as_ref()
-            .expect("buffer not loaded")
-            .as_mut_slice()
+        turso_assert!(!self.data_ptr.is_null(), "buffer not loaded");
+        // SAFETY: `data_ptr`/`data_len` describe the bytes of the `Arc<Buffer>`
+        // held in `self.buffer`, which stays alive and does not move while it is
+        // installed. Handing out `&mut [u8]` from `&self` mirrors
+        // `Buffer::as_mut_slice`; the page byte range is mutated only under the
+        // pager's own exclusion rules, as before.
+        unsafe { std::slice::from_raw_parts_mut(self.data_ptr, self.data_len) }
     }
 
     /// The position where page content starts. It's 100 for page 1 (database file header is 100 bytes),
@@ -762,14 +793,7 @@ impl Page {
     pub fn new(id: i64) -> Self {
         turso_assert_greater_than_or_equal!(id, 0);
         Self {
-            inner: UnsafeCell::new(PageInner {
-                flags: AtomicUsize::new(0),
-                id: id as usize,
-                pin_count: AtomicUsize::new(0),
-                wal_tag: AtomicU64::new(TAG_UNSET),
-                buffer: None,
-                overflow_cells: crate::alloc::vec![],
-            }),
+            inner: UnsafeCell::new(PageInner::unloaded(id as usize)),
         }
     }
 
@@ -783,7 +807,7 @@ impl Page {
     pub fn get_contents(&self) -> &mut PageInner {
         let inner = self.get();
         turso_debug_assert!(
-            inner.buffer.is_some(),
+            inner.buffer().is_some(),
             "page buffer not loaded",
             { "page_id": inner.id }
         );
@@ -2821,7 +2845,7 @@ impl Pager {
         let page = Arc::new(Page::new(DatabaseHeader::PAGE_ID as i64));
         {
             let inner = page.get();
-            inner.buffer = Some(Arc::new(Buffer::new_temporary(size.get() as usize)));
+            inner.set_buffer(Arc::new(Buffer::new_temporary(size.get() as usize)));
         }
 
         page.get_contents().write_database_header(&header);
@@ -5908,7 +5932,7 @@ pub fn allocate_new_page(page_id: i64, buffer_pool: &Arc<BufferPool>) -> PageRef
     {
         let buffer = buffer_pool.get_page();
         let inner = page.get();
-        inner.buffer = Some(Arc::new(buffer));
+        inner.set_buffer(Arc::new(buffer));
         page.set_loaded();
         page.clear_wal_tag();
     }
@@ -5929,7 +5953,7 @@ pub fn default_page1(cipher: Option<&CipherMode>) -> PageRef {
 
     {
         let inner = page.get();
-        inner.buffer = Some(Arc::new(Buffer::new_temporary(
+        inner.set_buffer(Arc::new(Buffer::new_temporary(
             default_header.page_size.get() as usize,
         )));
     }

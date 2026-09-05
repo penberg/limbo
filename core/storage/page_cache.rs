@@ -355,7 +355,7 @@ impl PageCache {
 
         if clean_page {
             page.clear_loaded();
-            let _ = page.get().buffer.take();
+            let _ = page.get().take_buffer();
         }
 
         // Remove from map first
@@ -678,7 +678,7 @@ impl PageCache {
                 self.map.remove(&key);
                 // Clean the page
                 page.clear_loaded();
-                let _ = page.get().buffer.take();
+                let _ = page.get().take_buffer();
 
                 // Remove from queue
                 unsafe {
@@ -720,7 +720,7 @@ impl PageCache {
         for &entry_ptr in self.map.values() {
             let entry = unsafe { &*entry_ptr };
             entry.page.clear_loaded();
-            let _ = entry.page.get().buffer.take();
+            let _ = entry.page.get().take_buffer();
         }
 
         self.map.clear();
@@ -875,7 +875,7 @@ mod tests {
         let page = Arc::new(Page::new(page_id as i64));
         {
             let inner = page.get();
-            inner.buffer = Some(Arc::new(crate::Buffer::new_temporary(4096)));
+            inner.set_buffer(Arc::new(crate::Buffer::new_temporary(4096)));
         }
         page.set_loaded();
         page

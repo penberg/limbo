@@ -619,7 +619,7 @@ pub fn finish_read_page(page_idx: usize, buffer: Arc<Buffer>, page: PageRef) {
     tracing::trace!("finish_read_page(page_idx = {page_idx})");
     {
         let inner = page.get();
-        inner.buffer = Some(buffer);
+        inner.set_buffer(buffer);
         page.clear_locked();
         page.set_loaded();
         // we set the wal tag only when reading page from log, or in allocate_page,
@@ -643,7 +643,7 @@ pub fn begin_write_btree_page(
     let page_id = page.get().id;
     tracing::trace!("begin_write_btree_page(page_id={})", page_id);
 
-    let buffer = page.get().buffer.clone().expect("buffer not loaded");
+    let buffer = page.get().buffer().cloned().expect("buffer not loaded");
     let buf_len = buffer.len();
 
     let write_complete = {

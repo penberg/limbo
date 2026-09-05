@@ -2232,7 +2232,7 @@ impl Connection {
     ) -> Result<bool> {
         let content = page_ref.get_contents();
         // empty read - attempt to read absent page
-        if content.buffer.as_ref().is_none_or(|b| b.is_empty()) {
+        if content.buffer().is_none_or(|b| b.is_empty()) {
             return Ok(false);
         }
         page.copy_from_slice(content.as_ptr());
