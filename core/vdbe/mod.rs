@@ -327,6 +327,23 @@ impl Register {
         }
     }
 
+    /// Puts `record` into a register and leaks the register's previous value. We do this, because
+    /// the drop glue could not be inlined and was too costly.
+    ///
+    /// Precondition: The register must contain [Value::Null]. It would also be safe to use on any
+    /// [Value] that doesn't own heap memory, but enforcing [Value::Null] is simpler for now.
+    #[aristo::intent(
+        "The function is only called on a register that contains Value::Null.",
+        verify = "full",
+        id = "register_previously_contained_null"
+    )]
+    #[inline]
+    pub fn put_record_into_null_register(&mut self, record: ImmutableRecord) {
+        let emptied = std::mem::replace(self, Register::Record(record));
+        turso_debug_assert!(matches!(emptied, Register::Value(Value::Null)));
+        std::mem::forget(emptied);
+    }
+
     /// Fallibly sets the register to a copy of `val`, reusing the register's
     /// existing allocation when possible; see [Value::try_clone_from].
     #[inline]

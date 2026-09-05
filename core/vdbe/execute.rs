@@ -3268,7 +3268,7 @@ pub fn op_make_record(
     let buf = state.registers[dest_reg].take_buf();
     let regs = &state.registers[start_reg..start_reg + count];
     let record = ImmutableRecord::build_from_registers(regs, buf)?;
-    state.registers[dest_reg] = Register::Record(record);
+    state.registers[dest_reg].put_record_into_null_register(record);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
@@ -5954,10 +5954,7 @@ pub fn op_row_data(
 
         ImmutableRecord::copy_payload(record.get_payload(), buf)?
     };
-
-    let reg = &mut state.registers[*dest];
-    *reg = Register::Record(record);
-
+    state.registers[*dest].put_record_into_null_register(record);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
@@ -9140,7 +9137,7 @@ pub fn op_sorter_data(
             .take_current(buf)
             .expect("sorter record checked above")
     };
-    state.registers[*dest_reg] = Register::Record(record);
+    state.registers[*dest_reg].put_record_into_null_register(record);
     state.pc += 1;
     Ok(InsnFunctionStepResult::Step)
 }
