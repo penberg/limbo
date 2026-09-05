@@ -2075,6 +2075,60 @@ impl Program {
                 }
                 state.io_completions = None;
             }
+            // A trigger can return FAIL before the parent program reaches
+            // Halt. FAIL keeps changes made by earlier rows, so their
+            // index-method writes must finish before abort() releases the
+            // statement savepoint and commits those partial changes. The
+            // error is stored by the dispatch loop below, which then comes
+            // back here, and by the IO arm of this block on resume.
+            if state.pending_fail_prepare_error.is_some() {
+                let fail_error = state
+                    .pending_fail_prepare_error
+                    .take()
+                    .expect("checked is_some above");
+                match execute::index_method_stage_statement_all(state) {
+                    Ok(IOResult::Done(())) => {
+                        if let Err(abort_err) = self.abort(pager, Some(&fail_error), state, true) {
+                            tracing::error!(
+                                "Abort failed after preparing FAIL index methods: {abort_err}"
+                            );
+                        }
+                        return Err(fail_error.into());
+                    }
+                    Ok(IOResult::IO(io)) => {
+                        state.pending_fail_prepare_error = Some(fail_error);
+                        io.set_waker(waker);
+                        if io.is_explicit_yield() {
+                            return Ok(StepResult::Yield);
+                        }
+                        let finished = io.finished();
+                        state.io_completions = Some(io);
+                        if !finished {
+                            return Ok(StepResult::IO);
+                        }
+                        continue 'io_check;
+                    }
+                    Err(prepare_error) => {
+                        // FAIL may keep earlier base-table rows only when every
+                        // matching index-method write was staged successfully.
+                        // Once preparation fails, committing those rows would
+                        // leave the table and index out of sync, so roll back the
+                        // whole transaction while returning the real preparation
+                        // error to the caller.
+                        let rollback_error =
+                            LimboError::Raise(ResolveType::Rollback, prepare_error.to_string());
+                        if let Err(abort_err) =
+                            self.abort(pager, Some(&rollback_error), state, true)
+                        {
+                            tracing::error!(
+                                "Abort also failed after FAIL index-method preparation: \
+                                 {abort_err}"
+                            );
+                        }
+                        return Err(prepare_error);
+                    }
+                }
+            }
             loop {
                 // Closed/interrupt/deadline/progress checks run once every
                 // CHECK_INTERVAL instructions instead of on each one (SQLite
@@ -2115,60 +2169,6 @@ impl Program {
                     }
                 }
 
-                // A trigger can return FAIL before the parent program reaches
-                // Halt. FAIL keeps changes made by earlier rows, so their
-                // index-method writes must finish before abort() releases the
-                // statement savepoint and commits those partial changes.
-                if state.pending_fail_prepare_error.is_some() {
-                    let fail_error = state
-                        .pending_fail_prepare_error
-                        .take()
-                        .expect("checked is_some above");
-                    match execute::index_method_stage_statement_all(state) {
-                        Ok(IOResult::Done(())) => {
-                            if let Err(abort_err) =
-                                self.abort(pager, Some(&fail_error), state, true)
-                            {
-                                tracing::error!(
-                                    "Abort failed after preparing FAIL index methods: {abort_err}"
-                                );
-                            }
-                            return Err(fail_error.into());
-                        }
-                        Ok(IOResult::IO(io)) => {
-                            state.pending_fail_prepare_error = Some(fail_error);
-                            io.set_waker(waker);
-                            if io.is_explicit_yield() {
-                                return Ok(StepResult::Yield);
-                            }
-                            let finished = io.finished();
-                            state.io_completions = Some(io);
-                            if !finished {
-                                return Ok(StepResult::IO);
-                            }
-                            continue 'io_check;
-                        }
-                        Err(prepare_error) => {
-                            // FAIL may keep earlier base-table rows only when every
-                            // matching index-method write was staged successfully.
-                            // Once preparation fails, committing those rows would
-                            // leave the table and index out of sync, so roll back the
-                            // whole transaction while returning the real preparation
-                            // error to the caller.
-                            let rollback_error =
-                                LimboError::Raise(ResolveType::Rollback, prepare_error.to_string());
-                            if let Err(abort_err) =
-                                self.abort(pager, Some(&rollback_error), state, true)
-                            {
-                                tracing::error!(
-                                    "Abort also failed after FAIL index-method preparation: \
-                                     {abort_err}"
-                                );
-                            }
-                            return Err(prepare_error);
-                        }
-                    }
-                }
                 let (insn, _) = &insns[state.pc as usize];
                 if trace_insns {
                     if enable_tracing {
@@ -2238,6 +2238,7 @@ impl Program {
                             || matches!(err, LimboError::Raise(ResolveType::Fail, _)) =>
                         {
                             state.pending_fail_prepare_error = Some(err);
+                            continue 'io_check;
                         }
                         err => {
                             if let Err(abort_err) = self.abort(pager, Some(&err), state, true) {
