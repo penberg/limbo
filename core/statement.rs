@@ -561,7 +561,41 @@ impl Statement {
         }
     }
 
+    /// Every step of a statement passes through here, so the work that only
+    /// matters on the first call, the last call, a busy wait or an error is
+    /// gated behind cheap flag tests and kept out of line. A row in the middle
+    /// of a scan runs only the interpreter call and the result-row bookkeeping.
     fn _step(&mut self, waker: Option<&Waker>) -> Result<StepResult> {
+        if matches!(self.state.execution_state, ProgramExecutionState::Init)
+            || !self.counted_as_active_root
+            || self.busy_handler_state.is_some()
+        {
+            if let Some(result) = self.prepare_step(waker)? {
+                return Ok(result);
+            }
+        }
+        let res = self
+            .program
+            .step(&mut self.state, &self.pager, self.query_mode, waker);
+        if let Ok(StepResult::Row) = res {
+            self.busy = true;
+            // Track when a write statement yields its first Row. With ephemeral-buffered
+            // RETURNING, this proves all DML completed — only the scan-back remains.
+            if self.query_mode == QueryMode::Normal
+                && self.program.change_cnt_on
+                && !self.program.result_columns.is_empty()
+            {
+                self.has_returned_row = true;
+            }
+            return Ok(StepResult::Row);
+        }
+        self.finish_step(res, waker)
+    }
+
+    /// First-call and busy-wait work of [`Self::_step`]. Returns the result to
+    /// hand back to the caller when the statement must not run yet.
+    #[inline(never)]
+    fn prepare_step(&mut self, waker: Option<&Waker>) -> Result<Option<StepResult>> {
         if !self.counted_as_active_root && matches!(self.origin, StatementOrigin::Root) {
             self.program.connection.start_root_statement()?;
             self.counted_as_active_root = true;
@@ -605,16 +639,23 @@ impl Statement {
                 if let Some(waker) = waker {
                     waker.wake_by_ref();
                 }
-                return Ok(StepResult::Sleep {
+                return Ok(Some(StepResult::Sleep {
                     duration: busy_state.get_delay(now),
-                });
+                }));
             }
         }
+        Ok(None)
+    }
 
+    /// Everything [`Self::_step`] does after the interpreter returned something
+    /// other than a row: schema retries, completion, busy handling and errors.
+    #[inline(never)]
+    fn finish_step(
+        &mut self,
+        mut res: std::result::Result<StepResult, Box<LimboError>>,
+        waker: Option<&Waker>,
+    ) -> Result<StepResult> {
         const MAX_SCHEMA_RETRY: usize = 50;
-        let mut res = self
-            .program
-            .step(&mut self.state, &self.pager, self.query_mode, waker);
         for attempt in 0..MAX_SCHEMA_RETRY {
             // Only reprepare if we still need to update schema
             if !matches!(&res, Err(err) if matches!(**err, LimboError::SchemaUpdated)) {
