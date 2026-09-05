@@ -6549,6 +6549,7 @@ impl CursorTrait for BTreeCursor {
         }
     }
 
+    #[inline]
     fn next_row(&mut self) -> CursorStep {
         if self.null_flag {
             self.null_flag = false;
@@ -6611,6 +6612,7 @@ impl CursorTrait for BTreeCursor {
     }
 
     #[cfg_attr(debug_assertions, instrument(skip(self), level = Level::DEBUG))]
+    #[inline]
     fn rowid(&mut self) -> IOResultOr<Option<i64>> {
         if self.needs_restore() {
             return_if_io!(self.restore_context());
@@ -6710,6 +6712,7 @@ impl CursorTrait for BTreeCursor {
         Ok(IOResult::Done(self.reusable_immutable_record.as_ref()))
     }
 
+    #[inline]
     fn record_payload(&mut self) -> IOResultOr<Option<&[u8]>> {
         if self.needs_restore() {
             return restore_record_payload(self);

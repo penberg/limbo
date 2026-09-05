@@ -1170,8 +1170,10 @@ impl ProgramState {
             {
                 cursor.close(context);
             }
-            if let Some(Cursor::BTree(cursor)) = cursor.take() {
-                cursor.recycle();
+            match cursor.take() {
+                Some(Cursor::BTree(cursor)) => crate::storage::btree::CursorTrait::recycle(cursor),
+                Some(Cursor::Dyn(cursor)) => cursor.recycle(),
+                _ => {}
             }
             *context = None;
         }
