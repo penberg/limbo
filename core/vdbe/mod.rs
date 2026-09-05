@@ -1848,6 +1848,7 @@ impl Program {
     }
 
     #[turso_macros::trace_stack]
+    #[inline(always)]
     pub fn step(
         &self,
         state: &mut ProgramState,
