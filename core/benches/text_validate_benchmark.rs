@@ -3,8 +3,8 @@
 //!
 //! Baseline: `simdutf8::basic::from_utf8`, exactly what the TEXT serial-type
 //! arm of `nth_into_register` in `core/vdbe/mod.rs` calls on main today.
-//! Candidate: an ASCII OR-reduction fast path that falls back to the baseline
-//! for non-ASCII input.
+//! Candidates: an ASCII OR-reduction fast path that falls back to the baseline
+//! for non-ASCII input, byte by byte or a word at a time.
 //!
 //! Real TEXT values are decoded from b-tree page cells at arbitrary byte
 //! offsets, and short-input `from_utf8` is alignment-sensitive. Each measured
@@ -44,8 +44,8 @@ fn validate_ascii_or(data: &[u8]) -> Option<&str> {
     simdutf8::basic::from_utf8(data).ok()
 }
 
-/// Verbatim copy of `validate_utf8` in `core/vdbe/mod.rs`: the OR-reduction
-/// only runs where it wins (short strings, where simdutf8's std fallback is
+/// The byte-at-a-time OR-reduction with a cutoff: the OR-reduction only
+/// runs where it wins (short strings, where simdutf8's std fallback is
 /// alignment-sensitive); longer inputs go straight to real SIMD validation.
 #[inline]
 fn validate_ascii_or_cutoff(data: &[u8]) -> Option<&str> {
@@ -61,6 +61,41 @@ fn validate_ascii_or_cutoff(data: &[u8]) -> Option<&str> {
         }
     }
     simdutf8::basic::from_utf8(data).ok()
+}
+
+/// Verbatim copy of `validate_utf8` in `core/vdbe/mod.rs`: the OR-reduction
+/// of the cutoff variant done eight bytes at a time, then four, two and one
+/// for the rest, so a value takes at most `len / 8 + 3` unaligned loads.
+#[inline]
+fn validate_ascii_words(data: &[u8]) -> Option<&str> {
+    const ASCII_SCAN_CUTOFF: usize = 512;
+    if data.len() <= ASCII_SCAN_CUTOFF && is_ascii(data) {
+        // SAFETY: all bytes are ASCII, which is valid UTF-8.
+        return Some(unsafe { core::str::from_utf8_unchecked(data) });
+    }
+    simdutf8::basic::from_utf8(data).ok()
+}
+
+#[inline]
+fn is_ascii(data: &[u8]) -> bool {
+    let mut acc = 0u64;
+    let mut rest = data;
+    while let Some((word, tail)) = rest.split_first_chunk::<8>() {
+        acc |= u64::from_ne_bytes(*word);
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<4>() {
+        acc |= u64::from(u32::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<2>() {
+        acc |= u64::from(u16::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some(&byte) = rest.first() {
+        acc |= u64::from(byte);
+    }
+    acc & 0x8080_8080_8080_8080 == 0
 }
 
 const BUF_LEN: usize = 8192;
@@ -135,6 +170,11 @@ fn assert_functions_agree() {
             validate_ascii_or_cutoff(case),
             "cutoff variant disagrees on {case:?}"
         );
+        assert_eq!(
+            validate_simdutf8(case),
+            validate_ascii_words(case),
+            "word variant disagrees on {case:?}"
+        );
     }
 }
 
@@ -167,6 +207,9 @@ fn bench_text_validate(criterion: &mut Criterion) {
                 )
             });
         });
+        group.bench_function(format!("ascii_words_{size}"), |b| {
+            b.iter(|| run_schedule(&ascii_buf, &schedule, size, rounds, validate_ascii_words));
+        });
     }
 
     let (mb_buf, mb_schedule) = multibyte_fixture();
@@ -179,6 +222,9 @@ fn bench_text_validate(criterion: &mut Criterion) {
     });
     group.bench_function("ascii_or_cutoff_multibyte_64", |b| {
         b.iter(|| run_schedule(&mb_buf, &mb_schedule, 64, rounds, validate_ascii_or_cutoff));
+    });
+    group.bench_function("ascii_words_multibyte_64", |b| {
+        b.iter(|| run_schedule(&mb_buf, &mb_schedule, 64, rounds, validate_ascii_words));
     });
 
     group.finish();

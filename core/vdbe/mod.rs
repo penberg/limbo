@@ -3751,17 +3751,37 @@ impl<'a> ValueIteratorExt for crate::types::ValueIterator<'a> {
 #[inline]
 fn validate_utf8(data: &[u8]) -> Option<&str> {
     const ASCII_SCAN_CUTOFF: usize = 512;
-    if data.len() <= ASCII_SCAN_CUTOFF {
-        let mut acc = 0u8;
-        for &byte in data {
-            acc |= byte;
-        }
-        if acc.is_ascii() {
-            // SAFETY: all bytes are ASCII, which is valid UTF-8.
-            return Some(unsafe { core::str::from_utf8_unchecked(data) });
-        }
+    if data.len() <= ASCII_SCAN_CUTOFF && is_ascii(data) {
+        // SAFETY: all bytes are ASCII, which is valid UTF-8.
+        return Some(unsafe { core::str::from_utf8_unchecked(data) });
     }
     simdutf8::basic::from_utf8(data).ok()
+}
+
+/// ORs the bytes together a word at a time: eight, then four, two and one
+/// for the rest, so a value of any length takes at most `len / 8 + 3`
+/// loads. The loads are unaligned, so the slice's position on the page
+/// does not matter.
+#[inline]
+fn is_ascii(data: &[u8]) -> bool {
+    let mut acc = 0u64;
+    let mut rest = data;
+    while let Some((word, tail)) = rest.split_first_chunk::<8>() {
+        acc |= u64::from_ne_bytes(*word);
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<4>() {
+        acc |= u64::from(u32::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some((word, tail)) = rest.split_first_chunk::<2>() {
+        acc |= u64::from(u16::from_ne_bytes(*word));
+        rest = tail;
+    }
+    if let Some(&byte) = rest.first() {
+        acc |= u64::from(byte);
+    }
+    acc & 0x8080_8080_8080_8080 == 0
 }
 
 #[cfg(test)]
@@ -3780,6 +3800,24 @@ mod tests {
         ));
         state.active_op_state.clear();
         assert!(state.active_op_state.parse_schema().is_none());
+    }
+
+    #[test]
+    fn is_ascii_checks_every_byte_of_every_length() {
+        for len in 0..40 {
+            let ascii: Vec<u8> = (0..len).map(|i| b'a' + (i % 26) as u8).collect();
+            assert!(is_ascii(&ascii), "length {len}");
+            assert_eq!(validate_utf8(&ascii), std::str::from_utf8(&ascii).ok());
+            for position in 0..len {
+                let mut bytes = ascii.clone();
+                bytes[position] = 0xc3;
+                assert!(!is_ascii(&bytes), "length {len}, byte {position}");
+                assert_eq!(validate_utf8(&bytes), std::str::from_utf8(&bytes).ok());
+            }
+        }
+        let text = "héllo wörld, ünïcödé";
+        assert!(!is_ascii(text.as_bytes()));
+        assert_eq!(validate_utf8(text.as_bytes()), Some(text));
     }
 
     #[test]
