@@ -3278,10 +3278,9 @@ pub fn op_make_record(
             ))
             .into());
         }
-        for (i, affinity_code) in affinity_str.bytes().enumerate().take(count) {
-            let reg_index = start_reg + i;
-            let affinity = Affinity::from_char_code(affinity_code);
-            apply_affinity_char(&mut state.registers[reg_index], affinity);
+        let registers = &mut state.registers[start_reg..start_reg + count];
+        for (register, &affinity_code) in registers.iter_mut().zip(affinity_str.as_bytes()) {
+            apply_affinity_char(register, Affinity::from_char_code(affinity_code));
         }
     }
 
@@ -16194,10 +16193,9 @@ pub fn op_affinity(
         .into());
     }
 
-    for (i, affinity_code) in affinities.bytes().enumerate().take(count.get()) {
-        let reg_index = *start_reg + i;
-        let affinity = Affinity::from_char_code(affinity_code);
-        apply_affinity_char(&mut state.registers[reg_index], affinity);
+    let registers = &mut state.registers[*start_reg..*start_reg + count.get()];
+    for (register, &affinity_code) in registers.iter_mut().zip(affinities.as_bytes()) {
+        apply_affinity_char(register, Affinity::from_char_code(affinity_code));
     }
 
     state.pc += 1;
